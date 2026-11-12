@@ -17,6 +17,7 @@ export const OPTICAL_SEARCH: SearchDemoData = {
     "Inicio",
     "Bandeja",
     "Agenda",
+    "Pedidos",
     "Pacientes",
     "Tareas",
     "Finanzas",

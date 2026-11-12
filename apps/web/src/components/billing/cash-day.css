@@ -21,9 +21,8 @@
 .fc-state[data-state="open"] i { background: #16a34a; animation: fc-pulse 1.6s ease-in-out infinite; }
 .fc-state[data-state="ready"] { color: var(--teal-hover); background: var(--teal-soft); }
 .fc-state[data-state="ready"] i { background: var(--teal); }
-.fc-tabs { display: flex; gap: 4px; background: #eef0f4; border-radius: 999px; padding: 4px; align-self: flex-start; max-width: 100%; overflow: hidden; }
-.fc-tabs span { padding: 6px 12px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-.fc-tabs span.on { background: var(--paper); border-radius: 999px; font-weight: 700; color: var(--ink); }
+.fc-where { margin: 0; font-size: 13px; color: var(--muted); }
+.fc-where b { color: var(--ink); }
 .fc-cards { display: flex; flex-wrap: wrap; gap: 8px; }
 .fc-stat { flex: 1 1 96px; min-width: 0; border: 1px solid var(--fc-line); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .fc-stat-main { flex: 1 1 100%; background: var(--fc-tint); }
@@ -32,6 +31,8 @@
 .fc-stat-main b { font-size: 26px; }
 .fc-sub { font-size: 12px; color: var(--muted); }
 .fc-block { border: 1px solid var(--fc-line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+/* Los movimientos se quedan con el espacio que sobra: lo de abajo no baja con cada cobro. */
+.fc-block:last-of-type { flex: 1 0 auto; }
 .fc-block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .fc-block-head b { font-size: 15px; }
 .fc-block-head span { font-size: 12px; color: var(--muted); }

@@ -25,6 +25,11 @@ const onePerson: { title: string; text: string; link?: { href: string; label: st
   { title: "Sofi responde en cada canal", text: "Donde le escriben, a cualquier hora.", link: { href: "/agentes/recepcion", label: "Conoce a Sofi" } },
   { title: "Tu equipo, cuando hace falta", text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo hablado." },
 ]
+// Lo que también llega a la misma persona: el chat de la web (Integraciones › Chat web) y el mapa de su cita.
+const also = [
+  { title: "El chat de tu web, con una línea", text: "Copias una línea y la pegas en tu sitio. Lo que escriben ahí llega a la misma Bandeja y Sofi responde al momento." },
+  { title: "«Cómo llegar», en su cita", text: "Su cita, en Su enlace y en el portal, abre el mapa con la dirección de tu sede. Nadie escribe para preguntar dónde queda." },
+]
 
 const faq: FaqItem[] = [
   {
@@ -38,6 +43,10 @@ const faq: FaqItem[] = [
   {
     q: "¿Mi equipo puede responder también?",
     a: "Sí, desde la Bandeja o desde la ficha de la persona, eligiendo por qué canal. Si alguien del equipo escribe, Sofi espera 15 minutos antes de volver a hablar.",
+  },
+  {
+    q: "¿Cómo pongo el chat en mi página web?",
+    a: "En Configuración › Integraciones › Chat web copias una línea y la pegas en tu sitio. Si no lo manejas tú, «Enviar a quien hace mi web» copia un mensaje listo para mandárselo. Antes puedes probarlo ahí mismo, sin publicar.",
   },
   {
     q: "¿Cuánto cuesta WhatsApp?",
@@ -97,6 +106,14 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
             <p>La cita y la historia clínica quedan a nombre de Tomás; la conversación, con Rosa. Cada uno en su ficha.</p>
           </div>
         </div>
+        <div class="om-also">
+          {also.map((item) => (
+            <div class="om-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
 
@@ -132,7 +149,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </div>
           <div class="om-card soft">
             <h3>Su enlace en el mensaje</h3>
-            <p>Para elegir la hora, cambiar su cita o descargar su receta. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+            <p>Para elegir la hora, cambiar su cita, completar sus datos o firmar su consentimiento. <a href="/portal-del-paciente">Ver Su enlace</a></p>
           </div>
           <div class="om-card soft">
             <h3>Lo que cobra Meta</h3>
@@ -179,6 +196,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 
   .om-split { display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch; }
   .om-cards { flex: 1.4 1 480px; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+  /* Debajo de las dos columnas, a la misma distancia que hay entre ellas (la sección separa a 40). */
+  .om-also { margin-top: -16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 14px; }
   .om-card { background: var(--paper); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
   .om-card h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.01em; }
   .om-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }

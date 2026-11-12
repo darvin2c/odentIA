@@ -112,7 +112,7 @@ import type { DecisionModel } from "./decision/port.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
-import { describeUnsupported, type Evidence, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, isHiddenPersonalLink, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -1121,9 +1121,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       await traceAnswer(text, "bloqueada", verdict.checks, null)
       return { verdict, blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}${capped}` }
     }
+    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
+    // Tapado (`token=…`, como lo muestra la Bandeja), «Su enlace» no abre: no sale.
+    const hidden = verdict.unsupported.filter((check) => check.kind === "enlace" && isHiddenPersonalLink(check.value))
     ctx.checkFailures = (ctx.checkFailures ?? 0) + 1
     const missing = describeUnsupported(verdict)
-    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
     await traceAnswer(text, "bloqueada", verdict.checks, null)
     if (ctx.checkFailures >= MAX_UNSUPPORTED_REPLIES) {
       await performHandoff(
@@ -1136,6 +1138,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return {
         verdict,
         blocked: `${prefix}No enviado: ${missing} no figura en lo consultado. El caso pasa a una persona; no envíes más mensajes.`,
+      }
+    }
+    // El de elegir su cita se vuelve a pedir a su herramienta, que da el mismo enlace.
+    if (hidden.length > 0) {
+      const offered = ctx.offeredTools ?? toolNames
+      const again = offered.has("enviar_enlace_cita") && hidden.every((check) => /\/reserva\?/.test(check.value))
+        ? " Para dárselo de nuevo, vuelve a llamar a enviar_enlace_cita, que da el mismo enlace, y escríbelo tal cual."
+        : ""
+      return {
+        verdict,
+        blocked: `${prefix}No enviado: ese enlace es el de tu mensaje anterior como lo ves en el historial, sin su parte final, y así no abre.${again} Si no tienes cómo dárselo de nuevo, pasa el caso a recepción con request_human_handoff para que se lo envíe. Vuelve a enviar la respuesta sola en su paso.`,
       }
     }
     return {
@@ -1680,7 +1693,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           const origin = await clinicLinkOrigin(tx, publicUrl)
           if (!origin) return null
           const link = await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey })
-          return { link, url: personalLinkAddress(origin, link.token) }
+          // En el mensaje va la referencia del enlace; el worker pone el token al enviarlo (ADR 0037).
+          return { link, url: personalLinkAddress(origin, personalLinkRef(link.linkId)) }
         })
         if (!found) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         const { link, url } = found
@@ -1710,7 +1724,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_enlace_cita",
       description:
-        "Envía «Elige tu cita»: su página para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Es solo para reservar. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando diga que su enlace para reservar ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
+        "Envía «Elige tu cita»: su página para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Es solo para reservar. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando diga que su enlace para reservar ya no sirve: le das uno nuevo. Si te pide otra vez un enlace que ya le diste, escríbeselo de nuevo tal cual está en tu mensaje anterior: esta herramienta da solo el de elegir cita, no el de completar sus datos. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
       schema: z.object({
         patientId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
@@ -1790,8 +1804,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * Ya le dio su enlace con esa hora. No se le repite a cada «ya», pero si lo pide de nuevo («mándame
    * el link otra vez, no lo veo») se le devuelve el mismo para que se lo escriba tal cual: no
    * repetirlo no es negárselo (auditoría del 8 nov: 0 de 4 lo reenviaba). Se vuelve a pedir al
-   * servicio, que devuelve el mismo enlace vivo con su referencia: el historial que lee el modelo
-   * lo muestra sin token (`hidePersonalLinkRefs`) y copiado de ahí no abriría.
+   * servicio, que devuelve el mismo enlace vivo con su referencia.
    */
   const pickLinkAgain = async (
     origin: string | Promise<string | null>,
@@ -2105,7 +2118,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return "La persona no tiene citas por venir que confirmar. Si habla de otra cita, pregúntale cuál o pasa el caso a una persona."
       }
       if (result.outcome === "cambio") {
-        return `No se confirmó: la cita cambió de fecha después del recordatorio que recibió, y su «sí» puede ser a la fecha anterior. Dile con send_reply la fecha nueva y pregúntale si le queda bien; si dice que sí, vuelve a llamar con su id.\n${result.options.map((item) => `- ${said(item)} (id ${item.appointmentId})`).join("\n")}`
+        return `No se confirmó: la cita cambió de fecha después del último mensaje que recibió sobre ella, y su «sí» puede ser a la fecha anterior. Dile con send_reply la fecha nueva y pregúntale si le queda bien; si dice que sí, vuelve a llamar con su id.\n${result.options.map((item) => `- ${said(item)} (id ${item.appointmentId})`).join("\n")}`
       }
       if (result.outcome !== "varias") {
         // Un padre confirma las citas de quienes lleva: se le dice de quiénes son.

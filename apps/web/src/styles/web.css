@@ -9,7 +9,9 @@
   --ink: #0f172a;
   --ink-2: #334155;
   --muted: #475569;
-  --soft: #64748b;
+  /* El gris de horas y notas: #64748b no llegaba a 4,5:1 sobre los grises de las tarjetas (4,17 a 4,47);
+     este es el más cercano que pasa sobre todos ellos (4,7:1 sobre #eef0f4, 5,1:1 sobre --bg). */
+  --soft: #5d6b82;
   --line: #e2e8f0;
   --bg: #f6f8fb;
   --paper: #ffffff;
@@ -59,6 +61,18 @@ canvas {
 }
 a {
   color: var(--teal);
+}
+/* Lo que se toca responde al primer toque: sin la espera del doble toque para acercar y con un
+   destello discreto en vez del gris del navegador. */
+a,
+button,
+summary,
+label,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--sky) 22%, transparent);
 }
 a:hover {
   color: var(--teal-hover);
@@ -187,7 +201,6 @@ fieldset {
 .btn-p:hover {
   background: #86dbe8;
   color: #03252e;
-  transform: translateY(-1px);
 }
 .btn-g {
   background: transparent;
@@ -205,7 +218,17 @@ fieldset {
 .btn-d:hover {
   background: var(--teal-hover);
   color: #fff;
-  transform: translateY(-1px);
+}
+/* El botón se levanta solo con puntero: en el teléfono el «hover» se queda pegado tras tocar. Al
+   apretar, cualquier botón se hunde un poco: se nota que el toque llegó. */
+@media (hover: hover) {
+  .btn-p:hover,
+  .btn-d:hover {
+    transform: translateY(-1px);
+  }
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn-l {
   background: var(--paper);
@@ -324,6 +347,28 @@ details.q p {
   max-width: 820px;
 }
 
+/* Un texto que cambia solo no cambia el alto de su caja: sus variantes más largas van en la misma celda
+   sin verse (`fit-ghost`, con aria-hidden) y la caja mide siempre lo que la mayor. Regla de toda la
+   web: el movimiento ocurre dentro de su caja y nunca empuja lo que alguien intenta tocar. */
+.fit {
+  display: grid;
+}
+.fit > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  align-self: start;
+}
+/* Para una ficha o un estado corto: cada variante con su ancho, sin estirarse a la más ancha. */
+.fit-inline > * {
+  justify-self: start;
+}
+.fit-ghost {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+  animation: none !important;
+}
+
 /* Aparición suave al entrar cada sección; sin movimiento si la persona lo pide. */
 .rise {
   animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -351,9 +396,30 @@ details.q p {
   }
 }
 
+/* Cada bloque de una sección aparece con un fundido corto al verse por primera vez (lo marca
+   Base.astro). Solo opacidad: nada se desplaza, así lo que se toca está en su lugar desde el primer
+   instante. Ocultarlo no se anima (la transición va solo al aparecer), y no se usa en la portada ni
+   en lo que ya está en pantalla al cargar. */
+[data-rv] {
+  opacity: 0;
+}
+[data-rv="in"] {
+  opacity: 1;
+  transition: opacity 0.4s ease var(--rv-d, 0s);
+}
+@media print {
+  [data-rv] {
+    opacity: 1;
+  }
+}
+
 @media (max-width: 720px) {
   .wrap {
     padding: 0 16px;
+  }
+  /* La barra fija de abajo no tapa lo que recibe el foco con el teclado. */
+  html:has(.sticky-cta, .lsticky) {
+    scroll-padding-bottom: 96px;
   }
   .section {
     padding: 64px 0;

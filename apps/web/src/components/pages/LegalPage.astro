@@ -2,30 +2,16 @@
 // Documento legal de la web: título, fecha de la versión, índice con anclas, secciones numeradas, tablas y
 // marcadores «[Por completar…]» / «[Por confirmar…]» resaltados. Los textos viven en src/lib/legal/.
 // Una página va con noindex y el aviso de borrador mientras su texto conserve algún marcador.
-//
-// `page` (sin `doc`) mantiene la plantilla breve de las páginas que aún no tienen texto propio
-// (LEGAL en src/lib/pages-data.ts); esas van siempre sin indexar.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd } from "../../lib/faq"
 import { hasPending, LEGAL_UPDATED, LEGAL_UPDATED_ISO, type LegalDoc } from "../../lib/legal/types"
-import type { LegalPageData } from "../../lib/pages-data"
-import { contactEmail, legalLinks } from "../../lib/site"
+import { legalLinks } from "../../lib/site"
 import LegalText from "./LegalText.astro"
 
-type Props = { doc: LegalDoc; page?: never } | { page: LegalPageData; doc?: never }
+type Props = { doc: LegalDoc }
 
-const props = Astro.props
-const doc: LegalDoc = props.doc ?? {
-  path: props.page.path,
-  title: props.page.title,
-  description: props.page.description,
-  intro: [
-    props.page.covers,
-    `Si tienes una pregunta, escríbenos a [${contactEmail}](mailto:${contactEmail}).`,
-  ],
-  sections: [],
-}
-const noindex = props.doc ? hasPending(props.doc) : true
+const { doc } = Astro.props
+const noindex = hasPending(doc)
 const trail: [string, string][] = [
   ["Inicio", "/"],
   [doc.title, doc.path],
@@ -46,7 +32,7 @@ const hasToc = doc.sections.length > 1
     <header class="head">
       <span class="tag">[ Legal ]</span>
       <h1 class="h2">{doc.title}</h1>
-      {props.doc && <p class="updated">Última actualización: <time datetime={LEGAL_UPDATED_ISO}>{LEGAL_UPDATED}</time></p>}
+      <p class="updated">Última actualización: <time datetime={LEGAL_UPDATED_ISO}>{LEGAL_UPDATED}</time></p>
       {noindex && <p class="draft" role="note">Esta versión puede cambiar antes del lanzamiento.</p>}
       {doc.intro.map((p) => <p class="intro"><LegalText text={p} /></p>)}
     </header>
@@ -115,11 +101,12 @@ const hasToc = doc.sections.length > 1
 </Base>
 
 <style>
-  .crumbs ol { list-style: none; margin: 0; padding: 18px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--soft); }
+  .crumbs ol { list-style: none; margin: 0; padding: 12px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; color: var(--soft); }
   .crumbs li + li::before { content: "/"; margin-right: 6px; color: #cbd5e1; }
-  .crumbs a { color: var(--soft); text-decoration: none; display: inline-block; padding: 6px 0; }
+  /* La miga se toca entera: 44 px de alto (y un poco a los lados) sin correr el texto. */
+  .crumbs a { color: var(--soft); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; margin: 0 -6px; }
   .crumbs a:hover { color: var(--teal); }
-  .crumbs span { display: inline-block; padding: 6px 0; color: var(--ink-2); }
+  .crumbs span { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink-2); }
 
   .legal { padding-top: 40px; padding-bottom: 112px; }
   .head { display: flex; flex-direction: column; gap: 16px; max-width: 820px; }
@@ -163,6 +150,9 @@ const hasToc = doc.sections.length > 1
   }
   @media (max-width: 720px) {
     .legal { padding-top: 24px; padding-bottom: 72px; }
+    /* En el teléfono, el índice y las otras páginas se tocan con 44 px de alto. */
+    .toc a { min-height: 44px; align-items: center; padding: 4px 0; }
+    .others a { display: inline-flex; align-items: center; min-height: 44px; padding: 0; }
     .layout { margin-top: 32px; gap: 32px; }
     .body { gap: 36px; }
     /* En el móvil, cada fila de la tabla es una tarjeta con la etiqueta de cada columna. */

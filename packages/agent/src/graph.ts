@@ -76,6 +76,7 @@ import { attentionLines, attentionProgress, fitHistory, HISTORY_MAX_MESSAGES, HI
 import { channelFormatRule } from "./channel-format.js"
 import { languageOf } from "./language.js"
 import { treatmentOf } from "./treatment.js"
+import { webAddressesIn } from "./verify.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
@@ -1203,9 +1204,9 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       const source = name ? TOOL_SOURCES[name] : undefined
       const text = typeof result.content === "string" ? result.content : JSON.stringify(result.content)
       // Un enlace que entregó cualquier herramienta (el de reserva, el de
-      // completar sus datos) sustenta ese enlace en la respuesta (ADR 0097).
-      const links = text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi)
-      if (links && !source) {
+      // completar sus datos) sustenta ese enlace en la respuesta (ADR 0097), con la referencia de su token.
+      const links = webAddressesIn(text)
+      if (links.length > 0 && !source) {
         toolCtx.evidence = [...(toolCtx.evidence ?? []), { kind: "sistema", source: "Enlace que entregó el sistema", text: links.join("\n") }]
       }
       if (!name || !source) continue

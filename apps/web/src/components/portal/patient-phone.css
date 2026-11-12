@@ -1,5 +1,11 @@
 /* El teléfono de Andrea (portada de /portal-del-paciente): marco oscuro, la pantalla clara y una tarjeta
    blanca con borde por cosa, como la página real de Su enlace, con los botones en píldora. */
+/* Arriba del teléfono, qué pantalla muestra: Su enlace o su portal (dos páginas distintas en la app). */
+.dpp-wrap { width: 380px; max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.dpp-tabs { display: flex; gap: 4px; margin: 0; min-width: 0; border: 0; padding: 4px; border-radius: 999px; background: rgba(255, 255, 255, .08); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+.dpp-tabs button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: var(--on-night, #e7f5f8); font: 700 14px var(--font); cursor: pointer; }
+.dpp-tabs button[aria-pressed="true"] { background: #fff; color: var(--ink); }
+.dpp-tabs button:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
 .dpp { width: 380px; max-width: 100%; margin: 0 auto; background: #04131a; border-radius: 44px; padding: 12px; box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .7), inset 0 0 0 1px rgba(255, 255, 255, .1); }
 .dpp-screen { background: var(--bg); color: var(--ink); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; }
 .dpp-status { display: flex; justify-content: space-between; align-items: center; padding: 8px 22px 4px; font-size: 12px; font-weight: 700; }
@@ -28,7 +34,8 @@
 .dpp-btn.danger { background: #b42318; border-color: #b42318; color: #fff; font-weight: 700; }
 .dpp-btn.dpp-wide { margin-top: 4px; }
 .dpp-btn:not(:disabled):hover { filter: brightness(.96); }
-.dpp-pulse { animation: dpp-pulse 1.6s ease-out infinite; }
+/* Invita a tocar «Cambiar» tres veces y se queda quieto (nada late sin fin). */
+.dpp-pulse { animation: dpp-pulse 1.6s ease-out 3; }
 @keyframes dpp-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 45%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
 .dpp-slots { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
 .dpp-slots legend { padding: 0; margin-bottom: 2px; }

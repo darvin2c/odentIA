@@ -74,9 +74,20 @@ const agentStyle = (i: CardItem["agent"]) =>
         {b.points && (
           <ul class="points">
             {b.points.map((p) => (
-              <li style={agentStyle(p.agent)} class:list={{ ag: p.agent !== undefined }}>
-                {p.href ? <a href={p.href}><strong>{p.title}</strong></a> : <strong>{p.title}</strong>}
-                <span><Rich text={p.text} /></span>
+              <li style={agentStyle(p.agent)} class:list={{ ag: p.agent !== undefined, linked: Boolean(p.href) }}>
+                {/* Con enlace, la tarjeta entera se toca (como en «Lo que va con esto»), no solo el título. */}
+                {p.href ? (
+                  <a class="plink" href={p.href}>
+                    <strong>{p.title}</strong>
+                    <span><Rich text={p.text} /></span>
+                    <span class="arr" aria-hidden="true">→</span>
+                  </a>
+                ) : (
+                  <>
+                    <strong>{p.title}</strong>
+                    <span><Rich text={p.text} /></span>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -164,6 +175,11 @@ const agentStyle = (i: CardItem["agent"]) =>
   .section-white .points li { background: var(--bg); }
   .points span { color: var(--muted); }
   .points a { color: var(--teal); }
+  .points li.linked { padding: 0; }
+  .points .plink { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 18px 48px 18px 20px; border-radius: 16px; color: var(--ink); text-decoration: none; transition: box-shadow .2s ease; }
+  .points .plink:hover { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--teal); }
+  .points .plink strong { color: var(--teal); }
+  .points .plink .arr { position: absolute; right: 18px; top: 18px; color: var(--teal); font-size: 18px; }
 
   /* Conversación */
   .chat { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }

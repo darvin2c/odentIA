@@ -29,7 +29,8 @@
 /* El arco se achica con el alto de la ventana para que la demo entera quepa sin bajar la página. */
 .cl-arch .oa { max-width: clamp(220px, calc((100svh - 520px) * 1.25), 420px); margin: 0 auto; }
 
-@keyframes cl-ready { 50% { transform: scale(1.04); } }
+/* El botón listo late con su halo, sin cambiar de tamaño: lo que se toca no se mueve. */
+@keyframes cl-ready { 50% { box-shadow: 0 0 0 9px rgba(31, 157, 122, .1); } }
 @media (prefers-reduced-motion: reduce) {
   .cl-bulk[data-ready] .cl-confirm { animation: none; }
 }

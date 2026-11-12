@@ -1,6 +1,7 @@
 // «Tú decides» de latidIA (lienzo «Inicio», sección 6; también en /agentes): cada interruptor dice
 // qué pasa prendido y qué pasa apagado. Son los mismos de la configuración del consultorio; aquí
-// solo se prueban, no se guarda nada.
+// solo se prueban, no se guarda nada. Los nombres son los de la app: «Agendar, mover y cancelar citas»
+// (packages/services/src/agent-roles.ts) y las líneas del Administrador (admin-lines.ts).
 import { useState } from "react"
 import "./agent-switches.css"
 
@@ -9,15 +10,15 @@ const SWITCHES = [
     id: "agendar",
     agent: "Sofi",
     tone: "sofi",
-    label: "Agendar citas",
+    label: "Agendar, mover y cancelar citas",
     on: "Agenda en los horarios libres de cada médico, con el sí del paciente.",
-    off: "Envía su enlace para que la persona elija la hora.",
+    off: "No toca la agenda: envía el enlace para que la persona elija la hora.",
   },
   {
     id: "controles",
     agent: "Argos",
     tone: "argos",
-    label: "Avisar los controles",
+    label: "Avisar un control",
     on: "Escribe antes de que toque el control, como a Luis cada 3 meses.",
     off: "Te deja la lista y tu equipo decide a quién llamar.",
   },
@@ -33,8 +34,8 @@ const SWITCHES = [
     id: "otro",
     agent: "Argos",
     tone: "argos",
-    label: "Ofrecer otro horario",
-    on: "A quien faltó o canceló, le ofrece otra hora.",
+    label: "Reprogramar tras una inasistencia",
+    on: "A quien faltó, le ofrece otra hora.",
     off: "Quien faltó espera a que tu equipo lo llame.",
   },
 ]

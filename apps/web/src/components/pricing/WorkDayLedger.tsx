@@ -21,7 +21,7 @@ const CLINIC_DAY = (miguel: string, carlos: string): Row[] => [
   { time: "16:20", agent: "sofi", who: "Sofi", what: " reservó a Pedro; Pedro no vino", charge: "gestiona" },
   { time: "17:00", agent: "argos", who: "Argos", what: ": Rosa volvió tras faltar y la atendieron", charge: "recovered" },
   // ADR 0085: si la cita recuperada cuenta, se cobra solo ella y la conversación se devuelve.
-  { time: "17:00", agent: null, who: "", what: "Se devuelve la conversación de Rosa: cuenta la cita", charge: "refund" },
+  { time: "17:00", agent: null, who: "", what: "Te devolvemos la conversación en que Rosa reservó: se cobra solo la cita recuperada", charge: "refund" },
   // El software no suma: la última fila del día lo dice en la misma cuenta.
   { time: "24 h", agent: null, who: "", what: "El sistema, todo el día", charge: null },
 ]
@@ -36,7 +36,7 @@ const DAY: Row[] = ofProduct({
     { time: "16:20", agent: "sofi", who: "Sofi", what: " reservó a Pedro; Pedro no vino", charge: "gestiona" },
     { time: "17:00", agent: "argos", who: "Argos", what: ": Rosa volvió tras faltar y la atendieron", charge: "recovered" },
     // ADR 0085: si la cita recuperada cuenta, se cobra solo ella y la conversación se devuelve.
-    { time: "17:00", agent: null, who: "", what: "Se devuelve la conversación de Rosa: cuenta la cita", charge: "refund" },
+    { time: "17:00", agent: null, who: "", what: "Te devolvemos la conversación en que Rosa reservó: se cobra solo la cita recuperada", charge: "refund" },
     { time: "18:00", agent: "argos", who: "Argos", what: " le recordó su cita de mañana a Julia", charge: null },
     { time: "24 h", agent: null, who: "", what: "El sistema, todo el día", charge: null },
   ],

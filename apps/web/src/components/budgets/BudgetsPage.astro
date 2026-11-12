@@ -1,9 +1,10 @@
 ---
 // Presupuestos (lienzo del paso 3): la portada con el presupuesto de Carlos que se acepta, el paso a
-// paso del dictado a la cita, lo que ve el paciente en Su enlace, las preguntas y el cierre.
+// paso del dictado a la cita, lo que ve el paciente en Su enlace, el tablero de Oportunidades con sus
+// cuatro pasos (ilustración quieta), las preguntas y el cierre.
 // Título, descripción y preguntas son los de PAGES.presupuestos; los montos en soles son del ejemplo.
 import Base from "../../layouts/Base.astro"
-import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
 import { days, giftOf, shownPlan } from "../../lib/pricing"
 import { WORDS } from "../../lib/product"
@@ -18,12 +19,27 @@ const plan = shownPlan(pricing)
 const founder = plan !== null && plan === pricing.founders
 const gift = giftOf(pricing)
 const cta = ctaOf(pricing)
+const faq: FaqItem[] = [
+  ...page.faq,
+  {
+    q: "¿Dónde veo los presupuestos que nadie ha decidido?",
+    a: "En Oportunidades, el tablero de ventas. Cada interés de una persona avanza solo por cuatro pasos: Interesado, Evaluación agendada, Presupuesto enviado y Decidió, que se ve en Ganadas y Perdidas. Cada tarjeta dice por qué está ahí y, si tiene una, su tarea.",
+  },
+]
 const jsonLd = [
   breadcrumbJsonLd(Astro.site, [
     ["Inicio", "/"],
     [page.crumb, page.path],
   ]),
-  faqJsonLd(page.faq),
+  faqJsonLd(faq),
+]
+
+// El tablero de Oportunidades: los cuatro pasos fijos y cuándo llega sola cada tarjeta.
+const board: Array<{ step: string; when: string; who: string; what: string; note: string; tone?: "won" }> = [
+  { step: "Interesado", when: "Preguntó por un precio", who: "Jorge", what: "Ortodoncia", note: "Lo pidió por WhatsApp hoy" },
+  { step: "Evaluación agendada", when: "Al agendar su cita", who: "Rosa", what: "Implante · pieza 46", note: "Jueves 29 · 16:30" },
+  { step: "Presupuesto enviado", when: "Al presentarle el presupuesto", who: "Carlos", what: "Resina o corona · pieza 36", note: "Tarea: llamar el viernes" },
+  { step: "Decidió", when: "Al aceptarlo o rechazarlo", who: "Andrea", what: "Resina y limpieza", note: "Ganada · S/ 300", tone: "won" },
 ]
 
 const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; title: string; text: string }> = [
@@ -97,7 +113,32 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
     </div>
   </section>
 
-  <div class="faqwrap"><Faq items={page.faq} /></div>
+  <section class="section opp" id="oportunidades">
+    <div class="wrap col">
+      <div class="head">
+        <span class="tag">[ Oportunidades ]</span>
+        <h2 class="h2 t2">Tu tablero de ventas avanza solo.</h2>
+        <p class="lead">Cada interés de una persona es una tarjeta: un precio que preguntó, una evaluación, un presupuesto. Pasa de paso cuando ocurre algo real, y dice por qué está ahí y, si tiene una, su tarea.</p>
+      </div>
+      {/* Ilustración del tablero de Oportunidades: no son controles de esta página. */}
+      <ol class="board" aria-label="Ejemplo del tablero de Oportunidades, con sus cuatro pasos">
+        {board.map((column) => (
+          <li class="bcol">
+            <span class="bcol-h">{column.step}</span>
+            <span class="bcol-w">{column.when}</span>
+            <span class:list={["bcard", column.tone]}>
+              <b>{column.who}</b>
+              <span>{column.what}</span>
+              <span class="bnote">{column.note}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p class="opp-more">Las tareas las lleva quien tú elijas, y las que deja Argos se cierran solas cuando ya no hacen falta. <a href="/agentes/administrador">Conoce a Argos →</a></p>
+    </div>
+  </section>
+
+  <div class="faqwrap"><Faq items={faq} /></div>
 
   <CtaBand title="Presupuestos que se entienden y no se olvidan.">
     <Fragment slot="text">
@@ -132,7 +173,7 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
   .step { background: var(--paper); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
   .who { font-family: var(--agent-font); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--teal); }
   .who.clio { color: #1f7f63; }
-  .who.argos { color: #9a6a12; }
+  .who.argos { color: #8f6210; }
   .step b { font-size: 17px; line-height: 1.3; }
   .txt { font-size: 15px; line-height: 1.45; color: var(--muted); }
 
@@ -151,9 +192,25 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
   .ph-btn { text-align: center; font-weight: 700; color: #fff; background: var(--night); border-radius: 999px; padding: 14px; }
   .ph-link { text-align: center; font-weight: 700; color: var(--teal); padding: 6px; }
 
-  .faqwrap { background: var(--bg); }
+  .opp { padding: 96px 0; background: var(--bg); }
+  .opp .lead { font-size: 17px; }
+  .board { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .bcol { min-width: 0; background: var(--paper); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .bcol-h { font-weight: 800; font-size: 16px; line-height: 1.25; }
+  .bcol-w { font-size: 13px; line-height: 1.4; color: var(--muted); min-height: 2.8em; }
+  .bcard { margin-top: 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+  .bcard b { font-size: 15px; }
+  .bcard > span { color: var(--muted); }
+  .bcard .bnote { margin-top: 6px; font-family: var(--agent-font); font-size: 12px; color: var(--teal); }
+  .bcard.won { border-color: #1f7f63; }
+  .bcard.won .bnote { color: #1f7f63; }
+  .opp-more { margin: 0; font-size: 15px; color: var(--muted); }
+  .opp-more a { font-weight: 700; display: inline-block; padding: 10px 0; }
+
+  .faqwrap { background: var(--paper); }
 
   @media (max-width: 960px) {
+    .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ph { padding: 110px 0 64px; }
     .in { grid-template-columns: 1fr; gap: 36px; }
   }
@@ -164,6 +221,9 @@ const steps: Array<{ n: string; who: string; tone: "clio" | "team" | "argos"; ti
     .col { gap: 24px; }
     .steps { gap: 10px; }
     .step { padding: 16px; }
+    .opp { padding: 64px 0; }
+    .board { grid-template-columns: 1fr; gap: 10px; }
+    .bcol-w { min-height: 0; }
     .sees { padding: 64px 0 72px; }
     .row { gap: 28px; }
     .phone { width: 100%; flex-basis: 100%; }

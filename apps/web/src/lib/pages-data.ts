@@ -3,7 +3,7 @@
 // La documentación es privada, así que cada página explica sola qué hace esa parte y para quién.
 // Sin cifras de precio: esas viven solo en el inicio y en /precios (src/lib/pricing.ts).
 import type { FaqItem } from "./faq"
-import { AGENT_COLORS, contactEmail } from "./site"
+import { AGENT_COLORS } from "./site"
 
 export type AgentIndex = 0 | 1 | 2
 export type HeroVisualKind =
@@ -92,8 +92,11 @@ export type PageData = {
   cta?: { title?: string; text?: string }
 }
 
-/** Una página con su propio diseño (paso 3 de la web): de aquí solo toma lo de buscadores y las preguntas. */
-export type OwnPageData = Pick<PageData, "path" | "title" | "description" | "crumb" | "parent" | "faq">
+/**
+ * Una página con su propio diseño (paso 3 de la web): de aquí solo toma lo de buscadores, las migas y,
+ * si las usa, sus preguntas y «Sigue por aquí». Su portada y sus secciones viven en su componente.
+ */
+export type OwnPageData = Pick<PageData, "path" | "title" | "description" | "crumb" | "parent"> & Partial<Pick<PageData, "faq" | "related">>
 
 /** Nombres de los tres agentes (issue 183). La web siempre dice «Sofi», aunque cada clínica pueda renombrarla. */
 export const AGENT_NAMES = ["Sofi", "Clío", "Argos"] as const
@@ -154,7 +157,7 @@ export const LINKS: Record<string, { label: string; text: string }> = {
   },
   "/portal-del-paciente": {
     label: "Su enlace",
-    text: "Cada paciente reserva, cambia su cita y ve sus documentos.",
+    text: "Cada paciente reserva y cambia su cita. En su portal ve sus documentos.",
   },
   "/reportes": { label: "Reportes", text: "Lo que pasa en tu clínica, sin armar planillas." },
   "/varias-sedes": {
@@ -164,7 +167,7 @@ export const LINKS: Record<string, { label: string; text: string }> = {
   "/seguridad": { label: "Seguridad", text: "Roles, clínicas separadas y cómo usamos la IA." },
   "/precios": {
     label: "Precios",
-    text: "Un solo plan que vuelve como crédito. Pagas por el trabajo hecho.",
+    text: "Lo que cobra cada agente y lo que nunca se cobra. Pagas por el trabajo hecho.",
   },
   "/contacto": {
     label: "Habla con nosotros",
@@ -173,46 +176,6 @@ export const LINKS: Record<string, { label: string; text: string }> = {
 }
 
 // Ejemplos que se repiten (datos inventados, tomados del lienzo aprobado).
-const CHAT_LUCIA: ChatMsg[] = [
-  {
-    ch: "Instagram",
-    who: "Lucía",
-    side: "in",
-    text: "Hola, ¿cuánto me falta para que me quiten los brackets?",
-  },
-  {
-    ch: "Instagram",
-    who: "Sofi",
-    side: "out",
-    text: "Hola, Lucía. Soy Sofi, asistente virtual de Clínica Sonrisa Norte. En tu control del martes 28 la Dra. Paredes te dirá cuánto falta. ¿Te lo recuerdo un día antes?",
-  },
-  { ch: "Instagram", who: "Lucía", side: "in", text: "Sí, porfa." },
-  {
-    ch: "WhatsApp",
-    who: "Carmen, su mamá",
-    side: "in",
-    text: "Hola, soy la mamá de Lucía. ¿Podemos pasar su control del martes al viernes?",
-  },
-  {
-    ch: "WhatsApp",
-    who: "Sofi",
-    side: "out",
-    text: "Hola, Carmen. Claro: tengo el viernes 31 a las 16:00 con la Dra. Paredes. ¿Te lo dejo?",
-  },
-  { ch: "WhatsApp", who: "Carmen, su mamá", side: "in", text: "Sí, por favor." },
-  {
-    ch: "Correo",
-    who: "Sofi",
-    side: "out",
-    text: "Confirmación para Carmen: control de ortodoncia de Lucía, viernes 31 a las 16:00, con la Dra. Paredes.",
-  },
-]
-const PERSON_LUCIA = {
-  initials: "LR",
-  name: "Lucía Ramos",
-  sub: "Paciente · 14 años",
-  text: "Carmen, su mamá, es quien agenda y paga. Las dos escriben por canales distintos y todo queda en la misma ficha, sin duplicados y sin adivinar quién es por su número.",
-}
 const ACTS: LogEntry[] = [
   {
     t: "23:41",
@@ -322,13 +285,9 @@ const FAQ_MODEL: FaqItem = {
   q: "¿Qué inteligencia artificial usa?",
   a: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
 }
-const FAQ_META: FaqItem = {
-  q: "¿Tengo que pagarle algo más a WhatsApp?",
-  a: "WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima.",
-}
 const FAQ_TRAINING: FaqItem = {
   q: "¿Usan los datos de mi clínica para entrenar la IA?",
-  a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API (OpenAI y TypeSafe) tampoco.",
+  a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API tampoco: OpenAI, el de ChatGPT, y TypeSafe AI, cuyo modelo entiende qué pide cada mensaje.",
 }
 
 const AGENTS_PARENT: [string, string] = ["Agentes", "/agentes"]
@@ -367,7 +326,7 @@ export const PAGES = {
             agent: 0,
             title: "Tu agente de recepción",
             label: "Responde, informa y agenda a cualquier hora.",
-            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente.",
+            text: "Contesta al momento por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Agenda, mueve o cancela citas siempre con el sí del paciente. Y aprende de tus correcciones: cada lección la aprueba quien dirige la clínica.",
             href: "/agentes/recepcion",
           },
           {
@@ -381,7 +340,7 @@ export const PAGES = {
             agent: 2,
             title: "Tu agente administrador",
             label: "Recuerda citas y trae de vuelta a los pacientes.",
-            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo. Y te responde lo que le preguntes con las cifras de tu clínica.",
+            text: "Recuerda cada cita, avisa los controles, retoma los presupuestos y ofrece otra fecha a quien faltó. Si no puede escribirle a alguien, le deja la tarea a tu equipo. Le pides con tus palabras lo que quieres que haga, y te responde lo que le preguntes con las cifras de tu clínica.",
             href: "/agentes/administrador",
           },
         ],
@@ -507,7 +466,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Cuándo envía los recordatorios?",
-        a: "Un día antes y tres horas antes de cada cita, por el canal donde conversa con el paciente.",
+        a: "Un día antes y tres horas antes de cada cita, como viene, por el canal donde conversa con el paciente. Puedes poner de uno a tres avisos, entre una hora y una semana antes.",
       },
       {
         q: "¿Qué pasa si un paciente no tiene WhatsApp?",
@@ -532,83 +491,6 @@ export const PAGES = {
     description:
       "Software omnicanal para clínicas: WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo llegan a la misma persona y a su única historia, sin fichas repetidas.",
     crumb: "Omnicanal",
-    hero: {
-      type: "scene",
-      focus: "todos",
-      tag: "Omnicanal",
-      title: "Software omnicanal para clínicas:",
-      accent: "todos tus canales, una sola persona.",
-      lead: "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo llegan a una sola ficha por persona. Si alguien cambia de canal, la conversación sigue donde iba y nadie tiene que repetir nada.",
-    },
-    blocks: [
-      {
-        kind: "chat",
-        tag: "Omnicanal",
-        title: "Una conversación que cambia de canal sin perder el hilo.",
-        lead: "Lucía escribe por Instagram, su mamá sigue por WhatsApp y la confirmación llega por correo: una sola conversación y una sola ficha.",
-        person: PERSON_LUCIA,
-        messages: CHAT_LUCIA,
-        summary: "Una persona · 3 canales · 1 historia",
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "cards",
-        tag: "Los canales",
-        title: "Por donde te escriben.",
-        lead: "Los conectas una vez y llegan todos al mismo lugar, para tu equipo y para tus agentes.",
-        items: [
-          {
-            title: "WhatsApp",
-            text: "El número de tu clínica, conectado a través de Meta.",
-            href: "/whatsapp-para-clinicas-dentales",
-          },
-          {
-            title: "Instagram y Messenger",
-            text: "Los mensajes directos de las cuentas de tu clínica.",
-          },
-          { title: "Telegram", text: "Para quienes prefieren escribir por ahí." },
-          { title: "Chat de tu web", text: "Una ventana de chat en la web de tu clínica." },
-          {
-            title: "Correo",
-            text: "Gmail y Microsoft 365, en la misma conversación que lo demás.",
-          },
-        ],
-        note: "No atendemos llamadas ni SMS. [Por confirmar: cada canal, probado con su proveedor real antes de publicar]",
-      },
-      {
-        kind: "cards",
-        tag: "Una persona, no un número",
-        title: "Quien escribe no siempre es el paciente.",
-        lead: "Una mamá agenda por su hija, un esposo paga por los dos. odentIA distingue al paciente de quien conversa y de quien responde por él, sin crear fichas repetidas.",
-        items: [
-          {
-            title: "Una sola ficha por persona",
-            text: "Todos los canales llegan a la misma persona y a su única historia clínica.",
-          },
-          {
-            title: "Paciente, interlocutor y responsable",
-            text: "Lucía es la paciente; Carmen, su mamá, conversa, agenda y paga. Cada una en su lugar.",
-          },
-          {
-            title: "Sin adivinar por el número",
-            text: "Que un mensaje llegue desde un teléfono conocido no basta para dar datos de un paciente.",
-          },
-          {
-            title: "Todo el equipo ve el mismo hilo",
-            text: "Recepción retoma la conversación donde la dejó Sofi, sin preguntar de nuevo lo que ya se habló.",
-          },
-        ],
-      },
-      {
-        kind: "split",
-        tag: "Omnicanal y agéntica",
-        title: "Lo que empieza en un canal termina en tu agenda y en la historia del paciente.",
-        paragraphs: [
-          "Juntar los canales en una bandeja es solo la mitad. En odentIA los agentes actúan, no solo conversan: agendan, documentan la consulta, recuerdan la cita y traen de vuelta a tus pacientes. Tu equipo decide qué puede hacer cada uno.",
-        ],
-        link: { href: "/agentes", label: "Conoce a los tres agentes" },
-      },
-    ],
     related: [
       "/whatsapp-para-clinicas-dentales",
       "/agentes/recepcion",
@@ -616,28 +498,6 @@ export const PAGES = {
       "/portal-del-paciente",
       "/seguridad",
       "/precios",
-    ],
-    faq: [
-      {
-        q: "¿Qué significa omnicanal?",
-        a: "Que atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona.",
-      },
-      {
-        q: "¿Qué pasa si un paciente me escribe por otro canal?",
-        a: "La conversación sigue donde iba. Tu equipo y tus agentes ven todo lo que se habló, por cualquier canal, en la misma ficha.",
-      },
-      {
-        q: "¿Qué pasa si una mamá escribe por su hijo?",
-        a: "odentIA distingue al paciente de quien conversa y de quien responde por él. Todo queda en la ficha del paciente, sin crear otra persona.",
-      },
-      {
-        q: "¿Atienden llamadas o SMS?",
-        a: "No. odentIA atiende mensajes escritos: WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo.",
-      },
-      {
-        q: "¿Puedo usar el WhatsApp que ya tiene mi clínica?",
-        a: "Conectas el número de tu clínica a través de Meta. [Por confirmar: conexión con Meta probada]",
-      },
     ],
   },
 
@@ -648,104 +508,12 @@ export const PAGES = {
       "WhatsApp Business para tu clínica dental: conecta tu número y responde, agenda y recuerda citas desde la ficha de cada paciente. Lo que cobra Meta lo revisas en tu cuenta de Meta.",
     crumb: "WhatsApp para clínicas",
     parent: ["Omnicanal", "/omnicanal"],
-    hero: {
-      type: "visual",
-      visual: "whatsapp",
-      tag: "WhatsApp",
-      title: "WhatsApp Business para tu clínica dental,",
-      accent: "con tu número de siempre.",
-      lead: "Conecta el número de tu clínica y atiende cada mensaje desde odentIA: Sofi, tu agente de recepción, contesta al momento, agenda con el sí del paciente y le pasa a tu equipo lo que necesita a una persona.",
-      secondary: { href: "/agentes/recepcion", label: "Conoce a Sofi" },
-    },
-    blocks: [
-      {
-        kind: "steps",
-        tag: "Cómo se conecta",
-        title: "Tu número, en tres pasos.",
-        steps: [
-          {
-            title: "Conectas el número de tu clínica",
-            text: "Desde tu cuenta de Meta, con pasos guiados dentro de odentIA. [Por confirmar: conexión con Meta probada]",
-          },
-          {
-            title: "Eliges qué hace Sofi",
-            text: "Responder, agendar o solo avisarle a tu equipo. Cada tarea se prende o se apaga.",
-          },
-          {
-            title: "Cada mensaje llega a la ficha de la persona",
-            text: "Junto con lo que escribió por Instagram, el chat de tu web o el correo.",
-          },
-        ],
-      },
-      {
-        kind: "cards",
-        tag: "Lo que cobra Meta",
-        title: "Qué cuesta WhatsApp, sin letra chica.",
-        items: [
-          {
-            title: "WhatsApp lo cobra Meta a la clínica",
-            text: "Con sus propias tarifas: los mensajes de plantilla, como un recordatorio, y las respuestas cuando pasan de lo que Meta deja gratis.",
-          },
-          {
-            title: "Lo revisas en tu cuenta de Meta",
-            text: "odentIA no lo cobra ni lo estima: en Plan y pagos tienes el enlace a tu cuenta de Meta.",
-          },
-          {
-            title: "Lo que cobra odentIA",
-            text: "Pagas por el trabajo hecho, no por mensaje. Lo ves en la página de precios.",
-            href: "/precios",
-          },
-        ],
-      },
-      {
-        kind: "cards",
-        tag: "Qué pasa en tu WhatsApp",
-        title: "Lo que hacen tus agentes por WhatsApp.",
-        items: [
-          {
-            agent: 0,
-            title: "Responde y agenda",
-            text: "Informa precios y horarios, y agenda, mueve o cancela citas con el sí del paciente.",
-          },
-          {
-            agent: 2,
-            title: "Recuerda y trae de vuelta",
-            text: "Recuerda cada cita, avisa los controles y ofrece otra fecha a quien faltó.",
-          },
-          {
-            agent: 0,
-            title: "Envía Su enlace",
-            text: "Para que el paciente elija la hora, cambie su cita o vea sus documentos.",
-            href: "/portal-del-paciente",
-          },
-          {
-            title: "Tu equipo, cuando hace falta",
-            text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo que se habló.",
-          },
-        ],
-      },
-    ],
     related: [
       "/omnicanal",
       "/agentes/recepcion",
       "/agentes/administrador",
       "/portal-del-paciente",
       "/precios",
-    ],
-    faq: [
-      {
-        q: "¿Puedo usar el número que ya tiene mi clínica?",
-        a: "Sí, conectas el número de tu clínica a través de Meta, con pasos guiados dentro de odentIA. [Por confirmar: conexión con Meta probada]",
-      },
-      FAQ_META,
-      {
-        q: "¿Qué es la ventana de 24 horas?",
-        a: "Es la regla de Meta: cuando un paciente te escribe, durante las 24 horas siguientes puedes responderle libremente. Fuera de esa ventana, el primer mensaje tiene que ser una plantilla aprobada por Meta.",
-      },
-      {
-        q: "¿Mi equipo también puede responder?",
-        a: "Sí. Tu equipo ve las conversaciones en la ficha de cada persona y responde desde ahí cuando hace falta.",
-      },
     ],
   },
 
@@ -756,93 +524,6 @@ export const PAGES = {
     description:
       "Agenda odontológica online por sede, unidad dental y profesional. Tus pacientes reservan desde su enlace, Sofi agenda por cualquier canal y Argos recuerda cada cita.",
     crumb: "Agenda",
-    hero: {
-      type: "visual",
-      visual: "agenda",
-      tag: "Agenda",
-      title: "Agenda odontológica online,",
-      accent: "por sede, unidad dental y profesional.",
-      lead: "Cada servicio con quien lo atiende y sus horarios. Tus pacientes reservan desde su enlace; Sofi, tu agente de recepción, agenda por cualquier canal, y Argos, tu agente administrador, recuerda cada cita.",
-      secondary: { href: "/precios", label: "Ver los precios" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué resuelve",
-        title: "Una agenda que se llena y se cuida sola.",
-        items: [
-          {
-            title: "Por sede, unidad dental y profesional",
-            text: "Cada sede con sus unidades dentales y cada profesional con sus horarios.",
-          },
-          {
-            title: "Cada servicio, con quien lo atiende",
-            text: "Solo se ofrecen los horarios libres de quien hace ese servicio.",
-          },
-          {
-            agent: 0,
-            title: "Sofi agenda por cualquier canal",
-            text: "Agenda, mueve o cancela citas con el sí del paciente, también de noche.",
-            href: "/agentes/recepcion",
-          },
-          {
-            title: "Tus pacientes reservan solos",
-            text: "Desde Su enlace eligen sede, día y hora, y pueden cambiar su cita.",
-            href: "/portal-del-paciente",
-          },
-          {
-            agent: 2,
-            title: "Recordatorios incluidos",
-            text: "Argos recuerda cada cita un día antes y tres horas antes.",
-            href: "/agentes/administrador",
-          },
-          {
-            agent: 2,
-            title: "Quien faltó, con otra fecha",
-            text: "Si alguien no llegó, le ofrece otra fecha para que no se pierda el tratamiento.",
-          },
-        ],
-      },
-      {
-        kind: "steps",
-        tag: "Un ejemplo",
-        title: "Una cita, de la pregunta a la consulta.",
-        steps: [
-          {
-            when: "Miércoles · 23:40",
-            channel: "WhatsApp",
-            agent: 0,
-            title: "Andrea escribe con la clínica cerrada: quiere una evaluación.",
-            text: "Sofi le ofrece el jueves a las 10:30 con la Dra. Paredes o a las 16:30 con el Dr. Ríos.",
-          },
-          {
-            when: "Miércoles · 23:41",
-            channel: "Agenda",
-            agent: 0,
-            title: "Andrea elige las 10:30 y la cita aparece en la agenda del jueves 22.",
-            text: "Sin que nadie de tu equipo tenga que estar despierto.",
-          },
-          {
-            when: "Jueves · 07:30",
-            channel: "WhatsApp",
-            agent: 2,
-            title: "Tres horas antes, Argos le recuerda la cita.",
-            text: "Si la hubiera reservado con más tiempo, también le escribiría un día antes.",
-          },
-          { when: "Jueves · 10:30", channel: "Consulta", title: "Andrea llega a su evaluación." },
-        ],
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "split",
-        tag: "Para quién",
-        title: "Cada quien ve la agenda que necesita.",
-        paragraphs: [
-          "Recepción coordina el día de todas las unidades dentales; cada odontólogo ve sus pacientes y sus horarios. Si tienes varias sedes, cada una tiene su agenda y el paciente sigue siendo uno solo.",
-        ],
-        link: { href: "/varias-sedes", label: "Cómo funciona con varias sedes" },
-      },
-    ],
     related: [
       "/portal-del-paciente",
       "/agentes/recepcion",
@@ -866,7 +547,15 @@ export const PAGES = {
       },
       {
         q: "¿Se envían recordatorios de las citas?",
-        a: "Sí. Argos recuerda cada cita un día antes y tres horas antes. Es una tarea que se puede apagar.",
+        a: "Sí. Argos recuerda cada cita un día antes y tres horas antes, como viene, y tú cambias cuándo. Es la línea «Recordar la cita» y se puede apagar.",
+      },
+      {
+        q: "¿Puedo ver mis citas en el calendario de mi celular?",
+        a: "Sí, si atiendes pacientes. En la Agenda, «Mi calendario» te da un enlace solo tuyo para añadir tus citas a Google Calendar, Apple u Outlook. De cada cita se ve «Paciente» con sus iniciales, nunca el nombre, el servicio ni el motivo, y desde tu calendario no se mueve ni se reserva nada.",
+      },
+      {
+        q: "¿Cómo sé quién ya llegó?",
+        a: "Recepción marca «Llegó» y el odontólogo lo ve en su sala de espera, en Inicio: quién llegó, desde qué hora y cuánto lleva esperando. «Atender» abre la atención en un clic.",
       },
     ],
   },
@@ -958,79 +647,8 @@ export const PAGES = {
     path: "/caja-y-cobros",
     title: "Control de caja para clínica dental",
     description:
-      "Control de caja para tu clínica dental: cobros, adelantos, gastos y movimientos de efectivo por sede, quién debe y desde cuándo, y el cierre de caja con su hoja para firmar.",
+      "Control de caja para tu clínica dental: cobros, gastos y cierre de caja por sede, quién debe y desde cuándo, las comisiones de cada odontólogo y el inventario que se descuenta solo.",
     crumb: "Caja y cobros",
-    hero: {
-      type: "visual",
-      visual: "caja",
-      tag: "Caja y cobros",
-      title: "Control de caja para tu clínica dental,",
-      accent: "sede por sede.",
-      lead: "Registra cobros, adelantos y gastos, mira quién debe y desde cuándo, y cierra la caja de cada sede con su hoja para firmar la entrega.",
-      secondary: { href: "/reportes", label: "Ver los reportes" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué controla",
-        title: "Lo que entra, lo que sale y lo que falta cobrar.",
-        items: [
-          { title: "Una caja por sede", text: "Se abre sola con el primer cobro del día." },
-          { title: "Cobros y adelantos", text: "Con los medios de pago que configura tu clínica." },
-          {
-            title: "Gastos y movimientos de efectivo",
-            text: "Ingresos y retiros de efectivo, con su motivo.",
-          },
-          {
-            title: "Quién debe y desde cuándo",
-            text: "Las deudas ordenadas por antigüedad, para cobrar a tiempo.",
-          },
-          {
-            title: "Saldos a favor y devoluciones",
-            text: "Cada movimiento queda en la cuenta del paciente.",
-          },
-          { title: "Cierre de caja", text: "Al cerrar, imprimes la hoja para firmar la entrega." },
-        ],
-      },
-      {
-        kind: "steps",
-        tag: "Un ejemplo",
-        title: "Un día en la caja de la sede Norte.",
-        steps: [
-          {
-            when: "08:40",
-            title: "El primer cobro abre la caja.",
-            text: "Nadie tiene que acordarse de abrirla.",
-          },
-          {
-            when: "12:15",
-            title: "Carmen paga un adelanto del tratamiento de Lucía.",
-            text: "Queda en la cuenta de Lucía, con su medio de pago.",
-          },
-          {
-            when: "15:00",
-            title: "Se registra la compra de materiales como gasto.",
-            text: "Con el tipo de gasto y en qué se gastó.",
-          },
-          {
-            when: "19:30",
-            title: "Cierre de caja.",
-            text: "Se imprime la hoja para firmar la entrega del día.",
-          },
-        ],
-        note: "Ejemplo con datos inventados.",
-      },
-      {
-        kind: "split",
-        tag: "Para quién",
-        title: "Caja cobra. La dueña ve el mes.",
-        paragraphs: [
-          "Caja ve lo que necesita para cobrar, sin la historia clínica. Quien dirige la clínica ve cuánto entró, cuánto se gastó y cuánto falta cobrar, por sede o de todas juntas, en los reportes.",
-          "Las anulaciones piden un motivo y todo queda registrado: quién hizo cada movimiento y cuándo.",
-        ],
-        link: { href: "/reportes", label: "Ver qué muestran los reportes" },
-      },
-    ],
     related: ["/reportes", "/presupuestos-dentales", "/varias-sedes", "/seguridad", "/precios"],
     faq: [
       {
@@ -1049,6 +667,18 @@ export const PAGES = {
         q: "¿Quién puede ver la caja?",
         a: "Quien tiene ese permiso en tu clínica, como caja y la dirección. Caja no ve la historia clínica.",
       },
+      {
+        q: "¿Puedo cobrar en soles y en dólares?",
+        a: "Sí. Activas la otra moneda en los datos de tu clínica y escribes el tipo de cambio de hoy. Lo que está en dólares se debe en dólares hasta que se paga, el paciente puede pagarlo en soles y cada moneda tiene su caja y su cierre.",
+      },
+      {
+        q: "¿Calcula las comisiones de los odontólogos?",
+        a: "Sí. Le pones a cada profesional su porcentaje de lo cobrado, o un monto fijo por un servicio, y cada mes ves su liquidación: cuánto falta pagar, cómo se calcula y cada cobro por fecha. Cada odontólogo ve solo lo suyo en «Mis honorarios».",
+      },
+      {
+        q: "¿Lleva el inventario de materiales?",
+        a: "Sí. Cada servicio dice qué materiales usa y se descuentan solos al firmar la atención, en la sede donde se atendió. También registras las compras, cuentas lo que hay a fin de mes y vendes productos desde el cobro.",
+      },
     ],
   },
 
@@ -1056,73 +686,8 @@ export const PAGES = {
     path: "/portal-del-paciente",
     title: "Reserva de citas online para dentistas: Su enlace",
     description:
-      "Reserva de citas online para dentistas: con Su enlace cada paciente reserva, cambia su cita, ve sus documentos y responde sus presupuestos desde el teléfono, sin llamar ni descargar nada.",
+      "Reserva de citas online para dentistas: con Su enlace cada paciente reserva, cambia su cita y responde su presupuesto desde el teléfono, sin llamar ni descargar nada. En su portal ve sus documentos.",
     crumb: "Su enlace",
-    hero: {
-      type: "visual",
-      visual: "enlace",
-      tag: "Su enlace",
-      title: "Reserva de citas online para dentistas,",
-      accent: "con Su enlace.",
-      lead: "Cada paciente reserva, cambia su cita y ve sus documentos desde su propio enlace, sin tener que llamar.",
-      secondary: { href: "/agenda-odontologica", label: "Ver la agenda" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Qué puede hacer cada paciente",
-        title: "Lo que antes era una llamada, ahora es un toque.",
-        items: [
-          {
-            title: "Reservar su cita",
-            text: "Elige la sede, el día y la hora. Si es su primera cita, después de elegir le pedimos unos datos.",
-          },
-          { title: "Cambiar o cancelar", text: "Desde el mismo enlace, sin escribirle a nadie." },
-          {
-            title: "Ver sus documentos",
-            text: "Lo que la clínica le autoriza a ver, en un solo lugar.",
-          },
-          {
-            title: "Responder sus presupuestos",
-            text: "Ve las opciones y responde cuando lo decide.",
-            href: "/presupuestos-dentales",
-          },
-          {
-            title: "Leer y firmar consentimientos",
-            text: "Antes de la cita, con calma, desde su teléfono.",
-          },
-        ],
-      },
-      {
-        kind: "steps",
-        tag: "Cómo llega",
-        title: "Un enlace propio, sin contraseñas.",
-        steps: [
-          {
-            agent: 0,
-            title: "Tus agentes se lo envían",
-            text: "Por el canal donde ya conversan: Sofi, tu agente de recepción, cuando pide una cita, y Argos, tu agente administrador, cuando le toca su control.",
-          },
-          {
-            title: "Lo abre en el navegador",
-            text: "No tiene que descargar ninguna aplicación ni crear una contraseña.",
-          },
-          {
-            title: "Puede guardar su acceso",
-            text: "Para volver, entra con su huella o su cara, o pide un enlace nuevo.",
-          },
-        ],
-      },
-      {
-        kind: "split",
-        tag: "Tú decides",
-        title: "Cada clínica decide qué ve cada paciente.",
-        paragraphs: [
-          "Desde recepción se le da acceso a sus citas, sus presupuestos o sus documentos. Si un enlace venció, el paciente responde el mensaje y recibe uno nuevo.",
-        ],
-        link: { href: "/seguridad", label: "Cómo cuidamos los datos" },
-      },
-    ],
     related: [
       "/agenda-odontologica",
       "/presupuestos-dentales",
@@ -1146,6 +711,14 @@ export const PAGES = {
       {
         q: "¿Qué pasa si el horario se ocupa mientras elige?",
         a: "Se le avisa que ese horario acaba de ocuparse y elige otro de la lista.",
+      },
+      {
+        q: "¿Su enlace y el portal son lo mismo?",
+        a: "No. Su enlace lleva lo que tiene pendiente: su cita, sus datos, su presupuesto y lo que tiene por firmar, sin crear una cuenta. El portal es para ver todo lo suyo cuando quiera: el acceso se le da en la clínica, comprobando su documento, y no vence.",
+      },
+      {
+        q: "¿Un paciente nuevo puede registrarse solo?",
+        a: "Sí, con el enlace de tu clínica o el código QR de recepción. Tú eliges qué se le pregunta, dato por dato, y lo ve con tu logo y el color de tu marca.",
       },
     ],
   },
@@ -1180,69 +753,6 @@ export const PAGES = {
     description:
       "Software para cadenas de clínicas dentales: cada sede con su agenda, sus unidades dentales y su caja; cada paciente con una sola historia en todas; y cada rol con lo que le toca ver.",
     crumb: "Varias sedes",
-    hero: {
-      type: "visual",
-      visual: "sedes",
-      tag: "Varias sedes",
-      title: "Software para cadena de clínicas dentales:",
-      accent: "varias sedes, un solo equipo.",
-      lead: "Cada sede con su agenda, sus unidades dentales y su caja; cada paciente con una sola historia en todas; y cada rol con lo que le toca ver.",
-      secondary: { href: "/precios", label: "Ver los precios" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Cómo se organiza",
-        title: "Cada sede con lo suyo. El paciente, uno solo.",
-        items: [
-          {
-            title: "Una agenda por sede",
-            text: "Con sus unidades dentales, sus profesionales y sus horarios.",
-            href: "/agenda-odontologica",
-          },
-          {
-            title: "Una caja por sede",
-            text: "Con su propio cierre, y todas juntas en los reportes.",
-            href: "/caja-y-cobros",
-          },
-          {
-            title: "Un paciente, una historia",
-            text: "Si se atiende en otra sede, su historia va con él.",
-          },
-          {
-            agent: 0,
-            title: "Los agentes, en todas las sedes",
-            text: "Sofi, tu agente de recepción, ofrece los horarios de la sede que le conviene al paciente.",
-          },
-          {
-            title: "Reportes por sede o de todas",
-            text: "Comparas las sedes con los mismos datos.",
-            href: "/reportes",
-          },
-        ],
-      },
-      {
-        kind: "cards",
-        tag: "Roles",
-        title: "Cada quien ve lo que le toca.",
-        lead: "Recepción coordina, los odontólogos atienden con la historia y caja cobra. Cada rol ve solo lo que necesita.",
-        items: [
-          { title: "Recepción", text: "La agenda y las conversaciones." },
-          { title: "Odontólogos", text: "Sus pacientes y la historia clínica." },
-          { title: "Caja", text: "Los cobros, los gastos y el cierre." },
-          { title: "Dirección", text: "Los reportes de todas las sedes y la configuración." },
-        ],
-      },
-      {
-        kind: "split",
-        tag: "Sin cobrar por sede",
-        title: "Crecer no cambia tu plan.",
-        paragraphs: [
-          "Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios. Pagas por el trabajo que hacen tus agentes, no por cuántas sedes tienes.",
-        ],
-        link: { href: "/precios", label: "Ver los precios" },
-      },
-    ],
     related: ["/agenda-odontologica", "/caja-y-cobros", "/reportes", "/seguridad", "/precios"],
     faq: [
       {
@@ -1259,7 +769,7 @@ export const PAGES = {
       },
       {
         q: "¿Cada persona ve todas las sedes?",
-        a: "Cada persona ve lo que su rol le permite. [Por confirmar: limitar a una persona a ciertas sedes]",
+        a: "Cada persona ve lo que su rol le permite: recepción coordina, los odontólogos atienden con la historia y caja cobra.",
       },
     ],
   },
@@ -1271,102 +781,6 @@ export const PAGES = {
     description:
       "Cómo cuida odentIA los datos de tu clínica dental: cada clínica separada, roles para recepción, clínicos y caja, agentes que actúan dentro de lo que permites y todo registrado.",
     crumb: "Seguridad",
-    hero: {
-      type: "visual",
-      visual: "seguridad",
-      tag: "Seguridad",
-      title: "Seguridad y privacidad:",
-      accent: "tu clínica, tus datos, tus reglas.",
-      lead: "Cada clínica está separada de las demás, cada rol ve solo lo suyo, tu equipo decide qué hacen los agentes y todo queda registrado.",
-      secondary: { href: "/contacto", label: "Habla con nosotros" },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "La confianza",
-        title: "Tu clínica, tus datos, tus reglas.",
-        items: [
-          {
-            title: "Cada quien ve lo suyo",
-            text: "Recepción coordina, los odontólogos atienden con la historia y caja cobra. Cada rol ve solo lo que necesita.",
-          },
-          {
-            title: "Tu clínica, separada",
-            text: "Los datos de cada clínica están aislados de las demás, también para los agentes.",
-          },
-          {
-            title: "Tu equipo decide",
-            text: "Los agentes actúan dentro de lo que les permites y te pasan el caso cuando hace falta una persona.",
-          },
-          {
-            title: "Todo queda registrado",
-            text: "Quién hizo qué y cuándo, sea un agente o una persona de tu equipo.",
-          },
-        ],
-      },
-      {
-        kind: "cards",
-        tag: "Cómo usamos la IA",
-        title: "La IA ayuda. Las personas deciden.",
-        items: [
-          {
-            agent: 0,
-            title: "Dice que es virtual",
-            text: "Sofi, tu agente de recepción, siempre dice que es asistente virtual, con el nombre que tu clínica le ponga.",
-          },
-          {
-            agent: 1,
-            title: "Lo clínico lo confirma el odontólogo",
-            text: "Ninguna nota, diagnóstico ni plan entra a la historia sin su sí.",
-          },
-          {
-            agent: 2,
-            title: "Solo lo que tú prendes",
-            text: "Cada tarea de los agentes se prende o se apaga. Las promociones solo van a quien aceptó recibirlas.",
-          },
-          {
-            title: "Un modelo que probamos",
-            text: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
-          },
-          {
-            title: "Un presupuesto del mes",
-            text: "Te avisamos antes de llegar y, al llegar, las conversaciones nuevas pasan a tu equipo.",
-          },
-        ],
-      },
-      {
-        kind: "split",
-        tag: "Los textos legales",
-        title: "Privacidad y encargo de tratamiento, en preparación.",
-        paragraphs: [
-          "Tu clínica es la responsable de los datos de sus pacientes y odentIA los trata por encargo suyo. Los textos de privacidad, encargo de tratamiento y subencargados los está redactando un abogado y se publican antes de abrir.",
-        ],
-        points: [
-          {
-            title: "Privacidad",
-            text: "Qué datos guardamos, para qué y cómo pedir verlos, corregirlos o borrarlos.",
-            href: "/privacidad",
-          },
-          {
-            title: "Encargo de tratamiento",
-            text: "La relación entre tu clínica y odentIA con los datos de tus pacientes.",
-            href: "/encargo-de-tratamiento",
-          },
-          {
-            title: "Subencargados",
-            text: "Quién más trata los datos y para qué.",
-            href: "/subencargados",
-          },
-        ],
-      },
-    ],
-    related: [
-      "/agentes",
-      "/historia-clinica-y-odontograma",
-      "/varias-sedes",
-      "/contacto",
-      "/precios",
-    ],
     faq: [
       FAQ_TRAINING,
       {
@@ -1394,71 +808,5 @@ export const PAGES = {
     description:
       "¿Quieres saber si odentIA le sirve a tu clínica dental? Escríbenos y te responde una persona del equipo, o pruébalo sin tarjeta.",
     crumb: "Habla con nosotros",
-    hero: {
-      type: "visual",
-      visual: "contacto",
-      tag: "Contacto",
-      title: "Habla con nosotros.",
-      lead: "¿Quieres saber si odentIA le sirve a tu clínica o tienes una duda? Escríbenos y te responde una persona del equipo.",
-      secondary: { href: `mailto:${contactEmail}`, label: `Escribe a ${contactEmail}` },
-    },
-    blocks: [
-      {
-        kind: "cards",
-        tag: "Por dónde seguir",
-        title: "Elige lo que te queda más cómodo.",
-        items: [
-          {
-            title: "Escríbenos",
-            text: `A ${contactEmail}. Cuéntanos cuántas sedes tienes y por dónde te escriben tus pacientes.`,
-            href: `mailto:${contactEmail}`,
-            label: "Escribir un correo",
-          },
-          {
-            title: "Pruébalo tú mismo",
-            text: "Te registras, conectas tus canales y tus agentes trabajan con el crédito de prueba. Sin tarjeta.",
-          },
-          {
-            title: "Mira cómo cobramos",
-            text: "Un solo plan y pagas por el trabajo hecho.",
-            href: "/precios",
-            label: "Ver los precios",
-          },
-        ],
-      },
-    ],
-    related: ["/agentes", "/omnicanal", "/seguridad", "/precios"],
-    faq: [
-      {
-        q: "¿Necesito hablar con alguien para probarlo?",
-        a: "No. Te registras y tus agentes trabajan con el crédito de prueba. La prueba no pide tarjeta.",
-      },
-      {
-        q: "¿Me ayudan a conectar mis canales?",
-        a: "Escríbenos y te contamos cómo. [Por confirmar: acompañamiento en la puesta en marcha]",
-      },
-      {
-        q: "¿Funciona en mi país?",
-        a: "odentIA está hecho para clínicas de habla hispana. La moneda, la zona horaria y los documentos se configuran por clínica.",
-      },
-    ],
-    // Sin texto propio: la banda dice los días de prueba del plan que publica la administración.
-    cta: {
-      title: "¿Lo ves en tu clínica?",
-    },
   },
 } satisfies Record<string, PageData | OwnPageData>
-
-/** Páginas legales que aún no tienen texto propio (la plantilla breve de LegalPage). Las que ya lo tienen
- * viven en src/lib/legal/. */
-export type LegalPageData = { path: string; title: string; description: string; covers: string }
-
-export const LEGAL = {
-  libro: {
-    path: "/pe/libro-de-reclamaciones",
-    title: "Libro de reclamaciones",
-    description: "Libro de reclamaciones virtual de odentIA para Perú: deja tu reclamo o queja y recibe la copia en tu correo.",
-    covers:
-      "Solo para Perú: dónde dejar un reclamo o una queja. Un abogado confirma si aplica a un servicio entre empresas.",
-  },
-} satisfies Record<string, LegalPageData>

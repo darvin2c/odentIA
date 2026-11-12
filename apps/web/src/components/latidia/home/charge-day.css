@@ -14,7 +14,7 @@
 .cd2-what b { font-size: 15px; }
 .cd2-what span { font-size: 13px; color: var(--soft); }
 .cd2-amt { font-size: 20px; letter-spacing: -.01em; white-space: nowrap; }
-.cd2-amt.zero { color: #94a3b8; }
+.cd2-amt.zero { color: var(--soft); }
 .cd2-total { display: flex; justify-content: space-between; align-items: baseline; padding-top: 14px; }
 .cd2-total > b:first-child { font-size: 17px; }
 .cd2-sum { font-size: 30px; letter-spacing: -.02em; color: var(--teal-hover); white-space: nowrap; }

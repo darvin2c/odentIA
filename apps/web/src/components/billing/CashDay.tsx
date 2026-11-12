@@ -6,6 +6,7 @@
 // caja. Con movimiento reducido se ve el día terminado, sin animar. Los montos son del ejemplo.
 import { useCallback, useEffect, useRef, useState } from "react"
 import "./cash-day.css"
+import { useSteadyHeight } from "../../lib/steady"
 
 const STEP_MS = 1700
 const LAST = 6
@@ -33,6 +34,9 @@ const DAY: Entry[] = [
   { at: 5, time: "17:30", who: "Carlos Medina", sub: "Ticket 000214 · Efectivo", note: "Paga lo que faltaba", amount: 100, method: "Efectivo", kind: "cobro" },
 ]
 
+/** Lo que dice el estado de la caja a lo largo del día. */
+const STATES = ["Sin abrir", "Abierta desde 08:40", "Lista para cerrar"]
+
 /** «S/ 80,00»: los soles del ejemplo (una clínica de Perú). */
 const soles = (v: number) => `S/ ${v.toFixed(2).replace(".", ",")}`
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
@@ -41,6 +45,12 @@ export default function CashDay() {
   // Se arma en el servidor con el día terminado: sin JavaScript se lee igual.
   const [n, setN] = useState(LAST)
   const timer = useRef<number | undefined>(undefined)
+  // La tarjeta de la caja mide siempre lo que el día terminado: los cobros entran en espacio reservado.
+  // Al girar el teléfono, el día se muestra terminado y se mide de nuevo.
+  const steady = useSteadyHeight<HTMLDivElement>(undefined, () => {
+    window.clearInterval(timer.current)
+    setN(LAST)
+  })
 
   const play = useCallback(() => {
     window.clearInterval(timer.current)
@@ -75,32 +85,39 @@ export default function CashDay() {
   }
   const owes = n >= 2 && !carlosPaid
   const state = n === 0 ? "closed" : n >= LAST ? "ready" : "open"
-  const stateText = n === 0 ? "Sin abrir" : n >= LAST ? "Lista para cerrar" : "Abierta desde 08:40"
+  const stateText = n === 0 ? STATES[0] : n >= LAST ? STATES[2] : STATES[1]
 
   return (
     <div className="fc">
-      <div className="fc-card">
+      <div className="fc-card" ref={steady}>
         <div className="fc-top">
           <div className="fc-title">
             <b>Finanzas</b>
             <span>Caja por sede, deudas y gastos · Sede Norte · sábado 24 oct.</span>
           </div>
           <span className="fc-side">
-            <span className="fc-state" data-state={state}>
-              <i aria-hidden="true" />
-              {stateText}
+            {/* El estado más largo reserva su ancho: «Repetir el día» no se corre cuando cambia. */}
+            <span className="fit fit-inline">
+              {STATES.map((text) => (
+                <span key={text} className="fc-state fit-ghost" aria-hidden="true">
+                  <i />
+                  {text}
+                </span>
+              ))}
+              <span className="fc-state" data-state={state}>
+                <i aria-hidden="true" />
+                {stateText}
+              </span>
             </span>
             <button type="button" className="fc-replay" onClick={play}>
               <span aria-hidden="true">↻</span> Repetir el día
             </button>
           </span>
         </div>
-        <div className="fc-tabs" aria-hidden="true">
-          <span className="on">Caja</span>
-          <span>Deudas</span>
-          <span>Gastos</span>
-          <span>Comisiones</span>
-        </div>
+        {/* Dónde está, dicho como texto: las pestañas de Finanzas no se dibujan, porque aquí no se tocan. */}
+        <p className="fc-where">
+          Pestaña <b>Caja</b>. Las otras: Cobros, Deudas, Gastos y Comisiones.
+        </p>
 
         <div className="fc-cards">
           <div className="fc-stat fc-stat-main">
@@ -127,8 +144,12 @@ export default function CashDay() {
             <b>Por cobrar</b>
             <span>{owes ? "1 persona · S/ 100,00" : ""}</span>
           </div>
-          {owes ? (
-            <div className="fc-owe">
+          {/* Quien debe y «Nadie debe» ocupan la misma celda: el bloque no cambia de alto durante el día. */}
+          <div className="fit">
+            <div
+              className={owes ? "fc-owe" : "fc-owe fit-ghost"}
+              aria-hidden={owes ? undefined : true}
+            >
               <span>
                 <b>Carlos Medina</b>
                 <span>Resina · pieza 36 y limpieza dental</span>
@@ -136,9 +157,8 @@ export default function CashDay() {
               </span>
               <b className="fc-owe-amount">{soles(100)}</b>
             </div>
-          ) : (
-            <p className="fc-none">Nadie debe por ahora</p>
-          )}
+            {!owes && <p className="fc-none">Nadie debe por ahora</p>}
+          </div>
         </div>
 
         <div className="fc-block">

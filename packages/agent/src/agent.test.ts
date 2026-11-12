@@ -65,6 +65,7 @@ import {
   createBookingLink,
   reserveBookingLink,
   resolvePersonalLink,
+  hidePersonalLinkRefs,
   resolvePersonalLinkRefs,
   savePatientRegistrationConfig,
   secretsKeyFromEnv,
@@ -91,6 +92,7 @@ import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
 import { type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
+import { webAddressesIn } from "./verify.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -1196,7 +1198,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
 const linksOf = (text: string) => ({
   kind: "sistema",
   source: "Enlace que entregó el sistema",
-  text: (text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi) ?? []).join("\n"),
+  text: webAddressesIn(text).join("\n"),
 })
 
 /** «Su enlace» con la hora elegida, tal como queda en el mensaje: con la referencia del token al final (ADR 0109). */
@@ -1421,7 +1423,7 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
     }
   })()
   expect(confirmed).toContain("Confirmado y ejecutado")
-  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=[0-9a-f]{64}»/)
+  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=\{\{su-enlace:[0-9a-f-]{36}\}\}»/)
   expect(confirmed).not.toContain("tu salud")
 })
 
@@ -3067,8 +3069,38 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   const link = makeAgentTools(ctxFor(withPatient.conversationId, fx.contactId)).find((item) => item.name === "enviar_enlace_cita")!
   const sent = String(await link.invoke({ branchId: fx.branchId }))
   // El enlace va a la dirección de la clínica, es personal y no lleva nada que la comprobación de respuestas lea como hora, fecha o precio.
-  const url = /https:\/\/norte\.odentia\.test\/reserva\?token=([0-9a-f]{64})/.exec(sent)
-  expect(url).not.toBeNull()
+  // En el mensaje va la referencia del enlace, nunca el token: lo pone el worker al enviarlo (ADR 0037).
+  const ref = /https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}/.exec(sent)
+  expect(ref, sent).not.toBeNull()
+  expect(sent).not.toMatch(/token=[0-9a-f]{64}/)
+  expect(resolvePersonalLinkRefs(ref![0], KEY)).toMatch(/token=[0-9a-f]{64}$/)
+  // «Mándamelo otra vez»: tapado, como lo muestra la Bandeja, no abre y no sale; se le pide
+  // volver a la herramienta, que da el mismo enlace con su referencia.
+  const resendCtx = ctxFor(withPatient.conversationId, fx.contactId)
+  const copied = hidePersonalLinkRefs(ref![0])
+  resendCtx.evidence = [{ kind: "conversacion", source: "Respuestas anteriores del agente", text: `Aquí tienes tu enlace: ${copied}` }]
+  const send = (text: string) => makeAgentTools(resendCtx).find((item) => item.name === "send_reply")!.invoke({ text }).then(String)
+  const refusedCopy = await send(`Claro, aquí está de nuevo: ${copied}`)
+  expect(refusedCopy).toContain("No enviado: ese enlace es el de tu mensaje anterior")
+  expect(refusedCopy).toContain("vuelve a llamar a enviar_enlace_cita")
+  const again = String(await makeAgentTools(resendCtx).find((item) => item.name === "enviar_enlace_cita")!.invoke({ branchId: fx.branchId }))
+  const againRef = /https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}/.exec(again)![0]
+  expect(againRef).toBe(ref![0])
+  resendCtx.evidence.push({ kind: "sistema", source: "Enlace que entregó el sistema", text: webAddressesIn(again).join("\n") })
+  expect(await send(`Claro, aquí está de nuevo: ${againRef}`)).not.toContain("No enviado")
+  // Ya salió en este hilo: en lo que lee el agente, lo enviado conserva su referencia y lo que escribió
+  // el contacto no. Copiado de ahí sale tal cual y el worker le pone el token; así sirve también para
+  // «completa tus datos», que no tiene herramienta que lo vuelva a dar.
+  expect((await agentMessages(withPatient.conversationId)).some((body) => body.includes(againRef))).toBe(true)
+  const typed = `https://norte.odentia.test/reserva?token={{su-enlace:${randomUUID()}}}`
+  const asked = await ingestText("tg:enlace-paciente", "evt-enlace-3", `¿Me lo mandas otra vez? Tengo este: ${typed}`)
+  const resend = new ScriptedModel(() => toolCall("send_reply", { text: `Aquí lo tienes otra vez: ${againRef}` }, "e-reenvio"))
+  expect(await runScripted(resend, asked.conversationId, asked.messageId)).toBe("done")
+  const read = (resend.seen[0] ?? []).map((item) => String(item.content)).join("\n")
+  expect(read).toContain(againRef)
+  expect(read).not.toContain(typed)
+  expect(read).toContain(hidePersonalLinkRefs(typed))
+  expect(await agentMessages(withPatient.conversationId)).toContain(`Aquí lo tienes otra vez: ${againRef}`)
   expect(sent).toContain("Paciente enlace")
   // «Su enlace» vale una semana y es el mismo si ya tenía uno.
   expect(sent).toContain("vale 7 días")

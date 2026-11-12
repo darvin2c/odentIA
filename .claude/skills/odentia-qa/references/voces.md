@@ -5,6 +5,8 @@ Cinco voces revisan odentIA, latidIA y vistIA: novato, clínica, desarrollo, aud
 - **En la app**, en `odentia-qa`: usan la pantalla real, en una ronda o en la QA antes de entregar.
 - **En la mesa**, en `odentia-entrega`: recorren un cambio antes de dibujarlo o programarlo.
 
+Revisan solo lo que usan la clínica y sus pacientes: las apps de cada producto, el panel, el portal y los enlaces que reciben. La administración (`apps/admin`) no lleva voces: la usa el equipo de odentIA, y estas voces imitan a recepción, al clínico o al paciente, que ahí no están. Cómo se comprueba un cambio de la administración está en «Por dónde entra cada cambio» de `odentia-entrega`.
+
 Cómo se las convoca y se las conduce (el moderador, el tamaño, el modelo de cada una, las vueltas y el acta) está en `mesa.md`. Aquí está el método de cada voz.
 
 Una voz genérica opina sobre la pantalla. Una voz profunda recorre casos concretos de punta a punta, revisa cada comprobación de su lista, sigue el mismo dato por todos los lugares donde aparece y nombra la causa. El modelo de profundidad son los recorridos de `~/odentia-qa/2026-11-08-atencion-de-verdad/recorrido.md` y `~/odentia-qa/2026-11-09-repaso-atencion/recorrido.md`: veredicto primero, casos paso a paso con clics, qué está mal con su causa y cómo debe ser. Si están en la máquina, cada voz los lee antes de empezar.

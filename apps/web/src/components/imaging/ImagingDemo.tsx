@@ -74,14 +74,18 @@ export default function ImagingDemo({ variant = "dental" }: { variant?: Variant 
   const [zoom, setZoom] = useState(false)
   const touched = useRef(false)
 
-  // Pasa sola de pieza en pieza hasta que quien mira toca algo.
+  // Pasa sola de pieza en pieza hasta que quien mira toca algo, dos vueltas, y se queda en la última,
+  // como llegó del servidor (WCAG 2.2.2).
   useEffect(() => {
     if (variant !== "dental" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
       return
     setTooth(0)
+    let moves = 0
     const timer = window.setInterval(() => {
       if (touched.current) return window.clearInterval(timer)
-      setTooth((t) => (t + 1) % CROSSES.length)
+      moves += 1
+      setTooth(moves % CROSSES.length)
+      if (moves >= 2 * CROSSES.length - 1) window.clearInterval(timer)
     }, 1800)
     return () => window.clearInterval(timer)
   }, [variant])

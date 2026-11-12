@@ -23,6 +23,7 @@
 .wc-text > span { font-size: 13px; line-height: 1.45; color: var(--muted); }
 .wc-step[data-state="todo"] .wc-text > b { color: var(--muted); }
 .wc-text > .wc-wait { color: #7a4a06; background: #fff8ea; border: 1px solid #f3dfb2; border-radius: 10px; padding: 7px 10px; margin-top: 4px; animation: wc-in .4s ease both; }
+.wc-text > .wc-wait[data-off] { visibility: hidden; animation: none; }
 .wc-inbox { border: 1px solid var(--wc-line); border-radius: 16px; background: var(--wc-tint); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; opacity: 0; transform: translateY(8px); transition: opacity .45s, transform .45s; }
 .wc-inbox[data-on] { opacity: 1; transform: none; }
 .wc-inbox-k { font-family: var(--agent-font); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--teal-hover); }

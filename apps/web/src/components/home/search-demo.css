@@ -156,7 +156,7 @@
   border-bottom: 1px solid #e2e8f0;
 }
 .sd-lens {
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-lens svg {
   width: 18px;
@@ -266,7 +266,7 @@
   padding: 8px 4px 0;
   border-top: 1px solid #e2e8f0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-link {
   min-height: 32px;
@@ -324,7 +324,7 @@
   padding: 8px 10px 4px;
   font-size: 12px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-row {
   display: flex;
@@ -385,7 +385,7 @@
 }
 .sd-sub {
   font-size: 12px;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-child {
   gap: 8px;
@@ -407,13 +407,13 @@
   width: 92px;
   font-size: 12px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-meta,
 .sd-kbd-hint {
   flex: none;
   font-size: 12px;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-kbd-hint {
   display: none;
@@ -427,7 +427,7 @@
   color: var(--teal);
 }
 .sd-arrow {
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-arrow svg {
   width: 16px;
@@ -475,7 +475,7 @@
 .sd-hint {
   padding: 8px 14px 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-none {
   display: flex;
@@ -487,7 +487,7 @@
 }
 .sd-mut {
   font-size: 12px;
-  color: #64748b;
+  color: var(--soft);
 }
 .sd-create {
   min-height: 40px;
@@ -500,6 +500,8 @@
   cursor: pointer;
 }
 
+/* El alto de línea va fijo: con «normal», lo que dice adónde lleva una fila (en negrita) medía unos
+   píxeles más que la ayuda de las teclas, y el pie subía y bajaba en cada vuelta de la demo. */
 .sd-foot {
   display: flex;
   align-items: center;
@@ -510,7 +512,11 @@
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
   font-size: 12px;
-  color: #64748b;
+  line-height: 18px;
+  color: var(--soft);
+}
+.sd-foot-touch {
+  display: none;
 }
 .sd-foot.said {
   background: var(--teal-soft);
@@ -554,8 +560,21 @@
   .sd-kbd-hint,
   .sd-row.on .sd-kbd-hint,
   .sd-meta,
-  .sd-foot:not(.said) {
+  .sd-foot-keys {
     display: none;
+  }
+  /* El pie queda siempre, con el alto de dos líneas: al decir adónde lleva una fila no empuja la página. */
+  .sd-foot {
+    height: 54px;
+  }
+  .sd-foot-touch {
+    display: inline;
+  }
+  .sd-said {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
   .sd-kind {
     width: auto;
@@ -576,20 +595,18 @@
     padding: 0 12px;
     font-size: 13.5px;
   }
-  /* Zona táctil de 44 px sin cambiar el tamaño que se ve. */
+  /* Todo lo que se toca mide 44 px de alto en el teléfono: las fichas de ejemplo, «Buscar»,
+     «Filtrar», las filas, los enlaces del filtro y «Crear paciente». */
   .sd-chip,
+  .sd-create,
+  .sd-row,
+  .sd-child,
+  .sd-check,
+  .sd-link {
+    min-height: 44px;
+  }
   .sd-open,
   .sd-filter {
-    position: relative;
-  }
-  .sd-chip::after,
-  .sd-open::after,
-  .sd-filter::after {
-    content: "";
-    position: absolute;
-    inset: -4px -2px;
-  }
-  .sd-filter::after {
-    inset: -6px -4px;
+    height: 44px;
   }
 }

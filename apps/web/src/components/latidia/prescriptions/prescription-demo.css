@@ -10,7 +10,9 @@
 .rx-cases button:hover { filter: brightness(.96); }
 .rx-cases button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
-.rx-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; min-height: 470px; background: #fbfafe; }
+/* Los casos comparten celda: cada formulario se estira al alto del más largo y su pie queda abajo. */
+.rx-fit > .rx-body { align-self: stretch; }
+.rx-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; background: #fbfafe; }
 .rx-who { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rx-av { width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
 .rx-name { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
@@ -41,12 +43,15 @@
 .rx-block.ok { background: #e4f6ee; border: 1px solid #b7e4cf; color: #145c43; }
 .rx-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid #eee9f7; }
 .rx-status { font-size: 13px; color: var(--muted); flex: 1 1 200px; }
-.rx-emit { font-size: 14px; font-weight: 700; border-radius: 999px; padding: 12px 18px; background: #e4dcf3; color: #6f5f99; }
-.rx-emit.ok { background: var(--teal); color: #fff; }
+.rx-emit { min-height: 44px; border: 0; font: 700 14px var(--font); border-radius: 999px; padding: 0 18px; display: inline-flex; align-items: center; background: #e4dcf3; color: #6f5f99; }
+.rx-emit.ok { background: var(--teal); color: #fff; cursor: pointer; }
+button.rx-emit.ok:hover { background: var(--teal-hover); }
+.rx-emit:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+/* Emitida: ya no es un botón, es lo que pasó. */
+.rx-emitted { min-height: 44px; display: inline-flex; align-items: center; font-size: 14px; font-weight: 700; color: #16614b; }
 .rx-note { padding: 10px 20px; font-size: 12px; color: var(--muted); border-top: 1px solid #e9e2f7; }
 
 @media (max-width: 720px) {
   .rx { border-radius: 20px; }
   .rx-top, .rx-body { padding: 14px; }
-  .rx-body { min-height: 0; }
 }
