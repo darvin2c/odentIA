@@ -398,6 +398,10 @@ export interface PatientDocumentContext {
   paymentId?: string | null
   toothNumbers: number[]
   tags: string[]
+  /** La fecha del documento en esta versión; nula, vale la de subida. */
+  capturedAt?: string | null
+  /** Por qué se corrigió la fecha en esta versión. */
+  dateReason?: string | null
   authorUserId: string
   createdAt: string
 }
@@ -762,8 +766,10 @@ export interface TimelineItem {
   statusText?: string | null
   /** Vencimiento de un control, para leerlo aquí mismo. */
   dueAt?: string | null
-  /** Motivo de una atención anulada: la historia la muestra con él. */
+  /** Motivo de una atención anulada (o de un archivo retirado): la historia la muestra con él. */
   voidReason?: string | null
+  /** Un documento: cuándo se subió, que puede ser otro día que el de su fecha (`createdAt`). */
+  uploadedAt?: string
   /** Quién atendió; en una anulada, quién y cuándo la anuló. */
   professionalName?: string | null
   /** Quién firmó la atención y cuándo. */
@@ -808,7 +814,7 @@ export interface PatientLastVisit {
   plannedItems: Array<
     Pick<PlanItem, "id" | "title" | "toothNumber" | "status" | "planId" | "budgetId">
   >
-  documents: Array<Pick<PatientDocument, "id" | "label" | "category">>
+  documents: Array<Pick<PatientDocument, "id" | "label" | "category"> & { capturedAt?: string | null }>
 }
 
 /** Próxima acción derivada del recorrido: la calcula la API, la UI solo la muestra. */

@@ -7,6 +7,7 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
+import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
 import { useOpenWide } from "./wide-section"
@@ -311,7 +312,12 @@ export function EncounterHistoryCard({
               {documents.map((doc) => (
                 <li key={doc.id} className="flex flex-wrap items-center gap-2">
                   <span>
-                    {doc.label} <span className="text-muted-foreground">· {documentCategoryLabel(doc.category)}</span>
+                    {doc.label}{" "}
+                    <span className="text-muted-foreground">
+                      · {documentCategoryLabel(doc.category)}
+                      {/* Un papel con fecha propia (la historia que trajo, una radiografía vieja) la dice aquí. */}
+                      {doc.capturedAt ? ` · ${formatTakenAt({ ...doc, createdAt: doc.capturedAt })}` : ""}
+                    </span>
                   </span>
                   <DocumentOpenButton patientId={patientId} documentId={doc.id} label={doc.label} />
                 </li>

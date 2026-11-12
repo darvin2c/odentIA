@@ -1,6 +1,7 @@
 import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
 import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
+import { takenAt } from "@odentia/clinic-app/components/patient/document-labels"
 import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
@@ -1720,7 +1721,7 @@ function ToothImageThumb({ patientId, doc }: { patientId: string; doc: PatientDo
       )}
       <div className="flex flex-col gap-1 p-2">
         <span className="truncate text-xs font-medium">{doc.label}</span>
-        <span className="text-[11px] text-muted-foreground">{timeAgo(doc.createdAt)}</span>
+        <span className="text-[11px] text-muted-foreground">{timeAgo(takenAt(doc))}</span>
       </div>
     </li>
   )
@@ -1735,7 +1736,7 @@ function ToothDocLink({ patientId, doc }: { patientId: string; doc: PatientDocum
       <div className="flex flex-col gap-0.5">
         <span className="font-medium">{doc.label}</span>
         <span className="text-xs text-muted-foreground">
-          {(doc.sizeBytes / 1024).toFixed(0)} KB · {timeAgo(doc.createdAt)}
+          {(doc.sizeBytes / 1024).toFixed(0)} KB · {timeAgo(takenAt(doc))}
         </span>
       </div>
       {url ? (

@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { automationConsent } from "@odentia/db/schema/automation"
+import { patientDocument } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, message } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -25,6 +26,7 @@ import {
 import { clinicToday } from "./inventory-stock.js"
 import {
   loadPatientRecord,
+  documentDateWords,
   patientRecordFhirBundle,
   recordSendOptions,
   renderPatientRecordPdf,
@@ -313,4 +315,59 @@ it("la copia de la historia: PDF, paquete FHIR R4 y envío a la propia persona s
       ),
     ),
   ).rejects.toMatchObject({ code: "DATA_REQUEST_CLOSED" })
+})
+
+it("la copia de la historia pone cada documento en su fecha, sin una hora que nadie puso, y el FHIR la lleva", async () => {
+  const { run, patientId } = await adult()
+  const doc = (label: string, createdAt: string, capturedAt: string | null) => ({
+    organizationId: "org_a",
+    patientId,
+    category: "informe",
+    label,
+    storageKey: `pruebas/${label}.pdf`,
+    contentType: "application/pdf",
+    sizeBytes: 100,
+    createdAt: new Date(createdAt),
+    capturedAt: capturedAt ? new Date(capturedAt) : null,
+  })
+  // La historia anterior, de 2019, se subió hoy; el informe de octubre, en su día.
+  await ownerDb
+    .insert(patientDocument)
+    .values([
+      doc("Historia anterior", "2026-11-12T15:00:00Z", "2019-03-03T17:00:00Z"),
+      doc("Informe de octubre", "2026-10-01T15:00:00Z", null),
+    ])
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", patientId))
+  expect(record.documents.map((d) => d.label)).toEqual(["Historia anterior", "Informe de octubre"])
+  const zone = { locale: "es-PE", timezone: "America/Lima" }
+  const [old, october] = record.documents
+  expect(documentDateWords(old!, zone)).toBe(
+    "del 3 de marzo de 2019 (subido el 12 de noviembre de 2026, 10:00)",
+  )
+  expect(documentDateWords(october!, zone)).toBe("subido el 1 de octubre de 2026, 10:00")
+  expect(documentDateWords({ ...old!, category: "radiografia" }, zone)).toMatch(
+    /^tomada el 3 de marzo de 2019 /,
+  )
+  const bundle = patientRecordFhirBundle(record) as {
+    entry: Array<{
+      resource: {
+        resourceType: string
+        date?: string
+        content?: Array<{ attachment: { title: string; creation?: string } }>
+      }
+    }>
+  }
+  const refs = bundle.entry
+    .map((e) => e.resource)
+    .filter((r) => r.resourceType === "DocumentReference")
+  const fhirOld = refs.find((r) => r.content?.[0]?.attachment.title === "Historia anterior")
+  // Solo el día en la zona de la clínica: un día elegido no tiene hora.
+  expect(fhirOld).toMatchObject({
+    date: "2026-11-12T15:00:00.000Z",
+    content: [{ attachment: { creation: "2019-03-03" } }],
+  })
+  expect(
+    refs.find((r) => r.content?.[0]?.attachment.title === "Informe de octubre")?.content?.[0]
+      ?.attachment.creation,
+  ).toBeUndefined()
 })

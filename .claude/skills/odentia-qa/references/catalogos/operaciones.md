@@ -319,6 +319,21 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** la vista previa de «Cambiar la hoja» mostró la hoja que otra persona acababa de subir y, quitada en otra pestaña, decía «Elige la hoja»; el aviso de PDF con clave nunca salía porque pdf-lib no lanza su clase; con 200 mm, una receta de un medicamento salió en dos hojas (QA del 11 nov, corregidos antes de unir).
 
+## O-DOC-01 Subir un documento a la ficha y su fecha
+
+**Dónde:** `S/clinical.ts` (`registerPatientDocument`, `correctDocumentContext`), `API/patients.ts` (`POST /:id/documents`) y `API/patient-document-context.ts`, `S/patient-history.ts` (la Historia), `S/dental/tooth-history.ts` (la pieza), `S/patient-record.ts` (la copia y el FHIR), `S/portal-papers.ts` (el portal).
+
+- [ ] Hay dos fechas y no se mezclan: la del documento (`captured_at`, la que dice la persona) y la de subida (`created_at`, la que pone el servidor). La de subida no cambia y se ve donde se muestra la otra.
+- [ ] «La fecha de un documento» es una sola regla (`captured_at`, y si falta `created_at`) y la usan igual Documentos, el visor, la Historia, la historia de la pieza, el detalle de la atención, el portal, el filtro desde/hasta, la copia y el FHIR (`attachment.creation`).
+- [ ] Un día elegido no muestra una hora que nadie dijo.
+- [ ] La fecha no es futura (5 minutos de margen).
+- [ ] La fecha se corrige solo con una versión nueva del contexto, con su motivo y auditoría; la base rechaza cambiar `patient_document.captured_at` sin esa versión (`patient_document_date_guard`).
+- [ ] Un documento retirado no sale como vigente en ninguna lista; en la Historia queda plegado con su motivo.
+- [ ] La palabra de la fecha sigue a la categoría («toma» en una imagen, «del documento» en un papel).
+
+**Ya falló:** la Historia ponía por fecha de subida una radiografía con fecha de toma, mientras Documentos la ponía por su toma y la historia de la pieza por la subida; la copia imprimía 12:00 para un día elegido; la Historia mostraba un documento retirado como vigente (mesa del 12 nov).
+**Huecos conocidos:** el mismo envío dos veces deja dos documentos; no hay aviso si la fecha es anterior al nacimiento.
+
 ## O-WEB-01 Una escena de la web que se mueve sola
 
 **Dónde:** `apps/web/src/lib/steady.ts` (`useSteadyHeight`), `.fit`/`.fit-ghost` en `apps/web/src/styles/web.css`, cada demostración de `apps/web/src/components/**`; se comprueba con `apps/web/scripts/quietud.mjs`.
@@ -361,3 +376,5 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 | CO22 | Otro estado: recepción cancela y, con el cajón viejo en otra pestaña, alguien pulsa «Confirmar cita». | AGE-02 | La segunda recibe «la cita cambió»; la cita sigue cancelada. |
 | CO23 | A medias: cita 17:30–18:00 al final del turno; «Editar detalles» le pone un servicio de 90 minutos. | AGE-02 | Avisa que sale del horario, como al mover, y queda rastro de qué cambió. |
 | CO24 | Otro rol, a la vez: la dueña abre «Cambiar la hoja» y otra persona la reemplaza o la quita. | CFG-01 | La vista previa dice que la hoja cambió y no muestra la ajena; guardar o quitar no pisa la de la otra persona. |
+| CO25 | De otro día: una radiografía de 2023 y una historia en papel de 2018–2024 se suben hoy con su fecha, y después se retira una. | DOC-01 | La misma fecha en todos los lugares; el retirado queda plegado en la Historia; ninguna hora inventada en el visor ni en la copia. |
+| CO26 | Se equivoca y corrige: un informe sube con 2013 en vez de 2023, y dos personas corrigen la fecha a la vez. | DOC-01 | Se corrige con su motivo sin duplicar el archivo; la segunda recibe que el documento cambió. |

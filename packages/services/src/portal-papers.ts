@@ -19,6 +19,7 @@
  * Quién lo ve ya lo decide la sesión: la propia persona o su representante
  * legal vigente (`requirePortalSession`). Cada apertura queda registrada.
  */
+import { isImageDocumentCategory } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   patientDocument,
@@ -91,7 +92,6 @@ const FILE_TYPE_WORDS: Record<string, string> = {
   otro: "Archivo",
 }
 
-const IMAGE_CATEGORIES = new Set(["radiografia", "foto_clinica"])
 
 /** Desde cuándo un papel es «Nuevo»: después de su visita anterior (una hora sin volver). */
 const VISIT_GAP_MS = 60 * 60_000
@@ -323,7 +323,7 @@ export async function collectPortalPapers(
     if (inside.has(file.id) || foreign.has(file.id)) continue
     // La tomografía y el DICOM no van al portal en esta entrega: no se abren en el teléfono.
     if (notForPhone(file)) continue
-    const image = IMAGE_CATEGORIES.has(file.category)
+    const image = isImageDocumentCategory(file.category)
     // Una imagen se ve con su informe terminado o si no lo requiere: el hallazgo, primero con quien lo explica.
     if (image && file.reportStatus === "pendiente") continue
     papers.push({
@@ -443,7 +443,7 @@ export async function documentPortalState(
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled || !policy.allowedScope.documents)
     return { state: "apagado", words: "La clínica no muestra documentos en el portal", canHide: true }
-  if (IMAGE_CATEGORIES.has(file.category) && file.reportStatus === "pendiente")
+  if (isImageDocumentCategory(file.category) && file.reportStatus === "pendiente")
     return { state: "espera_informe", words: "Se verá en su portal cuando tenga su informe", canHide: true }
   return { state: "visible", words: "Se ve en su portal", canHide: true }
 }

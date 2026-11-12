@@ -11,6 +11,7 @@ import {
   type PatientDocument,
   planStatusLabel,
 } from "../../lib/patients"
+import { formatTakenAt, takenAt } from "./document-labels"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
@@ -79,7 +80,10 @@ function DocumentAttachment({
             : ""}
           {doc.planItemId ? ` · ${planTitle ?? "Vinculado a un tratamiento del plan"}` : ""}
           {" · "}
-          <time dateTime={doc.createdAt}>{formatDateTime(doc.createdAt)}</time>
+          {/* Con fecha propia (la de toma), solo su día, como en Documentos; si no, cuándo se subió. */}
+          <time dateTime={takenAt(doc)}>
+            {doc.capturedAt ? formatTakenAt(doc) : formatDateTime(doc.createdAt)}
+          </time>
         </span>
         {doc.tags.length > 0 && (
           <span className="flex flex-wrap gap-1">

@@ -255,6 +255,24 @@ No tiene camino en el código.
 
 ---
 
+## P-COM-24 Papeles que llegan con su propia fecha
+
+**Dónde:** Documentos › Nuevo › «Imagen o archivo» (`CA/document-upload-dialog.tsx`), el visor (`CA/document-viewer.tsx`, «Corregir la fecha»), la Historia (`S/patient-history.ts`, `CA/timeline.tsx`), la copia (`S/patient-record.ts`: PDF y FHIR) y el portal (`S/portal-papers.ts`).
+
+- [ ] Todo archivo puede llevar la fecha del papel («Fecha de toma» en una imagen, «Fecha del documento» en lo demás), distinta de la de subida, y las dos se ven con su nombre.
+- [ ] Documentos, el visor, la Historia, la historia de la pieza, el detalle de la atención, el portal, la copia y el FHIR (`attachment.creation`) usan la misma fecha del documento.
+- [ ] Un día sin hora se muestra sin hora (no «12:00»).
+- [ ] Lo que entró otro día que el de su fecha lo dice en la Historia («Subido el …»): la historia de otra clínica no se confunde con lo atendido aquí.
+- [ ] La fecha mal puesta se corrige sin retirar el archivo, con su motivo, y la anterior queda en «Cambios del archivo».
+- [ ] Lo retirado no se lee como vigente en la Historia: queda plegado, con su motivo.
+- [ ] Un resultado de laboratorio (INR, glucemia, biopsia) dice la fecha del examen donde se decide.
+
+**Ya falló:** la Historia ponía una radiografía de 2019 en el día de subida mientras Documentos la ponía en su toma; un informe no tenía dónde poner su fecha; la copia imprimía «12:00» para un día elegido; lo retirado seguía en la Historia como vigente (mesa del 12 nov, corregidos en la entrega de la fecha del documento).
+**Huecos conocidos:** una historia de varios años lleva una sola fecha (la de su última anotación), no su periodo (FHIR `DocumentReference.context.period`); nada avisa al atender que el paciente trajo historia anterior.
+**Fuentes:** HL7 FHIR R4 (`DocumentReference.date` y `Attachment.creation`); ADR 0080.
+
+---
+
 ## Casos
 
 | Caso | Situación | Recorre | Lo que tiene que pasar |
@@ -274,3 +292,5 @@ No tiene camino en el código.
 | CC13 | Fin de mes en una clínica de dos sedes: se paga la luz por otro importe, la factura del laboratorio y los honorarios del endodoncista visitante; se corrige un RUC mal escrito y se le entrega la lista al contador. | 20 | Todo con su comprobante y RUC; la corrección dice qué cambió; la lista se descarga; Gastos y Reportes cuadran. |
 | CC14 | A las 22:30 una paciente escribe «se me hinchó la cara y no puedo tragar» tres días después de una exodoncia, mientras otra paciente firma en la tablet de la unidad. | 09, 21, 22 | La paciente recibe el número de emergencias; el aviso al equipo no lleva su nombre y llega al abrir (no hay guardia); la tablet no muestra nada. |
 | CC15 | La clínica sube una hoja con el nombre y la colegiatura de una doctora; otro odontólogo emite una receta de 5 ítems a una paciente alérgica a penicilinas, y después la clínica ajusta los márgenes. | 01, 05, 23 | La receta pasa a 2 páginas con la hoja en ambas, la firma y el sello de quien receta; lo emitido antes del ajuste sale igual; una receta nueva con márgenes al máximo deja la firma entera. |
+| CC16 | Una paciente nueva trae su historia en papel de otra clínica (2018–2024) y una panorámica tomada hace 8 meses en un centro radiológico; una de las fechas se pone mal. | 07, 24 | Cada papel en su fecha en Documentos, Historia, copia y FHIR, con «Subido el …»; la fecha mal puesta se corrige con su motivo sin retirar. |
+| CC17 | La hoja del consentimiento de una exodoncia hecha el lunes se firmó en papel y se registra el jueves. | 24 y P-ODO-09 | Se registra firmada el lunes; el PDF y la Historia dicen el lunes y el día en que se registró; no queda dos veces (hoy no). |

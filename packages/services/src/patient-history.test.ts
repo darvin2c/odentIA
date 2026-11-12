@@ -1,5 +1,5 @@
 import { odontogramAssessment } from "@odentia/db/schema/dental"
-import { encounter } from "@odentia/db/schema/clinical"
+import { encounter, patientDocument, patientDocumentContext } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -142,4 +142,71 @@ it("Historia: cada atención va el día en que empezó, aunque se haya cargado d
   expect(data.find((item) => item.id === late)?.createdAt.toISOString()).toBe("2026-09-10T15:00:00.000Z")
   const asc = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["encounter"], order: "asc" }))
   expect(asc.data.map((item) => item.id)).toEqual([late, onTime, f.encounter.id])
+})
+
+it("Historia: cada documento va el día de su fecha, aunque se haya subido después, y guarda cuándo se subió", async () => {
+  const f = await clinicalFixture()
+  const upload = async (label: string, createdAt: Date, capturedAt: Date | null) => {
+    const [row] = await ownerDb
+      .insert(patientDocument)
+      .values({
+        organizationId: "org_a",
+        patientId: f.patient.id,
+        category: "informe",
+        label,
+        storageKey: `pruebas/${label}.pdf`,
+        contentType: "application/pdf",
+        sizeBytes: 100,
+        createdAt,
+        capturedAt,
+      })
+      .returning({ id: patientDocument.id })
+    if (!row) throw new Error("no se creó el documento")
+    return row.id
+  }
+  // La historia anterior, de 2019, se subió hoy; el informe de octubre se subió en su día; el de hoy no tiene fecha propia.
+  const today = new Date("2026-11-12T15:00:00Z")
+  const old = await upload("Historia anterior", today, new Date("2019-03-03T17:00:00Z"))
+  const october = await upload("Informe de octubre", new Date("2026-10-01T15:00:00Z"), null)
+  const fresh = await upload("Informe de hoy", new Date("2026-11-12T14:00:00Z"), null)
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["document"] }))
+  expect(data.map((item) => item.refId)).toEqual([fresh, october, old])
+  const past = data.find((item) => item.refId === old)
+  expect(past?.createdAt.toISOString()).toBe("2019-03-03T17:00:00.000Z")
+  expect(past?.uploadedAt?.toISOString()).toBe(today.toISOString())
+  expect(data.find((item) => item.refId === october)?.uploadedAt?.toISOString()).toBe("2026-10-01T15:00:00.000Z")
+  // De lo más antiguo a lo más nuevo, igual.
+  const asc = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["document"], order: "asc" }))
+  expect(asc.data.map((item) => item.refId)).toEqual([old, october, fresh])
+})
+
+it("Historia: un archivo retirado queda en su día como retirado, con su motivo, no como vigente", async () => {
+  const f = await clinicalFixture()
+  const [row] = await ownerDb
+    .insert(patientDocument)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      category: "informe",
+      label: "INR de otro paciente",
+      storageKey: "pruebas/inr.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      retiredAt: new Date("2026-11-12T16:00:00Z"),
+      retiredBy: f.actor,
+      retireReason: "Subido al paciente equivocado",
+    })
+    .returning({ id: patientDocument.id })
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["document"] }))
+  expect(data.find((item) => item.refId === row!.id)).toMatchObject({ status: "retirado", voidReason: "Subido al paciente equivocado" })
+  // Aunque estuviera en una atención: ya no está en su tarjeta, así que sale suelto y plegado.
+  await ownerDb.insert(patientDocumentContext).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    documentId: row!.id,
+    version: 1,
+    encounterId: f.encounter.id,
+  })
+  const all = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  expect(all.data.find((item) => item.refId === row!.id)).toMatchObject({ status: "retirado" })
 })

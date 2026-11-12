@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   DICOM_MAX_BYTES,
+  documentDateLabel,
+  formatTakenAt,
   MAX_BYTES,
   maxBytesFor,
   unsupportedFormatMessage,
@@ -22,5 +24,20 @@ describe("qué archivos entran", () => {
     expect(unsupportedFormatMessage("notas.docx")).toBe(
       "Solo se admiten JPG, PNG, WebP, PDF o DICOM.",
     )
+  })
+})
+
+describe("la fecha de cada archivo", () => {
+  it("una imagen dice su toma; un papel, su fecha; sin fecha propia, cuándo se subió", () => {
+    expect(documentDateLabel("radiografia")).toBe("Fecha de toma")
+    expect(documentDateLabel("foto_clinica")).toBe("Fecha de toma")
+    expect(documentDateLabel("informe")).toBe("Fecha del documento")
+    expect(documentDateLabel("")).toBe("Fecha del documento")
+    const uploaded = "2026-11-12T15:00:00Z"
+    expect(formatTakenAt({ category: "radiografia", capturedAt: "2019-03-03T17:00:00Z", createdAt: uploaded })).toMatch(/^Tomada /)
+    expect(formatTakenAt({ category: "informe", capturedAt: "2019-03-03T17:00:00Z", createdAt: uploaded })).toMatch(/^Del /)
+    expect(formatTakenAt({ category: "informe", capturedAt: null, createdAt: uploaded })).toMatch(/^Subida /)
+    // Solo el día: sin una hora que nadie puso.
+    expect(formatTakenAt({ category: "informe", capturedAt: "2019-03-03T17:00:00Z", createdAt: uploaded })).not.toMatch(/:/)
   })
 })

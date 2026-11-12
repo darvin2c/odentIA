@@ -23,7 +23,9 @@ import { useInfiniteQuery } from "@tanstack/react-query"
 import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { formatDate } from "../../lib/clinical-journey"
 import { timeAgo } from "../../lib/crm"
+import { isImageCategory } from "../../lib/document-list"
 import type { DocumentFilter } from "../../lib/patient-areas"
 import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-overview"
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
@@ -88,6 +90,8 @@ function isRetired(item: TimelineItem): boolean {
   if (item.type === "budget") return item.status === "cancelado"
   if (item.type === "follow_up") return item.status === "cancelado"
   if (item.type === "consent") return item.status === "anulado"
+  // Un archivo retirado queda en su día, plegado con su motivo: no se lee como vigente.
+  if (item.type === "document") return item.status === "retirado"
   return false
 }
 
@@ -99,6 +103,7 @@ function retiredSummary(items: TimelineItem[]): string {
     budget: ["presupuesto", "presupuestos"],
     follow_up: ["control", "controles"],
     consent: ["consentimiento", "consentimientos"],
+    document: ["archivo retirado", "archivos retirados"],
   }
   const parts: string[] = []
   for (const [type, [one, many]] of Object.entries(NAMES) as Array<[TimelineItem["type"], [string, string]]>) {
@@ -246,12 +251,27 @@ function OdontogramCard({
     </div>
   )
 }
-function DocumentCard({ patientId, item }: { patientId: string; item: TimelineItem }) {
+function DocumentCard({
+  patientId,
+  item,
+  timezone,
+}: {
+  patientId: string
+  item: TimelineItem
+  timezone: string
+}) {
   const teeth = item.toothNumbers ?? []
   const tags = item.tags ?? []
-  const signed = useDocumentUrl(patientId, item.refId)
+  const retired = item.status === "retirado"
+  const signed = useDocumentUrl(patientId, item.refId, !retired)
   const url = signed.data?.data.url ?? null
-  const isImage = item.category === "radiografia" || item.category === "foto_clinica"
+  const isImage = isImageCategory(item.category ?? "")
+  // Entró otro día que el de su fecha (la historia de otra clínica, una radiografía vieja):
+  // se dice cuándo se subió, para no confundirlo con lo atendido ese día.
+  const uploadedLater =
+    item.uploadedAt && dayKey(item.uploadedAt, timezone) !== dayKey(item.createdAt, timezone)
+      ? formatDate(item.uploadedAt)
+      : null
   return (
     <Attachment orientation="horizontal" className="w-full">
       <AttachmentMedia variant={isImage && url ? "image" : "icon"}>
@@ -270,11 +290,15 @@ function DocumentCard({ patientId, item }: { patientId: string; item: TimelineIt
           {teeth.length > 0 ? ` · P${teeth.join(", ")}` : ""}
           {tags.length > 0 ? ` · ${tags.join(", ")}` : ""}
           {item.encounterId ? " · vinculado a atención" : ""}
+          {uploadedLater ? ` · Subido el ${uploadedLater}` : ""}
+          {retired ? ` · Retirado${item.voidReason ? `: ${item.voidReason}` : ""}` : ""}
         </AttachmentDescription>
       </AttachmentContent>
-      <AttachmentActions className="max-w-full min-w-0 shrink pr-2">
-        <DocumentOpenButton patientId={patientId} documentId={item.refId} label={item.title} />
-      </AttachmentActions>
+      {!retired && (
+        <AttachmentActions className="max-w-full min-w-0 shrink pr-2">
+          <DocumentOpenButton patientId={patientId} documentId={item.refId} label={item.title} />
+        </AttachmentActions>
+      )}
     </Attachment>
   )
 }
@@ -523,7 +547,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
     ) : history.owns(item.type) ? (
       <history.Item key={item.id} item={item} patientId={patientId} />
     ) : item.type === "document" ? (
-      <DocumentCard key={item.id} patientId={patientId} item={item} />
+      <DocumentCard key={item.id} patientId={patientId} item={item} timezone={timezone} />
     ) : item.type === "anamnesis" ? (
       <AnamnesisCard key={item.id} item={item} timezone={timezone} locale={locale} onView={setViewingAnamnesis} />
     ) : (
@@ -618,7 +642,10 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
                   })
                 }
               >
-                {openRetired.has(key) ? "Ocultar lo anulado" : `Anulado ese día: ${retiredSummary(group.retired)} · Ver`}
+                {openRetired.has(key)
+                  ? "Ocultar lo anulado"
+                  : // Un archivo retirado queda en el día de su fecha, no en el que se retiró.
+                    `${group.retired.every((item) => item.type === "document") ? "Retirado" : "Anulado ese día"}: ${retiredSummary(group.retired)} · Ver`}
               </Button>
               {openRetired.has(key) ? (
                 <div id={`retired-${key}`} className="flex flex-col gap-2">
