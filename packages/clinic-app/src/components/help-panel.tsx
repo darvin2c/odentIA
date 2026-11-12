@@ -389,7 +389,8 @@ export function HelpButton({ className }: { className?: string } = {}) {
   const [giving, setGiving] = useState(false)
   const myRole = useMyRole()
   // Soporte mirando la clínica no da acceso a soporte (la API lo rechaza igual).
-  const canGiveAccess = (myRole === "owner" || myRole === "admin") && !useSupportMode()
+  const supportMode = useSupportMode()
+  const canGiveAccess = (myRole === "owner" || myRole === "admin") && !supportMode
   /** Lo que recibe el foco cuando aparece, porque el control que se tocó desaparece (WCAG 2.4.3). */
   const [focusId, setFocusId] = useState<string | null>(null)
   useEffect(() => {
@@ -649,7 +650,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                 <p id="ayuda-pregunta-nota" className="text-muted-foreground">
                   No escribas nombres de pacientes.<span className="hidden sm:inline"> No cambia nada por ti y, si no sabe, te lo dice.</span>
                 </p>
-                {direct && !direct.sent ? null : (
+                {(direct && !direct.sent) || supportMode ? null : (
                   <div className="flex flex-wrap items-center gap-x-4">
                     <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => openDirect("pregunta")}>
                       <span className="sm:hidden">Escribir a soporte</span>

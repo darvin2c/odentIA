@@ -7,8 +7,8 @@ import {
   useFormSubmitError,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
 import { useMemberName } from "../lib/crm"
@@ -210,6 +210,34 @@ interface GivenGrant {
 export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose: () => void }) {
   const refresh = useSupportAccessRefresh()
   const [given, setGiven] = useState<GivenGrant | null>(null)
+  const [ended, setEnded] = useState(false)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const statusRef = useRef<HTMLDivElement>(null)
+  // Al abrir, el cuadro queda a la vista y con el foco: no detrás de la conversación.
+  useEffect(() => {
+    titleRef.current?.scrollIntoView({ block: "start" })
+    titleRef.current?.focus()
+  }, [])
+  // Lo dado se sigue: si se quita desde la franja, se resuelve el caso o vence, la tarjeta lo dice.
+  const live = useQuery({
+    queryKey: ["support-case", given?.caseId ?? null],
+    queryFn: () =>
+      apiFetch<{ data: { grants: { id: string; active: boolean }[] } }>(`/api/help/cases/${given?.caseId}`),
+    enabled: given !== null,
+    refetchInterval: 30_000,
+  })
+  const stillActive = given
+    ? (live.data?.data.grants.find((item) => item.id === given.grant.id)?.active ?? true)
+    : false
+  useEffect(() => {
+    if (given && !stillActive) {
+      setGiven(null)
+      setEnded(true)
+    }
+  }, [given, stillActive])
+  useEffect(() => {
+    if (given) statusRef.current?.focus()
+  }, [given])
   const give = useMutation({
     retry: false,
     mutationFn: (values: SupportAccessValues) =>
@@ -218,6 +246,7 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
         body: JSON.stringify({ ...values, screen }),
       }),
     onSuccess: (body) => {
+      setEnded(false)
       setGiven(body.data)
       refresh()
     },
@@ -231,9 +260,11 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
       }),
     onSuccess: () => {
       setGiven(null)
+      setEnded(true)
       refresh()
       toast.success("Soporte ya no ve tu clínica")
     },
+    onError: () => toast.error("No pude quitar el acceso. Inténtalo otra vez."),
   })
   return (
     <section aria-labelledby="dar-acceso-titulo" className="flex flex-col gap-3">
@@ -246,7 +277,12 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
         ← Volver a Ayuda
       </Button>
       <div>
-        <h3 id="dar-acceso-titulo" tabIndex={-1} className="text-base font-bold">
+        <h3
+          id="dar-acceso-titulo"
+          ref={titleRef}
+          tabIndex={-1}
+          className="scroll-mt-2 text-base font-bold outline-none"
+        >
           Dar acceso a soporte de {appWords().name}
         </h3>
         <p className="text-sm text-muted-foreground">
@@ -255,8 +291,10 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
       </div>
       {given ? (
         <div
+          ref={statusRef}
+          tabIndex={-1}
           role="status"
-          className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary-soft px-3 py-2.5 text-sm"
+          className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary-soft px-3 py-2.5 text-sm outline-none"
         >
           <p>
             Listo. Soporte puede mirar {supportViewWords(given.grant.viewRole)} hasta las{" "}
@@ -279,11 +317,18 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
           ) : null}
         </div>
       ) : (
-        <SupportAccessForm
-          id="dar-acceso"
-          onSubmit={(values) => give.mutateAsync(values)}
-          onCancel={onClose}
-        />
+        <>
+          {ended ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              Soporte ya no ve tu clínica. Si hace falta, puedes darle acceso otra vez.
+            </p>
+          ) : null}
+          <SupportAccessForm
+            id="dar-acceso"
+            onSubmit={(values) => give.mutateAsync(values)}
+            onCancel={onClose}
+          />
+        </>
       )}
       <p className="text-xs text-muted-foreground">
         Queda anotado quién lo dio y qué miró soporte: lo ves en «Tus casos con soporte».

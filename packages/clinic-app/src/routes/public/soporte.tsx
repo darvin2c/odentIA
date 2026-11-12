@@ -22,7 +22,7 @@ const REASONS: Record<string, string> = {
   caso_resuelto: "se resolvió el caso",
   sin_quien_lo_dio: "quien lo dio ya no puede darlo",
   vencido: "se cumplió el tiempo",
-  salio: "saliste",
+  salio: "saliste; el permiso de la clínica sigue vigente hasta su hora y puedes volver a abrirla desde el caso",
 }
 
 function SupportEntryPage() {
@@ -87,7 +87,9 @@ function SupportEntryPage() {
             {ending
               ? `A las ${time(ending.at)}: ${ending.byName && ending.reason === "quitado" ? `lo quitó ${ending.byName}` : (REASONS[ending.reason] ?? "terminó")}.`
               : "Ya no puedes mirar esta clínica."}{" "}
-            Si hace falta seguir, pídelo otra vez desde el caso en la administración.
+            {ending?.reason === "salio"
+              ? null
+              : "Si hace falta seguir, pídelo otra vez desde el caso en la administración."}
           </p>
           <div>
             <Button variant="outline" onClick={() => window.close()}>

@@ -362,7 +362,8 @@ function OrgSwitcher() {
  * color que los avisos de la clínica, con hasta cuándo y «Salir».
  */
 function SupportStrip({ support }: { support: SupportMode }) {
-  const until = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }).replace(/\.$/, "")
+  const untilFull = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  const until = untilFull.replace(/\.$/, "")
   return (
     <NoticeStrip
       label="Soporte de odentIA"
@@ -371,7 +372,7 @@ function SupportStrip({ support }: { support: SupportMode }) {
           id: "soporte-mirando",
           tone: "alarma",
           message: `Solo mirar · Estás viendo la clínica como ${support.viewRoleLabel}, como soporte de odentIA, hasta las ${until}. No puedes cambiar nada.`,
-          short: `Solo mirar · ${support.viewRoleLabel} · hasta ${until}`,
+          short: `Solo mirar · ${support.viewRoleLabel} · hasta ${untilFull}`,
           action: {
             label: "Salir",
             onSelect: () => {

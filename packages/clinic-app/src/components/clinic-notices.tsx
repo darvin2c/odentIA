@@ -43,7 +43,9 @@ export function useClinicNotices() {
     queryFn: () =>
       apiFetch<{ data: ClinicNotice[] }>(`/api/account/billing/notices?orgId=${encodeURIComponent(org.id)}`).then((res) => res.data),
     staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    // Con un acceso de soporte a la vista, cada 30 s: así la franja se va cuando termina.
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((notice) => notice.topic === "soporte") ? 30_000 : 5 * 60_000,
     retry: false,
   })
 }

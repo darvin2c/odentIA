@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router"
 import { Sun, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { useSupportMode } from "../../lib/crm"
 import { authClient } from "../../lib/auth-client"
 import { awayText, greetingAt, type HomeAway } from "../../lib/home-away"
 
@@ -25,7 +26,9 @@ export function AwayLine({ canSeeAgenda }: { canSeeAgenda: boolean }) {
   const firstName = personFirstName(authClient.useSession().data?.user.name)
   const queryClient = useQueryClient()
 
+  const supportMode = useSupportMode()
   useEffect(() => {
+    if (supportMode) return
     const visit = () => {
       lastSent.current = Date.now()
       void apiFetch<{ data: { away: HomeAway | null } }>("/api/workspace/visit", {
@@ -59,7 +62,7 @@ export function AwayLine({ canSeeAgenda }: { canSeeAgenda: boolean }) {
       window.removeEventListener("pointerdown", onActivity)
       window.removeEventListener("keydown", onActivity)
     }
-  }, [queryClient])
+  }, [queryClient, supportMode])
 
   if (!away || closed) return null
   // Los casos no llevan botón: están justo debajo, en «Te espera».
