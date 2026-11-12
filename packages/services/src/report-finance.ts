@@ -19,6 +19,7 @@
 import type { Db } from "@odentia/db"
 import { type SQL, sql } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
+import { wholeReturnedChargeSql } from "./charge-returns.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { fixedOwedAt } from "./expense-recurring.js"
 import { payablesOwedAt } from "./expense-payable.js"
@@ -1007,9 +1008,12 @@ function attendedProceduresSql(
     select ep.id, e.professional_user_id as user_id, ep.description, e.started_at, ep.currency,
       ep.price_cents::bigint * ep.quantity as cents,
       -- Una sesión de un tratamiento ya cargado (el cargo es de todo el tratamiento) no queda por cobrar aparte.
+      -- Lo devuelto entero cuenta como cobrado (ADR 0068): la firma no lo vuelve a cargar.
       case when ch.charges > 0 then ch.unpaid
+        when exists (select 1 from patient_charge c3 where c3.organization_id = ep.organization_id
+          and c3.encounter_procedure_id = ep.id and ${wholeReturnedChargeSql(sql.raw("c3"))}) then 0
         when ep.plan_item_id is not null and exists (select 1 from patient_charge c2 where c2.organization_id = ep.organization_id
-          and c2.plan_item_id = ep.plan_item_id and c2.voided_at is null) then 0
+          and c2.plan_item_id = ep.plan_item_id and (c2.voided_at is null or ${wholeReturnedChargeSql(sql.raw("c2"))})) then 0
         else ep.price_cents::bigint * ep.quantity end as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
