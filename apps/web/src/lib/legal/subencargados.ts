@@ -1,14 +1,15 @@
 // Subencargados del tratamiento: proveedores que tratan datos de las clínicas por cuenta de odentIA.
 // La lista vive en `@odentia/auth/data-processors`, la misma que ve cada clínica en Protección de datos.
 // Al añadir o cambiar uno, actualiza LEGAL_UPDATED y avisa a las clínicas con la antelación del encargo.
-import { ALWAYS_PROCESSORS, type DataProcessor, OPTIONAL_PROCESSORS } from "@odentia/auth/data-processors"
-import { contactEmail } from "../site"
+import { ALWAYS_PROCESSORS, type DataProcessor, IMPORT_PROCESSORS, OPTIONAL_PROCESSORS } from "@odentia/auth/data-processors"
+import { contactEmail, supportEmail } from "../site"
 import type { LegalDoc } from "./types"
 
 /** Proveedor, para qué, datos que trata, país o región: de la lista compartida con la clínica. */
 const row = (p: DataProcessor): string[] => [p.name, p.purpose, p.data, p.country]
 const PLATAFORMA = ALWAYS_PROCESSORS.map(row)
 const SEGUN_CLINICA = OPTIONAL_PROCESSORS.map(row)
+const CARGA = IMPORT_PROCESSORS.map(row)
 
 const HEAD = ["Proveedor", "Para qué", "Datos que trata", "País o región"]
 
@@ -16,7 +17,7 @@ export const SUBENCARGADOS: LegalDoc = {
   path: "/subencargados",
   title: "Subencargados del tratamiento",
   description:
-    "Proveedores que tratan datos por cuenta de odentIA: alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción, direcciones y canales de mensajería. Para qué, qué datos y en qué país.",
+    "Proveedores que tratan datos por cuenta de odentIA: alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción, direcciones, canales de mensajería y la carga de datos. Para qué, qué datos y en qué país.",
   intro: [
     "Para prestar el servicio, odentIA recurre a los proveedores de esta lista, que tratan datos de las clínicas y de sus pacientes por cuenta de odentIA. Esta página forma parte del [contrato de encargo de tratamiento](/encargo-de-tratamiento).",
   ],
@@ -45,10 +46,25 @@ export const SUBENCARGADOS: LegalDoc = {
       ],
     },
     {
+      id: "carga",
+      title: "Proveedores de la carga de datos",
+      blocks: [
+        `Solo intervienen si la clínica nos envía sus datos para cargarlos al empezar, como su lista de pacientes, al correo [${supportEmail}](mailto:${supportEmail}). Los archivos se eliminan al terminar la carga o, a más tardar, a los 30 días de recibidos, como dice el [contrato de encargo de tratamiento](/encargo-de-tratamiento).`,
+        {
+          table: {
+            caption: "Proveedores que intervienen solo en la carga de datos",
+            head: HEAD,
+            rows: CARGA,
+          },
+        },
+      ],
+    },
+    {
       id: "entrenamiento",
       title: "Uso de los datos para entrenar modelos",
       blocks: [
         "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso.",
+        "Anthropic (Claude) solo interviene para ayudar al equipo de odentIA a preparar la carga de datos.",
       ],
     },
     {

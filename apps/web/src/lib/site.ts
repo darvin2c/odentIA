@@ -10,6 +10,8 @@ export const registerUrl = `https://app.${domain}${port}/register`
 export const loginUrl = `https://app.${domain}${port}/login`
 export const contactEmail = `hola@${domain}`
 export const privacyEmail = `privacidad@${domain}`
+/** Donde la clínica envía sus datos para la carga inicial (carta de bienvenida, `clinic-import-letter.ts`). */
+export const supportEmail = `soporte@${domain}`
 /** La solicitud de la lista de espera (Fundadores) va a la ruta pública de la API, en api.<dominio>. */
 export const waitlistApiUrl = `https://api.${domain}${port}/api/public/founders/waitlist`
 
