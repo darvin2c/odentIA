@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
+import { ORG_ROLES, type OrgRole, PRODUCT_ROLES, roleLabel } from "@odentia/auth/permissions"
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
@@ -28,6 +28,7 @@ import { normalizeForSearch } from "./knowledge.js"
 import { helpTopicsFor } from "./products.js"
 import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
 import { accessRequestPendingSql, clinicActsSinceSql } from "./support-case-rules.js"
+import { claimSupportGrant } from "./support-session.js"
 import { enqueueSupportInboxNotice, SUPPORT_ANSWER_BUSINESS_DAYS } from "./support-notices.js"
 
 /* ---------- Tipos ---------- */
@@ -80,6 +81,9 @@ export interface SupportCaseListItem {
 export interface SupportCaseDetail extends SupportCaseListItem {
   /** Cuándo pidió soporte el acceso de diagnóstico (el último pedido). */
   accessRequestedAt: string | null
+  /** Lo que pidió soporte: el rol con que mirar (nulo = solo la configuración) y cuántos minutos. */
+  accessRequestedRole: string | null
+  accessRequestedMinutes: number | null
   /** Hay un pedido de acceso y la clínica todavía no hizo nada después. */
   accessRequestPending: boolean
   detail: string | null
@@ -113,10 +117,22 @@ export interface SupportGrantItem {
   id: string
   caseId: string
   grantedBy: string
+  /** `diagnostico` (solo la configuración) o `rol` (la clínica en solo lectura con `viewRole`). */
+  scope: "diagnostico" | "rol"
+  viewRole: string | null
+  reason: string | null
+  /** La persona de soporte a quien se dio; nula hasta que alguien tome el caso. */
+  staffUserId: string | null
+  staffName: string | null
   expiresAt: string
   revokedAt: string | null
+  /** Por qué terminó antes de tiempo: lo quitaron, lo reemplazó otro, se resolvió el caso… */
+  endReason: string | null
+  revokedBy: string | null
   active: boolean
   createdAt: string
+  /** Las fichas que soporte abrió con este permiso: persona, parte y hora (solo en la clínica). */
+  reads: { patientName: string; resource: string; at: string }[]
 }
 
 export interface SupportDiagnostic {
@@ -204,11 +220,54 @@ function toGrant(row: typeof supportAccessGrant.$inferSelect): SupportGrantItem 
     id: row.id,
     caseId: row.caseId,
     grantedBy: row.grantedBy,
+    scope: row.scope === "rol" ? "rol" : "diagnostico",
+    viewRole: row.viewRole,
+    reason: row.reason,
+    staffUserId: row.staffUserId,
+    staffName: null,
     expiresAt: row.expiresAt.toISOString(),
     revokedAt: row.revokedAt?.toISOString() ?? null,
+    endReason: row.endReason,
+    revokedBy: row.revokedBy,
     active,
     createdAt: row.createdAt.toISOString(),
+    reads: [],
   }
+}
+
+/**
+ * Lo que la clínica ve de cada permiso en su caso: el nombre de quien de soporte
+ * lo tuvo y las fichas que abrió mientras valía (de `clinical_access_log`, la
+ * misma bitácora que «Consultas a la historia»).
+ */
+async function grantsSeenByClinic(tx: Db, orgId: string, rows: (typeof supportAccessGrant.$inferSelect)[]): Promise<SupportGrantItem[]> {
+  const out: SupportGrantItem[] = []
+  for (const row of rows) {
+    const item = toGrant(row)
+    if (row.staffUserId) {
+      const [staff] = await tx.select({ name: user.name }).from(user).where(eq(user.id, row.staffUserId)).limit(1)
+      item.staffName = staff?.name ?? null
+      const until = row.revokedAt ?? row.expiresAt
+      const reads = await tx.execute<{ name: string; resource: string; at: Date | string }>(sql`
+        select c.display_name as name,
+               l.resource, l.first_at as at
+        from clinical_access_log l
+        join patient p on p.organization_id = l.organization_id and p.id = l.patient_id
+        join contact c on c.organization_id = p.organization_id and c.id = p.person_id
+        where l.organization_id = ${orgId} and l.user_id = ${row.staffUserId}
+          and l.first_at >= ${row.createdAt} and l.first_at <= ${until}
+        order by l.first_at asc
+        limit 200
+      `)
+      item.reads = [...reads].map((read) => ({
+        patientName: read.name,
+        resource: read.resource,
+        at: new Date(read.at).toISOString(),
+      }))
+    }
+    out.push(item)
+  }
+  return out
 }
 
 function toAttachment(row: typeof supportAttachment.$inferSelect): SupportAttachmentItem {
@@ -449,7 +508,7 @@ export async function getMySupportCase(
       ? await tx.select({ name: user.name }).from(user).where(eq(user.id, kase.openedBy)).limit(1)
       : []
   return {
-    ...toDetail(kase, messages.map(toMessage), attachments, grants.map(toGrant), null, await accessRequestPendingOf(tx, kase)),
+    ...toDetail(kase, messages.map(toMessage), attachments, await grantsSeenByClinic(tx, orgId, grants), null, await accessRequestPendingOf(tx, kase)),
     openedByOther: opener ? { name: opener.name, roleLabel: kase.role } : null,
   }
 }
@@ -481,6 +540,8 @@ function toDetail(
     ...toListItem(row, messages.length),
     organizationName,
     accessRequestedAt: row.accessRequestedAt?.toISOString() ?? null,
+    accessRequestedRole: row.accessRequestedRole,
+    accessRequestedMinutes: row.accessRequestedMinutes,
     accessRequestPending,
     detail: row.detail,
     screen: row.screen,
@@ -666,9 +727,74 @@ export async function attachToMySupportCase(
 
 /* ---------- Consentimiento de acceso delegado (owner/admin; tx con RLS) ---------- */
 
+/** Los roles con que soporte puede mirar una clínica: los de su producto, menos propietario y «miembro». */
+export function supportViewRolesOf(product: ClinicalProduct): OrgRole[] {
+  return PRODUCT_ROLES[product].filter((role) => role !== "owner" && role !== "member")
+}
+
+/** El producto de la clínica (sin perfil, odentIA). */
+async function productOfOrg(tx: Db, orgId: string): Promise<ClinicalProduct> {
+  const [profile] = await tx
+    .select({ product: orgProfile.product })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  return isClinicalProduct(profile?.product) ? profile.product : "dental"
+}
+
+/** «Para qué», opcional: hasta 500 caracteres, vacío = nulo. */
+function supportReasonOf(reason: unknown): string | null {
+  if (reason === undefined || reason === null) return null
+  if (typeof reason !== "string") throw invalidField("reason", "Escribe para qué en texto.")
+  const text = reason.trim()
+  if (!text) return null
+  if (text.length > 500) throw invalidField("reason", "Escríbelo en 500 caracteres o menos.")
+  return text
+}
+
+function supportMinutesOf(minutes: unknown): number {
+  const value = minutes === undefined || minutes === null ? 30 : typeof minutes === "number" ? Math.floor(minutes) : Number.NaN
+  if (!Number.isInteger(value) || value < 5 || value > SUPPORT_GRANT_MAX_MINUTES) {
+    throw invalidField("minutes", `El acceso se autoriza entre 5 y ${SUPPORT_GRANT_MAX_MINUTES} minutos.`)
+  }
+  return value
+}
+
 /**
- * Un owner/admin autoriza a soporte a ver el diagnóstico de su organización.
- * Revoca los permisos activos previos del caso: uno vigente a la vez.
+ * Cierra el permiso abierto de la clínica antes de dar otro: uno solo vigente
+ * por clínica (`support_access_grant_one_open_uidx`), así el tope de 1 hora no se
+ * encadena abriendo casos. El vencido se cierra a su hora, como vencido; el
+ * vigente, ahora y como reemplazado. Corre con la clínica bloqueada.
+ */
+async function closeOpenGrantsOf(tx: Db, orgId: string, actorUserId: string, now: Date): Promise<void> {
+  const open = await tx
+    .select()
+    .from(supportAccessGrant)
+    .where(and(eq(supportAccessGrant.organizationId, orgId), isNull(supportAccessGrant.revokedAt)))
+  for (const grant of open) {
+    const expired = grant.expiresAt.getTime() <= now.getTime()
+    await tx
+      .update(supportAccessGrant)
+      .set(
+        expired
+          ? { revokedAt: grant.expiresAt, endReason: "vencido" }
+          : { revokedAt: now, endReason: "reemplazado", revokedBy: actorUserId },
+      )
+      .where(eq(supportAccessGrant.id, grant.id))
+  }
+}
+
+/** Dos autorizaciones a la vez (doble clic, dos pestañas) se ordenan por clínica. */
+async function lockSupportGrantsOf(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`support_grant:${orgId}`}))`)
+}
+
+/**
+ * Un owner/admin autoriza a soporte, ligado a un caso que puede leer: solo la
+ * configuración (`viewRole` nulo, el diagnóstico) o la app de la clínica en solo
+ * lectura con lo que ve `viewRole`. Uno vigente por clínica: el anterior se
+ * cierra. Si soporte lo había pedido, el permiso es de quien lo pidió; si no, de
+ * quien tome el caso. Queda en la auditoría con quien lo dio.
  */
 export async function grantSupportAccess(
   tx: Db,
@@ -677,6 +803,7 @@ export async function grantSupportAccess(
   canGrant: boolean,
   caseId: string,
   minutes: unknown,
+  access: { viewRole?: unknown; reason?: unknown } = {},
 ): Promise<SupportGrantItem> {
   if (!canGrant)
     throw new ServiceError(
@@ -684,63 +811,127 @@ export async function grantSupportAccess(
       403,
       "Solo quien es propietario o administra la clínica puede autorizar el acceso",
     )
-  const minutesNumber = typeof minutes === "number" ? Math.floor(minutes) : 30
-  if (
-    !Number.isInteger(minutesNumber) ||
-    minutesNumber < 5 ||
-    minutesNumber > SUPPORT_GRANT_MAX_MINUTES
-  ) {
-    throw invalidField("minutes", `El acceso se autoriza entre 5 y ${SUPPORT_GRANT_MAX_MINUTES} minutos.`)
+  const minutesNumber = supportMinutesOf(minutes)
+  const reason = supportReasonOf(access.reason)
+  let viewRole: OrgRole | null = null
+  if (access.viewRole !== undefined && access.viewRole !== null) {
+    const product = await productOfOrg(tx, orgId)
+    if (typeof access.viewRole !== "string" || !(supportViewRolesOf(product) as string[]).includes(access.viewRole))
+      throw invalidField("viewRole", "Elige un rol de la clínica.")
+    viewRole = access.viewRole as OrgRole
   }
+  await lockSupportGrantsOf(tx, orgId)
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
+  // Solo se autoriza en un caso que esta persona puede leer.
+  await requireCaseReader(tx, kase, orgId, userId)
   if (kase.status === "resuelto")
     throw validation("El caso ya está resuelto: no hace falta autorizar accesos")
-  await tx
-    .update(supportAccessGrant)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(supportAccessGrant.caseId, kase.id), isNull(supportAccessGrant.revokedAt)))
   // `createdAt` explícito: `expiresAt` nace del mismo instante, así el CHECK
   // de 1 h exacta no depende del reloj de la base.
   const grantedAt = new Date()
+  await closeOpenGrantsOf(tx, orgId, userId, grantedAt)
   const [grant] = await tx
     .insert(supportAccessGrant)
     .values({
       caseId: kase.id,
       organizationId: orgId,
       grantedBy: userId,
-      scope: "diagnostico",
+      scope: viewRole ? "rol" : "diagnostico",
+      viewRole,
+      // Lo pidió alguien de soporte: el permiso es suyo. Si no, de quien tome el caso.
+      staffUserId: kase.accessRequestedBy ?? kase.assigneeStaffId ?? null,
+      reason,
       createdAt: grantedAt,
       expiresAt: new Date(grantedAt.getTime() + minutesNumber * 60_000),
     })
     .returning()
   if (!grant) throw new Error("No se pudo autorizar el acceso")
+  await tx.insert(supportAccessAudit).values({
+    grantId: grant.id,
+    caseId: kase.id,
+    organizationId: orgId,
+    staffUserId: userId,
+    action: "autorizado",
+  })
   // Autorizar es la respuesta de la clínica: el caso vuelve a nosotros.
   await clinicActed(tx, kase, grant.id, await seesForOpener(tx, kase, orgId, userId))
   return toGrant(grant)
 }
 
-/** Quien autorizó (o un owner/admin) revoca el acceso: corta la lectura de inmediato. */
+/**
+ * Quita un permiso: quien lo dio, o la propietaria o un administrador. Queda
+ * quién lo quitó y que fue a mano; quitar uno ya cerrado no hace nada.
+ */
 export async function revokeSupportAccess(
   tx: Db,
   orgId: string,
   userId: string,
   canGrant: boolean,
   grantId: string,
+  caseId?: string,
 ): Promise<void> {
+  await lockSupportGrantsOf(tx, orgId)
   const [grant] = await tx
     .select()
     .from(supportAccessGrant)
     .where(eq(supportAccessGrant.id, grantId))
     .limit(1)
   if (!grant || grant.organizationId !== orgId) throw notFound("Permiso")
+  // La dirección nombra el caso: el permiso tiene que ser de ese caso.
+  if (caseId !== undefined && grant.caseId !== caseId) throw notFound("Permiso")
   if (grant.grantedBy !== userId && !canGrant)
-    throw new ServiceError("FORBIDDEN", 403, "No puedes revocar este acceso")
+    throw new ServiceError("FORBIDDEN", 403, "No puedes quitar este acceso")
   if (grant.revokedAt !== null) return
+  const now = new Date()
+  const expired = grant.expiresAt.getTime() <= now.getTime()
   await tx
     .update(supportAccessGrant)
-    .set({ revokedAt: new Date() })
+    .set(expired ? { revokedAt: grant.expiresAt, endReason: "vencido" } : { revokedAt: now, endReason: "quitado", revokedBy: userId })
     .where(eq(supportAccessGrant.id, grant.id))
+  if (!expired)
+    await tx.insert(supportAccessAudit).values({
+      grantId: grant.id,
+      caseId: grant.caseId,
+      organizationId: orgId,
+      staffUserId: userId,
+      action: "revocado",
+    })
+
+}
+
+/**
+ * «Dar acceso a soporte» desde Ayuda, sin que soporte lo haya pedido: abre el
+ * caso (el contrato liga el permiso a un caso) con el «para qué» como pregunta y
+ * da el permiso en la misma transacción.
+ */
+export async function giveSupportAccessFromHelp(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  canGrant: boolean,
+  input: { minutes?: unknown; viewRole?: unknown; reason?: unknown; screen: string; role: string; appVersion: string | null },
+): Promise<{ caseId: string; grant: SupportGrantItem }> {
+  if (!canGrant)
+    throw new ServiceError("FORBIDDEN", 403, "Solo quien es propietario o administra la clínica puede autorizar el acceso")
+  const reason = supportReasonOf(input.reason)
+  const question = reason ?? "Doy acceso a soporte para que revise la clínica"
+  const kase = await openSupportCaseFromHelp(tx, orgId, {
+    userId,
+    kind: "problema",
+    question,
+    detail: null,
+    screen: input.screen,
+    role: input.role,
+    appVersion: input.appVersion,
+    // Cada acceso dado es su propio caso: no se junta con otro igual.
+    dedupeKey: createHash("sha256").update(`acceso:${userId}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 32),
+  })
+  const grant = await grantSupportAccess(tx, orgId, userId, canGrant, kase.id, input.minutes, {
+    viewRole: input.viewRole,
+    reason,
+  })
+  return { caseId: kase.id, grant }
 }
 
 /* ---------- Cuenta (panel, sin clínica): casos de acceso con ownerDb ---------- */
@@ -1142,6 +1333,8 @@ export interface StaffSupportCaseDetail extends SupportCaseDetail {
   granters: { name: string; roleLabel: string }[]
   /** El mensaje que deja «Pedir acceso de diagnóstico…», tal cual; nulo si no se puede pedir. */
   accessRequestText: string | null
+  /** Los roles con que soporte puede pedir mirar esta clínica, con su nombre en el producto. */
+  accessViewRoles: { value: string; label: string }[]
   /** Por qué no se puede pedir el acceso en este caso, si no se puede. */
   accessRequestBlocked: string | null
   /** «Falta en la guía»: cuándo se marcó, o nulo. */
@@ -1200,7 +1393,13 @@ export async function getSupportCaseForStaff(
       pending,
     ),
     ...access,
-    accessRequestText: blocked || pending ? null : accessRequestText(access.openerCanGrant),
+    // Vista previa con lo que viene puesto (la configuración, 30 minutos); la administración arma la suya al elegir.
+    accessRequestText: blocked || pending ? null : accessRequestText(access.openerCanGrant, "la configuración de tu clínica", 30),
+    accessViewRoles: row.kase.organizationId
+      ? await productOfOrg(db, row.kase.organizationId).then((product) =>
+          supportViewRolesOf(product).map((role) => ({ value: role, label: roleLabel(role, product) })),
+        )
+      : [],
     accessRequestBlocked: blocked,
     guideGapMarkedAt: gap?.markedAt.toISOString() ?? null,
   }
@@ -1208,11 +1407,17 @@ export async function getSupportCaseForStaff(
 
 /* ---------- «Pedir acceso de diagnóstico…» (ADR 0181) ---------- */
 
-/** El mensaje fijo del pedido: cambia si quien abrió el caso puede autorizarlo. */
-function accessRequestText(openerCanGrant: boolean): string {
+/** El mensaje fijo del pedido: qué se pide mirar y quién lo autoriza. */
+function accessRequestText(openerCanGrant: boolean, what: string, minutes: number): string {
+  const ask = `Para revisarlo necesitamos mirar ${what}, ${minutes} minutos, sin cambiar nada.`
   return openerCanGrant
-    ? "Para revisarlo necesitamos ver la configuración de tu clínica. En este caso, abre «Acceso diagnóstico de soporte» y pulsa «Autorizar acceso». Tú eliges por cuánto tiempo, máximo 1 hora, y puedes revocarlo cuando quieras. Nunca vemos tus pacientes."
-    : "Para revisarlo necesitamos ver la configuración de tu clínica. Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda, en «Tus casos con soporte», con «Autorizar acceso». Eligen por cuánto tiempo, máximo 1 hora, y pueden revocarlo cuando quieran. Nunca vemos tus pacientes."
+    ? `${ask} En este caso, revisa el pedido y pulsa «Dar acceso». Puedes cambiar el rol o el tiempo, y quitarlo cuando quieras.`
+    : `${ask} Lo autoriza la propietaria o un administrador de la clínica: ya ven este caso en Ayuda, en «Tus casos con soporte». Pueden cambiar el rol o el tiempo, y quitarlo cuando quieran.`
+}
+
+/** «tu clínica como Odontólogo» o «la configuración de tu clínica», en las palabras del producto. */
+function accessWhatText(viewRole: OrgRole | null, product: ClinicalProduct): string {
+  return viewRole ? `tu clínica como ${roleLabel(viewRole, product)}` : "la configuración de tu clínica"
 }
 
 /** Quién abrió, si puede autorizar (con su membresía de hoy) y quiénes pueden. */
@@ -1302,8 +1507,17 @@ export async function requestSupportAccess(
   actor: AdminActor,
   caseId: string,
   now: Date = new Date(),
+  access: { viewRole?: unknown; minutes?: unknown } = {},
 ): Promise<{ requestedAt: string; repeated: boolean }> {
   const kase = await requireStaffCaseFor(db, actor, caseId, { lock: true })
+  const minutes = supportMinutesOf(access.minutes)
+  const product = kase.organizationId ? await productOfOrg(db, kase.organizationId) : "dental"
+  let viewRole: OrgRole | null = null
+  if (access.viewRole !== undefined && access.viewRole !== null) {
+    if (typeof access.viewRole !== "string" || !(supportViewRolesOf(product) as string[]).includes(access.viewRole))
+      throw invalidField("viewRole", "Elige un rol de la clínica.")
+    viewRole = access.viewRole as OrgRole
+  }
   const blocked = await accessRequestBlockedReason(db, kase)
   if (blocked) {
     const active = blocked.startsWith("Ya hay un acceso vigente")
@@ -1317,16 +1531,24 @@ export async function requestSupportAccess(
     organizationId: kase.organizationId,
     authorKind: "staff",
     authorUserId: actor.userId,
-    body: accessRequestText(openerCanGrant),
+    body: accessRequestText(openerCanGrant, accessWhatText(viewRole, product), minutes),
     createdAt: now,
   })
   await staffWrite(
     db,
     actor,
     kase,
-    { status: "esperando_clinica", resolvedAt: null, lastPublicMessageAt: now, accessRequestedAt: now },
+    {
+      status: "esperando_clinica",
+      resolvedAt: null,
+      lastPublicMessageAt: now,
+      accessRequestedAt: now,
+      accessRequestedRole: viewRole,
+      accessRequestedMinutes: minutes,
+      accessRequestedBy: actor.userId,
+    },
     "support.case.access_requested",
-    { de: kase.status, quienAbrioAutoriza: openerCanGrant },
+    { de: kase.status, quienAbrioAutoriza: openerCanGrant, rol: viewRole, minutos: minutes },
   )
   return { requestedAt: now.toISOString(), repeated: false }
 }
@@ -1560,6 +1782,14 @@ export async function setSupportCaseStatus(
     "support.case.status",
     { de: kase.status, a: status },
   )
+  // Resuelto, su permiso termina: no queda soporte mirando un caso cerrado.
+  if (status === "resuelto") {
+    const now = new Date()
+    await db
+      .update(supportAccessGrant)
+      .set({ revokedAt: now, endReason: "caso_resuelto" })
+      .where(and(eq(supportAccessGrant.caseId, kase.id), isNull(supportAccessGrant.revokedAt), gt(supportAccessGrant.expiresAt, now)))
+  }
 }
 
 /**
@@ -1670,7 +1900,8 @@ export async function readSupportDiagnostic(
   if (!kase.organizationId)
     throw new ServiceError("FORBIDDEN", 403, "Este caso no tiene clínica asociada")
   const orgId = kase.organizationId
-  const grant = await activeGrantFor(db, kase.id)
+  // El permiso tiene que ser de esta persona de soporte (o de nadie todavía: pasa a ser suyo).
+  const grant = await claimSupportGrant(db, actor, kase.id)
   if (!grant) {
     await db.insert(supportAccessAudit).values({
       grantId: null,

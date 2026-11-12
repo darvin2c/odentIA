@@ -10,13 +10,14 @@
  * trabajo y a quién avisar. Lo que no le toca a una persona no le llega.
  */
 import type { Db } from "@odentia/db"
-import { canAccess, seesBilling } from "@odentia/auth/permissions"
+import { canAccess, type OrgRole, roleLabel, seesBilling } from "@odentia/auth/permissions"
 import { currencyFractionDigits } from "@odentia/clinical"
 import { supportAccessGrant, supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
 import { saasCharge, saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm"
-import { getOrgLocale, orgProductName } from "./locale.js"
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne } from "drizzle-orm"
+import { getOrgLocale, orgProduct, orgProductName } from "./locale.js"
+import { accessRequestPendingSql } from "./support-case-rules.js"
 import { readOnlyAtOf } from "./saas-billing.js"
 import { type SaasAlert, getSaasAlerts } from "./saas-terms.js"
 
@@ -25,6 +26,7 @@ export type ClinicNoticeTone = "aviso" | "alarma" | "limite"
 export type ClinicNoticeAction =
   | { kind: "pagar" | "elegir_plan" | "ver_plan" | "ver_consumo" | "subir_tope" | "escribir_soporte"; label: string; shortLabel: string }
   | { kind: "quitar_acceso"; label: string; shortLabel: string; grantId: string; caseId: string }
+  | { kind: "revisar_acceso"; label: string; shortLabel: string; caseId: string }
 
 export interface ClinicNotice {
   /** Estable mientras el aviso sea el mismo: cambia al subir de nivel, y con él vuelve a verse. */
@@ -295,35 +297,62 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     }
   }
 
-  // Soporte con acceso: solo propietario y administrador, que pueden darlo y quitarlo.
-  if (billing) {
-    const grants = await tx
-      .select({
-        id: supportAccessGrant.id,
-        caseId: supportAccessGrant.caseId,
-        expiresAt: supportAccessGrant.expiresAt,
-        grantedBy: supportAccessGrant.grantedBy,
-        grantedByName: user.name,
-        question: supportCase.question,
-      })
-      .from(supportAccessGrant)
-      .leftJoin(user, eq(user.id, supportAccessGrant.grantedBy))
-      .leftJoin(supportCase, eq(supportCase.id, supportAccessGrant.caseId))
-      .where(and(eq(supportAccessGrant.organizationId, orgId), isNull(supportAccessGrant.revokedAt), gt(supportAccessGrant.expiresAt, now)))
-      .orderBy(asc(supportAccessGrant.expiresAt))
-      .limit(5)
-    const hour = (date: Date) => new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit", timeZone }).format(date)
-    for (const grant of grants) {
-      const who = grant.grantedBy === viewer.userId ? "Diste" : `${grant.grantedByName?.split(" ")[0] ?? "Alguien del equipo"} dio`
-      const why = grant.question ? ` por el caso «${grant.question.length > 60 ? `${grant.question.slice(0, 60)}…` : grant.question}»` : ""
+  // Soporte con acceso: lo ve todo el equipo, sin la X mientras dura (no se esconde lo que
+  // sigue abierto); quitarlo, solo la propietaria y los administradores. No copia el texto del
+  // caso: puede nombrar pacientes. Uno solo vigente por clínica.
+  const grants = await tx
+    .select({
+      id: supportAccessGrant.id,
+      caseId: supportAccessGrant.caseId,
+      scope: supportAccessGrant.scope,
+      viewRole: supportAccessGrant.viewRole,
+      expiresAt: supportAccessGrant.expiresAt,
+      grantedBy: supportAccessGrant.grantedBy,
+      grantedByName: user.name,
+    })
+    .from(supportAccessGrant)
+    .leftJoin(user, eq(user.id, supportAccessGrant.grantedBy))
+    .where(and(eq(supportAccessGrant.organizationId, orgId), isNull(supportAccessGrant.revokedAt), gt(supportAccessGrant.expiresAt, now)))
+    .orderBy(asc(supportAccessGrant.expiresAt))
+    .limit(1)
+  const hour = (date: Date) => new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", timeZone }).format(date)
+  const product = await orgProduct(tx, orgId)
+  const canManage = viewer.role === "owner" || viewer.role === "admin"
+  for (const grant of grants) {
+    const who = grant.grantedBy === viewer.userId ? "Lo diste tú" : `Lo dio ${grant.grantedByName ?? "alguien del equipo"}`
+    const what = grant.scope === "rol" && grant.viewRole ? `mirar como ${roleLabel(grant.viewRole as OrgRole, product)}` : "mirar la configuración"
+    notices.push({
+      id: `soporte:${grant.id}`,
+      topic: "soporte",
+      tone: "aviso",
+      message: `Soporte de ${brand} puede ${what} hasta las ${hour(grant.expiresAt)}. ${who}; no puede cambiar nada.`,
+      short: `Soporte: ${what.replace("mirar ", "")} · hasta ${hour(grant.expiresAt)}`,
+      action: canManage
+        ? { kind: "quitar_acceso", label: "Quitar acceso", shortLabel: "Quitar", grantId: grant.id, caseId: grant.caseId }
+        : null,
+      dismiss: null,
+    })
+  }
+
+  // Un pedido de soporte sin responder: a quien puede autorizarlo, con «Revisar». Este sí se
+  // cierra por hoy: todavía no hay nada abierto, y el pedido sigue en Ayuda y en el correo.
+  if (canManage && grants.length === 0) {
+    const requests = await tx
+      .select({ id: supportCase.id, role: supportCase.accessRequestedRole, minutes: supportCase.accessRequestedMinutes })
+      .from(supportCase)
+      .where(and(eq(supportCase.organizationId, orgId), isNotNull(supportCase.accessRequestedAt), ne(supportCase.status, "resuelto"), accessRequestPendingSql))
+      .orderBy(desc(supportCase.accessRequestedAt))
+      .limit(1)
+    for (const request of requests) {
+      const what = request.role ? `mirar como ${roleLabel(request.role as OrgRole, product)}` : "mirar la configuración"
       notices.push({
-        id: `soporte:${grant.id}`,
+        id: `soporte-pedido:${request.id}`,
         topic: "soporte",
         tone: "aviso",
-        message: `${who} acceso a soporte de ${brand} hasta las ${hour(grant.expiresAt)}${why}. Solo ve la configuración, no pacientes.`,
-        short: `Soporte tiene acceso hasta las ${hour(grant.expiresAt)}`,
-        action: { kind: "quitar_acceso", label: "Quitar acceso", shortLabel: "Quitar", grantId: grant.id, caseId: grant.caseId },
-        dismiss: "nivel",
+        message: `Soporte de ${brand} pide ${what}${request.minutes ? `, ${request.minutes} minutos` : ""}.`,
+        short: `Soporte pide ${what.replace("mirar ", "")}`,
+        action: { kind: "revisar_acceso", label: "Revisar", shortLabel: "Revisar", caseId: request.id },
+        dismiss: "dia",
       })
     }
   }
