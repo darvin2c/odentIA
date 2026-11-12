@@ -118,7 +118,8 @@ import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
 import { treatmentConsentStates } from "./consent-state.js"
 import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { ADVANCE_KEY, createCharge } from "./payments.js"
+import { ADVANCE_KEY, type WholeReturnedCharge, wholeReturnedCharges } from "./charge-returns.js"
+import { createCharge } from "./payments.js"
 import {
   addPlanItem,
   createTreatmentPlan,
@@ -2035,7 +2036,8 @@ export async function findEarlierTreatment(
 /** Cargo omitido al cerrar: queda registrado para mostrarlo en el resumen. */
 export interface SkippedCharge {
   procedureId: string
-  reason: "covered" | "free_act" | "zero_price" | "sessions_complete"
+  /** `returned`: lo cobrado de su tratamiento se devolvió todo y no se vuelve a cobrar solo (ADR 0068). */
+  reason: "covered" | "free_act" | "zero_price" | "sessions_complete" | "returned"
 }
 
 /** Línea del diálogo de cierre: qué quedó por cobrar y qué no. */
@@ -3256,6 +3258,16 @@ export async function finalizeEncounter(
       reason,
     })
   }
+  // Lo devuelto entero de cada tratamiento de la atención: cuenta como cobrado (ADR 0068).
+  const returnedByPlanItem = new Map<string, WholeReturnedCharge[]>()
+  for (const charge of await wholeReturnedCharges(
+    tx,
+    orgId,
+    patientId,
+    [...new Set(procedures.flatMap((proc) => (proc.planItemId ? [proc.planItemId] : [])))],
+  )) {
+    returnedByPlanItem.set(charge.planItemId, [...(returnedByPlanItem.get(charge.planItemId) ?? []), charge])
+  }
   for (const proc of procedures) {
     if (!proc.serviceId) {
       skip(proc, "free_act")
@@ -3315,10 +3327,14 @@ export async function finalizeEncounter(
             .limit(1)
         : []
       // El tope son las visitas previstas. Si nadie las fijó no hay tope:
-      // se cobra cada visita atendida, no solo la primera.
+      // se cobra cada visita atendida, no solo la primera. Una visita cuyo
+      // cobro se devolvió entero también cuenta: no deja otra por cobrar.
       const cap = line?.sessionsPlanned ?? planItem?.plannedSessions ?? null
-      if (cap !== null && visits.length >= cap) {
-        skip(proc, "sessions_complete")
+      const returnedVisits = (returnedByPlanItem.get(proc.planItemId) ?? []).filter(
+        (charge) => charge.encounterProcedureId !== null,
+      )
+      if (cap !== null && visits.length + returnedVisits.length >= cap) {
+        skip(proc, visits.length >= cap ? "sessions_complete" : "returned")
         continue
       }
       const amount = line?.priceCents ?? proc.priceCents
@@ -3367,9 +3383,12 @@ export async function finalizeEncounter(
       const agreed = line?.priceCents ?? proc.priceCents
       // Lo descontado en Cobrar también cuenta: si no, la sesión siguiente volvería a cobrarlo.
       const charged = active.reduce((sum, c) => sum + c.amountCents + c.returnedCents + c.discountCents, 0)
-      const remaining = agreed - charged
+      // Lo devuelto entero también se cobró: la recepción lo vuelve a cobrar a mano si corresponde.
+      // Como `active`, sin mirar la moneda: un tratamiento se acuerda en una sola.
+      const returnedWhole = returnedByPlanItem.get(proc.planItemId) ?? []
+      const remaining = agreed - charged - returnedWhole.reduce((sum, c) => sum + c.chargedCents, 0)
       if (remaining <= 0) {
-        skip(proc, "covered")
+        skip(proc, charged < agreed ? "returned" : "covered")
         continue
       }
       // Por tratamiento se cobra lo acordado completo en la primera

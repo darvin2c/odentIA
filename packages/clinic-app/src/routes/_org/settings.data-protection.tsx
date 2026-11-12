@@ -42,7 +42,7 @@ interface DataProtectionView {
   }
   agreement: { version: string; acceptedAt: string; acceptedByName: string | null } | null
   activities: Array<{ id: string; purpose: string; data: string; basis: string; keep: string }>
-  processors: { inUse: Processor[]; always: Processor[]; notUsed: string[] }
+  processors: { inUse: Processor[]; always: Processor[]; forImport: Processor[]; notUsed: string[] }
   requests: {
     year: number
     received: number
@@ -200,6 +200,14 @@ function DataProtectionBody({ view }: { view: DataProtectionView }) {
           <p className="text-sm text-muted-foreground">
             No usa: {missingWords(view.processors.notUsed)}. Si los conecta, aparecen aquí solos.
           </p>
+        ) : null}
+        {view.processors.forImport.length ? (
+          <div className="flex flex-col gap-2">
+            <ProcessorList title="Solo si la clínica pide cargar sus datos" items={view.processors.forImport} />
+            <p className="text-sm text-muted-foreground">
+              Los archivos que envía para la carga se eliminan al terminar o, a más tardar, a los 30 días de recibidos.
+            </p>
+          </div>
         ) : null}
       </section>
 

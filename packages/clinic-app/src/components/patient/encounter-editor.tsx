@@ -443,6 +443,10 @@ function skippedReasonLabel(reason: string | null): string {
       return "su servicio no tiene precio"
     case "sessions_complete":
       return "ya se cobraron todas las visitas previstas"
+    case "returned":
+      // Una devolución total no deja el tratamiento por cobrar otra vez (ADR 0068). Lo lee también
+      // quien atiende, que no cobra: dice quién lo haría, sin pedírselo.
+      return "un cobro de este tratamiento se devolvió entero, y lo devuelto no se vuelve a cobrar solo. Si hay que cobrarlo otra vez, lo hace caja en su cuenta, como otro concepto"
     default:
       return "no genera cobro"
   }

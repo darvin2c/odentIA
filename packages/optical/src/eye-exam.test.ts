@@ -6,7 +6,21 @@ import {
   parseEyeExam,
   referralSigns,
   refractionText,
+  typedNumber,
 } from "./eye-exam.js"
+
+describe("la graduación como se escribe o se pega", () => {
+  it("toma el negativo con cualquier raya, también la de la receta impresa", () => {
+    for (const minus of ["-", "−", "‒", "–", "‐", "‑"])
+      expect(typedNumber(`${minus}1,25`)).toBe(-1.25)
+    expect(typedNumber(" +2 ")).toBe(2)
+    expect(typedNumber("1.5")).toBe(1.5)
+    expect(typedNumber("  ")).toBeUndefined()
+    expect(typedNumber(undefined)).toBeUndefined()
+    // Lo que no es número vuelve tal cual, para que el servidor lo diga junto al campo.
+    expect(typedNumber("?1,25")).toBe("?1,25")
+  })
+})
 
 describe("la agudeza visual, como se escribe en una óptica", () => {
   it("acepta Snellen, decimal y lo que se anota cuando no lee la cartilla", () => {

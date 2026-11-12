@@ -2,9 +2,10 @@ import { encounter, patientDocument } from "@odentia/db/schema/clinical"
 import { lensPrescription } from "@odentia/db/schema/optical"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
-import { beforeAll, describe, expect, it } from "vitest"
+import { PDFPage } from "pdf-lib"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import { clinicalFixture } from "../clinical-test-fixture.js"
-import { updateEncounterDraft } from "../encounters.js"
+import { updateEncounterDraft, voidEncounter } from "../encounters.js"
 import { insertOrg, ownerDb, setupTestDb } from "../test-setup.js"
 import { productHooks } from "../products.js"
 import {
@@ -270,10 +271,44 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
     expect(hook?.state).toBe("anulado")
   })
 
+  it("anular la atención anula su receta: el QR dice «anulada», la venta no la ofrece y la externa sigue", async () => {
+    const f = await examined()
+    const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
+    const brought = await f.run((tx) =>
+      transcribeLensPrescription(tx, ...f.args, { kind: "contacto", lenses: { od: { esfera: -1 } }, issuedOn: "2026-10-01", prescriberName: "Dra. Ruiz" }),
+    )
+    await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Era de otro cliente" }))
+    expect((await f.run((tx) => lensPrescriptionCheck(tx, OPTICA, issued.id)))?.state).toBe("anulado")
+    const [row] = await ownerDb.select().from(lensPrescription).where(eq(lensPrescription.id, issued.id))
+    expect(row?.voidReason).toBe("Atención anulada: Era de otro cliente")
+    // La venta copia al pedido solo lo vigente: la externa, no la de la atención anulada.
+    const current = await f.run((tx) => currentLensPrescriptions(tx, OPTICA, f.patient.id))
+    expect(Object.values(current).map((item) => item?.id)).toEqual([brought.id])
+    // La lista dice que su atención se anuló: la ficha no ofrece «Emitir otra desde su examen».
+    const listed = await f.run((tx) => listLensPrescriptions(tx, OPTICA, f.patient.id))
+    expect(listed.map((item) => [item.id, item.encounterVoided])).toEqual(
+      expect.arrayContaining([
+        [issued.id, true],
+        [brought.id, false],
+      ]),
+    )
+  })
+
   it("la receta se imprime en PDF, la de la óptica y la externa", async () => {
     const f = await examined()
     const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
-    const pdf = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, issued.id))
+    // Lo que se dibuja en el papel: la graduación negativa lleva su signo, nunca «?».
+    const drawn = vi.spyOn(PDFPage.prototype, "drawText")
+    let pdf: Awaited<ReturnType<typeof renderLensPrescriptionPdf>>
+    let texts: string[]
+    try {
+      pdf = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, issued.id))
+      texts = drawn.mock.calls.map(([text]) => text)
+    } finally {
+      drawn.mockRestore()
+    }
+    expect(texts).toEqual(expect.arrayContaining(["‒1,25", "‒0,50", "180°", "‒1,00"]))
+    expect(texts.filter((text) => text.includes("?"))).toEqual([])
     expect(Buffer.from(pdf.bytes.slice(0, 5)).toString()).toBe("%PDF-")
     expect(pdf.filename).toMatch(/^Receta-de-anteojos-\d{4}-\d{2}-\d{2}\.pdf$/)
     const external = await f.run((tx) =>

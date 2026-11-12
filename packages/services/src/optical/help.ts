@@ -358,7 +358,7 @@ const EYE_FAQS: Faq[] = [
   {
     id: "equivoque-receta-emitida-corrijo",
     q: "¿Me equivoqué en una receta ya emitida, cómo la corrijo?",
-    a: "Una receta emitida no se edita: en «Recetas de lentes» de su ficha, «Anular» con el motivo. Si era de un examen, quien la firmó tiene en «Anteriores» «Emitir otra desde su examen», con la graduación escrita para corregirla, aunque la atención ya esté firmada.",
+    a: "Una receta emitida no se edita: en «Recetas de lentes» de su ficha, «Anular» con el motivo. Si era de un examen, quien la firmó tiene en «Anteriores» «Emitir otra desde su examen», con la graduación escrita para corregirla, aunque la atención ya esté firmada. Si la receta se anuló porque se anuló su atención, esa atención ya no emite otra: se emite desde una atención nueva.",
     forms: ["corregir receta de lentes", "me equivoque en la receta", "como cambio una receta emitida"],
     area: "clinica",
     needs: "clinical.write",

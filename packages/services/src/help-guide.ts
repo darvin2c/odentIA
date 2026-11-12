@@ -2092,12 +2092,12 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "entrego-autoridad-pide-registro-mis-datos",
         q: "¿Qué le entrego a la autoridad si me pide el registro de mis datos?",
-        a: "En Configuración › Protección de datos, «Descargar para la autoridad» arma un PDF con lo que la clínica usa ese día.",
+        a: "En Configuración › Protección de datos, «Descargar para la autoridad» arma un PDF con lo que la clínica usa ese día y, aparte, los proveedores que solo intervienen si pidió la carga de sus datos.",
       },
       {
         id: "aparece-proveedor-contrate",
         q: "¿Por qué aparece un proveedor que no contraté?",
-        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes.",
+        a: "Porque odentIA lo usa por cuenta de la clínica: el servidor, el almacenamiento o el modelo de los agentes. Los que dependen de la clínica solo aparecen si conecta ese canal o enciende los agentes. Los de la carga de datos van aparte: solo intervienen si la clínica envía sus datos para cargarlos, y esos archivos se eliminan al terminar o, a más tardar, a los 30 días.",
       },
     ],
   },

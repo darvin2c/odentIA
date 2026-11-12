@@ -22,7 +22,7 @@ import {
   type UsesLenses,
 } from "@odentia/optical"
 import { Alert, AlertDescription, AlertTitle, Field, FieldError, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { PrismBases } from "./lens-fields"
+import { numberOf, PrismBases } from "./lens-fields"
 
 /**
  * El borrador del examen: lo mismo que se guarda, con los números como se
@@ -64,15 +64,6 @@ const STATE_OPTIONS = (["sin_alteraciones", "con_hallazgos", "no_realizado"] as 
   value,
   label: HEALTH_STATE_LABELS[value],
 }))
-
-/** «−1,25», «+2», «1.5» o «−0,5» → número; vacío → undefined; lo demás, el texto, para que el servidor lo señale. */
-function numberOf(text: Text): number | string | undefined {
-  if (text === undefined) return undefined
-  const clean = text.trim().replace("−", "-").replace(",", ".").replace(/^\+/, "")
-  if (!clean) return undefined
-  const value = Number(clean)
-  return Number.isFinite(value) ? value : text
-}
 
 /** Un número guardado, como se escribe en la pantalla: con coma y con signo en las dioptrías. */
 function textOf(value: number | undefined, signed = false): Text {

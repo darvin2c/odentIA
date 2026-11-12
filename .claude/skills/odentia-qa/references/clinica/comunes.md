@@ -69,6 +69,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] El QR del papel abre su comprobación sin cuenta. Un código falso y uno que no existe dicen lo mismo, sin revelar nada.
 - [ ] Lo impreso dice lo mismo que la pantalla: pieza, diagnóstico, dosis, fechas y quién firmó.
 - [ ] Un papel anulado se ve anulado al comprobarlo.
+- [ ] Al anular una atención, el diálogo nombra lo que cae en ese producto (la receta de lentes en vistIA; descansos solo donde se emiten) y lo que lo usa (un pedido).
 
 **Fuentes:** ADR 0115, 0132 y 0133.
 
