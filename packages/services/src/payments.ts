@@ -3649,9 +3649,13 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       }
     }
   }
+  // Lo devuelto entero cuenta como cobrado (ADR 0068): ocupa su visita y su tratamiento no se vuelve a cargar.
+  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId)
   // Cobro por sesión: visitas previstas del tratamiento y qué visita es cada concepto.
   const planItemIds = [
-    ...new Set(liveCharges.map((c) => c.planItemId).filter((v): v is string => !!v)),
+    ...new Set(
+      [...liveCharges, ...returnedWhole].map((c) => c.planItemId).filter((v): v is string => !!v),
+    ),
   ]
   const plannedByPlanItem: Record<string, number> = {}
   if (planItemIds.length) {
@@ -3673,8 +3677,6 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       .orderBy(asc(treatmentBudgetItem.createdAt))
     for (const row of rows) plannedByPlanItem[row.planItemId] = row.sessionsPlanned ?? 1
   }
-  // Lo devuelto entero cuenta como cobrado (ADR 0068): ocupa su visita y su tratamiento no se vuelve a cargar.
-  const returnedWhole = await wholeReturnedCharges(tx, orgId, patientId)
   const visitNumberByCharge: Record<string, number> = {}
   const visitasPorTratamiento: Record<string, number> = {}
   const visitCharges = [
@@ -3929,11 +3931,12 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     /** Visitas atendidas por tratamiento (actos con cargo vivo o devuelto entero): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
     // Un adelanto para un tratamiento no lo da por cargado: al firmar se carga lo que falta.
-    // Lo devuelto entero también se cobró: al firmar no se vuelve a cargar (ADR 0068).
+    // Lo devuelto entero también se cobró: al firmar no se vuelve a cargar (ADR 0068). Lo que se
+    // cobra por sesión no entra: cada visita se carga al firmarla, hasta las acordadas.
     conCargo: coveredPlanItems([
       ...liveCharges.filter((charge) => !charge.requestKey?.startsWith(ADVANCE_KEY)),
       ...returnedWhole,
-    ]),
+    ]).filter((planItemId) => plannedByPlanItem[planItemId] === undefined),
   }
 }
 

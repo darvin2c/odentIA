@@ -180,4 +180,6 @@ it("por sesión: la visita devuelta entera cuenta para el tope y no deja otra po
   const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(account.pendiente.map((row) => [row.visitNumber, row.visitsPlanned])).toEqual([[2, 2]])
   expect(account.visitasPorTratamiento[item.id]).toBe(2)
+  // Por sesión, cada visita se carga al firmarla: el pie de la atención no lo da por cobrado.
+  expect(account.conCargo).not.toContain(item.id)
 })

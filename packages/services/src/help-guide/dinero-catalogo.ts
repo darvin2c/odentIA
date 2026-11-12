@@ -89,7 +89,7 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
       {
         id: "finanzas-devuelto-todo-no-se-cobra",
         q: "Le devolví todo lo de un tratamiento y volvió: ¿por qué al firmar no se le cobró?",
-        a: "Porque lo que se cobró de un tratamiento cuenta como cobrado aunque después se haya devuelto todo: así nadie recibe un cargo sorpresa por lo mismo. Al firmar, el cierre lo dice («lo cobrado de este tratamiento cuenta aunque se haya devuelto»), y su cuenta lo muestra como devuelto. Lo mismo con una visita de un tratamiento por sesiones cuyo cobro se devolvió entero: cuenta para las visitas acordadas. Si de verdad corresponde cobrarlo otra vez, en «Cobrar» usa «Agregar otro concepto» con lo que se le cobra. Un adelanto que se devolvió no cuenta: ese tratamiento se cobra al atenderlo.",
+        a: "Porque lo que se cobró de un tratamiento cuenta como cobrado aunque después se haya devuelto todo: así nadie recibe un cargo sorpresa por lo mismo. Al firmar, el cierre lo dice («lo cobrado de este tratamiento cuenta aunque se haya devuelto»), y su cuenta lo muestra como devuelto. Lo mismo con una visita de un tratamiento por sesiones cuyo cobro se devolvió entero: cuenta para las visitas acordadas. Si de verdad corresponde cobrarlo otra vez, en su cuenta abre «Cobrar» (si no debe nada, se llama «Cobrar un adelanto») y usa «Agregar otro concepto» con lo que se le cobra. Un adelanto que se devolvió no cuenta: ese tratamiento se cobra al atenderlo.",
         forms: [
           "devolvi todo y no se cobra",
           "le devolvi la plata y volvio",
