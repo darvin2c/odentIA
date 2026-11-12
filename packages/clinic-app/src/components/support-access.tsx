@@ -1,5 +1,5 @@
 import { type OrgRole, PRODUCT_ROLES, roleLabel } from "@odentia/auth/permissions"
-import { Button } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   submitErrorMessage,
   useAppForm,
@@ -73,6 +73,17 @@ export function untilSentence(iso: string): string {
   return time.endsWith(".") ? time : `${time}.`
 }
 
+/** Lo que verá soporte con cada elección, dicho antes de dar el acceso. */
+const VIEW_WORDS: Record<string, string> = {
+  [CONFIG]: "Verá sedes, canales, el agente y el equipo; ningún paciente.",
+  reception: "Verá la agenda, los pacientes y las conversaciones; no la historia clínica.",
+  cashier: "Verá los cobros y las cuentas; no la historia clínica.",
+  clinician: "Verá los pacientes, su historia y sus documentos.",
+  sales: "Verá las ventas, los cobros y la receta de lentes vigente.",
+  workshop: "Verá solo los pedidos del taller.",
+  admin: "Verá toda la clínica.",
+}
+
 export interface SupportAccessValues {
   viewRole: string | null
   minutes: number
@@ -129,9 +140,7 @@ export function SupportAccessForm({
         )}
       </form.AppField>
       <p className="text-sm text-muted-foreground">
-        {view === CONFIG
-          ? "Verá sedes, canales, el agente y el equipo; ningún paciente."
-          : "Verá lo mismo que ese rol de tu clínica, sin poder cambiar nada. Cada ficha que abra queda anotada."}
+        {VIEW_WORDS[view] ?? "Verá lo mismo que ese rol de tu clínica."} Sin poder cambiar nada; cada ficha que abra queda anotada.
       </p>
       {askReason ? (
         <form.AppField name="reason">
@@ -223,6 +232,7 @@ export function GiveSupportAccess({ screen, onClose }: { screen: string; onClose
     onSuccess: () => {
       setGiven(null)
       refresh()
+      toast.success("Soporte ya no ve tu clínica")
     },
   })
   return (
@@ -298,6 +308,7 @@ export interface ClinicGrant {
 }
 
 const END_WORDS: Record<string, string> = {
+  quitado: "lo quitaron",
   reemplazado: "lo reemplazó otro acceso",
   vencido: "se cumplió el tiempo",
   caso_resuelto: "se resolvió el caso",

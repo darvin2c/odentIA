@@ -4,6 +4,7 @@
  * texto lo decide el servicio, no esta pantalla. Aquí solo se pinta, se
  * recuerda quién cerró qué y se resuelve cada acción.
  */
+import { toast } from "@odentia/ui"
 import { type StripNotice, NoticeStrip } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, useNavigate, useRouterState } from "@tanstack/react-router"
@@ -141,6 +142,8 @@ function Strip({ userId }: { userId: string }) {
         method: "POST",
         body: JSON.stringify({ grantId: action.grantId }),
       }),
+    onSuccess: () => toast.success("Soporte ya no ve tu clínica"),
+    onError: () => toast.error("No pude quitar el acceso. Inténtalo otra vez."),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: noticesKey(org.id) })
       void queryClient.invalidateQueries({ queryKey: ["support-case"] })

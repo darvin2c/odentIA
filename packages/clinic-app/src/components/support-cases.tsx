@@ -1,5 +1,5 @@
 import { ExpandableText, submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
-import { Button, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@odentia/ui"
+import { Button, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, toast } from "@odentia/ui"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
@@ -254,7 +254,10 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
         method: "POST",
         body: JSON.stringify({ grantId }),
       }),
-    onSuccess: refreshAccess,
+    onSuccess: () => {
+      refreshAccess()
+      toast.success("Soporte ya no ve tu clínica")
+    },
   })
   const markSeen = useMutation({
     retry: false,
