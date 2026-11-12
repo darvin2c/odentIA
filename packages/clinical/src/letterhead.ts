@@ -8,9 +8,13 @@
 export const PT_PER_MM = 72 / 25.4
 /** Lo mínimo que se deja desde cada borde: las impresoras no imprimen en el borde. */
 const MIN_MARGIN_MM = 5
-/** El texto siempre tiene lugar: al menos la mitad del ancho y el 40 % del alto de la hoja. */
-const MIN_TEXT_WIDTH = 0.5
-const MIN_TEXT_HEIGHT = 0.4
+/**
+ * El texto siempre tiene lugar: al menos tres cuartos del ancho (lo que piden, lado a
+ * lado, la firma, el sello y el QR de un papel) y el 60 % del alto de la hoja (lo que
+ * pide una receta corta con su firma para salir en una sola hoja).
+ */
+const MIN_TEXT_WIDTH = 0.75
+const MIN_TEXT_HEIGHT = 0.6
 
 const A4 = { width: 595.28, height: 841.89 }
 const LETTER = { width: 612, height: 792 }
@@ -30,8 +34,8 @@ export function halfMm(value: number): number {
 
 /**
  * Dónde va el texto, dentro de lo posible: al menos 5 mm desde cada borde y, si los
- * márgenes no dejan lugar, se achican en proporción hasta dejar la mitad del ancho y el
- * 40 % del alto.
+ * márgenes no dejan lugar, se achican en proporción hasta dejar tres cuartos del ancho y
+ * el 60 % del alto.
  */
 export function clampLetterheadMargins(
   page: { widthPt: number; heightPt: number },

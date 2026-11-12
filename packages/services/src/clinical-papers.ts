@@ -396,6 +396,8 @@ export async function renderMedicalLeavePdf(
 export async function renderLetterheadSamplePdf(
   clinic: PaperContext["clinic"],
   signer: { name: string; title: string | null; registration: string | null } | null,
+  /** Con el QR, el bloque de la firma ocupa lo que en una receta de verdad. */
+  checkUrl: string | null = null,
 ) {
   const kit = await DocumentKit.open(clinic, documentFormat(clinic), {
     title: "Receta de ejemplo",
@@ -441,7 +443,7 @@ export async function renderLetterheadSamplePdf(
     title: signer?.title ?? null,
     registration: signer?.registration ?? null,
     at: now,
-    checkUrl: null,
+    checkUrl,
     strokes: null,
   })
   return kit.finish()

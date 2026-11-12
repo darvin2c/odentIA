@@ -1404,11 +1404,13 @@ export class DocumentKit {
   }
 
   private signedTextWidth(input: Pick<SignedBlockInput, "checkUrl" | "name">): number {
-    return (
+    // Nunca menos de un renglón de palabras: con una hoja angosta el texto baja, no se parte letra a letra.
+    return Math.max(
+      90,
       this.width -
-      10.5 * 2 -
-      (input.name ? STAMP_WIDTH + 12 : 0) -
-      (input.checkUrl ? CHECK_QR_SIZE + 8 + CHECK_CAPTION_WIDTH + 12 : 0)
+        10.5 * 2 -
+        (input.name ? STAMP_WIDTH + 12 : 0) -
+        (input.checkUrl ? CHECK_QR_SIZE + 8 + CHECK_CAPTION_WIDTH + 12 : 0),
     )
   }
 

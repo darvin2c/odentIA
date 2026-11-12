@@ -5,6 +5,7 @@
 import { degrees, PDFDocument, rgb } from "pdf-lib"
 import sharp from "sharp"
 import { expect, it } from "vitest"
+import { renderLetterheadSamplePdf } from "./clinical-papers.js"
 import { type DocumentClinic, DocumentKit, documentFormat } from "./document-kit.js"
 import { clampLetterheadMargins, letterheadKindOf, normalizeLetterhead } from "./letterhead.js"
 
@@ -121,7 +122,7 @@ it("dónde va el texto: al menos 5 mm del borde y siempre con lugar para escribi
   })
   const huge = clampLetterheadMargins(page, { topMm: 150, bottomMm: 120, leftMm: 90, rightMm: 90 })
   expect(huge.topMm + huge.bottomMm).toBeLessThanOrEqual(297 * 0.6 + 0.5)
-  expect(huge.leftMm + huge.rightMm).toBeLessThanOrEqual(210 * 0.5 + 0.5)
+  expect(huge.leftMm + huge.rightMm).toBeLessThanOrEqual(210 * 0.25 + 0.5)
 })
 
 it("el papel lleva la hoja de fondo en cada página y el texto entre su diseño", async () => {
@@ -179,4 +180,50 @@ it("sin poder leer la hoja, el papel sale con nuestro membrete y la térmica nun
     { title: "Ticket", docLabel: "Ticket" },
   )
   expect(thermal.hasSheet).toBe(false)
+})
+
+it("con una hoja de costados anchos, la firma, el sello y el QR siguen en una pieza (no letra por letra)", async () => {
+  const { pdf } = await normalizeLetterhead(await sheetPdf())
+  // La clínica pidió 45 mm a cada lado: el servidor deja tres cuartos del ancho para el texto.
+  const margins = clampLetterheadMargins({ widthPt: A4[0], heightPt: A4[1] }, { topMm: 50, bottomMm: 41, leftMm: 45, rightMm: 45 })
+  expect(margins.leftMm + margins.rightMm).toBeLessThanOrEqual(210 * 0.25 + 0.5)
+  const kit = await DocumentKit.open({ ...clinic, sheet: { pdf, ...margins, hasContact: false } }, documentFormat(clinic), {
+    title: "Receta",
+    docLabel: "Receta",
+  })
+  const signed = {
+    name: "Ana Torres",
+    credential: "Cirujano dentista · COP 12345",
+    at: "11 de noviembre de 2026, 20:59",
+    checkUrl: "https://example.com/c/demo",
+    strokes: null,
+  }
+  expect(kit.signedBlockHeight(signed)).toBeLessThan(130)
+  kit.text("Rp/ 1. Medicamento")
+  kit.anchorBottom(kit.signedBlockHeight(signed))
+  kit.signedBlock(signed)
+  expect((await PDFDocument.load(await kit.finish())).getPageCount()).toBe(1)
+})
+
+it("un PDF protegido se rechaza diciendo que está protegido, aunque se abra sin clave", async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([A4[0], A4[1]])
+  // Solo limita imprimir o copiar: se abre sin clave, pero su contenido va cifrado.
+  doc.context.trailerInfo.Encrypt = doc.context.obj({ Filter: "Standard", V: 1, R: 2 })
+  await expect(normalizeLetterhead(await doc.save({ useObjectStreams: false }))).rejects.toMatchObject({
+    fields: { file: expect.stringContaining("protegido") },
+  })
+})
+
+it("con los márgenes más altos que se permiten, una receta corta con su firma y su QR cabe en una hoja", async () => {
+  const { pdf } = await normalizeLetterhead(await sheetPdf())
+  // Pidió 150 mm arriba y 150 abajo: el servidor deja el 60 % del alto para el texto.
+  const margins = clampLetterheadMargins({ widthPt: A4[0], heightPt: A4[1] }, { topMm: 150, bottomMm: 150, leftMm: 19, rightMm: 19 })
+  expect(297 - margins.topMm - margins.bottomMm).toBeGreaterThanOrEqual(297 * 0.6 - 0.5)
+  const sample = await renderLetterheadSamplePdf(
+    { ...clinic, sheet: { pdf, ...margins, hasContact: false } },
+    { name: "Ana Torres", title: "Cirujano dentista", registration: "COP 12345" },
+    "https://clinica.example.com/comprobar/ejemplo",
+  )
+  expect((await PDFDocument.load(sample)).getPageCount()).toBe(1)
 })
