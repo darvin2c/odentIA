@@ -5,6 +5,7 @@ import {
   SideColumn,
   type SideColumnWidth,
   SideDockPortal,
+  sidePanelWidthKey,
   useDraftKeptInPage,
   useSideColumnWidth,
   useSideDock,
@@ -42,7 +43,7 @@ function boundsFromDrawerClass(className: string | undefined): SideColumnWidth |
   if (!rem) return DOCK_SIZES.md
   const width = Number(rem) * 16
   if (width > MAX_DOCKED_WIDTH) return null
-  return { initial: width, min: Math.max(320, width - 160), max: width + 192 }
+  return { initial: width, min: Math.max(320, width - 160) }
 }
 
 /**
@@ -107,7 +108,7 @@ function DockedColumn({
   dirty,
   children,
 }: Pick<DockedSurfaceProps, "bounds" | "children"> & { dirty: boolean }) {
-  const [width, resize] = useSideColumnWidth(`odentia.side-panel.${bounds.initial}`, bounds)
+  const [width, resize] = useSideColumnWidth(sidePanelWidthKey(bounds), bounds)
   const DraftGuard = useSideDockDraftGuard()
   const keptInPage = useDraftKeptInPage()
   const ref = React.useRef<HTMLElement | null>(null)

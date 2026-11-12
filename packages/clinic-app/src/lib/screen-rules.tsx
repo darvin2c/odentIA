@@ -373,7 +373,7 @@ export function canCorrectAgent(can: Can): boolean {
 }
 
 /** La columna de «Probar» de recepción: ancho de un chat, que se puede cambiar como el de cualquier panel. */
-export const RECEPTION_TEST_COLUMN = { initial: 416, min: 352, max: 560 }
+export const RECEPTION_TEST_COLUMN = { initial: 416, min: 352 }
 
 // --- Inicio ---------------------------------------------------------------------------------
 

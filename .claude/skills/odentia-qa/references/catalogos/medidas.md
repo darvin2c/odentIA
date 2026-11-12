@@ -358,3 +358,19 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Un solo tope de teclado para elegir el archivo.
 **Ya falló:** una receta de ejemplo a 5 px de letra; «45,5» escrito como 455 mm (QA del 11 nov, corregidos antes de unir).
 **Patrones:** `FormDrawer`; `Dialog` (`UI/`) para ampliar; `Field` (`UI/field.tsx`); `useFormSurface` como el logo.
+
+## En toda pantalla
+
+### M-PAN-01 Ensanchar el panel de la derecha y volver al de siempre
+**Quién:** todo el equipo, en computadora (≥ 1280 px); varias veces al día (supuesto).
+**Dónde:** `UP/side-dock.tsx` (`SideColumn`), `UP/docked-surface.tsx`, `UP/master-detail.tsx`; las tablas de al lado, `UP/data-table.tsx`.
+**Medida:** con ratón, 2 acciones (abrir y arrastrar el asa); volver, 1 doble clic. Con teclado desde un botón «Nuevo…», 2 Tab hasta el asa y 1 tecla (Fin o Enter); desde una fila de una lista larga, unos 214 Tab, porque el foco se queda en la lista (**a mejorar**). A 1440 px: tope 657 con el menú abierto, 865 con el menú en íconos.
+
+- [ ] El asa se ve en reposo (≥ 3:1, claro y oscuro) y se marca al pasar, al enfocar y al arrastrar.
+- [ ] La pista dice arrastrar, flechas, doble clic y Enter, y sale también al enfocar con el teclado.
+- [ ] Flechas ±16, Inicio al mínimo, Fin al tope y Enter al de siempre; lo que anuncia el lector es lo que se ve.
+- [ ] Lo que abre con el mismo ancho recuerda el mismo; uno compacto no hereda el de uno grande.
+- [ ] Con el panel al tope, la lista de atrás no parte palabras y sus botones de fila siguen a la vista; si algo queda debajo, se nota.
+- [ ] A 390 px no hay asa ni desplazamiento lateral.
+**Ya falló:** un tope fijo que no dejaba ensanchar aunque sobrara espacio; un borde sin señal de que se arrastra; la lista de atrás partida letra por letra; «Hecha» fuera de la vista sin aviso (QA del 12 nov, corregidos antes de unir).
+**Patrones:** el asa de `ResizableHandle` (`UI/resizable.tsx`); `Tooltip` (`UI/tooltip.tsx`); `wrap` y la columna de acciones fija de `DataTable`.

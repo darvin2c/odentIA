@@ -36,6 +36,10 @@ export const common = {
   sidePanel: {
     label: "Panel lateral",
     resize: "Redimensionar panel",
+    /** Pista al pasar sobre el borde: el asa sola no dice qué hace. */
+    resizeHint: "Arrastra o usa las flechas para cambiar el ancho · doble clic o Enter: el de siempre",
+    /** Lo que oye el lector de pantalla: sin texto, algunos leen el valor como porcentaje. */
+    width: (px: number) => `${px} píxeles de ancho`,
   },
   confirm: {
     /** Pregunta para un `window.confirm` (Aceptar/Cancelar); las superficies usan `unsaved`. */

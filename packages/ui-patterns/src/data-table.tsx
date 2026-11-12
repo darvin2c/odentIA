@@ -57,8 +57,17 @@ export interface DataTableProps<TData> {
    * de la tarjeta. Default `false`.
    */
   inCard?: boolean
+  /**
+   * Las celdas pasan a varias líneas cuando no caben, sin partir una palabra
+   * (`break-word`, nunca `anywhere`): con el panel de la derecha ensanchado, lo
+   * que no cabe se recorre de lado en vez de leerse letra por letra.
+   */
+  wrap?: boolean
   className?: string
 }
+
+/** Lo que pone `wrap`: un solo lugar para que ninguna tabla parta palabras. */
+const WRAP_CELLS = "[&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
 
 export interface DataTableSkeletonProps {
   /**
@@ -124,6 +133,7 @@ export function DataTable<TData>({
   isFetching = false,
   refreshMessage,
   inCard = false,
+  wrap = false,
   className,
 }: DataTableProps<TData>) {
   const resolved = useResolvedView(view)
@@ -161,7 +171,7 @@ export function DataTable<TData>({
       isFetching={isFetching}
       refreshMessage={refreshMessage}
       inCard={inCard}
-      className={className}
+      className={cn(wrap && WRAP_CELLS, className)}
     />
   )
 }
@@ -180,22 +190,75 @@ function RefreshBar({ isFetching, refreshMessage }: { isFetching: boolean; refre
   )
 }
 
+// Las acciones de la fila quedan pegadas a la derecha cuando la tabla no entra
+// (por ejemplo, con el panel de la derecha ensanchado): se puede actuar sin
+// recorrer la tabla de lado. Su fondo es opaco y sigue el de la fila (pasar,
+// foco, abierta, elegida); cuando algo pasa por debajo, una sombra lo dice.
+// Las clases van literales: el escáner de Tailwind lee texto, no interpolaciones.
+const CLIPPED_EDGE =
+  "group-data-clipped/table:shadow-[inset_1px_0_0_var(--color-border),-8px_0_8px_-8px_rgb(0_0_0/0.25)]"
+const STICKY_ACTIONS_HEAD = cn(
+  "sticky right-0 z-10 bg-[color-mix(in_oklab,var(--color-muted)_65%,var(--color-card))]",
+  CLIPPED_EDGE,
+)
+const STICKY_ACTIONS_CELL = cn(
+  "sticky right-0 z-10 bg-card",
+  "[tr:hover>&]:bg-[color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]",
+  // Como la fila: el foco la marca solo si toda ella abre el registro (`cursor-pointer`).
+  "[tr.cursor-pointer:has(:focus-visible)>&]:bg-[color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]",
+  "[tr:has([aria-expanded=true])>&]:bg-[color-mix(in_oklab,var(--color-muted)_50%,var(--color-card))]",
+  "[tr[data-state=active]>&]:bg-muted [tr[data-state=selected]>&]:bg-muted",
+  CLIPPED_EDGE,
+)
+
+/**
+ * Marca la tabla (`data-clipped`) mientras parte de ella queda fuera a la
+ * derecha o pasa por debajo de las acciones fijas.
+ */
+function useClippedTable(enabled: boolean) {
+  const frame = React.useRef<HTMLDivElement>(null)
+  const viewport = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    const box = frame.current
+    const area = viewport.current
+    if (!enabled || !box || !area) return
+    const update = () => {
+      const clipped = area.scrollWidth - area.clientWidth > 1
+      if (clipped) box.dataset.clipped = ""
+      else delete box.dataset.clipped
+    }
+    update()
+    if (typeof ResizeObserver !== "function") return
+    const observer = new ResizeObserver(update)
+    observer.observe(area)
+    const content = area.firstElementChild
+    if (content) observer.observe(content)
+    return () => observer.disconnect()
+  }, [enabled])
+  return { frame, viewport }
+}
+
 function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refreshMessage, inCard, className }: LayoutProps<TData>) {
+  const actionsId = resolveViewColumns(table).actions?.id
+  const { frame, viewport } = useClippedTable(actionsId !== undefined)
   return (
-    <div className={cn("overflow-hidden rounded-md bg-card", !inCard && "border", className)}>
+    <div ref={frame} className={cn("group/table overflow-hidden rounded-md bg-card", !inCard && "border", className)}>
       <RefreshBar isFetching={isFetching} refreshMessage={refreshMessage} />
       {/* La tabla que no entra se recorre con la barra del sistema de diseño:
           el contenedor del registry deja de scrollear (`overflow-visible`) para
           que el desborde llegue al área, que solo scrollea en horizontal. Con
           `overflow-x-auto` el navegador dibujaba su barra nativa —una por tabla
           agrupada— y habilitaba además el scroll vertical del contenedor. */}
-      <ScrollArea horizontal className="[&_[data-slot=table-container]]:overflow-visible">
+      <ScrollArea horizontal viewportRef={viewport} className="[&_[data-slot=table-container]]:overflow-visible">
         <Table>
           <TableHeader className="bg-muted/65">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} className="h-12 px-3 text-sm">
+                  <TableHead
+                    key={header.id}
+                    className={cn("h-12 px-3 text-sm", header.column.id === actionsId && STICKY_ACTIONS_HEAD)}
+                  >
                     {header.isPlaceholder
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}
@@ -219,7 +282,7 @@ function TableLayout<TData>({ table, onRowClick, isRowActive, isFetching, refres
                   }}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className={cn(cell.column.id === actionsId && STICKY_ACTIONS_CELL)}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
