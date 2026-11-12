@@ -209,10 +209,10 @@ export function MessageBubble({
         {/* Los botones con que salió: los toca la persona; aquí solo se leen (no parecen botones). */}
         {out && msg.buttons && msg.buttons.length > 0 ? (
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Con estos botones:</span>
+            <span>Para tocar en su teléfono:</span>
             <ul className="contents" aria-label="Botones que recibe la persona">
               {msg.buttons.map((title, index) => (
-                <li key={`${index}-${title}`} className="rounded bg-muted px-1.5 py-0.5">
+                <li key={`${index}-${title}`} className="rounded border border-border bg-background/70 px-1.5 py-0.5 text-foreground/80">
                   {title}
                 </li>
               ))}

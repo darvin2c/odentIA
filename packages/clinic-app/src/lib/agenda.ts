@@ -411,11 +411,29 @@ export function noticeLine(notice: AgendaAppointment["notice"], sent: string): s
   return notice.queued ? sent : null
 }
 
+/** De qué cambio habla el aviso que no le llegará: así no se confunde con otro (QA del 11 nov). */
+export interface NoticeChange {
+  change: "reservada" | "movida" | "cancelada"
+  /** El día y la hora de la cita, como los dice la Agenda («mañana a las 10:00», `whenSaid`); sin ella, no se nombra. */
+  when?: string
+  /** Al reservar: tampoco le llegará el recordatorio, y se dice en el mismo aviso, con una sola orden. */
+  reminderToo?: boolean
+}
+
+const NOTICE_ABOUT: Record<NoticeChange["change"], (when: string | undefined) => string> = {
+  reservada: (when) => (when ? `de su cita, reservada para ${when}` : "de su cita reservada"),
+  movida: (when) => (when ? `de que su cita ahora es ${when}` : "de que su cita cambió"),
+  cancelada: (when) => (when ? `de que se canceló su cita, que era ${when}` : "de que se canceló su cita"),
+}
+
 /** El aviso que no le llegará por algo de la persona, para avisarle a mano: queda a la vista hasta cerrarlo. */
-export function noticeWarning(appointment: Pick<AgendaAppointment, "notice" | "patientName">): string | null {
+export function noticeWarning(appointment: Pick<AgendaAppointment, "notice" | "patientName">, about: NoticeChange): string | null {
   const notice = appointment.notice
   if (!notice?.byHand || !notice.why) return null
   // A quien recibe sus avisos, si no es el paciente (su madre): no se confunde con el paciente.
   const who = notice.to ? `${notice.to}, que recibe los avisos de ${appointment.patientName},` : appointment.patientName
-  return `${who} no recibirá el aviso. ${notice.why}. Avísale tú.`
+  const what = NOTICE_ABOUT[about.change](about.when)
+  return about.reminderToo
+    ? `${who} no recibirá el aviso ${what}, ni el recordatorio. ${notice.why}. Avísale tú ahora y un día antes.`
+    : `${who} no recibirá el aviso ${what}. ${notice.why}. Avísale tú.`
 }

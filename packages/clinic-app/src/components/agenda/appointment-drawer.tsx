@@ -242,6 +242,7 @@ function RealAppointmentDrawer({
       )
         announceVisitStatus(result.data, { onUndone: () => void onChanged() })
       else {
+        warnUnsentNotice(result.data, { change: "cancelada", when: whenSaid(result.data.startsAt, timeZone, today) })
         toast.success(STATUS_DONE[result.data.status], {
           description: noticeLine(result.data.notice, "El agente le avisa y le ofrece otra fecha.") ?? undefined,
           // Cancelada: se ofrece otro día con lo mismo (servicio y profesional), sin volver a elegirlo.
@@ -258,7 +259,6 @@ function RealAppointmentDrawer({
               }
             : {}),
         })
-        warnUnsentNotice(result.data)
       }
       setActionError("")
       await onChanged()
@@ -373,12 +373,12 @@ function RealAppointmentDrawer({
       if (!when.shown) return
       try {
         const result = await move.mutateAsync(when.shown)
+        warnUnsentNotice(result.data, { change: "movida", when: whenSaid(result.data.startsAt, timeZone, today) })
         toast.success(
           `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
           // Confirmó otro día: el nuevo queda por confirmar, y se dice.
           { description: movedNote(appointment, result.data) },
         )
-        warnUnsentNotice(result.data)
         setStillConfirmed(false)
         setMode("view")
         await onChanged()

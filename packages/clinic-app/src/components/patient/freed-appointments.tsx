@@ -68,7 +68,7 @@ export function FinalizedFreedAppointments({
             planItemId: next.planItemId,
           }),
         })
-      else await releaseAppointment(appointment.id, notify)
+      else await releaseAppointment(appointment.id, notify, whenSaid(appointment.startsAt, activeOrgTimeZone(), today))
       setDone((current) => ({ ...current, [appointment.id]: how }))
       if (how === "usada" && next) setUsedFor((current) => ({ ...current, [appointment.id]: next.title }))
       onChanged(appointment.id, how)
@@ -152,13 +152,13 @@ export function FinalizedFreedAppointments({
  * Liberar la cita sin objeto la cancela por la clínica. No se le avisa salvo que el equipo lo
  * marque (mesa de la entrega 12: ningún mensaje sale sin que el equipo lo elija), y se dice.
  */
-async function releaseAppointment(id: string, notify: boolean): Promise<void> {
+async function releaseAppointment(id: string, notify: boolean, when: string | undefined): Promise<void> {
   const result = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${id}/status`, {
     method: "POST",
     body: JSON.stringify({ status: "cancelada", cancelReason: "clinica", ...(notify ? {} : { notice: false }) }),
   })
   // Marcó avisarle y no le llegará: se dice aparte y queda a la vista.
-  if (notify) warnUnsentNotice(result.data)
+  if (notify) warnUnsentNotice(result.data, { change: "cancelada", when })
 }
 
 function ReleaseDialog({
@@ -236,7 +236,7 @@ export function FreedAppointmentButtons({
           method: "POST",
           body: JSON.stringify({ expectedVersion: version, planItemId: reuse.planItemId }),
         })
-      else await releaseAppointment(appointmentId, notify)
+      else await releaseAppointment(appointmentId, notify, startsAt ? whenSaid(startsAt, activeOrgTimeZone(), today) : undefined)
       toast.success(how === "usada" ? `Su cita ahora es para ${reuse?.title ?? "lo que sigue"}` : "Cita liberada")
       await invalidateAppointmentQueries(queryClient)
       await Promise.all(

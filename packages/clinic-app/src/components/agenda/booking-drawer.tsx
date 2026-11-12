@@ -125,10 +125,15 @@ interface ReminderReach {
  * M3): «recibirá el recordatorio por correo» solo si la clínica lo envía; si no, recepción sabe que
  * avisa ella. Nada si le llega por WhatsApp.
  */
+/** Por dónde le llegará el recordatorio; null: no le llega. */
+function reminderVia(reach: ReminderReach): "whatsapp" | "correo" | null {
+  return reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+}
+
 export function reminderWords(reach: ReminderReach | null | undefined): string | null {
   if (!reach) return null
   const who = reach.forOther ? `${reach.name}, que recibe sus avisos,` : reach.name
-  const via = reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+  const via = reminderVia(reach)
   if (via === "whatsapp") return null
   if (via === "correo") return `${who} recibirá el recordatorio por correo.`
   return `${who} no recibirá el recordatorio automático: avísale tú un día antes.`
@@ -391,17 +396,24 @@ export function BookingDrawer({
           followUpIds: chosenControlsFor(patientId),
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
+        // Si tampoco le llegará el aviso, el recordatorio va en ese mismo aviso fijo: una sola orden (QA del 11 nov).
+        const reach = result.data.reminderReach
+        const unsent = noticeWarning(result.data, {
+          change: "reservada",
+          when: whenSaid(result.data.startsAt, timeZone, today),
+          reminderToo: !!reach && reminderVia(reach) === null,
+        })
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
           description:
             [
               noticeLine(result.data.notice, `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`),
-              reminderWords(result.data.reminderReach),
+              unsent ? null : reminderWords(reach),
             ]
               .filter(Boolean)
               .join(" ") || undefined,
         })
         // Lo que hay que revisar después queda a la vista hasta cerrarlo: el cajón se cierra al reservar.
-        for (const note of [whatsappNote.current, consentNote.current, noticeWarning(result.data)]) {
+        for (const note of [whatsappNote.current, consentNote.current, unsent]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
         // El control pedido en esta cita que no se sumó: su día no cae en su ventana (decisión B3).
