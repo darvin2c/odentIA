@@ -1,5 +1,17 @@
 import { halfMm } from "@odentia/clinical"
-import { Button, Checkbox, Input, Label, toast } from "@odentia/ui"
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  ScrollArea,
+  toast,
+} from "@odentia/ui"
 import { FormDrawer, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
@@ -46,11 +58,15 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
   const state = useQuery({ queryKey: LETTERHEAD_QUERY_KEY, queryFn: getLetterhead })
   const current = state.data?.letterhead ?? null
   const refresh = () => queryClient.invalidateQueries({ queryKey: LETTERHEAD_QUERY_KEY })
+  // Al quitarla, su botón desaparece: el foco va al que queda, «Subir la hoja».
+  const mainButton = useRef<HTMLButtonElement>(null)
   const remove = useMutation({
-    mutationFn: removeLetterhead,
+    // La que se tiene a la vista: si otra persona la cambió, no se quita la suya.
+    mutationFn: (id: string) => removeLetterhead(id),
     onSuccess: async ({ removedId }) => {
       await refresh()
-      toast.success("Hoja quitada. Tus papeles nuevos salen con tu logo.", {
+      requestAnimationFrame(() => mainButton.current?.focus())
+      toast.success("Hoja quitada. Tus papeles nuevos salen con el membrete de antes.", {
         duration: 10_000,
         ...(removedId
           ? {
@@ -68,7 +84,10 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
           : {}),
       })
     },
-    onError: (cause) => toast.error(submitErrorMessage(cause)),
+    onError: (cause) => {
+      toast.error(submitErrorMessage(cause))
+      void refresh()
+    },
   })
   return (
     <section
@@ -82,7 +101,7 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
         <p className="text-sm text-muted-foreground">
           {current
             ? "Tus papeles en hoja salen en ella. El ticket de caja no cambia."
-            : "Si tienes tu hoja membretada, súbela: tus recetas, consentimientos, presupuestos y demás papeles saldrán en ella. Sin hoja, salen con tu logo y tus datos."}
+            : "Si tienes tu hoja membretada, súbela: tus recetas, consentimientos, presupuestos y demás papeles saldrán en ella. Sin hoja, salen con tu nombre, tu logo si lo subiste y tus datos."}
         </p>
       </div>
       {state.isError ? (
@@ -107,6 +126,7 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
           )}
           <div className="flex flex-wrap gap-2">
             <Button
+              ref={mainButton}
               type="button"
               variant="outline"
               disabled={state.isPending || remove.isPending}
@@ -119,7 +139,7 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
                 type="button"
                 variant="ghost"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate()}
+                onClick={() => remove.mutate(current.id)}
               >
                 {remove.isPending ? "Quitando…" : "Quitar la hoja"}
               </Button>
@@ -149,6 +169,8 @@ interface Preview {
   /** Alto entre ancho del papel de la vista previa. */
   aspect: number
   pages: number
+  /** Las hojas que ocupa la receta de ejemplo: con más de una, el texto tiene poco lugar. */
+  samplePages: number
   lowResolution: boolean
   paper: "A4" | "Letter" | null
   signer: string | null
@@ -179,11 +201,30 @@ function LetterheadDrawer({
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<{ message: string; retry: boolean } | null>(
+    null,
+  )
+  const [previewAttempt, setPreviewAttempt] = useState(0)
+  // Un archivo rechazado deja el cajón sin hoja elegida: no queda a la vista la anterior.
+  const [cleared, setCleared] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [adjusting, setAdjusting] = useState(false)
-  const [dirty, setDirty] = useState(false)
+  const [enlarged, setEnlarged] = useState(false)
   const previewTurn = useRef(0)
+  // Lo que había al abrir: «sin guardar» solo si algo quedó distinto.
+  const initial = useRef<{ margins: LetterheadMargins | null; hasContact: boolean }>({
+    margins: null,
+    hasContact: false,
+  })
+  const dirty =
+    file !== null ||
+    hasContact !== initial.current.hasContact ||
+    (margins !== null &&
+      initial.current.margins !== null &&
+      (Object.keys(margins) as (keyof LetterheadMargins)[]).some(
+        (key) => margins[key] !== initial.current.margins?.[key],
+      ))
   // Lo que se midió en su dibujo, para «Volver a lo que encontramos».
   const detected = useMemo(() => (rendered ? detectMargins(rendered) : null), [rendered])
 
@@ -195,10 +236,12 @@ function LetterheadDrawer({
     setMargins(null)
     setPreview(null)
     setFileError(null)
+    setPreviewError(null)
+    setCleared(false)
     setSaveError(null)
     setAdjusting(false)
-    setDirty(false)
     setHasContact(current?.hasContact ?? false)
+    initial.current = { margins: null, hasContact: current?.hasContact ?? false }
     if (!current) return
     let alive = true
     setBusy(true)
@@ -212,6 +255,7 @@ function LetterheadDrawer({
           leftMm: current.leftMm,
           rightMm: current.rightMm,
         }
+        initial.current = { margins: own, hasContact: current.hasContact }
         setRendered(drawn)
         setMargins(own)
       })
@@ -231,40 +275,63 @@ function LetterheadDrawer({
     const turn = ++previewTurn.current
     const timer = setTimeout(() => {
       setBusy(true)
-      previewLetterhead(file, margins, hasContact)
+      previewLetterhead(file, margins, hasContact, current?.id ?? null)
         .then(async (result) => {
-          const { image, aspect } = await pdfPageImage(result.pdf, 800)
+          const { image, aspect, pages } = await pdfPageImage(result.pdf, 800)
           if (turn !== previewTurn.current) return
           setPreview({
             image,
             pdf: result.pdf,
             aspect,
             pages: result.pages,
+            samplePages: pages,
             lowResolution: result.lowResolution,
             paper: result.paper,
             signer: result.signer,
           })
-          setFileError(null)
+          setPreviewError(null)
         })
         .catch((cause) => {
           if (turn !== previewTurn.current) return
           setPreview(null)
-          setFileError(fieldError(cause) ?? "No pudimos preparar la vista previa. Prueba de nuevo.")
+          const field = fieldError(cause)
+          // Lo que es del archivo se dice junto al archivo; lo demás, donde va la vista previa.
+          if (field) reject(field)
+          else if (cause instanceof ApiError && cause.status === 409)
+            // Otra persona la cambió o la quitó: reintentar no sirve, hay que volver a abrirla.
+            setPreviewError({ message: submitErrorMessage(cause), retry: false })
+          else
+            setPreviewError({
+              message: "No pudimos preparar la vista previa.",
+              retry: true,
+            })
         })
         .finally(() => turn === previewTurn.current && setBusy(false))
     }, 350)
     return () => clearTimeout(timer)
-  }, [open, rendered, margins, hasContact, file])
+  }, [open, rendered, margins, hasContact, file, current, previewAttempt])
+
+  /** El archivo no sirve: se dice junto a él y el cajón queda sin hoja elegida. */
+  function reject(message: string) {
+    setFile(null)
+    setRendered(null)
+    setMargins(null)
+    setPreview(null)
+    setPreviewError(null)
+    setCleared(true)
+    setFileError(message)
+    setBusy(false)
+  }
 
   async function choose(next: File | undefined) {
     if (!next) return
     setSaveError(null)
     if (!/^(application\/pdf|image\/png|image\/jpeg)$/.test(next.type)) {
-      setFileError("La hoja debe ser PDF, PNG o JPG")
+      reject("La hoja debe ser PDF, PNG o JPG")
       return
     }
     if (next.size > MAX_BYTES) {
-      setFileError("La hoja no puede superar 5 MB")
+      reject("La hoja no puede superar 5 MB")
       return
     }
     setBusy(true)
@@ -274,17 +341,17 @@ function LetterheadDrawer({
       setFile(next)
       setRendered(drawn)
       setMargins(detectMargins(drawn))
-      setDirty(true)
+      setCleared(false)
     } catch {
-      setFileError("No pudimos leer esa hoja. Si es un PDF con clave, guárdalo sin clave.")
-      setBusy(false)
+      reject(
+        "No pudimos leer esa hoja. Si es un PDF con clave o protegido, guárdalo de nuevo sin protección.",
+      )
     }
   }
 
   function setSide(key: keyof LetterheadMargins, value: number) {
     if (!Number.isFinite(value)) return
     setMargins((now) => (now ? { ...now, [key]: Math.max(0, halfMm(value)) } : now))
-    setDirty(true)
   }
 
   async function submit(event: React.FormEvent) {
@@ -334,19 +401,24 @@ function LetterheadDrawer({
       open={open}
       onClose={onClose}
       title="Hoja membretada"
-      description="PDF, PNG o JPG. Mejor sin RUC, dirección ni teléfono: esos los ponemos desde tus datos."
+      description={
+        contact.line
+          ? `PDF, PNG o JPG. Mejor sin RUC, dirección ni teléfono: bajo tu diseño ponemos tu razón social, tu RUC y «${contact.line}».`
+          : "PDF, PNG o JPG. Mejor sin RUC: bajo tu diseño ponemos tu razón social y tu RUC."
+      }
       onSubmit={(event) => void submit(event)}
       isDirty={dirty}
       isSubmitting={saving}
       error={saveError}
       submitLabel="Usar esta hoja"
-      submitDisabled={!rendered || !preview || busy}
+      // Sin cambios no hay qué guardar: guardar igual dejaría otra versión idéntica.
+      submitDisabled={!rendered || !preview || busy || !dirty}
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm">
             <span className="min-w-0 flex-1 truncate">
-              {file?.name ?? current?.fileName ?? "Ningún archivo elegido"}
+              {file?.name ?? (cleared ? null : current?.fileName) ?? "Ningún archivo elegido"}
             </span>
             <Button
               type="button"
@@ -354,19 +426,20 @@ function LetterheadDrawer({
               size="sm"
               onClick={() => inputRef.current?.click()}
               disabled={saving}
+              aria-invalid={fileError ? true : undefined}
+              aria-describedby={fileError ? `${ids}-file-error` : undefined}
             >
-              {file || current ? "Elegir otra" : "Elegir la hoja"}
+              {file || (current && !cleared) ? "Elegir otra" : "Elegir la hoja"}
             </Button>
           </div>
+          {/* Lo abre el botón: una sola parada de teclado y un solo nombre. */}
           <input
             ref={inputRef}
-            id={`${ids}-file`}
             type="file"
             accept={ACCEPT}
-            className="sr-only"
-            aria-label="Elegir la hoja membretada"
-            aria-invalid={fileError ? true : undefined}
-            aria-describedby={fileError ? `${ids}-file-error` : undefined}
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden
             onChange={(event) => {
               void choose(event.target.files?.[0])
               event.target.value = ""
@@ -392,6 +465,22 @@ function LetterheadDrawer({
                     alt="Vista previa: una receta de ejemplo sobre tu hoja"
                     className="block h-auto w-full"
                   />
+                ) : previewError ? (
+                  <div className="flex aspect-[210/297] flex-col items-center justify-center gap-2 p-6 text-center text-sm">
+                    <p role="alert" className="text-destructive">
+                      {previewError.message}
+                    </p>
+                    {previewError.retry ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPreviewAttempt((now) => now + 1)}
+                      >
+                        Reintentar
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className="flex aspect-[210/297] items-center justify-center text-sm text-muted-foreground">
                     Preparando la vista previa…
@@ -417,14 +506,31 @@ function LetterheadDrawer({
                   </span>
                 ) : null}
               </div>
+              {preview && preview.samplePages > 1 ? (
+                <p className="text-sm">
+                  Con este lugar para el texto, una receta corta ya ocupa {preview.samplePages}{" "}
+                  hojas. Si puedes, deja más lugar en «Ajustar dónde va el texto».
+                </p>
+              ) : null}
               {preview ? (
-                <button
-                  type="button"
-                  className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
-                  onClick={() => openPdf(preview.pdf)}
-                >
-                  Ver en grande
-                </button>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() => setEnlarged(true)}
+                  >
+                    Ver en grande
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() => openPdf(preview.pdf)}
+                  >
+                    Abrir el PDF
+                  </Button>
+                </div>
               ) : null}
               <p className="text-sm text-muted-foreground">
                 {preview?.signer
@@ -462,10 +568,7 @@ function LetterheadDrawer({
                 <Checkbox
                   id={`${ids}-contact`}
                   checked={hasContact}
-                  onCheckedChange={(value) => {
-                    setHasContact(value === true)
-                    setDirty(true)
-                  }}
+                  onCheckedChange={(value) => setHasContact(value === true)}
                   aria-describedby={`${ids}-contact-hint`}
                   className="mt-0.5"
                 />
@@ -499,29 +602,32 @@ function LetterheadDrawer({
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     {SIDES.map((side) => (
-                      <div key={side.key} className="flex flex-col gap-1">
-                        <Label htmlFor={`${ids}-${side.key}`}>{side.label}</Label>
-                        <Input
-                          id={`${ids}-${side.key}`}
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step={0.5}
-                          value={margins[side.key]}
-                          onChange={(event) => setSide(side.key, Number(event.target.value))}
-                        />
-                      </div>
+                      <MillimetreField
+                        key={side.key}
+                        id={`${ids}-${side.key}`}
+                        label={side.label}
+                        value={margins[side.key]}
+                        onChange={(value) => setSide(side.key, value)}
+                      />
                     ))}
                   </div>
+                  {shown &&
+                  (Object.keys(shown) as (keyof LetterheadMargins)[]).some(
+                    (key) => shown[key] !== margins[key],
+                  ) ? (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      Dejamos {formatMm(shown.topMm)} arriba, {formatMm(shown.bottomMm)} abajo,{" "}
+                      {formatMm(shown.leftMm)} a la izquierda y {formatMm(shown.rightMm)} a la
+                      derecha: las impresoras no imprimen pegado al borde, y el texto necesita su
+                      lugar para la firma, el sello y el QR.
+                    </p>
+                  ) : null}
                   {detected ? (
                     <Button
                       type="button"
                       variant="link"
                       className="h-auto self-start p-0"
-                      onClick={() => {
-                        setMargins(detected)
-                        setDirty(true)
-                      }}
+                      onClick={() => setMargins(detected)}
                     >
                       Volver a lo que encontramos
                     </Button>
@@ -536,6 +642,25 @@ function LetterheadDrawer({
           </p>
         ) : null}
       </div>
+      {preview ? (
+        <Dialog open={enlarged} onOpenChange={setEnlarged}>
+          <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Así sale sobre tu hoja</DialogTitle>
+              <DialogDescription>
+                Una receta de ejemplo; mira si el texto pisa tu diseño.
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-[75svh]">
+              <img
+                src={preview.image}
+                alt="Vista previa en grande: una receta de ejemplo sobre tu hoja"
+                className="block h-auto w-full"
+              />
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </FormDrawer>
   )
 }
@@ -613,6 +738,54 @@ const HANDLES: { key: keyof LetterheadMargins; place: string }[] = [
   { key: "leftMm", place: "top-1/2 -left-2 -mt-1.5 cursor-ew-resize" },
   { key: "rightMm", place: "top-1/2 -right-2 -mt-1.5 cursor-ew-resize" },
 ]
+
+/** «26,5 mm»: con la coma del español. */
+function formatMm(value: number): string {
+  return `${String(value).replace(".", ",")} mm`
+}
+
+/**
+ * Un borde en milímetros: acepta coma o punto y deja el campo vacío mientras se escribe;
+ * vacío o inválido al salir, vuelve a lo que vale.
+ */
+function MillimetreField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: number
+  onChange: (value: number) => void
+}) {
+  const [text, setText] = useState(String(value).replace(".", ","))
+  const [editing, setEditing] = useState(false)
+  const shown = editing ? text : String(value).replace(".", ",")
+  return (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        value={shown}
+        onFocus={() => {
+          setText(String(value).replace(".", ","))
+          setEditing(true)
+        }}
+        onChange={(event) => {
+          const next = event.target.value
+          if (!/^\d{0,3}([.,]\d?)?$/.test(next)) return
+          setText(next)
+          const parsed = Number(next.replace(",", "."))
+          if (next !== "" && Number.isFinite(parsed)) onChange(parsed)
+        }}
+        onBlur={() => setEditing(false)}
+      />
+    </div>
+  )
+}
 
 /** El error que el servidor dijo junto al archivo, si lo dijo. */
 function fieldError(cause: unknown): string | null {

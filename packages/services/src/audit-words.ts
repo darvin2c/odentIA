@@ -557,7 +557,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "org_profile.logo_set": say("Cambió el logo de la clínica"),
   "org_profile.logo_removed": say("Quitó el logo de la clínica"),
   "org_profile.letterhead_set": say("Puso la hoja membretada de la clínica"),
-  "org_profile.letterhead_adjusted": say("Ajustó dónde va el texto en la hoja membretada"),
+  "org_profile.letterhead_adjusted": say("Ajustó la hoja membretada de la clínica"),
   "org_profile.letterhead_removed": say("Quitó la hoja membretada de la clínica"),
   "org_profile.brand_color_set": say("Cambió el color de la marca de la clínica"),
   "org_profile.brand_color_removed": say("Volvió al color con el que viene la app"),

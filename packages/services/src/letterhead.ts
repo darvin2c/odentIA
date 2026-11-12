@@ -18,7 +18,7 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, clinicLetterhead } from "@odentia/db/schema/org"
 import { and, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm"
-import { degrees, EncryptedPDFError, PDFDocument } from "pdf-lib"
+import { degrees, PDFDocument } from "pdf-lib"
 import sharp from "sharp"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -88,14 +88,17 @@ export async function normalizeLetterhead(bytes: Uint8Array): Promise<Normalized
   if (kind === "pdf") {
     let source: PDFDocument
     try {
-      source = await PDFDocument.load(bytes, { updateMetadata: false })
-    } catch (error) {
-      throw fileProblem(
-        error instanceof EncryptedPDFError
-          ? "Tu PDF tiene clave: guárdalo sin clave y súbelo de nuevo"
-          : "No pudimos leer ese PDF. Prueba guardándolo de nuevo como PDF",
-      )
+      // Se abre aunque esté protegido, para decir por qué no sirve en vez de «no se pudo leer».
+      source = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true })
+    } catch {
+      throw fileProblem("No pudimos leer ese PDF. Prueba guardándolo de nuevo como PDF")
     }
+    // pdf-lib no descifra: uno protegido, aunque se abra sin clave (solo limita imprimir o
+    // copiar), saldría en blanco o roto en el papel.
+    if (source.isEncrypted)
+      throw fileProblem(
+        "Tu PDF tiene clave o está protegido: ábrelo y guárdalo de nuevo como PDF sin protección (por ejemplo, Imprimir › Guardar como PDF)",
+      )
     const pages = source.getPageCount()
     if (pages === 0) throw fileProblem("Ese PDF no tiene páginas")
     const page = source.getPage(0)
@@ -266,7 +269,7 @@ function changedMeanwhile(): ServiceError {
  * La hoja que quien guarda tenía a la vista (`expected`: su id, o null si no había):
  * si otra persona la cambió entretanto, no se pisa. Sin `expected`, no se comprueba.
  */
-async function assertCurrent(
+export async function assertCurrentLetterhead(
   tx: Db,
   orgId: string,
   expected: string | null | undefined,
@@ -284,7 +287,7 @@ export async function saveLetterhead(
   input: LetterheadInput,
   expected?: string | null,
 ): Promise<Letterhead> {
-  await assertCurrent(tx, orgId, expected)
+  await assertCurrentLetterhead(tx, orgId, expected)
   return putVersion(tx, orgId, userId, input, "org_profile.letterhead_set")
 }
 
@@ -301,7 +304,8 @@ export async function adjustLetterhead(
   expected?: string,
 ): Promise<Letterhead> {
   const current = await getCurrentLetterhead(tx, orgId)
-  if (!current) throw notFound("Hoja membretada")
+  // Quien la tenía abierta y otra persona la quitó: lo mismo que si la hubieran cambiado.
+  if (!current) throw expected === undefined ? notFound("Hoja membretada") : changedMeanwhile()
   if (expected !== undefined && current.id !== expected) throw changedMeanwhile()
   const { id: _id, createdAt: _at, ...rest } = current
   return putVersion(tx, orgId, userId, { ...rest, ...changes }, "org_profile.letterhead_adjusted")
@@ -324,12 +328,17 @@ export async function restoreLetterhead(
   return putVersion(tx, orgId, userId, rest, "org_profile.letterhead_set")
 }
 
-/** Quita la hoja vigente: los papeles nuevos vuelven a nuestro membrete. Devuelve la quitada. */
+/**
+ * Quita la hoja vigente: los papeles nuevos vuelven a nuestro membrete. Devuelve la
+ * quitada. Con `expected`, solo si es la que quien la quita tenía a la vista.
+ */
 export async function removeLetterhead(
   tx: Db,
   orgId: string,
   userId: string,
+  expected?: string,
 ): Promise<{ removedId: string | null }> {
+  await assertCurrentLetterhead(tx, orgId, expected)
   const [removed] = await tx
     .update(clinicLetterhead)
     .set({ removedAt: sql`now()`, removedBy: userId })

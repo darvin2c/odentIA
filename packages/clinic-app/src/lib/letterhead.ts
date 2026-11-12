@@ -75,7 +75,10 @@ async function pdfjs() {
 }
 
 /** La primera página de un PDF dibujada a ese ancho, sobre blanco. */
-async function drawPdf(bytes: ArrayBuffer, widthPx: number): Promise<RenderedLetterhead> {
+async function drawPdf(
+  bytes: ArrayBuffer,
+  widthPx: number,
+): Promise<RenderedLetterhead & { pages: number }> {
   const lib = await pdfjs()
   // pdf.js 6 ya no evalúa código de las fuentes; sin XFA, solo se dibuja la página.
   const task = lib.getDocument({ data: new Uint8Array(bytes), enableXfa: false })
@@ -92,7 +95,7 @@ async function drawPdf(bytes: ArrayBuffer, widthPx: number): Promise<RenderedLet
     context.fillStyle = "#ffffff"
     context.fillRect(0, 0, canvas.width, canvas.height)
     await page.render({ canvasContext: context, viewport, canvas }).promise
-    return { canvas, widthPt: base.width, heightPt: base.height }
+    return { canvas, widthPt: base.width, heightPt: base.height, pages: doc.numPages }
   } finally {
     void task.destroy()
   }
@@ -131,9 +134,9 @@ export function base64ToBytes(base64: string): Uint8Array {
 export async function pdfPageImage(
   base64: string,
   widthPx: number,
-): Promise<{ image: string; aspect: number }> {
-  const { canvas } = await drawPdf(base64ToBytes(base64).buffer as ArrayBuffer, widthPx)
-  return { image: canvas.toDataURL("image/png"), aspect: canvas.height / canvas.width }
+): Promise<{ image: string; aspect: number; pages: number }> {
+  const { canvas, pages } = await drawPdf(base64ToBytes(base64).buffer as ArrayBuffer, widthPx)
+  return { image: canvas.toDataURL("image/png"), aspect: canvas.height / canvas.width, pages }
 }
 
 /**
@@ -221,7 +224,7 @@ export function detectMargins({
 
 /**
  * Dónde va el texto como lo guardará el servidor (`clampLetterheadMargins`): al menos
- * 5 mm desde cada borde, y la mitad del ancho y el 40 % del alto siempre para el texto.
+ * 5 mm desde cada borde, y tres cuartos del ancho y el 60 % del alto siempre para el texto.
  * Con esto se dibuja el recuadro y se recortan las franjas, para que coincidan con el papel.
  */
 export function clampMargins(
@@ -308,14 +311,19 @@ export async function getLetterheadPdf(): Promise<Blob> {
   })
 }
 
-/** La receta de ejemplo sobre la hoja (la elegida, o la de hoy sin `file`). */
+/**
+ * La receta de ejemplo sobre la hoja: la elegida o, sin `file`, la que se abrió
+ * (`current`): si otra persona la cambió o la quitó, el servidor lo dice.
+ */
 export function previewLetterhead(
   file: File | null,
   margins: LetterheadMargins,
   hasContact: boolean,
+  current: string | null,
 ): Promise<LetterheadPreview> {
   const form = marginsForm(margins, hasContact)
   if (file) form.append("file", file)
+  else if (current) form.append("current", current)
   return send<LetterheadPreview>("/api/org-profile/letterhead/preview", {
     method: "POST",
     body: form,
@@ -340,10 +348,12 @@ export function saveLetterhead(input: {
   return send("/api/org-profile/letterhead", { method: "PUT", body: form })
 }
 
-export function removeLetterhead(): Promise<{ removedId: string | null }> {
-  return apiFetch<{ data: { removedId: string | null } }>("/api/org-profile/letterhead", {
-    method: "DELETE",
-  }).then((body) => body.data)
+/** Quita la hoja que se tiene a la vista (`current`): si otra persona la cambió, no la quita. */
+export function removeLetterhead(current: string): Promise<{ removedId: string | null }> {
+  return apiFetch<{ data: { removedId: string | null } }>(
+    `/api/org-profile/letterhead?current=${encodeURIComponent(current)}`,
+    { method: "DELETE" },
+  ).then((body) => body.data)
 }
 
 export function restoreLetterhead(id: string): Promise<{ letterhead: LetterheadSummary }> {

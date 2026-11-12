@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import {
   adjustLetterhead,
+  assertCurrentLetterhead,
   clampLetterheadMargins,
   cleanLetterheadImage,
   clinicLogoFolder,
@@ -15,6 +16,7 @@ import {
   renderLetterheadSamplePdf,
   restoreLetterhead,
   ServiceError,
+  sampleCheckUrl,
   saveLetterhead,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -45,6 +47,16 @@ const restoreInput = z.object({ id: z.uuid() }).strict()
 
 /** La hoja que tenía a la vista quien guarda: su id, o «none» si no había. */
 const currentInput = z.union([z.literal("none"), z.uuid()]).optional()
+
+/** `current` de la petición: undefined sin él, null si no había hoja, o su id. */
+function seenOf(value: unknown) {
+  const seen = currentInput.safeParse(value ?? undefined)
+  if (!seen.success) return seen
+  return {
+    success: true as const,
+    data: seen.data === undefined ? undefined : seen.data === "none" ? null : seen.data,
+  }
+}
 
 /** Sin hoja que leer: se dice junto al archivo. */
 function chooseSheet(): ServiceError {
@@ -114,14 +126,20 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
       return c.json(errorBody(c, "VALIDATION", "Elige la hoja", { file: "Elige la hoja" }), 400)
     const margins = marginsInput.safeParse(Object.fromEntries(form))
     if (!margins.success) return validationError(c, margins.error.issues)
+    // Sin archivo, la hoja que se tenía a la vista: si otra persona la cambió o la quitó, se dice.
+    const seen = seenOf(form.get("current"))
+    if (!seen.success) return validationError(c, seen.error.issues)
     const file = fileOf(form, "file")
     return runService(c, 200, async () => {
-      const sheet = await normalizeLetterhead(file ? await bytesOf(file) : await currentPdf(orgId))
+      const sheet = await normalizeLetterhead(
+        file ? await bytesOf(file) : await currentPdf(orgId, seen.data),
+      )
       const page = { widthPt: sheet.widthPt, heightPt: sheet.heightPt }
       const clamped = clampLetterheadMargins(page, margins.data)
-      const { clinic, signer } = await withOrgContext(deps.db, orgId, async (tx) => ({
+      const { clinic, signer, checkUrl } = await withOrgContext(deps.db, orgId, async (tx) => ({
         clinic: await loadDocumentClinic(tx, orgId, { sheet: false }),
         signer: await letterheadSampleSigner(tx, orgId, userId),
+        checkUrl: await sampleCheckUrl(tx, orgId),
       }))
       const pdf = await renderLetterheadSamplePdf(
         {
@@ -130,6 +148,7 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
           sheet: { pdf: sheet.pdf, ...clamped, hasContact: margins.data.hasContact },
         },
         signer,
+        checkUrl,
       )
       return {
         pdf: Buffer.from(pdf).toString("base64"),
@@ -164,9 +183,9 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
         400,
       )
     // La hoja que quien guarda tenía a la vista: si otra persona la cambió, no se pisa.
-    const seen = currentInput.safeParse(form.get("current") ?? undefined)
+    const seen = seenOf(form.get("current"))
     if (!seen.success) return validationError(c, seen.error.issues)
-    const expected = seen.data === undefined ? undefined : seen.data === "none" ? null : seen.data
+    const expected = seen.data
     return runService(c, 200, async () => {
       const folder = clinicLogoFolder(orgId)
       const put = async (image: File, field: string) =>
@@ -228,12 +247,19 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
     })
   })
 
-  /** Quita la hoja: los papeles nuevos vuelven a nuestro membrete. Devuelve cuál, para «Deshacer». */
+  /**
+   * Quita la hoja: los papeles nuevos vuelven a nuestro membrete. Devuelve cuál, para
+   * «Deshacer». Con `?current=<id>`, solo si es la que se tenía a la vista.
+   */
   app.delete("/", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) return forbiddenLetterhead(c)
+    const seen = seenOf(c.req.query("current"))
+    if (!seen.success) return validationError(c, seen.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => removeLetterhead(tx, orgId, userId)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        removeLetterhead(tx, orgId, userId, seen.data ?? undefined),
+      ),
     )
   })
 
@@ -252,8 +278,11 @@ export function createLetterheadRoute(deps: Pick<CrmDeps, "db" | "storage">) {
     }))
   })
 
-  async function currentPdf(orgId: string): Promise<Uint8Array> {
-    const current = await withOrgContext(deps.db, orgId, (tx) => getCurrentLetterhead(tx, orgId))
+  async function currentPdf(orgId: string, expected?: string | null): Promise<Uint8Array> {
+    const current = await withOrgContext(deps.db, orgId, async (tx) => {
+      await assertCurrentLetterhead(tx, orgId, expected)
+      return getCurrentLetterhead(tx, orgId)
+    })
     if (!current)
       throw new ServiceError("VALIDATION", 400, "Elige la hoja", { file: "Elige la hoja" })
     if (!deps.storage.getAttachment)
