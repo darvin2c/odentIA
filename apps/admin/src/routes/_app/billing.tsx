@@ -25,25 +25,19 @@ import {
   FormDrawer,
   PageHeader,
   PageShell,
+  SkeletonRegion,
   submitErrorMessage,
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
   useFormSurface,
-  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus } from "lucide-react"
 import { createFileRoute } from "@tanstack/react-router"
-import { z } from "zod"
-import { requireAdminRole } from "../../lib/session"
+import { Plus } from "lucide-react"
 import { useState } from "react"
-import { api } from "../../lib/api"
-import { domainOf } from "../../lib/host"
-import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
-import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
-import { NegotiationsSection } from "../../components/billing-terms"
+import { z } from "zod"
 import {
   ManualPaymentDrawer,
   money,
@@ -52,7 +46,10 @@ import {
   usePaymentActions,
   usePaymentMethods,
 } from "../../components/billing-payments"
+import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
+import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
+import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import {
   BillingMethodsSkeleton,
   BillingPageSkeleton,
@@ -61,6 +58,9 @@ import {
   BillingSignupSkeleton,
   BillingSubscriptionsSkeleton,
 } from "../../components/skeletons/billing"
+import { api } from "../../lib/api"
+import { domainOf } from "../../lib/host"
+import { requireAdminRole } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/billing")({
   beforeLoad: requireAdminRole,

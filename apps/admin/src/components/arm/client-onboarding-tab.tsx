@@ -39,6 +39,7 @@ import { type ClientFileKind, ClientFileUploadDrawer, clientFileHref } from "./c
 import { invalidateClient } from "./client-model"
 import {
   approvedDraftOf,
+  DRAFT_GONE_WORDS,
   DRAFT_KIND_WORDS,
   draftSourceOf,
   draftSummaryWords,
@@ -136,13 +137,11 @@ export function ClientOnboardingTab({
     null
   const resend = useMutation({
     mutationFn: async (invitationId: string) =>
-      z
-        .object({ expiresAt: z.string() })
-        .parse(
-          await api<unknown>(`/api/admin/organizations/invitations/${invitationId}/resend`, {
-            method: "POST",
-          }),
-        ),
+      z.object({ expiresAt: z.string() }).parse(
+        await api<unknown>(`/api/admin/organizations/invitations/${invitationId}/resend`, {
+          method: "POST",
+        }),
+      ),
     onSuccess: (resent) => {
       toast.success(
         `Reenviada a ${ownerInvitation?.email ?? "la propietaria"} · ${invitationDueWords(resent.expiresAt).text}`,
@@ -456,8 +455,7 @@ function SkillDrafts({
                   ) : null}
                   {gone && draft.status !== "devuelta" ? (
                     <p className="text-sm text-muted-foreground">
-                      Su archivo se borró a los 30 días sin cargarse: pide a la skill que deje otro
-                      con el mismo número.
+                      {DRAFT_GONE_WORDS}: pide a la skill que deje otro con el mismo número.
                     </p>
                   ) : null}
                 </div>

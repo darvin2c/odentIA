@@ -6,18 +6,12 @@
  * palabras, las mismas del servidor (`CLIENT_STAGE_WORDS`, `LOST_REASON_WORDS`,
  * `CLIENT_ORIGIN_WORDS`). Si cambia uno, cambia el otro.
  */
+import { CLIENT_STAGE_NAMES, type ClientStageName } from "../../lib/list-search"
 import { supportDay, supportTime } from "../../lib/support-words"
 
-export const CLIENT_STAGES = [
-  "contacto",
-  "presentacion_agendada",
-  "presentacion_hecha",
-  "propuesta",
-  "entro",
-  "no_por_ahora",
-  "perdido",
-] as const
-export type ClientStage = (typeof CLIENT_STAGES)[number]
+/** Las etapas son las de la dirección de Clientes (`CLIENT_STAGE_NAMES`), una sola lista. */
+export const CLIENT_STAGES = CLIENT_STAGE_NAMES
+export type ClientStage = ClientStageName
 
 export const STAGE_WORDS: Record<ClientStage, string> = {
   contacto: "Contacto",

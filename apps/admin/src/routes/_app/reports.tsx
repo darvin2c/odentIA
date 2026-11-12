@@ -1,6 +1,7 @@
 import { isClinicalProduct } from "@odentia/clinical"
 import {
   FieldLabel,
+  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -525,7 +526,7 @@ function GroupsCard({ data }: { data: Funnel }) {
         options={GROUPS}
         onValueChange={setBy}
       />
-      <div className="overflow-x-auto">
+      <ScrollArea horizontal className="min-w-0 max-w-full">
         <table className="w-full min-w-[32rem] text-sm">
           <caption className="sr-only">
             Resultados {GROUPS.find((option) => option.value === by)?.label.toLowerCase()}
@@ -592,7 +593,7 @@ function GroupsCard({ data }: { data: Funnel }) {
             </tr>
           </tfoot>
         </table>
-      </div>
+      </ScrollArea>
     </ReportCard>
   )
 }

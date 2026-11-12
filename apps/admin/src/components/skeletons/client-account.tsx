@@ -6,8 +6,8 @@
  */
 import { cn, Skeleton } from "@odentia/ui"
 import { useIsAdmin } from "../../lib/session"
-import { OrgBillingSkeleton, OrgSummarySkeleton } from "./organization-detail"
 import { BillingHistorySkeleton } from "./billing"
+import { OrgBillingSkeleton, OrgSummarySkeleton } from "./organization-detail"
 import { RowSkeleton, TextSm, TextXs } from "./page-loading"
 
 /** La rejilla de Alta: arriba lo de la skill, después pasos · carga · Kairós. */

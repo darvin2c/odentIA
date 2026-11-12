@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   FieldLabel,
+  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -323,93 +324,99 @@ function PipelineBoard({
   const [showDecided, setShowDecided] = React.useState(false)
   const decided = columns.find((column) => column.key === "decidio")?.cards ?? []
   return (
-    <section
-      aria-label="Tablero del Embudo"
-      // Desde tableta las columnas van en fila y se recorren de lado aquí dentro, nunca la página entera.
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: la fila se desplaza con el teclado.
-      tabIndex={0}
-      aria-busy={stale || undefined}
-      className={`${PIPELINE_BOARD_CLASS} rounded-xl transition-opacity focus-visible:outline-2 focus-visible:outline-ring ${stale ? "opacity-60" : ""}`}
+    // Desde tableta las columnas van en fila y se recorren de lado aquí dentro (con la barra
+    // de ScrollArea y el teclado sobre su zona), nunca la página entera.
+    <ScrollArea
+      horizontal
+      className={`min-w-0 max-w-full rounded-xl transition-opacity ${stale ? "opacity-60" : ""}`}
     >
-      {columns
-        .filter((column) => column.key !== "decidio")
-        .map((column) => (
-          <section
-            key={column.key}
-            aria-labelledby={`embudo-${column.key}`}
-            className={PIPELINE_COLUMN_CLASS}
-          >
-            <header>
-              <h2
-                id={`embudo-${column.key}`}
-                className="flex items-baseline gap-2 text-sm font-semibold"
-              >
-                {COLUMN_WORDS[column.key].title}
-                <span className="font-medium text-muted-foreground tabular-nums">
-                  {column.cards.length}
-                </span>
-              </h2>
-              <p className="text-xs text-muted-foreground">{COLUMN_WORDS[column.key].fact}</p>
-            </header>
-            {column.cards.length === 0 ? (
-              <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                Ninguna ahora.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {column.cards.map((card) => (
-                  <li key={card.clientId}>
-                    <SaleCard card={card} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))}
-      <section aria-labelledby="embudo-decidio" className={PIPELINE_COLUMN_CLASS}>
-        <header>
-          <h2 id="embudo-decidio" className="flex items-baseline gap-2 text-sm font-semibold">
-            {COLUMN_WORDS.decidio.title}
-            <span className="font-medium text-muted-foreground tabular-nums">{decided.length}</span>
-          </h2>
-          <p className="text-xs text-muted-foreground">{COLUMN_WORDS.decidio.fact}</p>
-        </header>
-        <p className="text-sm">
-          {(["entro", "no_por_ahora", "perdido"] as const)
-            .map(
-              (decision) =>
-                `${DECISION_WORDS[decision]} ${decided.filter((card) => card.decision === decision).length}`,
-            )
-            .join(" · ")}
-        </p>
-        {decided.length > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="-ml-2 w-fit"
-            aria-expanded={showDecided}
-            aria-controls="embudo-decidio-tarjetas"
-            onClick={() => setShowDecided((shown) => !shown)}
-          >
-            <ChevronDown
-              aria-hidden
-              className={showDecided ? "rotate-180 transition-transform" : "transition-transform"}
-            />
-            {showDecided ? "Plegar" : "Ver cuáles"}
-          </Button>
-        ) : null}
-        {showDecided ? (
-          <ul id="embudo-decidio-tarjetas" className="flex flex-col gap-2">
-            {decided.map((card) => (
-              <li key={card.clientId}>
-                <SaleCard card={card} />
-              </li>
-            ))}
-          </ul>
-        ) : null}
+      <section
+        aria-label="Tablero del Embudo"
+        aria-busy={stale || undefined}
+        className={PIPELINE_BOARD_CLASS}
+      >
+        {columns
+          .filter((column) => column.key !== "decidio")
+          .map((column) => (
+            <section
+              key={column.key}
+              aria-labelledby={`embudo-${column.key}`}
+              className={PIPELINE_COLUMN_CLASS}
+            >
+              <header>
+                <h2
+                  id={`embudo-${column.key}`}
+                  className="flex items-baseline gap-2 text-sm font-semibold"
+                >
+                  {COLUMN_WORDS[column.key].title}
+                  <span className="font-medium text-muted-foreground tabular-nums">
+                    {column.cards.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-muted-foreground">{COLUMN_WORDS[column.key].fact}</p>
+              </header>
+              {column.cards.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  Ninguna ahora.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {column.cards.map((card) => (
+                    <li key={card.clientId}>
+                      <SaleCard card={card} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
+        <section aria-labelledby="embudo-decidio" className={PIPELINE_COLUMN_CLASS}>
+          <header>
+            <h2 id="embudo-decidio" className="flex items-baseline gap-2 text-sm font-semibold">
+              {COLUMN_WORDS.decidio.title}
+              <span className="font-medium text-muted-foreground tabular-nums">
+                {decided.length}
+              </span>
+            </h2>
+            <p className="text-xs text-muted-foreground">{COLUMN_WORDS.decidio.fact}</p>
+          </header>
+          <p className="text-sm">
+            {(["entro", "no_por_ahora", "perdido"] as const)
+              .map(
+                (decision) =>
+                  `${DECISION_WORDS[decision]} ${decided.filter((card) => card.decision === decision).length}`,
+              )
+              .join(" · ")}
+          </p>
+          {decided.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-ml-2 w-fit"
+              aria-expanded={showDecided}
+              aria-controls="embudo-decidio-tarjetas"
+              onClick={() => setShowDecided((shown) => !shown)}
+            >
+              <ChevronDown
+                aria-hidden
+                className={showDecided ? "rotate-180 transition-transform" : "transition-transform"}
+              />
+              {showDecided ? "Plegar" : "Ver cuáles"}
+            </Button>
+          ) : null}
+          {showDecided ? (
+            <ul id="embudo-decidio-tarjetas" className="flex flex-col gap-2">
+              {decided.map((card) => (
+                <li key={card.clientId}>
+                  <SaleCard card={card} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
       </section>
-    </section>
+    </ScrollArea>
   )
 }
 

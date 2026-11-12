@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest"
-import { approvedDraftOf, draftSummaryWords, type ImportDraft } from "./import-drafts"
+import { describe, expect, it, vi } from "vitest"
+import { ApiError, api } from "../../lib/api"
+import {
+  approvedDraftOf,
+  DRAFT_GONE_WORDS,
+  draftSourceOf,
+  draftSummaryWords,
+  type ImportDraft,
+} from "./import-drafts"
+
+vi.mock("../../lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/api")>()),
+  api: vi.fn(),
+}))
 
 const draft = (patch: Partial<ImportDraft>): ImportDraft => ({
   id: "d1",
@@ -46,5 +58,22 @@ describe("draftSummaryWords", () => {
       draftSummaryWords({ servicios: 38, sedes: 1, proveedores: 0, raro: 4, mediosDePago: 3 }),
     ).toBe("38 servicios · 1 sede · 3 medios de pago")
     expect(draftSummaryWords(null)).toBe("")
+  })
+})
+
+describe("draftSourceOf", () => {
+  it("un borrador cuyo archivo se borró lo dice sin pedirlo", async () => {
+    const source = draftSourceOf(draft({ payloadDeletedAt: "2026-12-11T00:00:00.000Z" }))
+    await expect(source?.load()).rejects.toThrow(DRAFT_GONE_WORDS)
+    expect(api).not.toHaveBeenCalled()
+  })
+
+  it("si el servidor responde que el archivo se borró, lo dice y refresca la lista", async () => {
+    vi.mocked(api).mockRejectedValueOnce(
+      new ApiError(409, { code: "IMPORT_DRAFT_PAYLOAD_GONE", message: "Se borró" }),
+    )
+    const onChanged = vi.fn()
+    await expect(draftSourceOf(draft({}), onChanged)?.load()).rejects.toThrow(DRAFT_GONE_WORDS)
+    expect(onChanged).toHaveBeenCalledOnce()
   })
 })

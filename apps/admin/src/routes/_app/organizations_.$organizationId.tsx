@@ -27,6 +27,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
+import { lookupClient } from "../../components/arm/client-lookup"
+import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { OrgBillingSection } from "../../components/org-billing"
 import { OrgImport } from "../../components/org-import"
 import { OrgReport } from "../../components/org-report"
@@ -34,11 +36,12 @@ import { OrgSetup } from "../../components/org-setup"
 import { OrgSpending, type SpendingAgent, type SpendingSearch } from "../../components/org-spending"
 import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
+import { OrganizationDetailPageSkeleton, OrganizationDetailSkeleton } from "../../components/skeletons/organization-detail"
 import { api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
-import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { domainOf, platformUrl } from "../../lib/host"
 import { invitationDueWords } from "../../lib/invitation-words"
+import { clientTabFromOrganization, rememberedClientsSearch } from "../../lib/list-search"
 import {
   ORGANIZATION_TAB_NAMES,
   ORGANIZATION_TABS,
@@ -47,9 +50,6 @@ import {
   organizationTabsFor,
 } from "../../lib/organization-tabs"
 import { useIsAdmin } from "../../lib/session"
-import { lookupClient } from "../../components/arm/client-lookup"
-import { clientTabFromOrganization, rememberedClientsSearch } from "../../lib/list-search"
-import { OrganizationDetailPageSkeleton, OrganizationDetailSkeleton } from "../../components/skeletons/organization-detail"
 
 /** Todo es opcional en la dirección: lo que falta es lo de siempre (Resumen, este mes, todo). */
 const searchSchema = z.object({

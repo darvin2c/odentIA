@@ -8,7 +8,7 @@ import { toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { z } from "zod"
-import { api } from "../../lib/api"
+import { ApiError, api } from "../../lib/api"
 import { limaDayWords } from "../../lib/invitation-words"
 import { supportDay } from "../../lib/support-words"
 
@@ -133,6 +133,15 @@ export interface DraftSource {
   onUsed?: () => void
 }
 
+/** Lo que se dice de un borrador cuyo JSON ya no está (se cargó, o pasaron 30 días). */
+export const DRAFT_GONE_WORDS = "El archivo ya se borró (30 días)"
+
+/** El servidor dice que el JSON del borrador ya se borró (409 `IMPORT_DRAFT_PAYLOAD_GONE`). */
+export const isDraftPayloadGone = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  error.status === 409 &&
+  error.shape.code === "IMPORT_DRAFT_PAYLOAD_GONE"
+
 /** El JSON de un borrador, validado otra vez por el servidor. */
 export async function loadDraftPayload(draftId: string): Promise<unknown> {
   const body = z
@@ -162,13 +171,26 @@ export function draftSourceOf(
   return {
     label: draftLine(draft),
     fileName: `${DRAFT_KIND_WORDS[draft.kind]} N.º ${draft.number} de la skill`,
-    load: () => loadDraftPayload(draft.id),
+    load: async () => {
+      if (draft.payloadDeletedAt)
+        throw new Error(`${DRAFT_GONE_WORDS}: pide a la skill que deje otro`)
+      try {
+        return await loadDraftPayload(draft.id)
+      } catch (error) {
+        if (!isDraftPayloadGone(error)) throw error
+        // Se borró mientras la pantalla estaba abierta: la lista se refresca y ya no se ofrece.
+        onChanged?.()
+        throw new Error(`${DRAFT_GONE_WORDS}: pide a la skill que deje otro`)
+      }
+    },
     onUsed: () =>
       void markDraftUsed(draft.id)
         .catch((error: unknown) =>
-          toast.error(
-            `Se hizo, pero no se anotó que el ${DRAFT_KIND_WORDS[draft.kind].toLowerCase()} N.º ${draft.number} se usó: ${submitErrorMessage(error)}`,
-          ),
+          isDraftPayloadGone(error)
+            ? toast.info(`${DRAFT_GONE_WORDS}. Lo que se cargó quedó cargado.`)
+            : toast.error(
+                `Se hizo, pero no se anotó que el ${DRAFT_KIND_WORDS[draft.kind].toLowerCase()} N.º ${draft.number} se usó: ${submitErrorMessage(error)}`,
+              ),
         )
         .finally(() => onChanged?.()),
   }

@@ -41,6 +41,10 @@ export const kairosItemSchema = z.object({
   status: z.string(),
   payload: z.record(z.string(), z.unknown()),
   ready: z.boolean(),
+  /** Quién redactó el mensaje o el guion: el modelo o, si no está configurado, una plantilla. */
+  drafter: z.enum(["modelo", "plantilla"]).nullable().default(null),
+  /** Lo que se dice de un borrador hecho con plantilla (lo escribe el servidor); null si no. */
+  draftNote: z.string().nullable().default(null),
   adminOnly: z.boolean(),
   expiresAt: z.string(),
   createdAt: z.string(),
@@ -319,6 +323,9 @@ export function KairosItemCard({
               label="el texto completo"
               className="mt-1 whitespace-pre-line"
             />
+            {item.drafter === "plantilla" && item.draftNote ? (
+              <p className="mt-2 text-xs text-muted-foreground">{item.draftNote}</p>
+            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -539,6 +546,9 @@ function KairosChangeDrawer({
           <AgentMark size="sm" />
           <span>Kairós lo preparó así. {item.reason}</span>
         </p>
+        {item.drafter === "plantilla" && item.draftNote ? (
+          <p className="text-sm text-muted-foreground">{item.draftNote}</p>
+        ) : null}
         {item.kind === "mensaje" ? (
           <>
             <p className="text-sm">{outreachWords(item)}</p>

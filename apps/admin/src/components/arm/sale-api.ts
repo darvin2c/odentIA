@@ -2,15 +2,17 @@
  * Lo que la venta del ARM lee de la API (`/api/admin/clients`, rutas de
  * `apps/api/src/routes/admin-clients.ts`): cada respuesta se lee con zod y cada
  * lectura tiene su clave de caché. Las claves cuelgan de `["admin","client",id]`
- * con su propio final («venta», …): otra pantalla que lea la misma ficha con
- * otro esquema no le pisa los datos, y una mutación las refresca todas a la vez.
+ * y una mutación las refresca todas a la vez. La ficha misma se lee una sola
+ * vez, con el esquema de `client-model.ts`: la venta la recorta con `select`.
  */
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
-import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { type ClientDetail, invalidateClient } from "./client-model"
+import { clientQueryKeys, fetchClientDetail } from "./client-queries"
 import { CLIENT_STAGES, PROPOSAL_STATUSES } from "./sale-words"
 
 export const productShape = z.enum(CLINICAL_PRODUCTS)
@@ -224,7 +226,6 @@ const sellerSchema = z.object({ id: z.string(), displayName: z.string() })
 /* ---------- Claves de caché ---------- */
 
 export const saleKeys = {
-  client: (clientId: string) => ["admin", "client", clientId, "venta", "ficha"] as const,
   tasks: (clientId: string, status: "abierta" | "hecha") =>
     ["admin", "client", clientId, "venta", "tareas", status] as const,
   proposals: (clientId: string) => ["admin", "client", clientId, "venta", "propuestas"] as const,
@@ -235,17 +236,8 @@ export const saleKeys = {
   sellers: ["admin", "billing", "sellers", "arm"] as const,
 }
 
-/** Lo que refresca cualquier cambio de la venta: la ficha, las listas, Kairós e Inicio. */
-export function invalidateClient(queryClient: QueryClient, clientId: string): void {
-  for (const queryKey of [
-    ["admin", "client", clientId],
-    ["admin", "clients"],
-    ["admin", "kairos"],
-    ["admin", "overview"],
-  ]) {
-    void queryClient.invalidateQueries({ queryKey })
-  }
-}
+/** Lo que refresca cualquier cambio de la venta: el mismo de toda la ficha. */
+export { invalidateClient }
 
 export function useInvalidateClient(clientId: string): () => void {
   const queryClient = useQueryClient()
@@ -256,12 +248,20 @@ export function useInvalidateClient(clientId: string): () => void {
 
 const enc = encodeURIComponent
 
+/** Lo que la venta lee de la ficha, con las etapas y los campos que usa. */
+const saleOf = (detail: ClientDetail): ClientSale => clientSaleSchema.parse(detail)
+
+/**
+ * La ficha vista desde la venta: la misma petición y la misma clave que
+ * `useClientDetail` (una sola lectura por ficha, con el esquema de
+ * `client-model.ts`), recortada a lo que usan la pestaña y los cajones.
+ */
 export function useClientSale(clientId: string, enabled = true) {
   return useQuery({
-    queryKey: saleKeys.client(clientId),
+    queryKey: clientQueryKeys.detail(clientId),
     enabled,
-    queryFn: async () =>
-      clientSaleSchema.parse(await api<unknown>(`/api/admin/clients/${enc(clientId)}`)),
+    queryFn: () => fetchClientDetail(clientId),
+    select: saleOf,
   })
 }
 

@@ -1,3 +1,4 @@
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
 import {
   AppShell,
   type AppShellNavEntry,
@@ -8,8 +9,6 @@ import {
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, Outlet, useMatches, useRouter, useRouterState } from "@tanstack/react-router"
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
-import type { ComponentType, ReactNode } from "react"
 import {
   ArrowLeft,
   BookOpen,
@@ -26,6 +25,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react"
+import type { ComponentType, ReactNode } from "react"
 import { z } from "zod"
 import { AdminBrand, AdminMark, ProductLogos } from "../components/admin-brand"
 import { api } from "../lib/api"

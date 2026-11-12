@@ -6,7 +6,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { z } from "zod"
 import { api } from "../../lib/api"
-import { clientDetailSchema, clientKey, contactRowSchema, kairosItemsSchema } from "./client-model"
+import { clientDetailSchema, clientKey, contactRowSchema } from "./client-model"
+import { kairosItemsSchema } from "./kairos-items"
 
 const enc = encodeURIComponent
 
@@ -18,12 +19,18 @@ export const clientQueryKeys = {
   kairos: (clientId: string) => ["admin", "kairos", "items", "espera", clientId] as const,
 }
 
+/**
+ * `GET /api/admin/clients/:id`, leído con su único esquema. La venta
+ * (`useClientSale`) usa esta misma petición y clave, con su propia vista.
+ */
+export const fetchClientDetail = async (clientId: string) =>
+  clientDetailSchema.parse(await api<unknown>(`/api/admin/clients/${enc(clientId)}`))
+
 /** La ficha: cabecera, datos, personas, tareas abiertas, últimas actividades y señales. */
 export function useClientDetail(clientId: string) {
   return useQuery({
     queryKey: clientQueryKeys.detail(clientId),
-    queryFn: async () =>
-      clientDetailSchema.parse(await api<unknown>(`/api/admin/clients/${enc(clientId)}`)),
+    queryFn: () => fetchClientDetail(clientId),
   })
 }
 

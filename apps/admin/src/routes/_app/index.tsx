@@ -874,8 +874,9 @@ function TaskItem({
 }
 
 /**
- * «Abrir solicitud» de una solicitud que todavía no tiene cliente: el cajón de
- * esa solicitud, con la lista de detrás como se miraba.
+ * «Abrir solicitud» de una fila que no trae su cliente: `/waitlist?solicitud=`
+ * busca el cliente de esa solicitud y abre su ficha en Venta (o Clientes, si
+ * no lo encuentra).
  */
 function OpenRequest({ id, urgent }: { id: string; urgent: boolean }) {
   return (

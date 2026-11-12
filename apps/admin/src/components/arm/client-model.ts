@@ -347,18 +347,6 @@ export const timelineSchema = z.object({
   nextBefore: z.string().nullable(),
 })
 
-/** Lo que Kairós dejó esperando el sí de una persona (`/api/admin/kairos/items`). */
-export const kairosItemSchema = z.object({
-  id: z.string(),
-  kind: z.string(),
-  title: z.string(),
-  reason: z.string(),
-  status: z.string(),
-  ready: z.boolean(),
-  expiresAt: z.string(),
-})
-export const kairosItemsSchema = z.object({ items: z.array(kairosItemSchema), total: z.number() })
-
 /** El equipo de la administración (Equipo), para elegir responsable. */
 export const staffSchema = z.object({
   staff: z.array(

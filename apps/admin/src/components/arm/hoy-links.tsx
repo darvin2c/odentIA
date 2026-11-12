@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import type { ClientTab } from "../../lib/list-search"
+import { invalidateClient } from "./client-model"
 
 /**
  * Cómo Hoy, Kairós, Reportes y Demos abren la ficha de un cliente: su página
@@ -71,7 +72,10 @@ export function OpenClientButton({
  * del menú van debajo de esa clave) e Inicio de antes.
  */
 export function invalidateArm(queryClient: QueryClient, clientId?: string | null): void {
-  if (clientId) void queryClient.invalidateQueries({ queryKey: ["admin", "client", clientId] })
+  if (clientId) {
+    invalidateClient(queryClient, clientId)
+    return
+  }
   void queryClient.invalidateQueries({ queryKey: ["admin", "clients"] })
   void queryClient.invalidateQueries({ queryKey: ["admin", "kairos"] })
   void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
