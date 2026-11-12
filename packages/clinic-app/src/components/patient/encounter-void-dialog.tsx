@@ -34,6 +34,7 @@ import {
   fetchEncounterVoidPreview,
   voidEncounterApi,
 } from "../../lib/encounters"
+import { productUi } from "../../product/product-ui"
 
 /** «Resina · 16 y Limpieza»: lo de esta atención, como lo nombra el presupuesto. */
 function joinNames(names: readonly string[]): string {
@@ -41,6 +42,22 @@ function joinNames(names: readonly string[]): string {
   const quoted = names.map((name) => `«${name}»`)
   if (quoted.length <= 1) return quoted[0] ?? ""
   return `${quoted.slice(0, -1).join(", ")} y ${quoted[quoted.length - 1]}`
+}
+
+/**
+ * Los papeles que se anulan con la atención, con los de su producto: descansos solo donde se
+ * emiten (latidIA) y la receta de lentes en vistIA.
+ */
+function voidedPapersText(): string {
+  const { medicalLeave, voidedWithEncounter = [] } = productUi().documents
+  const papers = [
+    voidedWithEncounter.length > 0 ? "Recetas de medicamentos" : "Recetas",
+    ...voidedWithEncounter,
+    ...(medicalLeave ? ["descansos"] : []),
+    "órdenes sin resultado",
+    "controles",
+  ]
+  return `${papers.join(", ")} y consentimientos sin firmar.`
 }
 
 /** Lo que puede hacer quien no puede anular: firmar la atención contando lo que pasó. */
@@ -289,10 +306,7 @@ export function EncounterVoidDialog({
                   <CollapsibleContent>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
                       <li>Sus diagnósticos, procedimientos y lo registrado en ella.</li>
-                      <li>
-                        Recetas, descansos, órdenes sin resultado, controles y consentimientos sin
-                        firmar.
-                      </li>
+                      <li>{voidedPapersText()}</li>
                       <li>Lo que se dio por hecho aquí vuelve a quedar pendiente, sin cargos.</li>
                       <li>
                         Un papel que ya entregaste dirá «Anulado» al comprobarlo; lo que la persona

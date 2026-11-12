@@ -406,7 +406,7 @@ export async function createCharge(
       throw conflict(
         "CHARGE_EXCEEDS_BUDGET",
         returnedWhole.length > 0 && sum(generated) < agreed
-          ? "Lo cobrado de este tratamiento cuenta aunque se haya devuelto, y ya cubre lo acordado: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
+          ? "Un cobro de este tratamiento se devolvió entero, y lo devuelto no se vuelve a cargar solo: si corresponde cobrarlo otra vez, usa «Agregar otro concepto»"
           : "El tratamiento ya tiene cargado el importe acordado",
       )
     amountCents ??= remaining

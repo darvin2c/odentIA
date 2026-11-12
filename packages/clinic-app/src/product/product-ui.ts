@@ -330,6 +330,8 @@ export interface ProductDocumentsUi {
   }
   /** Si emite descansos médicos (latidIA, decisión 8 del issue 229): «Nuevo», su filtro y su fila. */
   medicalLeave: boolean
+  /** Sus papeles que se anulan con la atención, como los nombra el diálogo de anular (vistIA: «recetas de lentes»). */
+  voidedWithEncounter?: readonly string[]
 }
 
 export interface ProductPapers {

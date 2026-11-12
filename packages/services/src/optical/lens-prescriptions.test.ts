@@ -283,6 +283,14 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
     // La venta copia al pedido solo lo vigente: la externa, no la de la atención anulada.
     const current = await f.run((tx) => currentLensPrescriptions(tx, OPTICA, f.patient.id))
     expect(Object.values(current).map((item) => item?.id)).toEqual([brought.id])
+    // La lista dice que su atención se anuló: la ficha no ofrece «Emitir otra desde su examen».
+    const listed = await f.run((tx) => listLensPrescriptions(tx, OPTICA, f.patient.id))
+    expect(listed.map((item) => [item.id, item.encounterVoided])).toEqual(
+      expect.arrayContaining([
+        [issued.id, true],
+        [brought.id, false],
+      ]),
+    )
   })
 
   it("la receta se imprime en PDF, la de la óptica y la externa", async () => {

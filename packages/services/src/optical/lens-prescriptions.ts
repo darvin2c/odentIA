@@ -61,11 +61,13 @@ export interface LensPrescriptionView {
   verifiedAt: string | null
   voidedAt: string | null
   voidReason: string | null
+  /** La atención en que se emitió se anuló: no se vuelve a emitir desde ella. */
+  encounterVoided: boolean
   /** Vencida o sin verificar: se informa, no impide vender. */
   notices: string[]
 }
 
-function toView(row: typeof lensPrescription.$inferSelect, today: string): LensPrescriptionView {
+function toView(row: typeof lensPrescription.$inferSelect, today: string, encounterVoided = false): LensPrescriptionView {
   const verifiedAt = row.verifiedAt ? row.verifiedAt.toISOString() : null
   return {
     id: row.id,
@@ -84,6 +86,7 @@ function toView(row: typeof lensPrescription.$inferSelect, today: string): LensP
     verifiedAt,
     voidedAt: row.voidedAt ? row.voidedAt.toISOString() : null,
     voidReason: row.voidReason,
+    encounterVoided,
     notices: row.voidedAt ? [] : prescriptionNotices({ source: row.source as "examen" | "externa", verifiedAt, validUntil: row.validUntil }, today),
   }
 }
@@ -325,11 +328,12 @@ export async function listLensPrescriptions(tx: Db, orgId: string, patientId: st
   await requirePatient(tx, orgId, patientId)
   const today = await clinicToday(tx, orgId)
   const rows = await tx
-    .select()
+    .select({ row: lensPrescription, encounterStatus: encounter.status })
     .from(lensPrescription)
+    .leftJoin(encounter, and(eq(encounter.organizationId, lensPrescription.organizationId), eq(encounter.id, lensPrescription.encounterId)))
     .where(and(eq(lensPrescription.organizationId, orgId), eq(lensPrescription.patientId, patientId)))
     .orderBy(desc(lensPrescription.issuedOn), desc(lensPrescription.createdAt))
-  return rows.map((row) => toView(row, today))
+  return rows.map(({ row, encounterStatus }) => toView(row, today, encounterStatus === "anulada"))
 }
 
 /**

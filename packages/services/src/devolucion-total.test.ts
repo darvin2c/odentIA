@@ -109,7 +109,7 @@ it("por tratamiento: devuelto todo, la siguiente atención no lo cobra otra vez 
   // En Caja, la línea del presupuesto tampoco vuelve a cargarse sola: se cobra como otro concepto.
   await expect(f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: line.id }))).rejects.toMatchObject({
     code: "CHARGE_EXCEEDS_BUDGET",
-    message: expect.stringContaining("cuenta aunque se haya devuelto"),
+    message: expect.stringContaining("se devolvió entero"),
   })
   const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(account.pendiente).toEqual([])

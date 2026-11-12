@@ -89,7 +89,7 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
       {
         id: "finanzas-devuelto-todo-no-se-cobra",
         q: "Le devolví todo lo de un tratamiento y volvió: ¿le tengo que cobrar?",
-        a: "Solo si corresponde, y lo decides tú: la app no se lo vuelve a cobrar sola, ni al firmar la atención ni desde su presupuesto. Lo que ya se le cobró de ese tratamiento sigue contando aunque se lo hayas devuelto, para que no le llegue un cobro sorpresa. Al firmar, el cierre de la atención lo avisa, y en su cuenta sale como «devuelto». Si sí corresponde cobrarle, abre «Cobrar» en su cuenta (si no debe nada, el botón dice «Cobrar un adelanto»), usa «Agregar otro concepto», escribe qué le cobras y cuánto, y cobra. Un adelanto que se le devolvió es distinto: ese tratamiento se cobra al atenderlo.",
+        a: "Solo si corresponde, y lo decides tú: la app no se lo vuelve a cobrar sola, ni al firmar la atención ni desde su presupuesto. Lo que ya se le cobró de ese tratamiento sigue contando aunque se lo hayas devuelto, para que no le llegue un cobro sorpresa. Al firmar, el cierre de la atención lo avisa («un cobro de este tratamiento se devolvió entero»), y en su cuenta sale como «devuelto». Si sí corresponde cobrarle, abre «Cobrar» en su cuenta (si no debe nada, el botón dice «Cobrar un adelanto»), usa «Agregar otro concepto», escribe qué le cobras y cuánto, y cobra. Un adelanto que se le devolvió es distinto: ese tratamiento se cobra al atenderlo.",
         forms: [
           "le devolvi todo y volvio le cobro",
           "le tengo que cobrar si le devolvi todo",
