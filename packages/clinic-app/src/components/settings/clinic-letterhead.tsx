@@ -54,7 +54,9 @@ const SIDES = [
 export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
   const id = useId()
   const queryClient = useQueryClient()
-  const [open, setOpen] = useState<"new" | "change" | null>(null)
+  // El cajón se queda con la hoja que había al abrirlo: si otra persona la cambia mientras
+  // tanto (otra pestaña, otro equipo), no se recarga con la ajena; la vista previa lo avisa.
+  const [open, setOpen] = useState<{ current: LetterheadSummary | null } | null>(null)
   const state = useQuery({ queryKey: LETTERHEAD_QUERY_KEY, queryFn: getLetterhead })
   const current = state.data?.letterhead ?? null
   const refresh = () => queryClient.invalidateQueries({ queryKey: LETTERHEAD_QUERY_KEY })
@@ -85,7 +87,11 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
       })
     },
     onError: (cause) => {
-      toast.error(submitErrorMessage(cause))
+      toast.error(
+        cause instanceof ApiError && cause.status === 409
+          ? "Otra persona cambió la hoja hace un momento. No se quitó nada: mira la que quedó."
+          : submitErrorMessage(cause),
+      )
       void refresh()
     },
   })
@@ -130,7 +136,7 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
               type="button"
               variant="outline"
               disabled={state.isPending || remove.isPending}
-              onClick={() => setOpen(current ? "change" : "new")}
+              onClick={() => setOpen({ current })}
             >
               {current ? "Cambiar la hoja" : "Subir la hoja"}
             </Button>
@@ -149,7 +155,7 @@ export function ClinicLetterheadSettings({ sheetSize }: { sheetSize: string }) {
       )}
       <LetterheadDrawer
         open={open !== null}
-        current={open === "change" ? current : null}
+        current={open?.current ?? null}
         contact={state.data?.contact ?? { line: null, branches: 0 }}
         sheetSize={sheetSize}
         onClose={() => setOpen(null)}
