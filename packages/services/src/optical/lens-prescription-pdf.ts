@@ -73,7 +73,8 @@ export async function renderLensPrescriptionPdf(
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
   if (!person) throw notFound("Paciente")
-  const clinic = await loadDocumentClinic(tx, orgId)
+  // Con la hoja membretada de cuando se emitió (ADR 0182).
+  const clinic = await loadDocumentClinic(tx, orgId, { at: row.createdAt })
   const kind = PRESCRIPTION_KINDS.find((item) => item.key === row.kind)?.label ?? row.kind
   const title = `Receta de ${kind.toLowerCase()}`
   const kit = await DocumentKit.open(clinic, documentFormat(clinic), {

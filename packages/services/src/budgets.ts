@@ -4049,8 +4049,11 @@ export async function getBudgetPrintPayload(
       }
     }
   }
-  const documentClinic = await loadDocumentClinic(tx, orgId)
   const isDraft = budget.status === "borrador"
+  // Entregado, con la hoja membretada de cuando se entregó; el borrador, con la de hoy (ADR 0182).
+  const documentClinic = await loadDocumentClinic(tx, orgId, {
+    at: isDraft ? null : (budget.presentedAt ?? budget.createdAt),
+  })
   // Fase, orden, sesiones y diagnóstico de cada línea salen del plan.
   const planItems = budget.items.length
     ? await tx

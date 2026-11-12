@@ -81,7 +81,9 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
         <h2 id={`${id}-title`} className="font-heading text-base font-medium">
           Logo
         </h2>
-        <p className="text-sm text-muted-foreground">Lo ven tus pacientes al abrir el registro y su enlace.</p>
+        <p className="text-sm text-muted-foreground">
+          Lo ven tus pacientes al abrir el registro y su enlace. Va en tus papeles si no tienes hoja membretada.
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-4">
         {logo ? (

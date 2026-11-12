@@ -136,10 +136,12 @@ export async function buildTicketSnapshot(
   const { ticket } = receipt
   const frozen = ticket.snapshot as TicketFrozen
   const org: DocOrg = {
-    ...(await loadFrozenDocumentClinic(tx, orgId, {
-      clinic: frozen.clinic,
-      branch: frozen.branch ?? null,
-    })),
+    ...(await loadFrozenDocumentClinic(
+      tx,
+      orgId,
+      { clinic: frozen.clinic, branch: frozen.branch ?? null },
+      ticket.createdAt,
+    )),
     currency: ticket.currency,
     ticketFooter: frozen.notice,
   }
@@ -496,10 +498,13 @@ export async function getRefundReceiptPdf(
   paper?: string | null,
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const frozen = await getRefundReceipt(tx, orgId, patientId, receiptId)
-  const org = await loadFrozenDocumentClinic(tx, orgId, {
-    clinic: frozen.clinic,
-    branch: frozen.branch,
-  })
+  const org = await loadFrozenDocumentClinic(
+    tx,
+    orgId,
+    { clinic: frozen.clinic, branch: frozen.branch },
+    frozen.refundedAt,
+    { sheet: !!paper },
+  )
   const money = (cents: number) => formatMoney(cents, frozen.currency, org.locale)
   const title = "Constancia de devolución"
   const kit = await DocumentKit.open(org, ticketFormat(org, paper), {
@@ -591,10 +596,13 @@ export async function renderReturnPdf(
 ): Promise<{ bytes: Uint8Array; filename: string; numberLabel: string; tradeName: string }> {
   const row = await getPaymentReturn(tx, orgId, patientId, returnId)
   const frozen = row.snapshot
-  const org = await loadFrozenDocumentClinic(tx, orgId, {
-    clinic: frozen.clinic,
-    branch: frozen.branch,
-  })
+  const org = await loadFrozenDocumentClinic(
+    tx,
+    orgId,
+    { clinic: frozen.clinic, branch: frozen.branch },
+    row.createdAt,
+    { sheet: !!paper },
+  )
   const money = (cents: number) => formatMoney(cents, row.currency, org.locale)
   const numberLabel = String(row.returnNumber).padStart(6, "0")
   const ticketLabel = String(frozen.ticket.number).padStart(6, "0")

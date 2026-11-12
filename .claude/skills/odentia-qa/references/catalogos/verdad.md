@@ -210,6 +210,17 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** «Piezas tratadas: 36, 46» con solo la 36 hecha.
 **Caso:** el 9 de marzo: caries oclusal y distal en la 46, pulpitis, y resina en la 36. Firmado: tratada la 36; la 46, un solo hallazgo vigente. El 23 se cementa la corona de la 46: su diagnóstico no es la pulpitis ya resuelta.
 
+## V-DAT-05 La clínica en sus papeles: razón social, RUC, dirección y teléfono
+**Aparece en:** la línea chica de la hoja membretada (`S/document-kit.ts` `sheetLetterhead`), el membrete sin hoja, la hoja que se firma (`S/document-clinic.ts` `loadDocumentLetterhead`), el odontograma impreso (`S/dental/odontogram.ts` `establishmentOf`), el comprobante y el ticket (`loadFrozenDocumentClinic`), la casilla y el texto del cajón de la hoja (`CA/settings/clinic-letterhead.tsx`) y la Ayuda.
+**A mano:** razón social y documento siempre (con hoja); con una sede, su nombre, dirección y teléfono; con varias, la dirección fiscal y ningún teléfono; la casilla los quita. El comprobante dice la dirección fiscal o, sin ella, la de la sede que cobró.
+- [ ] Los cinco lugares ponen la misma línea para la misma clínica.
+- [ ] Lo que el cajón y la Ayuda prometen agregar es lo que el papel agrega en esa clínica (una sede y varias).
+- [ ] Una clínica con varias sedes y sin dirección fiscal se entera de que sus papeles no dirán dirección.
+- [ ] «Sin hoja, salen con tu logo» solo si hay logo.
+
+**Ya falló:** «esos los ponemos desde tus datos» en una clínica de tres sedes sin dirección fiscal: el comprobante en hoja salió sin dirección (QA del 11 nov, corregido antes de unir).
+**Caso:** clínica con 3 sedes, sin dirección fiscal y sin logo. Sube su hoja: el cajón no promete teléfono. Cobra S/ 5 en la sede Miraflores: el comprobante A4 dice razón social, RUC, «Sede Miraflores» y una dirección.
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.
@@ -242,6 +253,7 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] No le promete a un rol lo que no puede hacer ni le niega lo que sí puede.
 - [ ] No explica algo que se quitó o se movió.
 - [ ] Contesta sobre la pantalla donde está la persona.
+- [ ] Al agregar una función que cambia lo que sale en los papeles, se releen las respuestas viejas que dicen qué va dónde (razón social, color, logo).
 
 **Ya falló:** contestó sobre otra pantalla.
 **Caso:** recepción, en la Agenda, pregunta «¿cómo le mando a la señora el enlace de su cita?». La respuesta nombra dónde está el botón, y siguiéndola el enlace queda copiado o enviado. La misma pregunta con caja dice que eso lo hace recepción.
@@ -279,3 +291,11 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** una cita reservada, movida y luego cambiada por la paciente desde su enlace: las tres filas de la Actividad decían la fecha final; el motivo de cancelación no se veía en el cajón, la ficha ni Reportes.
 **Caso:** el 10 de marzo a las 9:00 recepción da una cita para el 12 a las 10:00; a las 9:30 la mueve al 13 a las 11:00; a las 20:00 la paciente la cancela desde su enlace por viaje. La Actividad y el cajón dicen los tres momentos con su fecha de entonces, y la cancelada muestra el motivo.
+
+## V-RAS-04 Rastro de la hoja membretada (y de lo que se configura con versiones)
+**Aparece en:** Configuración › Actividad del equipo (`S/audit-words.ts`), las versiones de `clinic_letterhead`.
+- [ ] Guardar sin cambios no crea una versión ni una fila.
+- [ ] La fila dice sobre qué archivo, qué cambió (márgenes de cuánto a cuánto, la casilla) y si fue «Deshacer».
+
+**Caso:** abrir «Cambiar la hoja» y «Usar esta hoja» sin tocar nada: ninguna fila nueva. Marcar solo la casilla: la fila lo dice.
+

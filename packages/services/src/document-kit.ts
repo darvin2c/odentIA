@@ -26,6 +26,7 @@ import {
   LineCapStyle,
   PDFDocument,
   type PDFFont,
+  type PDFEmbeddedPage,
   type PDFImage,
   type PDFPage,
   type RGB,
@@ -38,6 +39,29 @@ import QRCode from "qrcode"
 export interface DocumentLogo {
   bytes: Uint8Array
   kind: "png" | "jpg"
+}
+
+/**
+ * La hoja membretada de la clínica (ADR 0182): un PDF de una página, ya normalizado al
+ * subirlo (sin recorte ni giro), y dónde va el texto, en milímetros desde cada borde
+ * de su hoja. Con `hasContact` su hoja ya dice la dirección y el teléfono.
+ */
+export interface DocumentSheet {
+  pdf: Uint8Array
+  topMm: number
+  bottomMm: number
+  leftMm: number
+  rightMm: number
+  hasContact: boolean
+}
+
+/** La hoja ya embebida en el papel: sus partes de fondo y los márgenes del texto, en puntos. */
+interface SheetArt {
+  parts: { page: PDFEmbeddedPage; x: number; y: number; width: number; height: number }[]
+  top: number
+  bottom: number
+  left: number
+  right: number
 }
 
 /** Lo que el papel dice de la clínica; lo arma `document-clinic.ts`. */
@@ -61,6 +85,17 @@ export interface DocumentClinic {
    * bajo el membrete y el cuadro de iniciales. Sin él, tinta, como siempre.
    */
   brandInk?: string | null
+  /**
+   * La hoja membretada de la clínica (ADR 0182): va de fondo en cada hoja y reemplaza
+   * nuestro membrete. El texto va donde ella dice; lo de en medio (una marca de agua)
+   * queda debajo. La térmica no la lleva.
+   */
+  sheet?: DocumentSheet | null
+  /**
+   * La clínica tenía hoja para este papel, pero no se pudo leer: el papel sale con
+   * nuestro membrete y no se guarda todavía (como sin QR), para no fijarlo así.
+   */
+  sheetUnavailable?: boolean
   locale: string
   timezone: string
   sheetSize: string
@@ -113,6 +148,55 @@ export function documentFormat(
   paper?: string | null,
 ): DocFormat {
   return sheetFormat(paper ?? clinic.sheetSize)
+}
+
+/**
+ * Embebe la hoja en el papel sin deformarla: escala al ancho del papel. Si su alto no
+ * coincide (una hoja Carta en un papel A4, o al revés), su parte de abajo va pegada al
+ * borde de abajo y el resto pegado arriba, cortando lo que se encime en medio. Una hoja
+ * que no se puede leer devuelve null: el papel sale con nuestro membrete.
+ */
+async function embedSheet(pdf: PDFDocument, sheet: DocumentSheet, format: DocFormat): Promise<SheetArt | null> {
+  try {
+    const source = await PDFDocument.load(sheet.pdf)
+    const page = source.getPage(0)
+    const { width: sheetWidth, height: sheetHeight } = page.getSize()
+    const scale = format.width / sheetWidth
+    const parts: SheetArt["parts"] = []
+    if (Math.abs(sheetHeight * scale - format.height) < 1) {
+      parts.push({ page: await pdf.embedPage(page), x: 0, y: 0, width: format.width, height: format.height })
+    } else {
+      const bottomPt = Math.min(Math.max(sheet.bottomMm * MM, 0), sheetHeight)
+      const overlap = Math.max(0, sheetHeight * scale - format.height)
+      const topFrom = Math.min(bottomPt + overlap / scale, sheetHeight)
+      if (bottomPt > 0)
+        parts.push({
+          page: await pdf.embedPage(page, { left: 0, bottom: 0, right: sheetWidth, top: bottomPt }),
+          x: 0,
+          y: 0,
+          width: format.width,
+          height: bottomPt * scale,
+        })
+      const topHeight = (sheetHeight - topFrom) * scale
+      if (topHeight > 0)
+        parts.push({
+          page: await pdf.embedPage(page, { left: 0, bottom: topFrom, right: sheetWidth, top: sheetHeight }),
+          x: 0,
+          y: format.height - topHeight,
+          width: format.width,
+          height: topHeight,
+        })
+    }
+    return {
+      parts,
+      top: sheet.topMm * MM * scale,
+      bottom: sheet.bottomMm * MM * scale,
+      left: sheet.leftMm * MM * scale,
+      right: sheet.rightMm * MM * scale,
+    }
+  } catch {
+    return null
+  }
 }
 
 // --- Letra ---------------------------------------------------------------------
@@ -357,6 +441,7 @@ export class DocumentKit {
   private readonly options: KitOptions
   private readonly tones: Record<Tone, RGB>
   private readonly logoImage: PDFImage | null
+  private readonly sheetArt: SheetArt | null
   private bottomLimit = 0
   private freshTop = Number.NaN
   private footerHeight = 0
@@ -369,6 +454,7 @@ export class DocumentKit {
     options: KitOptions,
     fonts: Record<Face, PDFFont>,
     logoImage: PDFImage | null,
+    sheetArt: SheetArt | null = null,
   ) {
     this.pdf = pdf
     this.clinic = clinic
@@ -376,11 +462,34 @@ export class DocumentKit {
     this.options = options
     this.fonts = fonts
     this.logoImage = logoImage
+    this.sheetArt = sheetArt
     this.tones = format.exactFit ? THERMAL_TONES : SHEET_TONES
-    this.page = pdf.addPage([format.width, format.height])
-    this.y = format.height - (format.exactFit ? THERMAL_PAD : TOP)
+    this.page = this.addSheet()
+    this.y = format.height - (format.exactFit ? THERMAL_PAD : this.top)
     this.measureFooter()
-    this.bottomLimit = format.exactFit ? THERMAL_PAD : BOTTOM + this.footerHeight + FOOTER_GAP
+    this.bottomLimit = format.exactFit ? THERMAL_PAD : this.bottom + this.footerHeight + FOOTER_GAP
+  }
+
+  /** Arriba del contenido: nuestro margen o, con hoja membretada, donde ella dice. */
+  private get top(): number {
+    return this.sheetArt ? this.sheetArt.top : TOP
+  }
+  /** Abajo del pie: nuestro margen o, con hoja membretada, donde ella dice. */
+  private get bottom(): number {
+    return this.sheetArt ? this.sheetArt.bottom : BOTTOM
+  }
+
+  /** Lleva la hoja membretada de fondo. */
+  get hasSheet(): boolean {
+    return this.sheetArt !== null
+  }
+
+  /** Una hoja nueva, con la membretada de fondo si la hay. */
+  private addSheet(): PDFPage {
+    const page = this.pdf.addPage([this.format.width, this.format.height])
+    for (const part of this.sheetArt?.parts ?? [])
+      page.drawPage(part.page, { x: part.x, y: part.y, width: part.width, height: part.height })
+    return page
   }
 
   /** Un papel nuevo con su membrete ya escrito. */
@@ -416,6 +525,8 @@ export class DocumentKit {
         logoImage = null
       }
     }
+    // Una hoja que no se lee no traba el papel: sale con nuestro membrete.
+    const sheetArt = clinic.sheet && !format.exactFit ? await embedSheet(pdf, clinic.sheet, format) : null
     const kit = new DocumentKit(
       pdf,
       clinic,
@@ -423,6 +534,7 @@ export class DocumentKit {
       options,
       Object.fromEntries(entries) as Record<Face, PDFFont>,
       logoImage,
+      sheetArt,
     )
     kit.letterhead()
     return kit
@@ -431,10 +543,10 @@ export class DocumentKit {
   // --- Geometría ---------------------------------------------------------------
 
   get left(): number {
-    return this.format.margin
+    return this.sheetArt ? this.sheetArt.left : this.format.margin
   }
   get right(): number {
-    return this.format.width - this.format.margin
+    return this.format.width - (this.sheetArt ? this.sheetArt.right : this.format.margin)
   }
   get width(): number {
     return this.right - this.left
@@ -447,7 +559,7 @@ export class DocumentKit {
   }
   /** Lo que cabe en una página entera debajo del encabezado corto. */
   private get pageRoom(): number {
-    return this.format.height - TOP - 40 - this.bottomLimit
+    return this.format.height - this.top - 40 - this.bottomLimit
   }
 
   gap(height = 8): void {
@@ -471,8 +583,8 @@ export class DocumentKit {
 
   newPage(): void {
     if (this.thermal) return
-    this.page = this.pdf.addPage([this.format.width, this.format.height])
-    this.y = this.format.height - TOP
+    this.page = this.addSheet()
+    this.y = this.format.height - this.top
     this.shortHeader()
     this.freshTop = this.y
   }
@@ -1292,11 +1404,13 @@ export class DocumentKit {
   }
 
   private signedTextWidth(input: Pick<SignedBlockInput, "checkUrl" | "name">): number {
-    return (
+    // Nunca menos de un renglón de palabras: con una hoja angosta el texto baja, no se parte letra a letra.
+    return Math.max(
+      90,
       this.width -
-      10.5 * 2 -
-      (input.name ? STAMP_WIDTH + 12 : 0) -
-      (input.checkUrl ? CHECK_QR_SIZE + 8 + CHECK_CAPTION_WIDTH + 12 : 0)
+        10.5 * 2 -
+        (input.name ? STAMP_WIDTH + 12 : 0) -
+        (input.checkUrl ? CHECK_QR_SIZE + 8 + CHECK_CAPTION_WIDTH + 12 : 0),
     )
   }
 
@@ -1614,6 +1728,10 @@ export class DocumentKit {
       this.thermalLetterhead()
       return
     }
+    if (this.sheetArt) {
+      this.sheetLetterhead()
+      return
+    }
     const clinic = this.clinic
     const wordmark = !!(clinic.wordmark && this.logoImage)
     const rightItems = [
@@ -1692,6 +1810,26 @@ export class DocumentKit {
     this.y -= 1.5
   }
 
+  /**
+   * Con hoja membretada su diseño dice quién es; el papel agrega una línea chica: la
+   * razón social (aunque sea igual al nombre: su diseño puede no decirla) y su documento
+   * y, salvo que la hoja ya los traiga, sede, dirección y teléfono.
+   */
+  private sheetLetterhead(): void {
+    const clinic = this.clinic
+    const fiscal = clinic.fiscalDocNumber
+      ? [clinic.fiscalDocType, clinic.fiscalDocNumber].filter(Boolean).join(" ")
+      : null
+    const items = [
+      clinic.legalName || clinic.tradeName,
+      fiscal,
+      ...(clinic.sheet?.hasContact ? [] : [clinic.branchName, clinic.address, clinic.phone]),
+    ].filter((item): item is string => !!item)
+    if (items.length === 0) return
+    this.text(items.join(" · "), { size: SIZE.label, tone: "gray", leading: 1.35, align: "right" })
+    this.y -= 4
+  }
+
   /** La línea del membrete y el cuadro de iniciales: el color de la marca o, sin él, tinta. */
   private get brandInk(): RGB {
     const ink = this.clinic.brandInk
@@ -1712,6 +1850,20 @@ export class DocumentKit {
 
   /** Desde la página 2: el nombre de la clínica y el título del documento. */
   private shortHeader(): void {
+    if (this.sheetArt) {
+      // Su diseño se repite en cada hoja: arriba solo el título del papel, chico.
+      const title = this.lay(this.options.title, this.width, {
+        size: SIZE.second,
+        tone: "gray",
+        leading: 1.3,
+        align: "right",
+      })[0]
+      if (title) {
+        this.drawLineAt(title, this.left, this.y, this.width)
+        this.y -= title.height + 10
+      }
+      return
+    }
     if (this.clinic.wordmark && this.logoImage) {
       this.wordmarkShortHeader(this.logoImage)
       return
@@ -1801,7 +1953,7 @@ export class DocumentKit {
       const text = this.footerRight(index + 1, pages.length)
       this.footers.push(text)
       this.page = page
-      const top = BOTTOM + this.footerHeight
+      const top = this.bottom + this.footerHeight
       page.drawLine({
         start: { x: this.left, y: top },
         end: { x: this.right, y: top },

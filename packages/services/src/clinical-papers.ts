@@ -387,3 +387,64 @@ export async function renderMedicalLeavePdf(
   })
   return kit.finish()
 }
+
+/**
+ * La vista previa de la hoja membretada (ADR 0182): una receta de ejemplo, con el mismo
+ * kit que las de verdad, firmada por otro profesional del equipo (su nombre y su
+ * colegiatura, sin su firma dibujada) y sin QR ni ningún paciente real.
+ */
+export async function renderLetterheadSamplePdf(
+  clinic: PaperContext["clinic"],
+  signer: { name: string; title: string | null; registration: string | null } | null,
+  /** Con el QR, el bloque de la firma ocupa lo que en una receta de verdad. */
+  checkUrl: string | null = null,
+) {
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), {
+    title: "Receta de ejemplo",
+    docLabel: "Receta de ejemplo",
+    patientLabel: "Paciente de ejemplo",
+  })
+  const now = new Date()
+  kit.gap(22)
+  kit.titleWithDetails("Receta", [
+    { text: "N.º 0", strong: true },
+    { text: `Emitida el ${dayWords(now, clinic)}` },
+  ])
+  kit.gap(16)
+  kit.facts(
+    [
+      { label: "Paciente", value: "Paciente de ejemplo", span: 2, strong: true },
+      { label: "Edad", value: "34 años" },
+      { label: "Historia clínica", value: "HC-000000", span: 2 },
+    ],
+    4,
+  )
+  kit.heading("Rp/", { size: SIZE.total, before: 22, after: 8 })
+  kit.table({
+    columns: [{ label: "", width: 21, pad: 0 }, { label: "" }],
+    closed: false,
+    rowPad: 9,
+    size: SIZE.read,
+    rows: [
+      [
+        [{ inlines: "1.", face: "sansSemi" }],
+        [
+          { inlines: "Medicamento de ejemplo 500 mg · tableta", size: 13.5, face: "sansSemi" },
+          { inlines: "1 tableta, vía oral, cada 8 horas, 3 días.", gapBefore: 4 },
+        ],
+      ],
+    ],
+  })
+  kit.subheading("Indicaciones", { before: 10 })
+  kit.text("Así se verán tus papeles sobre tu hoja.", { size: SIZE.read })
+  kit.gap(14)
+  signedAtBottom(kit, {
+    name: signer?.name ?? "Profesional de tu equipo",
+    title: signer?.title ?? null,
+    registration: signer?.registration ?? null,
+    at: now,
+    checkUrl,
+    strokes: null,
+  })
+  return kit.finish()
+}
