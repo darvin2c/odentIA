@@ -118,16 +118,20 @@ describe.each(PRODUCTS)("los avisos de cita que no salieron (%s)", (product) => 
     const cancelled = await person(c, "Ana Cancelada")
     const booked = await person(c, "Beto Reservó")
     const cancelledId = await cancelledAppointment(c, cancelled)
-    expect(await run(c, (tx) => enqueueAppointmentNotice(tx, c.orgId, cancelledId, "cancelada"))).toEqual({ queued: true })
+    // No tiene a dónde escribirle: se dice al equipo, y el aviso igual queda para «no pude».
+    const cancelledNotice = await run(c, (tx) => enqueueAppointmentNotice(tx, c.orgId, cancelledId, "cancelada"))
+    expect(cancelledNotice).toMatchObject({ queued: false, byHand: true })
     const startsAt = new Date(Date.now() + 2 * DAY)
     const [stands] = await ownerDb.insert(appointment).values({
       organizationId: c.orgId, branchId: c.branchId, patientId: booked, professionalUserId: c.professionalId, roomId: c.roomId,
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
     }).returning({ id: appointment.id })
-    expect(await run(c, (tx) => enqueueAppointmentNotice(tx, c.orgId, stands!.id, "reservada"))).toEqual({ queued: true })
+    expect(await run(c, (tx) => enqueueAppointmentNotice(tx, c.orgId, stands!.id, "reservada"))).toMatchObject({ queued: false, byHand: true })
     // Ninguno de los dos tiene a dónde escribirle.
     await run(c, (tx) => deliverDueJobs(tx, c.orgId, new Date(), { secretsKey: KEY }))
     expect((await jobsOf(c)).filter((job) => job.cause === "sin_destino").map((job) => job.kind).sort()).toEqual(["aviso_cita_cancelada", "aviso_cita_reservada"])
+    // Lo que se le dijo al equipo es el motivo con que falló el envío.
+    expect((await jobsOf(c)).find((job) => job.kind === "aviso_cita_cancelada")?.lastError).toBe(cancelledNotice.why)
     const unreached = await run(c, (tx) => getAdminUnreached(tx, c.orgId, all))
     expect(unreached.total).toBe(2)
     expect(unreached.people.map((row) => [row.lineKey, row.lineName])).toEqual([

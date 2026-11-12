@@ -160,6 +160,11 @@ export interface MessageItem {
   redactedAt: string | null
   /** Lo que la Bandeja dice bajo un mensaje que no salió o del que no se sabe si salió; nulo si no hace falta. */
   deliveryNote: string | null
+  /**
+   * Los botones de respuesta con que salió, por su título: los recibe la persona y el equipo solo
+   * los lee. Su id (que lleva el trabajo o la conversación) no sale del servidor. Vacío si no lleva.
+   */
+  buttons: string[]
   createdAt: string
 }
 
@@ -225,6 +230,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     location: row.location ?? null,
     redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
     deliveryNote: deliveryNoteOf(row.status, row.error),
+    buttons: (row.replyButtons ?? []).map((button) => button.title),
     createdAt: row.createdAt.toISOString(),
   }
 }

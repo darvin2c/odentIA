@@ -455,7 +455,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quien-avisa-persona-cita",
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si al moverla queda por confirmar, el aviso del cambio ya trae «Confirmar»; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Con la línea prendida, los avisos de reserva, cambio y cancelación le llegan siempre que haya por dónde escribirle, salvo que haya pedido no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+      },
+      {
+        id: "aviso-no-le-llegara",
+        q: "¿Por qué la Agenda me dice que no le llegará el aviso?",
+        a: "Porque no hay por dónde escribirle (no tiene WhatsApp ni correo, o la clínica no tiene WhatsApp conectado) o pidió no recibir mensajes de la clínica. Al reservar, mover o cancelar, ese aviso dice la cita y el motivo, y queda en pantalla hasta que lo cierras: avísale tú, por teléfono o en persona. Si en cambio «Recordar la cita», Sofi o Argos están apagados, o ya tiene otra cita al cancelarle una, solo lo menciona en el aviso de siempre; con los agentes en pausa, queda una tarea para avisarle.",
+        forms: ["no recibirá el aviso", "avísale tú", "no le llega el aviso de la cita", "por qué no le avisan"],
       },
       {
         id: "marco-llego",

@@ -286,7 +286,7 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   // El origen lo pone la ruta del equipo: lo que diga el cuerpo no cuenta (abajo sale «recepcion»).
   const cita = ((await created.json()) as { data: { id: string; notice?: unknown } }).data
   // Sin «Recordar la cita» prendida nadie le avisa: lo dice la respuesta.
-  expect(cita.notice).toEqual({ queued: false })
+  expect(cita.notice).toEqual({ queued: false, why: "«Recordar la cita» está apagada" })
   const seen = await buildApp("reception").request(`/appointments/${cita.id}/context`)
   expect(seen.status).toBe(200)
   const context = ((await seen.json()) as { data: { person: { name: string; relationship: string } | null; origin: { source: string; conversationId: string | null }; confirmation: unknown } }).data

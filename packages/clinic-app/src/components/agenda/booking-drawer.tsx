@@ -34,7 +34,8 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { z } from "zod"
-import type { AgendaAppointment } from "../../lib/agenda"
+import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
+import { warnUnsentNotice } from "./notice-warning"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
@@ -125,10 +126,15 @@ interface ReminderReach {
  * M3): «recibirá el recordatorio por correo» solo si la clínica lo envía; si no, recepción sabe que
  * avisa ella. Nada si le llega por WhatsApp.
  */
+/** Por dónde le llegará el recordatorio; null: no le llega. */
+function reminderVia(reach: ReminderReach): "whatsapp" | "correo" | null {
+  return reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+}
+
 export function reminderWords(reach: ReminderReach | null | undefined): string | null {
   if (!reach) return null
   const who = reach.forOther ? `${reach.name}, que recibe sus avisos,` : reach.name
-  const via = reach.via === undefined ? (reach.whatsapp.state === "es_su_whatsapp" ? "whatsapp" : reach.hasEmail ? "correo" : null) : reach.via
+  const via = reminderVia(reach)
   if (via === "whatsapp") return null
   if (via === "correo") return `${who} recibirá el recordatorio por correo.`
   return `${who} no recibirá el recordatorio automático: avísale tú un día antes.`
@@ -391,18 +397,26 @@ export function BookingDrawer({
           followUpIds: chosenControlsFor(patientId),
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
+        // Si tampoco le llegará el aviso, el recordatorio va en ese mismo aviso fijo: una sola orden (QA del 11 nov).
+        const reach = result.data.reminderReach
+        const about = {
+          change: "reservada" as const,
+          when: whenSaid(result.data.startsAt, timeZone, today),
+          reminderToo: !!reach && reminderVia(reach) === null,
+        }
+        const unsent = noticeWarning(result.data, about)
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
           description:
             [
-              result.data.notice?.queued
-                ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
-                : null,
-              reminderWords(result.data.reminderReach),
+              noticeLine(result.data.notice, `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`),
+              unsent ? null : reminderWords(reach),
             ]
               .filter(Boolean)
               .join(" ") || undefined,
         })
         // Lo que hay que revisar después queda a la vista hasta cerrarlo: el cajón se cierra al reservar.
+        // Uno por cita, como al moverla: si después se mueve, lo reemplaza.
+        warnUnsentNotice(result.data, about)
         for (const note of [whatsappNote.current, consentNote.current]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
