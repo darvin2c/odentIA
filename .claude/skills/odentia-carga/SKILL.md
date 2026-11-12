@@ -148,6 +148,8 @@ Deja `clinica.json` (el plan, con el logo y la hoja dentro) y `plan-de-carga-<n>
 - **Gastos fijos** con su `key`: volver a cargar no los anota dos veces. Sin día de pago en lo que envió, se propone en «Para decidir».
 - **Asistente**: las de «Lo que solo tú sabes» por su `basicKey` (`KNOWLEDGE_BASICS`); se cargan publicadas.
 - **Equipo**: la propietaria ya está invitada desde el alta; a los demás la carga los invita (les llega un correo). Horarios con `weekday` 0 domingo … 6 sábado.
+- **Formatos propios** (consentimientos y formularios): se cargan en borrador; la clínica los revisa y los publica.
+- **`slug`**: la dirección de la clínica en odentIA («dra-marialicia-calderon»). La administración no carga el plan en otra clínica.
 
 En la administración: ficha de la clínica › «Cargar datos» › «Configuración de la clínica» › «Elegir el plan». El ensayo dice, área por área, qué se crea, qué se actualiza, qué ya está, qué espera a una persona y qué no entra y por qué. «Cargar» lo guarda y envía las invitaciones. Con la primera sede, la clínica se enciende como en su alta. Cuando una persona del equipo acepta su invitación, se vuelve a ensayar y a cargar el mismo plan.
 
@@ -159,7 +161,7 @@ Se escribe `informe-<n>.json` (formato `progressReportSchema`, `packages/service
 pnpm --filter @odentia/services import:informe -- <carpeta>/informe-1.json
 ```
 
-Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
+Va a alguien del equipo de la clínica o con su invitación, y responde a quien acompaña, con su correo de odentia32.com (o del producto). Sin datos de pacientes (solo cifras), sin documentos ni teléfonos, sin promesas. Aprobado, se envía en «Cargar datos» › «Informe a la clínica»: se ve el PDF, se pulsa «Enviar» y queda registrado; el mismo número no sale dos veces. Desde la máquina de quien acompaña, el correo de producción no conecta: el informe sale siempre de la administración.
 
 ## El mapa
 

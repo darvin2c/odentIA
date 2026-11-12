@@ -66,8 +66,7 @@ export async function saveOrgProfile(
     ...identity
   } = input
   if (current) {
-    if (Object.keys(identity).length)
-      await tx
+    await tx
         .update(orgProfile)
         .set({ ...identity, updatedAt: new Date() })
         .where(eq(orgProfile.organizationId, orgId))

@@ -204,6 +204,7 @@ const teamMemberSchema = z.strictObject({
   name: text(120).optional(),
   /** Su rol en la clínica; la propietaria ya está invitada y no se vuelve a invitar. */
   role: z.enum(["owner", "admin", "reception", "clinician", "cashier", "sales", "workshop", "member"]),
+  // Cuáles valen en el producto de la clínica lo dice `PRODUCT_ROLES` al cargar.
   profile: z
     .strictObject({
       professionalTitle: text(120),
@@ -227,8 +228,10 @@ export const clinicSetupPlanSchema = z
     product: z.enum(CLINICAL_PRODUCTS),
     /** El país de la clínica (ISO 3166-1): decide la lista de códigos de sus servicios. */
     countryCode: z.string().trim().length(2).toUpperCase(),
-    /** La clínica, como la nombra quien prepara la carga: para no cargar el plan de otra. */
+    /** La clínica, como la nombra quien prepara la carga. */
     clinic: text(200),
+    /** Su dirección en odentIA («dra-marialicia-calderon»): el plan de otra clínica no se carga. */
+    slug: z.string().trim().min(2).max(63),
     identity: identitySchema.optional(),
     papers: papersSchema.optional(),
     brand: brandSchema.optional(),

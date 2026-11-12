@@ -17,7 +17,7 @@ const previewSchema = z.object({
   subject: z.string(),
   pages: z.number(),
   pdf: z.string(),
-  sent: z.object({ at: z.string(), to: z.string().nullable() }).nullable(),
+  sent: z.object({ at: z.string(), to: z.string().nullable(), state: z.enum(["enviando", "enviado", "desconocido"]) }).nullable(),
 })
 type Preview = z.infer<typeof previewSchema>
 
@@ -137,8 +137,9 @@ export function OrgReport({ organizationId }: { organizationId: string }) {
           </dl>
           {stage.preview.sent ? (
             <p className="text-sm text-muted-foreground">
-              Este informe ya se envió el {when.format(new Date(stage.preview.sent.at))}
-              {stage.preview.sent.to ? ` a ${stage.preview.sent.to}` : ""}: no se envía dos veces.
+              {stage.preview.sent.state === "enviado"
+                ? `Este informe ya se envió el ${when.format(new Date(stage.preview.sent.at))}${stage.preview.sent.to ? ` a ${stage.preview.sent.to}` : ""}: no se envía dos veces.`
+                : `Este informe se intentó enviar el ${when.format(new Date(stage.preview.sent.at))} y no se sabe si salió: revisa en Zoho antes de enviar otro con un número nuevo.`}
             </p>
           ) : (
             <div>

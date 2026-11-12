@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import { agentKnowledgeEntry } from "@odentia/db/schema/agent"
 import { invitation, member, user } from "@odentia/db/schema/auth"
 import { orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
@@ -31,6 +32,7 @@ const raw: ClinicSetupPlanInput = {
   product: "dental",
   countryCode: "PE",
   clinic: "Dra. Prueba",
+  slug: "carga-config",
   identity: {
     tradeName: "Dra. Prueba",
     legalName: "Prueba Dental E.I.R.L.",
@@ -55,8 +57,11 @@ const raw: ClinicSetupPlanInput = {
       role: "owner",
       profile: { professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "24489" },
       schedule: [{ branch: "principal", weekday: 1, start: "09:30", end: "11:30" }],
+      absences: [{ branch: "principal", from: "2026-12-24", to: "2026-12-26", reason: "Fiestas" }],
     },
     { email: "recepcion.prueba@example.com", name: "Recepción", role: "reception" },
+    // «Taller» es de vistIA: en odentIA no se invita.
+    { email: "taller.prueba@example.com", name: "Taller", role: "workshop" },
   ],
 }
 const plan = clinicSetupPlanSchema.parse(raw)
@@ -98,14 +103,15 @@ describe("carga de la configuración de una clínica", () => {
     expect(byLabel("recepcion.prueba@example.com")?.status).toBe("nueva")
     // La propietaria no es parte todavía: su perfil y su horario esperan.
     expect(result.items.find((item) => item.area === "Profesionales")).toMatchObject({ status: "espera" })
-    expect(result.totals.error).toBe(0)
+    expect(byLabel("taller.prueba@example.com")).toMatchObject({ status: "error", detail: "«workshop» no es un rol de este producto" })
+    expect(result.totals.error).toBe(1)
     const branches = await ownerDb.select().from(branch).where(eq(branch.organizationId, ORG))
     expect(branches).toHaveLength(0)
   })
 
   it("la carga crea con las operaciones de siempre y volver a cargar no duplica", async () => {
     const first = await run("carga")
-    expect(first.totals.error).toBe(0)
+    expect(first.totals.error).toBe(1)
     expect(first.invitations.map((i) => i.email)).toEqual(["recepcion.prueba@example.com"])
     const [profile] = await ownerDb.select().from(orgProfile).where(eq(orgProfile.organizationId, ORG))
     expect(profile).toMatchObject({ tradeName: "Dra. Prueba", fiscalDocNumber: "20542830752", budgetValidDays: 180, brandColor: "#ce6921" })
@@ -132,7 +138,14 @@ describe("carga de la configuración de una clínica", () => {
     await ownerDb.insert(member).values({ id: randomUUID(), organizationId: ORG, userId: id, role: "owner", createdAt: new Date() })
     const result = await run("carga")
     const professional = result.items.filter((item) => item.area === "Profesionales")
-    expect(professional.map((item) => item.status)).toEqual(["cambia", "cambia"])
+    expect(professional.map((item) => item.status)).toEqual(["cambia", "cambia", "nueva"])
     expect(result.totals.espera).toBe(0)
+    // La ausencia va de 00:00 a 23:59 en Lima (UTC−5), no en la hora del servidor.
+    const [block] = await ownerDb.select().from(scheduleBlock).where(eq(scheduleBlock.organizationId, ORG))
+    expect(block?.startsAt.toISOString()).toBe("2026-12-24T05:00:00.000Z")
+    expect(block?.endsAt.toISOString()).toBe("2026-12-27T04:59:00.000Z")
+    // Volver a cargar no la repite.
+    const again = await run("carga")
+    expect(again.items.filter((item) => item.area === "Profesionales").at(-1)?.status).toBe("igual")
   })
 })

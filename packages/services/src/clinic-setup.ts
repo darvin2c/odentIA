@@ -15,26 +15,28 @@
  * se crean aquí y el correo lo envía la ruta después de guardar. Nada de esto escribe a
  * pacientes.
  */
+import { PRODUCT_ROLES } from "@odentia/auth/permissions"
 import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { agentKnowledgeEntry } from "@odentia/db/schema/agent"
-import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { orgSpecialty, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { clinicalFormTemplate, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { expenseRecurring } from "@odentia/db/schema/finance"
 import { product as productTable, supplier } from "@odentia/db/schema/inventory"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
+import { scheduleBlock } from "@odentia/db/schema/availability"
 import { invitation, member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
-import { and, eq } from "drizzle-orm"
+import { and, eq, gt, sql } from "drizzle-orm"
 import { createHash, randomUUID } from "node:crypto"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { createRoom, setBranchDefaultDuration } from "./appointments.js"
-import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
+import { createScheduleBlock, setProfessionalSchedule, zonedTimeToUtc } from "./availability.js"
 import { createBranch, updateBranch } from "./branches.js"
 import { setClinicBrandColor, setClinicLogo } from "./clinic-identity.js"
 import { type ClinicSetupPlan, clinicSetupPlanSha256 } from "./clinic-setup-plan.js"
-import { createFormTemplate, publishFormTemplate, saveConsentTemplate, setProfessionalSpecialties } from "./clinical-forms.js"
+import { createConsentTemplate, createFormTemplate, setProfessionalSpecialties } from "./clinical-forms.js"
 import { ServiceError, validation } from "./errors.js"
 import { noteRecurringExpense } from "./expense-recurring.js"
 import { setCommissionRate } from "./finance.js"
@@ -89,6 +91,13 @@ export interface ClinicSetupResult {
   invitations: Array<{ id: string; email: string; role: string }>
   /** Lo que hay que subir antes de cargar (el ensayo lo dice; la carga lo espera listo). */
   needs: { logo: boolean; letterhead: boolean }
+  /** El logo que la carga reemplazó: la ruta lo borra del almacenamiento, como «Logo». */
+  replacedLogo: string | null
+}
+
+/** La huella de un archivo del plan: con ella se reconoce el mismo logo o la misma hoja. */
+function fileSha(file: { base64: string }): string {
+  return createHash("sha256").update(file.base64).digest("hex")
 }
 
 function requireSetupAdmin(actor: AdminActor | null): AdminActor {
@@ -124,18 +133,34 @@ export async function runClinicSetup(
 ): Promise<ClinicSetupResult> {
   const staff = requireSetupAdmin(actor)
   const by = staff.userId
+  // Una carga a la vez por clínica: dos a la vez leerían lo mismo y duplicarían.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('clinic-setup:' || ${orgId}))`)
   const [profile] = await tx
-    .select({ product: orgProfile.product, country: orgProfile.countryCode, tradeName: orgProfile.tradeName })
+    .select({ product: orgProfile.product, country: orgProfile.countryCode, tradeName: orgProfile.tradeName, timezone: orgProfile.timezone })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  const [org] = await tx.select({ name: organization.name, logo: organization.logo }).from(organization).where(eq(organization.id, orgId)).limit(1)
+  const [org] = await tx
+    .select({ name: organization.name, slug: organization.slug, logo: organization.logo })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1)
   if (!org) throw new ServiceError("NOT_FOUND", 404, "Clínica no encontrada")
+  // El plan dice de qué clínica es: el de otra no se carga aquí.
+  if (plan.slug !== org.slug) throw validation(`Este plan es de «${plan.slug}» y la clínica es «${org.slug}»: elige el plan de esta clínica`)
   const product: ClinicalProduct = (profile?.product as ClinicalProduct | undefined) ?? plan.product
   if (product !== plan.product) throw validation("El plan es de otro producto que la clínica: prepáralo con el de la clínica")
   if (profile && profile.country !== plan.countryCode)
     throw validation(`El plan es para ${plan.countryCode} y la clínica es de ${profile.country}: prepáralo con el país de la clínica`)
 
+  const timezone = profile?.timezone ?? "America/Lima"
+  // Lo último que cargó la administración en esta clínica: así se reconoce el mismo logo y la misma hoja.
+  const [last] = await tx.execute<{ metadata: { logoSha?: string; letterheadSha?: string } | null }>(
+    sql`select metadata from admin_audit where action = 'org.setup_import' and organization_id = ${orgId} order by created_at desc limit 1`,
+  )
+  const logoSha = plan.brand?.logo ? fileSha(plan.brand.logo) : null
+  const letterheadSha = plan.letterhead ? fileSha(plan.letterhead.file) : null
+  let replacedLogo: string | null = null
   const items: ClinicSetupItem[] = []
   const invitations: ClinicSetupResult["invitations"] = []
   const needs = { logo: false, letterhead: false }
@@ -160,7 +185,12 @@ export async function runClinicSetup(
         sp,
         orgId,
         by,
-        { ...identity, ...(secondCurrency !== undefined ? { secondCurrency, exchangeRate } : {}), ...(plan.papers ?? {}) },
+        {
+          ...identity,
+          ...(profile ? {} : { countryCode: plan.countryCode }),
+          ...(secondCurrency !== undefined ? { secondCurrency, exchangeRate } : {}),
+          ...(plan.papers ?? {}),
+        },
         product,
       )
       return profile ? "cambia" : "nueva"
@@ -176,17 +206,21 @@ export async function runClinicSetup(
     })
   }
   if (plan.brand?.logo) {
-    needs.logo = true
-    await step("Marca", `Logo (${plan.brand.logo.name})`, async (sp) => {
-      if (!files.logoUrl) return { status: org.logo ? "cambia" : "nueva", detail: "Se sube al cargar" }
-      await setClinicLogo(sp, orgId, by, files.logoUrl)
-      return org.logo ? "cambia" : "nueva"
-    })
+    const label = `Logo (${plan.brand.logo.name})`
+    if (org.logo && last?.metadata?.logoSha === logoSha) items.push({ area: "Marca", label, status: "igual" })
+    else {
+      needs.logo = true
+      await step("Marca", label, async (sp) => {
+        if (!files.logoUrl) return { status: org.logo ? "cambia" : "nueva", detail: "Se sube al cargar" }
+        replacedLogo = (await setClinicLogo(sp, orgId, by, files.logoUrl)).previous
+        return org.logo ? "cambia" : "nueva"
+      })
+    }
   }
   if (plan.letterhead) {
     const sheet = plan.letterhead
     const current = await getCurrentLetterhead(tx, orgId)
-    if (current?.fileName === sheet.file.name) items.push({ area: "Papeles", label: `Hoja membretada (${sheet.file.name})`, status: "igual" })
+    if (current && last?.metadata?.letterheadSha === letterheadSha) items.push({ area: "Papeles", label: `Hoja membretada (${sheet.file.name})`, status: "igual" })
     else {
       needs.letterhead = true
       await step("Papeles", `Hoja membretada (${sheet.file.name})`, async (sp) => {
@@ -385,6 +419,7 @@ export async function runClinicSetup(
         ...(wanted.minQuantity !== undefined ? { minQuantity: wanted.minQuantity } : {}),
         idempotencyKey: `carga-${fold(wanted.name)}`,
       })
+      if (wanted.onHand && !branchId) return { status: "error", detail: "Sus existencias necesitan una sede en el plan" }
       if (wanted.onHand && branchId)
         await addStock(sp, orgId, by, {
           productId: created.id,
@@ -432,8 +467,9 @@ export async function runClinicSetup(
       continue
     }
     await step("Formatos propios", `Consentimiento: ${wanted.title}`, async (sp) => {
-      await saveConsentTemplate(sp, orgId, by, { title: wanted.title, sections: wanted.sections })
-      return "nueva"
+      // En borrador: la clínica lo revisa y lo publica; no sale a nombre de odentIA.
+      await createConsentTemplate(sp, orgId, by, { title: wanted.title, sections: wanted.sections } as Parameters<typeof createConsentTemplate>[3])
+      return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }
     })
   }
   const forms = await tx.select({ title: clinicalFormTemplate.title }).from(clinicalFormTemplate).where(eq(clinicalFormTemplate.organizationId, orgId))
@@ -443,14 +479,14 @@ export async function runClinicSetup(
       continue
     }
     await step("Formatos propios", `Formulario: ${wanted.title}`, async (sp) => {
-      const created = await createFormTemplate(sp, orgId, by, {
+      // En borrador: la clínica lo revisa y lo publica.
+      await createFormTemplate(sp, orgId, by, {
         title: wanted.title,
         description: wanted.description ?? null,
         schema: wanted.schema,
         ...(wanted.respondent ? { respondent: wanted.respondent as "staff" | "portal" } : {}),
       })
-      await publishFormTemplate(sp, orgId, by, created.id)
-      return "nueva"
+      return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }
     })
   }
 
@@ -458,7 +494,7 @@ export async function runClinicSetup(
   const pending = await tx
     .select({ email: invitation.email })
     .from(invitation)
-    .where(and(eq(invitation.organizationId, orgId), eq(invitation.status, "pending")))
+    .where(and(eq(invitation.organizationId, orgId), eq(invitation.status, "pending"), gt(invitation.expiresAt, new Date())))
   for (const person of plan.team) {
     const label = person.name ? `${person.name} (${person.email})` : person.email
     const joined = memberOf(person.email)
@@ -467,6 +503,8 @@ export async function runClinicSetup(
         items.push({ area: "Equipo", label, status: "igual", detail: "Ya tiene su invitación" })
       else if (person.role === "owner")
         items.push({ area: "Equipo", label, status: "espera", detail: "La propietaria se invita en el alta; su invitación no está pendiente" })
+      else if (!PRODUCT_ROLES[product].includes(person.role as (typeof PRODUCT_ROLES)[ClinicalProduct][number]))
+        items.push({ area: "Equipo", label, status: "error", detail: `«${person.role}» no es un rol de este producto` })
       else
         await step("Equipo", label, async (sp) => {
           const id = randomUUID()
@@ -523,15 +561,35 @@ export async function runClinicSetup(
       })
     for (const absence of person.absences) {
       const branchId = branchFor(absence.branch)
-      await step("Profesionales", `${label} · ausencia ${absence.from} a ${absence.to}`, async (sp) => {
+      // Del primer día a las 00:00 al último a las 23:59, en la hora de la clínica.
+      const startsAt = zonedTimeToUtc(absence.from, 0, timezone)
+      const endsAt = zonedTimeToUtc(absence.to, 23 * 60 + 59, timezone)
+      const absenceLabel = `${label} · ausencia ${absence.from} a ${absence.to}`
+      const [already] = await tx
+        .select({ id: scheduleBlock.id })
+        .from(scheduleBlock)
+        .where(
+          and(
+            eq(scheduleBlock.organizationId, orgId),
+            eq(scheduleBlock.professionalUserId, userId),
+            eq(scheduleBlock.startsAt, startsAt),
+            eq(scheduleBlock.endsAt, endsAt),
+          ),
+        )
+        .limit(1)
+      if (already) {
+        items.push({ area: "Profesionales", label: absenceLabel, status: "igual" })
+        continue
+      }
+      await step("Profesionales", absenceLabel, async (sp) => {
         if (!branchId) return { status: "error", detail: "Necesita una sede" }
         await createScheduleBlock(sp, orgId, by, {
           branchId,
           professionalUserId: userId,
           kind: "ausencia",
           ...(absence.reason ? { reason: absence.reason } : {}),
-          startsAt: `${absence.from}T00:00:00`,
-          endsAt: `${absence.to}T23:59:00`,
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
         })
         return "nueva"
       })
@@ -552,9 +610,9 @@ export async function runClinicSetup(
     await writeAdminAudit(tx, staff, {
       action: "org.setup_import",
       organizationId: orgId,
-      metadata: { planSha256, ...totals, invitations: invitations.length },
+      metadata: { planSha256, ...totals, invitations: invitations.length, logoSha, letterheadSha },
     })
-  return { planSha256, items, totals, invitations, needs }
+  return { planSha256, items, totals, invitations, needs, replacedLogo }
 }
 
 /** Para que un ensayo no se guarde: la ruta lo lanza dentro de la transacción y lo atrapa afuera. */

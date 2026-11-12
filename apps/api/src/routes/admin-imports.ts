@@ -1,6 +1,6 @@
 import { isClinicalProduct, productWords, type ClinicalProduct } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
-import { invitation, organization, user } from "@odentia/db/schema/auth"
+import { invitation, member, organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { invitationTemplate } from "@odentia/mail"
 import {
@@ -19,17 +19,19 @@ import {
   normalizeLetterhead,
   planFileBytes,
   previewClinicImport,
+  productMailDomain,
   progressReportEmail,
   progressReportPdf,
   progressReportSchema,
+  finishProgressReport,
   progressReportSent,
   PROGRESS_REPORT_MAX_PAGES,
-  recordProgressReportSent,
+  reserveProgressReport,
   runClinicSetup,
   ServiceError,
   type AdminActor,
 } from "@odentia/services"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -190,7 +192,18 @@ export function createAdminImportsRoute(deps: ImportDeps) {
     return runService(c, 200, async () => {
       const { needs } = await rehearse(orgId, actor, plan)
       const files = await upload(orgId, plan, needs)
-      const result = await withOrgContext(deps.ownerDb, orgId, (tx) => runClinicSetup(tx, orgId, actor, plan, files, "carga"))
+      const folder = clinicLogoFolder(orgId)
+      let result: ClinicSetupResult
+      try {
+        result = await withOrgContext(deps.ownerDb, orgId, (tx) => runClinicSetup(tx, orgId, actor, plan, files, "carga"))
+      } catch (error) {
+        // Lo que se subió para una carga que no se guardó no queda en el almacenamiento.
+        const uploaded = [files.logoUrl, files.letterhead?.topBandUrl, files.letterhead?.bottomBandUrl, files.letterhead?.thumbnailUrl]
+        await Promise.allSettled(uploaded.filter((url): url is string => !!url).map((url) => deps.storage.deleteByUrl(url, folder)))
+        throw error
+      }
+      // El logo reemplazado se borra, como en «Logo».
+      if (result.replacedLogo) await deps.storage.deleteByUrl(result.replacedLogo, folder).catch(() => undefined)
       const emails = await sendInvitations(orgId, actor, result.invitations)
       return { ...result, emails }
     })
@@ -201,6 +214,34 @@ export function createAdminImportsRoute(deps: ImportDeps) {
   const requireReportAdmin = (actor: AdminActor) => {
     if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo un administrador envía informes a una clínica")
   }
+  /** El informe va a alguien de esa clínica (su equipo o una invitación) y la respuesta, a nuestro equipo. */
+  const checkReportPeople = async (orgId: string, report: { email: string; companion: { email: string } }) => {
+    const [org] = await deps.ownerDb
+      .select({ id: organization.id, product: orgProfile.product })
+      .from(organization)
+      .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
+      .where(eq(organization.id, orgId))
+      .limit(1)
+    if (!org) throw new ServiceError("NOT_FOUND", 404, "Clínica no encontrada")
+    const email = report.email.trim().toLowerCase()
+    const [joined] = await deps.ownerDb
+      .select({ id: member.id })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(and(eq(member.organizationId, orgId), eq(user.email, email)))
+      .limit(1)
+    const [invited] = await deps.ownerDb
+      .select({ id: invitation.id })
+      .from(invitation)
+      .where(and(eq(invitation.organizationId, orgId), eq(invitation.email, email)))
+      .limit(1)
+    if (!joined && !invited)
+      throw new ServiceError("VALIDATION", 400, `${report.email} no es del equipo de esta clínica ni tiene una invitación: el informe va a alguien de la clínica`)
+    const product: ClinicalProduct = isClinicalProduct(org.product) ? org.product : "dental"
+    const domain = productMailDomain(product)
+    if (!report.companion.email.toLowerCase().endsWith(`@${domain}`))
+      throw new ServiceError("VALIDATION", 400, `Quien acompaña firma con su correo de ${domain}`)
+  }
 
   app.post("/:orgId/report/preview", reportLimit, async (c) => {
     const actor = adminContextOf(c)
@@ -209,6 +250,7 @@ export function createAdminImportsRoute(deps: ImportDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       requireReportAdmin(actor)
+      await checkReportPeople(orgId, parsed.data)
       const { bytes, pages, content } = await progressReportPdf(parsed.data)
       if (pages > PROGRESS_REPORT_MAX_PAGES) throw new ServiceError("VALIDATION", 400, `El informe salió en ${pages} hojas: acorta las listas`)
       const mail = progressReportEmail(content)
@@ -225,10 +267,12 @@ export function createAdminImportsRoute(deps: ImportDeps) {
     return runService(c, 200, async () => {
       requireReportAdmin(actor)
       const report = parsed.data
-      const before = await withOrgContext(deps.ownerDb, orgId, (tx) => progressReportSent(tx, orgId, report.number))
-      if (before) throw new ServiceError("CONFLICT", 409, `El informe N.º ${report.number} ya se envió: no se envía dos veces`)
+      await checkReportPeople(orgId, report)
       const { bytes, content } = await progressReportPdf(report)
       const mail = progressReportEmail(content)
+      const sending = { number: report.number, to: content.email, subject: mail.subject }
+      // Primero se reserva: otra pestaña o un doble clic ya no pasan.
+      await withOrgContext(deps.ownerDb, orgId, (tx) => reserveProgressReport(tx, actor, orgId, sending))
       try {
         await deps.mailer.send({
           to: content.email,
@@ -236,12 +280,11 @@ export function createAdminImportsRoute(deps: ImportDeps) {
           attachments: [{ filename: `informe-${report.number}.pdf`, content: bytes, contentType: "application/pdf" }],
         })
       } catch {
-        // Un corte a mitad no dice si salió: no se repite solo.
+        // Un corte a mitad no dice si salió: queda como dudoso y no se repite solo.
+        await withOrgContext(deps.ownerDb, orgId, (tx) => finishProgressReport(tx, actor, orgId, { ...sending, state: "desconocido" }))
         throw new ServiceError("SEND_UNKNOWN", 502, "No se sabe si el correo salió: revisa en Zoho antes de volver a enviarlo")
       }
-      await withOrgContext(deps.ownerDb, orgId, (tx) =>
-        recordProgressReportSent(tx, actor, orgId, { number: report.number, to: content.email, subject: mail.subject }),
-      )
+      await withOrgContext(deps.ownerDb, orgId, (tx) => finishProgressReport(tx, actor, orgId, { ...sending, state: "enviado" }))
       return { sent: true, to: content.email, subject: mail.subject }
     })
   })

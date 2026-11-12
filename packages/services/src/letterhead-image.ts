@@ -9,6 +9,7 @@
  */
 import { clampLetterheadMargins, type LetterheadMargins, letterheadImagePage, PT_PER_MM } from "@odentia/clinical"
 import sharp from "sharp"
+import { validation } from "./errors.js"
 
 const MM_PER_PT = 1 / PT_PER_MM
 /** El ancho al que se mide y se recorta: unas 150 ppp en una A4, como en el navegador. */
@@ -17,6 +18,8 @@ const DEFAULT_MARGINS = { topMm: 15, bottomMm: 12, leftMm: 19, rightMm: 19 }
 const GAP_MM = 7
 const BLANK_RUN_MM = 10
 const INK_LUMINANCE = 0.8
+/** Una hoja A4 a 600 ppp tiene unos 35 millones de píxeles: más que eso no es una hoja. */
+const LETTERHEAD_MAX_PIXELS = 40_000_000
 
 export interface MeasuredLetterhead {
   page: { widthPt: number; heightPt: number }
@@ -29,13 +32,20 @@ export interface MeasuredLetterhead {
 
 /** Mide una hoja que es una imagen (PNG o JPG) y recorta sus franjas. */
 export async function measureLetterheadImage(bytes: Uint8Array): Promise<MeasuredLetterhead> {
-  const meta = await sharp(bytes).metadata()
-  if (!meta.width || !meta.height) throw new Error("La hoja no es una imagen que se pueda leer")
-  const page = letterheadImagePage(meta.width, meta.height)
+  // Como `normalizeLetterhead`: derecha según su EXIF y con un tope de píxeles.
+  const open = () => sharp(bytes, { limitInputPixels: LETTERHEAD_MAX_PIXELS }).rotate()
+  let upright: { width: number; height: number }
+  try {
+    const { info } = await open().toBuffer({ resolveWithObject: true })
+    upright = info
+  } catch {
+    throw validation("La hoja no es una imagen que se pueda leer")
+  }
+  const page = letterheadImagePage(upright.width, upright.height)
   const widthPt = page.width
   const heightPt = page.height
   // Sobre blanco, como se imprime: lo transparente no es tinta.
-  const rendered = sharp(bytes).flatten({ background: "#ffffff" }).resize({ width: RENDER_WIDTH_PX })
+  const rendered = open().flatten({ background: "#ffffff" }).resize({ width: RENDER_WIDTH_PX })
   const { data, info } = await rendered.clone().raw().toBuffer({ resolveWithObject: true })
   const { width, height, channels } = info
   const margins = clampLetterheadMargins({ widthPt, heightPt }, detect(data, width, height, channels, widthPt, heightPt))

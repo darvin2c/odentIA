@@ -166,6 +166,7 @@ const setup = {
   product: "dental",
   countryCode: "PE",
   clinic: "Clínica Carga",
+  slug: "clinica-carga",
   identity: { tradeName: "Clínica Carga", legalName: "Clínica Carga S.A.C." },
   papers: { budgetValidDays: 120 },
   branches: [{ key: "principal", name: "Principal", addressLine1: "Av. Larco 100", district: "Miraflores", city: "Lima" }],
@@ -207,7 +208,7 @@ it("la configuración se ensaya sin guardar, se carga con su invitación y repet
 const report = {
   clinic: "Clínica Carga",
   to: "Dra. Carga",
-  email: "dra.carga@example.com",
+  email: "recepcion.carga@example.com",
   number: 1,
   stage: "Alta de su cuenta",
   date: "2026-11-12",
@@ -221,7 +222,7 @@ it("el informe se ve antes, sale con su PDF por el correo de producción y no se
   const preview = await call("/report/preview", "u-admin", report)
   expect(preview.status).toBe(200)
   const shown = ((await preview.json()) as { data: { to: string; pages: number; sent: unknown } }).data
-  expect(shown).toMatchObject({ to: "dra.carga@example.com", pages: 1, sent: null })
+  expect(shown).toMatchObject({ to: "recepcion.carga@example.com", pages: 1, sent: null })
   expect(sent).toHaveLength(0)
 
   const first = await call("/report/send", "u-admin", report)
@@ -232,6 +233,15 @@ it("el informe se ve antes, sale con su PDF por el correo de producción y no se
   const again = await call("/report/send", "u-admin", report)
   expect(again.status).toBe(409)
   expect(sent).toHaveLength(1)
-  const after = ((await (await call("/report/preview", "u-admin", report)).json()) as { data: { sent: { to: string } } }).data
-  expect(after.sent.to).toBe("dra.carga@example.com")
+  const after = ((await (await call("/report/preview", "u-admin", report)).json()) as { data: { sent: { to: string; state: string } } }).data
+  expect(after.sent).toMatchObject({ to: "recepcion.carga@example.com", state: "enviado" })
+})
+
+it("el plan de otra clínica no se carga aquí y el informe no va a alguien de fuera", async () => {
+  const other = await call("/setup/preview", "u-admin", { ...setup, slug: "otra-clinica" })
+  expect(other.status).toBe(400)
+  const stranger = await call("/report/preview", "u-admin", { ...report, number: 2, email: "alguien@example.com" })
+  expect(stranger.status).toBe(400)
+  const outsider = await call("/report/preview", "u-admin", { ...report, number: 2, companion: { name: "X", email: "x@gmail.com" } })
+  expect(outsider.status).toBe(400)
 })

@@ -13,11 +13,12 @@
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { adminAudit } from "@odentia/db/schema/admin-core"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { brandPaper, type MailBrand, type MailTemplate, renderEmail } from "@odentia/mail"
 import { z } from "zod"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
+import { ServiceError } from "./errors.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 
 /** Hojas del informe como máximo: si pasa, el comando falla para que se acorte. */
@@ -28,6 +29,11 @@ const PRODUCT = {
   medical: { brand: "latidia", domain: "latidia72.com" },
   optical: { brand: "vistia", domain: "vistia20.com" },
 } as const
+
+/** El dominio de producción del producto: quien acompaña firma con un correo de ahí. */
+export function productMailDomain(product: (typeof CLINICAL_PRODUCTS)[number]): string {
+  return PRODUCT[product].domain
+}
 
 const ZONE = { locale: "es-PE", timezone: "America/Lima" }
 
@@ -292,39 +298,79 @@ function sameName(person: string, clinic: string): boolean {
 /** Lo que mide el cierre con la firma: el cierre en dos líneas, «Atentamente», tres de firma y sus espacios, para no partirla. */
 const SIGNATURE_HEIGHT = 3 * SIZE.dense * 1.45 + 3 * SIZE.dense * 1.35 + 6 + 4 + 12 + 6
 
-/** Lo que deja en la auditoría de la administración cada informe enviado: no se envía dos veces. */
-export const PROGRESS_REPORT_SENT_ACTION = "org.progress_report_sent"
+/**
+ * Cada informe deja su rastro en la auditoría de la administración: `enviando` antes de
+ * enviarlo, y después `enviado` o `desconocido` (el correo se cortó y no se sabe si
+ * salió). Con cualquiera de los tres, ese número no se vuelve a enviar: lo dudoso se
+ * revisa en Zoho, no se repite solo.
+ */
+export const PROGRESS_REPORT_ACTIONS = {
+  enviando: "org.progress_report_sending",
+  enviado: "org.progress_report_sent",
+  desconocido: "org.progress_report_unknown",
+} as const
+export type ProgressReportState = keyof typeof PROGRESS_REPORT_ACTIONS
 
-/** Si ese informe (por su número) ya se envió a esa clínica, cuándo y a quién. */
+/** Lo último que pasó con ese informe (por su número) en esa clínica, o null si nunca se envió. */
 export async function progressReportSent(
   tx: Db,
   orgId: string,
   number: number,
-): Promise<{ at: string; to: string | null } | null> {
+): Promise<{ at: string; to: string | null; state: ProgressReportState } | null> {
   const [row] = await tx
-    .select({ at: adminAudit.createdAt, metadata: adminAudit.metadata })
+    .select({ at: adminAudit.createdAt, action: adminAudit.action, metadata: adminAudit.metadata })
     .from(adminAudit)
     .where(
       and(
-        eq(adminAudit.action, PROGRESS_REPORT_SENT_ACTION),
+        inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)),
         eq(adminAudit.organizationId, orgId),
         eq(adminAudit.entityId, `informe-${number}`),
       ),
     )
     .orderBy(desc(adminAudit.createdAt))
     .limit(1)
-  return row ? { at: row.at.toISOString(), to: (row.metadata?.to as string | undefined) ?? null } : null
+  if (!row) return null
+  const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
+  return { at: row.at.toISOString(), to: (row.metadata?.to as string | undefined) ?? null, state }
 }
 
-/** Deja constancia de un informe enviado, después de que el servidor de correo lo aceptó. */
-export async function recordProgressReportSent(
+/**
+ * Reserva el envío de ese informe: con la clínica y el número bloqueados, si ya hay
+ * rastro no se reserva (dos pestañas o un doble clic no envían dos correos).
+ */
+export async function reserveProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
   input: { number: number; to: string; subject: string },
 ): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('informe:' || ${orgId} || ':' || ${input.number}))`)
+  const before = await progressReportSent(tx, orgId, input.number)
+  if (before)
+    throw new ServiceError(
+      "CONFLICT",
+      409,
+      before.state === "enviado"
+        ? `El informe N.º ${input.number} ya se envió: no se envía dos veces`
+        : `El informe N.º ${input.number} ya se intentó enviar: revisa en Zoho si salió antes de hacer otro`,
+    )
   await writeAdminAudit(tx, actor, {
-    action: PROGRESS_REPORT_SENT_ACTION,
+    action: PROGRESS_REPORT_ACTIONS.enviando,
+    organizationId: orgId,
+    entityId: `informe-${input.number}`,
+    metadata: { to: input.to, subject: input.subject },
+  })
+}
+
+/** Cómo terminó el envío reservado: salió, o no se sabe. */
+export async function finishProgressReport(
+  tx: Db,
+  actor: AdminActor,
+  orgId: string,
+  input: { number: number; to: string; subject: string; state: "enviado" | "desconocido" },
+): Promise<void> {
+  await writeAdminAudit(tx, actor, {
+    action: PROGRESS_REPORT_ACTIONS[input.state],
     organizationId: orgId,
     entityId: `informe-${input.number}`,
     metadata: { to: input.to, subject: input.subject },

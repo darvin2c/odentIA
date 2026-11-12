@@ -27,6 +27,7 @@ it("arma el plan con el logo dentro, dice lo que la biblioteca no tiene y sale e
       product: "dental",
       countryCode: "PE",
       clinic: "Dra. Prueba",
+      slug: "dra-prueba",
       brand: { color: "#CE6921", logo: { path: "logo.png" } },
       branches: [{ key: "principal", name: "Principal" }],
       services: [
