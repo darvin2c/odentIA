@@ -57,8 +57,17 @@ export interface DataTableProps<TData> {
    * de la tarjeta. Default `false`.
    */
   inCard?: boolean
+  /**
+   * Las celdas pasan a varias líneas cuando no caben, sin partir una palabra
+   * (`break-word`, nunca `anywhere`): con el panel de la derecha ensanchado, lo
+   * que no cabe se recorre de lado en vez de leerse letra por letra.
+   */
+  wrap?: boolean
   className?: string
 }
+
+/** Lo que pone `wrap`: un solo lugar para que ninguna tabla parta palabras. */
+const WRAP_CELLS = "[&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
 
 export interface DataTableSkeletonProps {
   /**
@@ -124,6 +133,7 @@ export function DataTable<TData>({
   isFetching = false,
   refreshMessage,
   inCard = false,
+  wrap = false,
   className,
 }: DataTableProps<TData>) {
   const resolved = useResolvedView(view)
@@ -161,7 +171,7 @@ export function DataTable<TData>({
       isFetching={isFetching}
       refreshMessage={refreshMessage}
       inCard={inCard}
-      className={className}
+      className={cn(wrap && WRAP_CELLS, className)}
     />
   )
 }

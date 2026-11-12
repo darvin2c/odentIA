@@ -55,6 +55,13 @@ describe("SideColumn", () => {
     expect(onResize).toHaveBeenLastCalledWith(672)
   })
 
+  it("el doble clic guarda el ancho de siempre aunque hoy no quepa entero", () => {
+    setViewport(800)
+    const { onResize, handle } = column(700)
+    fireEvent.doubleClick(handle)
+    expect(onResize).toHaveBeenLastCalledWith(512)
+  })
+
   it("el borde lleva un asa a la vista", () => {
     setViewport(1440)
     const { handle } = column(512)

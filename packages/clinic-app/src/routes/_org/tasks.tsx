@@ -149,7 +149,7 @@ function TasksPage() {
           // La etiqueta ya explica el origen; el título guardado no se modifica.
           const title = task.agentCase ? task.title.replace(CASE_PREFIX, "") : task.title
           return (
-            <div className="flex min-w-0 max-w-sm flex-col items-start gap-1 whitespace-normal [overflow-wrap:break-word]">
+            <div className="flex min-w-0 max-w-sm flex-col items-start gap-1 [overflow-wrap:break-word] [&>*]:max-w-full">
               <ExpandableText text={title} label="título de la tarea" className="font-medium" />
               {task.agentCase ? (
                 <span className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
@@ -174,7 +174,7 @@ function TasksPage() {
           const name = task.patientName ?? task.contactName
           if (!name && !task.opportunityTitle) return <span className="text-muted-foreground">—</span>
           return (
-            <span className="flex min-w-0 max-w-48 flex-col items-start gap-0.5 whitespace-normal [overflow-wrap:break-word]">
+            <span className="flex min-w-0 max-w-48 flex-col items-start gap-0.5 [overflow-wrap:break-word] [&>*]:max-w-full">
               {name ? (
                 <PersonLink patientId={task.patientId} contactId={task.contactId}>
                   {name}
@@ -336,7 +336,7 @@ function TasksPage() {
         />
       ) : (
         <div className="flex flex-col gap-2">
-          <DataTable className="[&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]" table={table} isFetching={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage} onRowClick={(task: TaskItem) => listSearch.setParam("task", task.id)} />
+          <DataTable wrap table={table} isFetching={tasksQuery.isFetching && !tasksQuery.isFetchingNextPage} onRowClick={(task: TaskItem) => listSearch.setParam("task", task.id)} />
           {tasksQuery.isError ? (
             <p role="alert" className="text-sm text-destructive">
               No se pudo actualizar la lista; se conservan las tareas cargadas.{" "}

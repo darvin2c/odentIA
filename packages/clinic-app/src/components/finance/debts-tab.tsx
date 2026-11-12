@@ -289,7 +289,8 @@ export function DebtsTab({
       ) : (
         <div className="flex flex-col gap-2">
           <DataTable
-            className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
+            wrap
+            className="[&_td]:align-top"
             table={table}
             isFetching={debts.isFetching && !debts.isFetchingNextPage}
           />

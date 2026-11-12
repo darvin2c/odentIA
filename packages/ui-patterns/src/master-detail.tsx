@@ -219,12 +219,6 @@ export function MasterDetail({
 }: MasterDetailProps) {
   const mode = useDetailMode()
   const dock = useSideDock()
-  // La misma clave que `DockedSurface`: lo que abre con el mismo ancho recuerda
-  // el mismo ancho, sea un detalle de lista o un formulario en cajón.
-  const [dockWidth, resizeDock] = useSideColumnWidth(
-    sidePanelWidthKey(DOCK_SIZES[panelSize]),
-    DOCK_SIZES[panelSize],
-  )
   const open = panel != null
   const pageScroll = listScroll === "page"
   const size = PANEL_SIZES[panelSize]
@@ -314,18 +308,11 @@ export function MasterDetail({
               </Drawer>
             }
           >
-            <SideColumn
-              aria-label={common.sidePanel.label}
-              width={dockWidth}
-              onResize={resizeDock}
-              bounds={DOCK_SIZES[panelSize]}
-              pageMinWidth={MASTER_MIN_WIDTH}
-              resizeLabel={common.sidePanel.resize}
-            >
+            <DetailColumn bounds={DOCK_SIZES[panelSize]}>
               <div ref={detailContentRef} className="flex h-full min-h-0 flex-col">
                 {panel}
               </div>
-            </SideColumn>
+            </DetailColumn>
           </SideDockPortal>
         ) : null}
       </>
@@ -425,5 +412,26 @@ export function MasterDetail({
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+  )
+}
+
+/**
+ * El detalle en la columna del layout. Lee el ancho recordado al abrirse, no al
+ * montar la página: lo comparte con los formularios que abren igual de anchos
+ * (`sidePanelWidthKey`), y uno de ellos pudo cambiarlo mientras tanto.
+ */
+function DetailColumn({ bounds, children }: { bounds: SideColumnWidth; children: React.ReactNode }) {
+  const [width, resize] = useSideColumnWidth(sidePanelWidthKey(bounds), bounds)
+  return (
+    <SideColumn
+      aria-label={common.sidePanel.label}
+      width={width}
+      onResize={resize}
+      bounds={bounds}
+      pageMinWidth={MASTER_MIN_WIDTH}
+      resizeLabel={common.sidePanel.resize}
+    >
+      {children}
+    </SideColumn>
   )
 }

@@ -201,6 +201,10 @@ const STEP = 16
  */
 export const sidePanelWidthKey = (bounds: SideColumnWidth) => `odentia.side-panel.${bounds.initial}`
 
+// En el servidor cae a `useEffect` para no emitir el aviso de `useLayoutEffect`.
+const useEffectBeforePaint: typeof React.useEffect =
+  typeof window === "undefined" ? React.useEffect : React.useLayoutEffect
+
 /** Ancho de una columna lateral, recordado en este navegador bajo `storageKey`. */
 export function useSideColumnWidth(
   storageKey: string,
@@ -208,7 +212,9 @@ export function useSideColumnWidth(
 ): [number, (next: number) => void] {
   const { initial, min } = bounds
   const [width, setWidth] = React.useState(initial)
-  React.useEffect(() => {
+  // Antes de pintar: sin tope, el salto del ancho inicial al guardado podía ser
+  // de cientos de píxeles en el primer cuadro.
+  useEffectBeforePaint(() => {
     try {
       const stored = Number(window.localStorage.getItem(storageKey))
       setWidth(Number.isFinite(stored) && stored > 0 ? Math.max(min, Math.round(stored)) : initial)
@@ -231,29 +237,48 @@ export function useSideColumnWidth(
   return [width, resize]
 }
 
+// Mientras hay una columna suscrita, el ancho se lee al cambiar la ventana y no
+// en cada render: leerlo mientras se arrastra obligaría al navegador a
+// recalcular la página en cada movimiento. Sin nadie suscrito se lee al pedirlo,
+// porque la ventana pudo cambiar mientras no había columna.
+let viewportWidth = 0
+let subscribers = 0
+const readViewport = () => {
+  viewportWidth = document.documentElement.clientWidth
+}
+
 const subscribeToViewport = (onChange: () => void) => {
-  window.addEventListener("resize", onChange)
-  // La barra de desplazamiento de la página aparece y se va sin `resize`.
-  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(onChange) : null
-  observer?.observe(document.documentElement)
-  return () => {
-    window.removeEventListener("resize", onChange)
-    observer?.disconnect()
+  const update = () => {
+    readViewport()
+    onChange()
   }
+  subscribers += 1
+  // El observador también ve la barra de desplazamiento, que aparece y se va sin `resize`.
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null
+  if (observer) observer.observe(document.documentElement)
+  else window.addEventListener("resize", update)
+  return () => {
+    subscribers -= 1
+    if (observer) observer.disconnect()
+    else window.removeEventListener("resize", update)
+  }
+}
+
+const viewportSnapshot = () => {
+  if (subscribers === 0) readViewport()
+  return viewportWidth
 }
 
 /**
  * Ancho útil de la ventana (sin la barra de desplazamiento), al día al
- * cambiarla. Es la misma medida para el tope, lo que oye el lector de pantalla
- * y el ancho que se pinta: con `100vw` (que incluye la barra) el CSS y el
- * cálculo diferían 15 px y una flecha para ensanchar achicaba la columna.
+ * cambiarla. Es la misma medida para el tope, lo que oye el lector de pantalla,
+ * las flechas y el ancho que se pinta: con `100vw` (que incluye la barra) el
+ * CSS y el cálculo diferían 15 px y una flecha para ensanchar achicaba la
+ * columna. La columna solo se monta en el navegador (portal o al abrirse), así
+ * que el valor del servidor no llega a pintarse.
  */
 function useViewportWidth(): number {
-  return React.useSyncExternalStore(
-    subscribeToViewport,
-    () => document.documentElement.clientWidth,
-    () => 0,
-  )
+  return React.useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => 0)
 }
 
 /** Ancho real del sidebar de la app: abierto, reducido a iconos o ausente. */
@@ -295,17 +320,20 @@ export function SideColumn({
 }: SideColumnProps) {
   const sidebar = useSidebarWidth()
   const viewport = useViewportWidth()
-  const floor = Math.min(bounds.min, 320)
-  // Lo que cabe ahora. Se lee al momento al arrastrar (el ancho de la ventana
-  // del render puede ser de antes del último cambio).
-  const fitsIn = (available: number) => Math.max(floor, available - sidebar - pageMinWidth)
-  const fits = () => fitsIn(document.documentElement.clientWidth)
+  // Lo que cabe ahora: el único tope.
+  const max = Math.max(Math.min(bounds.min, 320), viewport - sidebar - pageMinWidth)
+  // Lo que se ve, se anuncia y de donde parten las flechas: lo guardado puede
+  // ser de una ventana más grande.
+  const shown = Math.min(width, max)
   // Lo que se guarda nunca supera lo que cabe ahora: si no, el tirador tendría
   // un tramo muerto hasta volver por debajo del tope.
-  const apply = (next: number) => onResize(Math.min(next, fits()))
-  const max = fitsIn(viewport)
-  // El lector de pantalla oye el ancho que se ve, no el guardado si ya no cabe.
-  const shown = Math.min(width, max)
+  const apply = (next: number) => onResize(Math.min(next, max))
+  const keyTargets: Partial<Record<string, number>> = {
+    ArrowLeft: shown + STEP,
+    ArrowRight: shown - STEP,
+    Home: bounds.min,
+    End: max,
+  }
   return (
     <aside
       {...props}
@@ -314,15 +342,8 @@ export function SideColumn({
         className,
       )}
       // Un solo `width`: con `min-width` aparte, el mínimo ganaría al tope y la
-      // columna desbordaría en ventanas justas. Antes de conocer la ventana
-      // (servidor, primer pintado) lo recorta el CSS.
-      style={{
-        ...style,
-        width:
-          viewport > 0
-            ? `${shown}px`
-            : `min(${width}px, max(${floor}px, calc(100vw - ${sidebar + pageMinWidth}px)))`,
-      }}
+      // columna desbordaría en ventanas justas.
+      style={{ ...style, width: `${shown}px` }}
     >
       {/* biome-ignore lint/a11y/useSemanticElements: separador interactivo (patrón «window splitter» de ARIA); <hr> no admite foco ni valor. */}
       <div
@@ -343,25 +364,16 @@ export function SideColumn({
         onPointerMove={(event) => {
           if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
           // La columna termina en el borde derecho de la ventana.
-          apply(document.documentElement.clientWidth - event.clientX)
+          apply(viewport - event.clientX)
         }}
-        onDoubleClick={() => apply(bounds.initial)}
+        // Guarda el de siempre tal cual: si hoy no cabe, lo recorta lo que se ve,
+        // y en una ventana más grande vuelve entero.
+        onDoubleClick={() => onResize(bounds.initial)}
         onKeyDown={(event) => {
-          // Desde el ancho que se ve, que puede ser menor que el guardado. Se
-          // calcula y no se mide: la transición de ancho lo cambia en el cuadro
-          // siguiente, y dos flechas seguidas partían ambas del ancho anterior.
-          const from = Math.min(width, fits())
-          const next =
-            event.key === "ArrowLeft"
-              ? from + STEP
-              : event.key === "ArrowRight"
-                ? from - STEP
-                : event.key === "Home"
-                  ? bounds.min
-                  : event.key === "End"
-                    ? fits()
-                    : null
-          if (next === null) return
+          // Desde el ancho que se ve, calculado y no medido: dos flechas seguidas
+          // no parten ambas del ancho anterior.
+          const next = keyTargets[event.key]
+          if (next === undefined) return
           event.preventDefault()
           apply(next)
         }}
