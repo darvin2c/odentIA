@@ -93,7 +93,7 @@ import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
-import { dismissUnsentNotice, warnUnsentNotice } from "../../components/agenda/notice-warning"
+import { undoUnsentNotice, warnUnsentNotice } from "../../components/agenda/notice-warning"
 import { dayShort, shortName, whenSaid } from "../../components/agenda/shared"
 import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
@@ -935,7 +935,7 @@ function AgendaPage() {
       const back = input.back
       const note = input.was ? movedNote(input.was, result.data) : undefined
       // Antes del aviso de siempre, para que su «Deshacer» quede encima; deshacer lo quita.
-      if (input.undoOf) dismissUnsentNotice(result.data.id)
+      if (input.undoOf) undoUnsentNotice(result.data.id)
       else warnUnsentNotice(result.data, { change: "movida", when: whenSaid(result.data.startsAt, TZ, today) })
       toast.success(text, {
         description: note,

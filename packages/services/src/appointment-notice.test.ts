@@ -387,6 +387,9 @@ describe("al cambiar la cita, el agente le avisa", () => {
     await deliver(c)
     const { items } = await run(c, (tx) => listMessages(tx, c.orgId, rosa.conversationId!, {}))
     expect(items.find((item) => item.direction === "out")?.buttons).toEqual(["No podré ir"])
+    // Al cancelarle una cita teniendo otra por venir, el aviso (que ofrece otra fecha) no sale: se dice.
+    const second = await book(c, rosa.patientId, later(5 * DAY), { notice: false })
+    expect((await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, second.id, "cancelada"))).notice).toEqual({ queued: false, why: "Ya tiene otra cita reservada" })
 
     // Basta que tenga por dónde el mensaje que sale en lugar del de siempre (el de «Confirmar»).
     const only = await clinic({ approved: ["aviso_cita_movida_confirmar"] })

@@ -3349,6 +3349,9 @@ export async function enqueueAppointmentNotice(
   const runtime = await adminRuntime(tx, orgId)
   if (!runtime.receptionOn) return { queued: false, why: "Sofi está apagada" }
   if (!runtime.adminOn) return { queued: false, why: "Argos está apagado" }
+  // Con otra cita por venir, el aviso de la cancelación (que ofrece otra fecha) no sale (`isJobStillValid`).
+  if (change === "cancelada" && (await hasFutureAppointment(tx, orgId, appt.patientId, now)))
+    return { queued: false, why: "Ya tiene otra cita reservada" }
   const contactId = await preferredContact(tx, orgId, appt.patientId)
   if (!contactId) return { queued: false, why: "No tiene un teléfono ni un correo para avisarle", byHand: true }
   // Quien recibe sus avisos puede no ser el paciente: lo que hay que avisarle a mano es a ella.
@@ -3370,18 +3373,18 @@ export async function enqueueAppointmentNotice(
   // Si pidió no recibir mensajes de la clínica, no se dice que el agente le avisa: no saldría.
   if (!(await mayWriteFirst(tx, orgId, contactId, purposeOfKind(kind))))
     return { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true, ...to }
-  // En pausa, el aviso queda como tarea del equipo (`deliverJob`); si no, sale si tiene por dónde.
-  const unreachable = runtime.agentsPaused ? null : await noticeUnreachable(tx, orgId, contactId, kind, appt.status)
-  const told = (queued: boolean): AppointmentNotice =>
-    runtime.agentsPaused
-      ? { queued, why: "Los agentes están en pausa: queda una tarea para avisarle" }
-      : unreachable
-        ? { queued: false, why: unreachable, byHand: true, ...to }
-        : { queued }
+  // En pausa, el aviso queda como tarea del equipo (`deliverJob`); si no, sale si tiene por dónde
+  // el mensaje que de verdad saldrá.
+  const told = async (queued: boolean, sent: AppointmentNoticeKey): Promise<AppointmentNotice> => {
+    if (runtime.agentsPaused) return { queued, why: "Los agentes están en pausa: queda una tarea para avisarle" }
+    const unreachable = await noticeUnreachable(tx, orgId, contactId, sent, appt.status)
+    return unreachable ? { queued: false, why: unreachable, byHand: true, ...to } : { queued }
+  }
   if (change === "movida") {
-    // Un aviso que aún no sale dice la fecha nueva al salir: no hace falta otro.
+    // Un aviso que aún no sale dice la fecha nueva al salir: no hace falta otro. El que sale es ese
+    // (el de reserva, si aún no salió): se mira su vía.
     const [waiting] = await tx
-      .select({ id: automationJob.id })
+      .select({ id: automationJob.id, kind: automationJob.kind })
       .from(automationJob)
       .where(
         and(
@@ -3392,7 +3395,7 @@ export async function enqueueAppointmentNotice(
         ),
       )
       .limit(1)
-    if (waiting) return told(true)
+    if (waiting) return told(true, waiting.kind === "aviso_cita_reservada" ? "aviso_cita_reservada" : "aviso_cita_movida")
   }
   // Sin vía igual se encola: el envío fallido queda en «qué pasó» y en Inicio.
   const job = await enqueueJob(tx, orgId, {
@@ -3405,7 +3408,7 @@ export async function enqueueAppointmentNotice(
     patientId: appt.patientId,
     payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
   })
-  return job ? told(true) : { queued: false }
+  return job ? told(true, kind) : { queued: false }
 }
 
 /**

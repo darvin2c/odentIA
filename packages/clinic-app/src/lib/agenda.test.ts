@@ -47,7 +47,7 @@ describe("lo que se dice del aviso a la persona", () => {
         { patientName: "Juan Rojas", notice: { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true, to: "Carmen Rojas" } },
         { change: "cancelada", when: "mañana a las 9:00" },
       ),
-    ).toBe("Carmen Rojas, que recibe los avisos de Juan Rojas, no recibirá el aviso de que se canceló su cita, que era mañana a las 9:00. Pidió no recibir mensajes de la clínica. Avísale tú.")
+    ).toBe("Carmen Rojas no recibirá el aviso de que se canceló la cita de Juan Rojas, que era mañana a las 9:00. Pidió no recibir mensajes de la clínica. Avísale tú.")
     // Al reservar, si tampoco le llegará el recordatorio, una sola orden.
     expect(noticeWarning({ patientName: "Pedro Ramírez", notice: byHand }, { change: "reservada", when: "mañana a las 10:00", reminderToo: true })).toBe(
       "Pedro Ramírez no recibirá el aviso de su cita, reservada para mañana a las 10:00, ni el recordatorio. Su número no tiene WhatsApp y no tiene correo registrado. Avísale tú ahora y un día antes.",

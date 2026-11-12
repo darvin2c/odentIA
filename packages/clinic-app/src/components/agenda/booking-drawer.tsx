@@ -35,6 +35,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import * as React from "react"
 import { z } from "zod"
 import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
+import { warnUnsentNotice } from "./notice-warning"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
@@ -398,11 +399,12 @@ export function BookingDrawer({
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         // Si tampoco le llegará el aviso, el recordatorio va en ese mismo aviso fijo: una sola orden (QA del 11 nov).
         const reach = result.data.reminderReach
-        const unsent = noticeWarning(result.data, {
-          change: "reservada",
+        const about = {
+          change: "reservada" as const,
           when: whenSaid(result.data.startsAt, timeZone, today),
           reminderToo: !!reach && reminderVia(reach) === null,
-        })
+        }
+        const unsent = noticeWarning(result.data, about)
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
           description:
             [
@@ -413,7 +415,9 @@ export function BookingDrawer({
               .join(" ") || undefined,
         })
         // Lo que hay que revisar después queda a la vista hasta cerrarlo: el cajón se cierra al reservar.
-        for (const note of [whatsappNote.current, consentNote.current, unsent]) {
+        // Uno por cita, como al moverla: si después se mueve, lo reemplaza.
+        warnUnsentNotice(result.data, about)
+        for (const note of [whatsappNote.current, consentNote.current]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
         // El control pedido en esta cita que no se sumó: su día no cae en su ventana (decisión B3).
