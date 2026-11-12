@@ -729,6 +729,20 @@
       "when": 1794452841916,
       "tag": "0103_hoja_membretada_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1794496495441,
+      "tag": "0104_fecha_del_documento",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1794496514016,
+      "tag": "0105_fecha_del_documento_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -4,12 +4,15 @@ import {
   documentMaxBytes,
   IMAGE_TYPE_LABELS,
   type ImageType,
+  isImageDocumentCategory,
   type PatientDocumentCategory,
   REPORT_STATUS_LABELS,
   type ReportStatus,
 } from "@odentia/clinical"
-import { formatDate } from "../../lib/clinical-journey"
+import { regionToday, zonedDateOf } from "@odentia/ui-patterns"
+import { formatDate, instantFromClinicValue } from "../../lib/clinical-journey"
 import { timeAgo } from "../../lib/crm"
+import { activeOrgTimeZone } from "../../lib/locale"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 
@@ -93,7 +96,9 @@ export function tomographyTypeLabel(): string {
 }
 
 export function categoryLabel(category: string): string {
-  return productUi().documents.imaging.categoryLabels[category] ?? CATEGORY_LABELS[category] ?? category
+  return (
+    productUi().documents.imaging.categoryLabels[category] ?? CATEGORY_LABELS[category] ?? category
+  )
 }
 
 /** Tipos de imagen que admite cada categoría, los del producto (vacío: no aplica). */
@@ -117,14 +122,43 @@ export function reportStatusLabel(status: string | null | undefined): string | n
   return REPORT_STATUS_LABELS[status as ReportStatus] ?? status
 }
 
-/** Fecha que cuenta para la historia: la de toma si se registró, si no la de subida. */
+/** Fecha que cuenta para la historia: la del documento (la de toma, en una imagen) si se registró, si no la de subida. */
 export function takenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
   return doc.capturedAt ?? doc.createdAt
 }
 
-/** «Tomada 30/09/2026» o «Subida 18/10/2026»: el mismo formato de fecha que el resto de los papeles. */
-export function formatTakenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
-  return `${doc.capturedAt ? "Tomada" : "Subida"} ${formatDate(takenAt(doc))}`
+/**
+ * Instante de la fecha de un archivo para un día elegido en la clínica: hoy, ahora
+ * (nunca en el futuro); otro día, su mediodía, que no se corre de fecha en ningún
+ * formato y se muestra solo como día. Sin día, `null`: vale la fecha de subida.
+ */
+export function capturedInstant(day: string): string | null {
+  if (!day) return null
+  if (day === regionToday()) return new Date().toISOString()
+  return instantFromClinicValue(`${day}T12:00`)
+}
+
+/** El día (`yyyy-mm-dd`, en la zona de la clínica) de la fecha de un archivo, para su selector. */
+export function capturedDay(iso: string | null | undefined): string {
+  return iso ? zonedDateOf(iso, activeOrgTimeZone()) : ""
+}
+
+/** Cómo se llama la fecha propia de un archivo: la de toma en una imagen, la del documento en lo demás. */
+export function documentDateLabel(category: string): string {
+  return isImageDocumentCategory(category) ? "Fecha de toma" : "Fecha del documento"
+}
+
+/**
+ * «Tomada 30/09/2026» (una imagen), «Del 30/09/2026» (un papel) o «Subida 18/10/2026»
+ * (sin fecha propia): solo el día, como el resto de los papeles.
+ */
+export function formatTakenAt(doc: {
+  category?: string
+  capturedAt?: string | null
+  createdAt: string
+}): string {
+  if (!doc.capturedAt) return `Subida ${formatDate(doc.createdAt)}`
+  return `${doc.category && !isImageDocumentCategory(doc.category) ? "Del" : "Tomada"} ${formatDate(doc.capturedAt)}`
 }
 
 export function encounterLabel(e: Encounter): string {

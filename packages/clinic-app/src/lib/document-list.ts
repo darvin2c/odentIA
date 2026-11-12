@@ -1,3 +1,4 @@
+import { isImageDocumentCategory } from "@odentia/clinical"
 import type { DocumentFilter } from "./patient-areas"
 
 /**
@@ -28,11 +29,10 @@ export function teethWords(teeth: readonly number[]): string | null {
   return `${teeth.length === 1 ? "Pieza" : "Piezas"} ${teeth.join(", ")}`
 }
 
-const IMAGE_CATEGORIES = new Set(["radiografia", "foto_clinica"])
 
 /** La radiografía o la foto: lo que se ve en el visor de imágenes y se compara. */
 export function isImageCategory(category: string): boolean {
-  return IMAGE_CATEGORIES.has(category)
+  return isImageDocumentCategory(category)
 }
 
 /**

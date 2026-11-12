@@ -196,6 +196,8 @@ function CalendarDayButton({
 
   return (
     <Button
+      // Sin el ref, `focus()` no llega al botón: las flechas movían el día marcado pero no el foco.
+      ref={ref}
       variant="ghost"
       size="icon"
       data-day={day.date.toLocaleDateString(locale?.code)}

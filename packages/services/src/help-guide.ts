@@ -1023,6 +1023,20 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "historia-anterior-fecha",
+        q: "¿Cómo subo la historia escaneada que trae de otra clínica?",
+        a: "En su página › Clínica › Documentos, «Nuevo» › «Imagen o archivo». La historia escaneada va como «Informe». Cada archivo lleva su fecha: «Fecha de toma» en una imagen, y «Fecha del documento» en lo demás, la que tiene el papel (si abarca varios años, la de su última anotación). Con varios archivos, «Para todos» pone la misma categoría y la misma fecha a los que no tienen una propia, y después cambias la de cualquiera. La Historia lo pone en ese día y dice «Subido el …» cuando entró después, y Documentos lo agrupa por esa fecha. Sin fecha, vale el día en que se sube; no puede ser futura. A una imagen elige también su tipo. Lo hace quien atiende: recepción no ve Documentos.",
+        forms: ["subir la historia de otra clinica", "fecha del documento", "subir papeles viejos", "historia anterior del paciente", "en que fecha sale una imagen antigua", "subir muchos archivos a la vez", "subir papeles viejos con su fecha", "un paciente trajo su historia escaneada de otra clinica como la subo"],
+        area: "clinica",
+      },
+      {
+        id: "corregir-fecha-archivo",
+        q: "¿Cómo corrijo o cambio la fecha de un documento?",
+        a: "Ábrelo con «Ver» en Documentos y, en sus detalles, toca «Corregir la fecha»: eliges la correcta (vacía, vale la de subida) y escribes el motivo. Se guarda como una versión nueva: la fecha anterior, tu nombre y el motivo quedan en «Cambios del archivo», y la Historia lo pasa al día nuevo. Lo puede hacer quien atiende. Un archivo retirado ya no se corrige, y el PDF que generó la firma de un consentimiento lleva la fecha de la firma.",
+        forms: ["corregir la fecha de un archivo", "cambiar la fecha de una imagen", "me equivoque de fecha en un documento", "fecha equivocada en un archivo", "puse mal el año de un papel como lo cambio", "puse mal la fecha", "me equivoque de fecha en un archivo", "como cambio la fecha de un informe ya subido"],
+        area: "clinica",
+      },
+      {
         id: "tomografia",
         q: "¿Cómo veo una tomografía?",
         a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana. «Panorámica» arma la panorámica con cinco cortes de la pieza: «Ir a la pieza» lleva a la pieza de la orden, también a las terceras molares, y la barra «Cortes» recorre el arco. «Cortes» la muestra desde arriba, de frente y de lado, y «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres, con un clic o con el teclado (las flechas mueven la mira y Enter marca): quedan con tu nombre y son orientativas; para planificar una cirugía, confírmalas en el programa del tomógrafo. Si quitas una medida, «Deshacer» la vuelve a poner. Si el arco no sigue los dientes, «Más» › «Ajustar el arco» y «Terminar y guardar»: queda guardado con la tomografía. «Informe y datos» muestra el informe, la toma y las piezas sin salir de la imagen. Si el estudio trae más de una serie, «Serie» arriba elige cuál ver. En el celular, la pieza y las medidas van en la hoja de abajo.",

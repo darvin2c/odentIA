@@ -168,7 +168,7 @@ En la mesa, **su pregunta es: ¿se puede, y qué rompe?**
    - ¿Repetirla duplica algo (doble clic, reintento, dos pestañas)? ¿Un efecto externo (mensaje, cobro, PDF) se puede repetir sin querer?
    - ¿Es la misma operación para recepción, portal y agente, o hay una copia de la regla en una ruta, en la UI o en una herramienta del modelo?
 3. **Lo que promete la pantalla contra lo que hace el servidor.** Cada botón visible: ¿el servidor lo permite a ese rol? Cada botón escondido: ¿el servidor lo rechaza igual? Cada texto de estado: ¿coincide con lo que guardó?
-4. **Datos delicados:** dinero (redondeo, moneda, impuestos, que sumen lo mismo en todas partes), fechas y horas (zona de la clínica, cambio de día, fechas en el límite), datos clínicos (que nada se borre o se pise sin rastro) y aislamiento entre clínicas (RLS, siempre en local).
+4. **Datos delicados:** dinero (redondeo, moneda, impuestos, que sumen lo mismo en todas partes), fechas y horas (zona de la clínica, cambio de día, fechas en el límite, y la fecha que dice la persona frente a la que guardó el sistema: que cada lugar que la muestra use la misma), datos clínicos (que nada se borre o se pise sin rastro) y aislamiento entre clínicas (RLS, siempre en local).
 5. **Cada producto.** ¿La lógica vive en lo común o tiene variante dental, médica u óptica? ¿Cada variante hace lo mismo?
 6. **Lo que ya falló.** `git log` del área y los pendientes de las últimas entregas en la memoria: ¿volvió algo corregido? ¿Quedó sin hacer algo que se dejó pendiente?
 

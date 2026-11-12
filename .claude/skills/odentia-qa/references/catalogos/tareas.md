@@ -152,6 +152,22 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 
 **Ya falló:** el nombre no traía primero a quien venía hoy y su cita ya empezada no salía; el título decía seis días y se veían siete; el total de «Agenda de hoy» no era la suma de sus grupos.
 
+### T-REC-13 Dejar en la ficha los papeles que trae un paciente nuevo
+**Dónde:** la ficha (`R/_org/people.$personId.tsx`): Clínica › Documentos (quien atiende) y «Subir tomografía» (recepción).
+- [ ] Desde recepción sé dónde dejar la historia escaneada y las radiografías, o la pantalla dice a quién dárselas (hoy recepción solo sube la tomografía).
+- [ ] Cada papel lleva su fecha (la de la historia, el consentimiento o el informe), no solo la de subida, y la puedo corregir después sin retirar el archivo.
+- [ ] El mismo papel tiene la misma fecha en Documentos y en la Historia.
+- [ ] Con muchos papeles no repito la categoría ni la fecha uno por uno («Para todos»), también a 390 px.
+- [ ] Interrupción: cierro el cajón a medias y, o me pregunta antes de perderlo, o lo elegido sigue ahí.
+- [ ] ¿Se guardó? Después de subir, el botón dice «Listo», no «Cancelar».
+- [ ] La Ayuda, preguntada con mis palabras («radiografías», «historia escaneada»), nombra una pantalla que mi rol sí tiene.
+- [ ] Si el odontólogo no puede registrar pacientes, la pantalla o la Ayuda dicen quién sí (hoy la Ayuda le promete «Nuevo paciente»).
+- [ ] La Ayuda habla de «fecha del documento» para un papel y de «fecha de toma» solo para una imagen.
+- [ ] Hay un lugar claro para una historia escaneada de otra clínica (la Ayuda dice «Informe»).
+- [ ] Al corregir la fecha, el visor no me saca de donde estaba sin decirlo (hoy salta de «1 de 6» a «6 de 6»).
+
+**Ya falló:** «Subir tomografía» rechaza una radiografía y un PDF; una historia de 2018–2024 y un consentimiento de 2019 quedaban «Subida 12/11/2026»; una radiografía de marzo de 2024 salía bajo noviembre de 2026 en la Historia; la Ayuda mandó a recepción a una pestaña que no tiene (mesa del 12 nov); sin el modelo, la Ayuda no encontró «corregir la fecha» dicho con otras palabras (QA del 12 nov: se sumaron las frases).
+
 ---
 
 ## Caja
@@ -339,3 +355,5 @@ Todavía sin tareas: ninguna ronda recorrió vistIA con la voz novato. La primer
 | CT20 | «Llama: no puede a las 10, ¿a las 11?» Mientras tanto, otra recepcionista reserva las 11. | REC-04 | La cita queda a las 11, o la pantalla avisa que se ocupó antes de mover. |
 | CT21 | La paciente cancela por error desde su enlace y lo vuelve a abrir. | PAC-02, REC-06 | Puede reservar otra o ve a quién escribir; recepción ve la cancelación en Inicio. |
 | CT22 | «¿A qué hora venía la señora Dora?» Su cita de hoy ya empezó. | REC-12 | La encuentra por su nombre, primera, con su cita de hoy. |
+| CT23 | «Llegó un paciente de otra clínica con su historia escaneada de 2018 a 2024 y una radiografía. Déjalas en su ficha para que el doctor las vea.» | REC-01, REC-13 | La historia queda con su fecha, no con la de hoy; la radiografía en la fecha en que se tomó, igual en Documentos y en la Historia. |
+| CT24 | «Hoy trae seis papeles juntos: tres radiografías, un consentimiento de 2019, un informe de 2023 y una foto.» En el celular. | REC-13 | Los sube sin repetir la categoría seis veces y cada uno queda en su año. |

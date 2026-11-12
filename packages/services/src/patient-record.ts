@@ -34,6 +34,7 @@ import {
   HL7_IDENTIFIER_TYPE_SYSTEM,
   hl7DocumentTypeCode,
   isDiagnosisSystem,
+  isImageDocumentCategory,
   PRESCRIPTION_STATUS_FHIR,
   SEX_LABELS,
   SEX_TO_FHIR_GENDER,
@@ -59,7 +60,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import {
@@ -70,6 +71,7 @@ import {
   dayWords,
   documentFormat,
   SIZE,
+  type Zone,
 } from "./document-kit.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -250,7 +252,8 @@ export async function loadPatientRecord(
     .select()
     .from(patientDocument)
     .where(and(byPatient(patientDocument), isNull(patientDocument.retiredAt)))
-    .orderBy(asc(patientDocument.createdAt))
+    // Por su fecha (la de toma, en una imagen), como en la Historia; sin ella, la de subida.
+    .orderBy(asc(sql`coalesce(${patientDocument.capturedAt}, ${patientDocument.createdAt})`), asc(patientDocument.createdAt))
   const appointments = await tx
     .select()
     .from(appointment)
@@ -582,9 +585,7 @@ export async function renderPatientRecordPdf(
       tone: "gray",
     })
     kit.bullets(
-      record.documents.map(
-        (d) => `${d.label} · ${dayTimeWords(d.capturedAt ?? d.createdAt, zone)}`,
-      ),
+      record.documents.map((d) => `${d.label} · ${documentDateWords(d, zone)}`),
     )
   }
 
@@ -931,6 +932,10 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
             contentType: d.contentType,
             title: d.label,
             url: `documentos/${documentFileName(d)}`,
+            // FHIR R4 Attachment.creation: cuándo se hizo el papel (o se tomó la imagen);
+            // `date` es cuándo entró a la ficha.
+            // Solo el día (FHIR admite fecha sola): un día elegido no tiene hora.
+            ...(d.capturedAt ? { creation: clinicDay(d.capturedAt, record.clinic.timezone) } : {}),
           },
         },
       ],
@@ -950,6 +955,24 @@ function diagnosisCodeable(system: string | null, code: string | null, text: str
     ...(code && uri ? { coding: [{ system: uri, code }] } : {}),
     text: text ?? code ?? "Sin descripción",
   }
+}
+
+/** El día (AAAA-MM-DD) de un instante en la zona de la clínica. */
+function clinicDay(value: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(value)
+}
+
+/**
+ * La fecha de un documento en la copia: su día (la de toma, en una imagen), sin una
+ * hora que nadie puso, y cuándo se subió; sin fecha propia, solo cuándo se subió.
+ */
+export function documentDateWords(
+  d: { category: string; capturedAt: Date | null; createdAt: Date },
+  zone: Zone,
+): string {
+  const uploaded = `subido el ${dayTimeWords(d.createdAt, zone)}`
+  if (!d.capturedAt) return uploaded
+  return `${isImageDocumentCategory(d.category) ? "tomada el" : "del"} ${dayWords(d.capturedAt, zone)} (${uploaded})`
 }
 
 /** El nombre de un documento dentro del ZIP: su id y su extensión, para que no choquen. */

@@ -259,7 +259,8 @@ export async function getToothHistory(
     events.push({
       kind: "documento",
       id: doc.id,
-      at: doc.createdAt,
+      // El día de su fecha (la de toma), como en la Historia y en Documentos.
+      at: doc.capturedAt ?? doc.createdAt,
       title: doc.label,
       code: doc.category,
       surfaces: [],

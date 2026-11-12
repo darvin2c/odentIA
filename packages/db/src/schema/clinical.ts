@@ -627,7 +627,10 @@ export const patientDocument = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** Subtipo de imagen diagnóstica: sus valores los dice el producto (ADR 0079). */
     imageType: text("image_type"),
-    /** Fecha de toma; la de subida es created_at. */
+    /**
+     * Fecha del documento (la de toma, en una imagen); la de subida es created_at.
+     * Es la vigente: se corrige solo con una versión nueva de su contexto, con su motivo.
+     */
     capturedAt: timestamp("captured_at", { withTimezone: true }),
     /** Origen: equipo, sala o centro externo. */
     source: text("source"),
@@ -1851,6 +1854,14 @@ export const patientDocumentContext = pgTable(
     siteSystem: text("site_system"),
     siteCodes: text("site_codes").array().notNull().default(sql`'{}'`),
     tags: text("tags").array().notNull().default(sql`'{}'`),
+    /**
+     * La fecha del documento en esta versión (la de toma, en una imagen); nula,
+     * vale la de subida. Cada versión la lleva, así el historial dice cuál era
+     * antes de corregirla. La vigente se copia en `patient_document.captured_at`.
+     */
+    capturedAt: timestamp("captured_at", { withTimezone: true }),
+    /** Por qué se corrigió la fecha en esta versión; nulo si no cambió. */
+    dateReason: text("date_reason"),
     authorUserId: text("author_user_id").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1861,6 +1872,10 @@ export const patientDocumentContext = pgTable(
     ),
     index("patient_document_context_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_document_context_document_idx").on(table.documentId),
+    check(
+      "patient_document_context_date_reason_check",
+      sql`${table.dateReason} IS NULL OR char_length(${table.dateReason}) BETWEEN 1 AND 500`,
+    ),
   ],
 )
 

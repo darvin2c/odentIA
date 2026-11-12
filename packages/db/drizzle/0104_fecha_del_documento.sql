@@ -1,0 +1,3 @@
+ALTER TABLE "patient_document_context" ADD COLUMN "captured_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "patient_document_context" ADD COLUMN "date_reason" text;--> statement-breakpoint
+ALTER TABLE "patient_document_context" ADD CONSTRAINT "patient_document_context_date_reason_check" CHECK ("patient_document_context"."date_reason" IS NULL OR char_length("patient_document_context"."date_reason") BETWEEN 1 AND 500);

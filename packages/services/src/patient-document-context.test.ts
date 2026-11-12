@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import { treatmentBudget, treatmentPlan, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -355,4 +356,104 @@ it("listEncounterDocuments e hidratación por lote siguen el contexto vigente", 
     listEncounterDocuments(tx, "org_a", p.id, encounterB.id),
   )
   expect(inBAfter).toHaveLength(0)
+})
+
+it("corrige la fecha del documento con su motivo: la versión la guarda, el archivo la copia y nada la cambia por fuera", async () => {
+  await seedUser()
+  const p = await seedPatient("org_a", "Doc Fecha")
+  const created = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatientDocument(tx, "org_a", ACTOR, p.id, {
+      ...docInput("historia-anterior"),
+      category: "informe",
+      contentType: "application/pdf",
+      capturedAt: "2019-03-03T17:00:00Z",
+    }),
+  )
+  const correct = (input: Parameters<typeof correctDocumentContext>[5]) =>
+    withOrgContext(appDb, "org_a", (tx) => correctDocumentContext(tx, "org_a", ACTOR, p.id, created.id, input))
+  // Cambiarla pide su motivo, y nunca a una fecha futura.
+  await expect(correct({ expectedVersion: 1, capturedAt: "2023-03-03T17:00:00Z" })).rejects.toMatchObject({
+    fields: { dateReason: "Escribe por qué cambias la fecha." },
+  })
+  await expect(
+    correct({ expectedVersion: 1, capturedAt: new Date(Date.now() + 86_400_000).toISOString(), dateReason: "Mañana" }),
+  ).rejects.toMatchObject({ fields: { capturedAt: "La fecha del documento no puede ser futura" } })
+  // Un año mal escrito (1019 por 2019) no entra.
+  await expect(correct({ expectedVersion: 1, capturedAt: "1019-03-03T17:00:00Z", dateReason: "Año" })).rejects.toMatchObject({
+    fields: { capturedAt: "La fecha del documento no puede ser anterior a 1900" },
+  })
+
+  const fixed = await correct({ expectedVersion: 1, capturedAt: "2023-03-03T17:00:00Z", dateReason: "Puse el año equivocado" })
+  expect(fixed.contextVersion).toBe(2)
+  expect(fixed.capturedAt?.toISOString()).toBe("2023-03-03T17:00:00.000Z")
+  const read = await withOrgContext(appDb, "org_a", (tx) => getPatientDocument(tx, "org_a", p.id, created.id))
+  expect(read.capturedAt?.toISOString()).toBe("2023-03-03T17:00:00.000Z")
+
+  // Corregir solo los vínculos lleva la fecha vigente, sin motivo de fecha.
+  await correct({ expectedVersion: 2, tags: ["historia"] })
+  // Vacía, vuelve a la de subida.
+  const cleared = await correct({ expectedVersion: 3, capturedAt: null, dateReason: "No tiene fecha" })
+  expect(cleared.capturedAt).toBeNull()
+
+  const history = await withOrgContext(appDb, "org_a", (tx) => listDocumentContextHistory(tx, "org_a", p.id, created.id))
+  expect(history.map((v) => [v.version, v.capturedAt?.toISOString() ?? null, v.dateReason])).toEqual([
+    [1, "2019-03-03T17:00:00.000Z", null],
+    [2, "2023-03-03T17:00:00.000Z", "Puse el año equivocado"],
+    [3, "2023-03-03T17:00:00.000Z", null],
+    [4, null, "No tiene fecha"],
+  ])
+
+  // La base no deja cambiar la fecha del archivo sin su versión.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`update patient_document set captured_at = '2020-01-01T12:00:00Z' where id = ${created.id}::uuid`),
+    ),
+  ).rejects.toMatchObject({ cause: expect.objectContaining({ message: expect.stringContaining("versión nueva de su contexto") }) })
+})
+
+it("la fecha del PDF que generó la firma de un consentimiento no se corrige, y la base pide el motivo de toda fecha cambiada", async () => {
+  await seedUser()
+  const p = await seedPatient("org_a", "Doc Firma")
+  const pdf = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatientDocument(tx, "org_a", ACTOR, p.id, {
+      ...docInput("consentimiento-firmado"),
+      category: "consentimiento",
+      contentType: "application/pdf",
+    }),
+  )
+  const [template] = await ownerDb
+    .insert(consentTemplate)
+    .values({ organizationId: "org_a", key: `exo-${pdf.id}`, title: "Exodoncia", body: "Texto", status: "publicado" })
+    .returning()
+  await ownerDb.insert(consentDocument).values({
+    organizationId: "org_a",
+    templateId: template!.id,
+    templateVersion: 1,
+    bodySnapshot: "Texto",
+    titleSnapshot: "Exodoncia",
+    patientId: p.id,
+    signerName: "Doc Firma",
+    status: "firmado",
+    signedAt: new Date(),
+    pdfDocumentId: pdf.id,
+  })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      correctDocumentContext(tx, "org_a", ACTOR, p.id, pdf.id, {
+        expectedVersion: 1,
+        capturedAt: "2026-01-05T17:00:00Z",
+        dateReason: "Otra fecha",
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "DOCUMENT_DATE_FIXED" })
+  // Sin el servicio: una versión con otra fecha y sin motivo no entra.
+  const other = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatientDocument(tx, "org_a", ACTOR, p.id, { ...docInput("rx-sin-motivo") }),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`insert into patient_document_context (organization_id, patient_id, document_id, version, captured_at)
+        values ('org_a', ${p.id}::uuid, ${other.id}::uuid, 2, '2020-01-01T12:00:00Z')`),
+    ),
+  ).rejects.toMatchObject({ cause: expect.objectContaining({ message: expect.stringContaining("pide su motivo") }) })
 })
