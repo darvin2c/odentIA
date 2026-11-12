@@ -244,7 +244,9 @@
     {"q":"y le avisa al cliente cuando esta listo","expected":["pedidos"],"producto":"vistia","antes":{"q":"como marco como va un pedido","donde":"Pedidos"},"faqs":["¿Se le avisa cuando sus lentes están listos?"]},
     {"q":"y por que me sale lo del oftalmologo","expected":["pacientes"],"producto":"vistia","antes":{"q":"como anoto el examen de la vista","donde":"Pacientes"},"faqs":["¿Por qué me dice que conviene que lo vea un oftalmólogo?"]},
     {"q":"y donde le pongo la marca","expected":["inventario"],"producto":"vistia","antes":{"q":"como agrego un producto nuevo","donde":"Inventario"},"faqs":["¿Dónde pongo la marca y el modelo de una montura?"]},
-    {"q":"soporte me escribio que necesita acceso a la clinica, que tengo que hacer","expected":["inicio"],"producto":"odentia","faqs":["Soporte me pidió acceso de diagnóstico, ¿qué hago?"]},
+    {"q":"soporte me escribio que necesita acceso a la clinica, que tengo que hacer","expected":["inicio"],"producto":"odentia","faqs":["Soporte me pidió acceso, ¿qué hago?"]},
+    {"q":"como le quito el acceso a soporte","expected":["inicio"],"producto":"odentia","faqs":["¿Cómo le quito el acceso a soporte?"]},
+    {"q":"soporte puede ver a mis pacientes y su historia","expected":["inicio"],"producto":"odentia","faqs":["¿Soporte puede ver a mis pacientes?"]},
     {"q":"subi el comprobante del pago y me sale rechazado","expected":["plan-y-pagos"],"producto":"odentia","faqs":["Mi comprobante dice Rechazado, ¿qué hago?"]}
   ],
   "control": [
