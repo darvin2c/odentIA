@@ -93,6 +93,7 @@ import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
+import { warnUnsentNotice } from "../../components/agenda/notice-warning"
 import { dayShort, shortName } from "../../components/agenda/shared"
 import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
@@ -951,6 +952,7 @@ function AgendaPage() {
             }
           : undefined,
       })
+      warnUnsentNotice(result.data)
       setMessage(note ? `${text}. ${note}` : text)
       await invalidate()
     },

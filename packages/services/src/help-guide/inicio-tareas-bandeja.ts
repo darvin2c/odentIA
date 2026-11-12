@@ -281,6 +281,12 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
         forms: ["quien le mando ese mensaje automatico", "que es por que salio"],
         needs: "agent.read",
       },
+      {
+        id: "bandeja-botones",
+        q: "¿Cómo sé si le llegó «Confirmar»?",
+        a: "Bajo un mensaje que salió con botones dice «Con estos botones:» y sus nombres («Confirmar», «No podré ir»…). Los toca la persona en su teléfono; tú solo los lees. Cuando toca uno, te llega como su mensaje, con el nombre del botón.",
+        forms: ["le llegó con confirmar", "tocó confirmar", "qué opciones tenía el recordatorio", "con qué opciones le llegó"],
+      },
     ],
   },
 ]

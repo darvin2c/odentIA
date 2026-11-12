@@ -28,7 +28,7 @@ import {
 import { setProfessionalSchedule } from "./availability.js"
 import { createConnection } from "./connections.js"
 import { createContact, listContacts } from "./contacts.js"
-import { listConversations, writeToPerson } from "./conversations.js"
+import { listConversations, listMessages, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
 import {
@@ -291,7 +291,8 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const c = await clinic()
     const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
     const off = await book(c, rosa.patientId, later(3 * DAY))
-    expect(off.notice).toEqual({ queued: false })
+    // Lo decidió la clínica: se dice, sin pedir nada.
+    expect(off.notice).toEqual({ queued: false, why: "«Recordar la cita» está apagada" })
     await lineOn(c)
     // El agente o el enlace ya se lo dijeron en la conversación.
     const told = await book(c, rosa.patientId, later(4 * DAY), { notice: false })
@@ -363,8 +364,39 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const c = await clinic({ admin: false })
     await lineOn(c)
     const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
-    expect((await book(c, rosa.patientId, later(3 * DAY))).notice).toEqual({ queued: false })
+    expect((await book(c, rosa.patientId, later(3 * DAY))).notice).toEqual({ queued: false, why: "Argos está apagado" })
     expect(await jobsOf(c)).toEqual([])
+  })
+
+  it("si el aviso no le llegará, dice por qué y si hay que avisarle a mano", async () => {
+    // Sin WhatsApp conectado ni correo no hay por dónde: igual queda el envío, que fallará y quedará en «qué pasó».
+    const lone = await clinic({ whatsapp: false })
+    await lineOn(lone)
+    const pedro = await person(lone, "Pedro Ramírez", { consent: ["recordatorio"] })
+    expect((await book(lone, pedro.patientId, later(3 * DAY))).notice).toEqual({ queued: false, why: "La clínica no tiene WhatsApp conectado", byHand: true })
+    expect((await jobsOf(lone)).map((job) => job.kind)).toEqual(["aviso_cita_reservada"])
+
+    // Pidió no recibir ningún mensaje de la clínica.
+    const c = await clinic()
+    await lineOn(c)
+    const ana = await person(c, "Ana Ríos", { refused: ["avisos"], openWindow: true })
+    expect((await book(c, ana.patientId, later(3 * DAY))).notice).toEqual({ queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true })
+    // Con vía, va en camino sin más; y en la Bandeja se ve con qué botones salió.
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    expect((await book(c, rosa.patientId, later(4 * DAY))).notice).toEqual({ queued: true })
+    await deliver(c)
+    const { items } = await run(c, (tx) => listMessages(tx, c.orgId, rosa.conversationId!, {}))
+    expect(items.find((item) => item.direction === "out")?.buttons).toEqual(["No podré ir"])
+
+    // Basta que tenga por dónde el mensaje que sale en lugar del de siempre (el de «Confirmar»).
+    const only = await clinic({ approved: ["aviso_cita_movida_confirmar"] })
+    await lineOn(only)
+    const luis = await person(only, "Luis Paredes", { consent: ["recordatorio"] })
+    const first = await book(only, luis.patientId, later(3 * DAY), { notice: false })
+    const moved = await run(only, (tx) =>
+      moveAppointment(tx, only.orgId, only.ownerId, first.id, { expectedVersion: first.version, startsAt: later(5 * DAY).toISOString(), outsideSchedule: true }),
+    )
+    expect(moved.notice).toEqual({ queued: true })
   })
 
   it("mover una cita cuyo aviso aún no sale no deja otro aviso, y sus recordatorios cuentan desde la hora nueva", async () => {

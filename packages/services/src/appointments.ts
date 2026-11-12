@@ -34,6 +34,7 @@ import { alias } from "drizzle-orm/pg-core"
 import { requireCanAttend } from "./attending.js"
 import {
   appointmentConfirmationPlan,
+  type AppointmentNotice,
   type ConfirmationPlan,
   appointmentRemindersVia,
   cancelPendingForAppointment,
@@ -214,9 +215,9 @@ export interface AppointmentItem {
   encounter: AppointmentEncounterRef | null
   /**
    * Solo al reservar, mover o cancelar: si el agente le avisará a la persona
-   * («Recordar la cita»). Ausente en las lecturas.
+   * («Recordar la cita») y, si no, por qué. Ausente en las lecturas.
    */
-  notice?: { queued: boolean }
+  notice?: AppointmentNotice
   /**
    * Cita de prueba (ADR 0094): de qué prueba salió, quién la hizo en «Probar»
    * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.

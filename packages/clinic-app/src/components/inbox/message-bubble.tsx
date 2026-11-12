@@ -206,6 +206,19 @@ export function MessageBubble({
         ) : (
           msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>
         )}
+        {/* Los botones con que salió: los toca la persona; aquí solo se leen (no parecen botones). */}
+        {out && msg.buttons && msg.buttons.length > 0 ? (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span>Con estos botones:</span>
+            <ul className="contents" aria-label="Botones que recibe la persona">
+              {msg.buttons.map((title, index) => (
+                <li key={`${index}-${title}`} className="rounded bg-muted px-1.5 py-0.5">
+                  {title}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div
           className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
         >

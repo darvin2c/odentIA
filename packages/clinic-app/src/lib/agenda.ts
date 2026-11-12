@@ -85,8 +85,11 @@ export interface AgendaAppointment {
   /** De dónde salió la cita: recepción, una conversación, el agente o el enlace de reserva. */
   source?: string
   conversationId?: string | null
-  /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
-  notice?: { queued: boolean }
+  /**
+   * Solo al reservar, mover o cancelar: si el agente le avisará a la persona y, si no le llegará,
+   * por qué (`why`, una frase sin punto) y si hay que avisarle a mano (`byHand`).
+   */
+  notice?: { queued: boolean; why?: string; byHand?: boolean }
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   visit: AppointmentVisit
@@ -392,7 +395,25 @@ export function movedNote(
       : before.status === "programada" && after.status === "confirmada"
         ? "Vuelve a quedar confirmada."
         : null,
-    after.notice?.queued ? "El agente le avisa la nueva fecha." : null,
+    noticeLine(after.notice, "El agente le avisa la nueva fecha."),
   ]
   return notes.filter(Boolean).join(" ") || undefined
+}
+
+/**
+ * Lo que el aviso flotante dice del aviso a la persona: `sent` si va en camino; si no le llegará,
+ * por qué, sin pedir nada cuando lo decidió la clínica o quedó una tarea. Lo que hay que avisarle
+ * a mano va aparte y fijo (`noticeWarning`): un aviso que sale siempre deja de leerse (mesa del 11 nov).
+ */
+export function noticeLine(notice: AgendaAppointment["notice"], sent: string): string | null {
+  if (!notice || notice.byHand) return null
+  if (notice.why) return notice.queued ? `${notice.why}.` : `No se le avisa. ${notice.why}.`
+  return notice.queued ? sent : null
+}
+
+/** El aviso que no le llegará por algo de la persona, para avisarle a mano: queda a la vista hasta cerrarlo. */
+export function noticeWarning(appointment: Pick<AgendaAppointment, "notice" | "patientName">): string | null {
+  const notice = appointment.notice
+  if (!notice?.byHand || !notice.why) return null
+  return `${appointment.patientName} no recibirá el aviso. ${notice.why}. Avísale tú.`
 }

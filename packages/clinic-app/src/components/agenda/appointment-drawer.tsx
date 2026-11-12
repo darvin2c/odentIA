@@ -48,6 +48,7 @@ import {
   appointmentShortWords,
   doneForWords,
   movedNote,
+  noticeLine,
   professionalSaid,
   visitLabel,
   visitState,
@@ -67,6 +68,7 @@ import { CoordinationControls } from "../patient/plan/plan-coordination"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { announceVisitStatus, undoCame, useAppointmentArrival } from "./arrival"
+import { warnUnsentNotice } from "./notice-warning"
 import { TestAppointmentDrawer } from "./test-appointment-drawer"
 import { dayShort, rangeSaid, whenSaid } from "./shared"
 import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
@@ -239,9 +241,9 @@ function RealAppointmentDrawer({
         result.data.status === "atendida"
       )
         announceVisitStatus(result.data, { onUndone: () => void onChanged() })
-      else
+      else {
         toast.success(STATUS_DONE[result.data.status], {
-          description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
+          description: noticeLine(result.data.notice, "El agente le avisa y le ofrece otra fecha.") ?? undefined,
           // Cancelada: se ofrece otro día con lo mismo (servicio y profesional), sin volver a elegirlo.
           ...(result.data.status === "cancelada" && canWrite
             ? {
@@ -256,6 +258,8 @@ function RealAppointmentDrawer({
               }
             : {}),
         })
+        warnUnsentNotice(result.data)
+      }
       setActionError("")
       await onChanged()
       if (result.data.status === "cancelada") {
@@ -374,6 +378,7 @@ function RealAppointmentDrawer({
           // Confirmó otro día: el nuevo queda por confirmar, y se dice.
           { description: movedNote(appointment, result.data) },
         )
+        warnUnsentNotice(result.data)
         setStillConfirmed(false)
         setMode("view")
         await onChanged()

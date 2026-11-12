@@ -52,6 +52,7 @@ import {
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
   type AutomationMessage,
+  type AutomationMessageKey,
   automationMessageOf,
   CHOOSE_MESSAGES_LINK,
   generalPermissionButtons,
@@ -3281,18 +3282,49 @@ const APPOINTMENT_NOTICE_KINDS: ReadonlySet<string> = new Set(Object.values(NOTI
  * recordatorios, el horario de silencio y la vía que corresponda (respuesta,
  * mensaje aprobado o correo). No espera al día siguiente por el tope de un
  * mensaje al día, porque la cita cambió hoy, pero cuenta como el mensaje del
- * día de esa persona (ADR 0027). Devuelve si quedó en camino.
+ * día de esa persona (ADR 0027). Devuelve si quedó en camino y, si no le llegará,
+ * por qué (`AppointmentNotice`): la Agenda se lo dice a quien la cambió.
  */
+/** Lo que dice el aviso de un cambio de cita al equipo que lo hizo. */
+export interface AppointmentNotice {
+  /** Quedó en camino (o, con los agentes en pausa, una tarea para avisarle). */
+  queued: boolean
+  /**
+   * Por qué no le llegará como siempre, en una frase para el equipo y sin punto final: lo decidió
+   * la clínica («Recordar la cita» apagada), queda una tarea, o algo de la persona. Ausente si va en
+   * camino o no hacía falta avisar (una cita de prueba, una que ya pasó).
+   */
+  why?: string
+  /** No le llegará por algo de la persona (no hay por dónde, o pidió no recibir mensajes): hay que avisarle a mano. */
+  byHand?: boolean
+}
+
+/** El mensaje que puede salir en lugar del aviso de siempre, si tiene por dónde (el de «Confirmar», el de los datos). */
+const NOTICE_INSTEAD: Partial<Record<AppointmentNoticeKey, AutomationMessageKey[]>> = {
+  aviso_cita_movida: [MOVED_TO_CONFIRM_KEY],
+  aviso_cita_reservada: [APPOINTMENT_DATA_NOTICE_KEY],
+}
+
+/**
+ * Por qué no hay por dónde escribirle el aviso, con las palabras del envío (`noRoute`); nulo si el
+ * de siempre o el que sale en su lugar tienen vía. Lo mismo que decidirá la entrega.
+ */
+async function noticeUnreachable(tx: Db, orgId: string, contactId: string, kind: AppointmentNoticeKey): Promise<string | null> {
+  let first: string | null = null
+  for (const key of [kind, ...(NOTICE_INSTEAD[kind] ?? [])]) {
+    const route = await previewMessageRoute(tx, orgId, contactId, await currentAutomationMessage(tx, orgId, key))
+    if (!("cause" in route)) return null
+    first ??= route.detail
+  }
+  return first
+}
+
 export async function enqueueAppointmentNotice(
   tx: Db,
   orgId: string,
   appointmentId: string,
   change: AppointmentChange,
-): Promise<{ queued: boolean }> {
-  const rule = await enabledLine(tx, orgId, "recordatorio_cita")
-  if (!rule?.agentPart) return { queued: false }
-  const runtime = await adminRuntime(tx, orgId)
-  if (!runtime.adminOn || !runtime.receptionOn) return { queued: false }
+): Promise<AppointmentNotice> {
   const [appt] = await tx
     .select()
     .from(appointment)
@@ -3303,11 +3335,29 @@ export async function enqueueAppointmentNotice(
   if (!appt || appt.startsAt.getTime() <= now.getTime()) return { queued: false }
   const standing = appt.status === "programada" || appt.status === "confirmada"
   if (change === "cancelada" ? appt.status !== "cancelada" : !standing) return { queued: false }
+  // Una cita de prueba no le escribe a nadie (ADR 0094): no hay nada que decir.
+  if (appt.isTest) return { queued: false }
+  // Lo que decidió la clínica se dice, sin pedir nada (mesa del 11 nov).
+  const rule = await enabledLine(tx, orgId, "recordatorio_cita")
+  if (!rule) return { queued: false, why: "«Recordar la cita» está apagada" }
+  if (!rule.agentPart) return { queued: false, why: "En «Recordar la cita», los avisos los da tu equipo" }
+  const runtime = await adminRuntime(tx, orgId)
+  if (!runtime.receptionOn) return { queued: false, why: "Sofi está apagada" }
+  if (!runtime.adminOn) return { queued: false, why: "Argos está apagado" }
   const contactId = await preferredContact(tx, orgId, appt.patientId)
-  if (!contactId) return { queued: false }
+  if (!contactId) return { queued: false, why: "No tiene un teléfono ni un correo para avisarle", byHand: true }
   const kind = NOTICE_OF[change]
   // Si pidió no recibir mensajes de la clínica, no se dice que el agente le avisa: no saldría.
-  if (!(await mayWriteFirst(tx, orgId, contactId, purposeOfKind(kind)))) return { queued: false }
+  if (!(await mayWriteFirst(tx, orgId, contactId, purposeOfKind(kind))))
+    return { queued: false, why: "Pidió no recibir mensajes de la clínica", byHand: true }
+  // En pausa, el aviso queda como tarea del equipo (`deliverJob`); si no, sale si tiene por dónde.
+  const unreachable = runtime.agentsPaused ? null : await noticeUnreachable(tx, orgId, contactId, kind)
+  const told = (queued: boolean): AppointmentNotice =>
+    runtime.agentsPaused
+      ? { queued, why: "Los agentes están en pausa: queda una tarea para avisarle" }
+      : unreachable
+        ? { queued: false, why: unreachable, byHand: true }
+        : { queued }
   if (change === "movida") {
     // Un aviso que aún no sale dice la fecha nueva al salir: no hace falta otro.
     const [waiting] = await tx
@@ -3322,8 +3372,9 @@ export async function enqueueAppointmentNotice(
         ),
       )
       .limit(1)
-    if (waiting) return { queued: true }
+    if (waiting) return told(true)
   }
+  // Sin vía igual se encola: el envío fallido queda en «qué pasó» y en Inicio.
   const job = await enqueueJob(tx, orgId, {
     ruleId: rule.id,
     kind,
@@ -3334,7 +3385,7 @@ export async function enqueueAppointmentNotice(
     patientId: appt.patientId,
     payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
   })
-  return { queued: !!job }
+  return job ? told(true) : { queued: false }
 }
 
 /**

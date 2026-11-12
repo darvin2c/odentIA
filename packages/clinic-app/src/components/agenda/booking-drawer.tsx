@@ -34,7 +34,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { z } from "zod"
-import type { AgendaAppointment } from "../../lib/agenda"
+import { type AgendaAppointment, noticeLine, noticeWarning } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
@@ -394,16 +394,14 @@ export function BookingDrawer({
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
           description:
             [
-              result.data.notice?.queued
-                ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
-                : null,
+              noticeLine(result.data.notice, `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`),
               reminderWords(result.data.reminderReach),
             ]
               .filter(Boolean)
               .join(" ") || undefined,
         })
         // Lo que hay que revisar después queda a la vista hasta cerrarlo: el cajón se cierra al reservar.
-        for (const note of [whatsappNote.current, consentNote.current]) {
+        for (const note of [whatsappNote.current, consentNote.current, noticeWarning(result.data)]) {
           if (note) toast.warning(note, { duration: Number.POSITIVE_INFINITY, closeButton: true })
         }
         // El control pedido en esta cita que no se sumó: su día no cae en su ventana (decisión B3).
