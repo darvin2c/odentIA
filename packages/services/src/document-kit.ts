@@ -243,11 +243,23 @@ function fontData(face: Face): { bytes: Uint8Array; font: Font } {
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
 /**
- * Lo que la letra no tiene pero se escribe igual con otro carácter que sí tiene. El
- * signo menos (U+2212) de una graduación («−2,00») o de un descuento sale como raya
- * corta, del ancho de una cifra: como `?` cambiaba lo que dice el papel.
+ * Lo que la letra no tiene pero se escribe igual con otros caracteres que sí tiene:
+ * como `?` cambiaba lo que dice el papel. El signo menos (U+2212) de una graduación
+ * («−2,00») o de un descuento sale como raya de cifra (U+2012), que mide lo que una
+ * cifra y va a la altura de la barra del «+»: la columna de la graduación se lee
+ * pareja y no se confunde con «—», la celda sin dato. Lo demás es lo que un
+ * profesional escribe en sus indicaciones («PIO ≥ 21 mmHg»).
  */
-const STAND_INS: Record<string, string> = { "−": "–" }
+const STAND_INS: Record<string, string> = {
+  "−": "‒",
+  "≥": ">=",
+  "≤": "<=",
+  "≈": "~",
+  "→": "->",
+  "←": "<-",
+  // El incremento matemático, que se escribe igual que la delta del prisma.
+  "∆": "Δ",
+}
 
 /**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con

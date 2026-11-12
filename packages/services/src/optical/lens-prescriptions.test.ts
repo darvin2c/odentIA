@@ -299,10 +299,15 @@ describe("la receta de lentes de vistIA (entrega 3)", () => {
     const issued = await f.run((tx) => issueLensPrescription(tx, ...f.args, { encounterId: f.encounter.id, kind: "anteojos" }))
     // Lo que se dibuja en el papel: la graduación negativa lleva su signo, nunca «?».
     const drawn = vi.spyOn(PDFPage.prototype, "drawText")
-    const pdf = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, issued.id))
-    const texts = drawn.mock.calls.map(([text]) => text)
-    drawn.mockRestore()
-    expect(texts).toEqual(expect.arrayContaining(["–1,25", "–0,50", "180°", "–1,00"]))
+    let pdf: Awaited<ReturnType<typeof renderLensPrescriptionPdf>>
+    let texts: string[]
+    try {
+      pdf = await f.run((tx) => renderLensPrescriptionPdf(tx, OPTICA, f.patient.id, issued.id))
+      texts = drawn.mock.calls.map(([text]) => text)
+    } finally {
+      drawn.mockRestore()
+    }
+    expect(texts).toEqual(expect.arrayContaining(["‒1,25", "‒0,50", "180°", "‒1,00"]))
     expect(texts.filter((text) => text.includes("?"))).toEqual([])
     expect(Buffer.from(pdf.bytes.slice(0, 5)).toString()).toBe("%PDF-")
     expect(pdf.filename).toMatch(/^Receta-de-anteojos-\d{4}-\d{2}-\d{2}\.pdf$/)
