@@ -92,6 +92,12 @@ export interface SupportCaseDetail extends SupportCaseListItem {
   messages: SupportMessageItem[]
   attachments: SupportAttachmentItem[]
   grants: SupportGrantItem[]
+  /**
+   * En la clínica, a quien lee un caso que no abrió (la propietaria que lo ve
+   * por el pedido de acceso): quién lo abrió y con qué rol. Nulo para quien lo
+   * abrió y en la administración, que tiene `opener`.
+   */
+  openedByOther?: { name: string; roleLabel: string } | null
 }
 
 export interface SupportAttachmentItem {
@@ -437,14 +443,15 @@ export async function getMySupportCase(
     .where(eq(supportAccessGrant.caseId, kase.id))
     .orderBy(desc(supportAccessGrant.createdAt))
     .limit(10)
-  return toDetail(
-    kase,
-    messages.map(toMessage),
-    attachments,
-    grants.map(toGrant),
-    null,
-    await accessRequestPendingOf(tx, kase),
-  )
+  // La propietaria que lo lee por el pedido de acceso ve quién lo abrió: el correo se lo nombra.
+  const [opener] =
+    kase.openedBy && kase.openedBy !== userId
+      ? await tx.select({ name: user.name }).from(user).where(eq(user.id, kase.openedBy)).limit(1)
+      : []
+  return {
+    ...toDetail(kase, messages.map(toMessage), attachments, grants.map(toGrant), null, await accessRequestPendingOf(tx, kase)),
+    openedByOther: opener ? { name: opener.name, roleLabel: kase.role } : null,
+  }
 }
 
 /**

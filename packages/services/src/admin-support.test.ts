@@ -520,6 +520,9 @@ describe("pedir acceso de diagnóstico", () => {
     const read = await run((tx) => getMySupportCase(tx, ORG, OWNER, kase.id))
     expect(read.accessRequestedAt).not.toBeNull()
     expect(read.messages).toHaveLength(1)
+    // Ve quién lo abrió, como se lo dice el correo; quien lo abrió no se lo lee a sí mismo.
+    expect(read.openedByOther).toEqual({ name: "Clínica A", roleLabel: "Recepción" })
+    expect((await run((tx) => getMySupportCase(tx, ORG, CLIENT, kase.id))).openedByOther).toBeNull()
     // Otra clínica sigue sin verlo.
     await expect(run((tx) => getMySupportCase(tx, OTHER, OTHER_CLIENT, kase.id), OTHER)).rejects.toThrow(/no encontrado/i)
   })

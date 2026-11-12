@@ -159,6 +159,8 @@ const supportCaseDetail = supportCaseItem.extend({
   accessRequestedAt: z.string().nullable().optional(),
   /** El pedido sigue en pie: nadie de la clínica hizo nada después. */
   accessRequestPending: z.boolean().optional(),
+  /** A quien lee un caso que no abrió (la propietaria, por el pedido de acceso): quién lo abrió. */
+  openedByOther: z.object({ name: z.string(), roleLabel: z.string() }).nullable().optional(),
 })
 export const casesEnvelope = z.object({ data: z.array(supportCaseItem) })
 export type { SupportCaseItem }
@@ -368,6 +370,12 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
             label="Consulta inicial del caso"
             className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]"
           />
+          {kase.openedByOther ? (
+            <p className="text-sm text-muted-foreground">
+              Lo abrió {kase.openedByOther.name}
+              {kase.openedByOther.roleLabel ? ` (${kase.openedByOther.roleLabel})` : ""}.
+            </p>
+          ) : null}
 
           {detail.isPending ? (
             <p className="text-sm text-muted-foreground">Cargando la conversación…</p>
