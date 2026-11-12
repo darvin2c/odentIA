@@ -535,7 +535,11 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
   app.get("/:id/budgets/:budgetId/sign-sheet", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "budgets.decide")) return forbid(c)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getBudgetSignFrame(tx, orgId)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => {
+        const budgetId = z.uuid().safeParse(c.req.param("budgetId"))
+        return getBudgetSignFrame(tx, orgId, budgetId.success ? budgetId.data : undefined)
+      }),
+    )
   })
 
   app.post("/:id/budgets/:budgetId/decision", async (c) => {

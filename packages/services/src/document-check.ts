@@ -145,6 +145,16 @@ export async function documentCheckUrl(
   return origin ? `${origin}/comprobar/${documentCheckToken(checkKey, orgId, type, id)}` : null
 }
 
+/**
+ * El QR de un papel de ejemplo (la vista previa de la hoja membretada): la página de
+ * comprobar de la clínica con un código que no es de ningún papel, así el bloque de la
+ * firma se ve como en los de verdad y escanearlo dice que no es un papel de la clínica.
+ */
+export async function sampleCheckUrl(tx: Db, orgId: string): Promise<string | null> {
+  const origin = await clinicOriginOf(tx, orgId)
+  return origin ? `${origin}/comprobar/ejemplo` : null
+}
+
 /** «Rosa Quispe» → «R. Q.». */
 export function patientInitials(name: string): string {
   return name

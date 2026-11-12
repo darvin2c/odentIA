@@ -26,6 +26,7 @@ import {
   patient,
   patientDocument,
   serviceCatalog,
+  treatmentBudget,
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
@@ -3227,9 +3228,23 @@ export async function getConsentSheetFrame(
 export async function getBudgetSignFrame(
   tx: Db,
   orgId: string,
+  /** Con el presupuesto, la hoja membretada de cuando se entregó: la misma de su PDF (ADR 0182). */
+  budgetId?: string,
 ): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
+  const [budget] = budgetId
+    ? await tx
+        .select({
+          status: treatmentBudget.status,
+          presentedAt: treatmentBudget.presentedAt,
+          createdAt: treatmentBudget.createdAt,
+        })
+        .from(treatmentBudget)
+        .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.id, budgetId)))
+        .limit(1)
+    : []
+  const at = budget && budget.status !== "borrador" ? (budget.presentedAt ?? budget.createdAt) : null
   return {
-    clinic: await loadDocumentLetterhead(tx, orgId),
+    clinic: await loadDocumentLetterhead(tx, orgId, at),
     declaration: BUDGET_SIGN_DECLARATION,
     signatureNote: BUDGET_SIGNATURE_NOTE,
   }

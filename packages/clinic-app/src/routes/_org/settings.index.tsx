@@ -31,6 +31,7 @@ import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { RateField } from "../../components/finance/rate-input"
 import { ClinicBrandColorSettings } from "../../components/settings/clinic-brand-color"
+import { ClinicLetterheadSettings } from "../../components/settings/clinic-letterhead"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { capitalize } from "../../components/official-code-field"
@@ -288,7 +289,7 @@ function OrgProfilePage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Datos de la clínica"
-        subtitle="Con estos datos se leen las fechas, los importes y los documentos de toda la clínica."
+        subtitle="Con estos datos se leen las fechas, los importes y los documentos de toda la clínica. Aquí también van tu logo, tu hoja membretada y el color de tu marca."
       />
       {!canWrite ? (
         <SettingsNoAccess />
@@ -322,6 +323,7 @@ function OrgProfilePage() {
           {profile ? (
             <div className="flex max-w-3xl flex-col gap-4">
               <ClinicLogoSettings logo={profile.logo ?? null} name={profile.tradeName} />
+              <ClinicLetterheadSettings sheetSize={profile.sheetSize} />
               <ClinicBrandColorSettings
                 brandColor={profile.brandColor ?? null}
                 logo={profile.logo ?? null}

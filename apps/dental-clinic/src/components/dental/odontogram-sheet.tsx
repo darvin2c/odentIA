@@ -13,16 +13,79 @@ import type { PrintEstablishment } from "../../lib/dental/odontogram"
  * la línea del membrete y el cuadro de iniciales, lejos del rojo y el azul de la norma.
  */
 
-/** Hoja del perfil de la clínica y márgenes; al imprimir solo sale la hoja. */
-export function SheetPageStyle() {
+/**
+ * Hoja del perfil de la clínica y márgenes; al imprimir solo sale la hoja. Con la hoja
+ * membretada, sin margen: su diseño va de borde a borde y `SheetArticle` deja el del texto.
+ */
+export function SheetPageStyle({ establishment }: { establishment: PrintEstablishment | null }) {
   const sheet = useOrgProfile().data?.sheetSize === "Letter" ? "letter" : "A4"
   return (
-    <style>{`@page { size: ${sheet}; margin: 11mm }
+    <style>{`@page { size: ${sheet}; margin: ${establishment?.sheet ? "0" : "11mm"} }
       @media print {
         body * { visibility: hidden; }
+        /* La hoja se mide desde el borde del papel, no desde el área junto a la barra lateral
+           (oculta, pero ocupa su ancho): ningún contenedor la posiciona. */
+        :has(.odontogram-sheet) { position: static !important; }
         .odontogram-sheet, .odontogram-sheet * { visibility: visible; }
-        .odontogram-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; border: 0; box-shadow: none; padding: 0; }
+        .odontogram-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; max-width: none; border: 0; border-radius: 0; box-shadow: none; padding: 0; }
       }`}</style>
+  )
+}
+
+const PAPER =
+  "odontogram-sheet mx-auto w-full max-w-[210mm] rounded-lg border bg-white text-sm text-black"
+
+/**
+ * El papel del odontograma. Con la hoja membretada (ADR 0182), su parte de arriba y la de
+ * abajo van de borde a borde, como en los PDF: en pantalla, al principio y al final del
+ * papel; al imprimir, en cada página. Ahí van fijas y la tabla les guarda su lugar en cada
+ * página, porque el navegador repite su cabecera y su pie (con margen de página, Chrome
+ * recorta lo que se pone en él). `className` es el del contenido: relleno y separación.
+ */
+export function SheetArticle({
+  establishment,
+  className,
+  children,
+}: {
+  establishment: PrintEstablishment | null
+  className: string
+  children: React.ReactNode
+}) {
+  const sheet = establishment?.sheet
+  if (!sheet) return <article className={cn(PAPER, className)}>{children}</article>
+  const name = establishment?.tradeName || establishment?.legalName || "Establecimiento"
+  return (
+    <article className={cn(PAPER, "overflow-hidden print:overflow-visible")}>
+      <img src={sheet.topBand} alt="" className="fixed top-0 left-0 hidden w-full print:block" />
+      <img
+        src={sheet.bottomBand}
+        alt=""
+        className="fixed bottom-0 left-0 hidden w-full print:block"
+      />
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <td className="p-0">
+              <img src={sheet.topBand} alt={name} className="block h-auto w-full print:opacity-0" />
+            </td>
+          </tr>
+        </thead>
+        <tfoot>
+          <tr>
+            <td className="p-0">
+              <img src={sheet.bottomBand} alt="" className="block h-auto w-full print:opacity-0" />
+            </td>
+          </tr>
+        </tfoot>
+        <tbody>
+          <tr>
+            <td className="p-0 align-top">
+              <div className={cn(className, "print:px-[11mm]")}>{children}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
   )
 }
 
@@ -36,9 +99,31 @@ function initialsOf(name: string): string {
     .join("")
 }
 
-/** El membrete: logo o iniciales, nombre, razón social, documento fiscal y sede. */
+/**
+ * El membrete: logo o iniciales, nombre, razón social, documento fiscal y sede. Con la
+ * hoja membretada, su diseño (lo pone `SheetArticle`) dice quién es: aquí, la línea chica.
+ */
 export function SheetLetterhead({ establishment }: { establishment: PrintEstablishment | null }) {
   const name = establishment?.tradeName || establishment?.legalName || "Establecimiento"
+  const sheet = establishment?.sheet
+  if (sheet) {
+    const line = [
+      establishment?.legalName || name,
+      establishment?.fiscalDocNumber
+        ? [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" ")
+        : null,
+      establishment?.branchName,
+      establishment?.address,
+      establishment?.phone,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    return line ? (
+      <header>
+        <p className="text-right text-xs">{line}</p>
+      </header>
+    ) : null
+  }
   const fiscal = [
     establishment?.legalName && establishment.legalName !== name ? establishment.legalName : null,
     establishment?.fiscalDocNumber

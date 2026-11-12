@@ -202,6 +202,65 @@ export const branch = pgTable(
 )
 
 /**
+ * La hoja membretada de la clínica (ADR 0182): cada vez que se sube, se cambia o se
+ * corrige es una versión nueva; la anterior queda con `removed_at`. Nunca se borra:
+ * cada papel usa la hoja vigente cuando se emitió o se firmó (la de `created_at <= t`
+ * y sin quitar a esa hora), y el odontograma firmado guarda cuál tenía. La vigente es
+ * la única sin `removed_at`. El PDF va al bucket privado; las franjas y la miniatura
+ * (PNG) al público, porque las ve el paciente en la hoja que firma.
+ */
+export const clinicLetterhead = pgTable(
+  "clinic_letterhead",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id),
+    /** El PDF de una página que va de fondo, ya normalizado (bucket privado). */
+    pdfKey: text("pdf_key").notNull(),
+    /** Su parte de arriba y la de abajo, para la hoja que se firma en pantalla. */
+    topBandUrl: text("top_band_url").notNull(),
+    bottomBandUrl: text("bottom_band_url").notNull(),
+    thumbnailUrl: text("thumbnail_url").notNull(),
+    /** El tamaño de su página, en puntos (1/72 de pulgada). */
+    pageWidthPt: numeric("page_width_pt", { mode: "number" }).notNull(),
+    pageHeightPt: numeric("page_height_pt", { mode: "number" }).notNull(),
+    /** Dónde va el texto: lo que se deja desde cada borde de su hoja, en milímetros. */
+    topMm: numeric("top_mm", { mode: "number" }).notNull(),
+    bottomMm: numeric("bottom_mm", { mode: "number" }).notNull(),
+    leftMm: numeric("left_mm", { mode: "number" }).notNull(),
+    rightMm: numeric("right_mm", { mode: "number" }).notNull(),
+    /** Su hoja ya dice la dirección y el teléfono: el papel no los repite. */
+    hasContact: boolean("has_contact").notNull().default(false),
+    fileName: text("file_name").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: text("removed_by").references(() => user.id),
+  },
+  (table) => [
+    uniqueIndex("clinic_letterhead_current_uidx")
+      .on(table.organizationId)
+      .where(sql`${table.removedAt} is null`),
+    index("clinic_letterhead_org_created_idx").on(table.organizationId, table.createdAt),
+    check(
+      "clinic_letterhead_page_check",
+      sql`${table.pageWidthPt} > 0 and ${table.pageHeightPt} > 0`,
+    ),
+    check(
+      "clinic_letterhead_margins_check",
+      sql`${table.topMm} >= 0 and ${table.bottomMm} >= 0 and ${table.leftMm} >= 0 and ${table.rightMm} >= 0`,
+    ),
+    check(
+      "clinic_letterhead_removed_check",
+      sql`(${table.removedAt} is null) = (${table.removedBy} is null)`,
+    ),
+  ],
+)
+
+/**
  * Búsquedas de direcciones de cada clínica por día (issue 36): el tope diario
  * de las sugerencias de la sede (Google) y del paciente (Geoapify). Solo la
  * cuenta: lo escrito no se guarda.

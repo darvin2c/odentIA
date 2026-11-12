@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { OdontogramDocument } from "../../components/dental/odontogram-document"
 import {
+  SheetArticle,
   SheetLetterhead,
   SheetPageStyle,
   SheetSignature,
@@ -45,7 +46,7 @@ function SignedOdontogramPrintPage() {
   const { assessment, patient, establishment, checkUrl, signerStrokes } = query.data.data
   return (
     <PageShell className="flex flex-col gap-4">
-      <SheetPageStyle />
+      <SheetPageStyle establishment={establishment} />
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <p className="text-sm text-muted-foreground">
           Odontograma firmado. Usa «Imprimir» para llevarlo en papel o guardarlo como PDF; a color,
@@ -55,7 +56,7 @@ function SignedOdontogramPrintPage() {
           Imprimir
         </Button>
       </div>
-      <article className="odontogram-sheet mx-auto flex w-full max-w-[210mm] flex-col gap-3 rounded-lg border bg-white p-6 text-sm text-black">
+      <SheetArticle establishment={establishment} className="flex flex-col gap-3 p-6">
         <SheetLetterhead establishment={establishment} />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -97,7 +98,7 @@ function SignedOdontogramPrintPage() {
             ),
           }}
         />
-      </article>
+      </SheetArticle>
     </PageShell>
   )
 }
