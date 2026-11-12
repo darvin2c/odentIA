@@ -69,7 +69,7 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx =>
       ({ away: await recordHomeVisit(tx, orgId, userId, accessFor(memberRole)) })))
   })
-  app.get("/notifications", c => {
+  app.get("/notifications", async c => {
     // Soporte mirando la clínica no es del equipo: no tiene avisos propios (y leerlos
     // ordena la lista escribiendo, lo que su sesión de solo lectura no puede).
     if (isSupportRequest(c)) return c.json({ data: { items: [], unread: 0 } })
