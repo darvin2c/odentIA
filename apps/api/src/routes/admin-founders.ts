@@ -123,9 +123,13 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     return runService(c, 201, () => deps.ownerDb.transaction((tx) => addWaitlistFollowUp(tx, actor, c.req.param("id"), parsed.data)))
   })
 
-  /** Ocultar una entrada a soporte es de la administración, y no se deshace. */
+  /**
+   * Ocultar una entrada a soporte es de la administración, y no se deshace. El
+   * rol lo revisa el servicio, con su propio motivo («Solo el rol
+   * Administración oculta una entrada a soporte»), no el de invitar o descartar.
+   */
   app.post("/follow-ups/:entryId/hide", (c) => {
-    const actor = adminOf(c)
+    const actor = staffOf(c)
     return runService(c, 200, async () => {
       await deps.ownerDb.transaction((tx) => hideWaitlistFollowUp(tx, actor, c.req.param("entryId")))
       return { ok: true }
