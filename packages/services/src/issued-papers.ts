@@ -1,3 +1,4 @@
+import { isReadOnlyRequest } from "@odentia/db"
 /**
  * Lo emitido no cambia (ADR 0132). Receta, orden, descanso y hoja de atención se guardan como PDF una
  * sola vez, con su huella, y desde ahí se sirve ese archivo: verlo, enviarlo y
@@ -97,7 +98,9 @@ export async function issuedPaperBytes(
   const clinic = await loadDocumentClinic(tx, orgId, { at: input.issuedAt })
   const bytes = await draw({ clinic, checkUrl })
   // Sin su hoja membretada (no se pudo leer) tampoco se guarda: quedaría así para siempre.
-  if (voided || !checkUrl || clinic.sheetUnavailable || !storage.putPatientDocument) return bytes
+  // Soporte mirando la clínica tampoco lo guarda: solo lee (y la API no le sirve el PDF).
+  if (voided || !checkUrl || clinic.sheetUnavailable || !storage.putPatientDocument || isReadOnlyRequest())
+    return bytes
 
   let objectKey: string
   try {

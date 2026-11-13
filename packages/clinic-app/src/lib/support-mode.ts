@@ -116,9 +116,5 @@ export async function supportEnding(): Promise<{
 
 /** Con soporte mirando, ningún permiso de escritura: la pantalla no ofrece cambiar nada. */
 export function supportCan(permission: string): boolean {
-  return (
-    !permission.endsWith(".write") &&
-    !permission.endsWith(".decide") &&
-    !permission.endsWith(".send")
-  )
+  return ![".write", ".decide", ".send", ".receive", ".erase"].some((suffix) => permission.endsWith(suffix))
 }

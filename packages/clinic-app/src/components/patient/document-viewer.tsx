@@ -36,7 +36,7 @@ import { useEffect, useId, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
-import { timeAgo, useMemberName, usePermission } from "../../lib/crm"
+import { timeAgo, useMemberName, usePermission, useSupportMode } from "../../lib/crm"
 import { isImageCategory } from "../../lib/document-list"
 import type {
   Encounter,
@@ -609,6 +609,7 @@ function DocumentViewer({
     },
   })
   const memberName = useMemberName()
+  const supportMode = useSupportMode()
   const dateError = useFormSubmitError(dateForm)
   const datePending = useStore(dateForm.store, (state) => state.isSubmitting)
   const compareSelectId = useId()
@@ -1058,7 +1059,8 @@ function DocumentViewer({
         >
           Copiar enlace
         </Button>
-        {url && (
+        {/* Soporte mirando la clínica solo mira aquí: ni otra pestaña ni descargar. */}
+        {url && !supportMode && (
           <>
             <Button
               size="sm"

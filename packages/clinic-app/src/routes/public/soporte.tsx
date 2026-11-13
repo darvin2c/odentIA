@@ -18,7 +18,7 @@ export const Route = createFileRoute("/soporte")({
 
 const REASONS: Record<string, string> = {
   quitado: "lo quitó",
-  reemplazado: "lo reemplazó otro acceso que dio",
+  reemplazado: "la clínica dio otro acceso que lo reemplazó",
   caso_resuelto: "se resolvió el caso",
   sin_quien_lo_dio: "quien lo dio ya no puede darlo",
   vencido: "se cumplió el tiempo",

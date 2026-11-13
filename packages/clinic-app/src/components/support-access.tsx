@@ -78,7 +78,7 @@ const VIEW_WORDS: Record<string, string> = {
   [CONFIG]: "Verá sedes, canales, el agente y el equipo; ningún paciente.",
   reception: "Verá la agenda, los pacientes y las conversaciones; no la historia clínica.",
   cashier: "Verá los cobros y las cuentas; no la historia clínica.",
-  clinician: "Verá los pacientes, su historia y sus documentos.",
+  clinician: "Verá lo que ve quien atiende: los pacientes con su historia y sus documentos, sus conversaciones y sus tareas.",
   sales: "Verá las ventas, los cobros y la receta de lentes vigente.",
   workshop: "Verá solo los pedidos del taller.",
   admin: "Verá toda la clínica.",

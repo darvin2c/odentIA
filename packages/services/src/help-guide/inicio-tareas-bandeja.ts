@@ -133,7 +133,7 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "inicio-soporte-que-ve",
         q: "¿Soporte puede ver a mis pacientes?",
-        a: "Solo si se lo das, y por un tiempo. Con «Solo la configuración» no ve ningún paciente. Con un rol de tu equipo ve lo que vería ese rol: con el del profesional o Administrador, los pacientes, su historia y sus documentos; nunca puede cambiar nada, descargar ni imprimir, y una historia bloqueada no la abre. Cada parte de la historia clínica que abre queda anotada: lo ves en Ayuda › «Tus casos con soporte», en el caso del acceso (qué miró y a qué hora), y en la ficha del paciente › Datos › «Consultas a la historia» (la ven el propietario y los administradores).",
+        a: "Solo si se lo das, y por un tiempo. Con «Solo la configuración» no ve ningún paciente. Con un rol de tu equipo ve lo que vería ese rol: con el del profesional o Administrador, los pacientes, su historia y sus documentos; nunca puede cambiar nada ni descargar la historia, y una historia bloqueada no la abre; lo que abre en pantalla lo ve. Cada parte de la historia clínica que abre queda anotada: lo ves en Ayuda › «Tus casos con soporte», en el caso del acceso (qué miró y a qué hora), y en la ficha del paciente › Datos › «Consultas a la historia» (la ven el propietario y los administradores).",
         forms: [
           "soporte puede ver a mis pacientes",
           "que ve soporte de mi clinica",
