@@ -80,6 +80,7 @@ import {
   type ConsentNeed,
   cancelDerivationTask,
   getEncounterConsentNeeds,
+  listOpenEncounterForms,
 } from "./clinical-forms.js"
 import {
   type ClosingResolvable,
@@ -2205,6 +2206,11 @@ export interface ClosingCheckBase {
    * marcados y se resuelven los que vuelven en `resolveDiagnosisIds` (QA del 9 nov).
    */
   resolvable: ClosingResolvable[]
+  /**
+   * Los formularios de la atención que siguen a medias. No bloquean: el cierre
+   * lo avisa y se terminan después de firmar, con su propia fecha.
+   */
+  openForms: Array<{ id: string; title: string }>
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión: «Endodoncia · sesión 2 de 2». */
@@ -2641,6 +2647,7 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
+  const openForms = await listOpenEncounterForms(tx, orgId, row.id)
   // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
   // control: se muestra con lo que termina al firmar, para cambiarlo o quitarlo igual (QA antes de
   // entregar); no como uno que ya tenía.
@@ -2671,7 +2678,7 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
-  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, controls, ...product }
+  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, openForms, controls, ...product }
 }
 
 /** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
@@ -3492,6 +3499,8 @@ export async function finalizeEncounter(
     // Lo que faltaba saber de su salud al firmar, y si se usó anestesia: la constancia del aviso.
     healthGaps: closing.health.gaps,
     anesthetics: closing.health.anesthetics.length,
+    // Cuántos formularios quedaron a medias al firmar: la constancia de ese aviso.
+    openForms: closing.openForms.length,
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
       ? "fecha"

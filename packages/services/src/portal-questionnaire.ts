@@ -5,7 +5,13 @@ import { contact } from "@odentia/db/schema/crm"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull } from "drizzle-orm"
-import { assertAnswers, assertFormSchema, type FormSchemaDef } from "./clinical-forms.js"
+import {
+  assertAnswers,
+  assertFormSchema,
+  type FormSchemaDef,
+  type FormTemplateRow,
+  listFormTemplates,
+} from "./clinical-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
@@ -71,6 +77,21 @@ async function currentTemplate(tx: Db, orgId: string) {
     .orderBy(desc(clinicalFormTemplate.publishedAt))
     .limit(1)
   return template ?? null
+}
+
+/**
+ * Las plantillas para Configuración, con la que hoy reciben los pacientes
+ * marcada (`reachesPatients`): de las publicadas «que responde el paciente» les
+ * llega una sola, la de `currentTemplate`. La lista lo dice con esa misma regla.
+ */
+export async function listClinicFormTemplates(
+  tx: Db,
+  orgId: string,
+  query: Parameters<typeof listFormTemplates>[2] = {},
+): Promise<Array<FormTemplateRow & { reachesPatients: boolean }>> {
+  const rows = await listFormTemplates(tx, orgId, query)
+  const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
+  return rows.map((row) => ({ ...row, reachesPatients: row.id === reaching?.id }))
 }
 
 /** Borrador abierto del portal o, si no hay, el último enviado (solo lectura). */
