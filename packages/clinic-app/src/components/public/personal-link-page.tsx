@@ -305,6 +305,41 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
   return items
 }
 
+/** «el Dr. Luis Prado», «la Dra. Ana Torres»; sin tratamiento, el nombre solo. */
+function withArticle(professionalName: string): string {
+  if (/^Dra\.?\s/.test(professionalName)) return `la ${professionalName}`
+  if (/^Dr\.?\s/.test(professionalName)) return `el ${professionalName}`
+  return professionalName
+}
+
+function listed(parts: string[]): string {
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : (parts[0] ?? "")
+}
+
+/**
+ * «Lo que nos contaste»: qué envió desde aquí y cuándo (lo del mismo envío, junto) y quién lo
+ * lee. Nunca lo que respondió: el enlace se abre sin código y se puede reenviar. `null`: aún no
+ * envió nada.
+ */
+export function toldWords(view: PersonalLinkView, clinician: string): { sent: string[]; reader: string } | null {
+  const told = view.told
+  if (!told || told.items.length === 0) return null
+  const name = view.patientFirstName
+  const said = (what: NonNullable<PersonalLinkView["told"]>["items"][number]["what"], first: boolean): string => {
+    if (what === "datos") return name ? `los datos de ${name}` : "tus datos"
+    if (what === "salud") return name ? (first ? `la salud de ${name}` : "su salud") : "tu salud"
+    return `tus respuestas de «${name ? `Antes de la cita de ${name}` : "Antes de tu cita"}»`
+  }
+  const moments = [...new Set(told.items.map((item) => item.at))]
+  const sent = moments.map((at) => {
+    const parts = told.items.filter((item) => item.at === at).map((item, index) => said(item.what, index === 0))
+    return withPeriod(`Enviaste ${listed(parts)} el ${whenText({ startsAt: at, timeZone: told.timeZone })}`)
+  })
+  const professional = view.appointment && !view.appointment.cancelled ? view.appointment.professionalName?.trim() : ""
+  const who = professional ? withArticle(professional) : `tu ${clinician}`
+  return { sent, reader: `Lo lee ${who} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.` }
+}
+
 /** Lo que eligió de «Tus mensajes», dicho corto; por dónde le llegan, solo si de verdad salen por ahí (B2). */
 function messagesSummary(view: PersonalLinkView, messages: PersonalLinkMessages): string {
   if (messages.nothing) return `Pediste no recibir ningún mensaje de ${view.clinicName}.`
@@ -894,19 +929,25 @@ export function PersonalLinkPage({
 
   if (abre === "cuestionario") {
     const title = name ? `Antes de la cita de ${name}` : "Antes de tu cita"
-    if (!view.questionnaire)
+    if (!view.questionnaire) {
+      // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
+      const sentAt = view.told?.items.find((item) => item.what === "cuestionario")?.at
       return one(
         title,
-        empty(
-          "No tienes preguntas por responder",
-          "Si ya respondiste, la clínica tiene tus respuestas.",
-        ),
+        sentAt && view.told
+          ? empty(
+              "Ya lo enviaste",
+              `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
+            )
+          : empty("No tienes preguntas por responder", "Si ya respondiste, la clínica tiene tus respuestas."),
       )
+    }
     return one(
       title,
       <LinkQuestionnaireStep
         slug={slug}
         token={token}
+        onAlreadySent={refresh}
         onSent={() => {
           refresh()
           setDone({
@@ -1035,6 +1076,7 @@ export function PersonalLinkPage({
   }
 
   // «Tus pendientes»: una tarjeta por cosa que hacer; nunca un papel ni la historia.
+  const told = toldWords(view, clinician)
   const nothingToDo =
     !activeAppointment && items.length === 0 && view.toSchedule.length === 0 && !offersBooking
   return (
@@ -1118,6 +1160,26 @@ export function PersonalLinkPage({
             title="No te queda nada pendiente"
             description="Gracias. Si necesitas algo, escríbenos por el chat."
           />
+        ) : null}
+        {told ? (
+          // Lo que ya envió: que llegó, cuándo y quién lo lee. Nunca sus respuestas.
+          <section
+            aria-label="Lo que nos contaste"
+            className="flex flex-col gap-3 rounded-2xl border bg-card p-4"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="min-w-0 font-semibold break-words">Lo que nos contaste</h2>
+              <Badge variant="success">Lo recibimos</Badge>
+            </div>
+            <div className="flex flex-col gap-1 text-sm">
+              {told.sent.map((line) => (
+                <p key={line} className="break-words">
+                  {line}
+                </p>
+              ))}
+              <p className="text-muted-foreground">{told.reader}</p>
+            </div>
+          </section>
         ) : null}
         {view.messages ? (
           <section

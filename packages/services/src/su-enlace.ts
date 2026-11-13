@@ -107,7 +107,7 @@ import {
   portalBudgetContext,
   toPortalBudget,
 } from "./portal.js"
-import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
+import { pendingQuestionnaire, questionnaireSent, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
@@ -233,6 +233,12 @@ export interface PersonalLinkView {
   /** «Antes de tu cita», si hay uno por responder. */
   questionnaire: { title: string } | null
   /**
+   * «Lo que nos contaste»: qué envió desde su enlace quien lo abre y cuándo (`timeZone`: la
+   * zona de la clínica), para que sepa que llegó. Nunca lo que respondió ni ningún dato de su
+   * salud: el enlace se abre sin código y se puede reenviar.
+   */
+  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "cuestionario"; at: string }> } | null
+  /**
    * M3: lo que aceptó de su presupuesto y aún no tiene cita, «Lo que aceptaste, por
    * agendar»; se agenda con `planItemIds` al reservar. Solo a quien decide por el paciente.
    */
@@ -299,6 +305,42 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
     dataSubmitted: link.row.dataSubmittedAt !== null,
     withAppointment: link.appointment !== null && link.appointment.status !== "cancelada",
   })
+}
+
+/**
+ * Lo que envió desde su enlace quien lo abre (sus datos, su salud, el cuestionario) y cuándo:
+ * de la traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo.
+ */
+async function toldOf(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  timeZone: string,
+): Promise<PersonalLinkView["told"]> {
+  if (!link.patientId || !link.decides || link.expired) return null
+  const sent = await tx
+    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "patient"),
+        eq(auditEvent.entityId, link.patientId),
+        eq(auditEvent.action, "personal_link.data_sent"),
+        eq(auditEvent.actorUserId, `contact:${link.row.contactId}`),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(10)
+  const traced = sent.map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
+  const data = traced.find((row) => (row.fields?.length ?? 0) > 0 || row.renamed)
+  const health = traced.find((row) => row.health)
+  const questionnaire = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
+  const items: NonNullable<PersonalLinkView["told"]>["items"] = []
+  if (data) items.push({ what: "datos", at: data.at.toISOString() })
+  if (health) items.push({ what: "salud", at: health.at.toISOString() })
+  if (questionnaire?.own) items.push({ what: "cuestionario", at: questionnaire.at.toISOString() })
+  return items.length > 0 ? { timeZone, items } : null
 }
 
 /**
@@ -520,6 +562,7 @@ export async function getPersonalLinkView(
     budgets: [],
     consents: [],
     questionnaire: null,
+    told: null,
     toSchedule: [],
     another: null,
     confirmVia: null,
@@ -582,6 +625,7 @@ export async function getPersonalLinkView(
     budgets,
     consents,
     questionnaire,
+    told: await toldOf(tx, orgId, link, region.timezone),
     toSchedule,
     another,
     confirmVia: await linkReplyVia(tx, orgId, link.row),
@@ -1497,9 +1541,25 @@ export async function signPersonalLinkConsent(
 
 // ---------------------------------------------------------- cuestionario ---
 
+/**
+ * Por qué no hay cuestionario por responder: si ya está enviado, se dice eso («Ya lo enviaste»);
+ * el enlace sigue sirviendo. Lo demás (no decide, sin cita, vencido) es «ya no sirve».
+ */
+async function questionnaireClosed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<ServiceError> {
+  if (!link.patientId || !link.decides || link.expired) return linkExpired()
+  const sent = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
+  if (!sent) return linkExpired()
+  const { clinician } = productWords(await orgProduct(tx, orgId))
+  return new ServiceError(
+    "ALREADY_SUBMITTED",
+    409,
+    `${sent.own ? "Ya lo enviaste" : "Ya está enviado"}: la clínica tiene las respuestas de la primera vez. Si quieres cambiar algo, díselo a tu ${clinician.one} en la cita.`,
+  )
+}
+
 export async function getPersonalLinkQuestionnaire(tx: Db, orgId: string, token: string) {
   const link = await requireLiveLink(tx, orgId, token)
-  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw linkExpired()
+  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw await questionnaireClosed(tx, orgId, link)
   const pending = await pendingQuestionnaire(tx, orgId, link.patientId)
   if (!pending) throw linkExpired()
   return pending
@@ -1513,7 +1573,7 @@ export async function submitPersonalLinkQuestionnaire(
   deps: { secretsKey?: Buffer } = {},
 ): Promise<{ submitted: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
-  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw linkExpired()
+  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw await questionnaireClosed(tx, orgId, link)
   const submitted = await submitQuestionnaireFromLink(
     tx,
     { orgId, patientId: link.patientId, contactId: link.row.contactId },

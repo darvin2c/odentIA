@@ -46,6 +46,7 @@ import {
   createFormTemplate,
   listConsentDocuments,
   listConsentEvents,
+  listFormResponses,
   markConsentSentByLink,
   publishConsentTemplate,
   publishFormTemplate,
@@ -65,6 +66,7 @@ import {
   bookedDataLink,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
+  getPersonalLinkQuestionnaire,
   getPersonalLinkView,
   maskedAddress,
   personalLinkForEmailToken,
@@ -1657,4 +1659,78 @@ it("«Enviarme uno nuevo»: desde un enlace vencido le llega otro a su canal, un
   } finally {
     configurePublicLinks(null)
   }
+})
+
+/** Una paciente con cita por venir, su enlace y el cuestionario de la clínica publicado. */
+async function withQuestionnaire(f: Awaited<ReturnType<typeof clinicalFixture>>) {
+  const marta = await minimal(f, { given: "Marta", surname: "Lazo" })
+  const visit = await upcomingAppointment(f, marta.patientId)
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }),
+  )
+  const form = await f.run((tx) =>
+    createFormTemplate(tx, ORG, f.actor, {
+      // Un título propio: uno que empieza igual que otro pasaría a ser su versión siguiente.
+      title: `Antes de venir ${randomUUID().slice(0, 6)}`,
+      respondent: "portal",
+      schema: { sections: [{ id: "visita", title: "Tu visita", fields: [{ id: "motivo", label: "¿Por qué vienes?", type: "texto_largo" }] }] },
+    }),
+  )
+  await f.run((tx) => publishFormTemplate(tx, ORG, f.actor, form.id))
+  return { marta, visit, link }
+}
+
+// Mesa de formularios del 13 nov (F18): un segundo envío respondía «Este enlace ya no sirve» con el enlace vivo.
+it("el segundo envío del cuestionario dice «Ya lo enviaste», no que el enlace ya no sirve", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  // Otra pestaña u otro teléfono con el cuestionario abierto, y volver a abrirlo: dicen lo que pasó.
+  const again = f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Otra cosa" }, { secretsKey: KEY }))
+  await expect(again).rejects.toMatchObject({ code: "ALREADY_SUBMITTED", status: 409, message: expect.stringMatching(/^Ya lo enviaste/) })
+  await expect(f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, link.token))).rejects.toMatchObject({ code: "ALREADY_SUBMITTED" })
+  // Lo primero que envió es lo que quedó, y el enlace sigue abierto.
+  const [kept] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: marta.patientId }))
+  expect(kept?.answers).toMatchObject({ motivo: "Me duele la muela de abajo" })
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).status).toBe("abierto")
+  // A quien no decide por la paciente el enlace no le sirve para eso, como antes.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Tía", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: marta.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }))
+  await expect(f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, hers.token, { motivo: "x" }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+})
+
+// Mesa de formularios del 13 nov (C8): después de enviar, «Tus pendientes» no decía nada de lo enviado.
+it("después de enviar, su enlace dice qué envió y cuándo, y nunca lo que respondió", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  const open = () => f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  // Antes de enviar nada no hay nada que decir.
+  expect((await open()).told).toBeNull()
+
+  const before = Date.now()
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-03-04" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  const afterData = await open()
+  expect(afterData.told?.items.map((item) => item.what)).toEqual(["datos", "salud"])
+  expect(afterData.told?.timeZone).toBeTruthy()
+  expect(new Date(afterData.told!.items[0]!.at).getTime()).toBeGreaterThanOrEqual(before - 1000)
+
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  const afterAll = await open()
+  expect(afterAll.questionnaire).toBeNull()
+  expect(afterAll.told?.items.map((item) => item.what)).toEqual(["datos", "salud", "cuestionario"])
+  // El enlace se abre sin código y se puede reenviar: nada de lo que respondió viaja en él.
+  const sentToThePage = JSON.stringify(afterAll)
+  for (const secret of ["Penicilina", "muela", "1960-03-04"]) expect(sentToThePage).not.toContain(secret)
+
+  // Solo lo ve quien lo envió: otra persona que abre su propio enlace de la misma paciente, no.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Tía", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: marta.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).told).toBeNull()
 })
