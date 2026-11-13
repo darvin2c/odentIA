@@ -52,12 +52,17 @@ export function signedMaterial(timestamp: number, body: string): string {
 export const SIGNATURE_HEADER = "x-sallca-signature"
 export const TIMESTAMP_HEADER = "x-sallca-timestamp"
 
-/** Los adjuntos que se mandan a la API, sumados: lo que pasa se omite y se avisa en el texto. */
+/** Los adjuntos que se mandan a la API, sumados: lo que pasa se omite y se avisa aparte (`notice`). */
 export const ATTACHMENTS_MAX_BYTES = 10 * 1024 * 1024
 /** Cuántos adjuntos acepta la API (`INBOUND_ATTACHMENTS_MAX`). */
 export const ATTACHMENTS_MAX_COUNT = 20
 /** El texto que acepta la API. */
 export const TEXT_MAX_CHARS = 200_000
+/** El aviso que acepta la API. */
+export const NOTICE_MAX_CHARS = 2000
+/** El nombre y el tipo de un adjunto que acepta la API: lo que pasa se recorta, no se rechaza. */
+export const FILENAME_MAX_CHARS = 1000
+export const CONTENT_TYPE_MAX_CHARS = 200
 
 /** A dónde va a la API: un buzón fijo o la dirección de una persona. */
 type ApiRoute =
@@ -136,6 +141,13 @@ interface ParsedAttachment {
   content: ArrayBuffer | Uint8Array | string
 }
 
+/** Un nombre de adjunto de hasta 1000 caracteres, con su extensión. */
+function clipFilename(filename: string): string {
+  if (filename.length <= FILENAME_MAX_CHARS) return filename
+  const ext = /\.[a-z0-9]{1,8}$/i.exec(filename)?.[0] ?? ""
+  return filename.slice(0, FILENAME_MAX_CHARS - ext.length) + ext
+}
+
 /**
  * Los adjuntos que van a la API, en orden, hasta 10 MB y 20 en total; las imágenes de la
  * firma (en línea, sin nombre) no cuentan. Devuelve también lo que se omitió, para decirlo.
@@ -152,7 +164,7 @@ export function pickAttachments(attachments: readonly ParsedAttachment[]): {
   for (const attachment of attachments) {
     if (!attachment.filename && (attachment.related || attachment.disposition !== "attachment"))
       continue
-    const filename = (attachment.filename ?? "adjunto").trim() || "adjunto"
+    const filename = clipFilename((attachment.filename ?? "adjunto").trim() || "adjunto")
     const ext = /\.([a-z0-9]{1,8})$/i.exec(filename)?.[1]?.toLowerCase() ?? ""
     if (!ALLOWED_EXTENSIONS.has(ext) || typeof attachment.content !== "string") {
       notAllowed.push(filename)
@@ -166,15 +178,26 @@ export function pickAttachments(attachments: readonly ParsedAttachment[]): {
     total += size
     kept.push({
       filename,
-      contentType: attachment.mimeType || "application/octet-stream",
+      contentType: (attachment.mimeType || "application/octet-stream").slice(
+        0,
+        CONTENT_TYPE_MAX_CHARS,
+      ),
       base64: attachment.content,
     })
   }
   return { kept, tooMuch, notAllowed }
 }
 
-/** El aviso que va al final del texto cuando algún adjunto no se mandó. */
-export function omittedNote(tooMuch: readonly string[], notAllowed: readonly string[]): string {
+/**
+ * El aviso de los adjuntos que no se mandaron, aparte del texto: no se cita en la respuesta ni
+ * viaja al modelo. Dice dónde está el correo completo según el camino: un buzón se reenvía al
+ * buzón de siempre; la dirección de una persona, solo a su copia (si la tiene).
+ */
+export function omittedNote(
+  tooMuch: readonly string[],
+  notAllowed: readonly string[],
+  kind: ApiRoute["kind"],
+): string {
   const lines: string[] = []
   if (tooMuch.length)
     lines.push(
@@ -185,7 +208,14 @@ export function omittedNote(tooMuch: readonly string[], notAllowed: readonly str
       `No se guardaron por su tipo (solo PDF, imagen, xlsx, csv y docx): ${notAllowed.join(", ")}.`,
     )
   if (!lines.length) return ""
-  return `\n\n[Aviso del correo entrante] ${lines.join(" ")} El correo completo llegó también al buzón de siempre.`
+  const whole =
+    kind === "buzon"
+      ? "El correo completo llegó también al buzón de siempre."
+      : "El correo completo llega solo a la copia de esa persona, si tiene una."
+  const note = `${lines.join(" ")} ${whole}`
+  return note.length > NOTICE_MAX_CHARS
+    ? `${note.slice(0, NOTICE_MAX_CHARS - whole.length - 2)}… ${whole}`
+    : note
 }
 
 function hex(bytes: ArrayBuffer): string {
@@ -220,6 +250,19 @@ function senderOf(
   }
 }
 
+/**
+ * La primera dirección del Reply-To (RFC 5322 §3.6.2), recortada; null si no trae. La respuesta
+ * va ahí; el cliente se sigue ligando por el From verificado.
+ */
+function replyToOf(email: ParsedEmail): string | null {
+  for (const entry of email.replyTo ?? []) {
+    const address = entry.address || entry.group?.find((member) => member.address)?.address
+    const clean = (address ?? "").trim().toLowerCase()
+    if (clean && clean.length <= 254 && /^[^\s@<>]+@[^\s@<>]+$/.test(clean)) return clean
+  }
+  return null
+}
+
 /** El cuerpo que espera la API, armado desde el correo leído. */
 export async function inboundBody(
   raw: Uint8Array,
@@ -236,11 +279,8 @@ export async function inboundBody(
     email.messageId?.trim() ||
     `<sin-id-${hex(await crypto.subtle.digest("SHA-256", raw))}@entrante.sallca>`
   const { kept, tooMuch, notAllowed } = pickAttachments(email.attachments)
-  const note = omittedNote(tooMuch, notAllowed)
-  const text = (email.text ?? (email.html ? htmlToText(email.html) : "")).slice(
-    0,
-    TEXT_MAX_CHARS - note.length,
-  )
+  const note = omittedNote(tooMuch, notAllowed, route.kind)
+  const text = (email.text ?? (email.html ? htmlToText(email.html) : "")).slice(0, TEXT_MAX_CHARS)
   const thread = threadHeaders(email.inReplyTo, email.references)
   return JSON.stringify({
     mailbox: route.kind === "persona" ? "persona" : route.mailbox,
@@ -251,7 +291,9 @@ export async function inboundBody(
     fromName: sender.name,
     to: envelope.to.trim().toLowerCase().slice(0, 254),
     subject: email.subject ? email.subject.slice(0, 5000) : null,
-    text: text + note,
+    text,
+    notice: note || null,
+    replyTo: replyToOf(email),
     receivedAt: receivedAt.toISOString(),
     attachments: kept,
     inReplyTo: thread.inReplyTo,

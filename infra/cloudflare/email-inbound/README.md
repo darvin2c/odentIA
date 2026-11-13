@@ -45,6 +45,8 @@ Cuerpo JSON:
   "to": "soporte@odentia32.com",
   "subject": "…",
   "text": "el texto, o el HTML pasado a texto",
+  "notice": "los adjuntos que no se mandaron, o null",
+  "replyTo": "la primera dirección del Reply-To, o null",
   "receivedAt": "2026-11-12T15:00:00.000Z",
   "attachments": [{ "filename": "lista.xlsx", "contentType": "…", "base64": "…" }],
   "inReplyTo": "<…>",
@@ -59,7 +61,11 @@ Cuerpo JSON:
   `vistia20.com` → `optical`. Otro dominio solo se reenvía.
 - `inReplyTo` y `references` son las cabeceras del hilo, solo con sus Message-ID y recortadas
   (998 y 8000 caracteres): así la API reconoce la respuesta a un correo nuestro.
-- La respuesta de la API lleva `data.copyTo`: el buzón de la copia de esa persona, o `null`.
+- La respuesta de la API lleva `data.copyTo`: el buzón de la copia de esa persona, o `null`
+  (también si ya no está en el equipo, o si el correo es repetido: el mismo correo a dos personas
+  llega dos veces con el mismo Message-ID y cada entrega dice la copia de la suya).
+- `replyTo`: la primera dirección del `Reply-To`, en minúsculas; la respuesta del ARM va ahí.
+  El cliente se sigue ligando por el From verificado.
 - Sin `Message-ID`, va uno fijo por el contenido del correo: la API entra cada correo una sola vez.
 - `senderVerified` (`src/auth.ts`): el From se puede falsificar, así que la API liga el correo a
   su cliente solo si es `true`. Lo es si en el resultado de más arriba de Cloudflare
@@ -69,7 +75,10 @@ Cuerpo JSON:
   un remitente no verificado, para que una persona diga de quién es. Pruebas: `npm test`.
 - Adjuntos: solo PDF, imagen, xlsx, csv y docx (la API lo vuelve a comprobar por sus bytes; un
   xlsx o un docx tiene que traer sus partes de Office, sin macros ni ejecutables),
-  hasta 10 MB y 20 en total. Lo que pasa se omite y se avisa al final del texto. Las imágenes
+  hasta 10 MB y 20 en total. Lo que pasa se omite y se avisa en `notice`, aparte del texto (no
+  se cita en la respuesta ni viaja al modelo), con dónde está el correo completo: el buzón de
+  siempre para un buzón fijo, la copia de la persona (si tiene) para su dirección. El nombre
+  (1000) y el tipo (200) de cada adjunto se recortan para que la API no lo rechace. Las imágenes
   de la firma no se mandan.
 
 **Firma** (la misma que `verifyInboundSignature` en `apps/api/src/routes/inbound-email.ts`):
