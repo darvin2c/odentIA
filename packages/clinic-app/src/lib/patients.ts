@@ -4,6 +4,7 @@ import {
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
   type MissingPersonDatum,
+  type PregnancyToday,
   type Vitals,
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
@@ -212,6 +213,18 @@ export interface SaveHealthInput {
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
 }
 
+/** Lo que la persona, o quien habla por ella, dijo de su salud y ningún profesional revisó todavía. */
+export interface DeclaredHealthMark {
+  /** Cuándo lo dijo por última vez. */
+  at: string | null
+  allergies: string[]
+  conditions: string[]
+  medications: string[]
+  pregnancy: boolean
+  /** Su «No» a un grupo lo dijo la persona, no lo anotó un profesional. */
+  saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
+}
+
 export interface PatientHealth {
   revision: number
   reviewStatus: HealthReviewStatus
@@ -229,6 +242,17 @@ export interface PatientHealth {
   allergyReviewDue?: boolean
   /** Lo declarado por el paciente espera la revisión de un profesional (lo decide el servidor). */
   reviewPending?: boolean
+  /** Lo que dijo la persona y nadie revisó: qué filas, su «No» y cuándo (lo decide el servidor). */
+  declared?: DeclaredHealthMark
+  /** El embarazo a hoy, con el día en que se dijo y la semana calculada; null si no hay. */
+  pregnancy?: PregnancyToday | null
+  /** Lo último que envió de su salud desde su enlace, tal como llegó. */
+  linkDeclaration?: {
+    at: string
+    via: "enlace"
+    respondent: "patient" | "representative"
+    health: Record<string, unknown>
+  } | null
   latestAnamnesis: {
     id: string
     version: number
@@ -1005,6 +1029,8 @@ export interface PatientFull {
    * alergias; nulo para el resto.
    */
   allergyReview?: HealthReviewState | null
+  /** El «No» a las alergias lo dijo la persona y nadie lo revisó: no es un «niega» del equipo. */
+  allergySaidNo?: boolean | null
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }

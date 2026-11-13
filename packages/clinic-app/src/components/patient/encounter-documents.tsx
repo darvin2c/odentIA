@@ -645,11 +645,15 @@ export function EncounterDocumentsBlock({
                 Formulario · {form.templateTitle ?? "Formulario"}
               </span>
               <span className="text-xs text-muted-foreground">
-                {FORM_RESPONSE_STATUS_LABELS[form.status]}
+                {form.source === "portal"
+                  ? form.status === "finalizado"
+                    ? "Lo envió el paciente · revisado"
+                    : "Lo envió el paciente · por revisar"
+                  : FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" ? "Completar" : "Ver"}
+              {form.status === "borrador" && form.source !== "portal" ? "Completar" : "Ver"}
             </Button>
           </li>
         ))}
@@ -836,6 +840,8 @@ export function EncounterDocumentsBlock({
       ) : null}
       <FormDetail
         patientId={patientId}
+        encounterId={encounterId}
+        sex={patient.patient.sex ?? null}
         responseId={openForm}
         canWrite={canWrite && !disabled}
         onClose={() => setOpenForm(null)}
@@ -892,12 +898,16 @@ function PrescriptionRow({
 /** Un formulario de la atención se completa al lado, sin salir. */
 function FormDetail({
   patientId,
+  encounterId,
+  sex,
   responseId,
   canWrite,
   onClose,
   onChanged,
 }: {
   patientId: string
+  encounterId: string
+  sex: string | null
   responseId: string | null
   canWrite: boolean
   onClose: () => void
@@ -913,7 +923,7 @@ function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Formulario"}
-      description="Se guarda solo mientras lo completas."
+      description={response?.source === "portal" ? undefined : "Se guarda solo mientras lo completas."}
       onClose={onClose}
     >
       {response ? (
@@ -921,6 +931,8 @@ function FormDetail({
           key={response.id}
           response={response}
           canWrite={canWrite}
+          sex={sex}
+          encounterId={encounterId}
           onChanged={onChanged}
         />
       ) : null}

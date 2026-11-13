@@ -3,6 +3,7 @@ import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
+import { saidNoWords } from "../../lib/declared-health"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type TaskItem, useCan, usePermission } from "../../lib/crm"
@@ -128,6 +129,7 @@ export function PersonSummary({
               patientId={patientId}
               patientName={person.displayName}
               health={health.data?.data ?? null}
+              saidBy={{ sex: person.sex, contacts: detail?.contacts ?? [] }}
               onAntecedentes={() => openWide?.({ id: "antecedentes" })}
             />
           )}
@@ -210,7 +212,10 @@ export function PersonSummary({
           {patientId && canAlerts && detail && !clinical ? (
             <Fact label="Alergias">
               {allergies.length === 0
-                ? "Sin alergias registradas"
+                ? // El «No» que marcó la persona (o quien habla por ella) no es un «niega» de la clínica.
+                  detail.allergySaidNo
+                  ? `${saidNoWords({ sex: person.sex, contacts: detail.contacts })} · sin revisar`
+                  : "Sin alergias registradas"
                 : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>
           ) : null}

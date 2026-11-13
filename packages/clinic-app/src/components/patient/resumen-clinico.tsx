@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { pregnancyWords, type SaidBy, saidByWords, saidNoWords, shortDay } from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
@@ -139,11 +140,14 @@ export function ClinicalAlertsCard({
   patientId,
   patientName,
   health,
+  saidBy = {},
   onAntecedentes,
 }: {
   patientId: string
   patientName: string
   health: PatientHealth | null
+  /** De quién se habla, para decir quién dijo lo declarado (su sexo y quien decide por ella). */
+  saidBy?: SaidBy
   onAntecedentes: () => void
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
@@ -156,6 +160,11 @@ export function ClinicalAlertsCard({
   const today = clinicToday()
   const medications = (health?.medications ?? []).filter((medication) => isCurrentMedication(medication, today))
   const allergyState = health?.reviewStatus.allergies ?? "unknown"
+  // Lo que dijo la persona y nadie revisó, con la misma marca que la franja (lo decide el servidor).
+  const mark = health?.declared
+  const said = `${saidByWords(saidBy)} · por revisar`
+  const saidDay = mark?.at ? ` (${shortDay(mark.at)})` : ""
+  const pregnancy = health?.pregnancy ? pregnancyWords(health.pregnancy) : null
   const asa = asaLabel(health?.asaClass)
   // Lo que no es una alerta, en una línea: «niega» solo si se le preguntó, si no, «no preguntado»
   // (ADR 0035). Antes de atender se veían solo las alergias (QA del 8 nov, entrega 3).
@@ -163,8 +172,12 @@ export function ClinicalAlertsCard({
   const quiet = !health
     ? []
     : [
-    conditions.length === 0 ? `Enfermedades: ${groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}` : null,
-    medications.length === 0 ? `Medicación: ${groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}` : null,
+    conditions.length === 0
+      ? `Enfermedades: ${mark?.saidNo.conditions ? `dijo que no${saidDay}` : groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}`
+      : null,
+    medications.length === 0
+      ? `Medicación: ${mark?.saidNo.medications ? `dijo que no${saidDay}` : groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}`
+      : null,
     // ASA en odentIA siempre; en latidIA solo si alguien la clasificó.
     asa || productUi().health.showsAsa ? (asa ?? "ASA: sin clasificar") : null,
   ].filter((part): part is string => part !== null)
@@ -178,6 +191,23 @@ export function ClinicalAlertsCard({
       }
     >
       <ul className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
+        {pregnancy && health?.pregnancy ? (
+          <Alert
+            // Pasado el término ya no alarma: pide confirmarlo.
+            tone={pregnancy.confirm ? "muted" : "warning"}
+            title={pregnancy.title}
+            detail={[
+              pregnancy.confirm
+                ? `${pregnancy.detail}: pregúntale si sigue embarazada`
+                : health.pregnancy.weeksToday === null
+                  ? pregnancy.detail
+                  : `dijo ${health.pregnancy.weeksSaid} ${health.pregnancy.weeksSaid === 1 ? "semana" : "semanas"} el ${shortDay(health.pregnancy.saidOn ?? "")}`,
+              mark?.pregnancy ? "por revisar" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        ) : null}
         {allergies.map((allergy) => (
           <Alert
             key={allergy.id}
@@ -186,8 +216,8 @@ export function ClinicalAlertsCard({
               .filter(Boolean)
               .join(" ")} · ${allergyName(allergy)}`}
             detail={[
-              allergy.reaction ?? "reacción no descrita",
-              allergy.source === "paciente" ? "la declaró el paciente" : null,
+              allergy.reaction ?? (mark?.allergies.includes(allergy.id) ? "no dijo qué le pasó" : "reacción no descrita"),
+              mark?.allergies.includes(allergy.id) ? said : allergy.source === "paciente" ? "la dijo el paciente" : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -203,7 +233,11 @@ export function ClinicalAlertsCard({
         {health && allergies.length === 0 ? (
           <li className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
             <span className="text-sm font-medium">
-              {allergyState === "none" ? "Alergias: niega" : "Alergias: no preguntado"}
+              {mark?.saidNo.allergies
+                ? `Alergias: ${saidNoWords(saidBy).toLocaleLowerCase("es")} · sin revisar`
+                : allergyState === "none"
+                  ? "Alergias: niega"
+                  : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />
@@ -215,7 +249,14 @@ export function ClinicalAlertsCard({
             key={condition.id}
             tone="warning"
             title={condition.name}
-            detail={condition.diagnosisCode ? diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode) : condition.notes}
+            detail={
+              [
+                condition.diagnosisCode ? diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode) : condition.notes,
+                mark?.conditions.includes(condition.id) ? said : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined
+            }
           />
         ))}
         {medications.map((medication) => (
@@ -223,7 +264,7 @@ export function ClinicalAlertsCard({
             key={medication.id}
             tone="muted"
             title={[medication.name, medication.dose, medication.frequency].filter(Boolean).join(" · ")}
-            detail="Medicamento vigente"
+            detail={mark?.medications.includes(medication.id) ? said : "Medicamento vigente"}
           />
         ))}
         {quiet.length > 0 ? (

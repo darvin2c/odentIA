@@ -1,4 +1,4 @@
-import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
+import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -35,6 +35,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import {
+  declaredMarkWords,
+  pregnancyWords,
+  type SaidBy,
+  saidByWords,
+  saidNoWords,
+  shortDay,
+} from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import {
   ASA_OPTIONS,
@@ -164,7 +172,7 @@ const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responde
 /** Lo guardado, como lo edita el formulario. */
 function buildDrafts(health: PatientHealth): HealthFormValues {
   const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
-  const weeks = groupOf(interview, "antecedentesPersonales")["semanasEmbarazo"]
+  const weeks = pregnancyRecordOf(interview)?.semanas
   return {
     asaClass: health.asaClass ?? "",
     familyHistory: (health.familyHistory ?? []).map((row) => ({
@@ -220,17 +228,41 @@ interface HealthBase {
   interview: string
 }
 
-/** La entrevista con las semanas de embarazo (odentIA las pregunta en «Personales»). */
-function interviewOf(value: HealthFormValues, asksPregnancy: boolean): Rec {
-  if (!asksPregnancy) return value.interview
-  const personales = groupOf(value.interview, "antecedentesPersonales")
-  const weeks = value.pregnancyWeeks.trim()
-  if (personales["embarazo"] === true && weeks !== "") personales["semanasEmbarazo"] = Number(weeks)
-  else delete personales["semanasEmbarazo"]
-  const out = { ...value.interview }
+/**
+ * El embarazo de la entrevista con su fecha (`embarazoLactancia.embarazo`): sí o no, dicho hoy.
+ * Lo de antes (`antecedentesPersonales.embarazo`, sin fecha) sale: queda una sola forma.
+ * `estado` nulo lo quita («Sin responder»).
+ */
+function withPregnancy(interview: Rec, estado: "si" | "no" | null, today: string): Rec {
+  const out = { ...interview }
+  const personales = groupOf(interview, "antecedentesPersonales")
+  delete personales["embarazo"]
+  delete personales["semanasEmbarazo"]
   if (Object.keys(personales).length > 0) out["antecedentesPersonales"] = personales
   else delete out["antecedentesPersonales"]
+  const group = groupOf(interview, "embarazoLactancia")
+  if (estado) group["embarazo"] = { estado, fecha: today }
+  else delete group["embarazo"]
+  if (Object.keys(group).length > 0) out["embarazoLactancia"] = group
+  else delete out["embarazoLactancia"]
   return out
+}
+
+/**
+ * La entrevista con las semanas de embarazo (odentIA las pregunta en «Personales»). La fecha del
+ * embarazo es la del día en que se dijo: solo cambia al cambiar la respuesta o las semanas
+ * (`withPregnancy`), nunca por guardar otro dato. Lo guardado antes sin fecha queda como está
+ * hasta que alguien lo responde de nuevo.
+ */
+function interviewOf(value: HealthFormValues, asksPregnancy: boolean): Rec {
+  if (!asksPregnancy) return value.interview
+  const group = groupOf(value.interview, "embarazoLactancia")
+  const stated = group["embarazo"]
+  if (!stated || typeof stated !== "object") return value.interview
+  const { semanas: _semanas, ...statement } = stated as Rec
+  const weeks = value.pregnancyWeeks.trim()
+  group["embarazo"] = statement["estado"] === "si" && weeks !== "" ? { ...statement, semanas: Number(weeks) } : statement
+  return { ...value.interview, embarazoLactancia: group }
 }
 
 const INTERVIEW_PREFIX = "anamnesis.answers."
@@ -345,7 +377,7 @@ function healthSchema(
       const weeks = value.pregnancyWeeks.trim()
       if (
         asksPregnancy &&
-        groupOf(value.interview, "antecedentesPersonales")["embarazo"] === true &&
+        pregnancyRecordOf(value.interview)?.estado === "si" &&
         weeks !== "" &&
         !(/^\d{1,2}$/.test(weeks) && Number(weeks) <= 42)
       ) {
@@ -527,7 +559,7 @@ export function AntecedentesTab({
   })
   const surface = useFormSurface(form, {
     fieldMap: (key) => {
-      if (key === `${INTERVIEW_PREFIX}antecedentesPersonales.semanasEmbarazo`) return "pregnancyWeeks"
+      if (key === `${INTERVIEW_PREFIX}embarazoLactancia.embarazo.semanas`) return "pregnancyWeeks"
       // Lo de la entrevista lo dice cada sección bajo su dato (`serverInterviewErrors`).
       if (key.startsWith(INTERVIEW_PREFIX)) return "interview"
       const family = /^familyHistory\[(\d+)\](.*)$/.exec(key)
@@ -622,9 +654,14 @@ export function AntecedentesTab({
   }
 
   const personales = groupOf(interview, "antecedentesPersonales")
+  const pregnancyRecord = pregnancyRecordOf(interview)
   const legacy = legacyTexts(health.latestAnamnesis?.answers as AnamnesisAnswers | undefined)
   const fid = (name: string): string => `${uid}-${name}`
   const registration = patientQuery.data?.data.registration ?? null
+  const saidBy: SaidBy = {
+    sex: patientQuery.data?.data.patient.sex,
+    contacts: patientQuery.data?.data.contacts ?? [],
+  }
   const pendingReview = isHealthReviewPending(health)
   const submitLabel = pendingReview && !isDirty ? "Revisar y guardar" : "Guardar antecedentes"
   const readOnly = !canWrite || isSubmitting
@@ -649,8 +686,8 @@ export function AntecedentesTab({
           {health.reviewedAt ? (
             <Badge variant="secondary">Revisado por personal autorizado</Badge>
           ) : pendingReview ? (
-            <Badge variant="outline">
-              Declarado por el paciente/responsable · pendiente de revisión
+            <Badge variant="outline" className="h-auto max-w-full border-dashed py-px text-left whitespace-normal">
+              {declaredMarkWords(saidBy, health.declared?.at)}
             </Badge>
           ) : null}
         </div>
@@ -665,7 +702,7 @@ export function AntecedentesTab({
               Ver historial ({versions.length})
             </Button>
           ) : null}
-          {registration ? (
+          {registration || health.linkDeclaration ? (
             <Button type="button" variant="link" size="sm" onClick={() => setSnapshotOpen(true)}>
               Ver declaración original
             </Button>
@@ -682,6 +719,7 @@ export function AntecedentesTab({
         patientId={patientId}
         patientName={patientQuery.data?.data.patient.displayName ?? "el paciente"}
         health={health}
+        saidBy={saidBy}
       />
 
       {unasked ? (
@@ -693,7 +731,13 @@ export function AntecedentesTab({
           onAction={canWrite ? openDrawer : undefined}
         />
       ) : (
-        <AntecedentesSummary saved={saved} pendingReview={pendingReview} />
+        <AntecedentesSummary
+          saved={saved}
+          pendingReview={pendingReview}
+          mark={health.declared}
+          pregnancy={health.pregnancy ?? null}
+          saidBy={saidBy}
+        />
       )}
       <productHealth.Summary answers={(health.latestAnamnesis?.answers ?? {}) as Rec} />
 
@@ -872,20 +916,15 @@ export function AntecedentesTab({
                         <Select
                           // Con sus nombres: sin ellos, el campo muestra la clave («sin-responder», QA del 6 nov).
                           items={PREGNANCY_ITEMS}
-                          value={
-                            personales["embarazo"] === true
-                              ? "si"
-                              : personales["embarazo"] === false
-                                ? "no"
-                                : "sin-responder"
-                          }
-                          onValueChange={(v) =>
-                            updateInterview(
-                              "antecedentesPersonales",
-                              "embarazo",
-                              v === "si" ? true : v === "no" ? false : undefined,
+                          value={pregnancyRecord?.estado ?? "sin-responder"}
+                          onValueChange={(v) => {
+                            // Responderlo es decirlo hoy: queda con la fecha de hoy, que ya no se mueve.
+                            form.setFieldValue("interview", (prev) =>
+                              withPregnancy(prev, v === "si" || v === "no" ? v : null, clinicToday()),
                             )
-                          }
+                            if (v !== "si") form.setFieldValue("pregnancyWeeks", "")
+                            if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
+                          }}
                           disabled={readOnly}
                         >
                           <SelectTrigger id={fid("emb-estado")}>
@@ -897,10 +936,27 @@ export function AntecedentesTab({
                             <SelectItem value="no">No</SelectItem>
                           </SelectContent>
                         </Select>
+                        {pregnancyRecord ? (
+                          <p className="text-xs text-muted-foreground">
+                            {pregnancyRecord.fecha
+                              ? `Anotado el ${shortDay(pregnancyRecord.fecha)}. Si cambias la respuesta o las semanas, queda con la fecha de hoy.`
+                              : "Está anotado sin fecha: al responderlo de nuevo queda con la de hoy."}
+                          </p>
+                        ) : null}
                       </Field>
                     ) : null}
-                    {productHealth.asksPregnancy && personales["embarazo"] === true ? (
-                      <form.AppField name="pregnancyWeeks">
+                    {productHealth.asksPregnancy && pregnancyRecord?.estado === "si" ? (
+                      <form.AppField
+                        name="pregnancyWeeks"
+                        listeners={{
+                          // Las semanas son las de hoy: decirlas pone la fecha de hoy. Solo si sigue en «Sí»:
+                          // al pasar a «No» el campo se vacía y eso no es decir las semanas.
+                          onChange: () =>
+                            form.setFieldValue("interview", (prev) =>
+                              pregnancyRecordOf(prev)?.estado === "si" ? withPregnancy(prev, "si", clinicToday()) : prev,
+                            ),
+                        }}
+                      >
                         {(field) => (
                           <field.TextField
                             id={fid("emb-sem")}
@@ -1065,6 +1121,7 @@ export function AntecedentesTab({
         open={snapshotOpen}
         onClose={() => setSnapshotOpen(false)}
         registration={registration}
+        linkDeclaration={health.linkDeclaration ?? null}
       />
     </div>
   )
@@ -1078,9 +1135,16 @@ export function AntecedentesTab({
 function AntecedentesSummary({
   saved,
   pendingReview,
+  mark,
+  pregnancy,
+  saidBy,
 }: {
   saved: HealthFormValues
   pendingReview: boolean
+  /** Lo que dijo la persona y nadie revisó (lo decide el servidor). */
+  mark?: PatientHealth["declared"]
+  pregnancy: PregnancyToday | null
+  saidBy: SaidBy
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
   const activeCon = conditions.filter((r) => r.status === "activa")
@@ -1091,10 +1155,21 @@ function AntecedentesSummary({
   // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
   // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
   const asa = asaLabel(asaClass)
-  const rows: Array<{ title: string; state: HealthReviewState; detail: string; lead?: string }> = [
+  // Lo que dijo y nadie revisó se dice igual que en la franja: «lo dijo ella · por revisar», y su
+  // «No» como «dijo que no», nunca como el «niega» que anota quien se lo pregunta.
+  const said = `${saidByWords(saidBy).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} · por revisar`
+  const saidWord = (group: "conditions" | "medications", ids: string[]): string | undefined =>
+    mark?.saidNo[group]
+      ? `${saidNoWords(saidBy)} · sin revisar`
+      : ids.some((id) => mark?.[group].includes(id))
+        ? said
+        : undefined
+  const pregnancyText = pregnancy ? pregnancyWords(pregnancy) : null
+  const rows: Array<{ title: string; state: HealthReviewState; detail: string; lead?: string; said?: string }> = [
     {
       title: "Condiciones",
       state: review.conditions,
+      said: saidWord("conditions", activeCon.flatMap((row) => (row.id ? [row.id] : []))),
       lead:
         asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
@@ -1107,6 +1182,7 @@ function AntecedentesSummary({
     {
       title: "Medicación vigente",
       state: review.medications,
+      said: saidWord("medications", activeMed.flatMap((row) => (row.id ? [row.id] : []))),
       detail:
         activeMed.length > 0
           ? activeMed
@@ -1132,19 +1208,42 @@ function AntecedentesSummary({
           </Badge>
         ) : null}
       </div>
+      {pregnancyText ? (
+        <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
+          <span className="font-heading text-sm font-medium">{pregnancyText.title}</span>
+          <span className="text-sm text-muted-foreground">
+            {pregnancyText.confirm
+              ? `${pregnancyText.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}. Pregúntale si sigue embarazada.`
+              : pregnancy?.weeksToday === null
+                ? pregnancyText.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
+                : `Dijo ${pregnancyText.detail}`}
+          </span>
+          {mark?.pregnancy ? (
+            <Badge variant="outline" className="mt-1 h-auto w-fit max-w-full border-dashed py-px text-left whitespace-normal">
+              {said}
+            </Badge>
+          ) : null}
+        </div>
+      ) : null}
       {rows.map((row) => (
         <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
           <span className="font-heading text-sm font-medium">{row.title}</span>
           {row.lead ? <span className="text-sm">{row.lead}</span> : null}
           <span className="text-sm text-muted-foreground">{row.detail}</span>
-          <Badge
-            variant={
-              row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"
-            }
-            className="mt-1 w-fit"
-          >
-            {HEALTH_REVIEW_LABELS[row.state]}
-          </Badge>
+          {row.said ? (
+            <Badge variant="outline" className="mt-1 h-auto w-fit max-w-full border-dashed py-px text-left whitespace-normal">
+              {row.said}
+            </Badge>
+          ) : (
+            <Badge
+              variant={
+                row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"
+              }
+              className="mt-1 w-fit"
+            >
+              {HEALTH_REVIEW_LABELS[row.state]}
+            </Badge>
+          )}
         </div>
       ))}
     </div>
@@ -1245,19 +1344,34 @@ function SnapshotGroup({
   )
 }
 
+/** El embarazo de una declaración, como lo dijo: «Sí · 30 semanas». */
+function declaredPregnancyText(health: Rec): string | null {
+  const personal = (health["personal"] ?? null) as Rec | null
+  if (!personal || typeof personal["embarazo"] !== "boolean") return null
+  if (!personal["embarazo"]) return "No"
+  return typeof personal["semanasEmbarazo"] === "number" ? `Sí · ${personal["semanasEmbarazo"]} semanas` : "Sí"
+}
+
 /**
- * Declaración original del registro (snapshot append-only): solo lectura, nunca
- * se edita desde aquí. Los datos vigentes se corrigen con el editor clínico.
+ * La declaración original, solo para leer: lo que la persona envió desde su
+ * enlace («Tus datos y tu salud»), tal como llegó, y el registro con que se
+ * creó la ficha. Nunca se edita desde aquí: lo vigente se corrige en sus
+ * antecedentes, y esto sigue diciendo lo que se declaró.
  */
 function RegistrationSnapshotDialog({
   open,
   onClose,
   registration,
+  linkDeclaration,
 }: {
   open: boolean
   onClose: () => void
   registration: PatientFull["registration"]
+  linkDeclaration: PatientHealth["linkDeclaration"]
 }): React.JSX.Element {
+  const sentHealth = (linkDeclaration?.health ?? {}) as Rec
+  const sentPregnancy = declaredPregnancyText(sentHealth)
+  const sentBlood = sentHealth["bloodGroup"]
   const answers = (registration?.answers ?? {}) as Rec
   const health = (answers["health"] ?? {}) as Rec
   const representative = (answers["representative"] ?? null) as Rec | null
@@ -1272,14 +1386,40 @@ function RegistrationSnapshotDialog({
     >
       <DialogContent scrollable className="max-h-[85vh] sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Declaración original del registro</DialogTitle>
+          <DialogTitle>Declaración original</DialogTitle>
           <DialogDescription>
-            Snapshot inmutable de lo declarado al crear la ficha. No se edita: los datos vigentes se
-            corrigen con el editor clínico.
+            Lo que se declaró, tal como llegó. No se edita: lo vigente se corrige en sus antecedentes.
           </DialogDescription>
         </DialogHeader>
+        {linkDeclaration ? (
+          <section aria-label="Lo que envió desde su enlace" className="flex flex-col gap-3 text-sm">
+            <div className="flex flex-col gap-0.5">
+              <h3 className="font-medium">Lo que envió desde su enlace</h3>
+              <p className="text-muted-foreground">
+                {linkDeclaration.respondent === "patient" ? "Lo envió la propia persona" : "Lo envió quien decide por la persona"}{" "}
+                el {new Date(linkDeclaration.at).toLocaleString(activeOrgLocale(), { dateStyle: "long", timeStyle: "short" })}.
+              </p>
+            </div>
+            <SnapshotGroup title="Alergias" group={sentHealth["allergies"]} nameKey="substance" />
+            <SnapshotGroup title="Enfermedades" group={sentHealth["conditions"]} nameKey="name" />
+            <SnapshotGroup title="Medicación" group={sentHealth["medications"]} nameKey="name" />
+            {sentPregnancy ? (
+              <p>
+                <span className="font-medium">Embarazo · </span>
+                {sentPregnancy}
+              </p>
+            ) : null}
+            {typeof sentBlood === "string" && sentBlood in BLOOD_GROUP_LABELS ? (
+              <p>
+                <span className="font-medium">Grupo sanguíneo · </span>
+                {BLOOD_GROUP_LABELS[sentBlood as keyof typeof BLOOD_GROUP_LABELS]}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
         {registration ? (
           <div className="flex flex-col gap-4 text-sm">
+            {linkDeclaration ? <h3 className="border-t pt-4 font-medium">El registro con que se creó su ficha</h3> : null}
             <dl className="grid gap-1">
               <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-2">
                 <dt className="text-muted-foreground">Entrada</dt>
@@ -1365,8 +1505,8 @@ function RegistrationSnapshotDialog({
               </section>
             ) : null}
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Sin snapshot de registro.</p>
+        ) : linkDeclaration ? null : (
+          <p className="text-sm text-muted-foreground">Sin declaración guardada.</p>
         )}
       </DialogContent>
     </Dialog>

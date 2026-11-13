@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { PatientHealth } from "../../lib/patients"
+import { bareProduct, declareProduct } from "../../product/product-ui"
 import { askWhom, HealthReviewNotice } from "./health-review-notice"
+
+declareProduct(bareProduct("dental"))
 
 vi.mock("../../lib/crm", () => ({ usePermission: () => true, useMemberName: () => () => "Dra. Ana" }))
 
@@ -51,22 +54,57 @@ describe("«Pregúntale» en la atención", () => {
       render({ ...health, allergyReviewDue: false, reviewStatus: { allergies: "none", conditions: "none", medications: "none" } }),
     ).toBe("")
   })
-  it("lo que declaró en línea y nadie revisó se pide revisar en sus antecedentes (lo decide el servidor)", () => {
-    const answered = { ...health, allergyReviewDue: false, reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" } } as PatientHealth
+  it("lo que dijo y nadie revisó se pide revisar por tema, con sus palabras (lo decide el servidor)", () => {
+    const answered = { ...health, allergyReviewDue: false, reviewStatus: { allergies: "recorded", conditions: "none", medications: "recorded" } } as PatientHealth
     const declared = {
       ...answered,
       reviewPending: true,
-      conditions: [{ id: "c1", name: "Hipertensión", status: "activa", notes: "Lo declaró en su registro en línea el 09/11/2026." }],
-      medications: [{ id: "m1", name: "Losartán", notes: "Lo declaró en su registro en línea el 09/11/2026." }],
+      allergies: [{ id: "a1", substance: "Látex", reaction: null, isActive: true, severity: "desconocida", source: "paciente" }],
+      conditions: [],
+      medications: [{ id: "m1", name: "Sulfato ferroso", endDate: null }, { id: "m2", name: "Ácido fólico", endDate: null }],
+      pregnancy: { state: "vigente", saidOn: "2026-11-13", weeksSaid: 30, weeksToday: 32 },
+      declared: {
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: ["a1"],
+        conditions: [],
+        medications: ["m1", "m2"],
+        pregnancy: true,
+        saidNo: { allergies: false, conditions: true, medications: false },
+      },
     } as unknown as PatientHealth
-    const page = render(declared)
-    expect(page).toContain("Revisa con Lucía lo que declaró de su salud")
-    expect(page).toContain("Hipertensión y Losartán.")
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Lucero Vega" health={declared} saidBy={{ sex: "F" }} />
+      </QueryClientProvider>,
+    )
+    expect(page).toContain("Revisa con Lucero lo que dijo de su salud")
+    expect(page).toContain("Lo dijo ella el 13 nov, sin revisar")
+    // El embarazo, con la semana de hoy y lo que dijo ese día.
+    expect(page).toContain("32 semanas hoy (dijo 30 el 13 nov)")
+    expect(page).toContain("Látex · no dijo qué le pasó")
+    expect(page).toContain("Sulfato ferroso, Ácido fólico")
+    // Su «No» es de ella: no se lee «niega».
+    expect(page).toContain("dijo que no")
+    expect(page).not.toContain("Niega")
     expect(render({ ...declared, reviewPending: false })).toBe("")
+  })
+  it("un embarazo que ya pasó su término no alarma: pide confirmarlo, sin frenar", () => {
+    const past = {
+      ...health,
+      allergyReviewDue: false,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+      reviewedAt: "2026-11-14T15:00:00.000Z",
+      reviewPending: false,
+      pregnancy: { state: "por_confirmar", saidOn: "2026-01-10", weeksSaid: 30, weeksToday: null },
+      declared: { at: null, allergies: [], conditions: [], medications: [], pregnancy: false, saidNo: { allergies: false, conditions: false, medications: false } },
+    } as unknown as PatientHealth
+    const page = render(past)
+    expect(page).toContain("Pregúntale a Lucía si sigue embarazada")
+    expect(page).toContain("Embarazo por confirmar")
+    expect(page).toContain("Lo dijo el 10 ene, con 30 semanas")
   })
 })
 
-// QA del 10 nov (B11): en un niño decía «Pregúntale a QA por sus alergias», y la ficha ya decía quién habla por él.
 describe("«Pregúntale» con representante", () => {
   const guardian = {
     contactId: "c1",

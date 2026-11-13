@@ -17,6 +17,7 @@ import {
   REMOVAL_REASON_LABELS,
 } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
+import { type SaidBy, saidNoWords } from "../../lib/declared-health"
 import {
   type Allergy,
   addAllergyApi,
@@ -97,15 +98,20 @@ export function AllergiesCard({
   patientId,
   patientName,
   health,
+  saidBy = {},
 }: {
   patientId: string
   patientName: string
   health: PatientHealth
+  /** De quién se habla, para decir quién dijo que no tiene (su sexo y quien decide por ella). */
+  saidBy?: SaidBy
 }) {
   const titleId = useId()
   const canWrite = usePermission("clinical.write")
   const memberName = useMemberName()
   const originText = useOriginText()
+  // El «No» lo marcó la persona (o quien habla por ella) y nadie se lo preguntó en la clínica.
+  const saidNo = health.declared?.saidNo.allergies === true
   const restore = useRestoreAllergy(patientId)
   const [adding, setAdding] = useState(false)
   const [coding, setCoding] = useState<Allergy | null>(null)
@@ -145,14 +151,16 @@ export function AllergiesCard({
       {active.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
-            {health.reviewStatus.allergies === "none"
+            {saidNo
+              ? `${saidNoWords(saidBy)} · sin revisar.`
+              : health.reviewStatus.allergies === "none"
               ? "No tiene alergias: se le preguntó."
               : health.reviewStatus.allergies === "recorded"
                 ? "Sin alergias vigentes."
                 : "Aún no se le preguntó si tiene alergias."}
           </p>
           {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
-          {canWrite && health.reviewStatus.allergies === "unknown" ? (
+          {canWrite && (health.reviewStatus.allergies === "unknown" || saidNo) ? (
             <Button type="button" size="sm" variant="outline" disabled={noneReviewed.isPending} onClick={() => noneReviewed.mutate()}>
               {noneReviewed.isPending ? "Guardando…" : "No tiene alergias"}
             </Button>

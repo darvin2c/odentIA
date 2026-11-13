@@ -572,7 +572,12 @@ export function DocumentosSection({
     ...(forms.data?.data ?? [])
       .filter((response) => response.status !== "descartado")
       .map((response): Row => {
-        const date = response.finalizedAt ?? response.createdAt
+        const date = response.finalizedAt ?? response.submittedAt ?? response.createdAt
+        // Lo que respondió el paciente no es un borrador del equipo: se lee y se revisa, no se «completa».
+        const declared = response.source === "portal"
+        const sender = response.respondent?.name.trim().split(/\s+/)[0] ?? "el paciente"
+        const via =
+          response.submittedVia === "enlace" ? " desde su enlace" : response.submittedVia === "portal" ? " desde el portal" : ""
         return {
           key: `formulario-${response.id}`,
           kind: "formulario",
@@ -581,20 +586,25 @@ export function DocumentosSection({
           retired: false,
           title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
           detail: `${formatDate(date)} · ${
-            response.status === "finalizado"
-              ? "Finalizado"
-              : response.submittedAt
-                ? "Lo declaró la persona · por revisar"
+            declared
+              ? response.submittedAt
+                ? `Lo envió ${sender}${via}${response.status === "finalizado" ? " · revisado" : ""}`
+                : `Lo está respondiendo ${sender}: aún no lo envió`
+              : response.status === "finalizado"
+                ? "Finalizado"
                 : "Sin finalizar"
           }`,
           date,
           status:
             response.status === "finalizado"
-              ? { label: "Finalizado", tone: "success" }
-              : { label: "Borrador", tone: "warning" },
-          needsAction: response.status === "borrador",
+              ? { label: declared ? "Revisado" : "Finalizado", tone: "success" }
+              : declared
+                ? { label: response.submittedAt ? "Por revisar" : "Sin enviar", tone: "warning" }
+                : { label: "Borrador", tone: "warning" },
+          // Lo que el paciente aún no envió no pide nada al equipo.
+          needsAction: response.status === "borrador" && (!declared || response.submittedAt !== null),
           action:
-            response.status === "borrador" && canWrite ? { type: "completar" } : { type: "ver" },
+            response.status === "borrador" && canWrite && !declared ? { type: "completar" } : { type: "ver" },
           open: { kind: "formulario", response },
         }
       }),
@@ -998,6 +1008,7 @@ export function DocumentosSection({
 
       <OpenedDocument
         patientId={patientId}
+        sex={patient.data?.data.patient.sex ?? null}
         opened={opened}
         canWrite={canWrite}
         budgets={budgetPapers.budgets}
@@ -1276,6 +1287,7 @@ function FileRow({
 /** Un papel abierto al lado: su PDF con lo que se puede hacer con él; el formulario, su detalle. */
 function OpenedDocument({
   patientId,
+  sex,
   opened,
   canWrite,
   budgets,
@@ -1283,6 +1295,8 @@ function OpenedDocument({
   onChanged,
 }: {
   patientId: string
+  /** El sexo registrado del paciente: lo que él envió dice quién lo dijo. */
+  sex: string | null
   opened: Row["open"] | null
   canWrite: boolean
   budgets: BudgetWithTotals[]
@@ -1384,6 +1398,7 @@ function OpenedDocument({
               opened.response
             }
             canWrite={canWrite}
+            sex={sex}
             onChanged={onChanged}
           />
         </DetailDrawer>

@@ -91,11 +91,25 @@ export interface FormResponse {
   templateTitle: string | null
   source: "staff" | "portal"
   submittedAt: string | null
+  /** Por dónde lo envió el paciente; nulo si no quedó guardado (lo de antes) o es del equipo. */
+  submittedVia?: "portal" | "enlace" | null
+  /** Quién lo finalizó: en lo que envió el paciente, quien lo revisó. */
+  finalizedBy?: string | null
+  /** Quién lo envió, con su vínculo con el paciente (`self` es la propia persona). */
+  respondent?: {
+    name: string
+    relationship: string | null
+    relationshipDetail: string | null
+    kinship: string | null
+  } | null
   discardedAt: string | null
   discardReason: string | null
   createdAt: string
   updatedAt: string
 }
+
+/** Lo que pasó al finalizar: las alergias que de verdad entraron a Antecedentes. */
+export type FinalizedFormResponse = FormResponse & { passedAllergies?: string[] }
 
 export interface FormAddendum {
   id: string
@@ -464,8 +478,9 @@ export function updateFormResponse(
   return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
 }
 
-export function finalizeFormResponse(id: string) {
-  return post<FormResponse>(`${BASE}/form-responses/${id}/finalize`, {})
+/** `encounterId`: la atención en curso desde la que se revisa; la respuesta queda ligada a ella. */
+export function finalizeFormResponse(id: string, encounterId?: string | null) {
+  return post<FinalizedFormResponse>(`${BASE}/form-responses/${id}/finalize`, encounterId ? { encounterId } : {})
 }
 
 export function discardFormResponse(id: string, reason: string) {
