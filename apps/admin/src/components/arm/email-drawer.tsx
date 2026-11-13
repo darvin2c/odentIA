@@ -135,6 +135,15 @@ export function answeredWords(email: InboundEmail): string | null {
   return `Ya le respondimos el ${when}${last.from ? ` desde ${last.from}` : ""}. Lo que escribas sale como otra respuesta.`
 }
 
+/**
+ * Si «Responder» ofrece adjuntar una propuesta: solo Administración, con un
+ * cliente y fuera de Kairós (como «Escribir»). Nunca a lo que llegó a
+ * soporte@: sale firmado «Soporte · <marca>» y Soporte no vería esa
+ * respuesta. El servidor lo niega igual (400 en `proposalId`).
+ */
+export const canAttachProposal = (email: InboundEmail, isAdmin: boolean, fromKairos: boolean) =>
+  isAdmin && email.clientId !== null && email.mailbox !== "soporte" && !fromKairos
+
 /** Lo que quedó sin saber si salió: se resuelve antes de responder otra vez. */
 const unsettled = (email: InboundEmail) =>
   email.replies.filter((reply) => reply.status === "incierto" || reply.status === "pendiente")
@@ -396,8 +405,7 @@ function ReplyForm({
   onSent: () => void
 }) {
   const isAdmin = useIsAdmin()
-  // Una propuesta viaja solo con un cliente y la elige solo Administración (como «Escribir»).
-  const canAttach = isAdmin && email.clientId !== null && !onSend
+  const canAttach = canAttachProposal(email, isAdmin, Boolean(onSend))
   const proposals = useClientProposals(email.clientId ?? "", canAttach)
   const sendable = (proposals.data ?? []).filter(
     (proposal) => proposal.displayStatus === "borrador" || proposal.displayStatus === "enviada",

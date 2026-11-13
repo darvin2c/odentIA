@@ -28,6 +28,16 @@ export interface StaffMailRow {
 
 const BRANDS = "odentIA, latidIA y vistIA"
 
+/**
+ * Qué dice «Su correo» de la dirección: Soporte escribe desde soporte@ (no
+ * se muestra ni se corrige la suya); de Administración, se corrige hasta que
+ * sale el primer correo y después queda fija.
+ */
+export function staffMailAddress(row: StaffMailRow): "soporte" | "fija" | "editable" {
+  if (row.role === "support") return "soporte"
+  return row.mailFirstSentAt && row.mailLocal ? "fija" : "editable"
+}
+
 /** Las líneas de la fila: con qué escribe y a dónde le llega la copia. */
 export function StaffMailLine({ row }: { row: StaffMailRow }) {
   return (
@@ -75,16 +85,18 @@ const mailSchema = z.object({
  */
 export function StaffMailDrawer({ row, onClose }: { row: StaffMailRow; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const fixed = Boolean(row.mailFirstSentAt && row.mailLocal)
+  const address = staffMailAddress(row)
   const form = useAppForm({
     defaultValues: { mailLocal: row.mailLocal ?? "", copyTo: row.mailCopyTo ?? "" },
-    // Fija, el campo no se muestra y su valor es el de hoy: la misma validación vale.
-    validators: { onSubmit: mailSchema },
+    // Sin el campo (fija o de Soporte) su valor no se valida ni se manda.
+    validators: {
+      onSubmit: address === "editable" ? mailSchema : mailSchema.extend({ mailLocal: z.string() }),
+    },
     onSubmit: async ({ value, formApi }) => {
       const mailLocal = value.mailLocal.trim().toLowerCase()
       const copyTo = value.copyTo.trim().toLowerCase()
       const body = {
-        ...(!fixed && mailLocal !== (row.mailLocal ?? "") ? { mailLocal } : {}),
+        ...(address === "editable" && mailLocal !== (row.mailLocal ?? "") ? { mailLocal } : {}),
         ...(copyTo !== (row.mailCopyTo ?? "") ? { copyTo } : {}),
       }
       if (Object.keys(body).length > 0) {
@@ -110,7 +122,11 @@ export function StaffMailDrawer({ row, onClose }: { row: StaffMailRow; onClose: 
       cancelLabel={common.actions.cancel}
     >
       <div className="flex flex-col gap-4">
-        {fixed ? (
+        {address === "soporte" ? (
+          <p className="text-sm text-muted-foreground">
+            Escribe desde soporte@ ({BRANDS}), como todo Soporte.
+          </p>
+        ) : address === "fija" ? (
           <div className="flex flex-col gap-1 text-sm">
             <p className="font-medium">Escribe como {row.mailLocal}@</p>
             <p className="text-muted-foreground">
@@ -142,7 +158,7 @@ export function StaffMailDrawer({ row, onClose }: { row: StaffMailRow; onClose: 
               type="email"
               maxLength={254}
               autoComplete="off"
-              autoFocus={fixed}
+              autoFocus={address !== "editable"}
             />
           )}
         </form.AppField>

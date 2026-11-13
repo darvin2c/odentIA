@@ -59,6 +59,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
+import { user } from "@odentia/db/schema/auth"
 import {
   saasFollowUp,
   saasPlan,
@@ -102,6 +103,7 @@ import {
   markStaffMailUsed,
   outreachSender,
   senderOfAddress,
+  staffShortName,
 } from "./admin-staff-mail.js"
 import { productMailDomain } from "./clinic-progress-report.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
@@ -2341,6 +2343,12 @@ export async function prepareEmailReply(
   const sender = await outreachSender(tx, actor, product, mailbox)
   let proposalId: string | null = null
   if (input.proposalId) {
+    // Saldría firmada «Soporte · <marca>» y Soporte no vería esa respuesta: lo comercial va por «Escribir».
+    if (mailbox === "soporte")
+      throw invalidField(
+        "proposalId",
+        "Lo que llegó a soporte@ se responde sin propuesta: envíala desde «Escribir»",
+      )
     if (!client)
       throw invalidField("proposalId", "Este correo no es de un cliente: ligalo antes de adjuntar")
     proposalId = await sendableProposal(tx, actor, client.id, input.proposalId, now)
@@ -2405,6 +2413,7 @@ export async function prepareEmailReply(
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar la respuesta")
   if (sender.staffUserId) await markStaffMailUsed(tx, sender.staffUserId, now)
+  if (!kairosItemId) await closeKairosReplyDrafts(tx, actor, email.id, client, now)
   await writeAdminAudit(tx, actor, {
     action: "arm.reply_prepared",
     organizationId: client?.organizationId ?? null,
@@ -2412,6 +2421,73 @@ export async function prepareEmailReply(
     metadata: { outreachId: row.id, emailId: email.id, mailbox, proposalId, kairosItemId },
   })
   return outreachRowOf(row)
+}
+
+/**
+ * Una respuesta a mano deja sin efecto el borrador de Kairós de ese correo
+ * (`responder_correo` en espera): queda `vencida` con su motivo, como lo que
+ * ya no vale (`markStale` de Kairós), y su clave queda libre. No envía nada;
+ * Kairós no lo vuelve a preparar porque el correo ya tiene respuesta
+ * (`ruleReplyEmails`). «Lo que hizo» lo cuenta (`kairos.item_closed`).
+ */
+async function closeKairosReplyDrafts(
+  tx: Db,
+  actor: AdminActor,
+  emailId: string,
+  client: { organizationId: string | null } | null,
+  now: Date,
+): Promise<void> {
+  const open = await tx
+    .select({ id: kairosItem.id })
+    .from(kairosItem)
+    .where(
+      and(
+        eq(kairosItem.kind, "responder_correo"),
+        eq(kairosItem.status, "espera"),
+        sql`${kairosItem.payload} ->> 'emailId' = ${emailId}`,
+      ),
+    )
+    .for("update")
+  if (open.length === 0) return
+  const [person] = await tx
+    .select({ name: user.name })
+    .from(user)
+    .where(eq(user.id, actor.userId))
+    .limit(1)
+  const who = staffShortName(person?.name ?? "") || "Alguien del equipo"
+  const closed = await tx
+    .update(kairosItem)
+    .set({
+      status: "vencida",
+      error: `${who} lo respondió a mano: este borrador no sale`,
+      idempotencyKey: sql`'vencida:' || ${kairosItem.id}::text || ':' || ${kairosItem.idempotencyKey}`,
+      updatedAt: now,
+    })
+    .where(
+      inArray(
+        kairosItem.id,
+        open.map((item) => item.id),
+      ),
+    )
+    .returning({
+      id: kairosItem.id,
+      title: kairosItem.title,
+      clientId: kairosItem.clientId,
+      adminOnly: kairosItem.adminOnly,
+    })
+  for (const item of closed)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.item_closed",
+      entityId: item.id,
+      organizationId: client?.organizationId ?? null,
+      metadata: {
+        clientId: item.clientId,
+        itemId: item.id,
+        title: item.title,
+        why: `${who} respondió el correo a mano`,
+        adminOnly: item.adminOnly,
+      },
+    })
 }
 
 /**

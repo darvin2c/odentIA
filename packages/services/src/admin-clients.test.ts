@@ -958,9 +958,10 @@ describe("el historial", () => {
       kind: "persona",
       name: "Sergio Soporte",
     })
+    // Lo anotó Kairós, pero lo escribió quien lo mandó: sin nombre, su correo.
     expect(forAdmin.items.find((i) => i.title === "Nos escribió un correo")?.who).toEqual({
-      kind: "kairos",
-      name: "Kairós",
+      kind: "clinica",
+      name: email,
     })
     // Ordenado de lo más nuevo a lo más viejo.
     const times = forAdmin.items.map((i) => i.at.getTime())

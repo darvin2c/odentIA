@@ -2744,6 +2744,13 @@ async function kairosDoneRaw(
         words = title && why ? `Cerró la tarea «${title}»: ${why}` : null
         break
       }
+      case "kairos.item_closed": {
+        // Un borrador que ya no hace falta (`closeKairosReplyDrafts`: lo respondieron a mano).
+        const title = meta(a.metadata, "title")
+        const why = meta(a.metadata, "why")
+        words = title && why ? `Retiró su borrador «${title}»: ${why}` : null
+        break
+      }
     }
     if (!words) continue
     out.push({

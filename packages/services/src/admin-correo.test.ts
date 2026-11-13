@@ -18,6 +18,7 @@ import {
   inboundPersonOf,
   ingestInboundEmail,
 } from "./admin-inbound-email.js"
+import { kairosDone } from "./admin-kairos.js"
 import {
   markOutreachSent,
   outreachEmail,
@@ -704,5 +705,84 @@ describe("lo que corrigió la revisión", () => {
         prepareEmailReply(tx, admin, inbound.id, { body: "De Kairós.", kairosItemId: item }),
       ),
     ).rejects.toMatchObject({ code: "ALREADY_REPLIED", status: 409 })
+  })
+})
+
+describe("lo que corrigió el recorrido en pantalla", () => {
+  it("lo que llegó a soporte@ no lleva propuesta, tampoco de Administración (400 en proposalId)", async () => {
+    const inbound = await ingestInboundEmail(
+      ownerDb,
+      mail({ mailbox: "soporte", to: "soporte@odentia32.com", from: "rosa@hilo.test" }),
+    )
+    expect(inbound.clientId).toBe(clientId)
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, inbound.id, {
+          body: "Ya lo vemos.",
+          proposalId: "00000000-0000-4000-8000-000000000000",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      status: 400,
+      fields: { proposalId: expect.stringMatching(/soporte@/) },
+    })
+  })
+
+  it("una respuesta a mano cierra el borrador de Kairós de ese correo, sin enviar nada", async () => {
+    const inbound = await ingestInboundEmail(ownerDb, mail({ from: "a.mano@gmail.com" }))
+    const otherEmail = await ingestInboundEmail(ownerDb, mail({ from: "otra.persona@gmail.com" }))
+    const item = await replyItem(inbound.id)
+    const untouched = await replyItem(otherEmail.id)
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "A mano." }),
+    )
+    const [closed] = await ownerDb.select().from(kairosItem).where(eq(kairosItem.id, item))
+    expect(closed).toMatchObject({
+      status: "vencida",
+      error: "Ada Lovelace lo respondió a mano: este borrador no sale",
+      result: null,
+    })
+    // Su clave queda libre, como lo vencido; el de otro correo sigue en espera.
+    expect(closed?.idempotencyKey.startsWith(`vencida:${item}:`)).toBe(true)
+    const [still] = await ownerDb
+      .select({ status: kairosItem.status })
+      .from(kairosItem)
+      .where(eq(kairosItem.id, untouched))
+    expect(still?.status).toBe("espera")
+    // Solo la respuesta a mano, y todavía sin salir.
+    const replies = await ownerDb.transaction((tx) => getInboundEmail(tx, admin, inbound.id))
+    expect(replies.replies.map((row) => [row.id, row.status])).toEqual([[reply.id, "pendiente"]])
+    // «Lo que hizo» lo dice; Soporte no lo ve (es solo de Administración).
+    const done = await ownerDb.transaction((tx) => kairosDone(tx, admin, { limit: 200 }))
+    expect(done.map((entry) => entry.words)).toContain(
+      "Retiró su borrador «Responder»: Ada Lovelace respondió el correo a mano",
+    )
+    const forSupport = await ownerDb.transaction((tx) => kairosDone(tx, support, { limit: 200 }))
+    expect(forSupport.some((entry) => entry.words.startsWith("Retiró su borrador"))).toBe(false)
+  })
+
+  it("en el historial, el correo que entró dice quién lo escribió: su nombre o su correo", async () => {
+    const named = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        from: "rosa@hilo.test",
+        subject: "Con nombre",
+        receivedAt: new Date(Date.now() - 60_000),
+      }),
+    )
+    const bare = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", fromName: null, subject: "Sin nombre" }),
+    )
+    const history = await ownerDb.transaction((tx) =>
+      clientTimeline(tx, admin, clientId, { filter: "contactos", limit: 100 }),
+    )
+    const whoOf = (emailId: string) =>
+      history.items.find(
+        (entry) => entry.title === "Nos escribió un correo" && entry.link?.id === emailId,
+      )?.who
+    expect(whoOf(named.id)).toEqual({ kind: "clinica", name: "Rosa Mamani" })
+    expect(whoOf(bare.id)).toEqual({ kind: "clinica", name: "rosa@hilo.test" })
   })
 })

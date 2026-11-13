@@ -2596,14 +2596,19 @@ export async function clientTimeline(
     const mailboxOk = admin ? sql`true` : sql`e.mailbox = 'soporte'`
     // La fila de afuera, con su nombre completo: drizzle no califica las columnas de una sola tabla.
     const outer = sql.raw(`"admin"."saas_follow_up"`)
+    // El correo de una actividad que entró: el mismo cliente y la misma hora.
+    const inbound = (column: SQL) =>
+      sql`case when ${outer}.kind = 'correo' and ${outer}.direction = 'entro' then
+          (select ${column} from ${saasInboundEmail} e where e.client_id = ${outer}.client_id
+            and e.received_at = ${outer}.happened_at and ${mailboxOk} order by e.id limit 1) end`
     const rows = await tx
       .select({
         f: saasFollowUp,
-        inboundId: sql<
+        inboundId: sql<string | null>`${inbound(sql`e.id::text`)}`,
+        // Quién lo escribió: su nombre o, sin nombre, su correo.
+        inboundFrom: sql<
           string | null
-        >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'entro' then
-          (select e.id::text from ${saasInboundEmail} e where e.client_id = ${outer}.client_id
-            and e.received_at = ${outer}.happened_at and ${mailboxOk} order by e.id limit 1) end`,
+        >`${inbound(sql`coalesce(nullif(trim(e.from_name), ''), e.from_address)`)}`,
         repliedId: sql<
           string | null
         >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'salio' then
@@ -2621,7 +2626,7 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const { f, inboundId, repliedId } of rows) {
+    for (const { f, inboundId, inboundFrom, repliedId } of rows) {
       const kind = f.kind as SaasActivityKind
       const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
       const title = repliedId
@@ -2635,12 +2640,15 @@ export async function clientTimeline(
       push({
         id: `actividad:${f.id}`,
         at: f.happenedAt,
-        who: f.byKairos
-          ? { kind: "kairos", name: "Kairós" }
-          : byUser(f.authorUserId, {
-              kind: "persona",
-              name: "Nota anterior, sin autor registrado",
-            }),
+        // El correo que entró lo escribió quien lo mandó, aunque lo haya anotado Kairós.
+        who: inboundFrom
+          ? { kind: "clinica", name: inboundFrom }
+          : f.byKairos
+            ? { kind: "kairos", name: "Kairós" }
+            : byUser(f.authorUserId, {
+                kind: "persona",
+                name: "Nota anterior, sin autor registrado",
+              }),
         category: kind === "presentacion" || kind === "propuesta" ? "venta" : "contactos",
         title,
         detail:

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { answeredWords, inboundEmailSchema, replyHint, replyToWords } from "./email-drawer"
+import {
+  answeredWords,
+  canAttachProposal,
+  inboundEmailSchema,
+  replyHint,
+  replyToWords,
+} from "./email-drawer"
 import {
   canAnswer,
   type KairosItem,
@@ -160,5 +166,25 @@ describe("el correo que llegó", () => {
     expect(writeEmailHint({ proposal: false, support: true })).toContain("soporte@")
     expect(writeEmailHint({ proposal: false, support: false })).toContain("tu nombre")
     expect(writeEmailHint({ proposal: true, support: false })).toContain("propuesta en PDF")
+  })
+})
+
+describe("adjuntar una propuesta al responder", () => {
+  const withClient = inboundEmailSchema.parse({ ...email, clientId: "c1" })
+  it("solo Administración, con cliente y fuera de Kairós", () => {
+    expect(canAttachProposal(withClient, true, false)).toBe(true)
+    expect(canAttachProposal(withClient, false, false)).toBe(false)
+    expect(canAttachProposal(withClient, true, true)).toBe(false)
+    expect(canAttachProposal(inboundEmailSchema.parse(email), true, false)).toBe(false)
+  })
+
+  it("lo que llegó a soporte@ no la ofrece, tampoco a Administración: sale firmado por Soporte", () => {
+    const toSupport = inboundEmailSchema.parse({
+      ...email,
+      clientId: "c1",
+      mailbox: "soporte",
+      to: "soporte@odentia32.com",
+    })
+    expect(canAttachProposal(toSupport, true, false)).toBe(false)
   })
 })
