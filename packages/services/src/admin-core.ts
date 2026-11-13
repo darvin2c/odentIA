@@ -55,6 +55,12 @@ export interface AdminStaffRow {
   role: AdminRole
   active: boolean
   createdAt: Date
+  /** Su dirección en los dominios de las marcas (`<mailLocal>@odentia32.com`…); nula, escribe desde hola@. */
+  mailLocal: string | null
+  /** Dónde le llega la copia de lo que le escriben. */
+  mailCopyTo: string | null
+  /** Desde cuándo salen correos con su dirección: entonces ya no cambia. */
+  mailFirstSentAt: Date | null
 }
 
 /** Invitación pendiente para la UI de equipo. */
@@ -179,6 +185,9 @@ export async function listAdminStaff(ownerDb: Db): Promise<AdminStaffRow[]> {
       role: adminStaff.role,
       active: adminStaff.active,
       createdAt: adminStaff.createdAt,
+      mailLocal: adminStaff.mailLocal,
+      mailCopyTo: adminStaff.mailCopyTo,
+      mailFirstSentAt: adminStaff.mailFirstSentAt,
       name: user.name,
       email: user.email,
     })
@@ -191,6 +200,9 @@ export async function listAdminStaff(ownerDb: Db): Promise<AdminStaffRow[]> {
     role: isAdminRole(row.role) ? row.role : "support",
     active: row.active,
     createdAt: row.createdAt,
+    mailLocal: row.mailLocal,
+    mailCopyTo: row.mailCopyTo,
+    mailFirstSentAt: row.mailFirstSentAt,
   }))
 }
 
@@ -508,7 +520,12 @@ export async function setAdminStaffActive(
         throw new ServiceError("LAST_ADMIN", 409, "No se puede desactivar al último admin activo")
       }
     }
-    await tx.update(adminStaff).set({ active }).where(eq(adminStaff.userId, targetUserId))
+    // Quien deja el equipo ya no recibe la copia de lo que llega a su dirección (su
+    // buzón personal no es de Sallca); si vuelve, Administración la pone otra vez.
+    await tx
+      .update(adminStaff)
+      .set(active ? { active } : { active, mailCopyTo: null })
+      .where(eq(adminStaff.userId, targetUserId))
     if (!active) {
       // La baja invalida sesiones reales: una cookie conservada no debe seguir operando.
       await tx.delete(session).where(eq(session.userId, targetUserId))

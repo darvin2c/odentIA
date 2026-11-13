@@ -20,6 +20,7 @@
  *   salió»). La base protege ese flujo (`saas_outreach_guard`).
  * - La etapa del cliente no se guarda: se calcula al leer.
  */
+import { randomUUID } from "node:crypto"
 import {
   type ClinicalProduct,
   formatMoney,
@@ -40,6 +41,7 @@ import {
   SAAS_TASK_KINDS,
   type SaasActivityDirection,
   type SaasActivityKind,
+  type SaasInboundMailbox,
   type SaasLostReason,
   type SaasOpportunityDecision,
   type SaasOutreachChannel,
@@ -49,6 +51,7 @@ import {
   type SaasTaskStatus,
   saasClient,
   saasClientContact,
+  saasInboundEmail,
   saasOpportunity,
   saasOutreach,
   saasProposal,
@@ -56,6 +59,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
+import { user } from "@odentia/db/schema/auth"
 import {
   saasFollowUp,
   saasPlan,
@@ -63,7 +67,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { brandPaper, type MailBrand, renderEmail } from "@odentia/mail"
+import { brandPaper, type MailBrand, type MailMessage, renderEmail } from "@odentia/mail"
 import {
   and,
   asc,
@@ -93,6 +97,14 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import {
+  brandMailbox,
+  type MailSender,
+  markStaffMailUsed,
+  outreachSender,
+  senderOfAddress,
+  staffShortName,
+} from "./admin-staff-mail.js"
 import { productMailDomain } from "./clinic-progress-report.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
@@ -1898,8 +1910,14 @@ function percentWords(bps: number): string {
  * La propuesta en PDF (A4, dos hojas como mucho) con la marca del producto y
  * el titular (Sallca) en el membrete, como el informe del alta. Cuenta las
  * condiciones tal como quedaron guardadas: no promete ni agrega nada.
+ * `writeTo` es a dónde dice que puede escribirnos: la dirección de quien la
+ * envía (la misma del remitente del correo); sin ella, hola@ de la marca.
  */
-export async function proposalPdf(tx: Db, id: string): Promise<ProposalPdf> {
+export async function proposalPdf(
+  tx: Db,
+  id: string,
+  writeTo?: string | null,
+): Promise<ProposalPdf> {
   if (!UUID.test(id)) throw notFound("Propuesta")
   const [row] = await tx
     .select({
@@ -2003,7 +2021,7 @@ export async function proposalPdf(tx: Db, id: string): Promise<ProposalPdf> {
   kit.gap(6)
   kit.ensure(3 * SIZE.dense * 1.45 + 3 * SIZE.dense * 1.35 + 28)
   kit.text(
-    `Esta propuesta vale hasta el ${dayWords(p.validUntil, ZONE)}. Si tiene preguntas, puede escribirnos a contacto@${domain}.`,
+    `Esta propuesta vale hasta el ${dayWords(p.validUntil, ZONE)}. Si tiene preguntas, puede escribirnos a ${writeTo || `hola@${domain}`}.`,
     body,
   )
   kit.gap(4)
@@ -2048,7 +2066,8 @@ export interface OutreachInput {
 
 export interface OutreachRow {
   id: string
-  clientId: string
+  /** Nulo solo en la respuesta a un correo que aún no es de ningún cliente. */
+  clientId: string | null
   contactId: string | null
   channel: SaasOutreachChannel
   to: string
@@ -2062,6 +2081,10 @@ export interface OutreachRow {
   createdAt: Date
   /** WhatsApp: el enlace que abre el chat con el texto puesto. */
   whatsappUrl: string | null
+  /** Correo: la dirección que firma («Desde»): la de quien escribe, soporte@ u hola@. */
+  from: string | null
+  /** El correo que responde, si es una respuesta. */
+  inReplyToEmailId: string | null
 }
 
 /** El enlace de WhatsApp con el texto puesto: `https://wa.me/<número sin +>?text=<texto>`. */
@@ -2086,7 +2109,52 @@ function outreachRowOf(row: typeof saasOutreach.$inferSelect): OutreachRow {
     resolvedAt: row.resolvedAt,
     createdAt: row.createdAt,
     whatsappUrl: channel === "whatsapp" ? whatsappLink(row.toAddress, row.body) : null,
+    from: row.fromAddress,
+    inReplyToEmailId: row.inReplyToEmailId,
   }
+}
+
+/** Nuestro `Message-ID`: único, con el dominio de la marca que firma. */
+function newMessageId(product: ClinicalProduct): string {
+  return `<${randomUUID()}@${productMailDomain(product)}>`
+}
+
+/**
+ * La propuesta que se puede enviar a un cliente: lista (no por aprobar),
+ * vigente, sin decidir y la última que salió. Solo la envía Administración.
+ */
+async function sendableProposal(
+  tx: Db,
+  actor: AdminActor,
+  clientId: string,
+  proposalId: string,
+  now: Date,
+): Promise<string> {
+  if (actor.role !== "admin") throw forbidden("Solo el rol Administración envía propuestas")
+  const proposal = await proposalOfClient(tx, clientId, proposalId)
+  if (!proposal) throw invalidField("proposalId", "Esa propuesta no es de este cliente")
+  if (proposal.status === "por_aprobar")
+    throw new ServiceError(
+      "PROPOSAL_NEEDS_APPROVAL",
+      409,
+      "Esa propuesta espera aprobación de Administración",
+    )
+  if (proposal.status === "aceptada" || proposal.status === "no_aceptada")
+    throw new ServiceError("PROPOSAL_DECIDED", 409, "Esa propuesta ya se decidió")
+  const newer = await newerSentVersion(tx, proposal)
+  if (newer !== null)
+    throw new ServiceError(
+      "PROPOSAL_REPLACED",
+      409,
+      `Ya salió la v${newer}: envía esa o haz una versión nueva`,
+    )
+  if (proposal.validUntil < limaDate(now))
+    throw new ServiceError(
+      "PROPOSAL_EXPIRED",
+      409,
+      `Venció el ${dayWords(proposal.validUntil, ZONE)}: haz una versión nueva con otra vigencia`,
+    )
+  return proposal.id
 }
 
 /**
@@ -2094,7 +2162,9 @@ function outreachRowOf(row: typeof saasOutreach.$inferSelect): OutreachRow {
  * ruta después del commit (`outreachEmail`) y lo marca con `markOutreachSent`;
  * el de WhatsApp se abre por su enlace y lo resuelve una persona
  * (`resolveOutreach`). Una propuesta solo se envía lista (no por aprobar),
- * vigente y sin decidir. Soporte escribe, pero no envía propuestas.
+ * vigente y sin decidir. Soporte escribe, pero no envía propuestas. El correo
+ * sale con el nombre y la dirección de quien escribe (o desde hola@ si aún no
+ * tiene) y su propio Message-ID, para que la respuesta vuelva a su hilo.
  */
 export async function prepareOutreach(
   tx: Db,
@@ -2110,6 +2180,7 @@ export async function prepareOutreach(
   const body = trimmed("body", input.body, 5000, "el mensaje")
   let to = (input.to ?? "").trim()
   let subject: string | null = null
+  let sender: MailSender | null = null
   if (input.channel === "whatsapp") {
     to = (to || contact?.phone || "").replace(/[ ()-]/g, "")
     if (!E164.test(to))
@@ -2122,35 +2193,11 @@ export async function prepareOutreach(
     if (!EMAIL.test(to) || to.length > 254)
       throw invalidField(input.to ? "to" : "contactId", "Hace falta un correo válido")
     subject = trimmed("subject", input.subject, 200, "el asunto")
+    sender = await outreachSender(tx, actor, productOf(client.product))
   }
-  let proposalId: string | null = null
-  if (input.proposalId) {
-    if (actor.role !== "admin") throw forbidden("Solo el rol Administración envía propuestas")
-    const proposal = await proposalOfClient(tx, client.id, input.proposalId)
-    if (!proposal) throw invalidField("proposalId", "Esa propuesta no es de este cliente")
-    if (proposal.status === "por_aprobar")
-      throw new ServiceError(
-        "PROPOSAL_NEEDS_APPROVAL",
-        409,
-        "Esa propuesta espera aprobación de Administración",
-      )
-    if (proposal.status === "aceptada" || proposal.status === "no_aceptada")
-      throw new ServiceError("PROPOSAL_DECIDED", 409, "Esa propuesta ya se decidió")
-    const newer = await newerSentVersion(tx, proposal)
-    if (newer !== null)
-      throw new ServiceError(
-        "PROPOSAL_REPLACED",
-        409,
-        `Ya salió la v${newer}: envía esa o haz una versión nueva`,
-      )
-    if (proposal.validUntil < limaDate(now))
-      throw new ServiceError(
-        "PROPOSAL_EXPIRED",
-        409,
-        `Venció el ${dayWords(proposal.validUntil, ZONE)}: haz una versión nueva con otra vigencia`,
-      )
-    proposalId = proposal.id
-  }
+  const proposalId = input.proposalId
+    ? await sendableProposal(tx, actor, client.id, input.proposalId, now)
+    : null
   let kairosItemId: string | null = null
   if (input.kairosItemId) {
     if (!UUID.test(input.kairosItemId))
@@ -2175,12 +2222,16 @@ export async function prepareOutreach(
       body,
       proposalId,
       kairosItemId,
+      fromAddress: sender?.address ?? null,
+      messageId: sender ? newMessageId(productOf(client.product)) : null,
       createdBy: actor.userId,
       createdAt: now,
       updatedAt: now,
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  // Desde que se reserva puede salir: la dirección de quien escribe queda fija.
+  if (sender?.staffUserId) await markStaffMailUsed(tx, sender.staffUserId, now)
   await writeAdminAudit(tx, actor, {
     action: "arm.outreach_prepared",
     organizationId: client.organizationId,
@@ -2190,10 +2241,260 @@ export async function prepareOutreach(
   return outreachRowOf(row)
 }
 
+export interface EmailReplyInput {
+  body: string
+  /** Una propuesta del cliente del correo, como en «Escribir»; solo Administración. */
+  proposalId?: string | null
+  /** El borrador de Kairós de este correo (`responder_correo`), si sale de él. */
+  kairosItemId?: string | null
+}
+
+/** «Re: <asunto>», sin repetir el «Re:» que ya trae. */
+export function replySubject(subject: string | null | undefined): string {
+  const clean = (subject ?? "").replace(/\s+/g, " ").trim()
+  if (!clean) return "Re: su correo"
+  const reply = /^re\s*:/i.test(clean) ? clean : `Re: ${clean}`
+  return reply.length > 200 ? `${reply.slice(0, 199)}…` : reply
+}
+
+/** Los Message-ID (`<…>`) de una cabecera In-Reply-To o References, en orden y sin repetir. */
+export function threadMessageIds(...values: ReadonlyArray<string | null | undefined>): string[] {
+  const out: string[] = []
+  for (const value of values) {
+    for (const id of (value ?? "").match(/<[^<>\s]+>/g) ?? []) if (!out.includes(id)) out.push(id)
+  }
+  return out
+}
+
+/** El que pone el worker de Cloudflare a un correo que no traía Message-ID: no es de nadie. */
+const INVENTED_MESSAGE_ID = /^<sin-id-[^<>\s]*@entrante\.sallca>$/i
+
+/**
+ * El Message-ID de un correo que llegó, listo para una cabecera: con «<>» (se
+ * agregan si llegó sin ellos), o null si no es uno (sin «@», con espacios) o
+ * si lo inventó el worker porque el correo no traía.
+ */
+export function replyableMessageId(value: string | null | undefined): string | null {
+  const clean = (value ?? "").trim()
+  const id = /^<[^<>\s]+@[^<>\s]+>$/.test(clean)
+    ? clean
+    : /^[^<>\s]+@[^<>\s]+$/.test(clean)
+      ? `<${clean}>`
+      : null
+  return id && !INVENTED_MESSAGE_ID.test(id) ? id : null
+}
+
+/**
+ * La cabecera References de una respuesta (RFC 5322 §3.6.4): la References del
+ * correo o, si no trae, su In-Reply-To (solo si es un único id), más su
+ * Message-ID; hasta 8000 caracteres. Null si no queda ninguno.
+ */
+export function replyReferences(email: {
+  references: string | null
+  inReplyTo: string | null
+  messageId: string
+}): string | null {
+  const parent = threadMessageIds(email.references)
+  if (parent.length === 0) {
+    const inReplyTo = threadMessageIds(email.inReplyTo)
+    if (inReplyTo.length === 1) parent.push(...inReplyTo)
+  }
+  const own = replyableMessageId(email.messageId)
+  const ids = (own ? threadMessageIds(parent.join(" "), own) : parent).filter(
+    (id) => !INVENTED_MESSAGE_ID.test(id),
+  )
+  // Se conservan el primero (el que abrió el hilo) y los últimos: así lo hace todo cliente de correo.
+  while (ids.length > 2 && ids.join(" ").length > 8000) ids.splice(1, 1)
+  const joined = ids.join(" ")
+  return joined && joined.length <= 8000 ? joined : null
+}
+
+/**
+ * Prepara la respuesta a un correo que llegó: queda `pendiente` como
+ * cualquier envío y la ruta la manda después del commit. Va al remitente, con
+ * «Re: <asunto>», las cabeceras del hilo y su propio Message-ID. Lo que llegó
+ * a soporte@ sale desde soporte@ y lo pueden responder Soporte y
+ * Administración; lo demás (hola@, contacto@, fundadores@, la dirección de
+ * una persona) sale con el nombre y la dirección de quien responde y solo lo
+ * responde Administración. Un correo sin cliente se responde igual, sin ligarlo.
+ */
+export async function prepareEmailReply(
+  tx: Db,
+  actor: AdminActor,
+  emailId: string,
+  input: EmailReplyInput,
+  now = new Date(),
+): Promise<OutreachRow> {
+  if (!UUID.test(emailId)) throw notFound("Correo")
+  // Bloqueado: una respuesta a mano y el sí de Kairós no se cruzan.
+  const [email] = await tx
+    .select()
+    .from(saasInboundEmail)
+    .where(eq(saasInboundEmail.id, emailId))
+    .for("update")
+    .limit(1)
+  if (!email) throw notFound("Correo")
+  const mailbox = email.mailbox as SaasInboundMailbox
+  if (actor.role !== "admin" && mailbox !== "soporte")
+    throw forbidden("Soporte responde solo lo que llegó a soporte@")
+  const body = trimmed("body", input.body, 5000, "la respuesta")
+  const client = email.clientId ? await lockClient(tx, email.clientId) : null
+  const product = productOf(client?.product ?? email.product)
+  const sender = await outreachSender(tx, actor, product, mailbox)
+  let proposalId: string | null = null
+  if (input.proposalId) {
+    // Saldría firmada «Soporte · <marca>» y Soporte no vería esa respuesta: lo comercial va por «Escribir».
+    if (mailbox === "soporte")
+      throw invalidField(
+        "proposalId",
+        "Lo que llegó a soporte@ se responde sin propuesta: envíala desde «Escribir»",
+      )
+    if (!client)
+      throw invalidField("proposalId", "Este correo no es de un cliente: ligalo antes de adjuntar")
+    proposalId = await sendableProposal(tx, actor, client.id, input.proposalId, now)
+  }
+  let kairosItemId: string | null = null
+  if (input.kairosItemId) {
+    if (!UUID.test(input.kairosItemId))
+      throw invalidField("kairosItemId", "Ese borrador de Kairós no existe")
+    const [item] = await tx
+      .select({ id: kairosItem.id, emailId: sql<string | null>`${kairosItem.payload}->>'emailId'` })
+      .from(kairosItem)
+      .where(eq(kairosItem.id, input.kairosItemId))
+      .limit(1)
+    if (!item || item.emailId !== email.id)
+      throw invalidField("kairosItemId", "Ese borrador de Kairós no es de este correo")
+    // El borrador se preparó cuando nadie había respondido: si alguien respondió, no sale.
+    const [answered] = await tx
+      .select({ id: saasOutreach.id })
+      .from(saasOutreach)
+      .where(eq(saasOutreach.inReplyToEmailId, email.id))
+      .limit(1)
+    if (answered)
+      throw new ServiceError(
+        "ALREADY_REPLIED",
+        409,
+        "Alguien ya respondió este correo: revisa su respuesta en el correo antes de enviar otra",
+      )
+    kairosItemId = item.id
+  }
+  const [contact] = client
+    ? await tx
+        .select({ id: saasClientContact.id })
+        .from(saasClientContact)
+        .where(
+          and(
+            eq(saasClientContact.clientId, client.id),
+            eq(saasClientContact.email, email.fromAddress),
+          ),
+        )
+        .limit(1)
+    : []
+  const [row] = await tx
+    .insert(saasOutreach)
+    .values({
+      clientId: client?.id ?? null,
+      contactId: contact?.id ?? null,
+      channel: "correo",
+      // Su Reply-To, si trae (RFC 5322 §3.6.2); si no, el remitente.
+      toAddress: email.replyTo ?? email.fromAddress,
+      subject: replySubject(email.subject),
+      body,
+      proposalId,
+      kairosItemId,
+      inReplyToEmailId: email.id,
+      fromAddress: sender.address,
+      messageId: newMessageId(product),
+      references: replyReferences(email),
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar la respuesta")
+  if (sender.staffUserId) await markStaffMailUsed(tx, sender.staffUserId, now)
+  if (!kairosItemId) await closeKairosReplyDrafts(tx, actor, email.id, client, now)
+  await writeAdminAudit(tx, actor, {
+    action: "arm.reply_prepared",
+    organizationId: client?.organizationId ?? null,
+    entityId: client?.id ?? email.id,
+    metadata: { outreachId: row.id, emailId: email.id, mailbox, proposalId, kairosItemId },
+  })
+  return outreachRowOf(row)
+}
+
+/**
+ * Una respuesta a mano deja sin efecto el borrador de Kairós de ese correo
+ * (`responder_correo` en espera): queda `vencida` con su motivo, como lo que
+ * ya no vale (`markStale` de Kairós), y su clave queda libre. No envía nada;
+ * Kairós no lo vuelve a preparar porque el correo ya tiene respuesta
+ * (`ruleReplyEmails`). «Lo que hizo» lo cuenta (`kairos.item_closed`).
+ */
+async function closeKairosReplyDrafts(
+  tx: Db,
+  actor: AdminActor,
+  emailId: string,
+  client: { organizationId: string | null } | null,
+  now: Date,
+): Promise<void> {
+  const open = await tx
+    .select({ id: kairosItem.id })
+    .from(kairosItem)
+    .where(
+      and(
+        eq(kairosItem.kind, "responder_correo"),
+        eq(kairosItem.status, "espera"),
+        sql`${kairosItem.payload} ->> 'emailId' = ${emailId}`,
+      ),
+    )
+    .for("update")
+  if (open.length === 0) return
+  const [person] = await tx
+    .select({ name: user.name })
+    .from(user)
+    .where(eq(user.id, actor.userId))
+    .limit(1)
+  const who = staffShortName(person?.name ?? "") || "Alguien del equipo"
+  const closed = await tx
+    .update(kairosItem)
+    .set({
+      status: "vencida",
+      error: `${who} lo respondió a mano: este borrador no sale`,
+      idempotencyKey: sql`'vencida:' || ${kairosItem.id}::text || ':' || ${kairosItem.idempotencyKey}`,
+      updatedAt: now,
+    })
+    .where(
+      inArray(
+        kairosItem.id,
+        open.map((item) => item.id),
+      ),
+    )
+    .returning({
+      id: kairosItem.id,
+      title: kairosItem.title,
+      clientId: kairosItem.clientId,
+      adminOnly: kairosItem.adminOnly,
+    })
+  for (const item of closed)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.item_closed",
+      entityId: item.id,
+      organizationId: client?.organizationId ?? null,
+      metadata: {
+        clientId: item.clientId,
+        itemId: item.id,
+        title: item.title,
+        why: `${who} respondió el correo a mano`,
+        adminOnly: item.adminOnly,
+      },
+    })
+}
+
 /**
  * El envío, bloqueado, con si es solo de Administración (`outreachAdminOnlySql`:
- * lleva una propuesta o sale de algo de Kairós solo de Administración). Para
- * Soporte ese no existe: la misma respuesta que uno que no hay.
+ * lleva una propuesta, sale de algo de Kairós solo de Administración o responde
+ * lo que no llegó a soporte@). Para Soporte ese no existe: la misma respuesta
+ * que uno que no hay.
  */
 async function lockOutreach(tx: Db, actor: AdminActor, id: string) {
   if (!UUID.test(id)) throw notFound("Envío")
@@ -2209,15 +2510,18 @@ async function lockOutreach(tx: Db, actor: AdminActor, id: string) {
 
 /**
  * Salió: deja la actividad en la bitácora (solo de Administración si el envío
- * lo es) y, si llevaba una propuesta lista, la pasa a enviada.
+ * lo es) y, si llevaba una propuesta lista, la pasa a enviada. La respuesta a
+ * un correo sin cliente no deja actividad: la deja cuando se liga el correo
+ * (`settleRepliesOfEmail`).
  */
 async function outreachWentOut(
   tx: Db,
-  actor: AdminActor,
+  actor: AdminActor | null,
   row: typeof saasOutreach.$inferSelect,
   adminOnly: boolean,
   now: Date,
 ): Promise<void> {
+  if (!row.clientId) return
   const [client] = await tx
     .select()
     .from(saasClient)
@@ -2235,6 +2539,7 @@ async function outreachWentOut(
       contactId: row.contactId,
       proposalId: row.proposalId,
       adminOnly,
+      ...(row.sentAt ? { happenedAt: row.sentAt } : {}),
     },
     now,
   )
@@ -2245,6 +2550,35 @@ async function outreachWentOut(
       .set({ status: "enviada", sentAt: now, updatedAt: now })
       .where(and(eq(saasProposal.id, row.proposalId), eq(saasProposal.status, "borrador")))
   }
+}
+
+/**
+ * Al ligar un correo a un cliente, sus respuestas que salieron sin cliente
+ * pasan a ser de él, y las que ya salieron dejan su actividad con la hora en
+ * que salieron. Lo llama `assignInboundEmail`, en su misma transacción.
+ */
+export async function settleRepliesOfEmail(
+  tx: Db,
+  actor: AdminActor | null,
+  emailId: string,
+  clientId: string,
+  now = new Date(),
+): Promise<number> {
+  const moved = await tx
+    .update(saasOutreach)
+    .set({ clientId, updatedAt: now })
+    .where(and(eq(saasOutreach.inReplyToEmailId, emailId), isNull(saasOutreach.clientId)))
+    .returning()
+  for (const row of moved) {
+    if (row.status !== "enviado") continue
+    const [flag] = await tx
+      .select({ adminOnly: outreachAdminOnlySql(`"saas_outreach"`) })
+      .from(saasOutreach)
+      .where(eq(saasOutreach.id, row.id))
+      .limit(1)
+    await outreachWentOut(tx, actor, row, Boolean(flag?.adminOnly), now)
+  }
+  return moved.length
 }
 
 /**
@@ -2273,7 +2607,7 @@ export async function markOutreachSent(
   if (result === "enviado") await outreachWentOut(tx, actor, updated, row.adminOnly, now)
   await writeAdminAudit(tx, actor, {
     action: result === "enviado" ? "arm.outreach_sent" : "arm.outreach_uncertain",
-    entityId: row.clientId,
+    entityId: row.clientId ?? row.inReplyToEmailId,
     metadata: { outreachId: id },
   })
   return outreachRowOf(updated)
@@ -2312,7 +2646,7 @@ export async function resolveOutreach(
   if (outcome === "salio") await outreachWentOut(tx, actor, updated, row.adminOnly, now)
   await writeAdminAudit(tx, actor, {
     action: outcome === "salio" ? "arm.outreach_resolved_sent" : "arm.outreach_resolved_failed",
-    entityId: row.clientId,
+    entityId: row.clientId ?? row.inReplyToEmailId,
     metadata: { outreachId: id },
   })
   return outreachRowOf(updated)
@@ -2323,38 +2657,120 @@ export interface OutreachEmail {
   subject: string
   html: string
   text: string
+  /** A dónde van las respuestas: la misma dirección que firma. */
   replyTo: string
   brand: MailBrand
+  /** Quién firma: «Ada Lovelace · odentIA <ada.lovelace@odentia32.com>», «Soporte · odentIA <soporte@…>» u hola@. */
+  from: { name: string; address: string }
+  /** Nuestro Message-ID; nulo en un envío de antes de guardarlo. */
+  messageId: string | null
+  /** `In-Reply-To` y `References`, si responde un correo. */
+  headers: Record<string, string>
   attachments: Array<{ filename: string; content: Uint8Array; contentType: string }>
+}
+
+/** El mensaje para `mailer.send`: quien firma, la respuesta a esa misma dirección, el Message-ID y el hilo. */
+export function outreachMailMessage(email: OutreachEmail): MailMessage {
+  return {
+    to: email.to,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+    replyTo: email.replyTo,
+    brand: email.brand,
+    from: email.from,
+    ...(email.messageId ? { messageId: email.messageId } : {}),
+    ...(Object.keys(email.headers).length ? { headers: email.headers } : {}),
+    attachments: email.attachments,
+  }
+}
+
+const QUOTE_MAX = 4000
+
+/**
+ * La firma de una respuesta: la de quien sale como remitente. «Ada Lovelace ·
+ * odentIA», «Soporte · odentIA» o, desde hola@, «El equipo de odentIA».
+ */
+export function replySignature(sender: MailSender, product: ClinicalProduct): string {
+  return sender.address === brandMailbox(product, "hola").address
+    ? `El equipo de ${sender.name}`
+    : sender.name
+}
+
+/** El cuerpo ya termina con la firma (en su última línea): no se repite. */
+function endsWithSignature(body: string, signature: string): boolean {
+  const last = body.trimEnd().split("\n").at(-1)?.trim() ?? ""
+  return last.toLowerCase() === signature.toLowerCase()
+}
+
+/** «El 12 de noviembre de 2026, 10:15, Rosa Mamani escribió:» y el texto con «> ». */
+export function quotedEmail(email: {
+  fromName: string | null
+  fromAddress: string
+  receivedAt: Date
+  textBody: string | null
+}): string[] {
+  const text = (email.textBody ?? "").trim()
+  if (!text) return []
+  const when = new Intl.DateTimeFormat(ZONE.locale, {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: ZONE.timezone,
+  }).format(email.receivedAt)
+  const who = email.fromName?.trim() || email.fromAddress
+  const clipped = text.length > QUOTE_MAX ? `${text.slice(0, QUOTE_MAX)}…` : text
+  return [
+    `El ${when}, ${who} escribió:`,
+    clipped
+      .split(/\r?\n/)
+      .map((line) => `> ${line}`)
+      .join("\n"),
+  ]
 }
 
 /**
  * El correo de un envío pendiente, listo para `mailer.send` (después del
- * commit): con la marca del producto del cliente, respuesta a
- * contacto@<dominio> y, si lleva propuesta, su PDF adjunto.
+ * commit): con la marca del producto, su remitente (quien escribe, soporte@
+ * u hola@) y las respuestas a esa misma dirección, su Message-ID y, si
+ * responde un correo, las cabeceras del hilo y el correo citado debajo. Si
+ * lleva propuesta, su PDF adjunto.
  */
 export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> {
   if (!UUID.test(id)) throw notFound("Envío")
   const [row] = await tx
-    .select({ outreach: saasOutreach, clientName: saasClient.name, product: saasClient.product })
+    .select({
+      outreach: saasOutreach,
+      clientName: saasClient.name,
+      clientProduct: saasClient.product,
+      email: saasInboundEmail,
+    })
     .from(saasOutreach)
-    .innerJoin(saasClient, eq(saasClient.id, saasOutreach.clientId))
+    .leftJoin(saasClient, eq(saasClient.id, saasOutreach.clientId))
+    .leftJoin(saasInboundEmail, eq(saasInboundEmail.id, saasOutreach.inReplyToEmailId))
     .where(eq(saasOutreach.id, id))
     .limit(1)
   if (!row) throw notFound("Envío")
-  const { outreach } = row
+  const { outreach, email } = row
   if (outreach.channel !== "correo" || !outreach.subject)
     throw new ServiceError("OUTREACH_NOT_EMAIL", 409, "Ese envío no es un correo")
-  const product = productOf(row.product)
+  const product = productOf(row.clientProduct ?? email?.product ?? "dental")
   const brand = PRODUCT_BRAND[product]
-  const replyTo = `contacto@${productMailDomain(product)}`
+  const sender = outreach.fromAddress
+    ? await senderOfAddress(tx, product, outreach.fromAddress)
+    : brandMailbox(product, "hola")
   const paragraphs = outreach.body
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean)
+  if (email) {
+    // Una respuesta firma con quien sale como remitente (el borrador de Kairós viene sin firma).
+    const signature = replySignature(sender, product)
+    if (!endsWithSignature(outreach.body, signature)) paragraphs.push(signature)
+    paragraphs.push(...quotedEmail(email))
+  }
   const attachments: OutreachEmail["attachments"] = []
   if (outreach.proposalId) {
-    const pdf = await proposalPdf(tx, outreach.proposalId)
+    const pdf = await proposalPdf(tx, outreach.proposalId, sender.address)
     attachments.push({ filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" })
   }
   const template = renderEmail({
@@ -2363,17 +2779,27 @@ export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> 
     preview: paragraphs[0]?.slice(0, 140) ?? outreach.subject,
     title: outreach.subject,
     paragraphs,
-    reason: `Le escribimos por la relación de ${row.clientName} con ${brandPaper(brand).name}.`,
-    replies: "Si responde este correo, le llega a nuestro equipo.",
-    replyTo,
+    reason: row.clientName
+      ? `Le escribimos por la relación de ${row.clientName} con ${brandPaper(brand).name}.`
+      : `Le respondemos el correo que nos escribió a ${email?.toAddress ?? brandPaper(brand).name}.`,
+    replies: "Si responde este correo, le llega a quien le escribe.",
+    replyTo: sender.address,
   })
+  // El hilo (RFC 5322 §3.6.4), nunca con un Message-ID inventado ni sin «<>».
+  const headers: Record<string, string> = {}
+  const parentId = email ? replyableMessageId(email.messageId) : null
+  if (parentId) headers["In-Reply-To"] = parentId
+  if (email && outreach.references) headers.References = outreach.references
   return {
     to: outreach.toAddress,
     subject: template.subject,
     html: template.html,
     text: template.text,
-    replyTo,
+    replyTo: sender.address,
     brand,
+    from: { name: sender.name, address: sender.address },
+    messageId: outreach.messageId,
+    headers,
     attachments,
   }
 }

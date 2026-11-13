@@ -206,3 +206,47 @@ it("el correo entrante pasa con su firma y sin secreto no se recibe", async () =
   expect((await inbound(noSecret, "<montaje-3@test>")).status).toBe(503)
   expect((await app.request("/api/inbound/otra-cosa", { method: "POST" })).status).toBe(404)
 })
+
+it("Equipo: Administración corrige la dirección de una persona y su copia; Soporte no", async () => {
+  const team = await admin("GET", "/access/team", "u-admin")
+  expect(team.status).toBe(200)
+  const { staff: people } = (
+    (await team.json()) as {
+      data: {
+        staff: Array<{ userId: string; mailLocal: string | null; mailFirstSentAt: string | null }>
+      }
+    }
+  ).data
+  // La base les puso su dirección al crear la fila.
+  expect(people.find((row) => row.userId === "u-soporte")).toMatchObject({
+    mailLocal: "u.soporte",
+    mailFirstSentAt: null,
+  })
+  const denied = await admin("POST", "/access/team/u-soporte/mail", "u-soporte", {
+    mailLocal: "sofi",
+  })
+  expect(denied.status).toBe(403)
+  const changed = await admin("POST", "/access/team/u-soporte/mail", "u-admin", {
+    mailLocal: "sofia",
+    copyTo: "sofia@gmail.test",
+  })
+  expect(changed.status).toBe(200)
+  expect(((await changed.json()) as { data: { mailLocal: string } }).data.mailLocal).toBe("sofia")
+  const reserved = await admin("POST", "/access/team/u-soporte/mail", "u-admin", {
+    mailLocal: "hola",
+  })
+  expect(reserved.status).toBe(400)
+  const taken = await admin("POST", "/access/team/u-soporte/mail", "u-admin", {
+    mailLocal: "u.admin",
+  })
+  expect(taken.status).toBe(409)
+  expect(await code(taken)).toBe("MAIL_LOCAL_TAKEN")
+  // Después del primer correo que salió con ella, queda fija.
+  await ownerDb
+    .update(adminStaff)
+    .set({ mailFirstSentAt: new Date() })
+    .where(sql`user_id = 'u-soporte'`)
+  const fixed = await admin("POST", "/access/team/u-soporte/mail", "u-admin", { mailLocal: "sofi" })
+  expect(fixed.status).toBe(409)
+  expect(await code(fixed)).toBe("MAIL_LOCAL_FIXED")
+})

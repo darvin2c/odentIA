@@ -10,12 +10,18 @@ import {
   type SaasOutreachChannel,
   saasClient,
   saasClientContact,
+  saasInboundEmail,
 } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
-import { CLIENT_STAGE_WORDS, type ClientStage, clientStageSql } from "./admin-clients.js"
+import {
+  CLIENT_STAGE_WORDS,
+  type ClientStage,
+  clientStageSql,
+  inboundMailboxWords,
+} from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { type KairosDrafter, kairosReadySql, saveKairosDraft } from "./admin-kairos.js"
 import { forecastReport, funnelReport, revenueReport } from "./admin-reports.js"
@@ -33,8 +39,10 @@ const ZONE = { locale: "es-PE", timezone: "America/Lima" }
  *
  * Al modelo viaja solo lo permitido: el nombre, el producto, la ciudad y la
  * etapa de la clínica, el nombre de la persona, quien firma y los hechos de
- * la venta. Nunca datos de pacientes, adjuntos ni el cuerpo de un correo que
- * llegó; y en lo que ve Soporte, ni notas solo de administración ni importes.
+ * la venta. Nunca datos de pacientes ni adjuntos; el cuerpo de un correo que
+ * llegó, solo para responderlo y frase por frase con el mismo filtro
+ * (`kairosAllowedEmailText`); y en lo que ve Soporte, ni notas solo de
+ * administración ni importes.
  * Redactar no envía nada: el borrador queda en el ítem y una persona decide.
  */
 
@@ -69,6 +77,33 @@ export interface KairosDraftWriter {
     facts: string[]
     demo?: { name: string } | null
   }): Promise<{ script: string }>
+  /**
+   * La respuesta a un correo que llegó (`responder_correo`): solo el cuerpo,
+   * sin firma; el asunto («Re: …») y la firma de quien la envía los pone el
+   * envío. Del correo viaja solo lo que pasa el filtro (`kairosAllowedEmailText`).
+   */
+  draftReply(input: KairosReplyAsk): Promise<{ body: string }>
+}
+
+/**
+ * Lo que ve el modelo para responder un correo: solo lo que se le podría decir
+ * a quien escribe. El correo puede pedirle al modelo que repita lo que sabe,
+ * así que nada solo de Administración (notas, importes) ni la bitácora.
+ */
+export interface KairosReplyAsk {
+  product: ClinicalProduct
+  /** La clínica (su nombre, el producto y la etapa en palabras), si el correo ya es de un cliente. */
+  client: KairosDraftClientFacts | null
+  from: { name: string | null; address: string }
+  /** A qué buzón escribió, en palabras («hola@», «ana.torres@»). */
+  mailbox: string
+  subject: string | null
+  /** Las frases del correo que pueden viajar, en orden. */
+  lines: string[]
+  /** Cuántas frases se quitaron por parecer de un paciente. */
+  omitted: number
+  /** Siempre vacío por ahora: los hechos de la venta son internos. */
+  facts: string[]
 }
 
 export interface KairosWeeklyWriter {
@@ -147,6 +182,40 @@ export function kairosAllowedFact(text: string, options: { adminOnly: boolean })
   return told.length > FACT_MAX ? `${told.slice(0, FACT_MAX - 1)}…` : told
 }
 
+/** Cuántas frases de un correo viajan al modelo como mucho. */
+const EMAIL_LINES_MAX = 30
+/** Lo que sigue a una de estas líneas es el correo citado: no viaja. */
+const QUOTE_START =
+  /^(?:-{2,}\s*(?:original message|mensaje original|forwarded message|mensaje reenviado)|(?:el|on)\s.+\s(?:escribi[oó]|wrote):\s*$|de:\s.+@|from:\s.+@)/iu
+
+/**
+ * Lo que puede viajar al modelo del cuerpo de un correo que llegó: sin lo
+ * citado (las líneas con «>» y lo que sigue a «El … escribió:»), frase por
+ * frase con el mismo filtro de los hechos (`kairosAllowedFact`): lo que parece
+ * de un paciente se quita entero y se cuenta; los importes, solo si es de
+ * Administración. Como mucho 30 frases.
+ */
+export function kairosAllowedEmailText(
+  text: string | null | undefined,
+  options: { adminOnly: boolean },
+): { lines: string[]; omitted: number } {
+  const lines: string[] = []
+  let omitted = 0
+  for (const raw of (text ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+    const line = raw.trim()
+    if (QUOTE_START.test(line)) break
+    if (!line || line.startsWith(">")) continue
+    const sentences = line.length > 280 ? line.split(/(?<=[.!?…])\s+/u) : [line]
+    for (const sentence of sentences) {
+      if (!sentence.trim()) continue
+      const told = kairosAllowedFact(sentence, options)
+      if (told === null) omitted += 1
+      else if (lines.length < EMAIL_LINES_MAX) lines.push(told)
+    }
+  }
+  return { lines, omitted }
+}
+
 /** Un borrador por redactar, con lo justo que verá el modelo. */
 export interface KairosDraftJob {
   itemId: string
@@ -163,6 +232,74 @@ export interface KairosDraftJob {
 
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null
+
+/** Los datos de la clínica que ve el modelo, en palabras. */
+function clientFactsOf(
+  client: {
+    name: string
+    city: string | null
+    professionals: string | null
+    currentTool: string | null
+  },
+  product: ClinicalProduct,
+  stage: unknown,
+): KairosDraftClientFacts {
+  return {
+    name: client.name,
+    product,
+    city: client.city,
+    professionals: client.professionals
+      ? (PROFESSIONALS_WORDS[client.professionals as SaasClientProfessionals] ?? null)
+      : null,
+    currentTool: client.currentTool
+      ? (TOOL_WORDS[client.currentTool as SaasClientTool] ?? null)
+      : null,
+    stage: CLIENT_STAGE_WORDS[stage as ClientStage] ?? String(stage),
+  }
+}
+
+/**
+ * Lo último que se habló con el cliente, ya filtrado: sin lo que es solo de
+ * administración si el borrador no lo es, sin la nota vieja y sin el cuerpo
+ * de un correo que llegó (lo escribió la clínica y puede traer cualquier cosa).
+ */
+async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): Promise<string[]> {
+  const recent = await tx
+    .select({
+      kind: saasFollowUp.kind,
+      direction: saasFollowUp.direction,
+      outcome: saasFollowUp.outcome,
+      body: saasFollowUp.body,
+      happenedAt: saasFollowUp.happenedAt,
+    })
+    .from(saasFollowUp)
+    .where(
+      and(
+        eq(saasFollowUp.clientId, clientId),
+        not(saasFollowUp.fromNote),
+        adminOnly ? undefined : not(saasFollowUp.adminOnly),
+      ),
+    )
+    .orderBy(desc(saasFollowUp.happenedAt))
+    .limit(RECENT_ACTIVITIES)
+  const told = (text: string) => kairosAllowedFact(text, { adminOnly })
+  const facts: string[] = []
+  for (const entry of recent) {
+    const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
+    // En palabras: el borrador con plantilla lo copia tal cual y el modelo
+    // no debe devolver una fecha AAAA-MM-DD a la clínica.
+    const day = dayWords(entry.happenedAt, ZONE)
+    if (entry.kind === "correo" && entry.direction === "entro") {
+      facts.push(`${label} de la clínica el ${day}`)
+      continue
+    }
+    const body = told(entry.body)
+    if (!body) continue
+    const outcome = entry.outcome ? told(entry.outcome) : null
+    facts.push(`${label} del ${day}: ${body}${outcome ? ` · quedó en: ${outcome}` : ""}`)
+  }
+  return facts
+}
 
 /**
  * Lo que espera redacción: mensajes y guiones en espera, vigentes, sin
@@ -238,27 +375,6 @@ export async function pendingKairosDraftJobs(
             .where(eq(saasDemo.id, demoId))
             .limit(1)
         : []
-    // Lo último que se habló: sin lo que es solo de administración si el
-    // borrador no lo es, sin la nota vieja y sin el cuerpo de un correo que
-    // llegó (lo escribió la clínica y puede traer cualquier cosa).
-    const recent = await tx
-      .select({
-        kind: saasFollowUp.kind,
-        direction: saasFollowUp.direction,
-        outcome: saasFollowUp.outcome,
-        body: saasFollowUp.body,
-        happenedAt: saasFollowUp.happenedAt,
-      })
-      .from(saasFollowUp)
-      .where(
-        and(
-          eq(saasFollowUp.clientId, clientId),
-          not(saasFollowUp.fromNote),
-          item.adminOnly ? undefined : not(saasFollowUp.adminOnly),
-        ),
-      )
-      .orderBy(desc(saasFollowUp.happenedAt))
-      .limit(RECENT_ACTIVITIES)
     const told = (text: string) => kairosAllowedFact(text, { adminOnly: item.adminOnly })
     const facts = [
       item.reason,
@@ -270,20 +386,7 @@ export async function pendingKairosDraftJobs(
       .filter((fact): fact is string => fact !== null)
       // El motivo del ítem suele repetir su primer hecho («Dijo «no por ahora»…» dos veces).
       .filter((fact, index, all) => all.indexOf(fact) === index)
-    for (const entry of recent) {
-      const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
-      // En palabras: el borrador con plantilla lo copia tal cual y el modelo
-      // no debe devolver una fecha AAAA-MM-DD a la clínica.
-      const day = dayWords(entry.happenedAt, ZONE)
-      if (entry.kind === "correo" && entry.direction === "entro") {
-        facts.push(`${label} de la clínica el ${day}`)
-        continue
-      }
-      const body = told(entry.body)
-      if (!body) continue
-      const outcome = entry.outcome ? told(entry.outcome) : null
-      facts.push(`${label} del ${day}: ${body}${outcome ? ` · quedó en: ${outcome}` : ""}`)
-    }
+    facts.push(...(await recentClientFacts(tx, clientId, item.adminOnly)))
     const channel = str(payload.channel)
     jobs.push({
       itemId: item.id,
@@ -293,23 +396,112 @@ export async function pendingKairosDraftJobs(
         channel && (SAAS_OUTREACH_CHANNELS as readonly string[]).includes(channel)
           ? (channel as SaasOutreachChannel)
           : null,
-      client: {
-        name: client.name,
-        product,
-        city: client.city,
-        professionals: client.professionals
-          ? (PROFESSIONALS_WORDS[client.professionals as SaasClientProfessionals] ?? null)
-          : null,
-        currentTool: client.currentTool
-          ? (TOOL_WORDS[client.currentTool as SaasClientTool] ?? null)
-          : null,
-        stage: CLIENT_STAGE_WORDS[stage as ClientStage] ?? String(stage),
-      },
+      client: clientFactsOf(client, product, stage),
       contact: contact ? { name: contact.name, title: contact.title } : null,
       senderName: sender?.name?.trim() || `El equipo de ${productWords(product).name}`,
       demo: demo ? { name: demo.name } : null,
       facts,
       adminOnly: item.adminOnly,
+    })
+  }
+  return jobs
+}
+
+/** Una respuesta por redactar (`responder_correo`), con lo justo que verá el modelo. */
+export interface KairosReplyJob {
+  itemId: string
+  ask: KairosReplyAsk
+}
+
+/**
+ * Las respuestas a correos que esperan redacción: `responder_correo` en
+ * espera, vigentes y sin borrador, las más viejas primero. Del correo viaja
+ * solo lo que pasa el filtro (`kairosAllowedEmailText`); del cliente, si lo
+ * tiene, solo lo que se le podría decir a quien escribe (su nombre, el
+ * producto y la etapa en palabras): nada de su bitácora, sus notas ni sus
+ * importes. Sin firma: la pone el envío con quien la aprueba. Solo lee.
+ */
+export async function pendingKairosReplyJobs(
+  tx: Db,
+  options: { limit?: number } = {},
+  now = new Date(),
+): Promise<KairosReplyJob[]> {
+  const limit = Math.min(
+    Math.max(Math.trunc(options.limit ?? KAIROS_DRAFTS_PER_PASS), 1),
+    DRAFTS_MAX,
+  )
+  const pending = await tx
+    .select({
+      item: kairosItem,
+      email: {
+        id: saasInboundEmail.id,
+        mailbox: saasInboundEmail.mailbox,
+        product: saasInboundEmail.product,
+        from: saasInboundEmail.fromAddress,
+        fromName: saasInboundEmail.fromName,
+        to: saasInboundEmail.toAddress,
+        subject: saasInboundEmail.subject,
+        text: saasInboundEmail.textBody,
+        clientId: saasInboundEmail.clientId,
+      },
+    })
+    .from(kairosItem)
+    .innerJoin(
+      saasInboundEmail,
+      sql`${saasInboundEmail.id}::text = ${kairosItem.payload} ->> 'emailId'`,
+    )
+    .where(
+      and(
+        eq(kairosItem.status, "espera"),
+        eq(kairosItem.kind, "responder_correo"),
+        sql`not ${kairosReadySql}`,
+        sql`${kairosItem.expiresAt} > ${now.toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(asc(kairosItem.createdAt), asc(kairosItem.id))
+    .limit(limit)
+
+  const jobs: KairosReplyJob[] = []
+  for (const { item, email } of pending) {
+    const [client] = email.clientId
+      ? await tx
+          .select({
+            name: saasClient.name,
+            product: saasClient.product,
+            stage: clientStageSql(now),
+          })
+          .from(saasClient)
+          .where(eq(saasClient.id, email.clientId))
+          .limit(1)
+      : []
+    const product: ClinicalProduct = isClinicalProduct(client?.product ?? email.product)
+      ? ((client?.product ?? email.product) as ClinicalProduct)
+      : "dental"
+    const text = kairosAllowedEmailText(email.text, { adminOnly: item.adminOnly })
+    const told = (value: string) => kairosAllowedFact(value, { adminOnly: item.adminOnly })
+    const subject = email.subject ? told(email.subject) : null
+    jobs.push({
+      itemId: item.id,
+      ask: {
+        product,
+        client: client
+          ? clientFactsOf(
+              { name: client.name, city: null, professionals: null, currentTool: null },
+              product,
+              client.stage,
+            )
+          : null,
+        from: {
+          name: email.fromName ? told(email.fromName) : null,
+          address: email.from,
+        },
+        mailbox: `${inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to })}@`,
+        subject,
+        lines: text.lines,
+        // Un asunto que no puede viajar cuenta como una frase quitada.
+        omitted: text.omitted + (email.subject && !subject ? 1 : 0),
+        facts: [],
+      },
     })
   }
   return jobs
@@ -327,8 +519,9 @@ export interface KairosDraftsOutcome {
 }
 
 /**
- * Redacta con el modelo los mensajes y guiones que esperan borrador (como
- * mucho `limit`, 20 por defecto) y guarda cada borrador en su ítem
+ * Redacta con el modelo los mensajes, guiones y respuestas a correos que
+ * esperan borrador (como mucho `limit` entre todos, 20 por defecto; primero
+ * los mensajes y guiones) y guarda cada borrador en su ítem
  * (`saveKairosDraft`). El modelo corre fuera de toda transacción; cada
  * borrador se guarda en la suya, con el ítem bloqueado, solo si todavía
  * espera y nadie lo redactó. Un fallo del modelo no frena a los demás.
@@ -339,24 +532,34 @@ export async function draftPendingKairosItems(
   options: { limit?: number } = {},
   now = new Date(),
 ): Promise<KairosDraftsOutcome> {
-  const jobs = await ownerDb.transaction((tx) => pendingKairosDraftJobs(tx, options, now))
+  const limit = Math.min(
+    Math.max(Math.trunc(options.limit ?? KAIROS_DRAFTS_PER_PASS), 1),
+    DRAFTS_MAX,
+  )
+  const { jobs, replies } = await ownerDb.transaction(async (tx) => {
+    const jobs = await pendingKairosDraftJobs(tx, { limit }, now)
+    const replies =
+      jobs.length < limit
+        ? await pendingKairosReplyJobs(tx, { limit: limit - jobs.length }, now)
+        : []
+    return { jobs, replies }
+  })
   const drafter: KairosDrafter = writer.drafter ?? "modelo"
   const outcome: KairosDraftsOutcome = { drafted: [], skipped: [], failed: [], drafter }
-  for (const job of jobs) {
-    let draft: { subject?: string | null; body: string; drafter: KairosDrafter }
-    try {
-      if (job.kind === "guion") {
-        const { script } = await writer.presentationScript({
-          client: job.client,
-          facts: job.facts,
-          demo: job.demo,
-        })
-        draft = { body: script, drafter }
-      } else {
-        if (!job.channel) {
-          outcome.skipped.push(job.itemId)
-          continue
+  type Draft = { subject?: string | null; body: string; drafter: KairosDrafter }
+  const tasks: Array<{ itemId: string; write: () => Promise<Draft | null> }> = [
+    ...jobs.map((job) => ({
+      itemId: job.itemId,
+      write: async (): Promise<Draft | null> => {
+        if (job.kind === "guion") {
+          const { script } = await writer.presentationScript({
+            client: job.client,
+            facts: job.facts,
+            demo: job.demo,
+          })
+          return { body: script, drafter }
         }
+        if (!job.channel) return null
         const written = await writer.draftMessage({
           client: job.client,
           ...(job.contact ? { contact: job.contact } : {}),
@@ -365,38 +568,57 @@ export async function draftPendingKairosItems(
           facts: job.facts,
           senderName: job.senderName,
         })
-        draft = {
+        return {
           subject: job.channel === "correo" ? (written.subject ?? null) : null,
           body: written.body,
           drafter,
         }
-      }
+      },
+    })),
+    ...replies.map((job) => ({
+      itemId: job.itemId,
+      // El asunto de una respuesta es «Re: …» y lo pone el envío.
+      write: async (): Promise<Draft> => ({
+        body: (await writer.draftReply(job.ask)).body,
+        drafter,
+      }),
+    })),
+  ]
+  for (const task of tasks) {
+    let draft: Draft | null
+    try {
+      draft = await task.write()
     } catch (error) {
       outcome.failed.push({
-        itemId: job.itemId,
+        itemId: task.itemId,
         error: error instanceof Error ? error.message.slice(0, 300) : "El modelo no respondió",
       })
       continue
     }
+    if (!draft) {
+      outcome.skipped.push(task.itemId)
+      continue
+    }
+    const ready = draft
     try {
       const saved = await ownerDb.transaction(async (tx) => {
         const [row] = await tx
           .select({ status: kairosItem.status, payload: kairosItem.payload })
           .from(kairosItem)
-          .where(eq(kairosItem.id, job.itemId))
+          .where(eq(kairosItem.id, task.itemId))
           .for("update")
         if (
           row?.status !== "espera" ||
           (row.payload.draft && typeof row.payload.draft === "object")
         )
           return false
-        return saveKairosDraft(tx, job.itemId, draft)
+        return saveKairosDraft(tx, task.itemId, ready)
       })
-      ;(saved ? outcome.drafted : outcome.skipped).push(job.itemId)
+      ;(saved ? outcome.drafted : outcome.skipped).push(task.itemId)
     } catch (error) {
       // Un borrador que no cabe (vacío, muy largo) no se guarda: se vuelve a pedir.
       if (!(error instanceof ServiceError)) throw error
-      outcome.failed.push({ itemId: job.itemId, error: error.message })
+      outcome.failed.push({ itemId: task.itemId, error: error.message })
     }
   }
   return outcome

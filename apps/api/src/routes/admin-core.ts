@@ -26,6 +26,7 @@ import {
   ServiceError,
   setAdminStaffActive,
   setAdminStaffRole,
+  setStaffMail,
   trustAdminDevice,
   writeAdminAudit,
 } from "@odentia/services"
@@ -592,6 +593,22 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       )
       return { ok: true as const }
     })
+  })
+
+  /**
+   * La dirección de una persona en los dominios de las marcas (`mailLocal`) y el
+   * buzón donde le llega la copia de lo que le escriben (`copyTo`; vacío o nulo,
+   * sin copia). Solo admin. La dirección no cambia después del primer correo
+   * que salió con ella (409 `MAIL_LOCAL_FIXED`); una tomada, 409 `MAIL_LOCAL_TAKEN`.
+   */
+  app.post("/team/:userId/mail", async (c) => {
+    const actor = adminContextOf(c)
+    const manager = forbidUnlessManager(c, actor)
+    if (manager) return manager
+    const param = userIdParam.safeParse({ userId: c.req.param("userId") })
+    if (!param.success) return validationError(c, param.error.issues)
+    const raw = await c.req.json().catch(() => null)
+    return runService(c, 200, () => setStaffMail(deps.ownerDb, actor, param.data.userId, raw ?? {}))
   })
 
   /** Revoca una invitación pendiente. Solo admin. */

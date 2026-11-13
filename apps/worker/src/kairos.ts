@@ -26,8 +26,9 @@ import { sql } from "drizzle-orm"
 /**
  * La pasada de Kairós en el worker (ARM de la administración): cada 5
  * minutos corre las reglas sin modelo (`kairosRulesPass`), pide al modelo los
- * borradores que esperan (hasta 20) y borra los archivos de las clínicas que
- * vencieron. Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
+ * borradores que esperan (hasta 20: mensajes, guiones y la respuesta de cada
+ * correo nuevo a hola@, contacto@, fundadores@ o a una persona del equipo) y
+ * borra los archivos de las clínicas que vencieron. Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
  * saber» de hasta 30 clientes con algo nuevo y, si la semana aún no lo tiene,
  * escribe el resumen de la semana de Reportes. Nunca envía nada a una
  * clínica: lo que prepara queda en espera del sí de una persona. La hora la

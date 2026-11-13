@@ -11,6 +11,7 @@ import {
   saasOpportunity,
   saasOutreach,
 } from "@odentia/db/schema/admin-arm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
 import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import type { MailMessage } from "@odentia/mail"
@@ -68,6 +69,9 @@ const writer: KairosDraftWriter & KairosWeeklyWriter = {
   },
   async presentationScript(input) {
     return { script: `Guion para ${input.client.name}` }
+  },
+  async draftReply(input) {
+    return { body: `Gracias, ${input.from.name ?? input.from.address}` }
   },
   async weeklySummary(input) {
     return { text: `Semana con ${input.figures.length} cifras` }
@@ -185,13 +189,16 @@ beforeAll(async () => {
           if (mailFails) throw new Error("se cortó la conexión")
         },
       },
-      replyToOf: (brand) => `ventas@${brand}.test`,
     }),
   )
 
   await ownerDb.insert(user).values([
     { id: ADMIN, name: "Ada Administración", email: "ada@kairos-ruta.test" },
     { id: SUPPORT, name: "Sofía Soporte", email: "sofia@kairos-ruta.test" },
+  ])
+  await ownerDb.insert(adminStaff).values([
+    { userId: ADMIN, role: "admin" },
+    { userId: SUPPORT, role: "support" },
   ])
   const mail = await client("correo", { email: "rosa@kairos-ruta.test" })
   await message("correo", mail, {
@@ -301,7 +308,9 @@ describe("lo que espera un sí", () => {
       to: "rosa@kairos-ruta.test",
       subject: "Su solicitud en odentIA",
       brand: "odentia",
-      replyTo: "ventas@odentia.test",
+      // Aprueba Soporte: sale desde soporte@ y la respuesta llega ahí.
+      from: { name: "Soporte · odentIA", address: "soporte@odentia32.com" },
+      replyTo: "soporte@odentia32.com",
     })
     expect(sent[0]?.text).toContain("¿Hablamos mañana?")
     const [outreach] = await ownerDb

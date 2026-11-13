@@ -23,6 +23,7 @@ import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm
 import { alias } from "drizzle-orm/pg-core"
 import {
   clientDuplicatePairsSql,
+  inboundMailboxWords,
   linkClientToOrganization,
   proposalLiveSql,
   proposalOfOpenSaleSql,
@@ -108,7 +109,11 @@ const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "duplicado",
 ])
 /** Lo que el modelo redacta antes de estar listo. */
-const DRAFT_KINDS = ["mensaje", "guion"] as const satisfies readonly KairosItemKind[]
+const DRAFT_KINDS = [
+  "mensaje",
+  "guion",
+  "responder_correo",
+] as const satisfies readonly KairosItemKind[]
 type DraftKind = (typeof DRAFT_KINDS)[number]
 
 const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
@@ -121,6 +126,7 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   demo: "una demo",
   presentacion_hecha: "la pregunta de una presentación",
   correo_sin_cliente: "un correo sin cliente",
+  responder_correo: "la respuesta a un correo",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -540,7 +546,15 @@ async function captureState(
     state.task = row ? { status: row.status, dueOn: row.due_on, dueAt: row.due_at } : null
   }
   const emailId = str(payload.emailId)
-  if (emailId) {
+  if (emailId && kind === "responder_correo") {
+    // La respuesta vale mientras nadie la haya respondido a mano; ligar el
+    // correo a un cliente no la cambia.
+    const [row] = await rows<{ n: number }>(
+      tx,
+      sql`select count(*)::int as n from saas_outreach where in_reply_to_email_id = ${emailId}::uuid`,
+    )
+    state.replies = row?.n ?? 0
+  } else if (emailId) {
     const [row] = await rows<{ client_id: string | null }>(
       tx,
       sql`select client_id from saas_inbound_email where id = ${emailId}::uuid`,
@@ -853,6 +867,13 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
   ): Promise<unknown>
   linkContactToUser(tx: Db, actor: AdminActor, contactId: string, userId: string): Promise<unknown>
   assignInboundEmail(tx: Db, actor: AdminActor, emailId: string, clientId: string): Promise<unknown>
+  /** La misma operación que «Responder» (`prepareEmailReply`): reserva la respuesta; la ruta la envía. */
+  prepareEmailReply(
+    tx: Db,
+    actor: AdminActor,
+    emailId: string,
+    input: { body: string; kairosItemId: string },
+  ): Promise<O>
   recordPresentation(
     tx: Db,
     actor: AdminActor,
@@ -902,6 +923,7 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   demo: [],
   presentacion_hecha: ["outcome", "body", "nextDueOn"],
   correo_sin_cliente: ["clientId"],
+  responder_correo: ["body"],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -997,6 +1019,22 @@ async function executeItem<O extends KairosOutreachPrepared>(
         return { status: "ejecutada", result: { emailId, clientId: target } }
       }
       throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta a quién ligar")
+    }
+    case "responder_correo": {
+      const emailId = optText(payload.emailId)
+      if (!emailId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el correo")
+      const body = optText(payload.body)
+      if (!body) throw invalidField("edited.body", "Escribe la respuesta")
+      const outreach = await executors.prepareEmailReply(tx, actor, emailId, {
+        body,
+        kairosItemId: item.id,
+      })
+      // Como un mensaje: hasta saber si salió, la ruta lo envía después del commit.
+      return {
+        status: "incierta",
+        result: { outreachId: outreach.id, channel: "correo" },
+        outreach,
+      }
     }
     case "correo_sin_cliente": {
       const emailId = optText(payload.emailId)
@@ -1133,8 +1171,11 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
   const edits = cleanEdits(kind, input.edited)
   const current = await captureState(tx, kind, item.clientId, item.payload)
   if (stable(item.expectedState ?? {}) !== stable(current)) {
+    // Una respuesta que alguien ya mandó a mano no se vuelve a preparar (`ruleReplyEmails`).
     const error =
-      "El cliente cambió desde que Kairós lo preparó: lo vuelve a preparar en la próxima pasada"
+      kind === "responder_correo"
+        ? "Alguien ya respondió este correo: esta respuesta no sale"
+        : "El cliente cambió desde que Kairós lo preparó: lo vuelve a preparar en la próxima pasada"
     await markStale(tx, item.id, now, error)
     return decision("vencida", null, error)
   }
@@ -1678,9 +1719,10 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     // Sin `request_id`: un correo que llega no es haberle respondido (la lista de espera no lo cuenta).
     const [entry] = await rows<{ id: string }>(
       tx,
-      sql`insert into saas_follow_up (client_id, body, kind, direction, happened_at, by_kairos)
+      // Lo que no llegó a soporte@ es comercial (puede hablar de precios): solo de Administración.
+      sql`insert into saas_follow_up (client_id, body, kind, direction, happened_at, by_kairos, admin_only)
       values (${email.client_id}::uuid, ${(subject ? `Correo recibido: ${subject}` : "Correo recibido, sin asunto").slice(0, 2000)},
-        'correo', 'entro', ${email.received_at}::timestamptz, true)
+        'correo', 'entro', ${email.received_at}::timestamptz, true, ${email.mailbox !== "soporte"})
       returning id`,
     )
     if (!entry) continue
@@ -1698,38 +1740,121 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     product: string
     from_address: string
     from_name: string | null
+    to_address: string
     subject: string | null
     received_at: string
     sender_verified: boolean
   }>(
     tx,
-    sql`select id, mailbox, product, from_address, from_name, subject, ${iso(sql`received_at`)} as received_at,
-      sender_verified
+    sql`select id, mailbox, product, from_address, from_name, to_address, subject,
+      ${iso(sql`received_at`)} as received_at, sender_verified
     from saas_inbound_email where client_id is null order by received_at asc`,
   )
   for (const email of unassigned) {
     const who = email.from_name?.trim() || email.from_address
+    const to = inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to_address })
     await pass.item({
       rule: "correo_sin_cliente",
       clientId: null,
       fact: email.id,
       kind: "correo_sin_cliente",
       title: `Correo sin cliente: ${who}`,
-      reason: `Llegó a ${email.mailbox}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} ${
+      reason: `Llegó a ${to}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} ${
         email.sender_verified
           ? "y su correo no es el de ningún cliente"
           : "de un remitente no verificado (puede no ser quien dice)"
       }: di de quién es`,
-      adminOnly: false,
+      // Lo que no llegó a soporte@ es comercial: Soporte no lo ve, ni lo liga ni lo responde.
+      adminOnly: email.mailbox !== "soporte",
       payload: {
         emailId: email.id,
         mailbox: email.mailbox,
+        to: email.to_address,
         product: email.product,
         from: email.from_address,
         fromName: email.from_name,
         subject: email.subject,
         receivedAt: email.received_at,
         clientId: null,
+      },
+    })
+  }
+}
+
+/** Cuántas horas atrás mira Kairós los correos por responder: lo que llegó antes ya no es nuevo. */
+const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
+
+/**
+ * (10b) La respuesta de cada correo que llegó a hola@, contacto@, fundadores@
+ * o a la dirección de una persona del equipo, nuevo y sin responder: Kairós
+ * deja `responder_correo` en espera y el modelo redacta el borrador después
+ * (`draftPendingKairosItems`). Nunca lo de soporte@ (puede traer datos de
+ * pacientes). Una sola vez por correo: si se descartó, venció o alguien lo
+ * respondió a mano, no se vuelve a preparar. Solo de un remitente verificado
+ * (lo demás puede ser falso o spam: queda para leerlo) y como mucho una en
+ * espera por remitente a la vez: quien escribe diez veces no llena la
+ * bandeja. Solo de Administración.
+ */
+async function ruleReplyEmails(pass: Pass): Promise<void> {
+  const { tx } = pass
+  const fresh = await rows<{
+    id: string
+    client_id: string | null
+    mailbox: string
+    product: string
+    from_address: string
+    from_name: string | null
+    to_address: string
+    reply_to: string | null
+    subject: string | null
+    received_at: string
+  }>(
+    tx,
+    sql`select e.id, e.client_id, e.mailbox, e.product, e.from_address, e.from_name, e.to_address, e.reply_to,
+      e.subject, ${iso(sql`e.received_at`)} as received_at
+    from saas_inbound_email e
+    where e.mailbox in ('hola', 'contacto', 'fundadores', 'persona')
+      and e.sender_verified
+      and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
+      and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)
+      and not exists (select 1 from kairos_item k
+        where k.kind = 'responder_correo' and k.payload ->> 'emailId' = e.id::text)
+      and not exists (select 1 from kairos_item k
+        where k.kind = 'responder_correo' and k.status = 'espera' and k.expires_at > ${pass.nowSql}
+          and k.payload ->> 'from' = e.from_address)
+      and (e.client_id is null or exists (select 1 from saas_client c where c.id = e.client_id and c.archived_at is null))
+    order by e.received_at asc`,
+  )
+  const senders = new Set<string>()
+  for (const email of fresh) {
+    // Uno por remitente en esta pasada también: el primero que llegó.
+    if (senders.has(email.from_address)) continue
+    senders.add(email.from_address)
+    const who = email.from_name?.trim() || email.from_address
+    const to = inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to_address })
+    const subject = email.subject?.trim()
+    await pass.item({
+      rule: "responder_correo",
+      clientId: email.client_id,
+      fact: email.id,
+      kind: "responder_correo",
+      title: `Responder a ${who}`,
+      reason: `Le escribió a ${to}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))}${
+        subject ? `: «${subject.slice(0, 120)}»` : ", sin asunto"
+      }`,
+      adminOnly: true,
+      payload: {
+        emailId: email.id,
+        mailbox: email.mailbox,
+        product: email.product,
+        from: email.from_address,
+        fromName: email.from_name,
+        // A dónde va la respuesta (su Reply-To), para decirlo en la tarjeta.
+        replyTo: email.reply_to,
+        subject: email.subject,
+        receivedAt: email.received_at,
+        body: null,
+        draft: null,
       },
     })
   }
@@ -2315,6 +2440,7 @@ export async function kairosRulesPass(tx: Db, now: Date): Promise<KairosPassResu
   // tarea genérica donde otra regla ya puso la suya.
   await ruleAccountsWithoutClient(pass)
   await ruleInboundEmails(pass)
+  await ruleReplyEmails(pass)
   await ruleDuplicates(pass)
   await ruleWaitlist(pass)
   await ruleProposalsExpiring(pass)
@@ -2616,6 +2742,13 @@ async function kairosDoneRaw(
         const title = meta(a.metadata, "title")
         const why = meta(a.metadata, "why")
         words = title && why ? `Cerró la tarea «${title}»: ${why}` : null
+        break
+      }
+      case "kairos.item_closed": {
+        // Un borrador que ya no hace falta (`closeKairosReplyDrafts`: lo respondieron a mano).
+        const title = meta(a.metadata, "title")
+        const why = meta(a.metadata, "why")
+        words = title && why ? `Retiró su borrador «${title}»: ${why}` : null
         break
       }
     }

@@ -1,16 +1,31 @@
 # Correo entrante de Sallca
 
-Un Email Worker de Cloudflare Email Routing para `soporte@` y `contacto@` de `odentia32.com`,
-`latidia72.com` y `vistia20.com` (ADR 0185). Por cada correo:
+Un Email Worker de Cloudflare Email Routing para `odentia32.com`, `latidia72.com` y
+`vistia20.com` (ADR 0185). Recibe, por reglas fijas, los buzones `soporte@`, `contacto@`,
+`hola@` y `fundadores@`, y por el **atrapa todo** de cada dominio cualquier otra dirección, que
+es la de una persona del equipo (`<mail_local>@`, la que se ve en Equipo de la administración).
+Qué hace con cada correo lo decide `deliver` (`src/flow.ts`), con las reglas de `src/route.ts`:
 
-1. **Lo reenvía** a `FORWARD_TO`, el buzón de siempre, para no perder nada aunque falle lo demás.
-2. **Lo manda firmado a la administración** (`POST ${API_URL}/api/inbound/email`), que lo liga
-   a su cliente por el correo exacto y guarda sus adjuntos como documentos solo de
-   Administración, que se borran a los 30 días. Nadie ni nada los abre ni los manda al modelo.
+- **Un buzón fijo**: primero **lo reenvía** a `FORWARD_TO`, el buzón de siempre, para no perder
+  nada aunque falle lo demás; después **lo manda firmado a la administración**
+  (`POST ${API_URL}/api/inbound/email`), que lo liga a su cliente (por la respuesta a un correo
+  nuestro o por el correo exacto) y guarda sus adjuntos como documentos solo de Administración,
+  que se borran a los 30 días. Nadie ni nada los abre ni los manda al modelo. Si fallan el
+  reenvío y la API, se rechaza para que quien escribe sepa que no llegó.
+- **La dirección de una persona**: primero va a la API, que dice si es de alguien del equipo.
+  Si lo es (2xx), el Worker lo reenvía a su copia (`copyTo`, si la tiene); si no es de nadie
+  (404 `MAILBOX_UNKNOWN`), **lo rechaza** («Esta dirección no existe») sin reenviarlo; si la API
+  falla o no responde, lo reenvía a `FORWARD_TO` para no perderlo. A una persona que ya no está
+  en el equipo solo le llega la respuesta a un correo que salió con su dirección.
+- **Solo se reenvía** a `FORWARD_TO`, sin pasar por la administración: `privacidad@`,
+  `reclamaciones@`, `redes@` y `reply@` (tienen su propia regla a Gmail y no deberían llegar
+  aquí), `no-reply@`, `postmaster@` y `abuse@`; lo que mandamos nosotros desde `no-reply@` o
+  `reply@` de un dominio nuestro; y las respuestas automáticas y los rebotes (`Auto-Submitted`
+  distinto de `no`, `X-Autoreply`, `X-Autorespond`, `Precedence: bulk|junk|auto_reply|list`,
+  `Content-Type: multipart/report`, sin remitente, `mailer-daemon@` o `postmaster@`).
 
-Si el envío a la API falla, el correo ya se reenvió: queda en el registro del Worker y **no se
-reintenta**. Solo si fallan el reenvío y la API, el correo se rechaza para que quien escribe
-sepa que no llegó.
+Lo que va a la API va una sola vez: si falla, queda en el registro del Worker y **no se
+reintenta**. Las respuestas que salen desde la administración no dejan copia en Gmail.
 
 **No se despliega desde el repositorio ni desde el CI**: estos pasos se hacen a mano, una vez.
 No es parte del monorepo (está fuera de `pnpm-workspace.yaml`).
@@ -21,7 +36,8 @@ Cuerpo JSON:
 
 ```json
 {
-  "mailbox": "soporte | contacto",
+  "mailbox": "soporte | contacto | hola | fundadores | persona",
+  "localPart": "ada.lovelace",
   "product": "dental | medical | optical",
   "messageId": "<…>",
   "from": "quien@escribe.com",
@@ -29,15 +45,27 @@ Cuerpo JSON:
   "to": "soporte@odentia32.com",
   "subject": "…",
   "text": "el texto, o el HTML pasado a texto",
+  "notice": "los adjuntos que no se mandaron, o null",
+  "replyTo": "la primera dirección del Reply-To, o null",
   "receivedAt": "2026-11-12T15:00:00.000Z",
   "attachments": [{ "filename": "lista.xlsx", "contentType": "…", "base64": "…" }],
+  "inReplyTo": "<…>",
+  "references": "<…> <…>",
   "senderVerified": true
 }
 ```
 
 - `mailbox` sale de la parte local del destinatario (`soporte+algo@` cuenta como `soporte@`);
+  cualquier otra parte local es `persona` y va con `localPart` (solo entonces);
   `product`, del dominio: `odentia32.com` → `dental`, `latidia72.com` → `medical`,
-  `vistia20.com` → `optical`. Otro destinatario solo se reenvía.
+  `vistia20.com` → `optical`. Otro dominio solo se reenvía.
+- `inReplyTo` y `references` son las cabeceras del hilo, solo con sus Message-ID y recortadas
+  (998 y 8000 caracteres): así la API reconoce la respuesta a un correo nuestro.
+- La respuesta de la API lleva `data.copyTo`: el buzón de la copia de esa persona, o `null`
+  (también si ya no está en el equipo, o si el correo es repetido: el mismo correo a dos personas
+  llega dos veces con el mismo Message-ID y cada entrega dice la copia de la suya).
+- `replyTo`: la primera dirección del `Reply-To`, en minúsculas; la respuesta del ARM va ahí.
+  El cliente se sigue ligando por el From verificado.
 - Sin `Message-ID`, va uno fijo por el contenido del correo: la API entra cada correo una sola vez.
 - `senderVerified` (`src/auth.ts`): el From se puede falsificar, así que la API liga el correo a
   su cliente solo si es `true`. Lo es si en el resultado de más arriba de Cloudflare
@@ -47,7 +75,10 @@ Cuerpo JSON:
   un remitente no verificado, para que una persona diga de quién es. Pruebas: `npm test`.
 - Adjuntos: solo PDF, imagen, xlsx, csv y docx (la API lo vuelve a comprobar por sus bytes; un
   xlsx o un docx tiene que traer sus partes de Office, sin macros ni ejecutables),
-  hasta 10 MB y 20 en total. Lo que pasa se omite y se avisa al final del texto. Las imágenes
+  hasta 10 MB y 20 en total. Lo que pasa se omite y se avisa en `notice`, aparte del texto (no
+  se cita en la respuesta ni viaja al modelo), con dónde está el correo completo: el buzón de
+  siempre para un buzón fijo, la copia de la persona (si tiene) para su dirección. El nombre
+  (1000) y el tipo (200) de cada adjunto se recortan para que la API no lo rechace. Las imágenes
   de la firma no se mandan.
 
 **Firma** (la misma que `verifyInboundSignature` en `apps/api/src/routes/inbound-email.ts`):
@@ -59,6 +90,10 @@ Cuerpo JSON:
   `INBOUND_EMAIL_SECRET` configurado responde 503.
 
 Si la API cambia su esquema, se cambia solo `signedMaterial` en `src/index.ts`.
+
+Pruebas (`npm test`, sin red): el remitente verificado (`src/auth.test.mjs`), a dónde va cada
+correo y qué no entra (`src/route.test.mjs`) y el flujo de reenviar, mandar y rechazar
+(`src/flow.test.mjs`).
 
 ## Pasos a mano
 
@@ -80,25 +115,34 @@ Con una persona que tenga acceso a la cuenta de Cloudflare de las zonas.
    ```
 
    `FORWARD_TO` acepta varias direcciones separadas por comas. Cada una tiene que estar
-   verificada en Email Routing › Destination addresses: si no, Cloudflare no la reenvía.
+   verificada en Email Routing › Destination addresses: si no, Cloudflare no la reenvía. Lo
+   mismo la copia de cada persona (la que se pone en Equipo de la administración): sin
+   verificar, el correo entra igual al ARM pero la copia no llega.
 3. **Email Routing de `odentia32.com` y `latidia72.com`** (cada zona › Email › Email Routing ›
-   Routing rules): las reglas de `soporte@` y `contacto@` pasan de «Send to an email» a
-   «Send to a Worker» › `sallca-correo-entrante`. Las demás direcciones (`hola@`,
-   `privacidad@`…) se quedan como están.
+   Routing rules): `soporte@`, `contacto@`, `hola@` y `fundadores@` con «Send to a Worker» ›
+   `sallca-correo-entrante` (crear `contacto@`, que hoy no existe), y el **Catch-all address**
+   encendido con «Send to a Worker» › `sallca-correo-entrante`. Las reglas de `privacidad@`,
+   `reclamaciones@`, `redes@` y `reply@` se quedan como están, a Gmail; la de
+   `darvin.cotrina@` en `odentia32.com` se quita (pasa a ser la dirección de una persona por el
+   atrapa todo, con su copia).
 4. **`vistia20.com`, de Namecheap a Cloudflare.** Hoy su correo lo recibe Namecheap:
    - en Cloudflare, Email Routing de la zona `vistia20.com` › Enable: agrega sus registros MX y
      el SPF de Cloudflare;
    - en Namecheap, quitar los MX y el SPF del reenvío de Namecheap (o pasar los nameservers a
      Cloudflare, si la zona aún no está ahí), para que no queden dos destinos;
-   - crear `soporte@` y `contacto@` con «Send to a Worker» › `sallca-correo-entrante`, y
-     `hola@` y `privacidad@` con «Send to an email» al buzón de siempre.
+   - crear `soporte@`, `contacto@`, `hola@` y `fundadores@` y el atrapa todo con «Send to a
+     Worker» › `sallca-correo-entrante`, y `privacidad@` con «Send to an email» al buzón de
+     siempre.
 5. **Probar**: escribir a `soporte@` de cada dominio desde una cuenta propia con un PDF chico.
    Tiene que llegar al buzón de siempre y aparecer en la administración (en la ficha del
    cliente si el correo es de uno, o en Kairós como «correo sin cliente»). Antes, revisar en el
    correo reenviado que Cloudflare deja arriba `ARC-Authentication-Results: i=1;
    mx.cloudflare.net; …` (si su servidor se llama de otro modo, ponerlo con
    `npx wrangler secret put AUTHSERV_ID`): sin eso, ningún correo se liga solo a su cliente. En Workers ›
-   `sallca-correo-entrante` › Logs se ve si la API respondió otra cosa.
+   `sallca-correo-entrante` › Logs se ve si la API respondió otra cosa. Después, escribir a
+   la dirección de una persona (tiene que llegar a su copia y a la administración) y a una que
+   no es de nadie (tiene que rebotar con «Esta dirección no existe»).
 
-Para volver atrás, las reglas de Email Routing vuelven a «Send to an email»: el Worker deja de
-recibir y el correo sigue llegando como antes.
+Para volver atrás, las reglas de Email Routing vuelven a «Send to an email» y el atrapa todo se
+apaga: el Worker deja de recibir y el correo sigue llegando como antes (las direcciones de las
+personas vuelven a rebotar).

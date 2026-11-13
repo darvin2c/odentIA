@@ -6,6 +6,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import {
+  brandMailbox,
   CLINIC_LOGO_MAX_BYTES,
   CLINIC_LOGO_MIME_EXT,
   CONVERSATION_STATE_ACTIONS,
@@ -179,8 +180,11 @@ export interface AppDeps {
   mailer: Mailer
   /** Correo de odentIA que recibe el aviso de cada hoja del Libro de Reclamaciones (COMPLAINTS_EMAIL). */
   complaintsEmail?: string | undefined
-  /** Buzón que lee las respuestas a los correos de Fundadores (FOUNDERS_EMAIL). */
-  foundersEmail?: string | undefined
+  /**
+   * Las conversaciones de la administración («Escribir», las respuestas a un correo y lo
+   * que se aprueba de Kairós) por su propio canal (CONVERSATION_SMTP_*). Sin él, `mailer`.
+   */
+  conversationMailer?: Mailer
   /** La conexión LISTEN que comparten todos los streams del proceso (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -378,6 +382,11 @@ export function createApp(deps: AppDeps) {
     const domain = domains[product]
     return domain ? onDomain(deps.webURL, deps.cookieDomain, domain) : deps.webURL
   }
+  /**
+   * hola@ de la marca (ADR 0186): recibe el aviso de cada cliente nuevo y las respuestas a la
+   * confirmación y a la invitación, y entra al ARM; desde ahí se responde con quien escribe.
+   */
+  const holaOf = (product: ClinicalProduct): string => brandMailbox(product, "hola").address
   /** La sesión del dominio de la petición: el inicio, el registro y la salida ponen la cookie en el suyo. */
   const authOf = (c: Context): Auth => {
     const product = productOfRequest(c)
@@ -515,7 +524,7 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
       panelUrlOf,
-      replyTo: deps.foundersEmail,
+      replyToOf: holaOf,
     }),
   )
   // El ARM (ADR 0185): clientes desde el primer contacto, Kairós y sus reportes.
@@ -524,6 +533,8 @@ export function createApp(deps: AppDeps) {
     createAdminClientsRoute({
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
+      ...(deps.conversationMailer ? { conversationMailer: deps.conversationMailer } : {}),
+      invitationReplyToOf: holaOf,
       storage: deps.storage,
       panelUrlOf,
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
@@ -536,6 +547,7 @@ export function createApp(deps: AppDeps) {
     createAdminKairosRoute({
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
+      ...(deps.conversationMailer ? { conversationMailer: deps.conversationMailer } : {}),
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
     }),
   )
@@ -600,11 +612,11 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
       remoteAddress: deps.registrationRemoteAddress,
-      replyTo: deps.foundersEmail,
+      replyToOf: holaOf,
       productOf: productOfRequest,
-      // El aviso «Solicitud nueva en la lista de espera»: al buzón de Fundadores, con el enlace a la solicitud.
+      // El aviso «Cliente nuevo»: a hola@ de la marca de la solicitud, con el enlace a su ficha.
       adminURL: deps.adminURL,
-      teamEmail: deps.foundersEmail,
+      teamEmailOf: holaOf,
     }),
   )
   // Libro de Reclamaciones de odentIA.

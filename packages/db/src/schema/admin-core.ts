@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -15,9 +16,47 @@ import { user } from "./auth.js"
 import { adminSchema, authSchema } from "./schemas.js"
 
 /**
+ * Lo que nunca es la dirección de una persona del equipo: los buzones de cada
+ * dominio y los nombres que un remitente usa para parecer oficial. La misma
+ * lista vive en el check de la base y en `admin_staff_mail_local_for`.
+ */
+export const STAFF_MAIL_RESERVED = [
+  "soporte",
+  "hola",
+  "contacto",
+  "fundadores",
+  "privacidad",
+  "reclamaciones",
+  "redes",
+  "reply",
+  "no-reply",
+  "noreply",
+  "postmaster",
+  "abuse",
+  "admin",
+  "administracion",
+  "ventas",
+  "info",
+  "webmaster",
+  "hostmaster",
+  "mailer-daemon",
+  "security",
+  "seguridad",
+] as const
+/** La parte local de la dirección de una persona: minúsculas y números, con «.», «_» o «-» entre ellos. */
+export const STAFF_MAIL_LOCAL_PATTERN = "^[a-z0-9]+([._-][a-z0-9]+)*$"
+
+/**
  * Personal interno de odentIA (administración global). Separado de
  * `member`/OrgRole: el staff NO hereda membresía de ningún tenant y ningún
  * cliente accede a endpoints globales. Solo roles `admin` y `support`.
+ *
+ * Cada persona tiene su dirección en los dominios de las marcas
+ * (`mail_local`@odentia32.com, @latidia72.com, @vistia20.com): la base la pone
+ * sola al crear la fila (`admin_staff_mail_local`) y Administración la corrige
+ * mientras no haya salido nada con ella (`mail_first_sent_at`); después queda
+ * fija (`admin_staff_mail_guard`). `mail_copy_to` es el buzón donde le llega la
+ * copia de lo que le escriben.
  */
 // Las claves foráneas de las tablas de administración llevan el nombre que les
 // dio PostgreSQL al crearlas a mano (`<tabla>_<columna>_fkey`).
@@ -25,6 +64,9 @@ export const adminStaff = adminSchema.table("admin_staff", {
   userId: text("user_id").primaryKey(),
   role: text("role").notNull(),
   active: boolean("active").notNull().default(true),
+  mailLocal: text("mail_local"),
+  mailCopyTo: text("mail_copy_to"),
+  mailFirstSentAt: timestamp("mail_first_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
@@ -33,6 +75,19 @@ export const adminStaff = adminSchema.table("admin_staff", {
 }, (table) => [
   foreignKey({ name: "admin_staff_user_id_fkey", columns: [table.userId], foreignColumns: [user.id] })
     .onDelete("cascade"),
+  uniqueIndex("admin_staff_mail_local_uidx").on(table.mailLocal),
+  check(
+    "admin_staff_mail_local_check",
+    sql`${table.mailLocal} IS NULL OR (${table.mailLocal} ~ ${sql.raw(`'${STAFF_MAIL_LOCAL_PATTERN}'`)}
+      AND length(${table.mailLocal}) BETWEEN 2 AND 64
+      AND ${table.mailLocal} NOT IN (${sql.raw(STAFF_MAIL_RESERVED.map((name) => `'${name}'`).join(","))}))`,
+  ),
+  check(
+    "admin_staff_mail_copy_check",
+    sql`${table.mailCopyTo} IS NULL OR (${table.mailCopyTo} = lower(${table.mailCopyTo})
+      AND length(${table.mailCopyTo}) BETWEEN 3 AND 254 AND ${table.mailCopyTo} LIKE '_%@_%._%'
+      AND strpos(${table.mailCopyTo}, ' ') = 0)`,
+  ),
 ])
 
 /**

@@ -313,12 +313,35 @@ export async function sendOutreach(
       .object({ outreach: outreachSchema, url: z.string().nullable() })
       .parse(await postJson(`/api/admin/clients/${enc(clientId)}/outreach`, body))
   } catch (error) {
-    if (error instanceof ApiError && error.shape.code === "SEND_UNKNOWN") {
-      const outreachId =
-        typeof error.details.outreachId === "string" ? error.details.outreachId : null
-      throw new SendUnknownError(outreachId, error.shape.message ?? "No se sabe si el correo salió")
-    }
-    throw error
+    throw sendUnknownOf(error)
+  }
+}
+
+/** El 502 `SEND_UNKNOWN` de un envío, como `SendUnknownError`; lo demás, tal cual. */
+function sendUnknownOf(error: unknown): unknown {
+  if (error instanceof ApiError && error.shape.code === "SEND_UNKNOWN") {
+    const outreachId =
+      typeof error.details.outreachId === "string" ? error.details.outreachId : null
+    return new SendUnknownError(outreachId, error.shape.message ?? "No se sabe si el correo salió")
+  }
+  return error
+}
+
+/**
+ * Responder un correo que llegó (`POST /inbound/:emailId/reply`): sale al
+ * remitente con «Re: …», el hilo y quien firma según el buzón. Como
+ * «Escribir», un 502 `SEND_UNKNOWN` trae el envío que no se sabe si salió.
+ */
+export async function sendEmailReply(
+  emailId: string,
+  body: { body: string; proposalId?: string | null },
+): Promise<SaleOutreach> {
+  try {
+    return z
+      .object({ outreach: outreachSchema })
+      .parse(await postJson(`/api/admin/clients/inbound/${enc(emailId)}/reply`, body)).outreach
+  } catch (error) {
+    throw sendUnknownOf(error)
   }
 }
 

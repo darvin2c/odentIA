@@ -6,6 +6,7 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasInboundEmail,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { aiUsage } from "@odentia/db/schema/agent"
@@ -48,6 +49,10 @@ function countingWriter(overrides: Partial<KairosWriter> = {}) {
     presentationScript: async (input) => {
       calls.push("guion")
       return fakeKairosWriter.presentationScript(input)
+    },
+    draftReply: async (input) => {
+      calls.push("respuesta")
+      return (overrides.draftReply ?? fakeKairosWriter.draftReply)(input)
     },
     weeklySummary: async (input) => {
       calls.push("semana")
@@ -254,4 +259,87 @@ it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () =
   ])
   // Nunca en el libro de gasto de una clínica.
   expect(await ownerDb.select().from(aiUsage)).toEqual([])
+})
+
+it("prepara una sola vez la respuesta de cada correo nuevo a hola@ o a una persona, nunca de soporte@", async () => {
+  // Miércoles 18, 08:00 de Lima: los correos llegaron esa madrugada.
+  const wednesday = new Date("2026-11-18T13:00:00Z")
+  const received = new Date("2026-11-18T10:00:00Z")
+  const emails = await ownerDb
+    .insert(saasInboundEmail)
+    .values([
+      {
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<k-hola@example.test>",
+        fromAddress: "dra.luna@example.test",
+        fromName: "Dra. Luna (ficticia)",
+        toAddress: "hola@odentia32.com",
+        subject: "¿Cómo empiezo?",
+        textBody:
+          "Tengo un consultorio con dos unidades.\nMi paciente con DNI 44556677 necesita su historia.\n> lo citado no viaja",
+        senderVerified: true,
+        receivedAt: received,
+      },
+      {
+        mailbox: "soporte",
+        product: "dental",
+        messageId: "<k-soporte@example.test>",
+        fromAddress: "recepcion@example.test",
+        toAddress: "soporte@odentia32.com",
+        subject: "No puedo entrar",
+        textBody: "La paciente Juana Pérez no aparece",
+        senderVerified: true,
+        receivedAt: received,
+      },
+    ])
+    .returning({ id: saasInboundEmail.id, mailbox: saasInboundEmail.mailbox })
+  const hola = emails.find((email) => email.mailbox === "hola")?.id ?? ""
+  const asks: Parameters<KairosWriter["draftReply"]>[0][] = []
+  const { writer, calls } = countingWriter({
+    draftReply: async (input) => {
+      asks.push(input)
+      return fakeKairosWriter.draftReply(input)
+    },
+  })
+  const result = await runKairosTick({ ownerDb, writer, storage, now: wednesday })
+  expect(result.errors).toEqual([])
+  const replies = await ownerDb
+    .select()
+    .from(kairosItem)
+    .where(eq(kairosItem.kind, "responder_correo"))
+  // Solo la de hola@: lo de soporte@ puede traer datos de pacientes.
+  expect(replies).toHaveLength(1)
+  const [reply] = replies
+  expect(reply).toMatchObject({ status: "espera", adminOnly: true, clientId: null })
+  expect(reply?.payload.emailId).toBe(hola)
+  expect(reply?.reason).toContain("Le escribió a hola@ de odentIA el 18 de noviembre")
+  expect(reply?.expiresAt.getTime()).toBe(wednesday.getTime() + 48 * 3_600_000)
+  // Redactada en la misma pasada, con el texto filtrado: sin la frase del paciente ni lo citado.
+  expect(calls.filter((call) => call === "respuesta")).toHaveLength(1)
+  expect(asks[0]?.lines).toEqual(["Tengo un consultorio con dos unidades."])
+  expect(asks[0]?.omitted).toBe(1)
+  expect(JSON.stringify(asks[0])).not.toContain("44556677")
+  expect(String(reply?.payload.body)).toContain("Gracias por escribirnos")
+  // Con su borrador, lista para el sí de una persona: nada salió.
+  expect(reply?.payload.draft).toMatchObject({ subject: null })
+
+  // Descartada, la pasada siguiente no la vuelve a preparar.
+  await ownerDb
+    .update(kairosItem)
+    .set({ status: "descartada" })
+    .where(eq(kairosItem.id, reply?.id ?? ""))
+  const again = countingWriter()
+  await runKairosTick({
+    ownerDb,
+    writer: again.writer,
+    storage,
+    now: new Date(wednesday.getTime() + 300_000),
+  })
+  const after = await ownerDb
+    .select()
+    .from(kairosItem)
+    .where(eq(kairosItem.kind, "responder_correo"))
+  expect(after).toHaveLength(1)
+  expect(again.calls).not.toContain("respuesta")
 })

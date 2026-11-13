@@ -33,6 +33,25 @@ const mailer = createMailer({
     ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
   },
 })
+// Las conversaciones de la administración («Escribir» y las respuestas) por su propio canal de
+// ZeptoMail, con el mismo servidor y remitentes; sin él, por el de siempre.
+const conversationMailer =
+  env.CONVERSATION_SMTP_USER && env.CONVERSATION_SMTP_PASS
+    ? createMailer({
+        host: env.SMTP_HOST,
+        port: env.SMTP_PORT,
+        user: env.CONVERSATION_SMTP_USER,
+        pass: env.CONVERSATION_SMTP_PASS,
+        from: env.SMTP_FROM,
+        fromByBrand: {
+          ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+          ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+        },
+      })
+    : undefined
+if (Boolean(env.CONVERSATION_SMTP_USER) !== Boolean(env.CONVERSATION_SMTP_PASS)) {
+  console.warn("CONVERSATION_SMTP_USER y CONVERSATION_SMTP_PASS van juntos: con uno solo, las conversaciones salen por SMTP_USER (docs/deployment.md).")
+}
 const authOptions = {
   db,
   ownerDb,
@@ -67,9 +86,6 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }
-if (env.NODE_ENV === "production" && !env.FOUNDERS_EMAIL) {
-  console.warn("FOUNDERS_EMAIL vacío: el equipo no recibe las solicitudes nuevas (docs/deployment.md).")
-}
 
 // El modelo de la plataforma (el mismo `LLM_*`), y su gasto, como gasto de Sallca: Kairós prepara, nunca envía.
 const llm = platformLlmFromEnv(env)
@@ -78,7 +94,7 @@ const kairos = createKairosWriter({ platform: llm, onUse: kairosAiUseRecorder(ow
 const kairosNotice = kairosModelNotice(llm)
 if (env.NODE_ENV === "production" && kairosNotice) console.warn(kairosNotice)
 if (env.NODE_ENV === "production" && !env.INBOUND_EMAIL_SECRET) {
-  console.warn("INBOUND_EMAIL_SECRET vacío: el correo entrante de soporte@ y contacto@ no llega al ARM (docs/deployment.md).")
+  console.warn("INBOUND_EMAIL_SECRET vacío: el correo entrante (los buzones y la dirección de cada persona del equipo) no llega al ARM (docs/deployment.md).")
 }
 
 const app = createApp({
@@ -105,7 +121,7 @@ const app = createApp({
   adminURL: env.ADMIN_URL,
   mailer,
   complaintsEmail: env.COMPLAINTS_EMAIL || undefined,
-  foundersEmail: env.FOUNDERS_EMAIL || undefined,
+  ...(conversationMailer ? { conversationMailer } : {}),
   listenUrl: env.APP_DATABASE_URL,
   // La dirección real de quien llama a las rutas públicas (el chat web, el
   // registro): detrás del túnel, la conexión es siempre la del túnel.

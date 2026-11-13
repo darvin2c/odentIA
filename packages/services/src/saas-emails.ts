@@ -248,7 +248,7 @@ export function waitlistReceivedEmail(input: {
   clinicName: string
   phone: string
   answerDays: number
-  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, el correo no promete que alguien lea las respuestas. */
+  /** hola@ de la marca, que entra al ARM; sin él, el correo no promete que alguien lea las respuestas. */
   replyTo?: string | undefined
   /** La marca del dominio donde se pidió (issue 229). */
   brand?: MailBrand
@@ -272,29 +272,30 @@ export function waitlistReceivedEmail(input: {
 }
 
 /**
- * Aviso al buzón de Fundadores (FOUNDERS_EMAIL) de cada solicitud nueva: qué
- * clínica, de qué producto y de dónde, con el botón a esa solicitud en la
- * administración. Es interno, así que va con la marca de odentIA aunque la
- * solicitud sea de otro producto. Nunca lleva el correo ni el celular de quien
- * pidió: se leen en la solicitud, detrás del segundo factor de la administración.
+ * Aviso a hola@ de la marca de la solicitud (ADR 0186) de
+ * cada cliente nuevo que pidió entrar desde la web: qué clínica, de qué
+ * producto y de dónde, con el botón a su ficha en la administración. Es
+ * interno, así que va con la marca de odentIA aunque sea de otro producto.
+ * Nunca lleva el correo ni el celular de quien pidió: se leen en la ficha,
+ * detrás del segundo factor de la administración.
  */
-export function waitlistTeamNoticeEmail(input: {
+export function newClientNoticeEmail(input: {
   clinicName: string
   product: ClinicalProduct
   city: string
   /** ISO 3166-1 alfa-2. */
   countryCode: string
-  /** `<ADMIN_URL>/waitlist?solicitud=<id>`; sin la dirección de la administración, sin botón. */
-  reviewUrl: string | null
+  /** `<ADMIN_URL>/clients/<id del cliente>`; sin la dirección de la administración, sin botón. */
+  clientUrl: string | null
 }): MailTemplate {
   const brand = mailBrandName(productWords(input.product).brand)
   return renderEmail({
-    subject: `Solicitud nueva en la lista de espera: ${input.clinicName} (${brand})`,
+    subject: `Cliente nuevo: ${input.clinicName} pidió entrar a ${brand}`,
     preview: `${input.clinicName}, de ${input.city}, pidió entrar a ${brand}.`,
-    internal: "Lista de espera",
+    internal: "Clientes",
     title: `${input.clinicName} pidió entrar a ${brand}`,
     paragraphs: [
-      `Llegó una solicitud nueva a la lista de espera de ${brand}. Quién la pidió y cómo escribirle están en la solicitud, no en este correo.`,
+      `Llegó un cliente nuevo desde la web de ${brand}. Quién pidió entrar y cómo escribirle están en su ficha, no en este correo.`,
     ],
     facts: [
       { label: "Producto", value: brand },
@@ -302,8 +303,8 @@ export function waitlistTeamNoticeEmail(input: {
       { label: "Ciudad", value: input.city },
       { label: "País", value: countryDisplayName(input.countryCode) },
     ],
-    ...(input.reviewUrl ? action("Abrir la solicitud", input.reviewUrl) : { note: "La encuentras en la administración, en Lista de espera." }),
-    reason: "Aviso interno de la administración: cada solicitud nueva de la lista de espera llega a este buzón.",
+    ...(input.clientUrl ? action("Abrir la ficha", input.clientUrl) : { note: "La encuentras en la administración, en Clientes." }),
+    reason: "Aviso interno de la administración: cada cliente nuevo que pide entrar desde la web llega a este buzón.",
   })
 }
 
@@ -316,7 +317,7 @@ export function founderInvitationEmail(input: {
   /** «domingo 1 de noviembre». */
   expiresText: string
   offer: { currency: string; priceCents: number; trialCreditCents: number; discountPercent: number | null; guaranteeMonths: number | null }
-  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, se pide otra invitación desde la web. */
+  /** hola@ de la marca, que entra al ARM; sin él, se pide otra invitación desde la web. */
   replyTo?: string | undefined
   /** La marca de la solicitud (issue 229). */
   brand?: MailBrand

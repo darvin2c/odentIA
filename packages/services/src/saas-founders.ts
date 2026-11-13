@@ -47,7 +47,7 @@ export const FOUNDER_INVITATION_DAYS = 14
 
 export type { SaasSignupMode, SaasWaitlistStatus }
 export { SAAS_WAITLIST_PROFESSIONALS, SAAS_WAITLIST_STATUSES, SAAS_WAITLIST_TOOLS }
-export { founderInvitationEmail, moneyText, waitlistReceivedEmail, waitlistTeamNoticeEmail } from "./saas-emails.js"
+export { founderInvitationEmail, moneyText, newClientNoticeEmail, waitlistReceivedEmail } from "./saas-emails.js"
 
 /* ---------- Cómo se abren clínicas ---------- */
 
@@ -156,6 +156,8 @@ export function waitlistInputSchemaFor(product: ClinicalProduct) {
 
 export interface WaitlistSubmitResult {
   id: string
+  /** El cliente del ARM de la solicitud: el aviso al buzón comercial abre su ficha. */
+  clientId: string | null
   /** Ya había una solicitud viva con ese correo: no se duplica ni se vuelve a escribir. */
   existing: boolean
   /** Días hábiles que se prometen para responderla: los que regían cuando llegó. */
@@ -179,18 +181,18 @@ export async function submitWaitlistRequest(
   const data = parsed.data
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`waitlist:${data.email}`}, 0))`)
   const [alive] = await tx
-    .select({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
+    .select({ id: saasWaitlistRequest.id, clientId: saasWaitlistRequest.clientId, createdAt: saasWaitlistRequest.createdAt })
     .from(saasWaitlistRequest)
     .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
     .limit(1)
-  if (alive) return { id: alive.id, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
+  if (alive) return { id: alive.id, clientId: alive.clientId, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
   const clientId = await clientForWaitlistRequest(tx, { ...data, product })
   const [row] = await tx
     .insert(saasWaitlistRequest)
     .values({ ...data, product, clientId, source: "web" })
     .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
-  return { id: row.id, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
+  return { id: row.id, clientId, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
 }
 
 export async function markWaitlistConfirmationSent(tx: Db, id: string): Promise<void> {

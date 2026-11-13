@@ -232,13 +232,25 @@ export function proposalOfOpenSaleSql(alias = "p"): SQL<boolean> {
 }
 
 /**
- * ¿Es solo de Administración un envío? Lleva una propuesta, o sale de algo de
- * Kairós que solo ve Administración. `o` es el alias de `saas_outreach`.
+ * ¿Es solo de Administración un envío? Lleva una propuesta, sale de algo de
+ * Kairós que solo ve Administración, o responde un correo que no llegó a
+ * soporte@ (lo comercial: puede hablar de precios). `o` es el alias de
+ * `saas_outreach`.
  */
 export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
   const o = sql.raw(alias)
   return sql<boolean>`(${o}.proposal_id is not null or exists (select 1 from admin.kairos_item ki
-    where ki.id = ${o}.kairos_item_id and ki.admin_only))`
+    where ki.id = ${o}.kairos_item_id and ki.admin_only) or exists (select 1 from admin.saas_inbound_email ie
+    where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte'))`
+}
+
+/**
+ * «soporte», «hola» o, en la dirección de una persona, su parte local real
+ * («ana.torres», sin `+etiqueta`): el «a quién escribió» de los textos.
+ */
+export function inboundMailboxWords(email: { mailbox: string; toAddress: string }): string {
+  if (email.mailbox !== "persona") return email.mailbox
+  return email.toAddress.split("@")[0]?.split("+")[0]?.trim().toLowerCase() || "persona"
 }
 
 /* ---------- La etapa ---------- */
@@ -2576,10 +2588,34 @@ export async function clientTimeline(
     }
   }
 
-  // La bitácora (las actividades).
+  // La bitácora (las actividades). La de un correo que entró se abre en ese
+  // correo (misma hora y cliente), y la de una respuesta que salió, en el
+  // correo que respondió (salió a la hora del envío). Soporte solo abre lo
+  // que llegó a soporte@.
   if (wants("contactos") || wants("venta")) {
+    const mailboxOk = admin ? sql`true` : sql`e.mailbox = 'soporte'`
+    // La fila de afuera, con su nombre completo: drizzle no califica las columnas de una sola tabla.
+    const outer = sql.raw(`"admin"."saas_follow_up"`)
+    // El correo de una actividad que entró: el mismo cliente y la misma hora.
+    const inbound = (column: SQL) =>
+      sql`case when ${outer}.kind = 'correo' and ${outer}.direction = 'entro' then
+          (select ${column} from ${saasInboundEmail} e where e.client_id = ${outer}.client_id
+            and e.received_at = ${outer}.happened_at and ${mailboxOk} order by e.id limit 1) end`
     const rows = await tx
-      .select()
+      .select({
+        f: saasFollowUp,
+        inboundId: sql<string | null>`${inbound(sql`e.id::text`)}`,
+        // Quién lo escribió: su nombre o, sin nombre, su correo.
+        inboundFrom: sql<
+          string | null
+        >`${inbound(sql`coalesce(nullif(trim(e.from_name), ''), e.from_address)`)}`,
+        repliedId: sql<
+          string | null
+        >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'salio' then
+          (select o.in_reply_to_email_id::text from ${saasOutreach} o join ${saasInboundEmail} e on e.id = o.in_reply_to_email_id
+            where o.client_id = ${outer}.client_id and o.status = 'enviado'
+              and o.sent_at = ${outer}.happened_at and ${mailboxOk} order by o.id limit 1) end`,
+      })
       .from(saasFollowUp)
       .where(
         and(
@@ -2590,24 +2626,29 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const f of rows) {
+    for (const { f, inboundId, inboundFrom, repliedId } of rows) {
       const kind = f.kind as SaasActivityKind
       const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
-      const title =
-        f.direction === "entro"
+      const title = repliedId
+        ? "Le respondimos su correo"
+        : f.direction === "entro"
           ? titles.entro
           : f.direction === "salio"
             ? titles.salio
             : titles.nota
+      const emailId = inboundId ?? repliedId
       push({
         id: `actividad:${f.id}`,
         at: f.happenedAt,
-        who: f.byKairos
-          ? { kind: "kairos", name: "Kairós" }
-          : byUser(f.authorUserId, {
-              kind: "persona",
-              name: "Nota anterior, sin autor registrado",
-            }),
+        // El correo que entró lo escribió quien lo mandó, aunque lo haya anotado Kairós.
+        who: inboundFrom
+          ? { kind: "clinica", name: inboundFrom }
+          : f.byKairos
+            ? { kind: "kairos", name: "Kairós" }
+            : byUser(f.authorUserId, {
+                kind: "persona",
+                name: "Nota anterior, sin autor registrado",
+              }),
         category: kind === "presentacion" || kind === "propuesta" ? "venta" : "contactos",
         title,
         detail:
@@ -2615,6 +2656,7 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ") || undefined,
         adminOnly: f.adminOnly,
+        ...(emailId ? { link: { kind: "correo" as const, id: emailId } } : {}),
       })
     }
   }
@@ -2944,13 +2986,14 @@ export async function clientTimeline(
         at: e.receivedAt,
         who: { kind: "clinica", name: e.fromName?.trim() || e.fromAddress },
         category: "contactos",
-        title: `Nos escribió a ${e.mailbox}@`,
+        title: `Nos escribió a ${inboundMailboxWords(e)}@`,
         detail:
           [clip(e.subject, 140), files ? `${files} ${files === 1 ? "adjunto" : "adjuntos"}` : null]
             .filter(Boolean)
             .join(" · ") || undefined,
-        adminOnly: false,
-        link: { kind: "correo", id: e.id },
+        // Lo que no llegó a soporte@ es comercial: Soporte no lo ve.
+        adminOnly: e.mailbox !== "soporte",
+        link: { kind: "correo" as const, id: e.id },
       })
     }
   }

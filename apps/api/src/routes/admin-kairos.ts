@@ -1,7 +1,7 @@
 import { fakeKairosWriter } from "@odentia/agent"
 import type { Db } from "@odentia/db"
 import type { KairosItemStatus } from "@odentia/db/schema/admin-arm"
-import type { MailBrand, Mailer } from "@odentia/mail"
+import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
   assignInboundEmail,
@@ -20,6 +20,8 @@ import {
   type OutreachEmail,
   type OutreachRow,
   outreachEmail,
+  outreachMailMessage,
+  prepareEmailReply,
   prepareOutreach,
   recordPresentation,
   ServiceError,
@@ -54,8 +56,12 @@ export interface AdminKairosDeps {
    * sin él, el doble determinista (`fakeKairosWriter`), sin gasto.
    */
   kairos?: KairosDraftWriter & KairosWeeklyWriter
-  /** El buzón que lee las respuestas de cada marca; sin él, contacto@ del dominio del producto. */
-  replyToOf?: (brand: MailBrand) => string | undefined
+  /**
+   * Por dónde salen los correos que se aprueban (conversaciones): el canal de
+   * ZeptoMail para conversaciones (`CONVERSATION_SMTP_*`); sin él, `mailer`. Las
+   * respuestas van a quien firma (la persona que aprueba, soporte@ u hola@).
+   */
+  conversationMailer?: Mailer
 }
 
 function staffOf(c: Context): AdminActor {
@@ -124,6 +130,8 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
+    prepareEmailReply: (tx, actor, emailId, input) =>
+      prepareEmailReply(tx, actor, emailId, input, now),
     recordPresentation: (tx, actor, taskId, input) =>
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
@@ -145,22 +153,14 @@ export interface KairosEmailOutcome {
  * anotar falla, el envío queda pendiente y también lo resuelve una persona.
  */
 export async function sendKairosOutreachEmail(
-  deps: Pick<AdminKairosDeps, "ownerDb" | "mailer" | "replyToOf">,
+  deps: Pick<AdminKairosDeps, "ownerDb" | "mailer" | "conversationMailer">,
   actor: AdminActor,
   outreachId: string,
   email: OutreachEmail,
 ): Promise<KairosEmailOutcome> {
   let sent = false
   try {
-    await deps.mailer.send({
-      to: email.to,
-      subject: email.subject,
-      html: email.html,
-      text: email.text,
-      replyTo: deps.replyToOf?.(email.brand) ?? email.replyTo,
-      brand: email.brand,
-      attachments: email.attachments,
-    })
+    await (deps.conversationMailer ?? deps.mailer).send(outreachMailMessage(email))
     sent = true
   } catch (error) {
     console.error("[kairos] el correo del envío no se sabe si salió", outreachId, error)

@@ -10,7 +10,7 @@ import {
   submitWaitlistRequest,
   waitlistInputSchemaFor,
   waitlistReceivedEmail,
-  waitlistTeamNoticeEmail,
+  newClientNoticeEmail,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -48,14 +48,14 @@ export function createPublicFoundersRoute(deps: {
   ownerDb: Db
   mailer: Mailer
   remoteAddress?: RegistrationRemoteAddress | undefined
-  /** Buzón que lee las respuestas (FOUNDERS_EMAIL). */
-  replyTo?: string | undefined
+  /** A dónde responde la clínica su confirmación: hola@ de la marca de su solicitud. */
+  replyToOf?: (product: ClinicalProduct) => string | undefined
   /** El producto del dominio de la petición: la solicitud lo guarda (decisión 17 del issue 229). */
   productOf?: (c: Context) => ClinicalProduct
-  /** La administración (ADMIN_URL): el aviso al equipo enlaza a la solicitud. */
+  /** La administración (ADMIN_URL): el aviso al equipo abre la ficha del cliente. */
   adminURL?: string | undefined
-  /** Buzón del equipo que recibe el aviso de cada solicitud nueva (FOUNDERS_EMAIL); sin él, no sale. */
-  teamEmail?: string | undefined
+  /** Quién recibe el aviso de cada cliente nuevo: hola@ de la marca de la solicitud; sin él, no sale. */
+  teamEmailOf?: (product: ClinicalProduct) => string | undefined
 }) {
   const app = new Hono()
   const buckets = new Map<string, { expiresAt: number; posts: number }>()
@@ -129,7 +129,7 @@ export function createPublicFoundersRoute(deps: {
    * va al registro (nunca los datos de quien pidió) y la solicitud sigue en
    * Inicio de la administración.
    */
-  const noticeTeam = async (to: string, id: string, product: ClinicalProduct, data: { clinicName: string; city: string; countryCode: string }) => {
+  const noticeTeam = async (to: string, id: string, clientId: string | null, product: ClinicalProduct, data: { clinicName: string; city: string; countryCode: string }) => {
     const now = Date.now()
     while ((noticesSent[0] ?? now) <= now - HOUR_MS) noticesSent.shift()
     if (noticesSent.length >= TEAM_NOTICES_PER_HOUR) {
@@ -140,12 +140,12 @@ export function createPublicFoundersRoute(deps: {
     try {
       await deps.mailer.send({
         to,
-        ...waitlistTeamNoticeEmail({
+        ...newClientNoticeEmail({
           clinicName: data.clinicName,
           product,
           city: data.city,
           countryCode: data.countryCode,
-          reviewUrl: deps.adminURL ? `${deps.adminURL.replace(/\/+$/, "")}/waitlist?solicitud=${id}` : null,
+          clientUrl: deps.adminURL && clientId ? `${deps.adminURL.replace(/\/+$/, "")}/clients/${clientId}` : null,
         }),
       })
     } catch {
@@ -171,7 +171,7 @@ export function createPublicFoundersRoute(deps: {
             clinicName: parsed.data.clinicName,
             phone: parsed.data.phone,
             answerDays: result.answerDays,
-            replyTo: deps.replyTo,
+            replyTo: deps.replyToOf?.(product),
             brand: productWords(product).brand,
           }),
         })
@@ -180,7 +180,8 @@ export function createPublicFoundersRoute(deps: {
         console.error(`Fundadores: no salió la copia de la solicitud ${result.id}`)
       }
       // Aparte de la copia: que la de quien pidió rebote no deja al equipo sin saberlo.
-      if (deps.teamEmail) await noticeTeam(deps.teamEmail, result.id, product, parsed.data)
+      const team = deps.teamEmailOf?.(product)
+      if (team) await noticeTeam(team, result.id, result.clientId, product, parsed.data)
     }
     return c.json({ ok: true, answerDays: result.answerDays }, 201)
   })

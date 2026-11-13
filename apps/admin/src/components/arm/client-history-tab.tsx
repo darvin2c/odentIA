@@ -2,7 +2,9 @@
  * Historial de la ficha del cliente: una sola línea de tiempo, de lo más nuevo
  * a lo más viejo, armada por el servidor desde sus fuentes (la solicitud, lo
  * anotado, las tareas hechas, la venta, la cuenta, los pagos, soporte, lo que
- * hizo Kairós). Cada entrada dice quién la hizo; nada se borra. El filtro vive
+ * hizo Kairós). Cada entrada dice quién la hizo; nada se borra. Un correo que
+ * llegó y la respuesta que le dimos abren ese correo al lado (`EmailDrawer`,
+ * con «Responder»). El filtro vive
  * en la dirección (`?historial=`) y «Ver más» trae lo anterior. Soporte no
  * recibe lo «solo administración» ni importes (lo filtra el servidor).
  */
@@ -18,6 +20,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Cog, History } from "lucide-react"
+import { useState } from "react"
 import { api } from "../../lib/api"
 import { CLIENT_HISTORY_FILTERS, type ClientHistoryFilter } from "../../lib/list-search"
 import type { ClientTabProps } from "./account-tabs"
@@ -29,6 +32,7 @@ import {
   wordOf,
 } from "./client-model"
 import { clientQueryKeys } from "./client-queries"
+import { EmailDrawer } from "./email-drawer"
 
 const FILTER_WORDS: Record<ClientHistoryFilter, string> = {
   todo: "Todo",
@@ -60,6 +64,7 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
     getNextPageParam: (last) => last.nextBefore,
   })
   const entries = history.data?.pages.flatMap((page) => page.items) ?? []
+  const [emailId, setEmailId] = useState<string | null>(null)
 
   return (
     <section aria-labelledby="historial-titulo" className="flex flex-col gap-4">
@@ -111,7 +116,7 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
             className="flex flex-col divide-y rounded-xl border bg-card"
           >
             {entries.map((entry) => (
-              <HistoryEntry key={entry.id} entry={entry} />
+              <HistoryEntry key={entry.id} entry={entry} onOpenEmail={setEmailId} />
             ))}
           </ol>
           {history.hasNextPage ? (
@@ -135,11 +140,19 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
           ) : null}
         </>
       )}
+      {emailId ? <EmailDrawer emailId={emailId} open onClose={() => setEmailId(null)} /> : null}
     </section>
   )
 }
 
-function HistoryEntry({ entry }: { entry: TimelineEntry }) {
+function HistoryEntry({
+  entry,
+  onOpenEmail,
+}: {
+  entry: TimelineEntry
+  onOpenEmail: (emailId: string) => void
+}) {
+  const emailId = entry.link?.kind === "correo" ? entry.link.id : null
   const kairos = entry.who.kind === "kairos"
   return (
     <li className="flex gap-3 p-4">
@@ -164,7 +177,18 @@ function HistoryEntry({ entry }: { entry: TimelineEntry }) {
             <span className="text-xs text-muted-foreground">Solo administración</span>
           ) : null}
         </div>
-        <p className="text-sm font-medium [overflow-wrap:anywhere]">{entry.title}</p>
+        {emailId ? (
+          <button
+            type="button"
+            onClick={() => onOpenEmail(emailId)}
+            className="w-fit text-left text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring [overflow-wrap:anywhere]"
+          >
+            {entry.title}
+            <span className="sr-only">: abrir el correo</span>
+          </button>
+        ) : (
+          <p className="text-sm font-medium [overflow-wrap:anywhere]">{entry.title}</p>
+        )}
         {entry.detail ? (
           <p className="whitespace-pre-wrap text-sm text-muted-foreground [overflow-wrap:anywhere]">
             {entry.detail}

@@ -21,6 +21,7 @@ import { Plus } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
 import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
+import { StaffMailButton, StaffMailDrawer, StaffMailLine } from "../../components/staff-mail"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 
@@ -36,6 +37,10 @@ interface StaffRow {
   role: "admin" | "support"
   active: boolean
   createdAt: string
+  /** Su dirección en las marcas (`<mailLocal>@`), la copia y desde cuándo queda fija. */
+  mailLocal?: string | null
+  mailCopyTo?: string | null
+  mailFirstSentAt?: string | null
 }
 
 interface InvitationRow {
@@ -80,6 +85,7 @@ function TeamPage() {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [reactivate, setReactivate] = useState<StaffRow | null>(null)
+  const [mailOf, setMailOf] = useState<StaffRow | null>(null)
   const [confirm, setConfirm] = useState<
     | { kind: "role"; row: StaffRow; role: "admin" | "support" }
     | { kind: "deactivate"; row: StaffRow }
@@ -288,9 +294,11 @@ function TeamPage() {
                     <div className="min-w-0 flex-1 basis-48">
                       <p className="truncate font-medium">{row.name || row.email}</p>
                       <p className="truncate text-xs text-muted-foreground">{row.email}</p>
+                      <StaffMailLine row={row} />
                     </div>
                     <Badge>{row.role === "admin" ? "Administración" : "Soporte"}</Badge>
                     {row.active ? null : <Badge>Desactivado</Badge>}
+                    {isManager ? <StaffMailButton onClick={() => setMailOf(row)} /> : null}
                     {isManager && row.userId !== myUserId ? (
                       reactivate?.userId === row.userId ? (
                         <form
@@ -451,6 +459,7 @@ function TeamPage() {
           </inviteForm.AppField>
         </FieldGroup>
       </FormDrawer>
+      {mailOf ? <StaffMailDrawer row={mailOf} onClose={() => setMailOf(null)} /> : null}
       <ConfirmDialog
         open={confirm !== null}
         title={

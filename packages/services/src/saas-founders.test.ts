@@ -140,7 +140,8 @@ describe("la lista de espera", () => {
     expect(first.existing).toBe(false)
     const again = await submitWaitlistRequest(ownerDb, { ...request("ANA@sonrisa.test"), clinicName: "Otra" })
     // El plazo que se promete es el que regía cuando llegó la solicitud.
-    expect(again).toEqual({ id: first.id, existing: true, answerDays: 2 })
+    expect(again).toEqual({ id: first.id, clientId: first.clientId, existing: true, answerDays: 2 })
+    expect(first.clientId).toEqual(expect.any(String))
     const [row] = await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, first.id))
     expect(row).toMatchObject({ email: "ana@sonrisa.test", phone: "+51987654321", countryCode: "PE", status: "por_revisar" })
   })

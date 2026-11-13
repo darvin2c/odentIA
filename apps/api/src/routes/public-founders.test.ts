@@ -158,11 +158,14 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   const res = await send(request("ana@sonrisa.test"))
   expect(res.status).toBe(201)
   expect(res.headers.get("access-control-allow-origin")).toBe("https://www.odentia.localhost")
-  expect(mailer.sent.map((m) => m.to)).toEqual(["ana@sonrisa.test"])
+  // La copia a quien pidió, que responde a hola@ de su marca, y el aviso «Cliente nuevo» a ese mismo hola@.
+  expect(mailer.sent.map((m) => m.to)).toEqual(["ana@sonrisa.test", "hola@odentia32.com"])
   expect(mailer.sent[0]?.subject).toBe("Clínica Sonrisa está en la lista de odentIA")
-  // Pedirlo otra vez no duplica la solicitud ni la copia.
+  expect(mailer.sent[0]?.replyTo).toBe("hola@odentia32.com")
+  expect(mailer.sent[1]?.subject).toContain("Cliente nuevo: Clínica Sonrisa")
+  // Pedirlo otra vez no duplica la solicitud, ni la copia ni el aviso.
   expect((await send(request("ana@sonrisa.test"))).status).toBe(201)
-  expect(mailer.sent).toHaveLength(1)
+  expect(mailer.sent).toHaveLength(2)
   const bad = await send({ ...request("x@y.test"), professionals: "muchos" })
   expect(bad.status).toBe(400)
   expect(((await bad.json()) as { error: { message: string } }).error.message).toBe("Elige cuántos odontólogos atienden")
@@ -179,27 +182,29 @@ describe("el aviso al equipo de cada solicitud nueva", () => {
       // Una dirección por envío: el límite por dirección no entra en estas pruebas.
       remoteAddress: () => `10.9.${Math.floor(ip / 250)}.${ip++ % 250}`,
       adminURL: "https://admin.odentia.localhost/",
-      teamEmail: teamEmail ?? undefined,
+      teamEmailOf: () => teamEmail ?? undefined,
     })
   }
   const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>
     route.request("/waitlist", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
   const idOf = async (email: string) =>
     (await ownerDb.select({ id: saasWaitlistRequest.id }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.id
+  const clientOf = async (email: string) =>
+    (await ownerDb.select({ clientId: saasWaitlistRequest.clientId }).from(saasWaitlistRequest).where(eq(saasWaitlistRequest.email, email)))[0]!.clientId
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it("una solicitud nueva envía la copia y el aviso, sin el correo ni el celular y con el enlace a esa solicitud", async () => {
+  it("una solicitud nueva envía la copia y el aviso de cliente nuevo, sin el correo ni el celular y con el enlace a su ficha", async () => {
     const mailer = recordingMailer()
     const res = await post(foundersRoute(mailer), request("aviso@norte.test"))
     expect(res.status).toBe(201)
     expect(mailer.sent.map((m) => m.to)).toEqual(["aviso@norte.test", TEAM])
     const notice = mailer.sent[1]!
-    expect(notice.subject).toBe("Solicitud nueva en la lista de espera: Clínica Sonrisa (odentIA)")
-    const url = `https://admin.odentia.localhost/waitlist?solicitud=${await idOf("aviso@norte.test")}`
-    expect(notice.text).toContain(`Abrir la solicitud: ${url}`)
+    expect(notice.subject).toBe("Cliente nuevo: Clínica Sonrisa pidió entrar a odentIA")
+    const url = `https://admin.odentia.localhost/clients/${await clientOf("aviso@norte.test")}`
+    expect(notice.text).toContain(`Abrir la ficha: ${url}`)
     expect(notice.html).toContain(`href="${url}"`)
     for (const body of [notice.subject, notice.text, notice.html]) {
       expect(body).not.toContain("aviso@norte.test")

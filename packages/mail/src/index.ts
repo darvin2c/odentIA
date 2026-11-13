@@ -45,6 +45,46 @@ export interface MailMessage {
   brand?: MailBrand
   /** Archivos adjuntos (el informe de avance en PDF); los logos van solos. */
   attachments?: ReadonlyArray<{ filename: string; content: Uint8Array; contentType: string }>
+  /**
+   * Quién firma, si no es el remitente de la marca: en una conversación de la
+   * administración, la persona que escribe («Ada Lovelace · odentIA
+   * <ada.lovelace@odentia32.com>»). Gana sobre `brand`.
+   */
+  from?: { name: string; address: string }
+  /** Cabeceras del hilo (`In-Reply-To`, `References`): una línea cada una. */
+  headers?: Readonly<Record<string, string>>
+  /** El `Message-ID` propio, con sus `<>`, para reconocer las respuestas. */
+  messageId?: string
+}
+
+/** Una cabecera no lleva saltos de línea: así nadie agrega otra (un Bcc) desde un valor. */
+function headerLine(name: string, value: string): string {
+  if (/[\r\n]/.test(value) || /[\r\n:]/.test(name))
+    throw new Error(`La cabecera ${name.replace(/[\r\n]/g, " ")} no puede tener saltos de línea`)
+  return value
+}
+
+/** Lo que recibe Nodemailer para un mensaje (sin adjuntos): el remitente, la respuesta y el hilo. */
+export function mailOptionsOf(
+  env: Pick<MailerEnv, "from" | "fromByBrand">,
+  message: Omit<MailMessage, "attachments">,
+) {
+  const brand = message.brand ?? BASE_MAIL_BRAND
+  const headers = message.headers
+    ? Object.fromEntries(Object.entries(message.headers).map(([name, value]) => [name, headerLine(name, value)]))
+    : undefined
+  return {
+    from: message.from
+      ? { name: headerLine("From", message.from.name), address: headerLine("From", message.from.address) }
+      : (env.fromByBrand?.[brand] ?? senderFor(env.from, brand)),
+    to: message.to,
+    subject: message.subject,
+    html: message.html,
+    text: message.text,
+    ...(message.replyTo ? { replyTo: headerLine("Reply-To", message.replyTo) } : {}),
+    ...(headers ? { headers } : {}),
+    ...(message.messageId ? { messageId: headerLine("Message-ID", message.messageId) } : {}),
+  }
 }
 
 /** «odentIA <no-reply@…>» con el nombre de otra marca: «latidIA <no-reply@…>». */
@@ -68,16 +108,11 @@ export function createMailer(env: MailerEnv): Mailer {
     auth: env.user ? { user: env.user, pass: env.pass ?? "" } : undefined,
   })
   return {
-    async send({ to, subject, html, text, replyTo, brand = BASE_MAIL_BRAND, attachments = [] }) {
+    async send({ attachments = [], ...message }) {
       await transporter.sendMail({
-        from: env.fromByBrand?.[brand] ?? senderFor(env.from, brand),
-        to,
-        subject,
-        html,
-        text,
-        ...(replyTo ? { replyTo } : {}),
+        ...mailOptionsOf(env, message),
         attachments: [
-          ...logoAttachments(html),
+          ...logoAttachments(message.html),
           ...attachments.map((file) => ({ ...file, content: Buffer.from(file.content) })),
         ],
       })
