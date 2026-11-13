@@ -354,6 +354,15 @@ const TEMPLATE_WRITER: KairosDraftWriter & KairosWeeklyWriter = {
     ]
     return { script: lines.join("\n") }
   },
+  async draftReply({ product, from, subject, senderName }) {
+    const brand = productWords(product).name
+    const first = from.name?.split(" ")[0] ?? ""
+    const signature = senderName.includes(brand) ? senderName : `${senderName}, ${brand}`
+    const about = subject ? ` sobre «${subject}»` : ""
+    return {
+      body: `Hola${first ? `, ${first}` : ""}: gracias por escribirnos${about}. ¿Lo conversamos en una llamada corta esta semana?\n\n${signature}`,
+    }
+  },
   async weeklySummary({ figures }) {
     const cited = figures
       .slice(0, 6)

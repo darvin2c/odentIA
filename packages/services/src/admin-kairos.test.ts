@@ -993,7 +993,12 @@ describe("lo que hizo", () => {
       ),
     ).toBe(true)
     expect(forSupport.some((entry) => entry.words.startsWith("Se cargó"))).toBe(false)
-    expect(forAdmin.every((entry) => !entry.words.includes("kairos."))).toBe(true)
+    // Ningún código de acción a la vista (los correos de prueba son @kairos.test: esos sí).
+    expect(
+      forAdmin.every(
+        (entry) => !entry.words.replace(/[\w.+-]+@kairos\.test/g, "").includes("kairos."),
+      ),
+    ).toBe(true)
   })
 
   it("lo repetido de una misma pasada va en una frase, con cada ficha y su Deshacer adentro", async () => {

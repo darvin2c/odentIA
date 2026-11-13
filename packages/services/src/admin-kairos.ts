@@ -108,7 +108,11 @@ const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "duplicado",
 ])
 /** Lo que el modelo redacta antes de estar listo. */
-const DRAFT_KINDS = ["mensaje", "guion"] as const satisfies readonly KairosItemKind[]
+const DRAFT_KINDS = [
+  "mensaje",
+  "guion",
+  "responder_correo",
+] as const satisfies readonly KairosItemKind[]
 type DraftKind = (typeof DRAFT_KINDS)[number]
 
 const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
@@ -541,7 +545,15 @@ async function captureState(
     state.task = row ? { status: row.status, dueOn: row.due_on, dueAt: row.due_at } : null
   }
   const emailId = str(payload.emailId)
-  if (emailId) {
+  if (emailId && kind === "responder_correo") {
+    // La respuesta vale mientras nadie la haya respondido a mano; ligar el
+    // correo a un cliente no la cambia.
+    const [row] = await rows<{ n: number }>(
+      tx,
+      sql`select count(*)::int as n from saas_outreach where in_reply_to_email_id = ${emailId}::uuid`,
+    )
+    state.replies = row?.n ?? 0
+  } else if (emailId) {
     const [row] = await rows<{ client_id: string | null }>(
       tx,
       sql`select client_id from saas_inbound_email where id = ${emailId}::uuid`,
@@ -1760,6 +1772,72 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
   }
 }
 
+/** Cuántas horas atrás mira Kairós los correos por responder: lo que llegó antes ya no es nuevo. */
+const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
+
+/**
+ * (10b) La respuesta de cada correo que llegó a hola@, contacto@, fundadores@
+ * o a la dirección de una persona del equipo, nuevo y sin responder: Kairós
+ * deja `responder_correo` en espera y el modelo redacta el borrador después
+ * (`draftPendingKairosItems`). Nunca lo de soporte@ (puede traer datos de
+ * pacientes). Una sola vez por correo: si se descartó, venció o alguien lo
+ * respondió a mano, no se vuelve a preparar. Solo de Administración.
+ */
+async function ruleReplyEmails(pass: Pass): Promise<void> {
+  const { tx } = pass
+  const fresh = await rows<{
+    id: string
+    client_id: string | null
+    mailbox: string
+    product: string
+    from_address: string
+    from_name: string | null
+    to_address: string
+    subject: string | null
+    received_at: string
+  }>(
+    tx,
+    sql`select e.id, e.client_id, e.mailbox, e.product, e.from_address, e.from_name, e.to_address, e.subject,
+      ${iso(sql`e.received_at`)} as received_at
+    from saas_inbound_email e
+    where e.mailbox in ('hola', 'contacto', 'fundadores', 'persona')
+      and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
+      and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)
+      and not exists (select 1 from kairos_item k
+        where k.kind = 'responder_correo' and k.payload ->> 'emailId' = e.id::text)
+      and (e.client_id is null or exists (select 1 from saas_client c where c.id = e.client_id and c.archived_at is null))
+    order by e.received_at asc`,
+  )
+  for (const email of fresh) {
+    const who = email.from_name?.trim() || email.from_address
+    const to =
+      email.mailbox === "persona" ? (email.to_address.split("@")[0] ?? "persona") : email.mailbox
+    const subject = email.subject?.trim()
+    await pass.item({
+      rule: "responder_correo",
+      clientId: email.client_id,
+      fact: email.id,
+      kind: "responder_correo",
+      title: `Responder a ${who}`,
+      reason: `Le escribió a ${to}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))}${
+        subject ? `: «${subject.slice(0, 120)}»` : ", sin asunto"
+      }`,
+      adminOnly: true,
+      payload: {
+        emailId: email.id,
+        mailbox: email.mailbox,
+        product: email.product,
+        from: email.from_address,
+        fromName: email.from_name,
+        subject: email.subject,
+        receivedAt: email.received_at,
+        body: null,
+        draft: null,
+      },
+    })
+  }
+}
+
 /**
  * (12) Duplicados por correo: dos clientes con la misma persona que se pueden
  * fusionar (la regla única `clientDuplicatePairsSql`, la misma de la señal
@@ -2340,6 +2418,7 @@ export async function kairosRulesPass(tx: Db, now: Date): Promise<KairosPassResu
   // tarea genérica donde otra regla ya puso la suya.
   await ruleAccountsWithoutClient(pass)
   await ruleInboundEmails(pass)
+  await ruleReplyEmails(pass)
   await ruleDuplicates(pass)
   await ruleWaitlist(pass)
   await ruleProposalsExpiring(pass)

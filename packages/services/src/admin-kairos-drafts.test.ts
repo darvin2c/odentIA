@@ -3,7 +3,9 @@ import {
   kairosWeekly,
   saasClient,
   saasClientContact,
+  saasInboundEmail,
   saasOpportunity,
+  saasOutreach,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
@@ -11,14 +13,17 @@ import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
+import { decideKairosItem, kairosRulesPass } from "./admin-kairos.js"
 import {
   draftPendingKairosItems,
   type KairosDraftWriter,
   type KairosWeeklyWriter,
+  kairosAllowedEmailText,
   kairosAllowedFact,
   kairosWeekStart,
   latestKairosWeekly,
   pendingKairosDraftJobs,
+  pendingKairosReplyJobs,
   writeKairosWeekly,
 } from "./admin-kairos-drafts.js"
 import { ServiceError } from "./errors.js"
@@ -57,6 +62,10 @@ function recordingWriter(failFor: Set<string> = new Set()) {
     async presentationScript(input) {
       seen.push({ op: "presentationScript", input })
       return { script: `Guion para ${input.client.name} con ${input.demo?.name ?? "sin demo"}` }
+    },
+    async draftReply(input) {
+      seen.push({ op: "draftReply", input: { ...input } })
+      return { body: `Gracias por tu correo. ${input.senderName}` }
     },
     async weeklySummary(input) {
       seen.push({ op: "weeklySummary", input })
@@ -399,5 +408,152 @@ describe("el resumen de la semana", () => {
       )),
     ]
     expect(row?.reach).toBe(false)
+  })
+})
+
+describe("la respuesta a un correo que llegó", () => {
+  it("del correo viaja solo lo que pasa el filtro, sin lo citado", () => {
+    const text = [
+      "Hola, somos una óptica con 3 sedes.",
+      "El plan de USD 29 nos sirve.",
+      "Mi paciente con DNI 44556677 no aparece.",
+      "",
+      "> Lo que les escribimos antes",
+      "El lun, 9 nov 2026, Ada <ada@odentia32.com> escribió:",
+      "Esto ya es el correo citado",
+    ].join("\n")
+    expect(kairosAllowedEmailText(text, { adminOnly: true })).toEqual({
+      lines: ["Hola, somos una óptica con 3 sedes.", "El plan de USD 29 nos sirve."],
+      omitted: 1,
+    })
+    expect(kairosAllowedEmailText(text, { adminOnly: false }).lines).toContain(
+      "El plan de [importe] nos sirve.",
+    )
+    // Un párrafo largo se mira frase por frase: solo se quita la del paciente.
+    const long = `${"Queremos ordenar la agenda de la óptica. ".repeat(6)}La paciente Juana Pérez tiene su receta vencida. ¿Cómo empezamos?`
+    const read = kairosAllowedEmailText(long, { adminOnly: true })
+    expect(read.omitted).toBe(1)
+    expect(read.lines.at(-1)).toBe("¿Cómo empezamos?")
+    expect(read.lines.join(" ")).not.toContain("Juana")
+    expect(kairosAllowedEmailText(null, { adminOnly: true })).toEqual({ lines: [], omitted: 0 })
+  })
+
+  it("Kairós la prepara una vez por correo, la firma quien lo recibió y no vale si alguien ya respondió", async () => {
+    const at = new Date(NOW.getTime() - 2 * HOUR)
+    const emails = await ownerDb
+      .insert(saasInboundEmail)
+      .values([
+        {
+          mailbox: "persona",
+          staffUserId: admin.userId,
+          product: "optical",
+          clientId: ids.client,
+          messageId: "<kd-persona@example.test>",
+          fromAddress: "rosa@drafts.test",
+          fromName: "Rosa Quispe",
+          toAddress: "ada@vistia20.com",
+          subject: "La demo del jueves",
+          textBody: "Ada, ¿podemos ver la demo con mi socio?",
+          senderVerified: true,
+          receivedAt: at,
+        },
+        {
+          mailbox: "contacto",
+          product: "optical",
+          messageId: "<kd-respondido@example.test>",
+          fromAddress: "otra@example.test",
+          toAddress: "contacto@vistia20.com",
+          subject: "Ya le respondimos",
+          receivedAt: at,
+        },
+        {
+          mailbox: "hola",
+          product: "optical",
+          messageId: "<kd-viejo@example.test>",
+          fromAddress: "vieja@example.test",
+          toAddress: "hola@vistia20.com",
+          subject: "Llegó hace días",
+          receivedAt: new Date(NOW.getTime() - 72 * HOUR),
+        },
+      ])
+      .returning({ id: saasInboundEmail.id, messageId: saasInboundEmail.messageId })
+    const idOfMail = (messageId: string) =>
+      emails.find((email) => email.messageId === messageId)?.id ?? ""
+    await ownerDb.insert(saasOutreach).values({
+      channel: "correo",
+      toAddress: "otra@example.test",
+      body: "Gracias, te escribimos pronto",
+      inReplyToEmailId: idOfMail("<kd-respondido@example.test>"),
+    })
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, NOW))
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, new Date(NOW.getTime() + 60_000)))
+    const prepared = await ownerDb
+      .select()
+      .from(kairosItem)
+      .where(eq(kairosItem.kind, "responder_correo"))
+    // Ni lo ya respondido ni lo que llegó hace más de 48 h; y una sola vez.
+    expect(prepared).toHaveLength(1)
+    const [reply] = prepared
+    expect(reply).toMatchObject({ clientId: ids.client, adminOnly: true, status: "espera" })
+    expect(reply?.reason).toContain("Le escribió a ada@ de vistIA")
+
+    const jobs = await ownerDb.transaction((tx) => pendingKairosReplyJobs(tx, {}, NOW))
+    const job = jobs.find((entry) => entry.itemId === reply?.id)
+    expect(job?.ask).toMatchObject({
+      product: "optical",
+      mailbox: "ada@",
+      subject: "La demo del jueves",
+      lines: ["Ada, ¿podemos ver la demo con mi socio?"],
+      omitted: 0,
+      senderName: "Ada Administración",
+      client: { name: "Clínica Borrador (ficticia)", stage: "Contacto" },
+    })
+    const { writer, seen } = recordingWriter()
+    const outcome = await draftPendingKairosItems(ownerDb, writer, { limit: 50 }, NOW)
+    expect(outcome.drafted).toContain(reply?.id)
+    expect(seen.filter((call) => call.op === "draftReply")).toHaveLength(1)
+    const [drafted] = await ownerDb
+      .select()
+      .from(kairosItem)
+      .where(eq(kairosItem.id, reply?.id ?? ""))
+    expect(drafted?.payload.body).toBe("Gracias por tu correo. Ada Administración")
+
+    // Si alguien la respondió a mano mientras tanto, el sí ya no vale.
+    await ownerDb.insert(saasOutreach).values({
+      clientId: ids.client,
+      channel: "correo",
+      toAddress: "rosa@drafts.test",
+      body: "Sí, el jueves a las 10",
+      inReplyToEmailId: idOfMail("<kd-persona@example.test>"),
+    })
+    const unused = () => {
+      throw new Error("no se ejecuta")
+    }
+    const decision = await ownerDb.transaction((tx) =>
+      decideKairosItem(
+        tx,
+        admin,
+        reply?.id ?? "",
+        { action: "aprobar" },
+        {
+          prepareOutreach: unused,
+          updateClient: unused,
+          linkContactToUser: unused,
+          assignInboundEmail: unused,
+          prepareEmailReply: unused,
+          recordPresentation: unused,
+          createProposal: unused,
+        },
+        NOW,
+      ),
+    )
+    expect(decision.status).toBe("vencida")
+    // Y no se vuelve a preparar.
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, new Date(NOW.getTime() + 120_000)))
+    const after = await ownerDb
+      .select({ id: kairosItem.id })
+      .from(kairosItem)
+      .where(eq(kairosItem.kind, "responder_correo"))
+    expect(after).toHaveLength(1)
   })
 })

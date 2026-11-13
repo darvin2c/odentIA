@@ -70,6 +70,9 @@ const writer: KairosDraftWriter & KairosWeeklyWriter = {
   async presentationScript(input) {
     return { script: `Guion para ${input.client.name}` }
   },
+  async draftReply(input) {
+    return { body: `Gracias, ${input.from.name ?? input.from.address}` }
+  },
   async weeklySummary(input) {
     return { text: `Semana con ${input.figures.length} cifras` }
   },
