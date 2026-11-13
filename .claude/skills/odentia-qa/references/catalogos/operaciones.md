@@ -397,3 +397,19 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 | CO25 | De otro día: una radiografía de 2023 y una historia en papel de 2018–2024 se suben hoy con su fecha, y después se retira una. | DOC-01 | La misma fecha en todos los lugares; el retirado queda plegado en la Historia; ninguna hora inventada en el visor ni en la copia. |
 | CO26 | Se equivoca y corrige: un informe sube con 2013 en vez de 2023, y dos personas corrigen la fecha a la vez. | DOC-01 | Se corrige con su motivo sin duplicar el archivo; la segunda recibe que el documento cambió. |
 | CO27 | Otro rol, a la vez: Ana corrige la fecha de un archivo mientras Luis tiene «Corregir la fecha» abierto con la fecha vieja. | DOC-01 | Luis guarda y la pantalla le dice que el archivo cambió; su fecha y su motivo siguen ahí. |
+
+## Soporte
+
+### O-SOP-01 Dar, usar y quitar un acceso temporal de soporte
+**Dónde:** `S/admin-support.ts` (`grantSupportAccess`, `revokeSupportAccess`, `giveSupportAccessFromHelp`, `setSupportCaseStatus`), `S/support-session.ts`, `API/help.ts`, `apps/api/src/lib/support-session.ts`, `S/clinic-notices.ts`.
+- [ ] Un solo permiso vigente por clínica, también con dos envíos a la vez; repetir el envío no abre otro caso.
+- [ ] Quitarlo, que venza, resolver el caso o que quien lo dio deje de poder darlo cortan todo lo que abría, también un archivo ya abierto. La franja de la clínica lo refleja en ese momento.
+- [ ] Dar, quitar y cada forma de terminar quedan con quién y por qué, en el caso y en Actividad del equipo.
+- [ ] Lo que se mira con el permiso queda ligado a ese permiso, con su hora exacta; el caso no muestra lecturas de otro permiso.
+- [ ] La hora de fin es la misma, en la zona de la sede, en el cuadro, la franja, la tarjeta del caso, la administración y «El acceso terminó».
+- [ ] Al terminar, la persona que miraba llega a «El acceso terminó» con o sin recargar, y la frase dice quién y por qué.
+
+**Caso:** CO28 · La propietaria da acceso dos veces a la vez. Soporte abre un documento. Una administradora quita el acceso y soporte vuelve al documento; luego otro acceso se resuelve con el caso. → Un permiso vigente; el documento deja de abrirse; cada fin con su autor y su motivo; el caso lista solo lo leído con cada permiso.
+
+**Para O-GEN-01:**
+- [ ] Una pantalla que solo mira no falla porque su lectura también guarda (vencer, crear al abrir): con una sesión de solo lectura, cada pantalla carga sin errores.

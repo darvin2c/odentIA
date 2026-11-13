@@ -406,3 +406,57 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Lo retirado queda plegado, con su motivo legible y sin «Abrir».
 - [ ] Los papeles del mismo día salen en el mismo orden en Documentos y en la Historia (hoy no siempre).
 **Ya falló:** «Subido el …» y el motivo del retiro se cortaban a 390 px (QA del 12 nov, corregido antes de unir).
+
+## Soporte de odentIA
+
+### M-SOP-01 Dar acceso a soporte de odentIA desde Ayuda
+**Quién:** la propietaria o quien administra; rara vez (supuesto).
+**Dónde:** `CA/help-panel.tsx` (pie de Ayuda), `CA/support-cases.tsx`, `CA/clinic-notices.tsx`.
+**Medida (1440×900, 12 nov 2026):** 3 clics, 0 tecleos, 1 vista, 0 saltos, 2 decisiones con valor puesto, unas 75 palabras; 1 desplazamiento dentro del panel porque el botón queda cortado. A 390 px, 4 toques y 1 desplazamiento. Con teclado, unas 60 teclas (el foco queda 19 paradas antes del formulario). **A mantener los clics; a mejorar el teclado y el desplazamiento.**
+- [ ] Se da desde Ayuda sin escribir un mensaje antes.
+- [ ] Antes de dar, dice qué verán según el rol elegido y hasta cuándo; el botón lleva el tiempo.
+- [ ] Al dar, la franja aparece en el acto, sin recargar.
+- [ ] El botón de dar se ve sin desplazar a 1440×900 y a 390 px.
+- [ ] Teclado: el foco va al título al abrir y a la tarjeta de resultado al dar; nada cae a la página.
+- [ ] Un error al dar o al quitar conserva lo elegido, se dice con palabras (no «Error 500») y se ve sin desplazar.
+**Ya falló:** el acceso solo se daba dentro de un caso escrito antes; el foco caía a la página al abrir el caso y al quitar; el error de dar salía como «Error 500» bajo el botón.
+**Patrones:** el formulario en línea de «Escribir a soporte»; `SubmitButton` con el texto en el botón.
+
+### M-SOP-02 Ver y quitar el acceso de soporte (escritorio y celular)
+**Quién:** la propietaria o quien administra, y el resto del equipo para saberlo.
+**Dónde:** `UP/notice-strip.tsx`, `CA/clinic-notices.tsx`.
+**Medida (12 nov 2026):** 390 px: 0 toques para ver la hora, 1 para quitar; sin X; sin desplazamiento. Corregir un rol equivocado: 3 clics en 1 superficie desde la tarjeta del panel, 5 desde la franja con el panel cerrado. **A mantener; a mejorar el aviso al quitar.**
+- [ ] La hora y el motivo caben en la franja a 390 px, sin desplazar y con su punto final.
+- [ ] Mientras el acceso dura, la franja no se cierra con una X.
+- [ ] «Quitar acceso» se llama igual en la franja (escritorio y 390), en Ayuda y en la administración.
+- [ ] Al quitar, un aviso dice que soporte ya no ve la clínica y ofrece dar otra vez con lo anterior puesto; si falla, lo dice.
+- [ ] Al quitar desde cualquier lugar, la tarjeta del panel de Ayuda cambia a la vez (no queda «Listo… puede mirar»).
+- [ ] Todo el equipo ve que soporte puede mirar, sin texto del caso.
+- [ ] La franja se va a la hora de vencer y cuando se resuelve el caso (no a los 5 minutos).
+**Ya falló:** la X escondía el aviso con el acceso vigente; la franja seguía diciendo «Diste acceso» después de quitarlo; quitar con error no decía nada (sigue sin decirlo, 12 nov); la tarjeta del panel quedaba con «Listo» tras quitar desde la franja.
+
+### M-SOP-03 Saber qué miró soporte
+**Quién:** la propietaria, quien atiende al paciente; alguna vez (supuesto).
+**Dónde:** `CA/support-cases.tsx`, `CA/patient/accesos-panel.tsx`, `R/settings.audit.tsx`.
+**Medida:** desde Ayuda, 2 clics al caso y el hilo (dio, terminó y cómo, fichas). Desde la ficha, sin medir (sin pacientes en la demo usada).
+- [ ] En el caso, líneas con quién dio el acceso, el rol, de cuándo a cuándo, cómo terminó (lo quitó alguien, lo reemplazó otro, se resolvió, venció) y qué fichas abrió soporte; no se borran al vencer.
+- [ ] Mientras el acceso dura, el caso también dice quién lo dio y cuándo.
+- [ ] En «Consultas a la historia» del paciente, la fila de soporte se distingue de las del equipo.
+- [ ] En Actividad del equipo, dar y quitar dicen el rol y hasta cuándo.
+- [ ] Las horas van en la zona de la clínica, sin segundos.
+
+### M-SOP-04 Mirar la clínica como soporte («Solo mirar»)
+**Quién:** soporte de odentIA, desde la administración.
+**Dónde:** `UP/notice-strip.tsx` (tono alarma), `CA/support-access.tsx`, la ruta `/soporte`.
+**Medida (12 nov 2026):** «Abrir la clínica (solo mirar)» → 1 pestaña nueva con la franja ámbar; salir, 1 clic; con el acceso quitado, la siguiente acción lleva a «El acceso terminó».
+- [ ] La franja ámbar es permanente, sin X, con el rol y la hora (también a 390 px, con su punto final).
+- [ ] No hay botones de escribir en ninguna pantalla, tampoco en Ayuda (los enlaces de escribir a soporte no salen).
+- [ ] Una pantalla que el rol no abre dice por qué sin pedirle a soporte que «pida a quien administra».
+- [ ] «Salir» no dice «El acceso terminó» si el acceso sigue vigente; dice que puede volver a abrir.
+- [ ] «El acceso terminó» dice quién lo quitó o que venció, tiene `h1` y sale de la clínica sin desplazamiento a 390 px.
+- [ ] Sin errores de consola en cada navegación.
+**Ya falló:** «Salir» presentado como fin del acceso; `POST /api/workspace/visit` 403 en cada pantalla (12 nov).
+
+### Giras nuevas (para «Sus giras»)
+- **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
+- **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
