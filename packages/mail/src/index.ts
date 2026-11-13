@@ -477,15 +477,15 @@ export function supportReplyNoticeTemplate({
   if (granter) {
     const clinic = granter.clinic ?? "tu clínica"
     const opener = granter.openerRole ? `${granter.openerName} (${granter.openerRole})` : granter.openerName
-    const first = `Soporte pide tu autorización para ver la configuración de ${clinic}, por el caso ${about} que abrió ${opener}.`
+    const first = `Soporte pide tu autorización para mirar ${clinic}, por el caso ${about} que abrió ${opener}.`
     return renderEmail({
       brand,
       subject: `Soporte de ${name} pide tu autorización`,
       preview: first,
       title: "Soporte pide tu autorización",
       paragraphs: [
-        `Hola. ${first} Lo autorizas desde ${name}, en el caso: ahí está lo que pide, eliges por cuánto tiempo y lo puedes quitar cuando quieras.`,
-        "Soporte solo lee la configuración: no abre la agenda, los pacientes, las historias, las conversaciones ni las exportaciones.",
+        `Hola. ${first} Lo autorizas desde ${name}, en el caso: ahí está con qué rol pide mirar y por cuánto tiempo; puedes cambiarlo y quitarlo cuando quieras.`,
+        "Soporte solo mira: no puede cambiar nada, descargar ni imprimir, y cada parte de la historia clínica que abra queda anotada para tu clínica.",
       ],
       action: { label: "Ver el pedido", url },
       reason: `Te escribimos porque eres propietario o administrador de ${clinic} en ${name}, quienes autorizan el acceso de soporte, y nadie lo autorizó todavía.`,

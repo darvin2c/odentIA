@@ -17,8 +17,18 @@ import { ApiError } from "./api"
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({
-    queryCache: new QueryCache({ onError: reloadWhenTwoFactorRequired }),
-    mutationCache: new MutationCache({ onError: offerTwoFactorStep }),
+    queryCache: new QueryCache({
+      onError: (error) => {
+        leaveWhenSupportEnded(error)
+        reloadWhenTwoFactorRequired(error)
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error) => {
+        leaveWhenSupportEnded(error)
+        offerTwoFactorStep(error)
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: 10_000,
@@ -26,6 +36,20 @@ export function createQueryClient(): QueryClient {
       },
     },
   })
+}
+
+/**
+ * Soporte mirando la clínica: cuando el acceso termina (se venció, lo quitaron o
+ * se resolvió el caso), la primera consulta que lo dice lleva a «El acceso
+ * terminó» y deja atrás lo que estaba en pantalla.
+ */
+let leaving = false
+function leaveWhenSupportEnded(error: unknown): void {
+  if (leaving || typeof window === "undefined") return
+  if (error instanceof ApiError && error.shape.code === "SUPPORT_ACCESS_ENDED") {
+    leaving = true
+    window.location.replace("/soporte?terminado=1")
+  }
 }
 
 function asksTwoFactor(error: unknown): error is ApiError {

@@ -1,5 +1,6 @@
 import { meterAiUse } from "@odentia/agent"
-import { withOrgContext } from "@odentia/db"
+import { isReadOnlyRequest, runOutsideReadOnly, withOrgContext } from "@odentia/db"
+import { errorBody } from "../lib/error.js"
 import {
   type ClinicalAccessResource,
   rankByMeaning,
@@ -130,11 +131,16 @@ export function createSearchRoute(deps: SearchDeps) {
     // la ficha: todo en una transacción y solo si la búsqueda respondió bien.
     if (response.status === 200 && reads.length) {
       try {
-        await withOrgContext(deps.db, orgId, async (tx) => {
-          for (const read of reads)
-            await recordClinicalAccess(tx, orgId, userId, read.patientId, read.resource)
-        })
+        // Con soporte la anota el sistema, fuera del solo lectura (ADR 0184).
+        await runOutsideReadOnly(() =>
+          withOrgContext(deps.db, orgId, async (tx) => {
+            for (const read of reads)
+              await recordClinicalAccess(tx, orgId, userId, read.patientId, read.resource)
+          }),
+        )
       } catch (error) {
+        if (isReadOnlyRequest())
+          return c.json(errorBody(c, "TRACE_FAILED", "No pudimos anotar esta consulta: inténtalo de nuevo"), 503)
         console.error("No se pudo registrar la consulta a la historia clínica desde el buscador", {
           error: error instanceof Error ? error.message : String(error),
         })

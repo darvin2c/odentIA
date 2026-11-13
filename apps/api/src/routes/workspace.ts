@@ -19,6 +19,7 @@ import {
   workspaceAccessFor,
 } from "@odentia/services"
 import { Hono } from "hono"
+import { isSupportRequest } from "../lib/support-session.js"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -68,7 +69,10 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx =>
       ({ away: await recordHomeVisit(tx, orgId, userId, accessFor(memberRole)) })))
   })
-  app.get("/notifications", c => {
+  app.get("/notifications", async c => {
+    // Soporte mirando la clínica no es del equipo: no tiene avisos propios (y leerlos
+    // ordena la lista escribiendo, lo que su sesión de solo lectura no puede).
+    if (isSupportRequest(c)) return c.json({ data: { items: [], unread: 0 } })
     const { orgId, userId, memberRole } = orgContextOf(c)
     const permissions = noticePermissions(memberRole)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listWorkspaceNotifications(tx, orgId, userId, permissions)))

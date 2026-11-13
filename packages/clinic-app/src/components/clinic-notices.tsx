@@ -4,6 +4,7 @@
  * texto lo decide el servicio, no esta pantalla. Aquí solo se pinta, se
  * recuerda quién cerró qué y se resuelve cada acción.
  */
+import { toast } from "@odentia/ui"
 import { type StripNotice, NoticeStrip } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, useNavigate, useRouterState } from "@tanstack/react-router"
@@ -19,6 +20,7 @@ import { SpendCapDrawer } from "./billing/spend-cap"
 export type ClinicNoticeAction =
   | { kind: "pagar" | "elegir_plan" | "ver_plan" | "ver_consumo" | "subir_tope" | "escribir_soporte"; label: string; shortLabel: string }
   | { kind: "quitar_acceso"; label: string; shortLabel: string; grantId: string; caseId: string }
+  | { kind: "revisar_acceso"; label: string; shortLabel: string; caseId: string }
 
 export interface ClinicNotice {
   id: string
@@ -35,13 +37,17 @@ const noticesKey = (orgId: string) => ["saas", orgId, "notices"] as const
 
 /** Los avisos de la clínica para quien mira; la misma consulta para la franja, el menú y la Bandeja. */
 export function useClinicNotices() {
-  const { org } = orgRouteApi.useRouteContext()
+  const { org, support } = orgRouteApi.useRouteContext()
   return useQuery({
+    // Soporte mirando la clínica no recibe los avisos de la clínica (tiene su propia franja).
+    enabled: !support,
     queryKey: noticesKey(org.id),
     queryFn: () =>
       apiFetch<{ data: ClinicNotice[] }>(`/api/account/billing/notices?orgId=${encodeURIComponent(org.id)}`).then((res) => res.data),
     staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    // Con un acceso de soporte a la vista, cada 30 s: así la franja se va cuando termina.
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((notice) => notice.topic === "soporte") ? 30_000 : 5 * 60_000,
     retry: false,
   })
 }
@@ -140,7 +146,13 @@ function Strip({ userId }: { userId: string }) {
         method: "POST",
         body: JSON.stringify({ grantId: action.grantId }),
       }),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: noticesKey(org.id) }),
+    onSuccess: () => toast.success("Soporte ya no ve tu clínica"),
+    onError: () => toast.error("No pude quitar el acceso. Inténtalo otra vez."),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: noticesKey(org.id) })
+      void queryClient.invalidateQueries({ queryKey: ["support-case"] })
+      void queryClient.invalidateQueries({ queryKey: ["support-cases"] })
+    },
   })
 
   const items = useMemo<StripNotice[]>(() => {
@@ -167,6 +179,11 @@ function Strip({ userId }: { userId: string }) {
           const base = { label: action.label, shortLabel: action.shortLabel }
           if (action.kind === "subir_tope") stripAction = { ...base, onSelect: raiseCap }
           else if (action.kind === "quitar_acceso") stripAction = { ...base, onSelect: () => revoke.mutate(action) }
+          else if (action.kind === "revisar_acceso")
+            stripAction = {
+              ...base,
+              onSelect: () => void navigate({ to: pathname, search: { ayuda: "casos", caso: action.caseId } as never }),
+            }
           else if (action.kind === "escribir_soporte")
             stripAction = { ...base, onSelect: () => void navigate({ to: pathname, search: { ayuda: "casos" } as never }) }
           else stripAction = { ...base, to: PLAN_PATH }

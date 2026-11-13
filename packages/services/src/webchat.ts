@@ -1,3 +1,4 @@
+import { isReadOnlyRequest } from "@odentia/db"
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import {
   assertValidWebchatConfig,
@@ -132,6 +133,8 @@ export async function getClinicWebchat(
   actorUserId: string | null,
 ): Promise<ClinicWebchat> {
   let row = await clinicWebchatRow(tx, orgId)
+  // Soporte mirando la clínica no crea el chat: lo dice como que no está.
+  if (!row && isReadOnlyRequest()) throw notFound("Chat web")
   if (!row) {
     // La pantalla y su vista previa lo piden a la vez al abrirse: uno solo lo crea,
     // el otro espera y usa ese. Dos chats firmarían sus sesiones con claves distintas.

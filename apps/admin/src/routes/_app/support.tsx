@@ -135,6 +135,10 @@ const caseDetail = caseItem.extend({
   grants: z.array(
     z.object({
       id: z.string(),
+      scope: z.enum(["diagnostico", "rol"]).optional(),
+      viewRole: z.string().nullable().optional(),
+      staffUserId: z.string().nullable().optional(),
+      endReason: z.string().nullable().optional(),
       expiresAt: z.string(),
       revokedAt: z.string().nullable(),
       active: z.boolean(),
@@ -151,6 +155,8 @@ const caseDetail = caseItem.extend({
   accessRequestPending: z.boolean(),
   /** El mensaje que deja el pedido, tal cual lo verá la clínica. */
   accessRequestText: z.string().nullable(),
+  /** Los roles de la clínica con que se puede pedir mirar. */
+  accessViewRoles: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
   /** Por qué no se ofrece pedir el acceso. */
   accessRequestBlocked: z.string().nullable(),
   guideGapMarkedAt: z.string().nullable(),
@@ -288,6 +294,8 @@ function SupportPage() {
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({})
   const [manyBody, setManyBody] = useState("")
   const [askingAccess, setAskingAccess] = useState(false)
+  const [askedRole, setAskedRole] = useState("configuracion")
+  const [askedMinutes, setAskedMinutes] = useState("30")
   const fileRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLHeadingElement>(null)
   const rowButtons = useRef(new Map<string, HTMLButtonElement>())
@@ -473,7 +481,11 @@ function SupportPage() {
   // marca es inmediata; `isPending` llega a la pantalla después.
   const requestingAccess = useRef(false)
   const requestAccess = useMutation({
-    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/request-access`, { method: "POST" }),
+    mutationFn: (input: { id: string; viewRole: string | null; minutes: number }) =>
+      api(`/api/admin/support/cases/${input.id}/request-access`, {
+        method: "POST",
+        body: JSON.stringify({ viewRole: input.viewRole, minutes: input.minutes }),
+      }),
     onSuccess: () => {
       setAskingAccess(false)
       toast.success("Pediste el acceso: el caso espera a la clínica")
@@ -503,6 +515,13 @@ function SupportPage() {
       },
     )
   }
+  // «Abrir la clínica (solo mirar)»: un pase de un minuto, en otra pestaña.
+  const openClinic = useMutation({
+    mutationFn: (id: string) => api(`/api/admin/support/cases/${id}/pass`, { method: "POST" }) as Promise<{ url: string }>,
+    onSuccess: (body) => {
+      window.open(body.url, "_blank", "noopener")
+    },
+  })
   const revokeGrant = useMutation({
     mutationFn: (grantId: string) =>
       api(`/api/admin/support/grants/revoke`, {
@@ -536,7 +555,7 @@ function SupportPage() {
     <PageShell className="flex flex-col gap-4">
       <PageHeader
         title="Soporte"
-        subtitle="Casos de las clínicas: conversación, responsable y acceso diagnóstico con permiso."
+        subtitle="Casos de las clínicas: conversación, responsable y acceso para mirar con permiso."
       />
 
       <div role="group" aria-label="Vistas de soporte" className="flex flex-wrap gap-2">
@@ -1231,14 +1250,33 @@ function SupportPage() {
               </div>
 
               <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
-                <p className="font-bold">Acceso diagnóstico</p>
+                <p className="font-bold">Acceso de soporte</p>
                 {(kase.grants ?? []).length === 0 ? (
                   <p className="text-muted-foreground">Sin permisos todavía.</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {kase.grants.map((grant) => (
                       <li key={grant.id} className="flex flex-wrap items-center gap-2">
-                        <span>{grantWords(grant, now)}</span>
+                        <span>
+                          {grantWords(
+                            {
+                              ...grant,
+                              viewRoleLabel: kase.accessViewRoles?.find((role) => role.value === grant.viewRole)?.label ?? grant.viewRole ?? null,
+                            },
+                            now,
+                          )}
+                        </span>
+                        {grant.active && grant.scope === "rol" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="min-h-11 sm:min-h-9"
+                            disabled={openClinic.isPending}
+                            onClick={() => openClinic.mutate(kase.id)}
+                          >
+                            Abrir la clínica (solo mirar) ↗
+                          </Button>
+                        ) : null}
                         {grant.active ? (
                           <Button
                             type="button"
@@ -1248,7 +1286,7 @@ function SupportPage() {
                             disabled={revokeGrant.isPending}
                             onClick={() => revokeGrant.mutate(grant.id)}
                           >
-                            Revocar
+                            Quitar acceso
                           </Button>
                         ) : null}
                       </li>
@@ -1268,7 +1306,7 @@ function SupportPage() {
                         setAskingAccess(true)
                       }}
                     >
-                      Pedir acceso de diagnóstico…
+                      Pedir acceso para mirar…
                     </Button>
                   ) : null}
                   <Button
@@ -1284,6 +1322,11 @@ function SupportPage() {
                       : "Ver diagnóstico (requiere permiso vigente)"}
                   </Button>
                 </div>
+                {openClinic.isError ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {openClinic.error instanceof Error ? openClinic.error.message : "No se pudo abrir la clínica."}
+                  </p>
+                ) : null}
                 {diagnostic.isError ? (
                   <p role="alert" className="text-sm text-destructive">
                     {diagnostic.error instanceof Error
@@ -1348,7 +1391,7 @@ function SupportPage() {
               {kase.accessRequestText ? (
                 <ConfirmDialog
                   open={askingAccess}
-                  title="¿Pedir el acceso de diagnóstico?"
+                  title="¿Pedir acceso para mirar?"
                   description={accessRecipientsWords(kase)}
                   confirmLabel="Pedir acceso"
                   cancelLabel="Volver"
@@ -1358,13 +1401,54 @@ function SupportPage() {
                   onConfirm={() => {
                     if (requestingAccess.current) return
                     requestingAccess.current = true
-                    requestAccess.mutate(kase.id)
+                    requestAccess.mutate({
+                      id: kase.id,
+                      viewRole: askedRole === "configuracion" ? null : askedRole,
+                      minutes: Number.parseInt(askedMinutes, 10),
+                    })
                   }}
                   onClose={() => setAskingAccess(false)}
                 >
                   <div className="flex flex-col gap-1.5 text-sm">
-                    <p className="font-semibold">Este mensaje queda en el caso:</p>
-                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">{kase.accessRequestText}</blockquote>
+                    <label className="flex flex-col gap-1 font-semibold">
+                      ¿Con qué rol necesitas mirar?
+                      <select
+                        className="h-10 rounded-md border bg-card px-2 font-normal"
+                        value={askedRole}
+                        onChange={(event) => setAskedRole(event.target.value)}
+                      >
+                        <option value="configuracion">Solo la configuración (ningún paciente)</option>
+                        {(kase.accessViewRoles ?? []).map((role) => (
+                          <option key={role.value} value={role.value}>
+                            {role.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 font-semibold">
+                      ¿Por cuánto tiempo?
+                      <select
+                        className="h-10 rounded-md border bg-card px-2 font-normal"
+                        value={askedMinutes}
+                        onChange={(event) => setAskedMinutes(event.target.value)}
+                      >
+                        <option value="15">15 minutos</option>
+                        <option value="30">30 minutos</option>
+                        <option value="60">1 hora</option>
+                      </select>
+                    </label>
+                    <p className="font-semibold">Este mensaje queda en el caso (con lo que elijas):</p>
+                    <blockquote className="rounded-xl bg-primary-soft px-3 py-2 whitespace-pre-wrap">
+                      {/* El servidor arma el texto con lo de siempre; aquí se ve con lo elegido. */}
+                      {kase.accessRequestText
+                        .replace(
+                          "la configuración de tu clínica",
+                          askedRole === "configuracion"
+                            ? "la configuración de tu clínica"
+                            : `tu clínica como ${kase.accessViewRoles?.find((role) => role.value === askedRole)?.label ?? askedRole}`,
+                        )
+                        .replace("30 minutos", `${askedMinutes} minutos`)}
+                    </blockquote>
                     <p className="text-muted-foreground">
                       El caso pasa a «Esperando a la clínica». Si no lo ven en 15 minutos, les llega el correo de que soporte necesita algo.
                     </p>

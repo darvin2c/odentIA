@@ -6,6 +6,7 @@ import { ShieldCheck } from "lucide-react"
 import { apiFetch } from "../../lib/api"
 import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { appWords } from "../../lib/product-words"
 import { QueryErrorState } from "../../lib/query-error"
 import { AccessLogSkeleton } from "../skeletons/person-sections"
 
@@ -13,6 +14,8 @@ import { AccessLogSkeleton } from "../skeletons/person-sections"
 interface AccessItem {
   userId: string
   userName: string | null
+  /** Soporte de odentIA, con el permiso de la clínica: no es del equipo. */
+  outsideClinic?: boolean
   resource: string
   firstAt: string
   lastAt: string
@@ -37,6 +40,8 @@ const RESOURCE_LABELS: Record<string, string> = {
   consentimientos: "Consentimientos",
   ordenes: "Órdenes",
   descarga: "Descargó la historia completa",
+  apertura: "Abrió la historia bloqueada",
+  descansos: "Descansos médicos",
 }
 
 /**
@@ -100,7 +105,15 @@ function AccessTable({ rows, isFetching }: { rows: AccessItem[]; isFetching: boo
         id: "quien",
         header: "Quién",
         meta: { view: { primary: true } },
-        cell: ({ row }) => row.original.userName ?? "Usuario sin nombre",
+        cell: ({ row }) =>
+          row.original.outsideClinic ? (
+            <span className="flex flex-col">
+              <span>Soporte de {appWords().name} · {row.original.userName ?? "sin nombre"}</span>
+              <span className="text-xs text-muted-foreground">fuera de la clínica, con el permiso de la clínica</span>
+            </span>
+          ) : (
+            (row.original.userName ?? "Usuario sin nombre")
+          ),
       },
       {
         id: "que",

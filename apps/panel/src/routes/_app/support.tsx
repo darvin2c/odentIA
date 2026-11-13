@@ -160,7 +160,7 @@ function AccountGrantBox({
         <>
           <p>
             Soporte puede ver el diagnóstico de {organizationName ?? "tu clínica"} hasta el{" "}
-            {new Date(activeGrant.expiresAt).toLocaleString()}.
+            {new Date(activeGrant.expiresAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}.
           </p>
           <Button
             type="button"
@@ -170,7 +170,7 @@ function AccountGrantBox({
             disabled={revoke.isPending}
             onClick={() => revoke.mutate(activeGrant.id)}
           >
-            Revocar ahora
+            Quitar acceso
           </Button>
           {revoke.isError ? (
             <p role="alert" className="text-sm text-destructive">

@@ -299,3 +299,13 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Caso:** abrir «Cambiar la hoja» y «Usar esta hoja» sin tocar nada: ninguna fila nueva. Marcar solo la casilla: la fila lo dice.
 
+## Acceso de soporte (QA del 12 nov)
+
+- [ ] (V-EST-07) Al terminar el acceso de alguien de fuera, su pantalla dice que terminó: tanto si la quitan como si vence, y aunque haya pasado tiempo desde que entró; nunca lo manda a otra página de la app.
+- [ ] (V-EST-07) «Ya no ve» o «deja de ver lo abierto» solo si lo que tenía en pantalla se retira; si no, «no puede abrir nada más».
+- [ ] (V-RAS-05) Lo que el cuadro y la guía prometen anotar se anota con cada rol que se puede elegir, no solo con el que abre la historia.
+- [ ] (V-RAS-05) Cada lectura del rastro cae dentro del acceso que la muestra: ninguna hora anterior a cuando se dio.
+- [ ] (V-RAS-05) Terminar un acceso deja la misma fila en «Actividad del equipo» y dice el mismo nombre, sea quien sea el que lo termina (la clínica o el equipo de odentIA).
+- [ ] (V-RAS-05) La línea de Actividad dice con qué alcance se dio (qué rol, cuánto tiempo), no una frase igual para todos.
+- [ ] «¿Cómo le doy…?» y «¿Cómo le quito…?» de una misma función reciben cada una su respuesta también sin el modelo (con el buscador de respaldo).
+- [ ] Un aviso de la franja que debe ver todo el equipo no queda plegado detrás de otro aviso de mayor nivel sin decirlo en la línea visible.

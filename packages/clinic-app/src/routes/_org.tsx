@@ -20,6 +20,7 @@ import {
   type AppShellNavItem,
   HeaderUtilitiesProvider,
   LoadingState,
+  NoticeStrip,
   SideDockProvider,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -69,9 +70,10 @@ import { authClient, authFetch } from "../lib/auth-client"
 import { requireTermsAccepted, requireVerifiedSession, type SessionInfo, ssrFetchOptions } from "../lib/guards"
 import { ApiError, apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
-import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone, notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
+import { endSupportSession, isSupportEnded, loadSupportSession, type SupportMode } from "../lib/support-mode"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
@@ -123,17 +125,38 @@ async function loadOrgRegion(): Promise<OrgRegion> {
 const ORG_ACCESS_FRESH_MS = 120_000
 
 /** Sesión verificada, términos aceptados y la clínica del host, o el redirect que toque. */
-async function checkOrgAccess(location: { href: string }): Promise<{ session: SessionInfo; org: FullOrganization }> {
+async function checkOrgAccess(
+  location: { href: string },
+): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode | null }> {
   const slug = orgSlugFromHostname(requestHostname())
   const cached = orgChecks.access
   if (typeof window !== "undefined" && cached && cached.slug === slug && Date.now() - cached.at < ORG_ACCESS_FRESH_MS) {
     return cached
   }
   const fetchOptions = ssrFetchOptions()
+  // Soporte de odentIA con el permiso de la clínica: entra sin sesión de la clínica, en solo
+  // lectura. En el servidor solo se pregunta si llega su cookie; en el navegador (la cookie no
+  // se lee) se pregunta a la vez que lo demás, sin sumar un viaje.
+  const ssrCookie = (fetchOptions as { headers?: { cookie?: string } }).headers?.cookie
+  const mayBeSupport = typeof window !== "undefined" || (ssrCookie?.includes("odentia_soporte=") ?? false)
+  const supportCheck = slug && mayBeSupport ? loadSupportSession(slug, fetchOptions) : Promise.resolve(null)
   // Las tres a la vez; se revisan en el orden de siempre: sesión, términos y clínica.
   const sessionCheck = requireVerifiedSession(location)
   const termsCheck = requireTermsAccepted(location)
   const orgRead = slug ? readOrganization(slug, fetchOptions) : null
+  const found = await supportCheck
+  // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», nunca la sesión normal
+  // de ese navegador (la de la administración llevaría a otra pantalla).
+  if (found === "terminado") throw redirect({ href: "/soporte?terminado=1" })
+  const support = found
+  if (support) {
+    // Lo de la sesión de la clínica no aplica: sus rechazos no quedan sin atender.
+    sessionCheck.catch(() => undefined)
+    termsCheck.catch(() => undefined)
+    orgRead?.catch(() => undefined)
+    if (typeof window !== "undefined") orgChecks.access = { slug: support.org.slug, at: Date.now(), ...support }
+    return support
+  }
   // Si falla una antes, las otras no quedan como rechazo sin atender.
   termsCheck.catch(() => undefined)
   orgRead?.catch(() => undefined)
@@ -147,8 +170,8 @@ async function checkOrgAccess(location: { href: string }): Promise<{ session: Se
     const { data: orgs } = await authClient.organization.list({ fetchOptions })
     throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })
   }
-  if (typeof window !== "undefined") orgChecks.access = { slug, at: Date.now(), session, org: data }
-  return { session, org: data }
+  if (typeof window !== "undefined") orgChecks.access = { slug, at: Date.now(), session, org: data, support: null }
+  return { session, org: data, support: null }
 }
 
 export const Route = createFileRoute("/_org")({
@@ -157,7 +180,7 @@ export const Route = createFileRoute("/_org")({
     if (toAdmin) throw redirect({ href: toAdmin })
     // El formato regional se pide junto con lo demás; si falla, queda el del navegador.
     const regionLoad = loadOrgRegion()
-    const { session, org: data } = await checkOrgAccess(location)
+    const { session, org: data, support } = await checkOrgAccess(location)
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     // La sede recordada es de esta persona: en un mostrador compartido no se hereda.
     if (typeof window !== "undefined") setActiveBranchOwner(session.userId)
@@ -171,7 +194,7 @@ export const Route = createFileRoute("/_org")({
     const elsewhere =
       region.product && region.product !== productUi().product ? tenantUrl(data.slug, location.href, region.product) : null
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
-    return { session, org: data, region, checkedAt: Date.now() }
+    return { session, org: data, region, checkedAt: Date.now(), support }
   },
   // Instalable solo con sesión: el portal, el registro y el chat del paciente comparten este origen.
   head: () => ({
@@ -187,8 +210,8 @@ export const Route = createFileRoute("/_org")({
 
 /** Sin la verificación que pide la clínica, su pantalla en vez de la aplicación. */
 function OrgGate() {
-  const { org, region, session, checkedAt } = orgRouteApi.useRouteContext()
-  rememberServerChecks({ org, region, session, checkedAt })
+  const { org, region, session, checkedAt, support } = orgRouteApi.useRouteContext()
+  rememberServerChecks({ org, region, session, checkedAt, support })
   if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} need={region.twoFactorRequired} />
   return <OrgLayout />
 }
@@ -338,8 +361,58 @@ function OrgSwitcher() {
   )
 }
 
+/**
+ * Soporte de odentIA mirando la clínica: una franja que no se cierra, de otro
+ * color que los avisos de la clínica, con hasta cuándo y «Salir».
+ */
+function SupportStrip({ support }: { support: SupportMode }) {
+  // Cada medio minuto se pregunta si el acceso sigue: lo que estaba en pantalla no queda a la
+  // vista después de quitarlo o de que venza.
+  useEffect(() => {
+    const check = () => {
+      void apiFetch("/api/support-session/me").catch((error) => {
+        if (isSupportEnded(error)) window.location.replace("/soporte?terminado=1")
+      })
+    }
+    const timer = window.setInterval(check, 30_000)
+    const untilEnd = new Date(support.expiresAt).getTime() - Date.now()
+    const atEnd = untilEnd > 0 ? window.setTimeout(check, untilEnd + 1_000) : undefined
+    return () => {
+      window.clearInterval(timer)
+      if (atEnd) window.clearTimeout(atEnd)
+    }
+  }, [support.expiresAt])
+  const untilFull = new Date(support.expiresAt).toLocaleTimeString(activeOrgLocale(), {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
+  })
+  const until = untilFull.replace(/\.$/, "")
+  return (
+    <NoticeStrip
+      label="Soporte de odentIA"
+      notices={[
+        {
+          id: "soporte-mirando",
+          tone: "alarma",
+          message: `Solo mirar · Estás viendo la clínica como ${support.viewRoleLabel}, como soporte de odentIA, hasta las ${until}. No puedes cambiar nada.`,
+          short: `Solo mirar · ${support.viewRoleLabel} · hasta ${untilFull}`,
+          action: {
+            label: "Salir",
+            onSelect: () => {
+              void endSupportSession()
+                .catch(() => undefined)
+                .finally(() => window.location.replace("/soporte?terminado=1"))
+            },
+          },
+        },
+      ]}
+    />
+  )
+}
+
 function OrgLayout() {
-  const { org, session, region } = orgRouteApi.useRouteContext()
+  const { org, session, region, support } = orgRouteApi.useRouteContext()
   // El formato de la clínica queda fijado antes de pintar las pantallas hijas
   // (también en SSR e hidratación); si el perfil cambia, se avisa a quien lo usa.
   const profile = useOrgProfile()
@@ -437,22 +510,36 @@ function OrgLayout() {
   return (
     <RaiseCapProvider>
     <AppShell
-      notice={<ClinicNoticeStrip userId={session.userId} />}
+      notice={support ? <SupportStrip support={support} /> : <ClinicNoticeStrip userId={session.userId} />}
       items={navItems}
       LinkComponent={RouterLink}
       pathname={pathname}
-      user={{ name: session.name, email: session.email, avatarUrl: session.image }}
+      user={
+        support
+          ? { name: session.name, email: "Soporte de odentIA", avatarUrl: null }
+          : { name: session.name, email: session.email, avatarUrl: session.image }
+      }
       // El perfil vive en el panel de la cuenta (otro origen): se llega con un enlace normal.
-      userMenuItems={[
-        // `clinica` deja en el panel el enlace para volver a esta clínica.
-        { label: "Mi perfil", icon: UserRound, href: panelUrl(`/profile?clinica=${encodeURIComponent(org.slug)}`) },
-        { label: "Cambiar contraseña", icon: KeyRound, href: panelUrl(`/profile?edit=password&clinica=${encodeURIComponent(org.slug)}`) },
-      ]}
+      userMenuItems={
+        support
+          ? []
+          : [
+              // `clinica` deja en el panel el enlace para volver a esta clínica.
+              { label: "Mi perfil", icon: UserRound, href: panelUrl(`/profile?clinica=${encodeURIComponent(org.slug)}`) },
+              { label: "Cambiar contraseña", icon: KeyRound, href: panelUrl(`/profile?edit=password&clinica=${encodeURIComponent(org.slug)}`) },
+            ]
+      }
       footerItems={footerItems}
       brand={<Brand />}
       brandIcon={<Brand compact />}
-      switcher={<OrgSwitcher />}
+      switcher={support ? undefined : <OrgSwitcher />}
       onSignOut={async () => {
+        if (support) {
+          await endSupportSession().catch(() => undefined)
+          queryClient.clear()
+          window.location.replace("/soporte?terminado=1")
+          return
+        }
         // Este equipo deja de recibir los avisos de quien sale.
         await forgetDevicePushOnSignOut()
         await authClient.signOut()
@@ -487,10 +574,15 @@ function OrgLayout() {
           </GlobalSearchProvider>
         </NoticesColumnProvider>
       </SideDockProvider>
-      {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
-      <AccessLinkPasswordGate request={authFetch} />
-      {/* Términos nuevos de cada persona y, para quien administra, el contrato de encargo de la clínica. */}
-      <LegalGate request={authFetch} clinic={clinicAgreement} links={legalLinks} />
+      {/* Soporte no tiene cuenta en la clínica: ni contraseña nueva ni términos que aceptar. */}
+      {support ? null : (
+        <>
+          {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
+          <AccessLinkPasswordGate request={authFetch} />
+          {/* Términos nuevos de cada persona y, para quien administra, el contrato de encargo de la clínica. */}
+          <LegalGate request={authFetch} clinic={clinicAgreement} links={legalLinks} />
+        </>
+      )}
     </AppShell>
     </RaiseCapProvider>
   )

@@ -1,3 +1,4 @@
+import { isReadOnlyRequest } from "@odentia/db"
 import { canAccess } from "@odentia/auth/permissions"
 import { IDENTITY_DOC_TYPES, moneyTotalsText, nameWords, sumAcceptedByCurrency, sumAcceptedCents } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -102,6 +103,8 @@ const CONFIRM_TTL_MS = CONFIRM_TTL_HOURS * 60 * 60 * 1000
  * propuesta vieja bloquee aunque su fila aún no se haya marcado.
  */
 export async function expireDueProposals(tx: Db, orgId: string, conversationId?: string): Promise<void> {
+  // Soporte mirando la clínica solo lee: el filtro por tiempo ya deja fuera lo vencido.
+  if (isReadOnlyRequest()) return
   const conditions = [
     eq(agentProposal.organizationId, orgId),
     eq(agentProposal.status, "propuesta"),
@@ -115,6 +118,7 @@ export async function expireDueProposals(tx: Db, orgId: string, conversationId?:
 }
 
 async function expireProposalById(tx: Db, orgId: string, id: string): Promise<void> {
+  if (isReadOnlyRequest()) return
   await tx
     .update(agentProposal)
     .set({ status: "expirada", updatedAt: new Date() })

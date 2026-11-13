@@ -300,3 +300,24 @@ No tiene camino en el código.
 | CC16 | Una paciente nueva trae su historia en papel de otra clínica (2018–2024) y una panorámica tomada hace 8 meses en un centro radiológico; una de las fechas se pone mal. | 07, 24 | Cada papel en su fecha en Documentos, Historia, copia y FHIR, con «Subido el …»; la fecha mal puesta se corrige con su motivo sin retirar. |
 | CC17 | La hoja del consentimiento de una exodoncia hecha el lunes se firmó en papel y se registra el jueves. | 24 y P-ODO-09 | Se registra firmada el lunes; el PDF y la Historia dicen el lunes y el día en que se registró; no queda dos veces (hoy no). |
 | CC18 | La paciente trae una periapical de la 36 de hace tres años y se adjunta en la atención de hoy, con su pieza. | 24 y P-ODO-14, P-ODO-17 | La pieza, Documentos y la tarjeta dicen la toma de hace tres años; el detalle no dice «Piezas tratadas: 36» (hoy sí). |
+| CC19 | La propietaria da acceso a soporte como el profesional para revisar la historia anterior de una paciente alérgica a penicilinas (HC-000001); soporte abre su Historia, el PDF de la clínica anterior, la conversación de WhatsApp y la ficha de un niño de 11 años; después la propietaria da otro acceso como Recepción y lo quita. | 06, 07, 24, 25 | El cuadro dijo lo que vería; cada cosa abierta queda en el caso y en «Consultas a la historia»; el PDF no se puede llevar; el segundo acceso reemplaza al primero y al quitarlo soporte ve «El acceso terminó»; Actividad dice los dos roles. |
+| CC20 | Mientras soporte mira, el odontólogo abre la ficha de esa paciente; al día siguiente busca qué miró soporte. | 06, 25 | Ve la franja sin «Quitar»; lo de después depende de la decisión pendiente. |
+
+## P-COM-25 Soporte de la plataforma mira la clínica
+
+**Dónde:** Ayuda › «Dar acceso a soporte» y «Tus casos con soporte» (`packages/clinic-app/src/components/support-access.tsx`, `support-cases.tsx`), la franja (`S/clinic-notices.ts`), la pantalla de fin (`R/public/soporte.tsx`), «Consultas a la historia» (`CA/accesos-panel.tsx`, `S/clinical-access.ts`), Configuración › Actividad del equipo. Tablas `support_access_grant` y `support_access_session` (`DB/admin-support.ts`). ADR 0184.
+
+- [ ] Antes de dar el acceso, el cuadro dice lo que verá soporte con cada rol, igual que lo que ese rol ve en la app (también conversaciones y agenda si el rol las ve).
+- [ ] Si ya hay un acceso vigente, el cuadro lo dice y dice que el nuevo lo reemplaza.
+- [ ] Mientras dura, todo el equipo ve la franja con el rol y la hora; solo propietaria y administradores la quitan; no lleva el texto del caso ni nombres.
+- [ ] Al quitarlo, reemplazarlo o vencer, soporte ve «El acceso terminó» con la hora y el motivo, y lo que tenía abierto (un archivo) deja de servirse.
+- [ ] En «Solo mirar» no hay ninguna acción de escribir, descargar, copiar enlace ni imprimir, tampoco en el visor ni en la lista de pacientes.
+- [ ] Cada cosa que abre soporte (cada parte de la historia, la ficha de la persona, cada conversación y cada archivo) queda en «Consultas a la historia» del paciente y en el caso, con la hora.
+- [ ] El caso dice lo que pasó con palabras que no confunden: cuántas fichas, conversaciones y archivos miró, no solo «historias clínicas».
+- [ ] Actividad del equipo dice quién dio y quitó el acceso, con qué rol, por cuánto tiempo y en qué caso.
+- [ ] La historia bloqueada no se abre con ningún rol, ni por su dirección ni por la búsqueda.
+- [ ] Con Recepción o Caja, soporte no llega a la historia clínica, ni por la pantalla ni por la dirección.
+- [ ] Los papeles emitidos (receta, consentimiento) y los archivos subidos se comportan igual en «Solo mirar», con el mismo aviso.
+- [ ] Pendiente legal: lo sensible (VIH, salud mental, violencia), los menores y quien no tiene consentimiento de datos vigente; si el profesional que atiende debe ver después qué miró soporte de su paciente; qué dice Protección de datos.
+
+**Fuentes:** ADR 0184 y 0080; contrato de encargo (`apps/web/src/lib/legal/encargo.ts`, «Confidencialidad»); Ley 29733 y su reglamento (encargado, datos sensibles, menores; verificar artículos); Ley 26842 art. 25 (reserva del acto médico; verificar); HL7 FHIR `AuditEvent`; HL7 v3 `ActInformationSensitivityPolicy`.
