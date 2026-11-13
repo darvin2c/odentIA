@@ -116,7 +116,7 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
-export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
+export { DockedSurface, type DockedSurfaceProps, useDockDecision, useDraftSaved } from "./docked-surface.js"
 export {
   MobileNavTrigger,
   PageHeader,

@@ -2,9 +2,11 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
-import type * as React from "react"
+import * as React from "react"
 import { afterEach, beforeAll, expect, it } from "vitest"
 
+import { DetailDrawer } from "./detail/detail-drawer.js"
+import { useDraftSaved } from "./docked-surface.js"
 import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
 import { FormDrawer } from "./form/form-drawer.js"
 import { DraftKeptInPage, SideDockProvider, SideDockSlot } from "./side-dock.js"
@@ -113,4 +115,98 @@ it("sin eso, cualquier navegación con lo escrito pregunta, como hasta ahora", a
   void router.navigate({ href: "/page?tab=otra" })
   await screen.findByRole("alertdialog")
   expect(router.state.location.searchStr).toBe("")
+})
+
+/** Un detalle que se guarda solo, como un formulario clínico: nunca hace `submit`. */
+function Autosaved() {
+  return (
+    <DetailDrawer open title="Evaluación" onClose={() => {}}>
+      <AutosavedAnswers />
+    </DetailDrawer>
+  )
+}
+
+function AutosavedAnswers() {
+  const draftSaved = useDraftSaved()
+  const [state, setState] = React.useState<"guardado" | "pendiente" | "error">("guardado")
+  React.useEffect(() => draftSaved(state === "guardado"), [draftSaved, state])
+  return (
+    <>
+      <input aria-label="Hallazgos" onInput={() => setState("pendiente")} />
+      {/* biome-ignore lint/a11y/useSemanticElements: imita la opción apagada que pinta la librería, un botón con rol. */}
+      <button type="button" role="radio" aria-checked="false" aria-disabled="true">
+        No
+      </button>
+      <button type="button" onClick={() => setState("guardado")}>
+        Termina el autoguardado
+      </button>
+      <button type="button" onClick={() => setState("error")}>
+        El servidor lo rechaza
+      </button>
+      <output>{state}</output>
+    </>
+  )
+}
+
+// Mesa de formularios del 13 nov (F10): con «Guardado» en pantalla, salir por el menú preguntaba
+// «Si sales, se perderán». La columna contaba la tecla y solo un `submit` la desarmaba.
+it("lo que se guarda solo: con todo guardado salir no pregunta, y un cambio que aún no se guardó sí", async () => {
+  const router = appWith(
+    [
+      ["/ficha", () => <Autosaved />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ficha",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.input(await screen.findByLabelText("Hallazgos"), { target: { value: "Percusión positiva" } })
+
+  // Aún sin guardar: avisa, como siempre.
+  void router.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
+  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+  fireEvent.click(screen.getByRole("button", { name: "Termina el autoguardado" }))
+  await screen.findByText("guardado")
+  await router.navigate({ href: "/agenda" })
+  await screen.findByText("Agenda")
+  expect(screen.queryByRole("alertdialog")).toBeNull()
+})
+
+it("lo que se guarda solo: volver a escribir después de guardar vuelve a avisar", async () => {
+  const router = appWith([["/ficha", () => <Autosaved />]], "/ficha")
+  render(<RouterProvider router={router} />)
+  fireEvent.input(await screen.findByLabelText("Hallazgos"), { target: { value: "Percusión" } })
+  fireEvent.click(screen.getByRole("button", { name: "Termina el autoguardado" }))
+  await screen.findByText("guardado")
+  fireEvent.input(screen.getByLabelText("Hallazgos"), { target: { value: "Percusión positiva" } })
+  void router.navigate({ href: "/ficha?tab=otra" })
+  await screen.findByRole("alertdialog")
+})
+
+it("lo que el servidor no guardó avisa aunque el cambio no haya sido una tecla", async () => {
+  const router = appWith([["/ficha", () => <Autosaved />]], "/ficha")
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+  void router.navigate({ href: "/ficha?tab=otra" })
+  await screen.findByRole("alertdialog")
+})
+
+// Un formulario finalizado o descartado se abre solo para leer: tocar una opción apagada no cambia nada.
+it("tocar una opción deshabilitada no cuenta como cambio sin guardar", async () => {
+  const router = appWith(
+    [
+      ["/ficha", () => <Autosaved />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ficha",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("radio", { name: "No" }))
+  fireEvent.keyDown(screen.getByRole("radio", { name: "No" }), { key: " " })
+  await router.navigate({ href: "/agenda" })
+  await screen.findByText("Agenda")
+  expect(screen.queryByRole("alertdialog")).toBeNull()
 })

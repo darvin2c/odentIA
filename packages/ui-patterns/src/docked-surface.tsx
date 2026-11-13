@@ -27,7 +27,24 @@ const CHOICE_SELECTOR =
  * pierda al salir) no arma el aviso de «salir sin guardar».
  */
 function isChoice(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(CHOICE_SELECTOR) !== null && target.closest("[data-draft-ignore]") === null
+  if (!(target instanceof Element)) return false
+  const choice = target.closest(CHOICE_SELECTOR)
+  // Una opción apagada no cambia nada al tocarla (un formulario que solo se lee).
+  if (choice === null || choice.matches(":disabled, [aria-disabled=true], [data-disabled]")) return false
+  return target.closest("[data-draft-ignore]") === null
+}
+
+const DraftSavedContext = React.createContext<(saved: boolean) => void>(() => {})
+
+/**
+ * Para una superficie que guarda sin `submit` (un autoguardado, una nota que se agrega con su
+ * botón): le dice a la columna cómo quedó lo escrito. `true`, ya está guardado: el aviso de
+ * «salir sin guardar» se desarma hasta que se vuelva a escribir. `false`, hay algo que no se
+ * guardó: avisa aunque el cambio no haya sido una tecla. Fuera de la columna no hace nada: en
+ * un cajón el aviso es el del propio cajón (`isDirty`).
+ */
+export function useDraftSaved(): (saved: boolean) => void {
+  return React.useContext(DraftSavedContext)
 }
 
 /** Un cajón más ancho que esto es una vista inmersiva (visor, comparador): no va a la columna. */
@@ -119,6 +136,12 @@ function DockedColumn({
   // escribir lo arma otra vez (p. ej. tras un error de validación).
   const [touched, setTouched] = React.useState(false)
   const [armed, setArmed] = React.useState(true)
+  // Lo que guarda sin `submit` lo dice la propia superficie (`useDraftSaved`).
+  const [unsaved, setUnsaved] = React.useState(false)
+  const draftSaved = React.useCallback((saved: boolean) => {
+    setUnsaved(!saved)
+    if (saved) setTouched(false)
+  }, [])
 
   // Quién la abrió se anota al renderizar, antes de que un campo con
   // `autoFocus` del formulario tome el foco y pase por ser el que la abrió.
@@ -179,9 +202,9 @@ function DockedColumn({
           setTouched(true)
         }}
       >
-        {children}
+        <DraftSavedContext.Provider value={draftSaved}>{children}</DraftSavedContext.Provider>
       </div>
-      {DraftGuard ? <DraftGuard dirty={armed && (dirty || touched)} keptInPage={keptInPage} /> : null}
+      {DraftGuard ? <DraftGuard dirty={unsaved || (armed && (dirty || touched))} keptInPage={keptInPage} /> : null}
     </SideColumn>
   )
 }
