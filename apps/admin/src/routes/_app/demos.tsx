@@ -65,6 +65,14 @@ function DemosPage() {
   const shown = all.filter((demo) => product === "todos" || demo.product === product)
   const opened = search.demo ? all.find((demo) => demo.id === search.demo) : undefined
   const close = () => setSearch({ demo: undefined })
+  // Borrada la demo no queda nada por guardar: el cierre no pasa por el aviso de borradores,
+  // que todavía puede ver escrito el nombre de la confirmación y frenar la navegación.
+  const closeDeleted = () =>
+    void navigate({
+      search: (prev) => ({ ...prev, demo: undefined }),
+      replace: true,
+      ignoreBlocker: true,
+    })
   const building = (demo: DemoItem) => demo.status !== "lista" || !demo.organizationId
 
   return (
@@ -171,7 +179,7 @@ function DemosPage() {
       {/* La que se arma o falló: su avance. La lista: su franja y lo que tiene para mostrar. */}
       <DemoProgressDrawer demoId={opened && building(opened) ? opened.id : null} onClose={close} />
       {search.demo && opened && !building(opened) ? (
-        <ReadyDemoDrawer demo={opened} isAdmin={isAdmin} onClose={close} />
+        <ReadyDemoDrawer demo={opened} isAdmin={isAdmin} onClose={close} onDeleted={closeDeleted} />
       ) : null}
       {search.demo && demos.isSuccess && !opened ? (
         <DetailDrawer open onClose={close} title="Esa demo ya no está" closeLabel="Cerrar">
@@ -190,10 +198,12 @@ function ReadyDemoDrawer({
   demo,
   isAdmin,
   onClose,
+  onDeleted,
 }: {
   demo: DemoItem
   isAdmin: boolean
   onClose: () => void
+  onDeleted: () => void
 }) {
   const detail = useDemoOfOrganization(demo.organizationId ?? "")
   const openDemo = useOpenDemo()
@@ -220,7 +230,7 @@ function ReadyDemoDrawer({
         <EmptyState title="Esa demo ya no está" description="Se borró mientras la mirabas." />
       ) : (
         <div className="flex flex-col gap-4">
-          <DemoBand demo={detail.data} isAdmin={isAdmin} onDeleted={onClose} />
+          <DemoBand demo={detail.data} isAdmin={isAdmin} onDeleted={onDeleted} />
           <DemoShowcase demo={detail.data} />
         </div>
       )}
