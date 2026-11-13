@@ -395,6 +395,24 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
+  // Soporte mirando una clínica (ADR 0184): desde su app, nada escribe, tampoco en las rutas de
+  // la cuenta, el acceso o el correo, que no pasan por los frenos de la clínica.
+  app.use("/api/*", async (c, next) => {
+    const method = c.req.method
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next()
+    if (c.req.path.startsWith("/api/support-session/")) return next()
+    const origin = c.req.header("origin") ?? ""
+    if (!(trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)))) return next()
+    if (!c.req.header("cookie")?.includes("odentia_soporte=")) return next()
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support === null) {
+      const session = supportSessionOf(c)
+      if (session) await auditDenied(deps.ownerDb, session)
+      return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+    }
+    return next()
+  })
+
   // Una página de una clínica no puede usar la cookie compartida para operar
   // el backoffice. SSR solo reenvía cookies para lecturas sin Origin.
   app.use("/api/admin/*", async (c, next) => {

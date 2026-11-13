@@ -70,7 +70,7 @@ import { authClient, authFetch } from "../lib/auth-client"
 import { requireTermsAccepted, requireVerifiedSession, type SessionInfo, ssrFetchOptions } from "../lib/guards"
 import { ApiError, apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
-import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone, notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
 import { endSupportSession, isSupportEnded, loadSupportSession, type SupportMode } from "../lib/support-mode"
@@ -144,7 +144,11 @@ async function checkOrgAccess(
   const sessionCheck = requireVerifiedSession(location)
   const termsCheck = requireTermsAccepted(location)
   const orgRead = slug ? readOrganization(slug, fetchOptions) : null
-  const support = await supportCheck
+  const found = await supportCheck
+  // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», nunca la sesión normal
+  // de ese navegador (la de la administración llevaría a otra pantalla).
+  if (found === "terminado") throw redirect({ href: "/soporte?terminado=1" })
+  const support = found
   if (support) {
     // Lo de la sesión de la clínica no aplica: sus rechazos no quedan sin atender.
     sessionCheck.catch(() => undefined)
@@ -378,7 +382,11 @@ function SupportStrip({ support }: { support: SupportMode }) {
       if (atEnd) window.clearTimeout(atEnd)
     }
   }, [support.expiresAt])
-  const untilFull = new Date(support.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  const untilFull = new Date(support.expiresAt).toLocaleTimeString(activeOrgLocale(), {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
+  })
   const until = untilFull.replace(/\.$/, "")
   return (
     <NoticeStrip

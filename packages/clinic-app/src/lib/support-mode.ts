@@ -28,7 +28,7 @@ interface SupportMe extends SupportMode {
 export async function loadSupportSession(
   slug: string,
   fetchOptions?: { headers?: Record<string, string> },
-): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode } | null> {
+): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode } | "terminado" | null> {
   try {
     const { data } = await apiFetch<{ data: SupportMe }>(
       "/api/support-session/me",
@@ -76,10 +76,7 @@ export async function loadSupportSession(
   } catch (error) {
     // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», no la sesión normal
     // de ese navegador (la de la administración llevaría a otra pantalla).
-    if (isSupportEnded(error) && typeof window !== "undefined") {
-      window.location.replace("/soporte?terminado=1")
-      return await new Promise<never>(() => undefined)
-    }
+    if (isSupportEnded(error)) return "terminado"
     return null
   }
 }

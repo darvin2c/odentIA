@@ -39,7 +39,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { weekdaysLabel } from "../../lib/branch-hours"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
-import { useCan, useMyRole, usePermission } from "../../lib/crm"
+import { useCan, useMyRole, usePermission, useSupportMode } from "../../lib/crm"
 import { settingsPrimary } from "../../lib/screen-rules"
 import { appRoleLabel } from "../../lib/product-words"
 import {
@@ -239,9 +239,12 @@ function TeamPage() {
   )
   const attendanceLoaded = attendanceQuery.data !== undefined
 
+  const supportMode = useSupportMode()
   const orgQuery = useQuery({
     queryKey: ["full-org", routeOrg.id],
     queryFn: async () => {
+      // Soporte mirando la clínica no tiene sesión de la clínica: el equipo llega con su sesión.
+      if (supportMode) return routeOrg as unknown as FullOrganization
       const { data, error } = await authClient.organization.getFullOrganization({
         query: { organizationId: routeOrg.id },
       })

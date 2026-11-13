@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
 import { useMemberName } from "../lib/crm"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 import { appWords } from "../lib/product-words"
 import { productUi } from "../product/product-ui"
 
@@ -64,7 +65,7 @@ export function supportViewWords(viewRole: string | null | undefined): string {
 
 /** «hasta las 4:40 p. m.» en la hora de este equipo. */
 export function untilWords(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  return new Date(iso).toLocaleTimeString(activeOrgLocale(), { hour: "numeric", minute: "2-digit", timeZone: activeOrgTimeZone() })
 }
 
 /** La hora al final de una frase: «6:34 p. m.» ya trae su punto; «18:34» lo recibe. */

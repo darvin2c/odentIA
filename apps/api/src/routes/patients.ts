@@ -738,6 +738,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const resource = ACCESS_RESOURCE_BY_PREFIX.find(([prefix]) => remainder.startsWith(prefix))?.[1]
     // Soporte mirando la clínica: lo que abre queda anotado ANTES de mostrarse, y si
     // no se puede anotar no se muestra (el contrato promete que cada acceso queda).
+    // La cabecera de la ficha con lo clínico (alergias, medicación) también es una lectura de la historia.
+    if (isSupportRequest(c) && remainder === "" && !write && c.req.query("clinical")) {
+      const headerId = canonicalUuid(c.req.path.match(/\/patients\/([^/]+)$/)?.[1])
+      if (headerId) {
+        const { orgId, userId } = orgContextOf(c)
+        const traced = await traceClinicalReadOrFail(deps.db, { orgId, userId, patientId: headerId, resource: "resumen" })
+        if (!traced) return c.json(errorBody(c, "TRACE_FAILED", "No pudimos anotar esta consulta: inténtalo de nuevo"), 503)
+      }
+    }
     // Descargar la historia completa no es mirar: soporte no se la lleva (y no se anota lo que no pasa).
     if (isSupportRequest(c) && remainder.startsWith("/record")) {
       const session = supportSessionOf(c)
