@@ -6,6 +6,10 @@
  * por nombre; el teléfono es solo una pista), pregunta «¿Es la misma clínica?»
  * con «Abrir esa» y «Es otra clínica», que vuelve a guardar diciendo que es
  * nueva (`confirmNew`). Nada se une solo.
+ *
+ * Desde un correo sin cliente (Kairós) llega con el correo y el nombre de
+ * quien escribió (`initial`) y, al guardarlo, liga el correo (`onCreated`);
+ * si era una que ya existía, «Es esta: ligar el correo» la usa.
  */
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
@@ -15,6 +19,7 @@ import {
   AgentSurface,
   common,
   FormDrawer,
+  submitErrorMessage,
   submitForm,
   useAppForm,
   useFormSurface,
@@ -67,7 +72,8 @@ const formSchema = z
     }
   })
 
-type FormValues = z.input<typeof formSchema>
+export type NewClientValues = z.input<typeof formSchema>
+type FormValues = NewClientValues
 
 const DEFAULTS: FormValues = {
   name: "",
@@ -115,7 +121,24 @@ export function useStaff() {
   })
 }
 
-export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function NewClientDrawer({
+  open,
+  onClose,
+  initial,
+  title = "Nuevo cliente",
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  /** Lo que ya se sabe (el remitente de un correo). */
+  initial?: Partial<NewClientValues>
+  title?: string
+  /**
+   * Lo que sigue al guardarlo, con el cliente nuevo o el que ya existía
+   * («Es esta»): ligar el correo. Si falla, el cliente queda y se dice.
+   */
+  onCreated?: (clientId: string) => Promise<void>
+}) {
   const isAdmin = useIsAdmin()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -124,7 +147,7 @@ export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () 
   const confirmNew = React.useRef(false)
 
   const form = useAppForm({
-    defaultValues: DEFAULTS,
+    defaultValues: { ...DEFAULTS, ...initial },
     validators: { onSubmit: formSchema },
     onSubmit: async ({ value, formApi }) => {
       const body = {
@@ -154,6 +177,7 @@ export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () 
         return
       }
       const created = clientCreatedSchema.parse(raw)
+      if (onCreated) await follow(created.id, body.name)
       void queryClient.invalidateQueries({ queryKey: ["admin", "clients"] })
       void queryClient.invalidateQueries({ queryKey: ["admin", "kairos"] })
       void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
@@ -168,13 +192,24 @@ export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () 
     },
   })
   const surface = useFormSurface(form, { fieldMap: FIELD_MAP })
+  /** Lo que sigue al cliente (ligar el correo); si falla, el cliente ya quedó y se dice cómo seguir. */
+  async function follow(clientId: string, name: string) {
+    try {
+      await onCreated?.(clientId)
+    } catch (error) {
+      toast.error(
+        `${name}: el correo no se ligó (${submitErrorMessage(error)}). Lígalo desde Kairós.`,
+      )
+    }
+  }
 
   const close = () => {
     setDuplicates(null)
     confirmNew.current = false
     onClose()
   }
-  const openExisting = (hint: DuplicateHint) => {
+  const openExisting = async (hint: DuplicateHint) => {
+    if (onCreated && hint.clientId) await follow(hint.clientId, hint.words)
     close()
     form.reset()
     if (hint.clientId)
@@ -198,7 +233,7 @@ export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () 
       {...surface}
       open={open}
       onClose={close}
-      title="Nuevo cliente"
+      title={title}
       description="Basta la clínica, una persona y cómo contactarla. Lo demás se completa en su ficha."
       submitLabel="Guardar cliente"
       cancelLabel={common.actions.cancel}
@@ -245,9 +280,9 @@ export function NewClientDrawer({ open, onClose }: { open: boolean; onClose: () 
                             type="button"
                             size="sm"
                             variant="outline"
-                            onClick={() => openExisting(hint)}
+                            onClick={() => void openExisting(hint)}
                           >
-                            Abrir esa
+                            {onCreated && hint.clientId ? "Es esta: ligar el correo" : "Abrir esa"}
                           </Button>
                         ) : null}
                       </li>

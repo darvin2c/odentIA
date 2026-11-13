@@ -25,8 +25,9 @@ import {
 } from "./sale-api"
 
 /**
- * «Escribir» a un cliente (lienzo de la ficha). Correo: sale con la marca del
- * producto y responde a contacto@ de ese dominio; si se corta a mitad, el
+ * «Escribir» a un cliente (lienzo de la ficha). Correo: sale con el nombre y
+ * la dirección de quien escribe (o hola@ de la marca), y la respuesta vuelve
+ * a esa dirección; si se corta a mitad, el
  * servidor dice que no se sabe si salió (502 `SEND_UNKNOWN`) y aquí no se
  * vuelve a enviar: la persona revisa y marca «Salió» o «No salió». WhatsApp:
  * no hay bandeja de Sallca, así que se abre el chat con el texto puesto en otra
@@ -56,10 +57,7 @@ export function WriteDrawer(props: WriteDrawerProps) {
 
 const OTHER = "__otro"
 
-type Phase =
-  | { kind: "form" }
-  | { kind: "whatsapp"; outreachId: string; url: string; to: string }
-  | { kind: "incierto"; outreachId: string | null; message: string }
+type Phase = { kind: "form" } | OutreachCheck
 
 const writeSchema = z
   .object({
@@ -191,24 +189,6 @@ function WriteForm({
   })
   const surface = useFormSurface(form, { fieldMap: { to: "to", contactId: "contactId" } })
   const values = useStore(form.store, (state) => state.values)
-  // Lo que se abrió por WhatsApp o quedó incierto se resuelve aquí: «Salió» o «No salió».
-  const resolve = useMutation({
-    mutationFn: async ({
-      outreachId,
-      outcome,
-    }: {
-      outreachId: string
-      outcome: "salio" | "no_salio"
-    }) => resolveOutreach(outreachId, outcome),
-    onSuccess: (_data, { outcome }) => {
-      invalidate()
-      toast.success(
-        outcome === "salio" ? "Anotado: salió. Queda en su historial." : "Anotado: no salió.",
-      )
-      onClose()
-    },
-  })
-
   const usable = contacts.filter((contact) => addressOf(contact, values.channel))
   const contactOptions = [
     ...usable.map((contact) => ({
@@ -220,76 +200,14 @@ function WriteForm({
 
   if (phase.kind !== "form") {
     return (
-      <FormDrawer
-        open
+      <OutreachCheckDrawer
+        phase={phase}
         onClose={onClose}
-        title={phase.kind === "whatsapp" ? "¿Salió el WhatsApp?" : "¿Salió el correo?"}
-        onSubmit={(event) => event.preventDefault()}
-        hideSubmit
-        cancelLabel={common.actions.close}
-        isSubmitting={resolve.isPending}
-      >
-        <div className="flex flex-col gap-4">
-          {phase.kind === "whatsapp" ? (
-            <>
-              <p className="text-sm">
-                Se abrió WhatsApp con el mensaje para {phase.to} en otra pestaña. Envíalo desde ahí
-                y vuelve para decir si salió.
-              </p>
-              <a
-                href={phase.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex w-fit items-center gap-1.5 text-sm font-medium underline underline-offset-4"
-              >
-                <ExternalLink aria-hidden className="size-4" />
-                Abrir WhatsApp otra vez
-              </a>
-            </>
-          ) : (
-            <PageNotice tone="alarma" label="No se sabe">
-              {phase.message}
-            </PageNotice>
-          )}
-          {phase.outreachId ? (
-            <div className="flex flex-wrap gap-2">
-              <SubmitButton
-                type="button"
-                pending={resolve.isPending && resolve.variables?.outcome === "salio"}
-                disabled={resolve.isPending}
-                onClick={() =>
-                  phase.outreachId &&
-                  resolve.mutate({ outreachId: phase.outreachId, outcome: "salio" })
-                }
-              >
-                Salió
-              </SubmitButton>
-              <SubmitButton
-                type="button"
-                variant="outline"
-                pending={resolve.isPending && resolve.variables?.outcome === "no_salio"}
-                disabled={resolve.isPending}
-                onClick={() =>
-                  phase.outreachId &&
-                  resolve.mutate({ outreachId: phase.outreachId, outcome: "no_salio" })
-                }
-              >
-                No salió
-              </SubmitButton>
-            </div>
-          ) : null}
-          {resolve.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {submitErrorMessage(resolve.error)}
-            </p>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            {phase.kind === "whatsapp"
-              ? "Si cierras sin decirlo, el mensaje queda pendiente en su historial hasta que alguien lo marque."
-              : "No se vuelve a enviar solo. Si cierras sin decirlo, queda como incierto en su historial."}
-          </p>
-        </div>
-      </FormDrawer>
+        onResolved={() => {
+          invalidate()
+          onClose()
+        }}
+      />
     )
   }
 
@@ -376,7 +294,7 @@ function WriteForm({
                   values.channel === "correo"
                     ? proposalId
                       ? "Sale con la marca del producto y la propuesta en PDF adjunta."
-                      : "Sale con la marca del producto; si responde, llega a contacto@ de su dominio."
+                      : "Sale con tu nombre y tu dirección de la marca (o desde hola@ si aún no tienes una); su respuesta vuelve ahí."
                     : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
                 }
                 rows={7}
@@ -401,6 +319,116 @@ function WriteForm({
             Por WhatsApp no va el PDF: si hace falta, envíalo por correo.
           </p>
         ) : null}
+      </div>
+    </FormDrawer>
+  )
+}
+
+/** Lo que espera que una persona diga si salió: el WhatsApp abierto o el correo incierto. */
+export type OutreachCheck =
+  | { kind: "whatsapp"; outreachId: string; url: string; to: string }
+  | { kind: "incierto"; outreachId: string | null; message: string }
+
+/**
+ * «¿Salió?»: el WhatsApp que se abrió por su enlace o el correo que no se sabe
+ * si salió (502 `SEND_UNKNOWN`). La persona dice «Salió» o «No salió» con la
+ * misma operación de los envíos; nada se vuelve a enviar solo. Lo usan
+ * «Escribir» y «Responder».
+ */
+export function OutreachCheckDrawer({
+  phase,
+  onClose,
+  onResolved,
+}: {
+  phase: OutreachCheck
+  onClose: () => void
+  /** Después de anotarlo (la pantalla refresca lo suyo y cierra). */
+  onResolved: () => void
+}) {
+  const resolve = useMutation({
+    mutationFn: async ({
+      outreachId,
+      outcome,
+    }: {
+      outreachId: string
+      outcome: "salio" | "no_salio"
+    }) => resolveOutreach(outreachId, outcome),
+    onSuccess: (_data, { outcome }) => {
+      toast.success(
+        outcome === "salio" ? "Anotado: salió. Queda en su historial." : "Anotado: no salió.",
+      )
+      onResolved()
+    },
+  })
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={phase.kind === "whatsapp" ? "¿Salió el WhatsApp?" : "¿Salió el correo?"}
+      onSubmit={(event) => event.preventDefault()}
+      hideSubmit
+      cancelLabel={common.actions.close}
+      isSubmitting={resolve.isPending}
+    >
+      <div className="flex flex-col gap-4">
+        {phase.kind === "whatsapp" ? (
+          <>
+            <p className="text-sm">
+              Se abrió WhatsApp con el mensaje para {phase.to} en otra pestaña. Envíalo desde ahí y
+              vuelve para decir si salió.
+            </p>
+            <a
+              href={phase.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-fit items-center gap-1.5 text-sm font-medium underline underline-offset-4"
+            >
+              <ExternalLink aria-hidden className="size-4" />
+              Abrir WhatsApp otra vez
+            </a>
+          </>
+        ) : (
+          <PageNotice tone="alarma" label="No se sabe">
+            {phase.message}
+          </PageNotice>
+        )}
+        {phase.outreachId ? (
+          <div className="flex flex-wrap gap-2">
+            <SubmitButton
+              type="button"
+              pending={resolve.isPending && resolve.variables?.outcome === "salio"}
+              disabled={resolve.isPending}
+              onClick={() =>
+                phase.outreachId &&
+                resolve.mutate({ outreachId: phase.outreachId, outcome: "salio" })
+              }
+            >
+              Salió
+            </SubmitButton>
+            <SubmitButton
+              type="button"
+              variant="outline"
+              pending={resolve.isPending && resolve.variables?.outcome === "no_salio"}
+              disabled={resolve.isPending}
+              onClick={() =>
+                phase.outreachId &&
+                resolve.mutate({ outreachId: phase.outreachId, outcome: "no_salio" })
+              }
+            >
+              No salió
+            </SubmitButton>
+          </div>
+        ) : null}
+        {resolve.isError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitErrorMessage(resolve.error)}
+          </p>
+        ) : null}
+        <p className="text-xs text-muted-foreground">
+          {phase.kind === "whatsapp"
+            ? "Si cierras sin decirlo, el mensaje queda pendiente en su historial hasta que alguien lo marque."
+            : "No se vuelve a enviar solo. Si cierras sin decirlo, queda como incierto en su historial."}
+        </p>
       </div>
     </FormDrawer>
   )

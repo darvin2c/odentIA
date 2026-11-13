@@ -20,7 +20,9 @@ import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import { EmailDrawer } from "./email-drawer"
 import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./hoy-links"
+import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
 
 /**
  * Lo que preparó Kairós y espera el sí de una persona (`/api/admin/kairos`):
@@ -28,6 +30,10 @@ import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./h
  * Cambiar y Ahora no. Aprobar ejecuta la misma operación de la pantalla en el
  * servidor; un correo sale una sola vez y un WhatsApp se abre por su enlace y
  * queda «¿Salió?» hasta que la persona lo dice. Nada se reintenta solo.
+ *
+ * Los correos: «responder_correo» trae el borrador de la respuesta y se envía
+ * (o se cambia en el mismo cajón de «Responder»); «correo_sin_cliente» se
+ * liga a un cliente, se responde sin ligarlo o crea el cliente con el correo.
  */
 
 /** El tipo y el estado se leen como texto: uno nuevo del servidor no rompe la pantalla. */
@@ -99,6 +105,7 @@ export function kairosItemTab(kind: string): ClientTab {
     case "vinculo":
       return "contactos"
     case "mensaje":
+    case "responder_correo":
       return "historial"
     default:
       return "resumen"
@@ -127,6 +134,8 @@ function approveLabel(item: KairosItem): string {
       return "Ir a Demos"
     case "presentacion_hecha":
       return "Sí, se hizo"
+    case "responder_correo":
+      return "Enviar"
     default:
       return "Aprobar"
   }
@@ -141,7 +150,22 @@ function dueWords(expiresAt: string, now: Date): { text: string; urgent: boolean
   return { text: `Vence el ${supportDayTime(expiresAt)}`, urgent: left < 6 * 3_600_000 }
 }
 
+/** Lo que Kairós redacta antes de estar listo: hasta tenerlo, no se puede enviar. */
+const DRAFTED = new Set(["mensaje", "guion", "responder_correo"])
+
+/** «Juana Pérez <juana@…>» de un correo que llegó. */
+const senderOf = (item: KairosItem): string => {
+  const from = text(item.payload.from) ?? ""
+  const name = text(item.payload.fromName)
+  return name ? `${name} <${from}>` : from
+}
+
+/** Soporte responde solo lo que llegó a soporte@ (lo demás es comercial; el servidor lo niega igual). */
+const canAnswer = (item: KairosItem, isAdmin: boolean) =>
+  isAdmin || text(item.payload.mailbox) === "soporte"
+
 const outreachWords = (item: KairosItem): string | null => {
+  if (item.kind === "responder_correo") return `Respuesta por correo a ${senderOf(item)}`
   const channel = channelOf(item)
   const to = text(item.payload.to)
   if (!channel) return null
@@ -259,7 +283,15 @@ export function KairosItemCard({
 }) {
   const decide = useKairosDecide()
   const [changing, setChanging] = useState(false)
+  const [replying, setReplying] = useState(false)
+  const [creating, setCreating] = useState(false)
   const leave = useFocusOnLeave<HTMLLIElement>()
+  const emailId = text(item.payload.emailId)
+  /** El sí del ítem con lo que se cambió: lo usan «Responder» (el texto) y «Crear cliente» (el cliente). */
+  const approveWith = async (edited: Record<string, unknown>) => {
+    leave.markLeaving()
+    await decide.mutateAsync({ item, action: "aprobar", edited })
+  }
   const due = dueWords(item.expiresAt, now)
   const facts = textList(item.payload.facts)
   const subject = text(item.payload.subject)
@@ -308,7 +340,7 @@ export function KairosItemCard({
           </ul>
         </div>
       ) : null}
-      {item.kind === "mensaje" || item.kind === "guion" ? (
+      {DRAFTED.has(item.kind) ? (
         item.ready && body ? (
           <div className="rounded-lg bg-muted p-3 text-sm">
             {outreachWords(item) ? (
@@ -345,14 +377,47 @@ export function KairosItemCard({
           <Button
             type="button"
             size="sm"
-            disabled={
-              pending || ((item.kind === "mensaje" || item.kind === "guion") && !item.ready)
-            }
+            disabled={pending || (DRAFTED.has(item.kind) && !item.ready)}
             onClick={() => run("aprobar")}
           >
             {approveLabel(item)}
           </Button>
         )}
+        {item.kind === "responder_correo" && emailId && item.ready ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => setReplying(true)}
+          >
+            Cambiar
+          </Button>
+        ) : null}
+        {item.kind === "correo_sin_cliente" && emailId ? (
+          <>
+            {canAnswer(item, isAdmin) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => setReplying(true)}
+              >
+                Responder
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setCreating(true)}
+            >
+              Crear cliente con este correo
+            </Button>
+          </>
+        ) : null}
         {!onlyAdmin && CHANGEABLE.has(item.kind) && !needsClient && item.ready ? (
           <Button
             type="button"
@@ -363,7 +428,10 @@ export function KairosItemCard({
           >
             Cambiar
           </Button>
-        ) : !CHANGEABLE.has(item.kind) && item.kind !== "demo" && item.clientId ? (
+        ) : !CHANGEABLE.has(item.kind) &&
+          item.kind !== "demo" &&
+          item.kind !== "responder_correo" &&
+          item.clientId ? (
           <OpenClientButton
             clientId={item.clientId}
             tab={kairosItemTab(item.kind)}
@@ -388,8 +456,51 @@ export function KairosItemCard({
           onApproving={leave.markLeaving}
         />
       ) : null}
+      {emailId && replying ? (
+        item.kind === "responder_correo" ? (
+          // «Cambiar» es responder con el borrador de Kairós; «Enviar» es su sí.
+          <EmailDrawer
+            emailId={emailId}
+            open
+            replying
+            draft={body ?? ""}
+            draftNote={item.drafter === "plantilla" ? item.draftNote : null}
+            onSend={(edited) => approveWith({ body: edited })}
+            onClose={() => setReplying(false)}
+          />
+        ) : (
+          // Responder sin ligarlo: el ítem sigue esperando que digan de quién es.
+          <EmailDrawer emailId={emailId} open replying onClose={() => setReplying(false)} />
+        )
+      ) : null}
+      {creating ? (
+        <NewClientDrawer
+          open
+          title="Crear cliente con este correo"
+          initial={newClientFromEmail(item)}
+          onCreated={(clientId) => approveWith({ clientId })}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
     </li>
   )
+}
+
+/** Lo que se sabe del remitente para «Nuevo cliente»: su correo, su nombre y la marca. */
+export function newClientFromEmail(item: KairosItem): Partial<NewClientValues> {
+  const product = text(item.payload.product)
+  const mailbox = text(item.payload.mailbox)
+  return {
+    contactName: text(item.payload.fromName) ?? "",
+    email: text(item.payload.from) ?? "",
+    ...(product && (CLINICAL_PRODUCTS as readonly string[]).includes(product)
+      ? { product: product as ClinicalProduct }
+      : {}),
+    origin: "otro",
+    originDetail: mailbox
+      ? `Nos escribió a ${mailbox === "persona" ? "una persona del equipo" : `${mailbox}@`}`
+      : "",
+  }
 }
 
 /* ---------- Cambiar ---------- */
