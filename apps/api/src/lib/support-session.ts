@@ -229,7 +229,8 @@ export function supportFileSecret(secretsKey: Buffer): Buffer {
 /**
  * `/api/support-session`: canjear el pase, saber con qué se mira, salir, saber
  * por qué terminó y leer un archivo. Público (sin la sesión de Better Auth): cada
- * ruta comprueba la cookie de soporte.
+ * ruta comprueba la cookie de soporte. «El acceso terminó» (`SUPPORT_ACCESS_ENDED`)
+ * se le dice solo a quien trae esa cookie; sin ella, `/me` y `/ended` responden sin datos.
  */
 export function createSupportSessionRoute(deps: {
   ownerDb: Db
@@ -282,7 +283,12 @@ export function createSupportSessionRoute(deps: {
 
   app.get("/me", async (c) => {
     const token = cookieOf(c)
-    const session = token ? await resolveSupportSession(deps.ownerDb, token) : null
+    // Sin cookie de soporte no hay nada que haya terminado: es el equipo de la clínica, cuya app
+    // lo pregunta en cada comprobación del acceso. Decirle «terminó» lo sacaba de su clínica.
+    // Responde sin error y sin datos: solo repite lo que el pedido ya traía (ninguna cookie).
+    if (!token) return c.json({ data: null })
+    // Con la cookie, es de soporte o de nadie: si la sesión ya no vale, el acceso terminó.
+    const session = await resolveSupportSession(deps.ownerDb, token)
     if (!session)
       return c.json(errorBody(c, "SUPPORT_ACCESS_ENDED", "El acceso de soporte terminó"), 401)
     const [org] = await deps.ownerDb
