@@ -129,7 +129,6 @@ const DOWNLOAD_TYPES = [
   "application/zip",
   "application/vnd.",
   "application/octet-stream",
-  "application/dicom",
 ]
 function isDownload(response: Response): boolean {
   const disposition = response.headers.get("content-disposition") ?? ""

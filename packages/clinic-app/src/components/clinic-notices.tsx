@@ -37,8 +37,10 @@ const noticesKey = (orgId: string) => ["saas", orgId, "notices"] as const
 
 /** Los avisos de la clínica para quien mira; la misma consulta para la franja, el menú y la Bandeja. */
 export function useClinicNotices() {
-  const { org } = orgRouteApi.useRouteContext()
+  const { org, support } = orgRouteApi.useRouteContext()
   return useQuery({
+    // Soporte mirando la clínica no recibe los avisos de la clínica (tiene su propia franja).
+    enabled: !support,
     queryKey: noticesKey(org.id),
     queryFn: () =>
       apiFetch<{ data: ClinicNotice[] }>(`/api/account/billing/notices?orgId=${encodeURIComponent(org.id)}`).then((res) => res.data),

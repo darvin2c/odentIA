@@ -400,8 +400,11 @@ export function createApp(deps: AppDeps) {
   app.use("/api/*", async (c, next) => {
     const method = c.req.method
     if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next()
-    if (c.req.path.startsWith("/api/support-session/")) return next()
+    if (c.req.path.startsWith("/api/support-session/") || c.req.path.startsWith("/api/admin/")) return next()
     const origin = c.req.header("origin") ?? ""
+    // La administración no es la app de una clínica: su personal sigue trabajando aunque
+    // tenga abierta, en otra pestaña, una clínica para mirar.
+    if (origin === adminOrigin) return next()
     if (!(trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)))) return next()
     if (!c.req.header("cookie")?.includes("odentia_soporte=")) return next()
     const support = await supportSessionGate(c, deps.ownerDb)
