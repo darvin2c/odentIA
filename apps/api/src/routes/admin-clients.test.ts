@@ -552,7 +552,7 @@ describe("envíos", () => {
     expect(mailAttempts - attemptsBefore).toBe(1)
   })
 
-  it("el correo que sale va con la marca del producto, firma quien escribe, le responden a ella y queda enviado", async () => {
+  it("el correo que escribe Soporte sale desde soporte@ con la marca del producto, le responden ahí y queda enviado", async () => {
     const clientId = await newClient("Consultorio Pardo (ficticio)", "bien@andes.test")
     const response = await call("POST", `/${clientId}/outreach`, SUPPORT, {
       channel: "correo",
@@ -567,12 +567,12 @@ describe("envíos", () => {
     expect(mail).toMatchObject({
       to: "bien@andes.test",
       subject: "Su demo",
-      from: { name: "Sara Soporte · odentIA", address: "sara.soporte@odentia32.com" },
-      replyTo: "sara.soporte@odentia32.com",
+      from: { name: "Soporte · odentIA", address: "soporte@odentia32.com" },
+      replyTo: "soporte@odentia32.com",
       brand: "odentia",
     })
     expect(mail?.messageId).toMatch(/^<[0-9a-f-]{36}@odentia32\.com>$/)
-    expect(data.outreach.from).toBe("sara.soporte@odentia32.com")
+    expect(data.outreach.from).toBe("soporte@odentia32.com")
   })
 
   it("WhatsApp devuelve el enlace con el texto y queda pendiente hasta «Salió»", async () => {

@@ -308,9 +308,9 @@ describe("lo que espera un sí", () => {
       to: "rosa@kairos-ruta.test",
       subject: "Su solicitud en odentIA",
       brand: "odentia",
-      // Firma quien aprueba, y la respuesta le llega a esa misma dirección.
-      from: { name: "Sofía Soporte · odentIA", address: "sofia.soporte@odentia32.com" },
-      replyTo: "sofia.soporte@odentia32.com",
+      // Aprueba Soporte: sale desde soporte@ y la respuesta llega ahí.
+      from: { name: "Soporte · odentIA", address: "soporte@odentia32.com" },
+      replyTo: "soporte@odentia32.com",
     })
     expect(sent[0]?.text).toContain("¿Hablamos mañana?")
     const [outreach] = await ownerDb
