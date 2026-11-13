@@ -23,6 +23,7 @@ import {
   appointmentPlanItem,
   patient,
   patientDataConsent,
+  patientHealthDeclaration,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
@@ -964,8 +965,19 @@ async function saveLinkData(
   }
   if (Object.keys(patch).length > 0) await updatePatient(tx, orgId, actor, patientId, patch)
   // Su salud entra como declarada por la persona: la revisa quien atiende.
-  if (withHealth && input.health)
-    await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
+  if (withHealth && input.health) {
+    const saved = await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
+    // Y queda aparte tal como la envió, con quién y cuándo: Antecedentes guarda lo vigente, que el
+    // equipo corrige; «Ver declaración original» muestra esto. Sin nada respondido, no hay qué guardar.
+    if (saved.revision > 0)
+      await tx.insert(patientHealthDeclaration).values({
+        organizationId: orgId,
+        patientId,
+        via: "enlace",
+        respondent: link.row.contactId === personId ? "patient" : "representative",
+        health: input.health,
+      })
+  }
   const person = await requirePatient(tx, orgId, patientId)
   const stillMissing = await getPatientMissingData(tx, orgId, patientId)
   if (personId) {

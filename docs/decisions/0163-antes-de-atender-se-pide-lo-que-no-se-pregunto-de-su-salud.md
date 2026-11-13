@@ -1,6 +1,6 @@
 # 0163 · Antes de atender se pide lo que no se preguntó de su salud
 
-Fecha: 2026-11-08 · Estado: aceptada · Amplía el aviso de alergias de la atención (ADR 0072)
+Fecha: 2026-11-08 · Estado: aceptada · Amplía el aviso de alergias de la atención (ADR 0072) · Actualizada el 2026-11-13: el embarazo declarado sale arriba de la ficha y de la atención, con su fecha
 
 ## Problema
 
@@ -29,6 +29,19 @@ La regla de la UX es avisar donde se decide sin frenar: nada puede trabar la fir
 - Lo que nunca se preguntó se pide en la primera atención, con la respuesta más común a un toque, y el panel ya no afirma lo que nadie preguntó.
 - Sacrificio: pacientes cargados sin antecedentes verán el aviso hasta que se responda. El embarazo no tiene fila propia (va en la entrevista de Antecedentes) y la medicación no se vuelve a preguntar a los 6 meses como las alergias; revisarlo si una clínica real lo pide.
 - Un anestésico con un nombre que no se reconoce no refuerza el cierre, pero el aviso de arriba sale igual.
+
+## Actualización del 2026-11-13: el embarazo declarado sale arriba, con su fecha
+
+«El embarazo no tiene fila propia (va en la entrevista de Antecedentes)… revisarlo si una clínica real lo pide» era un límite de alcance. La mesa del 13 nov sobre lo que la clínica le pide al paciente mostró el riesgo: una paciente que declaró 30 semanas en su registro no lo tenía a la vista en la franja, en «Lo que declaró» ni en el panel de la atención, que es donde se decide una radiografía o una receta. Se revisa esa consecuencia; lo demás de la decisión sigue igual.
+
+- **El embarazo sale arriba de la ficha y de la atención**, junto a las alergias, y en el aviso «Revisa con… lo que dijo de su salud». Sigue sin fila propia en «Pregúntale a…»: no se pregunta a un toque, se muestra lo que ya se dijo.
+- **Se guarda con el día en que se dijo**, en la forma que ya usaba latidIA (`embarazoLactancia.embarazo = { estado, fecha, semanas? }`), ahora común a los tres productos. La pantalla dice la semana de hoy («32 semanas hoy (30 el 13 nov)») y, pasada la semana 42, deja de mostrarlo como alerta y pide confirmarlo. La fecha es parte del dato: solo cambia cuando alguien responde de nuevo el embarazo o sus semanas, nunca por guardar otro dato de la entrevista.
+- **Lo guardado antes en odentIA y vistIA** (`antecedentesPersonales.embarazo`, un sí o no sin fecha) no se reescribe: se sigue leyendo, sin semana de hoy, como «Embarazo por confirmar». Queda en la forma nueva cuando alguien lo responde otra vez.
+- **Avisa, no frena.** No pide ningún paso ni impide abrir, recetar ni firmar. La receta y la orden de odentIA siguen sin avisar por embarazo (latidIA sí, ADR 0143): queda fuera de este cambio.
+
+Alternativas descartadas: *tomar la fecha de la versión de la entrevista* (cambia cada vez que alguien edita otro dato, y el embarazo parecería recién dicho); *mostrar las semanas que se dijeron, sin fecha* (un «30 semanas» congelado es falso al mes y queda para siempre); *una tabla propia para el embarazo* (la entrevista versionada ya lo guarda y latidIA ya lo lee de ahí).
+
+Referencias de la actualización: `packages/clinical/src/pregnancy.ts` (`pregnancyToday`, `checkInterviewPregnancy`, `declaredPregnancy`), `packages/services/src/product-hooks.ts` (`COMMON_INTERVIEW`), `packages/services/src/clinical.ts` (`getPatientHealth`: `pregnancy` y `declared`), `packages/clinic-app/src/lib/declared-health.ts`, `patient-header.tsx` (`PatientClinicalStrip`); pruebas `pregnancy.test.ts` y `lo-que-dijo-el-paciente.test.ts`.
 
 ## Referencias
 

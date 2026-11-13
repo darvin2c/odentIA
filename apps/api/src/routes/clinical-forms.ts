@@ -727,9 +727,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para finalizar formularios")
     }
+    // Sin cuerpo, como siempre. Desde la atención viaja cuál es: lo revisado queda ligado a ella.
+    const text = await c.req.text()
+    let body: unknown = {}
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = null
+      }
+    }
+    const parsed = z.object({ encounterId: z.string().uuid().nullish() }).strict().safeParse(body)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeFormResponse(tx, orgId, userId, c.req.param("id")),
+        finalizeFormResponse(tx, orgId, userId, c.req.param("id"), { encounterId: parsed.data.encounterId ?? null }),
       ),
     )
   })

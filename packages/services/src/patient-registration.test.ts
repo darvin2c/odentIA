@@ -1746,7 +1746,12 @@ it("su entrevista declarada se suma campo por campo: lo que anotó el profesiona
   const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
   await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, revision: view.revision }))
   const after = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", ines.id))
-  expect(after.latestAnamnesis?.answers).toMatchObject({ antecedentesPersonales: { cirugias: "Apendicectomía", embarazo: true } })
+  // El embarazo entra con el día en que lo dijo (el del registro), junto a lo que ya estaba.
+  expect(after.latestAnamnesis?.answers).toMatchObject({
+    antecedentesPersonales: { cirugias: "Apendicectomía" },
+    embarazoLactancia: { embarazo: { estado: "si", semanas: 20 } },
+  })
+  expect(after.pregnancy).toMatchObject({ state: "vigente", weeksSaid: 20 })
   expect(after.medications.map((row) => row.name)).toEqual(["Losartán"])
   expect(after).toMatchObject({ reviewPending: true, reviewStatus: { medications: "recorded", conditions: "none" } })
   await publishAsking("org_a", { "personal.embarazo": "hidden" })
