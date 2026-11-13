@@ -222,7 +222,7 @@ function KnowCard({ client }: { client: ClientDetail }) {
       ) : null}
       {client.signals.length ? (
         <p className="text-sm">
-          <span className="font-medium">Marca: </span>
+          <span className="font-medium">Kairós marca: </span>
           {client.signals.map((signal) => signal.words).join(" · ")}
         </p>
       ) : null}
