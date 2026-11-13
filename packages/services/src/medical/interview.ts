@@ -1,6 +1,6 @@
-import { parseMedicalHistory } from "@odentia/medical"
+import { medicalHistoryEntries, parseMedicalHistory, readMedicalHistory } from "@odentia/medical"
 import { invalidField, validation } from "../errors.js"
-import { answeredOf, type ProductInterview } from "../product-hooks.js"
+import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
 
 /**
  * La entrevista de latidIA (issue 229, decisión 13): lo común más embarazo y
@@ -41,4 +41,8 @@ export const medicalInterview: ProductInterview = {
       ...(Object.keys(habits).length ? { habitos: habits } : {}),
     }
   },
+  record: (answers, today) => [
+    ...COMMON_INTERVIEW.record(answers, today),
+    ...medicalHistoryEntries(readMedicalHistory(answers, today), today),
+  ],
 }

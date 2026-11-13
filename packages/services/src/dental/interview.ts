@@ -1,4 +1,4 @@
-import { dentalInterviewErrors } from "@odentia/dental"
+import { dentalInterviewEntries, dentalInterviewErrors } from "@odentia/dental"
 import { fieldsError } from "../errors.js"
 import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
 
@@ -20,4 +20,5 @@ export const dentalInterview: ProductInterview = {
       ...(Object.keys(dental).length ? { antecedentesOdontologicos: dental } : {}),
     }
   },
+  record: (answers, today) => [...COMMON_INTERVIEW.record(answers, today), ...dentalInterviewEntries(answers)],
 }

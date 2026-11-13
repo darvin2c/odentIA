@@ -92,6 +92,26 @@ export const FHIR_OBSERVATION_INTERPRETATION_SYSTEM =
 /** Parentesco de una persona vinculada: v3-RoleCode, con «otro» como texto. */
 export const FHIR_ROLE_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
 
+/**
+ * `Questionnaire.item.type` (R4) desde el tipo de pregunta de un formulario. Una
+ * opción elegida es un `Coding` solo con su texto: las opciones de la clínica no
+ * tienen código. La firma viaja como texto (quién firmó; R4 no tiene respuesta de
+ * firma) y la pieza como su número (ISO 3950), que la pregunta nombra.
+ */
+export const FORM_FIELD_TYPE_FHIR = {
+  texto: "string",
+  texto_largo: "text",
+  numero: "decimal",
+  booleano: "boolean",
+  opcion_unica: "choice",
+  opcion_multiple: "choice",
+  fecha: "date",
+  firma: "string",
+  pieza: "integer",
+  escala: "integer",
+  adjunto: "reference",
+} as const
+
 /** El código FHIR de un valor propio, o null si no tiene equivalencia segura. */
 export function fhirCode<T extends Record<string, string>>(table: T, value: string | null | undefined): T[keyof T] | null {
   if (!value || !Object.hasOwn(table, value)) return null

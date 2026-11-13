@@ -53,10 +53,10 @@ it("cada momento de lo común pregunta al producto: una clínica médica no ve n
     expect(
       await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id)),
     ).not.toHaveProperty("odontogramEntries")
-    // La copia de latidIA lleva sus antecedentes médicos, no el odontograma.
+    // La copia de latidIA no lleva el odontograma; sus antecedentes médicos van con su entrevista.
     expect(
       (await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))).productSections.map((s) => s.title),
-    ).toEqual(["Antecedentes médicos"])
+    ).toEqual([])
     // Cerrar sigue igual en lo común, sin nada del odontograma.
     await f.ready(f.encounter.id)
     const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
@@ -234,16 +234,11 @@ it("los antecedentes médicos van en la entrevista de latidIA y en su copia de l
     expect(saved.latestAnamnesis?.answers).not.toHaveProperty("habitos.cigarrillosDia")
     const record = await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
     const [day, month, year] = [today.slice(8, 10), today.slice(5, 7), today.slice(0, 4)]
-    expect(record.productSections).toEqual([
-      {
-        title: "Antecedentes médicos",
-        lines: [
-          `Embarazada, 12 semanas (registrado el ${day}/${month}/${year})`,
-          "Hábitos: tabaco: lo dejó",
-          `Vacunas: Influenza (${day}/${month}/${year})`,
-        ],
-        empty: "Sin embarazo, hábitos ni vacunas registrados.",
-      },
+    // Van en «Entrevista de salud» de la copia, como en la ficha, cada dato con su nombre.
+    expect(record.interview?.entries.map((entry) => `${entry.label}: ${entry.value}`)).toEqual([
+      `Embarazo: Embarazada, 12 semanas (registrado el ${day}/${month}/${year})`,
+      "Hábitos: tabaco: lo dejó",
+      `Vacunas: Influenza (${day}/${month}/${year})`,
     ])
   } finally {
     await setProduct("dental")

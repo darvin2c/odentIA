@@ -1,9 +1,11 @@
 import {
   CORE_VITAL_KEYS,
+  commonInterviewEntries,
   DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
   type DiagnosisSystemKey,
   type ImagingType,
+  type InterviewEntry,
   type MedicationCatalog,
   type RegistrationAnswers,
   SUGGESTED_CONSENT_TEMPLATES,
@@ -239,6 +241,11 @@ export interface ProductInterview {
   check(answers: Record<string, unknown>, today: string): Record<string, unknown>
   /** Lo que la persona declaró en su registro, ya con las claves de la entrevista. */
   declared(health: DeclaredHealth, today: string): Record<string, unknown>
+  /**
+   * La entrevista guardada en la copia de la historia, dato por dato y en el
+   * orden de la pantalla: lo común y lo del producto. Vacío si nada se respondió.
+   */
+  record(answers: unknown, today: string): InterviewEntry[]
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
@@ -255,6 +262,7 @@ export const COMMON_INTERVIEW: ProductInterview = {
     const personal = answeredOf(health.personal)
     return Object.keys(personal).length ? { antecedentesPersonales: personal } : {}
   },
+  record: (answers) => commonInterviewEntries(answers),
 }
 
 /** Lo que el producto revisa al emitir una receta, además de las alergias. */

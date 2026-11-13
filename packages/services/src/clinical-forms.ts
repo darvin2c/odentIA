@@ -737,7 +737,8 @@ export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function conditionMet(condition: FieldCondition, answer: unknown): boolean {
+/** Si la respuesta de la que depende una pregunta la deja a la vista. */
+export function conditionMet(condition: FieldCondition, answer: unknown): boolean {
   if (Array.isArray(answer)) return answer.includes(condition.equals)
   return answer === condition.equals
 }
