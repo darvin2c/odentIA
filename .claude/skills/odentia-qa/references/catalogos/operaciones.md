@@ -408,6 +408,7 @@ Un caso por operación, dicho como estado del dato. Se recorren en el código y,
 - [ ] Lo que se mira con el permiso queda ligado a ese permiso, con su hora exacta; el caso no muestra lecturas de otro permiso.
 - [ ] La hora de fin es la misma, en la zona de la sede, en el cuadro, la franja, la tarjeta del caso, la administración y «El acceso terminó».
 - [ ] Al terminar, la persona que miraba llega a «El acceso terminó» con o sin recargar, y la frase dice quién y por qué.
+- [ ] «El acceso terminó» es solo de quien miraba como soporte: el equipo de la clínica, con un acceso dado o sin él, sigue en su clínica en cada navegación, también pasados dos minutos de haber entrado.
 
 **Caso:** CO28 · La propietaria da acceso dos veces a la vez. Soporte abre un documento. Una administradora quita el acceso y soporte vuelve al documento; luego otro acceso se resuelve con el caso. → Un permiso vigente; el documento deja de abrirse; cada fin con su autor y su motivo; el caso lista solo lo leído con cada permiso.
 

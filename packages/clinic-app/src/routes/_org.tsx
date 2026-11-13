@@ -73,7 +73,7 @@ import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHos
 import { activeOrgLocale, activeOrgTimeZone, notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
-import { endSupportSession, isSupportEnded, loadSupportSession, type SupportMode } from "../lib/support-mode"
+import { endSupportSession, loadSupportSession, type SupportMode } from "../lib/support-mode"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
@@ -139,21 +139,28 @@ async function checkOrgAccess(
   // se lee) se pregunta a la vez que lo demás, sin sumar un viaje.
   const ssrCookie = (fetchOptions as { headers?: { cookie?: string } }).headers?.cookie
   const mayBeSupport = typeof window !== "undefined" || (ssrCookie?.includes("odentia_soporte=") ?? false)
-  const supportCheck = slug && mayBeSupport ? loadSupportSession(slug, fetchOptions) : Promise.resolve(null)
+  // Lo comprobado antes dice si esta pantalla ya miraba como soporte: para ella, que ya no haya
+  // sesión de soporte también es que terminó (la cookie dura lo que el permiso).
+  const alreadySupport = cached?.slug === slug && cached.support !== null
+  const supportCheck = slug && mayBeSupport ? loadSupportSession(slug, fetchOptions, alreadySupport) : Promise.resolve(null)
   // Las tres a la vez; se revisan en el orden de siempre: sesión, términos y clínica.
   const sessionCheck = requireVerifiedSession(location)
   const termsCheck = requireTermsAccepted(location)
   const orgRead = slug ? readOrganization(slug, fetchOptions) : null
   const found = await supportCheck
-  // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», nunca la sesión normal
-  // de ese navegador (la de la administración llevaría a otra pantalla).
-  if (found === "terminado") throw redirect({ href: "/soporte?terminado=1" })
-  const support = found
-  if (support) {
-    // Lo de la sesión de la clínica no aplica: sus rechazos no quedan sin atender.
+  if (found) {
+    // Con soporte, mirando o terminado, lo de la sesión de la clínica no aplica: sus rechazos
+    // no quedan sin atender.
     sessionCheck.catch(() => undefined)
     termsCheck.catch(() => undefined)
     orgRead?.catch(() => undefined)
+  }
+  // Tenía sesión de soporte y el acceso terminó: «El acceso terminó», nunca la sesión normal
+  // de ese navegador (la de la administración llevaría a otra pantalla). Quien no la tenía (el
+  // equipo de la clínica) recibe nulo y sigue con su sesión de siempre.
+  if (found === "terminado") throw redirect({ href: "/soporte?terminado=1" })
+  const support = found
+  if (support) {
     if (typeof window !== "undefined") orgChecks.access = { slug: support.org.slug, at: Date.now(), ...support }
     return support
   }
@@ -365,13 +372,14 @@ function OrgSwitcher() {
  * Soporte de odentIA mirando la clínica: una franja que no se cierra, de otro
  * color que los avisos de la clínica, con hasta cuándo y «Salir».
  */
-function SupportStrip({ support }: { support: SupportMode }) {
+function SupportStrip({ support, slug }: { support: SupportMode; slug: string }) {
   // Cada medio minuto se pregunta si el acceso sigue: lo que estaba en pantalla no queda a la
-  // vista después de quitarlo o de que venza.
+  // vista después de quitarlo o de que venza. Aquí ya se mira como soporte: que la API no vea
+  // ninguna sesión (la cookie venció con el permiso) también es que terminó.
   useEffect(() => {
     const check = () => {
-      void apiFetch("/api/support-session/me").catch((error) => {
-        if (isSupportEnded(error)) window.location.replace("/soporte?terminado=1")
+      void loadSupportSession(slug, undefined, true).then((found) => {
+        if (found === "terminado") window.location.replace("/soporte?terminado=1")
       })
     }
     const timer = window.setInterval(check, 30_000)
@@ -381,7 +389,7 @@ function SupportStrip({ support }: { support: SupportMode }) {
       window.clearInterval(timer)
       if (atEnd) window.clearTimeout(atEnd)
     }
-  }, [support.expiresAt])
+  }, [support.expiresAt, slug])
   const untilFull = new Date(support.expiresAt).toLocaleTimeString(activeOrgLocale(), {
     hour: "numeric",
     minute: "2-digit",
@@ -510,7 +518,7 @@ function OrgLayout() {
   return (
     <RaiseCapProvider>
     <AppShell
-      notice={support ? <SupportStrip support={support} /> : <ClinicNoticeStrip userId={session.userId} />}
+      notice={support ? <SupportStrip support={support} slug={org.slug} /> : <ClinicNoticeStrip userId={session.userId} />}
       items={navItems}
       LinkComponent={RouterLink}
       pathname={pathname}

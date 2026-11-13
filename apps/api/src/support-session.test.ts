@@ -152,6 +152,71 @@ it("quitado el acceso, la siguiente lectura dice que terminó y por qué", async
   expect(((await ended.json()) as { data: { reason: string; byName: string } }).data).toMatchObject({ reason: "quitado", byName: "Ana Propietaria" })
 })
 
+it("sin cookie de soporte nada terminó: «/me» responde sin error y sin datos, y ninguna ruta dice que el acceso terminó", async () => {
+  // El equipo de la clínica: su navegador nunca tuvo la cookie, y la app pregunta por ella en
+  // cada comprobación del acceso. Decirle «terminó» lo sacaba de su clínica a los dos minutos.
+  const me = await call(null, "GET", "/support-session/me")
+  expect(me.status).toBe(200)
+  expect(await me.json()).toEqual({ data: null })
+  // Tampoco con otras cookies del navegador, ni con la de soporte vacía.
+  for (const cookie of ["otra=1; sesion=abc", "odentia_soporte="]) {
+    const other = await call(cookie, "GET", "/support-session/me")
+    expect(other.status).toBe(200)
+    expect(await other.json()).toEqual({ data: null })
+  }
+  // Las rutas de la clínica siguen el camino de siempre: aquí, sin sesión, el 401 de la sesión.
+  const clinic = await call(null, "GET", "/org-profile")
+  expect(clinic.status).toBe(401)
+  expect(await code(clinic)).not.toBe("SUPPORT_ACCESS_ENDED")
+})
+
+it.each([
+  [
+    "lo quitaron",
+    async ({ caseId, grantId }: { cookie: string; caseId: string; grantId: string }) => {
+      const { revokeSupportAccess } = await import("@odentia/services")
+      await withOrgContext(appDb, ORG, (tx) => revokeSupportAccess(tx, ORG, "u-sop-owner", true, grantId, caseId))
+    },
+    "quitado",
+  ],
+  [
+    "venció",
+    async ({ grantId }: { cookie: string; caseId: string; grantId: string }) => {
+      await ownerDb.execute(sql`
+        update support_access_grant
+        set created_at = now() - interval '2 hours', expires_at = now() - interval '1 hour'
+        where id = ${grantId}`)
+    },
+    "vencido",
+  ],
+  [
+    "salió",
+    async ({ cookie }: { cookie: string; caseId: string; grantId: string }) => {
+      expect((await call(cookie, "POST", "/support-session/end", {})).status).toBe(200)
+    },
+    "salio",
+  ],
+] as const)("con la cookie de una sesión que terminó (%s), «/me» dice que el acceso terminó y nunca atiende otra sesión", async (_caso, end, reason) => {
+  const entered = await enter("reception")
+  expect((await call(entered.cookie, "GET", "/support-session/me")).status).toBe(200)
+  await end(entered)
+  const me = await call(entered.cookie, "GET", "/support-session/me")
+  expect(me.status).toBe(401)
+  expect(await code(me)).toBe("SUPPORT_ACCESS_ENDED")
+  // Con esa cookie el pedido es de soporte o de nadie: tampoco las rutas de la clínica.
+  const clinic = await call(entered.cookie, "GET", "/org-profile")
+  expect(clinic.status).toBe(401)
+  expect(await code(clinic)).toBe("SUPPORT_ACCESS_ENDED")
+  const ended = await call(entered.cookie, "GET", "/support-session/ended")
+  expect(((await ended.json()) as { data: { reason: string } }).data.reason).toBe(reason)
+})
+
+it("una cookie de soporte que no es de ninguna sesión no abre nada: responde igual que una terminada", async () => {
+  const me = await call(`odentia_soporte=${"x".repeat(43)}`, "GET", "/support-session/me")
+  expect(me.status).toBe(401)
+  expect(await code(me)).toBe("SUPPORT_ACCESS_ENDED")
+})
+
 it("el pase sirve una vez y solo desde la app de una clínica", async () => {
   const { caseId } = await withOrgContext(appDb, ORG, (tx) =>
     giveSupportAccessFromHelp(tx, ORG, "u-sop-owner", true, { minutes: 15, viewRole: "cashier", screen: "/", role: "Propietario", appVersion: null }),
