@@ -34,7 +34,7 @@ import {
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasPlan } from "@odentia/db/schema/saas-billing"
@@ -72,6 +72,7 @@ import {
   decideSaasProposal,
   markOutreachSent,
   type OutreachRow,
+  prepareEmailReply,
   prepareOutreach,
   recordPresentation,
   resolveOutreach,
@@ -374,6 +375,8 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
+    prepareEmailReply: (tx, actor, emailId, input) =>
+      prepareEmailReply(tx, actor, emailId, input, now),
     recordPresentation: (tx, actor, taskId, input) =>
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
@@ -1051,6 +1054,61 @@ export async function seedAdminArm(
     },
     now,
   )
+  // A hola@ de odentIA, de alguien que aún no es cliente, ya respondido por Ada (sale con su
+  // dirección y queda en el hilo); y uno a la dirección de Ada, de una clienta que la conoce.
+  const toHola = await ingestInboundEmail(
+    tx,
+    {
+      mailbox: "hola",
+      product: "dental",
+      messageId: "<seed-arm-correo-3@example.test>",
+      from: "dra.quispe.sonrisas@example.test",
+      fromName: "Dra. Elena Quispe (ficticia)",
+      to: `hola@${productMailDomain("dental")}`,
+      subject: "Quiero probar odentIA en mi consultorio",
+      text: "Hola, tengo un consultorio en Huancayo con dos unidades dentales. ¿Cómo empiezo? (ejemplo ficticio)",
+      receivedAt: clock.ago(1, 2),
+      attachments: [],
+      senderVerified: true,
+    },
+    now,
+  )
+  if (!toHola.duplicate) {
+    const reply = await prepareEmailReply(
+      tx,
+      ADA,
+      toHola.id,
+      {
+        body: "Hola, doctora. Con gusto le mostramos odentIA: ¿le acomoda una llamada corta esta semana? (ejemplo ficticio)",
+      },
+      now,
+    )
+    await markOutreachSent(tx, ADA, reply.id, "enviado", now)
+  }
+  const [ada] = await tx
+    .select({ mailLocal: adminStaff.mailLocal })
+    .from(adminStaff)
+    .where(eq(adminStaff.userId, ADA.userId))
+    .limit(1)
+  if (ada?.mailLocal)
+    await ingestInboundEmail(
+      tx,
+      {
+        mailbox: "persona",
+        localPart: ada.mailLocal,
+        product: "medical",
+        messageId: "<seed-arm-correo-4@example.test>",
+        from: "patricia.sanborja@example.test",
+        fromName: "Patricia Núñez (ficticia)",
+        to: `${ada.mailLocal}@${productMailDomain("medical")}`,
+        subject: "¿Podemos vernos el jueves?",
+        text: "Ada, ¿te acomoda el jueves a las 10 para ver la agenda con el equipo? (ejemplo ficticio)",
+        receivedAt: clock.ago(0, 2),
+        attachments: [],
+        senderVerified: true,
+      },
+      now,
+    )
 
   /* --- Documentos y lo que cargó la skill --- */
   await seedOnboardingFiles(tx, clock, storage, { prueba, deuda })

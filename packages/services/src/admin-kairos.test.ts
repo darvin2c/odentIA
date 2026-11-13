@@ -152,6 +152,10 @@ const executors: KairosExecutors = {
   async assignInboundEmail(_tx, actor, emailId, clientId) {
     calls.push({ op: "assignInboundEmail", args: [actor.userId, emailId, clientId] })
   },
+  async prepareEmailReply(_tx, actor, emailId, input) {
+    calls.push({ op: "prepareEmailReply", args: [actor.userId, emailId, input] })
+    return { id: "00000000-0000-4000-8000-000000000001" }
+  },
   async recordPresentation(_tx, actor, taskId, input) {
     calls.push({ op: "recordPresentation", args: [actor.userId, taskId, input] })
   },

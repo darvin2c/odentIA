@@ -121,6 +121,7 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   demo: "una demo",
   presentacion_hecha: "la pregunta de una presentación",
   correo_sin_cliente: "un correo sin cliente",
+  responder_correo: "la respuesta a un correo",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -853,6 +854,13 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
   ): Promise<unknown>
   linkContactToUser(tx: Db, actor: AdminActor, contactId: string, userId: string): Promise<unknown>
   assignInboundEmail(tx: Db, actor: AdminActor, emailId: string, clientId: string): Promise<unknown>
+  /** La misma operación que «Responder» (`prepareEmailReply`): reserva la respuesta; la ruta la envía. */
+  prepareEmailReply(
+    tx: Db,
+    actor: AdminActor,
+    emailId: string,
+    input: { body: string; kairosItemId: string },
+  ): Promise<O>
   recordPresentation(
     tx: Db,
     actor: AdminActor,
@@ -902,6 +910,7 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   demo: [],
   presentacion_hecha: ["outcome", "body", "nextDueOn"],
   correo_sin_cliente: ["clientId"],
+  responder_correo: ["body"],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -997,6 +1006,22 @@ async function executeItem<O extends KairosOutreachPrepared>(
         return { status: "ejecutada", result: { emailId, clientId: target } }
       }
       throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta a quién ligar")
+    }
+    case "responder_correo": {
+      const emailId = optText(payload.emailId)
+      if (!emailId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el correo")
+      const body = optText(payload.body)
+      if (!body) throw invalidField("edited.body", "Escribe la respuesta")
+      const outreach = await executors.prepareEmailReply(tx, actor, emailId, {
+        body,
+        kairosItemId: item.id,
+      })
+      // Como un mensaje: hasta saber si salió, la ruta lo envía después del commit.
+      return {
+        status: "incierta",
+        result: { outreachId: outreach.id, channel: "correo" },
+        outreach,
+      }
     }
     case "correo_sin_cliente": {
       const emailId = optText(payload.emailId)

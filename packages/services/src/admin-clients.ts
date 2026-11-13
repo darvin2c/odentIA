@@ -232,13 +232,16 @@ export function proposalOfOpenSaleSql(alias = "p"): SQL<boolean> {
 }
 
 /**
- * ¿Es solo de Administración un envío? Lleva una propuesta, o sale de algo de
- * Kairós que solo ve Administración. `o` es el alias de `saas_outreach`.
+ * ¿Es solo de Administración un envío? Lleva una propuesta, sale de algo de
+ * Kairós que solo ve Administración, o responde un correo que no llegó a
+ * soporte@ (lo comercial: puede hablar de precios). `o` es el alias de
+ * `saas_outreach`.
  */
 export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
   const o = sql.raw(alias)
   return sql<boolean>`(${o}.proposal_id is not null or exists (select 1 from admin.kairos_item ki
-    where ki.id = ${o}.kairos_item_id and ki.admin_only))`
+    where ki.id = ${o}.kairos_item_id and ki.admin_only) or exists (select 1 from admin.saas_inbound_email ie
+    where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte'))`
 }
 
 /* ---------- La etapa ---------- */

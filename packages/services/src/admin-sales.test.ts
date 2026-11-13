@@ -868,7 +868,9 @@ describe("envíos", () => {
     expect(email).toMatchObject({
       to: contact.email,
       subject: "Su propuesta",
-      replyTo: "contacto@latidia72.com",
+      // Sale con quien escribe, y la respuesta le llega a esa misma dirección.
+      replyTo: "ada.admin@latidia72.com",
+      from: { name: "Ada Admin · latidIA", address: "ada.admin@latidia72.com" },
       brand: "latidia",
     })
     expect(email.attachments).toEqual([expect.objectContaining({ contentType: "application/pdf" })])

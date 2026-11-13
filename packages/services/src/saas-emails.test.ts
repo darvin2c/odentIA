@@ -1,6 +1,7 @@
 import { configureMailLinks, resetMailLinks } from "@odentia/mail"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  newClientNoticeEmail,
   saasAlertEmail,
   saasBillingUrl,
   saasOverdueEmail,
@@ -9,7 +10,6 @@ import {
   saasRestrictionSoonEmail,
   saasSettlementEmail,
   saasTrialEndedEmail,
-  waitlistTeamNoticeEmail,
 } from "./saas-emails.js"
 
 const url = saasBillingUrl("https://app.odentia32.com/", "org_1")
@@ -136,36 +136,36 @@ describe("correos de Plan y pagos", () => {
   })
 })
 
-describe("aviso al equipo de una solicitud nueva en la lista de espera", () => {
-  const reviewUrl = "https://admin.odentia32.com/waitlist?solicitud=7f1c"
+describe("aviso de cliente nuevo al buzón comercial", () => {
+  const clientUrl = "https://admin.odentia32.com/clients/7f1c"
 
-  it("dice la clínica, el producto, la ciudad y el país, con el botón a esa solicitud y el texto escapado", () => {
-    const mail = waitlistTeamNoticeEmail({
+  it("dice la clínica, el producto, la ciudad y el país, con el botón a su ficha y el texto escapado", () => {
+    const mail = newClientNoticeEmail({
       clinicName: "Consultorio <Latido> & Cía",
       product: "medical",
       city: "Arequipa",
       countryCode: "PE",
-      reviewUrl,
+      clientUrl,
     })
-    expect(mail.subject).toBe("Solicitud nueva en la lista de espera: Consultorio <Latido> & Cía (latidIA)")
-    // Interno: con la marca de odentIA aunque la solicitud sea de latidIA.
+    expect(mail.subject).toBe("Cliente nuevo: Consultorio <Latido> & Cía pidió entrar a latidIA")
+    // Interno: con la marca de odentIA aunque el cliente sea de latidIA.
     expect(mail.brand).toBeUndefined()
-    expect(mail.html).toContain("Interno · Lista de espera")
+    expect(mail.html).toContain("Interno · Clientes")
     expect(mail.text).toContain("Producto: latidIA")
     expect(mail.text).toContain("Clínica: Consultorio <Latido> & Cía")
     expect(mail.text).toContain("Ciudad: Arequipa")
     expect(mail.text).toContain("País: Perú")
-    expect(mail.text).toContain(`Abrir la solicitud: ${reviewUrl}`)
-    expect(mail.html).toContain(`href="${reviewUrl}"`)
+    expect(mail.text).toContain(`Abrir la ficha: ${clientUrl}`)
+    expect(mail.html).toContain(`href="${clientUrl}"`)
     // El nombre lo escribió quien pidió: en el HTML va escapado.
     expect(mail.html).not.toContain("<Latido>")
     expect(mail.html).toContain("Consultorio &lt;Latido&gt; &amp; Cía")
   })
 
   it("odentIA con su nombre; sin la dirección de la administración, sin botón", () => {
-    const mail = waitlistTeamNoticeEmail({ clinicName: "Clínica Sonrisa", product: "dental", city: "Cusco", countryCode: "PE", reviewUrl: null })
-    expect(mail.subject).toBe("Solicitud nueva en la lista de espera: Clínica Sonrisa (odentIA)")
-    expect(mail.text).not.toContain("Abrir la solicitud")
-    expect(mail.text).toContain("Lista de espera")
+    const mail = newClientNoticeEmail({ clinicName: "Clínica Sonrisa", product: "dental", city: "Cusco", countryCode: "PE", clientUrl: null })
+    expect(mail.subject).toBe("Cliente nuevo: Clínica Sonrisa pidió entrar a odentIA")
+    expect(mail.text).not.toContain("Abrir la ficha")
+    expect(mail.text).toContain("Clientes")
   })
 })

@@ -20,6 +20,7 @@ import {
   type OutreachEmail,
   type OutreachRow,
   outreachEmail,
+  prepareEmailReply,
   prepareOutreach,
   recordPresentation,
   ServiceError,
@@ -124,6 +125,8 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
+    prepareEmailReply: (tx, actor, emailId, input) =>
+      prepareEmailReply(tx, actor, emailId, input, now),
     recordPresentation: (tx, actor, taskId, input) =>
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>

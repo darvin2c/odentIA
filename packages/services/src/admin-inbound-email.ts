@@ -1,9 +1,17 @@
 /**
- * Correo que llega a soporte@ y contacto@ de cada producto (lo manda firmado
- * el worker de Cloudflare a `/api/inbound/email`). Entra una sola vez por su
- * `Message-ID`. El From de un correo se puede falsificar: el cliente se busca
- * solo si el worker verificó el remitente (`senderVerified`: DMARC, o SPF o
- * DKIM alineados con el From). Entonces, por correo exacto, en este orden: un
+ * Correo que llega a los buzones de cada producto (soporte@, contacto@, hola@,
+ * fundadores@) o a la dirección de una persona del equipo (`persona`, por su
+ * `mail_local`); lo manda firmado el worker de Cloudflare a
+ * `/api/inbound/email`. Una dirección que no es de nadie no entra (404
+ * `MAILBOX_UNKNOWN`: el worker la rechaza); la de una persona que ya no está
+ * en el equipo entra solo si responde un correo que salió con su dirección.
+ * Entra una sola vez por su `Message-ID`.
+ *
+ * El From de un correo se puede falsificar: el cliente se busca solo si el
+ * worker verificó el remitente (`senderVerified`: DMARC, o SPF o DKIM
+ * alineados con el From). Entonces, primero por el hilo (`hilo`: responde un
+ * envío nuestro, por su `In-Reply-To` o `References`, y viene del mismo
+ * correo al que salió) y después por correo exacto, en este orden: un
  * contacto, una solicitud de la web, una persona del equipo de su cuenta. Si
  * no está verificado, o en el primer lugar donde aparece hay más de un
  * cliente, no se elige: queda sin cliente y Kairós lo propone
@@ -22,9 +30,11 @@ import {
   type SaasInboundMatch,
   saasClient,
   saasInboundEmail,
+  saasOutreach,
 } from "@odentia/db/schema/admin-arm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
-import { eq } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm"
 import { z } from "zod"
 import {
   cleanFilename,
@@ -35,6 +45,8 @@ import {
 import { clientByEmail } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { settleRepliesOfEmail, threadMessageIds } from "./admin-sales.js"
+import { staffByMailLocal } from "./admin-staff-mail.js"
 import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 
 const TEXT_MAX = 20_000
@@ -55,23 +67,41 @@ const attachmentSchema = z.strictObject({
     .regex(/^inbound\/[A-Za-z0-9_.-]{1,200}$/, "La clave del adjunto no es de un correo entrante"),
 })
 
-const inboundSchema = z.strictObject({
-  mailbox: z.enum(SAAS_INBOUND_MAILBOXES, "Buzón no válido"),
-  product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
-  messageId: z.string().trim().min(1, "Falta el Message-ID").max(998, "Message-ID demasiado largo"),
-  from: z.string().trim().toLowerCase().pipe(z.email("Correo del remitente no válido").max(254)),
-  fromName: z.string().nullish(),
-  to: z.string().trim().toLowerCase().pipe(z.email("Correo de destino no válido").max(254)),
-  subject: z.string().nullish(),
-  text: z.string().nullish(),
-  receivedAt: z.date("Fecha de llegada no válida"),
-  attachments: z
-    .array(attachmentSchema)
-    .max(INBOUND_ATTACHMENTS_MAX, "Demasiados adjuntos")
-    .default([]),
-  /** El worker verificó el remitente; sin decirlo, no se da por verificado. */
-  senderVerified: z.boolean().default(false),
-})
+/** Las cabeceras del hilo se guardan recortadas: `References` puede traer cientos de ids. */
+const IN_REPLY_TO_MAX = 998
+const REFERENCES_MAX = 8000
+
+const inboundSchema = z
+  .strictObject({
+    mailbox: z.enum(SAAS_INBOUND_MAILBOXES, "Buzón no válido"),
+    /** Con `persona`: la parte local a la que escribieron (`ada.lovelace` de ada.lovelace@…). */
+    localPart: z.string().trim().toLowerCase().max(64, "Dirección demasiado larga").nullish(),
+    /** Cabeceras del hilo, tal como llegaron. */
+    inReplyTo: z.string().nullish(),
+    references: z.string().nullish(),
+    product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
+    messageId: z
+      .string()
+      .trim()
+      .min(1, "Falta el Message-ID")
+      .max(998, "Message-ID demasiado largo"),
+    from: z.string().trim().toLowerCase().pipe(z.email("Correo del remitente no válido").max(254)),
+    fromName: z.string().nullish(),
+    to: z.string().trim().toLowerCase().pipe(z.email("Correo de destino no válido").max(254)),
+    subject: z.string().nullish(),
+    text: z.string().nullish(),
+    receivedAt: z.date("Fecha de llegada no válida"),
+    attachments: z
+      .array(attachmentSchema)
+      .max(INBOUND_ATTACHMENTS_MAX, "Demasiados adjuntos")
+      .default([]),
+    /** El worker verificó el remitente; sin decirlo, no se da por verificado. */
+    senderVerified: z.boolean().default(false),
+  })
+  .refine((value) => (value.mailbox === "persona") === Boolean(value.localPart), {
+    message: "La dirección de una persona va con su parte local, y solo ella",
+    path: ["localPart"],
+  })
 export type InboundEmailInput = z.input<typeof inboundSchema>
 
 export interface InboundEmailResult {
@@ -82,6 +112,75 @@ export interface InboundEmailResult {
   matchedBy: SaasInboundMatch | null
   /** Los adjuntos que quedaron como documentos del cliente. */
   fileIds: string[]
+  /** La dirección de una persona: el buzón donde le llega la copia (el worker la reenvía ahí). */
+  copyTo: string | null
+}
+
+/** Las cabeceras del hilo, solo sus Message-ID, recortadas para guardarlas. */
+function threadHeader(value: string | null | undefined, max: number): string | null {
+  const ids = threadMessageIds(value)
+  while (ids.length > 1 && ids.join(" ").length > max) ids.splice(ids.length > 2 ? 1 : 0, 1)
+  const text = ids.join(" ")
+  return text && text.length <= max ? text : null
+}
+
+/**
+ * A quién del equipo le escribieron a `<localPart>@`: una persona activa, o
+ * una que ya no está si el correo responde uno que salió con su dirección. Si
+ * no es de nadie, 404 `MAILBOX_UNKNOWN` (el worker lo rechaza sin reenviarlo).
+ */
+export async function inboundPersonOf(
+  tx: Db,
+  localPart: string,
+  thread: readonly string[],
+): Promise<{ userId: string; copyTo: string | null }> {
+  const unknown = () =>
+    new ServiceError("MAILBOX_UNKNOWN", 404, "Esa dirección no es de nadie del equipo")
+  const staff = await staffByMailLocal(tx, localPart)
+  if (!staff) throw unknown()
+  if (!staff.active) {
+    const [ours] =
+      thread.length > 0
+        ? await tx
+            .select({ id: saasOutreach.id })
+            .from(saasOutreach)
+            .innerJoin(adminStaff, eq(adminStaff.userId, staff.userId))
+            .where(
+              and(
+                inArray(saasOutreach.messageId, [...thread]),
+                sql`split_part(${saasOutreach.fromAddress}, '@', 1) = ${adminStaff.mailLocal}`,
+              ),
+            )
+            .limit(1)
+        : []
+    if (!ours) throw unknown()
+  }
+  return { userId: staff.userId, copyTo: staff.copyTo }
+}
+
+/**
+ * El cliente de una respuesta a un envío nuestro: el del envío más reciente
+ * del hilo que salió a ese mismo correo. Solo con el remitente verificado.
+ */
+async function clientByThread(
+  tx: Db,
+  from: string,
+  thread: readonly string[],
+): Promise<string | null> {
+  if (thread.length === 0) return null
+  const [row] = await tx
+    .select({ clientId: saasOutreach.clientId })
+    .from(saasOutreach)
+    .where(
+      and(
+        inArray(saasOutreach.messageId, [...thread]),
+        eq(saasOutreach.toAddress, from),
+        isNotNull(saasOutreach.clientId),
+      ),
+    )
+    .orderBy(desc(saasOutreach.createdAt))
+    .limit(1)
+  return row?.clientId ?? null
 }
 
 /** Recorta y quita lo que no se imprime al final; vacío es nulo. */
@@ -183,6 +282,12 @@ export async function ingestInboundEmail(
     )
   const input = parsed.data
   const subject = trimTo(input.subject, SUBJECT_MAX)
+  const inReplyTo = threadHeader(input.inReplyTo, IN_REPLY_TO_MAX)
+  const references = threadHeader(input.references, REFERENCES_MAX)
+  const thread = threadMessageIds(inReplyTo, references)
+  const person = input.localPart ? await inboundPersonOf(tx, input.localPart, thread) : null
+  // «Escribió a ada.lovelace@» o «Escribió a hola@».
+  const mailboxWords = input.localPart ?? input.mailbox
   const stored: StoredInboundAttachment[] = input.attachments.map((attachment) => ({
     filename: cleanFilename(attachment.filename),
     contentType: attachment.contentType,
@@ -199,6 +304,9 @@ export async function ingestInboundEmail(
       fromAddress: input.from,
       fromName: trimTo(input.fromName, 200),
       toAddress: input.to,
+      staffUserId: person?.userId ?? null,
+      inReplyTo,
+      references,
       subject,
       textBody: input.text ? input.text.slice(0, TEXT_MAX) : null,
       senderVerified: input.senderVerified,
@@ -225,10 +333,16 @@ export async function ingestInboundEmail(
       clientId: existing.clientId,
       matchedBy: (existing.matchedBy as SaasInboundMatch | null) ?? null,
       fileIds: [],
+      copyTo: person?.copyTo ?? null,
     }
   }
-  // Un remitente sin verificar no se liga solo: su From puede ser falso.
-  const match = input.senderVerified ? await matchInboundClient(tx, input.from) : null
+  // Un remitente sin verificar no se liga solo: su From puede ser falso. Primero el hilo.
+  const threadClient = input.senderVerified ? await clientByThread(tx, input.from, thread) : null
+  const match: { clientId: string; matchedBy: SaasInboundMatch } | null = threadClient
+    ? { clientId: threadClient, matchedBy: "hilo" }
+    : input.senderVerified
+      ? await matchInboundClient(tx, input.from)
+      : null
   let fileIds: string[] = []
   if (match) {
     const attached = await attachToClient(tx, null, match.clientId, stored, input.receivedAt, now)
@@ -243,7 +357,7 @@ export async function ingestInboundEmail(
       })
       .where(eq(saasInboundEmail.id, created.id))
     await recordInboundActivity(tx, match.clientId, {
-      mailbox: input.mailbox,
+      mailbox: mailboxWords,
       subject,
       receivedAt: input.receivedAt,
       attachments: stored.length,
@@ -254,6 +368,7 @@ export async function ingestInboundEmail(
     entityId: created.id,
     metadata: {
       mailbox: input.mailbox,
+      staffUserId: person?.userId ?? null,
       product: input.product,
       matchedBy: match?.matchedBy ?? null,
       clientId: match?.clientId ?? null,
@@ -267,6 +382,7 @@ export async function ingestInboundEmail(
     clientId: match?.clientId ?? null,
     matchedBy: match?.matchedBy ?? null,
     fileIds,
+    copyTo: person?.copyTo ?? null,
   }
 }
 
@@ -322,15 +438,20 @@ export async function assignInboundEmail(
     })
     .where(eq(saasInboundEmail.id, email.id))
   await recordInboundActivity(tx, clientId, {
-    mailbox: email.mailbox,
+    mailbox:
+      email.mailbox === "persona"
+        ? (email.toAddress.split("@")[0] ?? email.mailbox)
+        : email.mailbox,
     subject: email.subject,
     receivedAt: email.receivedAt,
     attachments: (email.attachments as StoredInboundAttachment[]).length,
   })
+  // Lo que se le respondió antes de saber de quién era pasa a su cliente.
+  const replies = await settleRepliesOfEmail(tx, actor, email.id, clientId, now)
   await writeAdminAudit(tx, actor, {
     action: "inbound.email_assigned",
     entityId: email.id,
-    metadata: { clientId, attachments: attached.fileIds.length },
+    metadata: { clientId, attachments: attached.fileIds.length, replies },
   })
   return { id: email.id, clientId, fileIds: attached.fileIds }
 }
