@@ -206,6 +206,7 @@ import { decideActionReview, requestActionReview } from "../saas-action-review.j
 import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import { secretsKeyFromEnv } from "../secrets.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
+import { seedAdminArm } from "../seed-admin-arm.js"
 import { seedAdminOrganizations } from "../seed-admin-organizations.js"
 import { seedAdminSupport } from "../seed-admin-support.js"
 import { seedAgent } from "../seed-agent.js"
@@ -5459,6 +5460,41 @@ await db.transaction(async (tx) => {
     .where(eq(saasDemo.id, demo.id))
 })
 
+// --- odentIA: una clínica dental para presentar, con el motor de «Crear demo» (ADR 0096) ---
+// «Agendar presentación» del ARM ofrece la demo lista del producto del cliente: sin esta,
+// las clínicas dentales no tenían ninguna. La arma igual que la administración.
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "dental",
+      kind: "general",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Dental Sonrisa Lince",
+      slug: "seed-dental-sonrisa-lince",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_112,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo dental de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "dental", size: "pequeno" }, { secretsKey, fetch })
+  await tx
+    .update(saasDemo)
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
+    .where(eq(saasDemo.id, demo.id))
+})
+
 // --- vistIA: una óptica para presentar, con el motor de «Crear demo» (ADR 0096) ---
 // La arma igual que la administración: su equipo, su biblioteca, meses de historia y
 // las próximas dos semanas. Se entra desde Clínicas › «Demos».
@@ -5497,6 +5533,11 @@ await db.transaction(async (tx) => {
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
 await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash, storage })
 
+// --- El ARM de la administración (ADR 0185): clientes en cada etapa, tareas, propuestas,
+// envíos, correos que llegan y lo que prepara Kairós. Al final: necesita las cuentas de
+// la semilla y las demos para presentar ya armadas.
+const arm = await db.transaction((tx) => seedAdminArm(tx, storage))
+
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
   const tables = [
@@ -5523,6 +5564,9 @@ async function summary(orgId: string, label: string): Promise<string> {
   return `org ${label} (${orgId}): ${counts.join(" ")}`
 }
 console.log("seed-dev ok")
+console.log(
+  `ARM de la administración: ${arm.clients} clientes de la semilla; Kairós puso ${arm.kairos.tasks} tareas, preparó ${arm.kairos.items} cosas y redactó ${arm.kairos.drafted} borradores`,
+)
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
 console.log(await summary(MEDICAL_DEMO_ORG, "consultorio-san-martin (latidIA)"))

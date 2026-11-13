@@ -2,6 +2,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
+import { saasClient, saasTask } from "@odentia/db/schema/admin-arm"
 import { adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import {
   type AdminActor,
@@ -11,7 +12,7 @@ import {
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -22,7 +23,8 @@ import { createClinicLoad } from "../lib/clinic-load.js"
 /**
  * La carga de una clínica (ADR 0104) contra una base real: lo que corre la skill en el
  * servidor (`createClinicLoad`, lo mismo que `cli/carga.ts`) solo lo hace la administración,
- * y la pestaña «Carga» de la administración solo lee el registro, con su segundo factor.
+ * y la pestaña «Carga» de la administración solo lee el registro, con su segundo factor. Un
+ * informe que no se sabe si salió se cierra o se reenvía desde ahí, solo Administración.
  */
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -33,7 +35,14 @@ const admin: AdminActor = { userId: "u-admin", role: "admin" }
 const support: AdminActor = { userId: "u-soporte", role: "support" }
 
 /** Lo que salió por correo en estas pruebas. */
-const sent: Array<{ to: string; subject: string; attachments?: ReadonlyArray<{ filename: string }> }> = []
+const sent: Array<{
+  to: string
+  subject: string
+  html?: string
+  attachments?: ReadonlyArray<{ filename: string; content?: Uint8Array }>
+}> = []
+/** Si el correo de la app se corta (como el de producción cuando no se sabe si salió). */
+let mailFails = false
 
 /** Lo que se guardó en el almacenamiento privado en estas pruebas. */
 const stored = new Map<string, Uint8Array>()
@@ -64,16 +73,36 @@ const storage = {
   deleteAttachment: async (key: string) => {
     stored.delete(key)
   },
+  getAttachment: async (key: string) => {
+    const bytes = stored.get(key)
+    if (!bytes) throw new Error(`no está ${key}`)
+    return bytes
+  },
 } as unknown as Storage
 
 const mailer = {
   send: async (message: (typeof sent)[number]) => {
+    if (mailFails) throw new Error("se cortó la conexión")
     sent.push(message)
+  },
+}
+
+/** La misma carga con un correo que siempre se corta: el informe queda «no se sabe si salió». */
+const cutMailer = {
+  send: async () => {
+    throw new Error("se cortó la conexión")
   },
 }
 
 function read(path: string, user: string) {
   return app.request(`/api/admin/imports/${ORG}${path}`, { headers: new Headers({ "x-test-user": user, origin: ADMIN }) })
+}
+
+function post(path: string, user: string) {
+  return app.request(`/api/admin/imports/${ORG}${path}`, {
+    method: "POST",
+    headers: new Headers({ "x-test-user": user, origin: ADMIN }),
+  })
 }
 
 async function record<T>(): Promise<T> {
@@ -210,8 +239,8 @@ it("los pacientes se ensayan, se cargan por tandas y repetir no duplica", async 
   // Cada pasada es una carga en el registro: la segunda no se suma a la primera.
   const { loads } = await record<{ loads: Array<{ kind: string; by: string | null; summary: string }> }>()
   expect(loads).toEqual([
-    { kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 ya se habían cargado" },
-    { kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 personas creadas" },
+    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 ya se habían cargado" },
+    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 personas creadas" },
   ])
 })
 
@@ -274,16 +303,7 @@ it("un informe que salió por otra vía se registra con su fecha, sin enviarse",
 })
 
 it("un informe que no se sabe si salió se cierra como enviado, sin volver a enviarlo", async () => {
-  const failing = createClinicLoad({
-    ownerDb,
-    storage,
-    mailer: {
-      send: async () => {
-        throw new Error("se cortó la conexión")
-      },
-    },
-    webURL: "https://app.odentia.localhost",
-  })
+  const failing = createClinicLoad({ ownerDb, storage, mailer: cutMailer, webURL: "https://app.odentia.localhost" })
   const fourth = progressReportSchema.parse({ ...report, number: 4 })
   await expect(failing.sendReport(ORG, admin, fourth)).rejects.toMatchObject({ code: "SEND_UNKNOWN" })
   const before = await record<{ reports: Array<{ number: number; state: string; at: string }> }>()
@@ -307,4 +327,86 @@ it("el plan de otra clínica no se carga aquí y el informe no va a alguien de f
   await expect(
     load.previewReport(ORG, admin, progressReportSchema.parse({ ...report, number: 3, companion: { name: "Alguien", email: "x@gmail.com" } })),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("de un informe que no se sabe si salió, soporte no lo cierra ni lo reenvía", async () => {
+  const failing = createClinicLoad({ ownerDb, storage, mailer: cutMailer, webURL: "https://app.odentia.localhost" })
+  await expect(failing.sendReport(ORG, admin, progressReportSchema.parse({ ...report, number: 5 }))).rejects.toMatchObject({
+    code: "SEND_UNKNOWN",
+  })
+  expect((await post("/reports/5/confirm-sent", "u-soporte")).status).toBe(403)
+  expect((await post("/reports/5/resend", "u-soporte")).status).toBe(403)
+  const { reports } = await record<{ reports: Array<{ number: number; state: string; canResend: boolean }> }>()
+  expect(reports.find((item) => item.number === 5)).toMatchObject({ state: "desconocido", canResend: true })
+  expect(JSON.stringify(reports)).not.toContain("pdfKey")
+})
+
+it("«No salió: reenviar» manda el mismo informe una vez; si vuelve a cortarse, queda otra vez sin saberse", async () => {
+  // Uno ya enviado no se reenvía.
+  const already = await post("/reports/1/resend", "u-admin")
+  expect(already.status).toBe(409)
+
+  // La tarea urgente que Kairós puso por el N.º 5.
+  const [client] = await ownerDb
+    .insert(saasClient)
+    .values({ name: "Clínica Carga", product: "dental", organizationId: ORG })
+    .returning({ id: saasClient.id })
+  const clientId = client?.id ?? ""
+  const [task] = await ownerDb
+    .insert(saasTask)
+    .values({
+      clientId,
+      kind: "alta",
+      title: "Revisar en Zoho si salió el informe N.º 5",
+      dueOn: "2026-11-12",
+      byKairos: true,
+      kairosKey: `informe_desconocido:${clientId}:informe-5-1:2026-11-12`,
+    })
+    .returning({ id: saasTask.id })
+
+  sent.length = 0
+  mailFails = true
+  const cut = await post("/reports/5/resend", "u-admin")
+  mailFails = false
+  expect(cut.status).toBe(502)
+  expect(((await cut.json()) as { error: { code: string } }).error.code).toBe("SEND_UNKNOWN")
+  const still = await record<{ reports: Array<{ number: number; state: string; resent: boolean }> }>()
+  expect(still.reports.find((item) => item.number === 5)).toMatchObject({ state: "desconocido", resent: true })
+  const [open] = await ownerDb.select({ status: saasTask.status }).from(saasTask).where(eq(saasTask.id, task?.id ?? ""))
+  expect(open?.status).toBe("abierta")
+
+  const pdfKey = [...stored.keys()].find((key) => key.includes("/informe-5-")) ?? ""
+  const resent = await post("/reports/5/resend", "u-admin")
+  expect(resent.status).toBe(200)
+  expect(sent).toHaveLength(1)
+  expect(sent[0]).toMatchObject({ to: "recepcion.carga@example.com" })
+  expect(sent[0]?.attachments?.map((file) => file.filename)).toEqual(["informe-5.pdf"])
+  // El mismo PDF que se guardó al primer intento, no uno armado otra vez.
+  expect(sent[0]?.attachments?.[0]?.content).toEqual(stored.get(pdfKey))
+  const after = await record<{ reports: Array<{ number: number; state: string; canResend: boolean }> }>()
+  expect(after.reports.find((item) => item.number === 5)).toMatchObject({ state: "enviado", canResend: false })
+  const [closed] = await ownerDb
+    .select({ status: saasTask.status, doneNote: saasTask.doneNote })
+    .from(saasTask)
+    .where(eq(saasTask.id, task?.id ?? ""))
+  expect(closed).toEqual({ status: "hecha", doneNote: "Kairós la cerró: salió el informe N.º 5" })
+
+  // Una segunda pulsación ya no envía nada.
+  expect((await post("/reports/5/resend", "u-admin")).status).toBe(409)
+  expect(sent).toHaveLength(1)
+})
+
+it("«Revisé en Zoho: salió» lo cierra como enviado sin reenviarlo", async () => {
+  const failing = createClinicLoad({ ownerDb, storage, mailer: cutMailer, webURL: "https://app.odentia.localhost" })
+  await expect(failing.sendReport(ORG, admin, progressReportSchema.parse({ ...report, number: 6 }))).rejects.toMatchObject({
+    code: "SEND_UNKNOWN",
+  })
+  sent.length = 0
+  const confirmed = await post("/reports/6/confirm-sent", "u-admin")
+  expect(confirmed.status).toBe(200)
+  expect(sent).toHaveLength(0)
+  const { reports } = await record<{ reports: Array<{ number: number; state: string }> }>()
+  expect(reports.find((item) => item.number === 6)).toMatchObject({ state: "enviado" })
+  expect((await post("/reports/6/confirm-sent", "u-admin")).status).toBe(409)
+  expect((await post("/reports/abc/resend", "u-admin")).status).toBe(404)
 })

@@ -1,12 +1,13 @@
 /**
  * La administración en negro (ADR 0091), en pantalla: el producto de cada
- * clínica se ve como un punto con su nombre, el filtro «Producto» cuenta y
+ * clínica se ve como un punto con su nombre en Clientes, el filtro «Producto»
  * filtra, y la ficha de un consultorio de latidIA abre en su dominio.
  */
-import { createHmac } from "node:crypto"
+import { createHmac, randomUUID } from "node:crypto"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
+import { accountClient } from "./admin"
 import { hostUrl } from "./env"
 import { expect, test } from "./fixtures"
 
@@ -50,23 +51,30 @@ test("la administración distingue el producto de cada clínica y filtra por él
   await expect(page.getByRole("group", { name: "Producto" })).toBeVisible()
   await shot("hoy-claro")
 
-  await page.goto(`${ADMIN}/organizations`)
-  // Cada clínica es una tarjeta que lleva a su ficha.
-  const list = page.getByRole("list").filter({ has: page.getByRole("link", { name: new RegExp(medical.org.name) }) })
-  const medicalRow = list.getByRole("link", { name: new RegExp(medical.org.name) })
-  const dentalRow = list.getByRole("link", { name: new RegExp(owner.org.name) })
+  // Clientes, en «Con cuenta»: cada clínica es una fila que dice su producto y lleva a su ficha.
+  // La misma persona lleva las dos clínicas: buscarla por su correo deja solo las de esta prueba.
+  const contact = { name: "Ana Pruebas", email: `productos-${randomUUID()}@test.dev` }
+  for (const [org, product] of [[medical.org, "medical"], [owner.org, "dental"]] as const)
+    await accountClient(fixtureDb, { org, product, contact })
+  await page.goto(`${ADMIN}/clients?vista=con_cuenta&q=${encodeURIComponent(contact.email)}`)
+  await expect(page.getByRole("heading", { level: 1, name: "Clientes" })).toBeVisible()
+  const medicalRow = page.getByRole("row").filter({ hasText: medical.org.name })
+  const dentalRow = page.getByRole("row").filter({ hasText: owner.org.name })
   await expect(medicalRow).toContainText("latidIA")
   await expect(dentalRow).toContainText("odentIA")
 
   // El filtro: solo latidIA deja el consultorio y quita la clínica dental.
   const filter = page.getByRole("group", { name: "Producto" })
-  await expect(filter.getByRole("button", { name: /latidIA\s*\d+/ })).toBeVisible()
-  await filter.getByRole("button", { name: /latidIA/ }).click()
+  const latidia = filter.getByRole("button", { name: /latidIA/ })
+  await latidia.click()
+  await expect(latidia).toHaveAttribute("aria-pressed", "true")
+  await expect(page).toHaveURL(/producto=medical/)
   await expect(medicalRow).toBeVisible()
   await expect(dentalRow).toHaveCount(0)
 
   // La ficha dice qué es y abre en el dominio de su producto.
   await medicalRow.click()
+  await expect(page.getByRole("heading", { level: 1, name: medical.org.name })).toBeVisible()
   await expect(page.getByText("latidIA · consultorio médico")).toBeVisible()
   await expect(page.getByRole("link", { name: new RegExp(`Abrir en ${medical.org.slug}\\.`) })).toBeVisible()
   await shot("organizaciones-claro")

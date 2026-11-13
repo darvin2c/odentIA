@@ -64,7 +64,7 @@ test("equipo reconocido: sin código en el mismo equipo; se pide desde otro paí
   // Desde otro país: se pide el código y dice por qué.
   // Con la página abierta: lo siguiente que pide datos lleva a poner el código.
   await page.setExtraHTTPHeaders({ "cf-ipcountry": "CL" })
-  await page.getByRole("navigation").getByRole("link", { name: "Organizaciones" }).first().click()
+  await page.getByRole("navigation").getByRole("link", { name: "Clientes" }).first().click()
   await expect(page).toHaveURL(/\/security/)
   // Y al cargar de nuevo, también.
   await page.goto(ADMIN)

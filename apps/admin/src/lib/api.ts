@@ -8,6 +8,12 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public shape: ApiErrorShape,
+    /**
+     * Lo demás que trae el error, tal como llega (por ejemplo `duplicates` de
+     * un 409 `CLIENT_MAYBE_DUPLICATE` o `outreachId` de un 502 `SEND_UNKNOWN`):
+     * quien lo usa lo valida con su esquema.
+     */
+    public details: Record<string, unknown> = {},
   ) {
     super(shape.message ?? `Error ${status}`)
   }
@@ -55,14 +61,22 @@ export async function api<T>(rawPath: string, init?: RequestInit): Promise<T> {
   if (cookie) headers.set("cookie", cookie)
   const response = await fetch(`${API_URL}${path}`, { ...init, credentials: "include", headers })
   if (!response.ok) {
-    const parsed = errorSchema.safeParse(await response.json().catch(() => ({})))
+    const body: unknown = await response.json().catch(() => ({}))
+    const parsed = errorSchema.safeParse(body)
     const shape = parsed.success ? (parsed.data.error ?? {}) : {}
+    const raw = (body as { error?: unknown } | null)?.error
+    const details =
+      raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
     // A mitad de trabajo la API puede volver a pedir el código (otro país, la
     // marca venció): se lleva a ponerlo, no a «Algo salió mal» (ADR 0090).
-    if (shape.code === "MFA_REQUIRED" && typeof window !== "undefined" && window.location.pathname !== "/security") {
+    if (
+      shape.code === "MFA_REQUIRED" &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/security"
+    ) {
       window.location.assign("/security")
     }
-    throw new ApiError(response.status, shape)
+    throw new ApiError(response.status, shape, details)
   }
   if (response.status === 204) return undefined as T
   const envelope = envelopeSchema.parse(await response.json())

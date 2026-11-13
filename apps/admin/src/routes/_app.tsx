@@ -1,3 +1,4 @@
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
 import {
   AppShell,
   type AppShellNavEntry,
@@ -8,21 +9,23 @@ import {
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, Outlet, useMatches, useRouter, useRouterState } from "@tanstack/react-router"
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
-import type { ComponentType, ReactNode } from "react"
 import {
   ArrowLeft,
   BookOpen,
+  Bot,
   Building2,
-  ListChecks,
+  ChartColumn,
   CircleHelp,
   Coins,
+  Columns3,
   CreditCard,
   Home,
+  Presentation,
   ShieldCheck,
   UserRound,
   Users,
 } from "lucide-react"
+import type { ComponentType, ReactNode } from "react"
 import { z } from "zod"
 import { AdminBrand, AdminMark, ProductLogos } from "../components/admin-brand"
 import { api } from "../lib/api"
@@ -77,21 +80,27 @@ function AdminLayout() {
         .parse(await api<unknown>("/api/admin/consumer-complaints/summary")),
     staleTime: 60_000,
   })
-  // Los números de «Lista de espera» y «Soporte»: los mismos de «Prospectos por responder» y
-  // «Casos de soporte por atender» en Inicio (los cuenta el servidor con la misma regla).
+  // El número de «Soporte»: el mismo de «Casos de soporte por atender» en Hoy (lo cuenta el
+  // servidor con la misma regla).
   const queues = useQuery({
     queryKey: ["admin", "overview", "nav"],
     queryFn: async () => api<{ items: { key: string; count: number }[] }>("/api/admin/overview"),
     select: (data) => ({
-      waitlist: data.items.find((item) => item.key === "waitlist")?.count ?? 0,
       support: data.items.find((item) => item.key === "support-open")?.count ?? 0,
     }),
+    staleTime: 60_000,
+  })
+  // Lo que Kairós dejó y espera un sí, de lo que esta persona puede ver (Soporte no cuenta lo de
+  // Administración). Decidir algo invalida `["admin", "kairos"]` y el número se pone al día.
+  const kairos = useQuery({
+    queryKey: ["admin", "kairos", "count"],
+    queryFn: async () => z.object({ waiting: z.number().int().nonnegative() }).parse(await api<unknown>("/api/admin/kairos/count")),
     staleTime: 60_000,
   })
   return (
     <AdminFrame
       session={{ role: adminSession.actor.role, user: adminSession.user }}
-      waitlist={queues.data?.waitlist}
+      kairos={kairos.data?.waiting}
       support={queues.data?.support}
       complaints={complaints.data?.pending}
     >
@@ -102,25 +111,31 @@ function AdminLayout() {
 
 function AdminFrame({
   session,
-  waitlist,
+  kairos,
   support,
   complaints,
   children,
 }: {
   session: SeenSession
-  waitlist?: number
+  kairos?: number
   support?: number
   complaints?: number
   children: ReactNode
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const queryClient = useQueryClient()
+  // El ARM (ADR 0185): el cliente es el eje. La lista de espera y Organizaciones ya no van en el
+  // menú: sus direcciones llevan a Clientes y a la ficha del cliente.
+  const admin = session.role === "admin"
   const items: AppShellNavEntry[] = [
-    { label: "Inicio", to: "/", icon: Home },
-    { label: "Lista de espera", to: "/waitlist", icon: ListChecks, badge: waitlist || undefined },
-    { label: "Organizaciones", to: "/organizations", icon: Building2 },
+    { label: "Hoy", to: "/", icon: Home },
+    { label: "Clientes", to: "/clients", icon: Building2 },
+    { label: "Embudo", to: "/pipeline", icon: Columns3 },
+    { label: "Kairós", to: "/kairos", icon: Bot, badge: kairos || undefined, badgeLabel: "esperan tu sí" },
+    ...(admin ? [{ label: "Reportes", to: "/reports", icon: ChartColumn }] : []),
+    { label: "Demos", to: "/demos", icon: Presentation },
     { label: "Usuarios", to: "/users", icon: Users },
-    ...(session.role === "admin"
+    ...(admin
       ? [
           { label: "Cobros y planes", to: "/billing", icon: CreditCard },
           { label: "Comisiones", to: "/commissions", icon: Coins },
@@ -133,9 +148,7 @@ function AdminFrame({
       icon: BookOpen,
       badge: complaints || undefined,
     },
-    ...(session.role === "admin"
-      ? [{ label: "Equipo", to: "/team", icon: ShieldCheck }]
-      : []),
+    ...(admin ? [{ label: "Equipo", to: "/team", icon: ShieldCheck }] : []),
   ]
   return (
     <AppShell

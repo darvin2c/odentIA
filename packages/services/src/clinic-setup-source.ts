@@ -38,6 +38,11 @@ const reviewSchema = z
 
 export type ClinicSetupReview = z.output<typeof reviewSchema>
 
+/** Lo de revisar de una fuente (`review` de `clinica.fuente.json`), para armar otra vez el PDF del plan. */
+export function clinicSetupReview(source: unknown): ClinicSetupReview {
+  return reviewSchema.parse((source as Record<string, unknown> | null)?.review)
+}
+
 /** Una entrada de la biblioteca con su código en la lista del país, para el plan y su PDF. */
 export interface LibraryEntry {
   key: string

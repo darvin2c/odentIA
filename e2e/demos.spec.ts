@@ -1,13 +1,15 @@
 /**
  * Las demos para presentar (ADR 0096), en pantalla: la administración crea una
- * demo de latidIA desde Clínicas, ve cómo se arma, la abre en su ficha con lo
- * que tiene para mostrar, la vuelve a empezar y la borra escribiendo su
- * nombre. La arma el worker de verdad.
+ * demo de latidIA desde Demos, ve cómo se arma, la abre con lo que tiene para
+ * mostrar, la vuelve a empezar y la borra escribiendo su nombre. La arma el
+ * worker de verdad.
  */
 import { createHmac, randomUUID } from "node:crypto"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasPlan } from "@odentia/db/schema/saas-billing"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
+import { surface } from "./admin"
 import { hostUrl } from "./env"
 import { expect, test } from "./fixtures"
 
@@ -74,9 +76,9 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   await page.getByRole("button", { name: "Entrar a la administración" }).click()
   await expect(page).not.toHaveURL(/\/security/)
 
-  // --- Crear demo (tablero 3) -----------------------------------------------------------------
-  await page.goto(`${ADMIN}/organizations`)
-  await expect(page.getByRole("heading", { level: 1, name: "Clínicas" })).toBeVisible()
+  // --- Crear demo (tablero 3), desde Demos --------------------------------------------------
+  await page.goto(`${ADMIN}/demos`)
+  await expect(page.getByRole("heading", { level: 1, name: "Demos" })).toBeVisible()
   await page.getByRole("button", { name: "Crear demo" }).first().click()
   await page
     .getByRole("radiogroup", { name: "Producto" })
@@ -101,31 +103,31 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   // --- Mientras se crea (tablero 4) y lista ---------------------------------------------------
   await expect(page.getByText("Puedes cerrar esto y seguir.")).toBeVisible()
   await shot("creando-demo")
-  await expect(page.getByRole("heading", { name: `${name} está lista` })).toBeVisible({
+  // Lista, el avance da paso a la demo misma: lo que tiene para mostrar y «Abrir la demo».
+  const detail = surface(page, name)
+  await expect(detail.getByRole("heading", { name, exact: true })).toBeVisible({
     timeout: 180_000,
   })
-  await expect(page.getByRole("button", { name: "Abrir la demo" })).toBeEnabled()
+  await expect(detail.getByRole("button", { name: "Abrir la demo" })).toBeEnabled()
   await shot("demo-lista")
-  await page.getByRole("button", { name: "Cerrar" }).last().click()
+  await detail.getByRole("button", { name: "Cerrar" }).last().click()
 
-  // --- Clínicas, con las demos (tablero 1) ----------------------------------------------------
-  await page.getByLabel("Clase").click()
-  await page.getByRole("option", { name: "Demos" }).click()
-  await expect(page).toHaveURL(/clase=demo/)
-  const card = page.getByRole("link", { name: new RegExp(name) })
-  await expect(card).toContainText("Demo")
-  await expect(card).toContainText("Pediatría · pequeño · 6 meses · al día")
+  // --- Demos, con su filtro de producto (tablero 1) -------------------------------------------
+  await page.getByRole("group", { name: "Producto" }).getByRole("button", { name: /latidIA/ }).click()
+  await expect(page).toHaveURL(/producto=medical/)
+  const row = page.getByRole("listitem").filter({ hasText: name })
+  await expect(row).toContainText("Demo")
+  await expect(row).toContainText("latidIA")
+  await expect(row).toContainText("Pediatría · pequeño · 6 meses · al día")
   await shot("clinicas-demos")
 
   // --- La ficha de una demo (tablero 2) -------------------------------------------------------
-  await card.click()
-  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible()
-  const band = page.getByRole("region", { name: "Demo" })
+  await row.getByRole("button", { name: "Ver", exact: true }).click()
+  await expect(detail.getByRole("heading", { name, exact: true })).toBeVisible()
+  const band = detail.getByRole("region", { name: "Demo" })
   await expect(band).toContainText("Demo de Pediatría · pequeño · 6 meses · Perú")
-  await expect(page.getByRole("heading", { name: "Lo que tiene hoy para mostrar" })).toBeVisible()
-  await expect(page.getByText("Control de niño sano")).toBeVisible()
-  // Una demo nunca se factura: el mes lo dice, también en lo que paga.
-  await expect(page.getByText("Es una demo: no se cobra")).toBeVisible()
+  await expect(detail.getByRole("heading", { name: "Lo que tiene hoy para mostrar" })).toBeVisible()
+  await expect(detail.getByText("Control de niño sano")).toBeVisible()
   await shot("ficha-demo-claro")
   await page.evaluate(() => {
     document.documentElement.classList.add("dark")
@@ -140,6 +142,21 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   await shot("ficha-demo-telefono")
   await page.setViewportSize({ width: 1366, height: 900 })
 
+  // Una demo nunca es cliente ni se factura: su página de clínica sigue siendo la suya (no lleva a
+  // Clientes) y el mes lo dice, también en lo que paga.
+  const [demo] = await fixtureDb
+    .select({ id: saasDemo.id, organizationId: saasDemo.organizationId })
+    .from(saasDemo)
+    .where(eq(saasDemo.name, name))
+    .orderBy(desc(saasDemo.createdAt))
+    .limit(1)
+  expect(demo?.organizationId).toBeTruthy()
+  await page.goto(`${ADMIN}/organizations/${demo!.organizationId}`)
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/organizations/${demo!.organizationId}`))
+  await expect(page.getByText("Es una demo: no se cobra")).toBeVisible()
+  await page.goto(`${ADMIN}/demos?demo=${demo!.id}`)
+
   // --- Volver a empezar y borrar (tablero 4b) -------------------------------------------------
   await band.getByRole("button", { name: "Volver a empezar" }).click()
   await expect(page.getByRole("alertdialog")).toContainText(
@@ -147,21 +164,18 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   )
   await shot("volver-a-empezar")
   await page.getByRole("alertdialog").getByRole("button", { name: "Volver a empezar" }).click()
-  await expect(band).toContainText("Se está volviendo a armar")
-  // Al terminar, la ficha de la clínica anterior ya no existe: se vuelve a Clínicas y se abre la nueva.
-  await page.goto(`${ADMIN}/organizations?clase=demo`)
-  const rebuilt = page.getByRole("link", { name: new RegExp(name) })
-  await expect(async () => {
-    await page.reload()
-    await expect(rebuilt).toContainText("al día", { timeout: 2_000 })
-  }).toPass({ timeout: 180_000, intervals: [3_000] })
-  await rebuilt.click()
+  // Mientras se vuelve a armar, la demo muestra su avance; al terminar, vuelve a estar lista.
+  await expect(page.getByRole("heading", { name: `Creando ${name}` })).toBeVisible()
+  await expect(detail.getByRole("heading", { name, exact: true })).toBeVisible({
+    timeout: 180_000,
+  })
+  await expect(detail.getByRole("region", { name: "Demo" })).toContainText("Al día hoy")
 
-  await page
+  const dialog = page.getByRole("alertdialog")
+  await detail
     .getByRole("region", { name: "Demo" })
     .getByRole("button", { name: "Borrar demo" })
     .click()
-  const dialog = page.getByRole("alertdialog")
   const confirmName = dialog.getByLabel("Escribe el nombre para confirmar")
   await expect(dialog).toContainText(`Escribe «${name}» tal cual`)
   // Un nombre que no coincide no borra: se dice junto al campo y el diálogo sigue abierto.
@@ -172,6 +186,7 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   await shot("borrar-demo")
   await confirmName.fill(name)
   await dialog.getByRole("button", { name: "Borrar demo" }).click()
-  await expect(page).toHaveURL(/\/organizations(\?|$)/)
-  await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0)
+  await expect(page).toHaveURL(/\/demos(\?|$)/)
+  await expect(page).not.toHaveURL(/demo=/)
+  await expect(page.getByRole("listitem").filter({ hasText: name })).toHaveCount(0)
 })

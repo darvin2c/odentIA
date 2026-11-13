@@ -1,0 +1,13 @@
+# Ejemplo sin secretos (ver README.md). Los secretos se ponen con `wrangler secret put`:
+#   INBOUND_EMAIL_SECRET  el mismo valor que INBOUND_EMAIL_SECRET de la API
+#   API_URL               https://api.odentia32.com
+#   FORWARD_TO            el buzón de siempre, verificado en Email Routing
+name = "sallca-correo-entrante"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+# Sin URL pública: solo lo llama Email Routing.
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true

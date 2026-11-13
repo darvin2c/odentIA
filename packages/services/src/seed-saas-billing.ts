@@ -10,7 +10,9 @@
  * (`seed-org-dental-smile`, `seed-org-clinica-norte`), no envía correos ni
  * activa automatizaciones.
  */
+import { isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -26,7 +28,10 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { clientForWaitlistRequest, linkClientToOrganization } from "./admin-clients.js"
+import type { AdminActor } from "./admin-core.js"
+import { decide } from "./admin-sales.js"
 import { addDays as addCivilDays, dayStart, reportDayOf } from "./report-periods.js"
 import {
   confirmSaasPayment,
@@ -614,7 +619,9 @@ function requestDates(row: DemoRequest, now: Date, enteredAt: Date | null) {
  * Fundadores en desarrollo: solicitudes de la lista de espera en cada etapa
  * (por revisar, invitada con el enlace de la semilla y por vencer, invitación
  * vencida, entró, paga y descartada), su seguimiento y un precio negociado que
- * vence en 6 días en «Demo Deuda» (issue 168). Idempotente por correo: lo ya
+ * vence en 6 días en «Demo Deuda» (issue 168). Cada solicitud tiene su cliente
+ * del ARM (`linkDemoRequestsToClients`); el resto del ARM lo siembra
+ * `seedAdminArm` al final de la semilla. Idempotente por correo: lo ya
  * sembrado vuelve a tener fechas de hoy mientras siga como lo dejó la semilla.
  * No envía correos.
  */
@@ -664,6 +671,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
         ),
       )
   }
+  await linkDemoRequestsToClients(db, now)
 
   // El seguimiento solo se agrega (`saas_follow_up_append_only`): lo de la semilla se borra
   // por su id y se vuelve a escribir con las fechas de hoy; lo que anotó una persona queda.
@@ -673,23 +681,27 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
     .where(inArray(user.id, [SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID]))
   if (staff.length === 2) {
     const requests = await db
-      .select({ id: saasWaitlistRequest.id, email: saasWaitlistRequest.email })
+      .select({ id: saasWaitlistRequest.id, email: saasWaitlistRequest.email, clientId: saasWaitlistRequest.clientId })
       .from(saasWaitlistRequest)
       .where(inArray(saasWaitlistRequest.email, DEMO_FOLLOW_UPS.map((entry) => entry.email)))
     await db.delete(saasFollowUp).where(inArray(saasFollowUp.id, DEMO_FOLLOW_UPS.map((entry) => entry.id)))
     const entries = DEMO_FOLLOW_UPS.flatMap((entry) => {
-      const requestId = requests.find((request) => request.email === entry.email)?.id
-      if (!requestId) return []
+      const request = requests.find((item) => item.email === entry.email)
+      if (!request) return []
+      const createdAt = limaAt(now, entry.daysAgo, entry.hour)
       return [
         {
           id: entry.id,
-          requestId,
+          requestId: request.id,
+          // También es del cliente de la solicitud (ADR 0185): su ficha lo ve en el historial.
+          clientId: request.clientId,
+          happenedAt: createdAt,
           authorUserId: entry.authorUserId,
           body: entry.body,
           followUpOn: entry.followUpIn === null ? null : limaDay(now, entry.followUpIn),
           adminOnly: entry.adminOnly,
           fromNote: "fromNote" in entry ? entry.fromNote : false,
-          createdAt: limaAt(now, entry.daysAgo, entry.hour),
+          createdAt,
         },
       ]
     })
@@ -701,6 +713,71 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
     .update(saasSubscription)
     .set({ discountBps: 1000, discountEndsAt: new Date(now.getTime() + 6 * 86_400_000), updatedAt: now })
     .where(and(eq(saasSubscription.organizationId, "seed-saas-deuda"), eq(saasSubscription.discountBps, 0)))
+}
+
+/**
+ * Cada solicitud de la semilla con su cliente del ARM (ADR 0185), con la misma
+ * operación que la solicitud de la web (`clientForWaitlistRequest`): la que
+ * entró queda ligada a su cuenta y la descartada, perdida con su motivo. La de
+ * una clínica que es demo (Clínica Norte) no da cliente: una demo nunca es
+ * cliente. Idempotente: solo toca las que aún no tienen cliente.
+ */
+async function linkDemoRequestsToClients(db: Db, now: Date): Promise<void> {
+  const requests = await db
+    .select()
+    .from(saasWaitlistRequest)
+    .where(
+      and(
+        inArray(saasWaitlistRequest.email, DEMO_WAITLIST.map((row) => row.email)),
+        isNull(saasWaitlistRequest.clientId),
+      ),
+    )
+  const [admin] = await db.select({ id: user.id }).from(user).where(eq(user.id, SEED_STAFF_ADMIN_ID)).limit(1)
+  const ada: AdminActor = { userId: SEED_STAFF_ADMIN_ID, role: "admin" }
+  for (const request of requests) {
+    if (request.organizationId) {
+      const [demo] = [
+        ...(await db.execute<{ demo: boolean }>(sql`select (
+          exists (select 1 from ${saasDemo} d where d.organization_id = ${request.organizationId})
+          or exists (select 1 from ${saasSubscription} s where s.organization_id = ${request.organizationId} and s.is_demo)
+        ) as demo`)),
+      ]
+      if (demo?.demo) continue
+    }
+    const clientId = await clientForWaitlistRequest(
+      db,
+      {
+        email: request.email,
+        firstName: request.firstName,
+        lastName: request.lastName,
+        phone: request.phone,
+        clinicName: request.clinicName,
+        countryCode: request.countryCode,
+        city: request.city,
+        professionals: request.professionals,
+        currentTool: request.currentTool,
+        product: isClinicalProduct(request.product) ? request.product : "dental",
+      },
+      request.createdAt,
+    )
+    await db.update(saasWaitlistRequest).set({ clientId }).where(eq(saasWaitlistRequest.id, request.id))
+    if (request.organizationId) {
+      await linkClientToOrganization(db, null, {
+        clientId,
+        organizationId: request.organizationId,
+        origin: "web",
+        now: request.enteredAt ?? now,
+      })
+    } else if (request.status === "descartada" && admin) {
+      await decide(
+        db,
+        ada,
+        clientId,
+        { decision: "perdido", reason: "no_es_una_clinica", reasonDetail: request.discardReason },
+        request.decidedAt ?? new Date(request.createdAt.getTime() + DAY),
+      )
+    }
+  }
 }
 
 /**

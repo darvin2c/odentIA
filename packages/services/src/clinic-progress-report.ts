@@ -312,8 +312,58 @@ export async function progressReportPdf(raw: ProgressReportInput): Promise<{
   return { bytes, pages: kit.pageCount, content }
 }
 
+/**
+ * Lo que necesita el correo del informe para salir otra vez igual. Viaja con la reserva en
+ * el registro: un informe que no se sabe si salió se reenvía con su mismo correo y su mismo
+ * PDF, sin volver a armarlo.
+ */
+export interface ProgressReportMail {
+  brand: MailBrand
+  brandName: string
+  title: string
+  clinic: string
+  to: string
+  closing: string
+  replyTo: string
+  signature: { name: string }
+}
+
+/** Lo del contenido que lleva el correo, y nada más. */
+export function progressReportMailOf(content: ProgressReportContent): ProgressReportMail {
+  return {
+    brand: content.brand,
+    brandName: content.brandName,
+    title: content.title,
+    clinic: content.clinic,
+    to: content.to,
+    closing: content.closing,
+    replyTo: content.replyTo,
+    signature: { name: content.signature.name },
+  }
+}
+
+/** Lo guardado en el registro, si está completo (un informe de antes de guardarlo no lo tiene). */
+function mailFromMetadata(value: unknown): ProgressReportMail | null {
+  if (!value || typeof value !== "object") return null
+  const mail = value as Record<string, unknown>
+  const signature = mail.signature as Record<string, unknown> | undefined
+  const texts = ["brand", "brandName", "title", "clinic", "to", "closing", "replyTo"] as const
+  if (texts.some((key) => typeof mail[key] !== "string") || typeof signature?.name !== "string")
+    return null
+  return {
+    brand: mail.brand as MailBrand,
+    brandName: mail.brandName as string,
+    title: mail.title as string,
+    clinic: mail.clinic as string,
+    to: mail.to as string,
+    closing: mail.closing as string,
+    replyTo: mail.replyTo as string,
+    signature: { name: signature.name },
+  }
+}
+
 /** El correo que lleva el informe: corto, informativo y con respuesta a quien acompaña. */
-export function progressReportEmail(content: ProgressReportContent): MailTemplate {
+export function progressReportEmail(content: ProgressReportMail): MailTemplate {
   return {
     ...renderEmail({
       brand: content.brand,
@@ -346,8 +396,9 @@ const SIGNATURE_HEIGHT = 3 * SIZE.dense * 1.45 + 3 * SIZE.dense * 1.35 + 6 + 4 +
 /**
  * Cada informe deja su rastro en la auditoría de la administración: `enviando` antes de
  * enviarlo, y después `enviado` o `desconocido` (el correo se cortó y no se sabe si
- * salió). Con cualquiera de los tres, ese número no se vuelve a enviar: lo dudoso se
- * revisa en Zoho, no se repite solo.
+ * salió). Con cualquiera de los tres, ese número no se vuelve a enviar solo: lo dudoso se
+ * revisa en Zoho y una persona lo cierra como salido o, si no salió, lo reenvía igual
+ * (`reserveProgressReportResend`), una vez por pulsación y nunca en un reintento.
  */
 export const PROGRESS_REPORT_ACTIONS = {
   enviando: "org.progress_report_sending",
@@ -355,6 +406,17 @@ export const PROGRESS_REPORT_ACTIONS = {
   desconocido: "org.progress_report_unknown",
 } as const
 export type ProgressReportState = keyof typeof PROGRESS_REPORT_ACTIONS
+
+/**
+ * Lo último de un informe: el más nuevo y, a la misma hora (reservar y cerrar
+ * en una misma transacción comparten `now()`), el cierre antes que el «enviándose».
+ * Sin el desempate, un informe que no se sabe si salió podía leerse «enviándose»
+ * y perder «Revisé en Zoho: salió» (QA del ARM, 12 nov).
+ */
+const latestReportFirst = [
+  desc(adminAudit.createdAt),
+  sql`case when ${adminAudit.action} = ${PROGRESS_REPORT_ACTIONS.enviando} then 1 else 0 end`,
+] as const
 
 /** Lo último que pasó con ese informe (por su número) en esa clínica, o null si nunca se envió. */
 export async function progressReportSent(
@@ -372,7 +434,7 @@ export async function progressReportSent(
         eq(adminAudit.entityId, `informe-${number}`),
       ),
     )
-    .orderBy(desc(adminAudit.createdAt))
+    .orderBy(...latestReportFirst)
     .limit(1)
   if (!row) return null
   const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
@@ -387,9 +449,17 @@ export async function reserveProgressReport(
   tx: Db,
   actor: AdminActor,
   orgId: string,
-  input: { number: number; to: string; subject: string; stage: string; pdfKey: string },
+  input: {
+    number: number
+    to: string
+    subject: string
+    stage: string
+    pdfKey: string
+    /** El correo tal como sale, para poder reenviarlo igual si no se sabe si salió. */
+    mail?: ProgressReportMail
+  },
 ): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('informe:' || ${orgId} || ':' || ${input.number}))`)
+  await lockProgressReport(tx, orgId, input.number)
   const before = await progressReportSent(tx, orgId, input.number)
   if (before)
     throw new ServiceError(
@@ -403,8 +473,102 @@ export async function reserveProgressReport(
     action: PROGRESS_REPORT_ACTIONS.enviando,
     organizationId: orgId,
     entityId: `informe-${input.number}`,
-    metadata: { to: input.to, subject: input.subject, stage: input.stage, pdfKey: input.pdfKey },
+    metadata: {
+      to: input.to,
+      subject: input.subject,
+      stage: input.stage,
+      pdfKey: input.pdfKey,
+      ...(input.mail ? { mail: input.mail } : {}),
+    },
   })
+}
+
+/** El número de ese informe en esa clínica, bloqueado hasta el fin de la transacción. */
+async function lockProgressReport(tx: Db, orgId: string, number: number): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('informe:' || ${orgId} || ':' || ${number}))`)
+}
+
+/** Lo que hace falta para reenviar un informe: el mismo número, destinatario, PDF y correo. */
+export interface ProgressReportResend {
+  number: number
+  to: string
+  subject: string
+  stage: string
+  pdfKey: string
+  mail: ProgressReportMail
+}
+
+/**
+ * Por qué no se puede reenviar ese informe, o null si se puede: solo uno que quedó «no se
+ * sabe si salió», con su PDF y su correo guardados. Lo usa la ruta para decirlo antes de
+ * leer el PDF y la reserva para volver a mirarlo con el número bloqueado.
+ */
+export function progressReportResendProblem(
+  number: number,
+  found: ProgressReportRecord | undefined,
+): ServiceError | null {
+  if (!found)
+    return new ServiceError("NOT_FOUND", 404, `El informe N.º ${number} no está en el registro`)
+  if (found.state === "enviado")
+    return new ServiceError(
+      "CONFLICT",
+      409,
+      `El informe N.º ${number} ya figura como enviado: no se envía dos veces`,
+    )
+  if (found.state === "enviando")
+    return new ServiceError(
+      "CONFLICT",
+      409,
+      `El informe N.º ${number} se está enviando o quedó a medias: revisa en Zoho si salió antes de reenviarlo`,
+    )
+  if (!found.pdfKey || !found.mail || !found.to)
+    return new ServiceError(
+      "CONFLICT",
+      409,
+      `El informe N.º ${number} no guardó su PDF o su correo: no se puede reenviar igual desde aquí`,
+    )
+  return null
+}
+
+/**
+ * Reserva el reenvío de un informe que no se sabe si salió: con el número bloqueado, vuelve
+ * a mirar que siga así y deja otra vez `enviando` con lo mismo que llevaba (destinatario,
+ * asunto, PDF y correo) y la marca de reenvío. Dos pulsaciones no envían dos correos.
+ */
+export async function reserveProgressReportResend(
+  tx: Db,
+  actor: AdminActor,
+  orgId: string,
+  number: number,
+): Promise<ProgressReportResend> {
+  await lockProgressReport(tx, orgId, number)
+  const found = (await listProgressReports(tx, orgId)).find((report) => report.number === number)
+  const problem = progressReportResendProblem(number, found)
+  if (problem) throw problem
+  if (!found?.pdfKey || !found.mail || !found.to)
+    throw new ServiceError("CONFLICT", 409, `El informe N.º ${number} no se puede reenviar`)
+  const sending: ProgressReportResend = {
+    number,
+    to: found.to,
+    subject: found.subject ?? "",
+    stage: found.stage ?? "",
+    pdfKey: found.pdfKey,
+    mail: found.mail,
+  }
+  await writeAdminAudit(tx, actor, {
+    action: PROGRESS_REPORT_ACTIONS.enviando,
+    organizationId: orgId,
+    entityId: `informe-${number}`,
+    metadata: {
+      to: sending.to,
+      subject: sending.subject,
+      stage: sending.stage,
+      pdfKey: sending.pdfKey,
+      mail: sending.mail,
+      resent: true,
+    },
+  })
+  return sending
 }
 
 /** Cómo terminó el envío reservado: salió, o no se sabe. */
@@ -423,6 +587,10 @@ export async function finishProgressReport(
     sentAt?: string
     /** Salió por otra vía y se registra después: el sistema no lo envió. */
     registered?: boolean
+    /** El correo tal como salió (o se intentó), para reenviarlo igual si no se sabe si salió. */
+    mail?: ProgressReportMail
+    /** Es un reenvío de ese mismo número. */
+    resent?: boolean
   },
 ): Promise<void> {
   await writeAdminAudit(tx, actor, {
@@ -436,6 +604,8 @@ export async function finishProgressReport(
       pdfKey: input.pdfKey,
       ...(input.sentAt ? { sentAt: input.sentAt } : {}),
       ...(input.registered ? { registered: true } : {}),
+      ...(input.mail ? { mail: input.mail } : {}),
+      ...(input.resent ? { resent: true } : {}),
     },
   })
 }
@@ -458,12 +628,24 @@ export interface ProgressReportRecord {
   registeredLater: boolean
   /** La clave del PDF tal como salió; sin ella, el informe se envió antes de guardarlos. */
   pdfKey: string | null
+  /** El correo tal como salió; sin él, el informe es de antes de guardarlo y no se reenvía. */
+  mail: ProgressReportMail | null
+  /** Lo último fue un reenvío de ese número. */
+  resent: boolean
 }
 
 /** Los informes de esa clínica, el último estado de cada número, del más nuevo al más viejo. */
 export async function listProgressReports(tx: Db, orgId: string): Promise<ProgressReportRecord[]> {
+  return (await progressReportsOf(tx, [orgId])).get(orgId) ?? []
+}
+
+/** Los informes de varias clínicas en una sola lectura (lo de `listProgressReports`, por clínica). */
+export async function progressReportsOf(tx: Db, orgIds: string[]): Promise<Map<string, ProgressReportRecord[]>> {
+  const out = new Map<string, ProgressReportRecord[]>()
+  if (!orgIds.length) return out
   const rows = await tx
     .select({
+      orgId: adminAudit.organizationId,
       at: adminAudit.createdAt,
       action: adminAudit.action,
       entityId: adminAudit.entityId,
@@ -472,10 +654,13 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
     })
     .from(adminAudit)
     .leftJoin(user, eq(user.id, adminAudit.actorUserId))
-    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
-    .orderBy(desc(adminAudit.createdAt))
-  const seen = new Map<number, ProgressReportRecord>()
+    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), inArray(adminAudit.organizationId, [...new Set(orgIds)])))
+    .orderBy(...latestReportFirst)
+  const seenOf = new Map<string, Map<number, ProgressReportRecord>>()
   for (const row of rows) {
+    if (!row.orgId) continue
+    const seen = seenOf.get(row.orgId) ?? new Map<number, ProgressReportRecord>()
+    seenOf.set(row.orgId, seen)
     const number = Number(row.entityId?.replace("informe-", ""))
     if (!Number.isInteger(number) || seen.has(number)) continue
     const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
@@ -491,13 +676,18 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
       by: row.by ?? null,
       registeredLater: meta.registered === true,
       pdfKey: (meta.pdfKey as string | undefined) ?? null,
+      mail: mailFromMetadata(meta.mail),
+      resent: meta.resent === true,
     })
   }
-  return [...seen.values()].sort((a, b) => b.number - a.number)
+  for (const [orgId, seen] of seenOf) out.set(orgId, [...seen.values()].sort((a, b) => b.number - a.number))
+  return out
 }
 
 /** Una carga en el registro de la clínica: la configuración o los pacientes de un plan. */
 export interface ClinicLoadRecord {
+  /** La primera fila de la auditoría de esa carga (la tanda 0 de los pacientes): no cambia al seguir. */
+  id: string
   kind: "configuracion" | "pacientes"
   at: string
   by: string | null
@@ -533,15 +723,15 @@ function loadSummary(kind: ClinicLoadRecord["kind"], totals: Record<string, numb
  * pacientes se cargan por tandas: las tandas seguidas del mismo plan son una sola carga.
  */
 export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoadRecord[]> {
-  const rows = await tx.execute<{ action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null }>(sql`
-    select a.action, a.created_at, a.metadata, u.name
+  const rows = await tx.execute<{ id: string; action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null }>(sql`
+    select a.id, a.action, a.created_at, a.metadata, u.name
     from admin_audit a left join "user" u on u.id = a.actor_user_id
     where a.organization_id = ${orgId} and a.action in ('org.setup_import', 'org.data_import')
     order by a.created_at desc
     limit 500`)
   // `open`: las tandas llegan de la más nueva a la más vieja, y la tanda 0 es el comienzo de
   // esa pasada; la anterior a ella (otra pasada del mismo plan) va en su propia fila.
-  const loads: Array<{ kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
+  const loads: Array<{ id: string; kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
   for (const row of rows) {
     const meta = row.metadata ?? {}
     const kind = row.action === "org.setup_import" ? "configuracion" : "pacientes"
@@ -551,10 +741,11 @@ export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoad
     const last = loads.at(-1)
     if (kind === "pacientes" && last?.kind === "pacientes" && last.open && last.plan === meta.planSha256) {
       for (const [key, value] of Object.entries(totals)) last.totals[key] = (last.totals[key] ?? 0) + value
+      last.id = row.id
       if (first) last.open = false
       continue
     }
-    loads.push({ kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
+    loads.push({ id: row.id, kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
   }
-  return loads.slice(0, 100).map(({ kind, at, by, totals }) => ({ kind, at, by, summary: loadSummary(kind, totals) }))
+  return loads.slice(0, 100).map(({ id, kind, at, by, totals }) => ({ id, kind, at, by, summary: loadSummary(kind, totals) }))
 }

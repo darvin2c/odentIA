@@ -5,6 +5,7 @@ import { session } from "@odentia/db/schema/auth"
 import { reportQuestion } from "@odentia/db/schema/reports"
 import { saasAction, saasPlan, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { desc, eq } from "drizzle-orm"
+import { accountClient } from "./admin"
 import { hostUrl, tenant } from "./env"
 import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
@@ -213,16 +214,19 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await shot("admin-plan")
   await page.keyboard.press("Escape")
 
-  // La ficha: el mes con lo cobrado, lo que costó y el margen, y lo que hizo cada agente.
-  await gotoHydrated(page, hostUrl("admin", `/organizations/${org.id}`))
+  // La ficha: la de su cliente (lo liga Kairós), en Uso; el enlace de antes a sus gastos lleva ahí.
+  // El mes con lo cobrado, lo que costó y el margen, y lo que hizo cada agente.
+  await accountClient(fixtureDb, { org, product: "dental" })
+  await gotoHydrated(page, hostUrl("admin", `/organizations/${org.id}?tab=gastos`))
+  await expect(page).toHaveURL(/\/clients\/[0-9a-f-]{36}\?tab=uso/)
+  await expect(page.getByRole("tab", { name: "Uso" })).toHaveAttribute("aria-selected", "true")
   const month = page.getByRole("region", { name: "El mes, en curso" })
   await expect(month).toBeVisible()
   await expect(month.getByText("Nos costó", { exact: true })).toBeVisible()
   await expect(month.getByText("Margen", { exact: true })).toBeVisible()
   await expect(page.getByRole("region", { name: "Lo que hicieron los agentes" })).toContainText("82 conversaciones")
   await shot("admin-ficha")
-  // Gastos: costo y margen por agente y tipo, también lo que no se cobra (tablero O2).
-  await page.getByRole("tab", { name: "Gastos" }).click()
+  // Gastos, debajo en la misma pestaña: costo y margen por agente y tipo, también lo que no se cobra (tablero O2).
   const byType = page.getByRole("region", { name: "Por agente y tipo" })
   await expect(byType.getByRole("columnheader", { name: "Nos costó" })).toBeVisible()
   await expect(byType.getByRole("row").filter({ hasText: "Sofi · Gestiona" })).toContainText("52")

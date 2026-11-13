@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { saasClient } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
@@ -20,6 +21,8 @@ import { and, asc, desc, eq, gt, ilike, inArray, lte, ne, or, type SQL, sql } fr
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { planPrices } from "./saas-actions.js"
+import { clientForWaitlistRequest, linkClientToOrganization } from "./admin-clients.js"
+import { applyInvitedProposal } from "./admin-sales.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
@@ -162,7 +165,9 @@ export interface WaitlistSubmitResult {
 /**
  * Deja la solicitud en la lista, con el producto del dominio donde se pidió.
  * Un mismo correo con una solicitud viva (por revisar o invitada) no crea
- * otra: se devuelve la que hay.
+ * otra: se devuelve la que hay. En la misma transacción la solicitud queda
+ * con su cliente del ARM (`clientForWaitlistRequest`: el que ya tiene a esa
+ * persona, o uno nuevo que llegó por la web) y su persona como contacto.
  */
 export async function submitWaitlistRequest(
   tx: Db,
@@ -179,9 +184,10 @@ export async function submitWaitlistRequest(
     .where(and(eq(saasWaitlistRequest.email, data.email), inArray(saasWaitlistRequest.status, ["por_revisar", "invitada"])))
     .limit(1)
   if (alive) return { id: alive.id, existing: true, answerDays: (await saasTermsAt(tx, alive.createdAt)).waitlistAnswerDays }
+  const clientId = await clientForWaitlistRequest(tx, { ...data, product })
   const [row] = await tx
     .insert(saasWaitlistRequest)
-    .values({ ...data, product })
+    .values({ ...data, product, clientId, source: "web" })
     .returning({ id: saasWaitlistRequest.id, createdAt: saasWaitlistRequest.createdAt })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar la solicitud")
   return { id: row.id, existing: false, answerDays: (await saasTermsAt(tx, row.createdAt)).waitlistAnswerDays }
@@ -1087,7 +1093,8 @@ export async function releaseFounderInvitation(tx: Db, requestId: string): Promi
 /**
  * La clínica ya se creó con la invitación: queda en el plan de la invitación,
  * con la prueba de ese plan desde ahora y, si el plan las tiene, las
- * condiciones garantizadas por sus meses. La invitación no sirve más.
+ * condiciones garantizadas por sus meses. La invitación no sirve más. Su
+ * cliente del ARM queda con la cuenta y su venta cerrada como «entró».
  */
 export async function completeFounderInvitation(tx: Db, requestId: string, orgId: string, now = new Date()): Promise<void> {
   const [row] = await tx.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, requestId)).limit(1).for("update")
@@ -1119,6 +1126,31 @@ export async function completeFounderInvitation(tx: Db, requestId: string, orgId
     .update(saasWaitlistRequest)
     .set({ status: "entro", organizationId: orgId, enteredAt: now, claimedAt: null, tokenHash: null, updatedAt: now })
     .where(eq(saasWaitlistRequest.id, requestId))
+  // Si su cliente ya tiene otra cuenta (una segunda clínica de la misma persona), la nueva es
+  // otro cliente: ligarla a esa ficha se rechazaría y desharía la entrada entera.
+  const [requested] = row.clientId
+    ? await tx.select({ organizationId: saasClient.organizationId }).from(saasClient).where(eq(saasClient.id, row.clientId)).limit(1)
+    : []
+  const sameClient = requested?.organizationId && requested.organizationId !== orgId ? null : row.clientId
+  const clientId = await linkClientToOrganization(tx, null, { clientId: sameClient, organizationId: orgId, origin: "web", now })
+  if (clientId && clientId !== row.clientId) {
+    await tx.update(saasWaitlistRequest).set({ clientId }).where(eq(saasWaitlistRequest.id, requestId))
+  }
+  // Si se invitó con una propuesta aceptada (`inviteClient`), sus condiciones quedan puestas al
+  // entrar, con las mismas operaciones de «Precio y prueba». Si no se pueden aplicar (la cuenta
+  // quedó en otro plan), la clínica entra igual: queda la constancia para que Administración las
+  // ponga a mano, en un punto de guardado para no dejar nada a medias.
+  try {
+    await tx.transaction((inner) => applyInvitedProposal(inner as Db, requestId, orgId, now))
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    await writeAdminAudit(tx, null, {
+      action: "arm.proposal_not_applied",
+      organizationId: orgId,
+      entityId: requestId,
+      metadata: { code: error.code },
+    })
+  }
   await writeAdminAudit(tx, null, { action: "saas.waitlist_entered", organizationId: orgId, entityId: requestId, metadata: { planId: plan.id } })
 }
 

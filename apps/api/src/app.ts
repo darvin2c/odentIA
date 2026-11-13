@@ -1,4 +1,4 @@
-import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
+import type { KairosWriter, PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
 import { BASE_PRODUCT, type ClinicalProduct, configureZodMessages, type DomainProduct, type ProductDomains, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
@@ -62,6 +62,7 @@ import { lockedRecordGuard } from "./lib/record-lock.js"
 import { createAccountRoute } from "./routes/account.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
+import { createAdminClientsRoute } from "./routes/admin-clients.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
 import {
   createAccountAdminAccessRoute,
@@ -71,7 +72,9 @@ import {
 import { createAdminDemosRoute } from "./routes/admin-demos.js"
 import { createAdminFoundersRoute } from "./routes/admin-founders.js"
 import { createAdminImportsRoute } from "./routes/admin-imports.js"
+import { createAdminKairosRoute } from "./routes/admin-kairos.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
+import { createAdminReportsRoute } from "./routes/admin-reports.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import {
   auditDenied,
@@ -101,6 +104,7 @@ import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
+import { createInboundEmailRoute } from "./routes/inbound-email.js"
 import { runService, validationError } from "./routes/helpers.js"
 import { createInventoryRoute } from "./routes/inventory.js"
 import { createOrdersRoute } from "./routes/orders.js"
@@ -184,6 +188,13 @@ export interface AppDeps {
   llm?: PlatformLlm
   /** Credenciales de plataforma de los modelos de decisión (JEV_*). */
   decisions?: PlatformDecisions
+  /**
+   * Kairós, el agente del ARM de la administración, con el modelo de la plataforma
+   * (`createKairosWriter`). Sin él, sus rutas usan el doble determinista (sin gasto).
+   */
+  kairos?: KairosWriter
+  /** El secreto con que el worker de correo de Cloudflare firma lo que llega (INBOUND_EMAIL_SECRET). Sin él, 503. */
+  inboundEmailSecret?: string | undefined
   /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
   embedder?: SearchEmbedder
   /** Quién sugiere direcciones (issue 36): Google para la sede, Geoapify para el paciente. */
@@ -507,6 +518,28 @@ export function createApp(deps: AppDeps) {
       replyTo: deps.foundersEmail,
     }),
   )
+  // El ARM (ADR 0185): clientes desde el primer contacto, Kairós y sus reportes.
+  app.route(
+    "/api/admin/clients",
+    createAdminClientsRoute({
+      ownerDb: deps.ownerDb,
+      mailer: deps.mailer,
+      storage: deps.storage,
+      panelUrlOf,
+      ...(deps.kairos ? { kairos: deps.kairos } : {}),
+      getBillingSummary: getOrganizationBillingSummary,
+      startTrial: startSaasTrial,
+    }),
+  )
+  app.route(
+    "/api/admin/kairos",
+    createAdminKairosRoute({
+      ownerDb: deps.ownerDb,
+      mailer: deps.mailer,
+      ...(deps.kairos ? { kairos: deps.kairos } : {}),
+    }),
+  )
+  app.route("/api/admin/reports", createAdminReportsRoute({ ownerDb: deps.ownerDb }))
   app.get("/api/admin/overview", (c) =>
     runService(c, 200, () =>
       deps.ownerDb.transaction((tx) =>
@@ -730,6 +763,17 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
+  // Lo que llega de una máquina, fuera de `/api/admin/*` (sin cookie ni Origin) y antes de `userScoped`, cuyo
+  // use("*") respondería 401: el correo entrante firmado (HMAC).
+  app.route(
+    "/api/inbound",
+    createInboundEmailRoute({
+      ownerDb: deps.ownerDb,
+      storage: deps.storage,
+      secret: deps.inboundEmailSecret ?? null,
+    }),
+  )
+  app.all("/api/inbound/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
   // Soporte mirando una clínica con su permiso: canjear el pase, salir y sus archivos.
   const supportSecret = supportFileSecret(deps.secretsKey)
   app.route(

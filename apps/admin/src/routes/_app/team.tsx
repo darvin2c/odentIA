@@ -6,13 +6,13 @@ import {
   FormDrawer,
   PageHeader,
   PageShell,
+  SkeletonRegion,
   submitErrorMessage,
   submitForm,
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
   useFormSurface,
-  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -20,9 +20,9 @@ import { createFileRoute } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
+import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
-import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 
 export const Route = createFileRoute("/_app/team")({
   pendingComponent: TeamPageSkeleton,

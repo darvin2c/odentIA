@@ -3,8 +3,8 @@
  * impuesto frente a lo que nos costó, por agente y tipo, con la alarma
  * interna y la Fundadora sin uso. Solo lo ve odentIA (rol admin).
  */
-import { Badge, Button, ScrollArea, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
-import { ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { Badge, Button, ScrollArea } from "@odentia/ui"
+import { ErrorState, LoadingState, ViewTabs } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Fragment, useState } from "react"
@@ -257,12 +257,16 @@ export function CostMarginOverviewSection({ product = "todos" }: { product?: Pro
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Todas las clínicas</h3>
-        <Tabs value={order} onValueChange={(value) => setOrder(value as "margen" | "costo")}>
-          <TabsList aria-label="Orden">
-            <TabsTrigger value="margen">Menor margen primero</TabsTrigger>
-            <TabsTrigger value="costo">Mayor costo primero</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {/* ViewTabs se desplaza en su sitio: a 390 px las dos pestañas desbordaban la página. */}
+        <ViewTabs
+          label="Orden"
+          value={order}
+          options={[
+            { value: "margen", label: "Menor margen primero" },
+            { value: "costo", label: "Mayor costo primero" },
+          ]}
+          onValueChange={setOrder}
+        />
       </div>
       <ScrollArea horizontal className="max-w-full rounded-xl border bg-card">
         <table className="w-full min-w-[40rem] text-sm">

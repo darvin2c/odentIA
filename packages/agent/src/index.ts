@@ -38,6 +38,21 @@ export { runShadowTriage } from "./decision/shadow.js"
 export { type DecisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 export { createHelpWriter, fakeHelpWriter } from "./help-writer.js"
 export {
+  createKairosWriter,
+  fakeKairosWriter,
+  KAIROS_GOALS,
+  kairosModelNotice,
+  type KairosAnnotation,
+  type KairosChatModel,
+  type KairosClientFacts,
+  type KairosUse,
+  type KairosWriter,
+  type KairosWriterDeps,
+  readDraft,
+  readSummary,
+  readWeekly,
+} from "./kairos.js"
+export {
   type AgentRuntime,
   consumeAgentRun,
   processAgentRun,

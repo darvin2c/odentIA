@@ -1,7 +1,8 @@
 /**
- * Hoy (`routes/_app/index.tsx`): filas con nombre, una línea y su botón, en
- * secciones; debajo, «Otras colas». Sin el bloque de cobros: lo de cobro solo
- * se dibuja si llega (soporte no lo recibe).
+ * Hoy (`routes/_app/index.tsx`): lo que Kairós dejó listo (tarjetas), las
+ * tareas de hoy con «Mías | Todas» y filas con nombre, una línea y su botón,
+ * en secciones; debajo, «Otras colas». Sin el bloque de cobros: lo de cobro
+ * solo se dibuja si llega (soporte no lo recibe).
  */
 import { Skeleton } from "@odentia/ui"
 import { PageLoading, ProductFilterSkeleton, TextBase, TextSm } from "./page-loading"
@@ -27,10 +28,38 @@ function RowsSkeleton({ rows }: { rows: number }) {
   )
 }
 
-/** Las secciones de filas de Inicio mientras llegan. */
+/** «Kairós dejó listo»: la superficie del agente con una tarjeta por llegar. */
+function ReadySkeleton() {
+  return (
+    <div className="space-y-3 rounded-xl border border-agent-border bg-agent-soft p-5">
+      <TextBase className="w-40" />
+      <TextSm className="w-80" />
+      {[0, 1].map((card) => (
+        <div key={card} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-6 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <TextBase className="w-64" />
+              <TextSm className="w-40" />
+            </div>
+          </div>
+          <TextSm className="w-full" />
+          <div className="flex gap-2">
+            <Skeleton className="h-8 w-20 rounded-3xl" />
+            <Skeleton className="h-8 w-20 rounded-3xl" />
+            <Skeleton className="h-8 w-20 rounded-3xl" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Lo de Hoy mientras llega: lo de Kairós, las tareas y las secciones de filas. */
 export function HomeSkeleton() {
   return (
     <div className="space-y-6">
+      <ReadySkeleton />
       <RowsSkeleton rows={3} />
       <RowsSkeleton rows={2} />
     </div>
@@ -60,7 +89,7 @@ export function HomeCountersSkeleton() {
 
 export function HomePageSkeleton() {
   return (
-    <PageLoading title="Hoy" subtitle="Lo que necesita atención del equipo." className="space-y-6" bodyClassName="space-y-6">
+    <PageLoading title="Hoy" subtitle="Lo que Kairós dejó listo y lo que toca hoy." className="space-y-6" bodyClassName="space-y-6">
       <ProductFilterSkeleton />
       <HomeSkeleton />
       <HomeCountersSkeleton />

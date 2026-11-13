@@ -71,6 +71,15 @@ const envSchema = z.object({
    * valida igual para que una dirección mal escrita falle al arrancar.
    */
   SUPPORT_INBOX_EMAIL: z.union([z.literal(""), z.email()]).default(""),
+  /**
+   * Secreto compartido con el worker de Cloudflare que recibe el correo de
+   * soporte@ y contacto@ y lo manda firmado (HMAC sha256) a `/api/inbound/email`.
+   * Opcional: sin él esa ruta responde 503 y el correo solo se reenvía.
+   */
+  INBOUND_EMAIL_SECRET: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32, "INBOUND_EMAIL_SECRET: 32 caracteres como mínimo").optional(),
+  ),
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().min(1).default("auto"),
   S3_ACCESS_KEY: z.string().min(1),
