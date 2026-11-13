@@ -120,6 +120,12 @@ const MONEY =
  * ese hecho no viaja al modelo. Hablar de «sus pacientes» en la venta sí.
  */
 const PATIENT = /historia cl[ií]nica|diagn[oó]stic|\bDNI\b|\b\d{8}\b/iu
+/**
+ * Un paciente con su nombre («la paciente Juana Pérez tiene caries»): pasaba
+ * el filtro (medición del 12 nov). Sin la marca `i`, para que el nombre sea el
+ * que empieza con mayúscula.
+ */
+const NAMED_PATIENT = /\b[Pp]acientes?\s+(?:[Ss]r\.?\s+|[Ss]ra\.?\s+)?\p{Lu}\p{Ll}+/u
 
 /**
  * Un hecho tal como puede viajar al modelo, o null si no puede: lo que parece
@@ -128,7 +134,7 @@ const PATIENT = /historia cl[ií]nica|diagn[oó]stic|\bDNI\b|\b\d{8}\b/iu
  */
 export function kairosAllowedFact(text: string, options: { adminOnly: boolean }): string | null {
   const clean = text.replace(/\s+/g, " ").trim()
-  if (!clean || PATIENT.test(clean)) return null
+  if (!clean || PATIENT.test(clean) || NAMED_PATIENT.test(clean)) return null
   const told = options.adminOnly ? clean : clean.replace(MONEY, "[importe]")
   return told.length > FACT_MAX ? `${told.slice(0, FACT_MAX - 1)}…` : told
 }
@@ -254,6 +260,8 @@ export async function pendingKairosDraftJobs(
     ]
       .map(told)
       .filter((fact): fact is string => fact !== null)
+      // El motivo del ítem suele repetir su primer hecho («Dijo «no por ahora»…» dos veces).
+      .filter((fact, index, all) => all.indexOf(fact) === index)
     for (const entry of recent) {
       const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
       // En palabras: el borrador con plantilla lo copia tal cual y el modelo

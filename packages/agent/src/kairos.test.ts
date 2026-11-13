@@ -142,7 +142,8 @@ describe("fakeKairosWriter", () => {
     })
     expect(mail.subject).toBe("Tu solicitud de odentIA")
     expect(mail.body.startsWith("Hola, Rosa:")).toBe(true)
-    expect(mail.body.endsWith("Ana Torres")).toBe(true)
+    // Firma con quien envía y la marca del producto.
+    expect(mail.body.endsWith("Ana Torres, odentIA")).toBe(true)
     const whatsapp = await fakeKairosWriter.draftMessage({
       client,
       channel: "whatsapp",
@@ -406,14 +407,82 @@ describe("createKairosWriter con el proveedor", () => {
       })
       expect(draft).toEqual({
         subject: "Tu solicitud de odentIA",
-        body: "Hola, Rosa:\nGracias por escribirnos.\n\nAna Torres",
+        // Firmó solo con su nombre: se completa con la marca.
+        body: "Hola, Rosa:\nGracias por escribirnos.\n\nAna Torres, odentIA",
       })
       const human = JSON.stringify(
         (provider.requests[0]?.body as { messages?: unknown[] } | undefined)?.messages?.[1],
       )
       expect(human).toContain("Primera respuesta a quien dejó su solicitud en la web")
-      expect(human).toContain("Firma: Ana Torres")
+      expect(human).toContain("Firma: Ana Torres, odentIA")
       expect(uses[0]?.purpose).toBe("borrador")
+    } finally {
+      await provider.close()
+    }
+  })
+
+  it("firma con quien envía y la marca: completa la firma de solo nombre y agrega la que falta", async () => {
+    const replies = [
+      "Hola, Rosa. Te escribo por tu invitación.\nAna Torres",
+      "Hola, Rosa. ¿Lo vemos?",
+    ]
+    const { provider, writer } = await withProvider((n, response) =>
+      chat(response, { content: replies[n - 1] ?? "" }),
+    )
+    try {
+      const ask = {
+        client: { ...client, product: "optical" as const },
+        channel: "whatsapp" as const,
+        goal: "recordar_invitacion",
+        facts: [],
+        senderName: "Ana Torres",
+      }
+      expect((await writer.draftMessage(ask)).body).toBe(
+        "Hola, Rosa. Te escribo por tu invitación.\nAna Torres, vistIA",
+      )
+      expect((await writer.draftMessage(ask)).body).toBe(
+        "Hola, Rosa. ¿Lo vemos?\n\nAna Torres, vistIA",
+      )
+    } finally {
+      await provider.close()
+    }
+  })
+
+  it("no propone como dato nuevo lo que la clínica ya tiene", async () => {
+    const args = {
+      activity: {
+        kind: "nota",
+        direction: null,
+        outcome: null,
+        body: "Usan Excel.",
+        contactId: null,
+      },
+      task: null,
+      newContacts: [],
+      // El modelo copiaba los datos de la clínica aunque la anotación no los dijera.
+      data: { city: "arequipa", professionals: "4-9", currentTool: "cuaderno_excel" },
+    }
+    const { provider, writer } = await withProvider((_n, response) =>
+      chat(response, {
+        content: null,
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "ordenar_anotacion", arguments: JSON.stringify(args) },
+          },
+        ],
+      }),
+    )
+    try {
+      const read = await writer.parseAnnotation({
+        text: "Usan Excel.",
+        today,
+        client: { ...client, city: "Arequipa", professionals: "4-9" },
+        contacts,
+        demos,
+      })
+      expect(read.data).toEqual({ currentTool: "cuaderno_excel" })
     } finally {
       await provider.close()
     }
@@ -423,7 +492,7 @@ describe("createKairosWriter con el proveedor", () => {
     const { provider, writer } = await withProvider((_n, response) =>
       chat(response, {
         content:
-          "RESUMEN\n- Rosa decide la compra [H1]\n- Tiene 12 sedes [H9]\n- Sin fuente\n- Le interesa la agenda [H2][H1]\nFALTA\n- Qué usa hoy",
+          "RESUMEN\n- Rosa decide la compra [H1]\n- Tiene 12 sedes [H9]\n- Sin fuente\n- Le interesa la agenda [H2][H1]\nFALTA\n- Quién más decide",
       }),
     )
     try {
@@ -431,7 +500,10 @@ describe("createKairosWriter con el proveedor", () => {
         { text: "Rosa Quispe es la gerente y decide", source: "contacto:c-rosa" },
         { text: "Le interesa la agenda por WhatsApp", source: "actividad:a-1" },
       ]
-      const result = await writer.summarizeClient({ client, facts })
+      const result = await writer.summarizeClient({
+        client: { ...client, city: "Lima", professionals: "2-3" },
+        facts,
+      })
       expect(result).toEqual({
         summary: "Rosa decide la compra. Le interesa la agenda.",
         sources: [
@@ -439,8 +511,15 @@ describe("createKairosWriter con el proveedor", () => {
           { text: "Le interesa la agenda.", source: "actividad:a-1" },
           { text: "Le interesa la agenda.", source: "contacto:c-rosa" },
         ],
-        missing: ["Qué usa hoy"],
+        // Primero lo que falta en sus datos, después lo que propone el modelo.
+        missing: ["Qué usa hoy para su agenda e historias", "Quién más decide"],
       })
+      // De la ficha solo viajan el nombre y el producto: lo demás lo escribía citando un hecho que no lo decía.
+      const human = JSON.stringify(
+        (provider.requests[0]?.body as { messages?: unknown[] } | undefined)?.messages?.[1],
+      )
+      expect(human).toContain("Clínica: Clínica Sonríe (ficticia)")
+      expect(human).not.toMatch(/Ciudad|Etapa de la venta|Profesionales/)
     } finally {
       await provider.close()
     }

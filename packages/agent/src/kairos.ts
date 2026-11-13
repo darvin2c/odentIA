@@ -236,6 +236,33 @@ function clientLines(client: KairosClientFacts): string[] {
   ].filter((value): value is string => value !== null)
 }
 
+/**
+ * La firma de un mensaje: quien envía y la marca del producto de la clínica
+ * («Ada Torres, odentIA»), como la plantilla de la semilla. Sin la marca, la
+ * clínica recibía solo un nombre (medición del 12 nov, 12 de 12 borradores).
+ */
+function kairosSignature(senderName: string, product: KairosClientFacts["product"]): string {
+  const name = senderName.trim()
+  const brand = PRODUCT_LINE[product].name
+  return name.includes(brand) ? name : `${name}, ${brand}`
+}
+
+/**
+ * El cuerpo termina con la firma: si el modelo puso solo el nombre en la
+ * última línea, se completa; si no firmó, se agrega.
+ */
+function signed(body: string, senderName: string, product: KairosClientFacts["product"]): string {
+  const signature = kairosSignature(senderName, product)
+  const name = senderName.trim()
+  const lines = body.trimEnd().split("\n")
+  const last = lines.at(-1)?.trim() ?? ""
+  // Ya firmó con el nombre y la marca, en una línea o en dos.
+  const tail = lines.slice(-2).join(" ")
+  if (tail.includes(name) && tail.includes(PRODUCT_LINE[product].name)) return body.trimEnd()
+  if (last === name) return [...lines.slice(0, -1), signature].join("\n")
+  return `${body.trimEnd()}\n\n${signature}`
+}
+
 /** Lo que falta saber de un cliente para vender bien: sale de sus datos vacíos, no del modelo. */
 function missingOf(client: KairosClientFacts): string[] {
   return [
@@ -252,14 +279,14 @@ const VOICE = `Eres Kairós, el agente de la administración de Sallca. Sallca h
 Siempre:
 - Español de Perú, trato de tú, cálido, claro y profesional. Frases cortas. Sin emojis.
 - Usa solo los hechos que se te dan. No inventes fechas, horarios, precios, descuentos, plazos, funciones, resultados ni promesas.
-- Nunca escribas montos ni precios, aunque aparezcan en los hechos.
+- Nunca escribas montos ni precios, aunque aparezcan en los hechos (solo el resumen de la semana cita las cifras que recibe).
 - Nunca uses ni pidas datos de pacientes.
 - Los hechos son notas internas del equipo: úsalos para entender, no los cites tal cual ni digas de dónde los sacaste.`
 
 const DRAFT_SYSTEM = `${VOICE}
 
 Tu tarea ahora: redactar un mensaje que la persona que firma enviará a una clínica que es cliente o posible cliente de Sallca.
-- Escríbelo como lo escribiría quien firma, en primera persona, y termina con su nombre en la última línea.
+- Escríbelo como lo escribiría quien firma, en primera persona, y termina con la firma tal como viene, en la última línea.
 - Termina con un siguiente paso fácil (una pregunta o una conversación corta), sin proponer días ni horas que no estén en los hechos.
 - Correo: la primera línea es «Asunto: …» (máximo 80 caracteres), luego una línea en blanco y el cuerpo, de 3 a 6 frases.
 - WhatsApp: sin asunto, de 2 a 4 frases, sin formato.
@@ -268,8 +295,8 @@ Tu tarea ahora: redactar un mensaje que la persona que firma enviará a una clí
 const SUMMARY_SYSTEM = `${VOICE}
 
 Tu tarea ahora: escribir «Lo que hay que saber» de un cliente para quien lo atiende en Sallca, con los hechos numerados que recibes.
-- De 2 a 5 frases cortas. Cada frase termina con la referencia de los hechos que la respaldan, entre corchetes: [H2] o [H1][H4]. Una frase sin referencia no vale.
-- Después, «Qué falta saber»: de 0 a 3 cosas que convendría preguntar.
+- De 2 a 5 frases cortas, solo con lo que dicen los hechos numerados. Cada frase termina con la referencia de los hechos que la respaldan, entre corchetes: [H2] o [H1][H4]. Una frase sin referencia no vale.
+- Después, «Qué falta saber»: de 1 a 3 cosas que convendría preguntar para avanzar la venta.
 - Formato exacto:
 RESUMEN
 - frase [H1]
@@ -287,17 +314,18 @@ Tu tarea ahora: un guion breve para que la persona del equipo presente el produc
 const WEEKLY_SYSTEM = `${VOICE}
 
 Tu tarea ahora: el resumen de la semana para Administración, con las cifras que recibes.
-- De 3 a 6 frases. Cita las cifras tal como vienen en «Lo que dice»; no calcules, no redondees y no escribas ningún número que no esté ahí.
+- De 3 a 6 frases. Cita los números tal como vienen en «Lo que dice», también los importes; no calcules, no redondees y no escribas ningún número que no esté ahí.
+- Si «Lo que dice» no trae un número («Nada en noviembre», «Ninguna paga todavía»), dilo con tus palabras dentro de la frase («en noviembre no se cobró nada»), nunca pegado tal cual.
 - Primero lo que avanzó, después lo que pide atención. Sin adjetivos de más.
 - Responde solo con el texto.`
 
 const ANNOTATION_SYSTEM = `${VOICE}
 
 Tu tarea ahora: ordenar lo que anotó una persona del equipo sobre un cliente en las piezas de la herramienta «ordenar_anotacion». Llama siempre a la herramienta.
-- activity: lo que pasó. kind: llamada, whatsapp, correo, reunion, presentacion (solo si la presentación ya se hizo), propuesta o nota. direction: «salio» si lo hicimos nosotros, «entro» si nos buscó la clínica, null si es una nota. outcome: en qué quedó, en pocas palabras, o null. body: lo anotado, limpio y fiel, sin agregar nada. contactId: el id de la persona de la lista si la nombra, o null.
+- activity: lo que pasó. kind: llamada, whatsapp, correo, reunion, presentacion (solo si la presentación ya se hizo), propuesta o nota. direction: «salio» si lo hicimos nosotros, «entro» si nos buscó la clínica, null si es una nota. outcome: en qué quedó, en pocas palabras, o null. body: lo anotado, limpio y fiel, sin agregar nada (tampoco un nombre que no escribió). contactId: el id de la persona de la lista si la nombra por su nombre («ella» o «él» no la nombran), o null.
 - task: solo si dijo qué hacer después y cuándo. dueOn es el día (AAAA-MM-DD) contando desde «Hoy»; «el jueves» es el próximo jueves después de hoy. time: «HH:MM» en 24 horas si dijo una hora, si no null. kind: llamar, escribir, presentacion, propuesta, alta, cobro u otro. title: corto, en infinitivo. demoId: el id de la demo de la lista si la nombra, o null. Si no dijo cuándo, task es null.
 - newContacts: personas nuevas que nombra y no están en la lista (con su cargo si lo dijo y sus papeles: decide, usa, paga, solo si lo dijo). Si la menciona sin su nombre («su socio», «la gerente»), name es el cargo y «(nombre por preguntar)», como «Socio (nombre por preguntar)», title es el cargo y roles va vacío: se confirman después. Nunca uses «Su socio» como nombre.
-- data: solo lo que dijo de la clínica: city, professionals (1, 2-3, 4-9 o 10+), currentTool (nada, cuaderno_excel u otro_software). Lo que no dijo va en null.
+- data: solo lo que dijo de la clínica en la anotación: city, professionals (1, 2-3, 4-9 o 10+), currentTool (nada, cuaderno_excel u otro_software). Lo que no dijo en la anotación va en null, aunque ya esté en los datos de la clínica de arriba.
 - Nunca inventes: lo que no está en la anotación va en null o vacío.`
 
 /* ---------- Esquema de la anotación ---------- */
@@ -352,18 +380,30 @@ function limaInstant(day: string, time: string): string | null {
   return Number.isNaN(at.getTime()) ? null : at.toISOString()
 }
 
-/** De lo que leyó el modelo a la anotación: los ids que no están en las listas no se toman. */
+/**
+ * De lo que leyó el modelo a la anotación: los ids que no están en las listas
+ * no se toman, y un dato igual al que ya tiene la clínica no se propone (el
+ * modelo lo copiaba de sus datos aunque la anotación no lo dijera: medición
+ * del 12 nov, 8 de 10 anotaciones).
+ */
 function annotationOf(
   read: AnnotationRead,
-  input: { contacts: { id: string }[]; demos: { id: string }[] },
+  input: {
+    client: KairosClientFacts
+    contacts: { id: string }[]
+    demos: { id: string }[]
+  },
 ): KairosAnnotation {
   const contactIds = new Set(input.contacts.map((contact) => contact.id))
   const demoIds = new Set(input.demos.map((demo) => demo.id))
   const known = (id: string | null, ids: Set<string>) => (id && ids.has(id) ? id : null)
   const data: KairosAnnotation["data"] = {}
-  if (read.data.city?.trim()) data.city = read.data.city.trim()
-  if (read.data.professionals) data.professionals = read.data.professionals
-  if (read.data.currentTool) data.currentTool = read.data.currentTool
+  const city = read.data.city?.trim()
+  if (city && plain(city) !== plain(input.client.city ?? "")) data.city = city
+  if (read.data.professionals && read.data.professionals !== input.client.professionals)
+    data.professionals = read.data.professionals
+  if (read.data.currentTool && read.data.currentTool !== input.client.currentTool)
+    data.currentTool = read.data.currentTool
   return {
     activity: {
       kind: read.activity.kind,
@@ -583,6 +623,7 @@ export function createKairosWriter(deps: KairosWriterDeps): KairosWriter {
     drafter: "modelo",
     async draftMessage(input) {
       const goal = KAIROS_GOALS[input.goal]?.instruction ?? input.goal
+      const signature = kairosSignature(input.senderName, input.client.product)
       const human = [
         `Canal: ${input.channel === "correo" ? "correo" : "WhatsApp"}`,
         `Para qué: ${goal}`,
@@ -590,18 +631,24 @@ export function createKairosWriter(deps: KairosWriterDeps): KairosWriter {
         input.contact
           ? `Le escribes a: ${input.contact.name}${input.contact.title ? ` (${input.contact.title})` : ""}`
           : "Le escribes a: el equipo de la clínica (sin nombre)",
-        `Firma: ${input.senderName}`,
+        `Firma: ${signature}`,
         `Hechos:\n${factLines(input.facts)}`,
       ].join("\n")
-      return readDraft(await write("borrador", DRAFT_SYSTEM, human), input.channel)
+      const draft = readDraft(await write("borrador", DRAFT_SYSTEM, human), input.channel)
+      return { ...draft, body: signed(draft.body, input.senderName, input.client.product) }
     },
 
     async summarizeClient(input) {
+      // Solo el nombre y el producto, sin número: lo demás de la ficha (ciudad,
+      // etapa…) el modelo lo escribía citando un hecho que no lo decía.
       const human = [
-        ...clientLines(input.client),
+        clientLines(input.client).slice(0, 2).join("\n"),
         `Hechos:\n${input.facts.map((fact, index) => `[H${index + 1}] ${fact.text}`).join("\n") || "(sin hechos)"}`,
       ].join("\n")
-      return readSummary(await write("resumen", SUMMARY_SYSTEM, human), input.facts)
+      const read = readSummary(await write("resumen", SUMMARY_SYSTEM, human), input.facts)
+      // Primero lo que falta en sus datos (no depende del modelo), después lo que propone.
+      const missing = [...new Set([...missingOf(input.client), ...read.missing])].slice(0, 3)
+      return { ...read, missing }
     },
 
     async presentationScript(input) {
@@ -871,7 +918,7 @@ export const fakeKairosWriter: KairosWriter = {
       ? goal.line(input.client)
       : `Te escribo sobre ${product} para ${input.client.name}.`
     const close = goal?.close ?? "¿Lo conversamos?"
-    const body = [hello, line, close, input.senderName].join(
+    const body = [hello, line, close, kairosSignature(input.senderName, input.client.product)].join(
       input.channel === "correo" ? "\n\n" : "\n",
     )
     if (input.channel === "whatsapp") return { body }

@@ -183,7 +183,8 @@ beforeAll(async () => {
       contactId: contact.id,
       to: "rosa@drafts.test",
       draft: null,
-      facts: ["La propuesta cuesta USD 29 al mes"],
+      // El motivo repetido en sus hechos viaja una sola vez.
+      facts: ["La propuesta vale hasta el viernes", "La propuesta cuesta USD 29 al mes"],
     },
   })
   await item("guion", client.id, {
@@ -222,6 +223,10 @@ describe("lo que puede ver el modelo", () => {
     expect(kairosAllowedFact("Cuesta USD 29", { adminOnly: true })).toBe("Cuesta USD 29")
     expect(kairosAllowedFact("Su historia clínica dice…", { adminOnly: true })).toBeNull()
     expect(kairosAllowedFact("DNI 45678912", { adminOnly: true })).toBeNull()
+    // Un paciente con su nombre no viaja; «sus pacientes» en la venta, sí.
+    expect(
+      kairosAllowedFact("La paciente Juana Pérez tiene caries en la 16", { adminOnly: true }),
+    ).toBeNull()
     expect(kairosAllowedFact("Tiene 300 pacientes en Excel", { adminOnly: false })).toBe(
       "Tiene 300 pacientes en Excel",
     )
@@ -261,6 +266,9 @@ describe("lo que puede ver el modelo", () => {
     const toldAdmin = correo?.facts.join("\n") ?? ""
     expect(toldAdmin).toContain("USD 29")
     expect(toldAdmin).toContain("20 % de descuento")
+    expect(
+      correo?.facts.filter((fact) => fact === "La propuesta vale hasta el viernes"),
+    ).toHaveLength(1)
     expect(toldAdmin).not.toMatch(/historia|DNI/)
   })
 })
