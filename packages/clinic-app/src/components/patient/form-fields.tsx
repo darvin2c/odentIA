@@ -1,5 +1,4 @@
 import {
-  Button,
   Checkbox,
   cn,
   Field,
@@ -19,6 +18,7 @@ import {
 import { DatePickerButton, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
+import { ChoiceButtons } from "../choice-buttons"
 import { FirmaPad, FirmaView } from "./firma-pad"
 import { productUi } from "../../product/product-ui"
 import { PlacesField } from "../../product/site-fields"
@@ -92,6 +92,13 @@ export interface AttachmentOption {
 }
 
 /**
+ * Las opciones de una escala o de un Sí/No: en el teléfono (ancho de teléfono o
+ * puntero de dedo) cada una mide al menos 44 px; con ratón, lo de siempre.
+ */
+const ANSWER_CHOICES =
+  "[&_[data-slot=toggle-group-item]]:min-w-9 max-sm:[&_[data-slot=toggle-group-item]]:min-h-11 max-sm:[&_[data-slot=toggle-group-item]]:min-w-11 pointer-coarse:[&_[data-slot=toggle-group-item]]:min-h-11 pointer-coarse:[&_[data-slot=toggle-group-item]]:min-w-11"
+
+/**
  * ¿La respuesta se da con varios controles (opciones, casillas, piezas,
  * firma)? Entonces va en `FieldSet` + `FieldLegend`; si no, en `Field` +
  * `FieldLabel htmlFor`.
@@ -152,6 +159,8 @@ function AnswerFrame({
       <FieldSet data-invalid={invalid || undefined} className="gap-1.5">
         <FieldLegend id={labelId} variant="label" className={cn("mb-0", invalid && "text-destructive")}>
           <AnswerLabel field={field} />
+          {/* El asterisco es solo para la vista y un grupo no lleva `aria-required`: se dice con palabras. */}
+          {field.required ? <span className="sr-only"> (obligatoria)</span> : null}
         </FieldLegend>
         {children(labelId)}
         {help}
@@ -328,6 +337,8 @@ export function AnswerInput({
       )
     case "booleano":
     case "escala": {
+      // El grupo de opciones del sistema: una sola parada de Tab y las flechas entre opciones
+      // (antes cada número era una parada: 10 para llegar al 8). Tocar lo marcado lo desmarca.
       const options: Array<{ value: boolean | number; text: string }> =
         field.type === "booleano"
           ? [
@@ -338,37 +349,22 @@ export function AnswerInput({
               const n = (field.min ?? 0) + i
               return { value: n, text: String(n) }
             })
+      const chosen = options.find((option) => option.value === value)
       return (
-        <div
+        <ChoiceButtons
           id={id}
-          role="radiogroup"
-          aria-required={required}
           aria-labelledby={labelledBy}
           aria-describedby={describedBy}
-          aria-invalid={ariaInvalid}
-          onBlur={groupBlur}
-          className="flex flex-wrap gap-1.5"
-        >
-          {options.map((option) => {
-            const checked = value === option.value
-            return (
-              <Button
-                key={String(option.value)}
-                type="button"
-                size="sm"
-                role="radio"
-                aria-checked={checked}
-                aria-invalid={ariaInvalid}
-                variant={checked ? "default" : "outline"}
-                className={field.type === "escala" ? "w-10" : "min-w-16"}
-                disabled={disabled}
-                onClick={() => onChange(checked ? null : option.value)}
-              >
-                {option.text}
-              </Button>
-            )
-          })}
-        </div>
+          invalid={invalid}
+          onBlur={onBlur}
+          disabled={disabled}
+          tone="primary"
+          value={chosen ? String(chosen.value) : null}
+          options={options.map((option) => ({ value: String(option.value), label: option.text }))}
+          onChange={(picked) => onChange(options.find((option) => String(option.value) === picked)?.value ?? null)}
+          onClear={() => onChange(null)}
+          className={ANSWER_CHOICES}
+        />
       )
     }
     case "opcion_unica":

@@ -1,5 +1,6 @@
 import { Button, Checkbox } from "@odentia/ui"
 import {
+  advanceOnEnter,
   ErrorState,
   FormChoiceField,
   LoadingState,
@@ -255,13 +256,30 @@ export function LinkConsentStep({
   )
 }
 
-/** «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la página (`onSent`). */
-export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; token: string; onSent: () => void }) {
+/**
+ * «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la
+ * página (`onSent`); si ya estaba enviado (otra pestaña, otro teléfono), el servidor lo dice
+ * junto al botón y la página se pone al día (`onAlreadySent`).
+ */
+export function LinkQuestionnaireStep({
+  slug,
+  token,
+  onSent,
+  onAlreadySent,
+}: {
+  slug: string
+  token: string
+  onSent: () => void
+  onAlreadySent?: () => void
+}) {
   const query = useQuery({ queryKey: ["link-questionnaire", slug, token], queryFn: () => fetchLinkQuestionnaire(slug, token), retry: false })
   const send = useMutation({
     retry: false,
     mutationFn: (answers: Record<string, unknown>) => submitLinkQuestionnaire(slug, token, answers),
     onSuccess: () => onSent(),
+    onError: (error) => {
+      if (error instanceof ApiError && error.shape.code === "ALREADY_SUBMITTED") onAlreadySent?.()
+    },
   })
   const schema = query.data?.data.schema ?? null
   const form = useAppForm({
@@ -286,7 +304,8 @@ export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; t
   if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data
   return (
-    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+    // Enter (o «Ir» en el teléfono) pasa a la pregunta siguiente: solo «Enviar respuestas» envía.
+    <form className="flex flex-col gap-4" onSubmit={submit} onKeyDown={advanceOnEnter} noValidate>
       <h2 className="text-lg font-semibold">{questionnaire.title}</h2>
       {questionnaire.schema.sections.map((section) => (
         <fieldset key={section.id} className="m-0 flex flex-col gap-4 rounded-2xl border bg-card p-4">

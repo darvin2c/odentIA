@@ -31,6 +31,7 @@ export {
   FormFieldGroup,
   useFieldControl,
 } from "./field-control.js"
+export { advanceOnEnter } from "./enter-advances.js"
 export { fieldErrorMessages } from "./field-errors.js"
 export {
   type CheckboxFieldProps,
