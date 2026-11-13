@@ -73,6 +73,8 @@ export async function recordClinicalAccess(
 export interface ClinicalAccessItem {
   userId: string
   userName: string | null
+  /** Quien consultó no es del equipo de la clínica: soporte de odentIA con el permiso de la clínica. */
+  outsideClinic: boolean
   resource: string
   firstAt: Date
   lastAt: Date
@@ -91,6 +93,7 @@ export async function listClinicalAccess(
     .select({
       userId: clinicalAccessLog.userId,
       userName: user.name,
+      outsideClinic: sql<boolean>`exists (select 1 from support_access_grant g where g.staff_user_id = ${clinicalAccessLog.userId} and g.organization_id = ${clinicalAccessLog.organizationId} and g.created_at <= ${clinicalAccessLog.lastAt})`,
       resource: clinicalAccessLog.resource,
       firstAt: clinicalAccessLog.firstAt,
       lastAt: clinicalAccessLog.lastAt,

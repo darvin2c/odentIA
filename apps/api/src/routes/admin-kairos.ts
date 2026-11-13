@@ -36,7 +36,7 @@ import { adminContextOf } from "../lib/admin-context.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Kairós en la administración (`/api/admin/kairos`, el ARM; ADR 0184): lo
+ * Kairós en la administración (`/api/admin/kairos`, el ARM; ADR 0185): lo
  * que espera un sí, aprobar o descartar, «Lo que hizo», Hoy y el número del
  * menú. Kairós nunca envía ni decide solo: aprobar ejecuta la misma operación
  * de la pantalla (`KairosExecutors` con las funciones reales de venta,

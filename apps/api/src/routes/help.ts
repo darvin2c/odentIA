@@ -23,6 +23,7 @@ import {
   describeHelpScreen,
   getAgentConfig,
   getMySupportCase,
+  giveSupportAccessFromHelp,
   grantSupportAccess,
   type HelpAsker,
   listActiveSupportGrants,
@@ -61,7 +62,11 @@ const requestInput = z.object({
 const caseMessageInput = z.object({ body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres.") })
 const grantInput = z.object({
   minutes: z.number().int("El acceso se autoriza entre 5 y 60 minutos.").min(5, "El acceso se autoriza entre 5 y 60 minutos.").max(60, "El acceso se autoriza entre 5 y 60 minutos.").optional(),
+  /** El rol de la clínica con que mira soporte; nulo o ausente = solo la configuración. */
+  viewRole: z.string().max(40).nullish(),
+  reason: z.string().max(500, "Escríbelo en 500 caracteres o menos.").nullish(),
 })
+const giveInput = grantInput.extend({ screen: z.string().max(200).optional() })
 const grantRevokeInput = z.object({ grantId: z.uuid() })
 
 /**
@@ -190,11 +195,10 @@ export function createHelpRoute(deps: HelpRouteDeps) {
 
   /* ---------- Casos de soporte: conversación, reapertura, adjuntos y consentimiento ---------- */
   /**
-   * Permisos diagnóstico vigentes de la clínica: solo metadatos para el aviso
-   * global, sin textos del caso. Cualquier miembro puede verlos.
+   * Permisos de soporte vigentes de la clínica: solo metadatos, sin textos del
+   * caso, para quien puede darlos o quitarlos. El resto del equipo se entera por
+   * la franja de avisos (`getClinicNotices`), que ve todo el equipo.
    */
-  // Solo quien puede dar o quitar el acceso lo ve (ADR 0065): soporte no ve
-  // pacientes, así que al resto del equipo no le cambia nada.
   app.get("/grants/active", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (memberRole !== "owner" && memberRole !== "admin") return c.json({ data: [] })
@@ -323,8 +327,35 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     const canGrant = memberRole === "owner" || memberRole === "admin"
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        grantSupportAccess(tx, orgId, userId, canGrant, c.req.param("id"), parsed.data.minutes ?? 30),
+        grantSupportAccess(tx, orgId, userId, canGrant, c.req.param("id"), parsed.data.minutes ?? 30, {
+          viewRole: parsed.data.viewRole ?? null,
+          reason: parsed.data.reason ?? null,
+        }),
       ),
+    )
+  })
+
+  /**
+   * «Dar acceso a soporte» desde Ayuda, sin que soporte lo haya pedido: abre el
+   * caso y da el permiso a la vez. Solo propietaria o administradores.
+   */
+  app.post("/support-access", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = giveInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const canGrant = memberRole === "owner" || memberRole === "admin"
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const asker = askerOf(userId, memberRole, await orgProduct(tx, orgId))
+        return giveSupportAccessFromHelp(tx, orgId, userId, canGrant, {
+          minutes: parsed.data.minutes ?? 30,
+          viewRole: parsed.data.viewRole ?? null,
+          reason: parsed.data.reason ?? null,
+          screen: (parsed.data.screen ?? "/").slice(0, 200),
+          role: asker.roleLabel,
+          appVersion: deps.appVersion ?? null,
+        })
+      }),
     )
   })
 
@@ -335,7 +366,7 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     const canGrant = memberRole === "owner" || memberRole === "admin"
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) =>
-        revokeSupportAccess(tx, orgId, userId, canGrant, parsed.data.grantId),
+        revokeSupportAccess(tx, orgId, userId, canGrant, parsed.data.grantId, c.req.param("id")),
       )
       return { ok: true }
     })

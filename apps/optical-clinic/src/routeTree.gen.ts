@@ -17,6 +17,7 @@ import { Route as PendientesRouteImport } from './../../../packages/clinic-app/s
 import { Route as PortalRouteImport } from './../../../packages/clinic-app/src/routes/public/portal'
 import { Route as RegistroRouteImport } from './../../../packages/clinic-app/src/routes/public/registro'
 import { Route as ReservaRouteImport } from './../../../packages/clinic-app/src/routes/public/reserva'
+import { Route as SoporteRouteImport } from './../../../packages/clinic-app/src/routes/public/soporte'
 import { Route as AgendaRouteImport } from './../../../packages/clinic-app/src/routes/_org/agenda'
 import { Route as BranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/branches'
 import { Route as CommissionsRouteImport } from './../../../packages/clinic-app/src/routes/_org/commissions'
@@ -127,6 +128,11 @@ const RegistroRoute = RegistroRouteImport.update({
 const ReservaRoute = ReservaRouteImport.update({
   id: '/reserva',
   path: '/reserva',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SoporteRoute = SoporteRouteImport.update({
+  id: '/soporte',
+  path: '/soporte',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgendaRoute = AgendaRouteImport.update({
@@ -539,6 +545,7 @@ export interface FileRoutesByFullPath {
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
+  '/soporte': typeof SoporteRoute
   '/agenda': typeof AgendaRoute
   '/branches': typeof BranchesRoute
   '/commissions': typeof CommissionsRoute
@@ -618,6 +625,7 @@ export interface FileRoutesByTo {
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
+  '/soporte': typeof SoporteRoute
   '/agenda': typeof AgendaRoute
   '/branches': typeof BranchesRoute
   '/commissions': typeof CommissionsRoute
@@ -697,6 +705,7 @@ export interface FileRoutesById {
   '/portal': typeof PortalRoute
   '/registro': typeof RegistroRoute
   '/reserva': typeof ReservaRoute
+  '/soporte': typeof SoporteRoute
   '/_org/agenda': typeof AgendaRoute
   '/_org/branches': typeof BranchesRoute
   '/_org/commissions': typeof CommissionsRoute
@@ -778,6 +787,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/registro'
     | '/reserva'
+    | '/soporte'
     | '/agenda'
     | '/branches'
     | '/commissions'
@@ -857,6 +867,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/registro'
     | '/reserva'
+    | '/soporte'
     | '/agenda'
     | '/branches'
     | '/commissions'
@@ -935,6 +946,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/registro'
     | '/reserva'
+    | '/soporte'
     | '/_org/agenda'
     | '/_org/branches'
     | '/_org/commissions'
@@ -1016,6 +1028,7 @@ export interface RootRouteChildren {
   PortalRoute: typeof PortalRoute
   RegistroRoute: typeof RegistroRoute
   ReservaRoute: typeof ReservaRoute
+  SoporteRoute: typeof SoporteRoute
   BajaDottokenRoute: typeof BajaDottokenRoute
   CDottokenRoute: typeof CDottokenRoute
   ComprobarDottokenRoute: typeof ComprobarDottokenRoute
@@ -1081,6 +1094,13 @@ declare module '@tanstack/react-router' {
       path: '/reserva'
       fullPath: '/reserva'
       preLoaderRoute: typeof ReservaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/soporte': {
+      id: '/soporte'
+      path: '/soporte'
+      fullPath: '/soporte'
+      preLoaderRoute: typeof SoporteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_org/agenda': {
@@ -1760,6 +1780,7 @@ const rootRouteChildren: RootRouteChildren = {
   PortalRoute: PortalRoute,
   RegistroRoute: RegistroRoute,
   ReservaRoute: ReservaRoute,
+  SoporteRoute: SoporteRoute,
   BajaDottokenRoute: BajaDottokenRoute,
   CDottokenRoute: CDottokenRoute,
   ComprobarDottokenRoute: ComprobarDottokenRoute,

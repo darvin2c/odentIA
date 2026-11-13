@@ -14,7 +14,7 @@ import { type AppDeps, createApp } from "../app.js"
 import { signInboundEmail } from "./inbound-email.js"
 
 /**
- * El ARM montado en la app real (ADR 0184): las rutas de la administración
+ * El ARM montado en la app real (ADR 0185): las rutas de la administración
  * detrás de su sesión, su segundo factor y su origen; el correo entrante fuera
  * de ellas, con su propia firma; y el Kairós que recibe la app es el que usan
  * las rutas.

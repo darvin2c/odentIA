@@ -1,5 +1,5 @@
 /**
- * El ARM de la administración (ADR 0184), de punta a punta en pantalla: un
+ * El ARM de la administración (ADR 0185), de punta a punta en pantalla: un
  * cliente que se agrega a mano, lo que se anota con Kairós (con LLM_MODEL=fake
  * ordena con sus reglas fijas y lo dice), una tarea, una propuesta que sale por
  * WhatsApp y la persona marca «Salió», y todo queda en su Historial. Soporte

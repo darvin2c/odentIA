@@ -75,7 +75,7 @@ import { moneyText } from "./saas-emails.js"
 import { type WaitlistStage, waitlistStage } from "./saas-founders.js"
 
 /**
- * Los clientes del ARM de la administración (ADR 0184): la clínica es el eje,
+ * Los clientes del ARM de la administración (ADR 0185): la clínica es el eje,
  * desde el primer contacto (a mano, con la solicitud de la web o cuando abre
  * su cuenta) y para siempre. La solicitud y la cuenta son cosas que le pasan
  * al cliente, no el cliente.

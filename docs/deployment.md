@@ -380,7 +380,7 @@ que promete la carta, no una evaluación de cumplimiento legal.
 ### Correo entrante
 
 `soporte@` y `contacto@` de los tres dominios pasan por el Email Worker
-`sallca-correo-entrante` (`infra/cloudflare/email-inbound`, ADR 0184): lo reenvía al buzón de
+`sallca-correo-entrante` (`infra/cloudflare/email-inbound`, ADR 0185): lo reenvía al buzón de
 siempre (`FORWARD_TO`) y además lo manda firmado a `POST /api/inbound/email`, donde la
 administración lo liga a su cliente. `INBOUND_EMAIL_SECRET` va en la API (entorno de
 producción del proyecto) y, con el mismo valor, como secreto del Worker; sin él la ruta

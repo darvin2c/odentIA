@@ -1,5 +1,5 @@
 export { createAppDb, createOwnerDb, type Db } from "./client.js"
-export { withOrgContext } from "./context.js"
+export { isReadOnlyRequest, runOutsideReadOnly, runReadOnly, withOrgContext } from "./context.js"
 export {
   BUNDLED_DIAGNOSIS_LISTS,
   type DiagnosisListLoad,

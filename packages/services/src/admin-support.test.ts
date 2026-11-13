@@ -258,8 +258,11 @@ describe("respuesta a varios casos", () => {
 
 describe("acceso delegado", () => {
   it("solo owner/admin autoriza; sin permiso vigente se deniega y audita; revocar corta el acceso", async () => {
-    const seed = await seedRequest(ORG, CLIENT, "Necesito que revisen mi configuración")
+    const seed = await seedRequest(ORG, OWNER, "Necesito que revisen mi configuración")
     const kase = seed
+    // En un caso que no puede leer (lo abrió otra persona y soporte no pidió nada), no autoriza.
+    const notHers = await seedRequest(ORG, CLIENT, "Recepción pregunta algo suyo")
+    await expect(run((tx) => grantSupportAccess(tx, ORG, OWNER, true, notHers.id, 30))).rejects.toThrow(/no encontrado/i)
 
     await expect(run((tx) => grantSupportAccess(tx, ORG, CLIENT, false, kase.id, 30))).rejects.toThrow(/propietario/i)
     const grant = await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
@@ -317,7 +320,7 @@ describe("lo que hace la clínica vuelve el caso a nosotros", () => {
   })
 
   it("autorizar el acceso o adjuntar sin escribir también es responder, y avisa al buzón", async () => {
-    const granted = await seedRequest(ORG, CLIENT, "No puedo imprimir el ticket desde Caja")
+    const granted = await seedRequest(ORG, OWNER, "No puedo imprimir el ticket desde Caja")
     await setSupportCaseStatus(ownerDb, staff, granted.id, "esperando_clinica")
     await inboxSent(granted.id)
     await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, granted.id, 30))

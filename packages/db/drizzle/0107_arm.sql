@@ -129,6 +129,7 @@ CREATE TABLE "admin"."saas_inbound_email" (
 	"to_address" text NOT NULL,
 	"subject" text,
 	"text_body" text,
+	"sender_verified" boolean DEFAULT false NOT NULL,
 	"received_at" timestamp with time zone NOT NULL,
 	"attachments" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"matched_by" text,

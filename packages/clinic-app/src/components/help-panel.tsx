@@ -21,6 +21,8 @@ import { ADMIN_NAME, HELP_NAME, useReceptionName, withReceptionName } from "../l
 import { openArgos } from "../lib/argos"
 import { ASK_HELP_EVENT } from "../lib/global-search"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
+import { GiveSupportAccess } from "./support-access"
+import { useMyRole, useSupportMode } from "../lib/crm"
 import { appWords } from "../lib/product-words"
 
 const helpAnswer = z.object({
@@ -383,6 +385,12 @@ export function HelpButton({ className }: { className?: string } = {}) {
   const handledLink = useRef<string | null>(null)
   const exchanges = useConversation()
   const [direct, setDirect] = useState<DirectMessage | null>(null)
+  // «Dar acceso a soporte»: el cuadro en el mismo panel, solo para quien puede darlo.
+  const [giving, setGiving] = useState(false)
+  const myRole = useMyRole()
+  // Soporte mirando la clínica no da acceso a soporte (la API lo rechaza igual).
+  const supportMode = useSupportMode()
+  const canGiveAccess = (myRole === "owner" || myRole === "admin") && !supportMode
   /** Lo que recibe el foco cuando aparece, porque el control que se tocó desaparece (WCAG 2.4.3). */
   const [focusId, setFocusId] = useState<string | null>(null)
   useEffect(() => {
@@ -642,7 +650,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                 <p id="ayuda-pregunta-nota" className="text-muted-foreground">
                   No escribas nombres de pacientes.<span className="hidden sm:inline"> No cambia nada por ti y, si no sabe, te lo dice.</span>
                 </p>
-                {direct && !direct.sent ? null : (
+                {(direct && !direct.sent) || supportMode ? null : (
                   <div className="flex flex-wrap items-center gap-x-4">
                     <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => openDirect("pregunta")}>
                       <span className="sm:hidden">Escribir a soporte</span>
@@ -651,6 +659,11 @@ export function HelpButton({ className }: { className?: string } = {}) {
                     <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => openDirect("problema")}>
                       Reportar un problema
                     </Button>
+                    {canGiveAccess ? (
+                      <Button type="button" variant="link" className={`h-auto p-0 ${LINK}`} onClick={() => setGiving(true)}>
+                        Dar acceso a soporte
+                      </Button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -665,6 +678,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
               </p>
             )}
 
+            {giving ? <GiveSupportAccess screen={pathname} onClose={() => setGiving(false)} /> : null}
             <SupportCasesSection initialCaseId={linkedCase} />
             {suggestions.length === 0 ? null : started ? (
               <details className="border-t pt-1">

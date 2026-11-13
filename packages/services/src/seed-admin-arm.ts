@@ -1,5 +1,5 @@
 /**
- * Semilla manual del ARM de la administración (ADR 0184): clientes en cada
+ * Semilla manual del ARM de la administración (ADR 0185): clientes en cada
  * etapa, sus personas, tareas, propuestas, envíos, correos que llegan, un
  * documento, lo que cargó la skill (con un informe que no se sabe si salió) y
  * lo que prepara Kairós, para recorrer Hoy, Clientes, Embudo, Kairós y
@@ -774,7 +774,7 @@ export async function seedAdminArm(
         clock.ago(1),
       )
       // Hoy solo Administración arma propuestas, así que la operación nunca la deja
-      // «por aprobar»; la semilla la muestra como la armaría un vendedor (ADR 0184).
+      // «por aprobar»; la semilla la muestra como la armaría un vendedor (ADR 0185).
       await tx
         .update(saasProposal)
         .set({ status: "por_aprobar", updatedAt: now })

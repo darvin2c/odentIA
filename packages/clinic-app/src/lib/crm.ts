@@ -2,6 +2,7 @@ import { canAccess } from "@odentia/auth/permissions"
 import { getRouteApi } from "@tanstack/react-router"
 import { useCallback } from "react"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
+import { type SupportMode, supportCan } from "./support-mode"
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -359,13 +360,23 @@ export function useMyRole(): string {
  * gating visual: la API aplica la matriz con `canAccess` y devuelve 403.
  */
 export function usePermission(permission: string): boolean {
-  return canAccess(useMyRole(), permission)
+  const { support } = orgRouteApi.useRouteContext()
+  return canAccess(useMyRole(), permission) && (!support || supportCan(permission))
+}
+
+/** Soporte de odentIA mirando la clínica con permiso, o nulo. */
+export function useSupportMode(): SupportMode | null {
+  return orgRouteApi.useRouteContext().support ?? null
 }
 
 /** Comprobador de permisos del usuario para decisiones que dependen de varios a la vez. */
 export function useCan(): (permission: string) => boolean {
   const role = useMyRole()
-  return useCallback((permission: string) => canAccess(role, permission), [role])
+  const { support } = orgRouteApi.useRouteContext()
+  return useCallback(
+    (permission: string) => canAccess(role, permission) && (!support || supportCan(permission)),
+    [role, support],
+  )
 }
 
 export function useMyUserId(): string {

@@ -1,5 +1,5 @@
 /**
- * Ficha del cliente › Alta (ARM; ADR 0104, 0183 y 0184): de los archivos que
+ * Ficha del cliente › Alta (ARM; ADR 0104, 0183 y 0185): de los archivos que
  * manda la clínica al informe que le llega. A la izquierda, los pasos: nadie
  * los marca, el servidor los calcula de lo que ya pasó. Al centro, el registro
  * de la carga (`OrgLoadRecord`): la carga y el informe los hace la skill en el

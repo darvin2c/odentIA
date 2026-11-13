@@ -302,27 +302,32 @@ describe("franja de avisos: el tope y el crédito", () => {
 })
 
 describe("franja de avisos: soporte con acceso", () => {
-  it("solo propietario y administrador, diciendo quién lo dio", async () => {
+  it("todo el equipo lo ve sin el texto del caso y sin la X; quitarlo, solo propietario y administrador (ADR 0184)", async () => {
     const { orgId, people, read } = await clinic()
     const [kase] = await ownerDb
       .insert(supportCase)
-      .values({ organizationId: orgId, openedBy: people.owner, question: "No se envían los recordatorios", screen: "/agenda", role: "owner", dedupeKey: randomUUID() })
+      .values({ organizationId: orgId, openedBy: people.owner, question: "No se envían los recordatorios de Rosa", screen: "/agenda", role: "owner", dedupeKey: randomUUID() })
       .returning()
     if (!kase) throw new Error("sin caso")
     await ownerDb.insert(supportAccessGrant).values({
       organizationId: orgId,
       caseId: kase.id,
-      scope: "diagnostico",
+      scope: "rol",
+      viewRole: "clinician",
       grantedBy: people.owner,
       expiresAt: new Date(Date.now() + 30 * 60_000),
     })
     const owner = await read("owner")
     expect(owner).toHaveLength(1)
-    expect(owner[0]).toMatchObject({ topic: "soporte", tone: "aviso", action: { kind: "quitar_acceso" } })
-    expect(owner[0]?.message).toMatch(/^Diste acceso/)
-    expect(owner[0]?.message).toContain("No se envían los recordatorios")
-    expect(await read("reception")).toEqual([])
-    expect(await read("clinician")).toEqual([])
+    expect(owner[0]).toMatchObject({ topic: "soporte", tone: "aviso", action: { kind: "quitar_acceso" }, dismiss: null })
+    expect(owner[0]?.message).toMatch(/^Soporte de .+ puede mirar como /)
+    expect(owner[0]?.message).toMatch(/Lo diste tú/)
+    // El texto del caso puede nombrar pacientes: no va en la franja.
+    expect(owner[0]?.message).not.toContain("Rosa")
+    const reception = await read("reception")
+    expect(reception).toHaveLength(1)
+    expect(reception[0]).toMatchObject({ topic: "soporte", action: null, dismiss: null })
+    expect(await read("clinician")).toHaveLength(1)
   })
 })
 

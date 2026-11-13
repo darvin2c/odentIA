@@ -1,5 +1,5 @@
 /**
- * Lo común de los recorridos de la administración (el ARM, ADR 0184): entrar
+ * Lo común de los recorridos de la administración (el ARM, ADR 0185): entrar
  * con su segundo factor desde la pantalla real y el cliente de una cuenta de
  * prueba.
  */

@@ -5533,7 +5533,7 @@ await db.transaction(async (tx) => {
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
 await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash, storage })
 
-// --- El ARM de la administración (ADR 0184): clientes en cada etapa, tareas, propuestas,
+// --- El ARM de la administración (ADR 0185): clientes en cada etapa, tareas, propuestas,
 // envíos, correos que llegan y lo que prepara Kairós. Al final: necesita las cuentas de
 // la semilla y las demos para presentar ya armadas.
 const arm = await db.transaction((tx) => seedAdminArm(tx, storage))

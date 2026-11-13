@@ -1,5 +1,5 @@
 /**
- * Ficha del cliente › Documentos (ARM, ADR 0184): lo que le mandamos (carta,
+ * Ficha del cliente › Documentos (ARM, ADR 0185): lo que le mandamos (carta,
  * propuestas, presentaciones) y lo que nos mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
  * que se borra. Lo que manda la clínica es solo de Administración y se borra a
  * los 30 días (lo promete el contrato de encargo); Soporte no ve lo que es

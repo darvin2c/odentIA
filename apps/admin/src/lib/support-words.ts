@@ -67,17 +67,39 @@ export function supportWaitWords(
   return { text: `${waiting} · ${answer.text}`, urgent: answer.urgent }
 }
 
-/** El acceso de diagnóstico, en palabras: «Vigente hasta las 15:30», «Venció el mié 11 nov, 15:30», «Revocado el…». */
+const END_WORDS: Record<string, string> = {
+  quitado: "Lo quitaron",
+  reemplazado: "Lo reemplazó otro acceso",
+  vencido: "Venció",
+  caso_resuelto: "Se cerró al resolver el caso",
+  sin_quien_lo_dio: "Se cerró: quien lo dio ya no administra la clínica",
+}
+
+/**
+ * El acceso de soporte, en palabras: qué mira («como Odontólogo» o «la
+ * configuración») y su estado («vigente hasta las 15:30», «lo quitaron el…»).
+ */
 export function grantWords(
-  grant: { expiresAt: string; revokedAt: string | null; active: boolean },
+  grant: {
+    expiresAt: string
+    revokedAt: string | null
+    active: boolean
+    scope?: string
+    viewRoleLabel?: string | null
+    endReason?: string | null
+    staffName?: string | null
+  },
   now: Date = new Date(),
 ): string {
-  if (grant.revokedAt) return `Revocado el ${supportDayTime(grant.revokedAt)}`
+  const what = grant.scope === "rol" && grant.viewRoleLabel ? `Mirar como ${grant.viewRoleLabel}` : "La configuración"
+  const whom = grant.staffName ? ` · para ${grant.staffName}` : ""
+  if (grant.revokedAt)
+    return `${what}${whom} · ${END_WORDS[grant.endReason ?? "quitado"] ?? "Terminó"} el ${supportDayTime(grant.revokedAt)}`
   if (grant.active)
     return dayKey(new Date(grant.expiresAt)) === dayKey(now)
-      ? `Vigente hasta las ${supportTime(grant.expiresAt)}`
-      : `Vigente hasta el ${supportDayTime(grant.expiresAt)}`
-  return `Venció el ${supportDayTime(grant.expiresAt)}`
+      ? `${what}${whom} · vigente hasta las ${supportTime(grant.expiresAt)}`
+      : `${what}${whom} · vigente hasta el ${supportDayTime(grant.expiresAt)}`
+  return `${what}${whom} · venció el ${supportDayTime(grant.expiresAt)}`
 }
 
 /** El tipo de caso, como lo lee el equipo: «acceso» es entrar a su cuenta (el valor guardado no cambia). */

@@ -1,7 +1,7 @@
 # Correo entrante de Sallca
 
 Un Email Worker de Cloudflare Email Routing para `soporte@` y `contacto@` de `odentia32.com`,
-`latidia72.com` y `vistia20.com` (ADR 0184). Por cada correo:
+`latidia72.com` y `vistia20.com` (ADR 0185). Por cada correo:
 
 1. **Lo reenvía** a `FORWARD_TO`, el buzón de siempre, para no perder nada aunque falle lo demás.
 2. **Lo manda firmado a la administración** (`POST ${API_URL}/api/inbound/email`), que lo liga

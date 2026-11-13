@@ -1,6 +1,6 @@
 /**
  * La lista de clínicas de antes. Una clínica con cuenta es ahora un cliente
- * (ADR 0184): la lista abre Clientes en «Con cuenta», con su producto y su
+ * (ADR 0185): la lista abre Clientes en «Con cuenta», con su producto y su
  * búsqueda; las demos están en Demos («?clase=demo»), y «Alta asistida» es
  * «Dar de alta» en la ficha del cliente. Queda como ruta que solo redirige:
  * hay enlaces guardados con ella.

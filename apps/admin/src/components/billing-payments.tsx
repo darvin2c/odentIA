@@ -1,6 +1,6 @@
 /**
  * Los pagos de una clínica, una sola vez para Cobros y planes y para la ficha
- * del cliente › Plan y pagos (ARM, ADR 0184): ver el comprobante, confirmar,
+ * del cliente › Plan y pagos (ARM, ADR 0185): ver el comprobante, confirmar,
  * rechazar con motivo, reversar, devolver y registrar un pago recibido. Las
  * reglas son del servidor (solo Administración, 409 si otra persona ya lo
  * decidió); aquí solo se piden y se dicen.

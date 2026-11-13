@@ -124,7 +124,7 @@ function AdminFrame({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const queryClient = useQueryClient()
-  // El ARM (ADR 0184): el cliente es el eje. La lista de espera y Organizaciones ya no van en el
+  // El ARM (ADR 0185): el cliente es el eje. La lista de espera y Organizaciones ya no van en el
   // menú: sus direcciones llevan a Clientes y a la ficha del cliente.
   const admin = session.role === "admin"
   const items: AppShellNavEntry[] = [

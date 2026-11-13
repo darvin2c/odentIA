@@ -48,7 +48,7 @@ import {
 } from "./saas-founders.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Los clientes del ARM (ADR 0184): etapa calculada, duplicados, fusión, personas, historial y enganches. */
+/** Los clientes del ARM (ADR 0185): etapa calculada, duplicados, fusión, personas, historial y enganches. */
 setupTestDb()
 const admin: AdminActor = { userId: "arm-admin", role: "admin" }
 const support: AdminActor = { userId: "arm-support", role: "support" }

@@ -1,5 +1,5 @@
 /**
- * La ficha del cliente (tablero 3 del lienzo del ARM, ADR 0184): una sola
+ * La ficha del cliente (tablero 3 del lienzo del ARM, ADR 0185): una sola
  * ficha antes y después de tener cuenta. Arriba, quién es y su próximo paso;
  * «Anotar», «Escribir» y «Nueva tarea» a la mano, y lo que decide
  * Administración (Invitar, Dar de alta, No por ahora, Perdido). Las pestañas

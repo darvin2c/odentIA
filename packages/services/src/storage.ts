@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -107,6 +108,17 @@ export interface Storage {
   }): Promise<AttachmentRef>
 }
 
+/**
+ * En un pedido de soporte en solo lectura, cómo se nombra un archivo en vez de
+ * con una URL firmada: la API la pone con `runWithFileProxy`.
+ */
+const fileProxy = new AsyncLocalStorage<(objectKey: string) => string>()
+
+/** Corre `fn` con los archivos nombrados por `proxy` en lugar de URL firmadas. */
+export function runWithFileProxy<T>(proxy: (objectKey: string) => string, fn: () => T): T {
+  return fileProxy.run(proxy, fn)
+}
+
 export function createStorage(env: StorageEnv): Storage {
   const client = new S3Client({
     endpoint: env.endpoint,
@@ -153,6 +165,10 @@ export function createStorage(env: StorageEnv): Storage {
       }
     },
     async attachmentUrl(objectKey, ttlSeconds = 900) {
+      // Soporte mirando la clínica: el archivo pasa por la API, que comprueba el permiso
+      // en cada pedido; una URL firmada seguiría sirviendo después de quitarlo.
+      const proxy = fileProxy.getStore()
+      if (proxy) return proxy(objectKey)
       return getSignedUrl(
         client,
         new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }),

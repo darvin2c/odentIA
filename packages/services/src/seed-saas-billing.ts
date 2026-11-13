@@ -693,7 +693,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
         {
           id: entry.id,
           requestId: request.id,
-          // También es del cliente de la solicitud (ADR 0184): su ficha lo ve en el historial.
+          // También es del cliente de la solicitud (ADR 0185): su ficha lo ve en el historial.
           clientId: request.clientId,
           happenedAt: createdAt,
           authorUserId: entry.authorUserId,
@@ -716,7 +716,7 @@ export async function seedFoundersDemo(db: Db, now = new Date()): Promise<void> 
 }
 
 /**
- * Cada solicitud de la semilla con su cliente del ARM (ADR 0184), con la misma
+ * Cada solicitud de la semilla con su cliente del ARM (ADR 0185), con la misma
  * operación que la solicitud de la web (`clientForWaitlistRequest`): la que
  * entró queda ligada a su cuenta y la descartada, perdida con su motivo. La de
  * una clínica que es demo (Clínica Norte) no da cliente: una demo nunca es

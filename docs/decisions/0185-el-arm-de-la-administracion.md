@@ -1,4 +1,4 @@
-# 0184 · El ARM de la administración
+# 0185 · El ARM de la administración
 
 Fecha: 2026-11-12 · Estado: aceptada · Extiende la [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) (la solicitud y la invitación) y la [0104](0104-cargar-los-datos-de-una-clinica-nueva.md) (la carga de una clínica nueva); muestra lo que hace la carga de la [0183](0183-la-carga-corre-en-el-servidor.md); sigue la [0063](0063-una-tabla-nueva-nace-cerrada-al-rol-de-la-app.md) y la [0064](0064-cada-tabla-en-el-esquema-de-su-dueno.md)
 

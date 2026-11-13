@@ -1,4 +1,4 @@
-import { type Db, withOrgContext } from "@odentia/db"
+import { type Db, isReadOnlyRequest, runOutsideReadOnly, withOrgContext } from "@odentia/db"
 import { type ClinicalAccessResource, recordClinicalAccess } from "@odentia/services"
 
 /**
@@ -10,6 +10,12 @@ export async function traceClinicalRead(
   db: Db,
   input: { orgId: string; userId: string; patientId: string; resource: ClinicalAccessResource },
 ): Promise<void> {
+  // Soporte mirando la clínica (ADR 0184): la anota el sistema, fuera del solo lectura,
+  // y si no se puede anotar el pedido falla en vez de mostrar sin rastro.
+  if (isReadOnlyRequest()) {
+    if (!(await traceClinicalReadOrFail(db, input))) throw new Error("No se pudo anotar la consulta de soporte")
+    return
+  }
   try {
     await withOrgContext(db, input.orgId, (tx) =>
       recordClinicalAccess(tx, input.orgId, input.userId, input.patientId, input.resource),
@@ -20,5 +26,31 @@ export async function traceClinicalRead(
       resource: input.resource,
       error: error instanceof Error ? error.message : String(error),
     })
+  }
+}
+
+/**
+ * Traza que se escribe antes de mostrar (soporte mirando la clínica): `false` si
+ * no se pudo, y entonces no se muestra. Corre fuera del solo lectura del pedido:
+ * es el sistema el que anota, no quien mira.
+ */
+export async function traceClinicalReadOrFail(
+  db: Db,
+  input: { orgId: string; userId: string; patientId: string; resource: ClinicalAccessResource },
+): Promise<boolean> {
+  try {
+    await runOutsideReadOnly(() =>
+      withOrgContext(db, input.orgId, (tx) =>
+        recordClinicalAccess(tx, input.orgId, input.userId, input.patientId, input.resource),
+      ),
+    )
+    return true
+  } catch (error) {
+    console.error("No se pudo registrar la consulta de soporte a la historia clínica", {
+      patientId: input.patientId,
+      resource: input.resource,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return false
   }
 }

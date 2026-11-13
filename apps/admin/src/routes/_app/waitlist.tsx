@@ -1,6 +1,6 @@
 /**
  * La lista de espera de antes. Cada solicitud de la web es ahora un momento de
- * su cliente (ADR 0184): `?solicitud=<id>` abre la ficha de su cliente en
+ * su cliente (ADR 0185): `?solicitud=<id>` abre la ficha de su cliente en
  * Venta, donde viven su seguimiento y la invitación; sin solicitud, Clientes
  * con la vista equivalente a la etapa (`?etapa=`), su producto y su búsqueda.
  * Queda como ruta que solo redirige: hay enlaces y correos guardados con ella.

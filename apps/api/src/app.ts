@@ -76,6 +76,15 @@ import { createAdminKairosRoute } from "./routes/admin-kairos.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminReportsRoute } from "./routes/admin-reports.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
+import {
+  auditDenied,
+  createSupportSessionRoute,
+  supportFileSecret,
+  supportGuard,
+  supportOrgContext,
+  supportSessionGate,
+  supportSessionOf,
+} from "./lib/support-session.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
@@ -397,6 +406,27 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
+  // Soporte mirando una clínica (ADR 0184): desde su app, nada escribe, tampoco en las rutas de
+  // la cuenta, el acceso o el correo, que no pasan por los frenos de la clínica.
+  app.use("/api/*", async (c, next) => {
+    const method = c.req.method
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next()
+    if (c.req.path.startsWith("/api/support-session/") || c.req.path.startsWith("/api/admin/")) return next()
+    const origin = c.req.header("origin") ?? ""
+    // La administración no es la app de una clínica: su personal sigue trabajando aunque
+    // tenga abierta, en otra pestaña, una clínica para mirar.
+    if (origin === adminOrigin) return next()
+    if (!(trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)))) return next()
+    if (!c.req.header("cookie")?.includes("odentia_soporte=")) return next()
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support === null) {
+      const session = supportSessionOf(c)
+      if (session) await auditDenied(deps.ownerDb, session)
+      return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+    }
+    return next()
+  })
+
   // Una página de una clínica no puede usar la cookie compartida para operar
   // el backoffice. SSR solo reenvía cookies para lecturas sin Origin.
   app.use("/api/admin/*", async (c, next) => {
@@ -466,7 +496,18 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
   app.route("/api/admin/imports", createAdminImportsRoute({ ...deps, panelUrlOf }))
-  app.route("/api/admin/support", createAdminSupportRoute(deps))
+  app.route(
+    "/api/admin/support",
+    createAdminSupportRoute({
+      ...deps,
+      // La app de la clínica vive junto al panel de su producto: `app.odentia32.com` →
+      // `<slug>.odentia32.com` (en local, con el prefijo de la rama y el puerto del proxy).
+      clinicUrlOf: (slug, product, path) => {
+        const panel = new URL(panelUrlOf(product))
+        return `${panel.protocol}//${slug}.${panel.host.replace(/(^|\.)app\./, "$1")}${path}`
+      },
+    }),
+  )
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route(
     "/api/admin/waitlist",
@@ -477,7 +518,7 @@ export function createApp(deps: AppDeps) {
       replyTo: deps.foundersEmail,
     }),
   )
-  // El ARM (ADR 0184): clientes desde el primer contacto, Kairós y sus reportes.
+  // El ARM (ADR 0185): clientes desde el primer contacto, Kairós y sus reportes.
   app.route(
     "/api/admin/clients",
     createAdminClientsRoute({
@@ -634,7 +675,21 @@ export function createApp(deps: AppDeps) {
 
   // Rutas de usuario (sin contexto de organización).
   const userScoped = new Hono()
-  userScoped.use("*", requireSession(deps))
+  // Este `use("*")` corre en todo /api/*. Con la cookie de soporte no hay sesión de la
+  // clínica: soporte sigue a las rutas de la clínica (con sus frenos) o a nada.
+  userScoped.use("*", async (c, next) => {
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support) return support
+    if (support === null) {
+      if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+        const session = supportSessionOf(c)
+        if (session) await auditDenied(deps.ownerDb, session)
+        return c.json(errorBody(c, "SUPPORT_READ_ONLY", "Soporte solo mira: no puede cambiar nada"), 403)
+      }
+      return next()
+    }
+    return requireSession(deps)(c, next)
+  })
 
   const AVATAR_MIME: Record<string, string> = {
     "image/png": "png",
@@ -719,6 +774,20 @@ export function createApp(deps: AppDeps) {
     }),
   )
   app.all("/api/inbound/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
+  // Soporte mirando una clínica con su permiso: canjear el pase, salir y sus archivos.
+  const supportSecret = supportFileSecret(deps.secretsKey)
+  app.route(
+    "/api/support-session",
+    createSupportSessionRoute({
+      ownerDb: deps.ownerDb,
+      storage: deps.storage,
+      secret: supportSecret,
+      cookieDomainOf: (c) => domains[productOfRequest(c)] ?? deps.cookieDomain,
+      // Los mismos orígenes que CORS deja llamar con credenciales.
+      isClinicOrigin: (origin) => trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)),
+      sessionUserOf: async (c) => (await authOf(c).api.getSession({ headers: c.req.raw.headers }))?.user.id ?? null,
+    }),
+  )
 
   app.route("/api", userScoped)
 
@@ -730,12 +799,20 @@ export function createApp(deps: AppDeps) {
     c.req.path.startsWith("/api/webhooks/") || c.req.path.startsWith("/webhooks/")
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
+    // Con la cookie de soporte, el pedido es de soporte en solo lectura o de nadie.
+    const support = await supportSessionGate(c, deps.ownerDb)
+    if (support) return support
+    if (support === null) return next()
     return requireSession(deps)(c, next)
   })
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
+    const support = supportSessionOf(c)
+    if (support) return (await supportOrgContext(c, db, support, deps.ownerDb)) ?? next()
     return requireOrgContext(deps)(c, next)
   })
+  // Soporte solo mira: nada que no sea leer, la base en solo lectura y sin descargas.
+  guarded.use("*", supportGuard(supportSecret, deps.ownerDb))
   // La historia bloqueada (ADR 0080) en toda ruta que nombra a la ficha o a la
   // persona en la consulta o en el cuerpo, no solo en su dirección.
   const lockGuard = lockedRecordGuard(db)
@@ -1033,6 +1110,8 @@ export function createApp(deps: AppDeps) {
   })
 
   guarded.get("/notifications/stream", async (c) => {
+    // Soporte no es del equipo: sin flujo de avisos (204 detiene la reconexión del navegador).
+    if (supportSessionOf(c)) return c.body(null, 204)
     const { orgId } = orgContextOf(c)
     const lastEventId = c.req.header("last-event-id")
 

@@ -1,2362 +1,9 @@
 {
-  "id": "ddc3777f-1d69-4008-b514-57c1940633ff",
+  "id": "8b1b8078-47c9-436e-b009-fc3a3342ce5a",
   "prevId": "5e0abe34-1150-4aa4-85a8-c169350925ba",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "admin.kairos_ai_usage": {
-      "name": "kairos_ai_usage",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "purpose": {
-          "name": "purpose",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "input_tokens": {
-          "name": "input_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "output_tokens": {
-          "name": "output_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cached_tokens": {
-          "name": "cached_tokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cost_micros": {
-          "name": "cost_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "kairos_ai_usage_created_idx": {
-          "name": "kairos_ai_usage_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "kairos_ai_usage_client_id_saas_client_id_fk": {
-          "name": "kairos_ai_usage_client_id_saas_client_id_fk",
-          "tableFrom": "kairos_ai_usage",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "kairos_ai_usage_purpose_check": {
-          "name": "kairos_ai_usage_purpose_check",
-          "value": "\"admin\".\"kairos_ai_usage\".\"purpose\" IN ('borrador','resumen','anotar','guion','semana','clasificar')"
-        },
-        "kairos_ai_usage_tokens_check": {
-          "name": "kairos_ai_usage_tokens_check",
-          "value": "coalesce(\"admin\".\"kairos_ai_usage\".\"input_tokens\", 0) >= 0 AND coalesce(\"admin\".\"kairos_ai_usage\".\"output_tokens\", 0) >= 0\n        AND coalesce(\"admin\".\"kairos_ai_usage\".\"cached_tokens\", 0) >= 0 AND coalesce(\"admin\".\"kairos_ai_usage\".\"cost_micros\", 0) >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.kairos_item": {
-      "name": "kairos_item",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expected_state": {
-          "name": "expected_state",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'espera'"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result": {
-          "name": "result",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "admin_only": {
-          "name": "admin_only",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "kairos_item_idempotency_uidx": {
-          "name": "kairos_item_idempotency_uidx",
-          "columns": [
-            {
-              "expression": "idempotency_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "kairos_item_status_idx": {
-          "name": "kairos_item_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "kairos_item_client_idx": {
-          "name": "kairos_item_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "kairos_item_client_id_saas_client_id_fk": {
-          "name": "kairos_item_client_id_saas_client_id_fk",
-          "tableFrom": "kairos_item",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "kairos_item_decided_by_user_id_fk": {
-          "name": "kairos_item_decided_by_user_id_fk",
-          "tableFrom": "kairos_item",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "decided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "kairos_item_kind_check": {
-          "name": "kairos_item_kind_check",
-          "value": "\"admin\".\"kairos_item\".\"kind\" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente')"
-        },
-        "kairos_item_status_check": {
-          "name": "kairos_item_status_check",
-          "value": "\"admin\".\"kairos_item\".\"status\" IN ('espera','ejecutada','fallida','incierta','descartada','vencida')"
-        },
-        "kairos_item_text_check": {
-          "name": "kairos_item_text_check",
-          "value": "length(trim(\"admin\".\"kairos_item\".\"title\")) BETWEEN 1 AND 200 AND length(trim(\"admin\".\"kairos_item\".\"reason\")) BETWEEN 1 AND 1000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.kairos_weekly": {
-      "name": "kairos_weekly",
-      "schema": "admin",
-      "columns": {
-        "week_start": {
-          "name": "week_start",
-          "type": "date",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "figures": {
-          "name": "figures",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "kairos_weekly_monday_check": {
-          "name": "kairos_weekly_monday_check",
-          "value": "extract(isodow from \"admin\".\"kairos_weekly\".\"week_start\") = 1"
-        },
-        "kairos_weekly_text_check": {
-          "name": "kairos_weekly_text_check",
-          "value": "char_length(btrim(\"admin\".\"kairos_weekly\".\"text\")) BETWEEN 1 AND 4000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_client": {
-      "name": "saas_client",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "char(2)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PE'"
-        },
-        "city": {
-          "name": "city",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "professionals": {
-          "name": "professionals",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "current_tool": {
-          "name": "current_tool",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'otro'"
-        },
-        "origin_detail": {
-          "name": "origin_detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "referred_by_client_id": {
-          "name": "referred_by_client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "archived_by": {
-          "name": "archived_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "summary_sources": {
-          "name": "summary_sources",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "summary_at": {
-          "name": "summary_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_client_org_uidx": {
-          "name": "saas_client_org_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_product_idx": {
-          "name": "saas_client_product_idx",
-          "columns": [
-            {
-              "expression": "product",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_owner_idx": {
-          "name": "saas_client_owner_idx",
-          "columns": [
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_name_idx": {
-          "name": "saas_client_name_idx",
-          "columns": [
-            {
-              "expression": "lower(\"name\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_client_referred_by_client_id_saas_client_id_fk": {
-          "name": "saas_client_referred_by_client_id_saas_client_id_fk",
-          "tableFrom": "saas_client",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "referred_by_client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_client_owner_user_id_user_id_fk": {
-          "name": "saas_client_owner_user_id_user_id_fk",
-          "tableFrom": "saas_client",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_client_organization_id_organization_id_fk": {
-          "name": "saas_client_organization_id_organization_id_fk",
-          "tableFrom": "saas_client",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_client_archived_by_user_id_fk": {
-          "name": "saas_client_archived_by_user_id_fk",
-          "tableFrom": "saas_client",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "archived_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_client_created_by_user_id_fk": {
-          "name": "saas_client_created_by_user_id_fk",
-          "tableFrom": "saas_client",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_client_name_check": {
-          "name": "saas_client_name_check",
-          "value": "length(trim(\"admin\".\"saas_client\".\"name\")) BETWEEN 1 AND 160"
-        },
-        "saas_client_product_check": {
-          "name": "saas_client_product_check",
-          "value": "\"admin\".\"saas_client\".\"product\" IN ('dental','medical','optical')"
-        },
-        "saas_client_country_check": {
-          "name": "saas_client_country_check",
-          "value": "\"admin\".\"saas_client\".\"country_code\" ~ '^[A-Z]{2}$'"
-        },
-        "saas_client_city_check": {
-          "name": "saas_client_city_check",
-          "value": "\"admin\".\"saas_client\".\"city\" IS NULL OR length(\"admin\".\"saas_client\".\"city\") <= 120"
-        },
-        "saas_client_professionals_check": {
-          "name": "saas_client_professionals_check",
-          "value": "\"admin\".\"saas_client\".\"professionals\" IS NULL OR \"admin\".\"saas_client\".\"professionals\" IN ('1','2-3','4-9','10+')"
-        },
-        "saas_client_tool_check": {
-          "name": "saas_client_tool_check",
-          "value": "\"admin\".\"saas_client\".\"current_tool\" IS NULL OR \"admin\".\"saas_client\".\"current_tool\" IN ('nada','cuaderno_excel','otro_software')"
-        },
-        "saas_client_origin_check": {
-          "name": "saas_client_origin_check",
-          "value": "\"admin\".\"saas_client\".\"origin\" IN ('web','referido','evento','whatsapp','redes','busqueda','otro')"
-        },
-        "saas_client_origin_detail_check": {
-          "name": "saas_client_origin_detail_check",
-          "value": "\"admin\".\"saas_client\".\"origin_detail\" IS NULL OR length(\"admin\".\"saas_client\".\"origin_detail\") <= 300"
-        },
-        "saas_client_referred_check": {
-          "name": "saas_client_referred_check",
-          "value": "\"admin\".\"saas_client\".\"referred_by_client_id\" IS DISTINCT FROM \"admin\".\"saas_client\".\"id\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_client_contact": {
-      "name": "saas_client_contact",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "roles": {
-          "name": "roles",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "roles_confirmed": {
-          "name": "roles_confirmed",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "phone": {
-          "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "preferred_channel": {
-          "name": "preferred_channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_primary": {
-          "name": "is_primary",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_client_contact_primary_uidx": {
-          "name": "saas_client_contact_primary_uidx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin\".\"saas_client_contact\".\"is_primary\"",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_contact_user_uidx": {
-          "name": "saas_client_contact_user_uidx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin\".\"saas_client_contact\".\"user_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_contact_email_idx": {
-          "name": "saas_client_contact_email_idx",
-          "columns": [
-            {
-              "expression": "email",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_client_contact_client_id_saas_client_id_fk": {
-          "name": "saas_client_contact_client_id_saas_client_id_fk",
-          "tableFrom": "saas_client_contact",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_client_contact_user_id_user_id_fk": {
-          "name": "saas_client_contact_user_id_user_id_fk",
-          "tableFrom": "saas_client_contact",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_client_contact_name_check": {
-          "name": "saas_client_contact_name_check",
-          "value": "length(trim(\"admin\".\"saas_client_contact\".\"name\")) BETWEEN 1 AND 160"
-        },
-        "saas_client_contact_title_check": {
-          "name": "saas_client_contact_title_check",
-          "value": "\"admin\".\"saas_client_contact\".\"title\" IS NULL OR length(\"admin\".\"saas_client_contact\".\"title\") <= 120"
-        },
-        "saas_client_contact_roles_check": {
-          "name": "saas_client_contact_roles_check",
-          "value": "\"admin\".\"saas_client_contact\".\"roles\" <@ ARRAY['decide','usa','paga']::text[]"
-        },
-        "saas_client_contact_phone_check": {
-          "name": "saas_client_contact_phone_check",
-          "value": "\"admin\".\"saas_client_contact\".\"phone\" IS NULL OR \"admin\".\"saas_client_contact\".\"phone\" ~ '^\\+[1-9][0-9]{6,14}$'"
-        },
-        "saas_client_contact_email_check": {
-          "name": "saas_client_contact_email_check",
-          "value": "\"admin\".\"saas_client_contact\".\"email\" IS NULL OR (\"admin\".\"saas_client_contact\".\"email\" = lower(\"admin\".\"saas_client_contact\".\"email\") AND length(\"admin\".\"saas_client_contact\".\"email\") BETWEEN 3 AND 254)"
-        },
-        "saas_client_contact_channel_check": {
-          "name": "saas_client_contact_channel_check",
-          "value": "\"admin\".\"saas_client_contact\".\"preferred_channel\" IS NULL OR \"admin\".\"saas_client_contact\".\"preferred_channel\" IN ('whatsapp','correo','llamada')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_client_file": {
-      "name": "saas_client_file",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filename": {
-          "name": "filename",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "admin_only": {
-          "name": "admin_only",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "delete_after": {
-          "name": "delete_after",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_client_file_object_uidx": {
-          "name": "saas_client_file_object_uidx",
-          "columns": [
-            {
-              "expression": "object_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_file_client_idx": {
-          "name": "saas_client_file_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_client_file_delete_idx": {
-          "name": "saas_client_file_delete_idx",
-          "columns": [
-            {
-              "expression": "delete_after",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_client_file_client_id_saas_client_id_fk": {
-          "name": "saas_client_file_client_id_saas_client_id_fk",
-          "tableFrom": "saas_client_file",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_client_file_created_by_user_id_fk": {
-          "name": "saas_client_file_created_by_user_id_fk",
-          "tableFrom": "saas_client_file",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_client_file_kind_check": {
-          "name": "saas_client_file_kind_check",
-          "value": "\"admin\".\"saas_client_file\".\"kind\" IN ('carta','propuesta','presentacion','archivo_clinica','correo','otro')"
-        },
-        "saas_client_file_source_check": {
-          "name": "saas_client_file_source_check",
-          "value": "\"admin\".\"saas_client_file\".\"source\" IS NULL OR \"admin\".\"saas_client_file\".\"source\" IN ('persona','kairos','correo')"
-        },
-        "saas_client_file_text_check": {
-          "name": "saas_client_file_text_check",
-          "value": "length(trim(\"admin\".\"saas_client_file\".\"filename\")) BETWEEN 1 AND 255 AND \"admin\".\"saas_client_file\".\"size_bytes\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_inbound_email": {
-      "name": "saas_inbound_email",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "mailbox": {
-          "name": "mailbox",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_address": {
-          "name": "from_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_name": {
-          "name": "from_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "to_address": {
-          "name": "to_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "text_body": {
-          "name": "text_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attachments": {
-          "name": "attachments",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "matched_by": {
-          "name": "matched_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "matched_at": {
-          "name": "matched_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "matched_by_user": {
-          "name": "matched_by_user",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_inbound_email_message_uidx": {
-          "name": "saas_inbound_email_message_uidx",
-          "columns": [
-            {
-              "expression": "message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_inbound_email_client_idx": {
-          "name": "saas_inbound_email_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "received_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_inbound_email_from_idx": {
-          "name": "saas_inbound_email_from_idx",
-          "columns": [
-            {
-              "expression": "from_address",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_inbound_email_client_id_saas_client_id_fk": {
-          "name": "saas_inbound_email_client_id_saas_client_id_fk",
-          "tableFrom": "saas_inbound_email",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_inbound_email_matched_by_user_user_id_fk": {
-          "name": "saas_inbound_email_matched_by_user_user_id_fk",
-          "tableFrom": "saas_inbound_email",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "matched_by_user"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_inbound_email_mailbox_check": {
-          "name": "saas_inbound_email_mailbox_check",
-          "value": "\"admin\".\"saas_inbound_email\".\"mailbox\" IN ('soporte','contacto')"
-        },
-        "saas_inbound_email_product_check": {
-          "name": "saas_inbound_email_product_check",
-          "value": "\"admin\".\"saas_inbound_email\".\"product\" IN ('dental','medical','optical')"
-        },
-        "saas_inbound_email_matched_check": {
-          "name": "saas_inbound_email_matched_check",
-          "value": "\"admin\".\"saas_inbound_email\".\"matched_by\" IS NULL OR \"admin\".\"saas_inbound_email\".\"matched_by\" IN ('contacto','solicitud','miembro','persona')"
-        },
-        "saas_inbound_email_text_check": {
-          "name": "saas_inbound_email_text_check",
-          "value": "length(trim(\"admin\".\"saas_inbound_email\".\"message_id\")) BETWEEN 1 AND 998\n        AND (\"admin\".\"saas_inbound_email\".\"text_body\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"text_body\") <= 20000)\n        AND (\"admin\".\"saas_inbound_email\".\"subject\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"subject\") <= 998)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_opportunity": {
-      "name": "saas_opportunity",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "seller_id": {
-          "name": "seller_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expected_on": {
-          "name": "expected_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason_detail": {
-          "name": "reason_detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "return_on": {
-          "name": "return_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_opportunity_open_uidx": {
-          "name": "saas_opportunity_open_uidx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"admin\".\"saas_opportunity\".\"decision\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_opportunity_client_idx": {
-          "name": "saas_opportunity_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_opportunity_client_id_saas_client_id_fk": {
-          "name": "saas_opportunity_client_id_saas_client_id_fk",
-          "tableFrom": "saas_opportunity",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_opportunity_seller_id_saas_seller_id_fk": {
-          "name": "saas_opportunity_seller_id_saas_seller_id_fk",
-          "tableFrom": "saas_opportunity",
-          "tableTo": "saas_seller",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "seller_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_opportunity_decided_by_user_id_fk": {
-          "name": "saas_opportunity_decided_by_user_id_fk",
-          "tableFrom": "saas_opportunity",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "decided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_opportunity_created_by_user_id_fk": {
-          "name": "saas_opportunity_created_by_user_id_fk",
-          "tableFrom": "saas_opportunity",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_opportunity_decision_check": {
-          "name": "saas_opportunity_decision_check",
-          "value": "(\"admin\".\"saas_opportunity\".\"decision\" IS NULL) = (\"admin\".\"saas_opportunity\".\"decided_at\" IS NULL)\n        AND (\"admin\".\"saas_opportunity\".\"decision\" IS NULL OR \"admin\".\"saas_opportunity\".\"decision\" IN ('entro','no_por_ahora','perdido'))\n        AND (\"admin\".\"saas_opportunity\".\"reason\" IS NULL OR \"admin\".\"saas_opportunity\".\"reason\" IN ('precio','sigue_con_lo_que_usa','no_es_el_momento','no_respondio','le_falta_una_funcion','no_es_una_clinica','otro'))\n        AND (\"admin\".\"saas_opportunity\".\"decision\" IS DISTINCT FROM 'no_por_ahora' OR \"admin\".\"saas_opportunity\".\"return_on\" IS NOT NULL)\n        AND (\"admin\".\"saas_opportunity\".\"decision\" IS NULL OR \"admin\".\"saas_opportunity\".\"decision\" = 'entro' OR \"admin\".\"saas_opportunity\".\"reason\" IS NOT NULL)\n        AND (\"admin\".\"saas_opportunity\".\"decision\" IS DISTINCT FROM 'entro' OR (\"admin\".\"saas_opportunity\".\"reason\" IS NULL AND \"admin\".\"saas_opportunity\".\"reason_detail\" IS NULL))"
-        },
-        "saas_opportunity_reason_detail_check": {
-          "name": "saas_opportunity_reason_detail_check",
-          "value": "\"admin\".\"saas_opportunity\".\"reason_detail\" IS NULL OR length(\"admin\".\"saas_opportunity\".\"reason_detail\") <= 500"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_outreach": {
-      "name": "saas_outreach",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "channel": {
-          "name": "channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "to_address": {
-          "name": "to_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "proposal_id": {
-          "name": "proposal_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kairos_item_id": {
-          "name": "kairos_item_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pendiente'"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_by": {
-          "name": "resolved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_outreach_client_idx": {
-          "name": "saas_outreach_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_outreach_status_idx": {
-          "name": "saas_outreach_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_outreach_client_id_saas_client_id_fk": {
-          "name": "saas_outreach_client_id_saas_client_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_outreach_contact_id_saas_client_contact_id_fk": {
-          "name": "saas_outreach_contact_id_saas_client_contact_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "saas_client_contact",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "contact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_outreach_proposal_id_saas_proposal_id_fk": {
-          "name": "saas_outreach_proposal_id_saas_proposal_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "saas_proposal",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "proposal_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_outreach_kairos_item_id_kairos_item_id_fk": {
-          "name": "saas_outreach_kairos_item_id_kairos_item_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "kairos_item",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "kairos_item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_outreach_created_by_user_id_fk": {
-          "name": "saas_outreach_created_by_user_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_outreach_resolved_by_user_id_fk": {
-          "name": "saas_outreach_resolved_by_user_id_fk",
-          "tableFrom": "saas_outreach",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "resolved_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_outreach_channel_check": {
-          "name": "saas_outreach_channel_check",
-          "value": "\"admin\".\"saas_outreach\".\"channel\" IN ('correo','whatsapp')"
-        },
-        "saas_outreach_status_check": {
-          "name": "saas_outreach_status_check",
-          "value": "\"admin\".\"saas_outreach\".\"status\" IN ('pendiente','enviado','incierto','no_salio')"
-        },
-        "saas_outreach_text_check": {
-          "name": "saas_outreach_text_check",
-          "value": "length(trim(\"admin\".\"saas_outreach\".\"body\")) BETWEEN 1 AND 5000 AND length(trim(\"admin\".\"saas_outreach\".\"to_address\")) BETWEEN 3 AND 254\n        AND (\"admin\".\"saas_outreach\".\"subject\" IS NULL OR length(\"admin\".\"saas_outreach\".\"subject\") <= 200)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_proposal": {
-      "name": "saas_proposal",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "opportunity_id": {
-          "name": "opportunity_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan_id": {
-          "name": "plan_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "list_price_cents": {
-          "name": "list_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "discount_bps": {
-          "name": "discount_bps",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "discount_months": {
-          "name": "discount_months",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "trial_days": {
-          "name": "trial_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "trial_credit_cents": {
-          "name": "trial_credit_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "billing_cycle": {
-          "name": "billing_cycle",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'mensual'"
-        },
-        "valid_until": {
-          "name": "valid_until",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'borrador'"
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "decided_by": {
-          "name": "decided_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "accepted_note": {
-          "name": "accepted_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_proposal_version_uidx": {
-          "name": "saas_proposal_version_uidx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "version",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_proposal_status_idx": {
-          "name": "saas_proposal_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "valid_until",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_proposal_client_id_saas_client_id_fk": {
-          "name": "saas_proposal_client_id_saas_client_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_proposal_opportunity_id_saas_opportunity_id_fk": {
-          "name": "saas_proposal_opportunity_id_saas_opportunity_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "saas_opportunity",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "opportunity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_proposal_plan_id_saas_plan_id_fk": {
-          "name": "saas_proposal_plan_id_saas_plan_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "saas_plan",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "plan_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_proposal_decided_by_user_id_fk": {
-          "name": "saas_proposal_decided_by_user_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "decided_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_proposal_approved_by_user_id_fk": {
-          "name": "saas_proposal_approved_by_user_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "approved_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_proposal_created_by_user_id_fk": {
-          "name": "saas_proposal_created_by_user_id_fk",
-          "tableFrom": "saas_proposal",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_proposal_status_check": {
-          "name": "saas_proposal_status_check",
-          "value": "\"admin\".\"saas_proposal\".\"status\" IN ('borrador','por_aprobar','enviada','aceptada','no_aceptada')"
-        },
-        "saas_proposal_version_check": {
-          "name": "saas_proposal_version_check",
-          "value": "\"admin\".\"saas_proposal\".\"version\" >= 1"
-        },
-        "saas_proposal_money_check": {
-          "name": "saas_proposal_money_check",
-          "value": "\"admin\".\"saas_proposal\".\"list_price_cents\" >= 0 AND \"admin\".\"saas_proposal\".\"currency\" ~ '^[A-Z]{3}$'\n        AND (\"admin\".\"saas_proposal\".\"trial_credit_cents\" IS NULL OR \"admin\".\"saas_proposal\".\"trial_credit_cents\" >= 0)"
-        },
-        "saas_proposal_discount_check": {
-          "name": "saas_proposal_discount_check",
-          "value": "\"admin\".\"saas_proposal\".\"discount_bps\" BETWEEN 0 AND 9000 AND (\"admin\".\"saas_proposal\".\"discount_months\" IS NULL OR \"admin\".\"saas_proposal\".\"discount_months\" BETWEEN 1 AND 36)"
-        },
-        "saas_proposal_trial_check": {
-          "name": "saas_proposal_trial_check",
-          "value": "\"admin\".\"saas_proposal\".\"trial_days\" IS NULL OR \"admin\".\"saas_proposal\".\"trial_days\" BETWEEN 0 AND 365"
-        },
-        "saas_proposal_cycle_check": {
-          "name": "saas_proposal_cycle_check",
-          "value": "\"admin\".\"saas_proposal\".\"billing_cycle\" IN ('mensual','quincenal')"
-        },
-        "saas_proposal_note_check": {
-          "name": "saas_proposal_note_check",
-          "value": "\"admin\".\"saas_proposal\".\"accepted_note\" IS NULL OR length(\"admin\".\"saas_proposal\".\"accepted_note\") <= 1000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_task": {
-      "name": "saas_task",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "due_on": {
-          "name": "due_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "due_at": {
-          "name": "due_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "assignee_user_id": {
-          "name": "assignee_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "demo_id": {
-          "name": "demo_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'abierta'"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "by_kairos": {
-          "name": "by_kairos",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "kairos_key": {
-          "name": "kairos_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "done_at": {
-          "name": "done_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "done_by": {
-          "name": "done_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "done_note": {
-          "name": "done_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_task_kairos_key_uidx": {
-          "name": "saas_task_kairos_key_uidx",
-          "columns": [
-            {
-              "expression": "kairos_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_task_status_due_idx": {
-          "name": "saas_task_status_due_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "due_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_task_client_status_idx": {
-          "name": "saas_task_client_status_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_task_assignee_status_idx": {
-          "name": "saas_task_assignee_status_idx",
-          "columns": [
-            {
-              "expression": "assignee_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_task_client_id_saas_client_id_fk": {
-          "name": "saas_task_client_id_saas_client_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_task_assignee_user_id_user_id_fk": {
-          "name": "saas_task_assignee_user_id_user_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "assignee_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_task_contact_id_saas_client_contact_id_fk": {
-          "name": "saas_task_contact_id_saas_client_contact_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "saas_client_contact",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "contact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_task_demo_id_saas_demo_id_fk": {
-          "name": "saas_task_demo_id_saas_demo_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "saas_demo",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "demo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_task_created_by_user_id_fk": {
-          "name": "saas_task_created_by_user_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_task_done_by_user_id_fk": {
-          "name": "saas_task_done_by_user_id_fk",
-          "tableFrom": "saas_task",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "done_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_task_kind_check": {
-          "name": "saas_task_kind_check",
-          "value": "\"admin\".\"saas_task\".\"kind\" IN ('llamar','escribir','presentacion','propuesta','alta','cobro','otro')"
-        },
-        "saas_task_status_check": {
-          "name": "saas_task_status_check",
-          "value": "\"admin\".\"saas_task\".\"status\" IN ('abierta','hecha','cancelada')"
-        },
-        "saas_task_title_check": {
-          "name": "saas_task_title_check",
-          "value": "length(trim(\"admin\".\"saas_task\".\"title\")) BETWEEN 1 AND 200"
-        },
-        "saas_task_done_note_check": {
-          "name": "saas_task_done_note_check",
-          "value": "\"admin\".\"saas_task\".\"done_note\" IS NULL OR length(\"admin\".\"saas_task\".\"done_note\") <= 2000"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "admin.platform_backup": {
       "name": "platform_backup",
       "schema": "admin",
@@ -3972,7 +1619,7 @@
       "checkConstraints": {
         "support_access_audit_action_check": {
           "name": "support_access_audit_action_check",
-          "value": "\"support_access_audit\".\"action\" in ('vista_diagnostica','denegado_sin_permiso','revocado')"
+          "value": "\"support_access_audit\".\"action\" in ('vista_diagnostica','denegado_sin_permiso','revocado','autorizado','pase','entrada','denegado_pase')"
         }
       },
       "isRLSEnabled": false
@@ -4013,6 +1660,24 @@
           "notNull": true,
           "default": "'diagnostico'"
         },
+        "view_role": {
+          "name": "view_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "staff_user_id": {
+          "name": "staff_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
@@ -4022,6 +1687,18 @@
         "revoked_at": {
           "name": "revoked_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_by": {
+          "name": "revoked_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_reason": {
+          "name": "end_reason",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -4072,6 +1749,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "support_access_grant_one_open_uidx": {
+          "name": "support_access_grant_one_open_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"support_access_grant\".\"revoked_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4132,6 +1825,34 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "support_access_grant_staff_user_id_user_id_fk": {
+          "name": "support_access_grant_staff_user_id_user_id_fk",
+          "tableFrom": "support_access_grant",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "staff_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_access_grant_revoked_by_user_id_fk": {
+          "name": "support_access_grant_revoked_by_user_id_fk",
+          "tableFrom": "support_access_grant",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "revoked_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "support_access_grant_case_id_case_id_fk": {
           "name": "support_access_grant_case_id_case_id_fk",
           "tableFrom": "support_access_grant",
@@ -4167,7 +1888,19 @@
       "checkConstraints": {
         "support_access_grant_scope_check": {
           "name": "support_access_grant_scope_check",
-          "value": "\"support_access_grant\".\"scope\" = 'diagnostico'"
+          "value": "\"support_access_grant\".\"scope\" in ('diagnostico','rol')"
+        },
+        "support_access_grant_role_check": {
+          "name": "support_access_grant_role_check",
+          "value": "(\"support_access_grant\".\"scope\" = 'rol') = (\"support_access_grant\".\"view_role\" is not null)"
+        },
+        "support_access_grant_reason_check": {
+          "name": "support_access_grant_reason_check",
+          "value": "\"support_access_grant\".\"reason\" is null or char_length(\"support_access_grant\".\"reason\") between 1 and 500"
+        },
+        "support_access_grant_end_check": {
+          "name": "support_access_grant_end_check",
+          "value": "(\"support_access_grant\".\"revoked_at\" is null) = (\"support_access_grant\".\"end_reason\" is null) and (\"support_access_grant\".\"end_reason\" is null or \"support_access_grant\".\"end_reason\" in ('quitado','reemplazado','vencido','caso_resuelto','sin_quien_lo_dio'))"
         },
         "support_access_grant_expiry_check": {
           "name": "support_access_grant_expiry_check",
@@ -4176,6 +1909,154 @@
         "support_access_grant_duration_check": {
           "name": "support_access_grant_duration_check",
           "value": "\"support_access_grant\".\"expires_at\" <= \"support_access_grant\".\"created_at\" + interval '1 hour'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "admin.support_access_session": {
+      "name": "support_access_session",
+      "schema": "admin",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "grant_id": {
+          "name": "grant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "staff_user_id": {
+          "name": "staff_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pass_hash": {
+          "name": "pass_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pass_expires_at": {
+          "name": "pass_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_hash": {
+          "name": "session_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "redeemed_at": {
+          "name": "redeemed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "support_access_session_pass_uidx": {
+          "name": "support_access_session_pass_uidx",
+          "columns": [
+            {
+              "expression": "pass_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "support_access_session_session_uidx": {
+          "name": "support_access_session_session_uidx",
+          "columns": [
+            {
+              "expression": "session_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "support_access_session_grant_idx": {
+          "name": "support_access_session_grant_idx",
+          "columns": [
+            {
+              "expression": "grant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "support_access_session_grant_id_support_access_grant_id_fk": {
+          "name": "support_access_session_grant_id_support_access_grant_id_fk",
+          "tableFrom": "support_access_session",
+          "tableTo": "support_access_grant",
+          "columnsFrom": [
+            "grant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "support_access_session_staff_user_id_user_id_fk": {
+          "name": "support_access_session_staff_user_id_user_id_fk",
+          "tableFrom": "support_access_session",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "staff_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "support_access_session_redeem_check": {
+          "name": "support_access_session_redeem_check",
+          "value": "(\"admin\".\"support_access_session\".\"redeemed_at\" is null) = (\"admin\".\"support_access_session\".\"session_hash\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -4481,6 +2362,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "access_requested_role": {
+          "name": "access_requested_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_requested_minutes": {
+          "name": "access_requested_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_requested_by": {
+          "name": "access_requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4665,6 +2564,20 @@
           "schemaTo": "auth",
           "columnsFrom": [
             "opened_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "support_case_access_requested_by_user_id_fk": {
+          "name": "support_case_access_requested_by_user_id_fk",
+          "tableFrom": "support_case",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "access_requested_by"
           ],
           "columnsTo": [
             "id"
@@ -43540,63 +41453,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'nota'"
-        },
-        "direction": {
-          "name": "direction",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "demo_id": {
-          "name": "demo_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "proposal_id": {
-          "name": "proposal_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "happened_at": {
-          "name": "happened_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "by_kairos": {
-          "name": "by_kairos",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {
@@ -43632,27 +41488,6 @@
             },
             {
               "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_follow_up_client_idx": {
-          "name": "saas_follow_up_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "happened_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -43705,62 +41540,6 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "saas_follow_up_client_id_saas_client_id_fk": {
-          "name": "saas_follow_up_client_id_saas_client_id_fk",
-          "tableFrom": "saas_follow_up",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_follow_up_contact_id_saas_client_contact_id_fk": {
-          "name": "saas_follow_up_contact_id_saas_client_contact_id_fk",
-          "tableFrom": "saas_follow_up",
-          "tableTo": "saas_client_contact",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "contact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_follow_up_demo_id_saas_demo_id_fk": {
-          "name": "saas_follow_up_demo_id_saas_demo_id_fk",
-          "tableFrom": "saas_follow_up",
-          "tableTo": "saas_demo",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "demo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_follow_up_proposal_id_saas_proposal_id_fk": {
-          "name": "saas_follow_up_proposal_id_saas_proposal_id_fk",
-          "tableFrom": "saas_follow_up",
-          "tableTo": "saas_proposal",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "proposal_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -43769,23 +41548,11 @@
       "checkConstraints": {
         "saas_follow_up_subject_check": {
           "name": "saas_follow_up_subject_check",
-          "value": "\"admin\".\"saas_follow_up\".\"client_id\" IS NOT NULL OR num_nonnulls(\"admin\".\"saas_follow_up\".\"request_id\", \"admin\".\"saas_follow_up\".\"organization_id\") = 1"
+          "value": "num_nonnulls(\"admin\".\"saas_follow_up\".\"request_id\", \"admin\".\"saas_follow_up\".\"organization_id\") = 1"
         },
         "saas_follow_up_body_check": {
           "name": "saas_follow_up_body_check",
           "value": "length(trim(\"admin\".\"saas_follow_up\".\"body\")) BETWEEN 1 AND 2000"
-        },
-        "saas_follow_up_kind_check": {
-          "name": "saas_follow_up_kind_check",
-          "value": "\"admin\".\"saas_follow_up\".\"kind\" IN ('llamada','whatsapp','correo','reunion','presentacion','propuesta','nota')"
-        },
-        "saas_follow_up_direction_check": {
-          "name": "saas_follow_up_direction_check",
-          "value": "\"admin\".\"saas_follow_up\".\"direction\" IS NULL OR \"admin\".\"saas_follow_up\".\"direction\" IN ('salio','entro')"
-        },
-        "saas_follow_up_outcome_check": {
-          "name": "saas_follow_up_outcome_check",
-          "value": "\"admin\".\"saas_follow_up\".\"outcome\" IS NULL OR length(\"admin\".\"saas_follow_up\".\"outcome\") <= 500"
         }
       },
       "isRLSEnabled": false
@@ -45630,19 +43397,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'web'"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -45670,21 +43424,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_waitlist_request_client_idx": {
-          "name": "saas_waitlist_request_client_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -45782,30 +43521,12 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "saas_waitlist_request_client_id_saas_client_id_fk": {
-          "name": "saas_waitlist_request_client_id_saas_client_id_fk",
-          "tableFrom": "saas_waitlist_request",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "saas_waitlist_request_source_check": {
-          "name": "saas_waitlist_request_source_check",
-          "value": "\"admin\".\"saas_waitlist_request\".\"source\" IN ('web','administracion')"
-        },
         "saas_waitlist_request_status_check": {
           "name": "saas_waitlist_request_status_check",
           "value": "\"admin\".\"saas_waitlist_request\".\"status\" IN ('por_revisar','invitada','entro','descartada')"
