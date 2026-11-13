@@ -1171,8 +1171,11 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
   const edits = cleanEdits(kind, input.edited)
   const current = await captureState(tx, kind, item.clientId, item.payload)
   if (stable(item.expectedState ?? {}) !== stable(current)) {
+    // Una respuesta que alguien ya mandó a mano no se vuelve a preparar (`ruleReplyEmails`).
     const error =
-      "El cliente cambió desde que Kairós lo preparó: lo vuelve a preparar en la próxima pasada"
+      kind === "responder_correo"
+        ? "Alguien ya respondió este correo: esta respuesta no sale"
+        : "El cliente cambió desde que Kairós lo preparó: lo vuelve a preparar en la próxima pasada"
     await markStale(tx, item.id, now, error)
     return decision("vencida", null, error)
   }
@@ -1802,12 +1805,13 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
     from_address: string
     from_name: string | null
     to_address: string
+    reply_to: string | null
     subject: string | null
     received_at: string
   }>(
     tx,
-    sql`select e.id, e.client_id, e.mailbox, e.product, e.from_address, e.from_name, e.to_address, e.subject,
-      ${iso(sql`e.received_at`)} as received_at
+    sql`select e.id, e.client_id, e.mailbox, e.product, e.from_address, e.from_name, e.to_address, e.reply_to,
+      e.subject, ${iso(sql`e.received_at`)} as received_at
     from saas_inbound_email e
     where e.mailbox in ('hola', 'contacto', 'fundadores', 'persona')
       and e.sender_verified
@@ -1845,6 +1849,8 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
         product: email.product,
         from: email.from_address,
         fromName: email.from_name,
+        // A dónde va la respuesta (su Reply-To), para decirlo en la tarjeta.
+        replyTo: email.reply_to,
         subject: email.subject,
         receivedAt: email.received_at,
         body: null,

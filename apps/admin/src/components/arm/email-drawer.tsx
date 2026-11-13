@@ -122,6 +122,19 @@ function UnverifiedNotice({ email }: { email: InboundEmail }) {
   )
 }
 
+/**
+ * «Ya le respondimos el …»: al responder desde Kairós u Hoy no se ve el correo
+ * ni lo que se le respondió, así que se dice antes de escribir otra. No frena:
+ * otra respuesta puede hacer falta.
+ */
+export function answeredWords(email: InboundEmail): string | null {
+  // Llegan de la más nueva a la más vieja.
+  const last = email.replies.find((reply) => reply.status === "enviado")
+  if (!last) return null
+  const when = supportDayTime(last.sentAt ?? last.createdAt)
+  return `Ya le respondimos el ${when}${last.from ? ` desde ${last.from}` : ""}. Lo que escribas sale como otra respuesta.`
+}
+
 /** Lo que quedó sin saber si salió: se resuelve antes de responder otra vez. */
 const unsettled = (email: InboundEmail) =>
   email.replies.filter((reply) => reply.status === "incierto" || reply.status === "pendiente")
@@ -209,6 +222,7 @@ function EmailSurface({
         email={data}
         draft={draft ?? ""}
         draftNote={draftNote}
+        direct={replying}
         onSend={onSend}
         onClose={onClose}
         onUnknown={(check) => {
@@ -365,6 +379,7 @@ function ReplyForm({
   email,
   draft,
   draftNote,
+  direct,
   onSend,
   onClose,
   onUnknown,
@@ -373,6 +388,8 @@ function ReplyForm({
   email: InboundEmail
   draft: string
   draftNote: string | null
+  /** Se abrió directo en «Responder» (Kairós, Hoy): no se vio lo que ya se le respondió. */
+  direct: boolean
   onSend: ((body: string) => Promise<void>) | undefined
   onClose: () => void
   onUnknown: (check: OutreachCheck) => void
@@ -415,6 +432,7 @@ function ReplyForm({
   // Desde Kairós el servidor señala el texto como `edited.body`.
   const surface = useFormSurface(form, { fieldMap: { "edited.body": "body" } })
   const pendingReplies = unsettled(email)
+  const answered = direct ? answeredWords(email) : null
   return (
     <FormDrawer
       {...surface}
@@ -447,6 +465,10 @@ function ReplyForm({
             {pendingReplies.length === 1
               ? "Hay una respuesta de la que no se sabe si salió. Revísala en el correo antes de responder otra vez."
               : `Hay ${pendingReplies.length} respuestas de las que no se sabe si salieron. Revísalas en el correo antes de responder otra vez.`}
+          </PageNotice>
+        ) : answered ? (
+          <PageNotice tone="aviso" label="Ya tiene respuesta">
+            {answered}
           </PageNotice>
         ) : null}
         <form.AppField name="body">

@@ -168,8 +168,16 @@ const senderOf = (item: KairosItem): string => {
 export const canAnswer = (item: KairosItem, isAdmin: boolean) =>
   isAdmin || text(item.payload.mailbox) === "soporte"
 
+/** A quién va la respuesta: el remitente o, si pidió otra dirección (Reply-To), esa. */
+export const replyTargetOf = (item: KairosItem): string => {
+  const replyTo = text(item.payload.replyTo)
+  return replyTo && replyTo !== text(item.payload.from)
+    ? `${replyTo} (la dirección que pidió para responderle)`
+    : senderOf(item)
+}
+
 const outreachWords = (item: KairosItem): string | null => {
-  if (item.kind === "responder_correo") return `Respuesta por correo a ${senderOf(item)}`
+  if (item.kind === "responder_correo") return `Respuesta por correo a ${replyTargetOf(item)}`
   const channel = channelOf(item)
   const to = text(item.payload.to)
   if (!channel) return null

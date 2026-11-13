@@ -127,7 +127,13 @@ describe("la dirección de cada persona", () => {
     ).rejects.toMatchObject({ code: "VALIDATION", fields: { mailLocal: expect.any(String) } })
     await expect(
       setStaffMail(ownerDb, admin, other.userId, { mailLocal: "ada.lovelace" }),
-    ).rejects.toMatchObject({ code: "MAIL_LOCAL_TAKEN", status: 409 })
+    ).rejects.toMatchObject({
+      code: "MAIL_LOCAL_TAKEN",
+      status: 409,
+      // Lo mismo junto al campo y en el mensaje: el formulario no lo dice dos veces.
+      message: "ada.lovelace@ ya es de otra persona del equipo",
+      fields: { mailLocal: "ada.lovelace@ ya es de otra persona del equipo" },
+    })
     await expect(
       setStaffMail(ownerDb, admin, other.userId, { copyTo: "no-es-correo" }),
     ).rejects.toMatchObject({ code: "VALIDATION" })

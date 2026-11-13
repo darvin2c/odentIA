@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { inboundEmailSchema, replyHint, replyToWords } from "./email-drawer"
-import { canAnswer, type KairosItem, kairosItemSchema, newClientFromEmail } from "./kairos-items"
+import { answeredWords, inboundEmailSchema, replyHint, replyToWords } from "./email-drawer"
+import {
+  canAnswer,
+  type KairosItem,
+  kairosItemSchema,
+  newClientFromEmail,
+  replyTargetOf,
+} from "./kairos-items"
+import { writeEmailHint } from "./write-drawer"
 
 /** Un correo como lo devuelve `GET /api/admin/clients/inbound/:emailId`. */
 const email = {
@@ -125,5 +132,33 @@ describe("el correo que llegó", () => {
     const plain = inboundEmailSchema.parse(email)
     expect(replyToWords(plain)).toBe("Elena Quispe <elena@example.test>")
     expect(plain).toMatchObject({ notice: null, replySignature: null })
+  })
+
+  it("al responder dice si ya le respondimos: desde Kairós se abre sin ver el correo", () => {
+    expect(answeredWords(inboundEmailSchema.parse(email))).toBeNull()
+    const sent = inboundEmailSchema.parse({
+      ...email,
+      replies: [
+        { ...email.replies[0], status: "enviado", sentAt: "2026-11-13T16:05:00.000Z" },
+        { ...email.replies[0], id: "o2", status: "no_salio" },
+      ],
+    })
+    expect(answeredWords(sent)).toMatch(
+      /^Ya le respondimos el .+ desde ada\.lovelace@odentia32\.com\. Lo que escribas sale como otra respuesta\.$/,
+    )
+  })
+
+  it("la tarjeta de Kairós dice a dónde irá la respuesta (su Reply-To)", () => {
+    const base = { emailId: "e1", mailbox: "hola", from: "elena@example.test", fromName: "Elena" }
+    expect(replyTargetOf(item(base))).toBe("Elena <elena@example.test>")
+    expect(replyTargetOf(item({ ...base, replyTo: "gerencia@example.test" }))).toBe(
+      "gerencia@example.test (la dirección que pidió para responderle)",
+    )
+  })
+
+  it("«Escribir» por correo dice desde dónde sale: Soporte, siempre desde soporte@", () => {
+    expect(writeEmailHint({ proposal: false, support: true })).toContain("soporte@")
+    expect(writeEmailHint({ proposal: false, support: false })).toContain("tu nombre")
+    expect(writeEmailHint({ proposal: true, support: false })).toContain("propuesta en PDF")
   })
 })

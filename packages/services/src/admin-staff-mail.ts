@@ -285,13 +285,11 @@ export async function setStaffMail(
         .from(adminStaff)
         .where(and(eq(adminStaff.mailLocal, mailLocal), ne(adminStaff.userId, targetUserId)))
         .limit(1)
-      if (taken)
-        throw new ServiceError(
-          "MAIL_LOCAL_TAKEN",
-          409,
-          `${mailLocal}@ ya es de otra persona del equipo`,
-          { mailLocal: "Ya es de otra persona del equipo" },
-        )
+      if (taken) {
+        // El mismo texto junto al campo y como mensaje: el formulario no lo repite abajo.
+        const message = `${mailLocal}@ ya es de otra persona del equipo`
+        throw new ServiceError("MAIL_LOCAL_TAKEN", 409, message, { mailLocal: message })
+      }
       patch.mailLocal = mailLocal
     }
     if (input.copyTo !== undefined) {

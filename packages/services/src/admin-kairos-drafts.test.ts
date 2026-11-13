@@ -452,6 +452,7 @@ describe("la respuesta a un correo que llegó", () => {
           fromAddress: "rosa@drafts.test",
           fromName: "Rosa Quispe",
           toAddress: "ada@vistia20.com",
+          replyTo: "gerencia@drafts.test",
           subject: "La demo del jueves",
           textBody: "Ada, ¿podemos ver la demo con mi socio?",
           senderVerified: true,
@@ -496,6 +497,11 @@ describe("la respuesta a un correo que llegó", () => {
     const [reply] = prepared
     expect(reply).toMatchObject({ clientId: ids.client, adminOnly: true, status: "espera" })
     expect(reply?.reason).toContain("Le escribió a ada@ de vistIA")
+    // La tarjeta dice a dónde va la respuesta: el Reply-To que pidió, no el remitente.
+    expect(reply?.payload).toMatchObject({
+      from: "rosa@drafts.test",
+      replyTo: "gerencia@drafts.test",
+    })
 
     const jobs = await ownerDb.transaction((tx) => pendingKairosReplyJobs(tx, {}, NOW))
     const job = jobs.find((entry) => entry.itemId === reply?.id)
@@ -557,6 +563,8 @@ describe("la respuesta a un correo que llegó", () => {
       ),
     )
     expect(decision.status).toBe("vencida")
+    // Dice lo que pasó: ya hay una respuesta, y no que Kairós la vuelva a preparar.
+    expect(decision.error).toBe("Alguien ya respondió este correo: esta respuesta no sale")
     // Y no se vuelve a preparar.
     await ownerDb.transaction((tx) => kairosRulesPass(tx, new Date(NOW.getTime() + 120_000)))
     const after = await ownerDb

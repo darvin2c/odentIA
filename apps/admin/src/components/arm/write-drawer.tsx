@@ -15,6 +15,7 @@ import { useMutation } from "@tanstack/react-query"
 import { ExternalLink } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
+import { useIsAdmin } from "../../lib/session"
 import {
   resolveOutreach,
   type SaleContact,
@@ -26,7 +27,8 @@ import {
 
 /**
  * «Escribir» a un cliente (lienzo de la ficha). Correo: sale con el nombre y
- * la dirección de quien escribe (o hola@ de la marca), y la respuesta vuelve
+ * la dirección de quien escribe (o hola@ de la marca; Soporte, siempre desde
+ * soporte@), y la respuesta vuelve
  * a esa dirección; si se corta a mitad, el
  * servidor dice que no se sabe si salió (502 `SEND_UNKNOWN`) y aquí no se
  * vuelve a enviar: la persona revisa y marca «Salió» o «No salió». WhatsApp:
@@ -34,6 +36,17 @@ import {
  * pestaña y queda «¿Salió?» hasta que la persona lo diga. Nada sale solo.
  */
 export type WriteChannel = "correo" | "whatsapp"
+
+/**
+ * Desde dónde sale un correo de «Escribir», como lo decide el servidor
+ * (`outreachSender`): Soporte siempre desde soporte@ de la marca; los demás,
+ * con su nombre y su dirección (o hola@ si aún no tienen).
+ */
+export function writeEmailHint({ proposal, support }: { proposal: boolean; support: boolean }) {
+  if (proposal) return "Sale con la marca del producto y la propuesta en PDF adjunta."
+  if (support) return "Sale desde soporte@ de la marca, como todo Soporte; su respuesta vuelve ahí."
+  return "Sale con tu nombre y tu dirección de la marca (o desde hola@ si aún no tienes una); su respuesta vuelve ahí."
+}
 
 export interface WriteDrawerProps {
   clientId: string
@@ -143,6 +156,7 @@ function WriteForm({
   contacts,
 }: WriteDrawerProps & { clientName: string; contacts: SaleContact[] }) {
   const invalidate = useInvalidateClient(clientId)
+  const isAdmin = useIsAdmin()
   const [phase, setPhase] = useState<Phase>({ kind: "form" })
 
   const form = useAppForm({
@@ -292,9 +306,7 @@ function WriteForm({
                 label="Mensaje"
                 description={
                   values.channel === "correo"
-                    ? proposalId
-                      ? "Sale con la marca del producto y la propuesta en PDF adjunta."
-                      : "Sale con tu nombre y tu dirección de la marca (o desde hola@ si aún no tienes una); su respuesta vuelve ahí."
+                    ? writeEmailHint({ proposal: Boolean(proposalId), support: !isAdmin })
                     : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
                 }
                 rows={7}
