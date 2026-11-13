@@ -1289,6 +1289,71 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
   expect(discarded.status).toBe(200)
 })
 
+it("formularios: un id mal escrito responde «no existe» (404), no un error interno", async () => {
+  const patientId = await createPatient()
+  const answers = { answers: {} }
+  const wrong: Array<[string, Promise<Response> | Response]> = [
+    ["finalizar", post(app, "/clinical-forms/form-responses/abc/finalize")],
+    ["guardar", patch(app, `/clinical-forms/form-responses/${crypto.randomUUID()}x`, answers)],
+    ["descartar", post(app, "/clinical-forms/form-responses/abc/discard", { reason: "x" })],
+    ["adendas", app.request("/clinical-forms/form-responses/abc/addenda")],
+    ["agregar adenda", post(app, "/clinical-forms/form-responses/abc/addenda", { text: "x" })],
+    ["publicar", post(app, "/clinical-forms/form-templates/abc/publish")],
+    ["archivar", post(app, "/clinical-forms/form-templates/abc/archive")],
+    ["volver a usar", post(app, "/clinical-forms/form-templates/abc/reuse")],
+    ["editar plantilla", patch(app, "/clinical-forms/form-templates/abc", { title: "Otro título" })],
+    ["lista por paciente", app.request("/clinical-forms/form-responses?patientId=abc")],
+    ["lista por atención", app.request(`/clinical-forms/form-responses?patientId=${patientId}&encounterId=abc`)],
+    ["lista por plantilla", app.request(`/clinical-forms/form-responses?patientId=${patientId}&templateId=abc`)],
+  ]
+  for (const [what, request] of wrong) {
+    const response = await request
+    expect(response.status, what).toBe(404)
+    expect((await json<ErrorBody>(response)).error.code, what).toBe("NOT_FOUND")
+  }
+  // Uno bien escrito que no existe sigue respondiendo lo mismo.
+  expect((await post(app, `/clinical-forms/form-templates/${crypto.randomUUID()}/publish`)).status).toBe(404)
+  expect((await post(app, `/clinical-forms/form-responses/${crypto.randomUUID()}/finalize`)).status).toBe(404)
+})
+
+it("formularios: dejar de usar y volver a usar desde Configuración; la lista dice cuál le llega al paciente", async () => {
+  const schema = { sections: [{ id: "s", title: "Preguntas", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] }
+  const publish = async (title: string, respondent: "staff" | "portal") => {
+    const draft = await post(app, "/clinical-forms/form-templates", { title, respondent, schema })
+    expect(draft.status).toBe(201)
+    const { id } = (await json<{ data: { id: string } }>(draft)).data
+    expect((await post(app, `/clinical-forms/form-templates/${id}/publish`)).status).toBe(201)
+    return id
+  }
+  const first = await publish("Cuestionario de la clínica (ruta)", "portal")
+  const second = await publish("Cuestionario nuevo (ruta)", "portal")
+  type Row = { id: string; key: string; version: number; status: string; reachesPatients: boolean }
+  const list = async () => (await json<{ data: Row[] }>(await app.request("/clinical-forms/form-templates"))).data
+  let rows = await list()
+  expect(rows.find((row) => row.id === second)?.reachesPatients).toBe(true)
+  expect(rows.find((row) => row.id === first)?.reachesPatients).toBe(false)
+
+  // Recepción no deja de usar ni vuelve a usar un formulario.
+  const reception = buildApp("reception")
+  expect((await post(reception, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(403)
+  expect((await post(reception, `/clinical-forms/form-templates/${second}/reuse`)).status).toBe(403)
+
+  expect((await post(app, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(200)
+  rows = await list()
+  expect(rows.find((row) => row.id === first)?.reachesPatients).toBe(true)
+  const reused = await post(app, `/clinical-forms/form-templates/${second}/reuse`)
+  expect(reused.status).toBe(201)
+  const back = (await json<{ data: Row }>(reused)).data
+  expect(back).toMatchObject({ version: 2, status: "publicado" })
+  rows = await list()
+  expect(rows.find((row) => row.id === back.id)?.reachesPatients).toBe(true)
+  // Ya en uso, no hay a qué volver.
+  expect((await post(app, `/clinical-forms/form-templates/${second}/reuse`)).status).toBe(409)
+  // Los deja fuera de uso: las demás pruebas del archivo no cuentan con un cuestionario del paciente.
+  expect((await post(app, `/clinical-forms/form-templates/${back.id}/archive`)).status).toBe(200)
+  expect((await post(app, `/clinical-forms/form-templates/${first}/archive`)).status).toBe(200)
+})
+
 it("órdenes: imagen con diagnóstico y hoja para imprimir; cancelar pide motivo; recepción no lee lo que pide la atención", async () => {
   const patientId = await createPatient()
   const created = await post(app, "/clinical-forms/orders", {

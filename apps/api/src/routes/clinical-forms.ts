@@ -36,10 +36,10 @@ import {
   listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
+  listClinicFormTemplates,
   listConsentTemplates,
   listFormAddenda,
   listFormResponses,
-  listFormTemplates,
   listProfessionalProfiles,
   listProfessionalSpecialties,
   listSpecialties,
@@ -53,6 +53,7 @@ import {
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
+  reuseFormTemplate,
   revokeConsentDocument,
   ServiceError,
   saveConsentTemplate,
@@ -424,6 +425,18 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/form-responses/:id", paperLock(formResponsePatientId, "Formulario no encontrado"))
   app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Formulario no encontrado"))
 
+  // Un id mal escrito no existe: se responde lo mismo que con uno que no se encuentra, en vez de
+  // dejar que la base lo rechace como un error interno.
+  const notFoundResponse = (c: Context, missing: string) => c.json(errorBody(c, "NOT_FOUND", missing), 404)
+  const knownId = (missing: string) => async (c: Context, next: Next) => {
+    if (!canonicalUuid(c.req.param("id"))) return notFoundResponse(c, missing)
+    await next()
+  }
+  app.use("/form-templates/:id", knownId("Plantilla no encontrada"))
+  app.use("/form-templates/:id/*", knownId("Plantilla no encontrada"))
+  app.use("/form-responses/:id", knownId("Formulario no encontrado"))
+  app.use("/form-responses/:id/*", knownId("Formulario no encontrado"))
+
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -612,9 +625,11 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
+    if (query.specialtyId && !canonicalUuid(query.specialtyId)) return notFoundResponse(c, "Especialidad no encontrada")
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listFormTemplates(tx, orgId, {
+        // Con cuál de los cuestionarios del paciente le llega, para que la lista lo diga.
+        listClinicFormTemplates(tx, orgId, {
           specialtyId: query.specialtyId,
           status: query.status,
           q: query.q,
@@ -675,6 +690,19 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
+  // «Volver a usar»: la versión siguiente, ya publicada, con las mismas preguntas.
+  app.post("/form-templates/:id/reuse", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración vuelve a usar un formulario")
+    }
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reuseFormTemplate(tx, orgId, userId, c.req.param("id")),
+      ),
+    )
+  })
+
   // --- Capturas ---
   app.get("/form-responses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -682,6 +710,9 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const query = c.req.query()
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
     const patientId = query.patientId
+    if (!canonicalUuid(patientId)) return notFoundResponse(c, "Paciente no encontrado")
+    if (query.encounterId && !canonicalUuid(query.encounterId)) return notFoundResponse(c, "Atención no encontrada")
+    if (query.templateId && !canonicalUuid(query.templateId)) return notFoundResponse(c, "Plantilla no encontrada")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listFormResponses(tx, orgId, {
