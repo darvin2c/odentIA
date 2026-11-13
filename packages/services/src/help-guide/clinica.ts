@@ -211,6 +211,14 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        id: "pacientes-copia-historia-trae-formularios",
+        q: "¿La copia de la historia trae los formularios?",
+        a: "Sí. La copia trae cada formulario finalizado, con su título y su versión, cada pregunta con su respuesta, sus adendas, quién lo llenó y cuándo se finalizó: los que llenó el equipo y los que respondió el paciente y ya se revisaron. También trae la «Entrevista de salud» de Antecedentes, con el embarazo si se registró y los antecedentes personales y familiares. Todo va en el PDF y en el archivo para otro sistema. Un borrador, o lo que el paciente envió y todavía nadie revisó, no sale: ábrelo en Documentos y «Finalizar…». La copia se baja en su página › Datos › Privacidad y pedidos, con «Descargar historia», que solo ve quien lee la historia clínica. En la Historia, cada formulario finalizado va con lo respondido en una línea y «Ver», y la atención firmada lo muestra con sus respuestas.",
+        forms: ["el formulario sale en la copia de la historia", "la historia que descargo incluye los formularios", "la copia de la historia lleva la entrevista de salud"],
+        area: "clinica",
+        needs: "clinical.read",
+      },
+      {
         id: "pacientes-documentos-buscar-retirar",
         q: "¿Cómo retiro un archivo que subí por error?",
         a: "No se borra: se retira. En su página › Clínica › Documentos, ábrelo y toca «Retirar…», con el motivo; deja de salir en la lista y al pie se pueden ver los retirados. «Buscar un papel» y los filtros de arriba encuentran cualquier documento. Una imagen dice «Sin informar» hasta que, en «Informe y datos», tocas «Marcar como informada»; «Volver a pendiente» lo deshace. Lo hace quien escribe en la historia clínica.",
