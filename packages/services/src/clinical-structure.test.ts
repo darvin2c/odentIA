@@ -1,4 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
+import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -641,13 +642,32 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
     })
     return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
   })
-  const response = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" },
-    }),
-  )
+  // Lo envía el paciente desde su enlace o el portal: el equipo no crea una respuesta con esta plantilla.
+  await expect(
+    run((tx) => createFormResponse(tx, "org_a", ACTOR, { templateId: template.id, patientId: patient.id })),
+  ).rejects.toMatchObject({ status: 400 })
+  const declared = async (answers: Record<string, unknown>) => {
+    const [row] = await run((tx) =>
+      tx
+        .insert(clinicalFormResponse)
+        .values({
+          organizationId: "org_a",
+          templateId: template.id,
+          templateVersion: template.version,
+          templateTitle: template.title,
+          templateSnapshot: template.schema as Record<string, unknown>,
+          patientId: patient.id,
+          status: "borrador",
+          answers,
+          source: "portal",
+          submittedAt: new Date(),
+        })
+        .returning(),
+    )
+    if (!row) throw new Error("Sin respuesta declarada")
+    return row
+  }
+  const response = await declared({ alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" })
   // Mientras no se finaliza, nada pasa a los antecedentes.
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id))
@@ -673,13 +693,7 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
   expect(health.revision).toBe(2)
   expect(health.reviewStatus.allergies).toBe("recorded")
   // «Ninguna» no es una alergia, y repetir la penicilina no la duplica.
-  const again = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" },
-    }),
-  )
+  const again = await declared({ alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" })
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, again.id))
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(2)
   // Al escribir amoxicilina, la receta avisa la penicilina por su grupo, como cualquier
