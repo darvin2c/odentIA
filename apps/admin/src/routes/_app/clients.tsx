@@ -444,7 +444,14 @@ function ClientsSubtitle({
 function ClinicCell({ item }: { item: ClientListItem }) {
   return (
     <span className="flex min-w-0 flex-col gap-1">
-      <span className="font-semibold [overflow-wrap:anywhere]">{item.name}</span>
+      {/* El nombre es el enlace de la fila: se abre con el teclado y en otra pestaña. */}
+      <Link
+        to="/clients/$clientId"
+        params={{ clientId: item.id }}
+        className="font-semibold [overflow-wrap:anywhere] outline-none hover:underline focus-visible:underline"
+      >
+        {item.name}
+      </Link>
       {item.signals.length ? (
         <span className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <AgentMark size="sm" className="mt-px size-5 rounded-md [&>svg]:size-3" />
