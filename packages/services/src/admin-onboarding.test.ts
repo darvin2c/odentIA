@@ -237,6 +237,8 @@ describe("onboardingSteps", () => {
     })
     expect(stepOf(forAdmin, "informe").detail).toContain("No se sabe si salió")
     expect(stepOf(forAdmin, "contrato").doneAt).toBeNull()
+    // Sin propietaria no hay «solo la propietaria».
+    expect(stepOf(forAdmin, "equipo").detail).toBe("Nadie de la clínica entró todavía")
     expect(forAdmin.next).toBe("entro")
 
     const forSupport = await onboardingSteps(ownerDb, support, freshClient, NOW)

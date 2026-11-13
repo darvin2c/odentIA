@@ -382,7 +382,14 @@ async function stepsOf(
   const lastIn = others.at(-1)?.at ?? null
   const team =
     others.length === 0 && invites.length === 0
-      ? step("equipo", null, "Solo la propietaria: aún no invitó a nadie")
+      ? step(
+          "equipo",
+          null,
+          // Sin propietaria todavía no hay nadie dentro: «solo la propietaria» contradecía «Entró».
+          owner
+            ? "Solo la propietaria: aún no invitó a nadie"
+            : "Nadie de la clínica entró todavía",
+        )
       : live.length === 0 && expired.length === 0 && lastIn
         ? step(
             "equipo",

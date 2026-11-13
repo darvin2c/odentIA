@@ -35,6 +35,7 @@ import {
 } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { createAssistedOrganization } from "./admin-organizations.js"
+import { listProgressReports } from "./clinic-progress-report.js"
 import { createSaasPlan } from "./saas-billing.js"
 import {
   completeFounderInvitation,
@@ -1186,5 +1187,45 @@ describe("enganches: la solicitud y la cuenta", () => {
         .from(saasClient)
         .where(eq(saasClient.organizationId, demo.organizationId)),
     ).toEqual([])
+  })
+})
+
+describe("los informes de la carga", () => {
+  it("a la misma hora, el cierre gana al «enviándose»: un informe que no se sabe si salió no se lee enviándose", async () => {
+    const orgId = `arm-${uniq()}`
+    await insertOrg(ownerDb, orgId, orgId)
+    const at = new Date()
+    // Reservar y cerrar en una misma transacción comparten now(): mismo created_at.
+    await ownerDb.insert(adminAudit).values([
+      {
+        action: "org.progress_report_unknown",
+        organizationId: orgId,
+        entityId: "informe-1",
+        createdAt: at,
+      },
+      {
+        action: "org.progress_report_sending",
+        organizationId: orgId,
+        entityId: "informe-1",
+        createdAt: at,
+      },
+      {
+        action: "org.progress_report_sending",
+        organizationId: orgId,
+        entityId: "informe-2",
+        createdAt: at,
+      },
+      {
+        action: "org.progress_report_sent",
+        organizationId: orgId,
+        entityId: "informe-2",
+        createdAt: at,
+      },
+    ])
+    const reports = await listProgressReports(ownerDb, orgId)
+    expect(reports.map((report) => [report.number, report.state])).toEqual([
+      [2, "enviado"],
+      [1, "desconocido"],
+    ])
   })
 })

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../lib/api"
+import { supportDay, supportDayTime } from "../lib/support-words"
 import { UnknownReportActions } from "./unknown-report-actions"
 
 /**
@@ -40,33 +41,17 @@ const recordSchema = z.object({
 type Report = z.infer<typeof recordSchema>["reports"][number]
 
 const LOAD_WORDS = { configuracion: "Configuración", pacientes: "Pacientes" } as const
-const zone = { timeZone: "America/Lima" } as const
-const dayAndTime = new Intl.DateTimeFormat("es-PE", {
-  ...zone,
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-})
-const dayOnly = new Intl.DateTimeFormat("es-PE", {
-  ...zone,
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-})
 
 /** Lo que pasó con un informe, sin decir más de lo que se sabe: salió no es que lo leyó. */
 function reportLine(report: Report): string {
-  const when = new Date(report.at)
   const to = report.to ? ` a ${report.to}` : ""
   if (report.registeredLater)
-    return `Salió el ${dayOnly.format(when)}${to} · por correo aparte; se registró después`
+    return `Salió el ${supportDay(report.at)}${to} · por correo aparte; se registró después`
   const by = report.by ? ` · por ${report.by}` : ""
   if (report.state === "desconocido")
-    return `No se sabe si salió · ${dayAndTime.format(when)}${to}${by}`
-  if (report.state === "enviando") return `Enviándose desde el ${dayAndTime.format(when)}${to}${by}`
-  return `Salió el ${dayAndTime.format(when)}${to}${by}`
+    return `No se sabe si salió · ${supportDayTime(report.at)}${to}${by}`
+  if (report.state === "enviando") return `Enviándose desde el ${supportDayTime(report.at)}${to}${by}`
+  return `Salió el ${supportDayTime(report.at)}${to}${by}`
 }
 
 export function OrgLoadRecord({ organizationId }: { organizationId: string }) {
@@ -194,7 +179,7 @@ export function OrgLoadRecord({ organizationId }: { organizationId: string }) {
               <li key={`${load.kind}-${load.at}`} className="flex flex-col gap-0.5 py-3">
                 <span className="text-sm font-medium">{LOAD_WORDS[load.kind]}</span>
                 <span className="text-sm text-muted-foreground">
-                  {dayAndTime.format(new Date(load.at))}
+                  {supportDayTime(load.at)}
                   {load.by ? ` · por ${load.by}` : ""}
                 </span>
                 <span className="text-sm">{load.summary}</span>

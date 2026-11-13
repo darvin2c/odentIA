@@ -407,6 +407,17 @@ export const PROGRESS_REPORT_ACTIONS = {
 } as const
 export type ProgressReportState = keyof typeof PROGRESS_REPORT_ACTIONS
 
+/**
+ * Lo último de un informe: el más nuevo y, a la misma hora (reservar y cerrar
+ * en una misma transacción comparten `now()`), el cierre antes que el «enviándose».
+ * Sin el desempate, un informe que no se sabe si salió podía leerse «enviándose»
+ * y perder «Revisé en Zoho: salió» (QA del ARM, 12 nov).
+ */
+const latestReportFirst = [
+  desc(adminAudit.createdAt),
+  sql`case when ${adminAudit.action} = ${PROGRESS_REPORT_ACTIONS.enviando} then 1 else 0 end`,
+] as const
+
 /** Lo último que pasó con ese informe (por su número) en esa clínica, o null si nunca se envió. */
 export async function progressReportSent(
   tx: Db,
@@ -423,7 +434,7 @@ export async function progressReportSent(
         eq(adminAudit.entityId, `informe-${number}`),
       ),
     )
-    .orderBy(desc(adminAudit.createdAt))
+    .orderBy(...latestReportFirst)
     .limit(1)
   if (!row) return null
   const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
@@ -636,7 +647,7 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
     .from(adminAudit)
     .leftJoin(user, eq(user.id, adminAudit.actorUserId))
     .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
-    .orderBy(desc(adminAudit.createdAt))
+    .orderBy(...latestReportFirst)
   const seen = new Map<number, ProgressReportRecord>()
   for (const row of rows) {
     const number = Number(row.entityId?.replace("informe-", ""))

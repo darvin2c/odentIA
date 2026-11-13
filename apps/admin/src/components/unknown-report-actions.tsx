@@ -1,8 +1,9 @@
 import { Button, toast } from "@odentia/ui"
 import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { api } from "../lib/api"
+import { focusInsideLater } from "../lib/focus"
 
 /**
  * Las dos salidas de un informe que quedó «no se sabe si salió» (ADR 0104 y 0183), en el
@@ -28,6 +29,12 @@ export function UnknownReportActions({
 }) {
   const queryClient = useQueryClient()
   const [confirming, setConfirming] = useState(false)
+  // Al quedar enviado, estos botones (y en Hoy, la fila) se van: el foco pasa a su sección.
+  const box = useRef<HTMLDivElement>(null)
+  const keepFocus = () => {
+    const section = box.current?.closest("section") ?? null
+    focusInsideLater(() => section)
+  }
   const base = `/api/admin/imports/${organizationId}/reports/${number}`
   // Lo que cambia: el registro, la ficha, Hoy y Kairós (la tarea se cierra al quedar enviado).
   const refresh = () => {
@@ -41,6 +48,7 @@ export function UnknownReportActions({
     mutationFn: () => api(`${base}/confirm-sent`, { method: "POST", body: "{}" }),
     onSuccess: () => {
       toast.success(`El informe N.º ${number} quedó como enviado`)
+      keepFocus()
       refresh()
     },
     onError: (error) => {
@@ -53,6 +61,7 @@ export function UnknownReportActions({
     onSuccess: () => {
       toast.success(`Salió otra vez el informe N.º ${number}${to ? ` a ${to}` : ""}`)
       setConfirming(false)
+      keepFocus()
       refresh()
     },
     // Si se cortó otra vez, queda sin saberse: se cierra la pregunta (otra pulsación es otro
@@ -65,7 +74,7 @@ export function UnknownReportActions({
   })
   const busy = confirmSent.isPending || resend.isPending
   return (
-    <div className="flex flex-wrap gap-2">
+    <div ref={box} className="flex flex-wrap gap-2">
       <Button
         type="button"
         size={size}
