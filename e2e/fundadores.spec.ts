@@ -5,16 +5,18 @@ import { session } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasPlan, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import type { Db } from "@odentia/db"
 import { desc, eq } from "drizzle-orm"
+import { accountClient, surface } from "./admin"
 import { hostUrl, PANEL, tenant, tenantPattern } from "./env"
-import { expect, test } from "./fixtures"
+import { api, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 
 /**
  * Fundadores (issue 165) y precio negociado con vencimiento (issue 168), de
- * punta a punta: la administración invita desde la lista de espera, la
- * persona crea su cuenta con el enlace del correo y abre su clínica con el
- * plan Fundadores; en Clínicas se ve el precio negociado que vence pronto.
+ * punta a punta: la solicitud llega por la web y es un cliente del ARM; la
+ * administración la anota e invita desde su ficha, la persona crea su cuenta
+ * con el enlace del correo y abre su clínica con el plan Fundadores; en Hoy se
+ * ve el precio negociado que vence pronto y lleva a su ficha.
  * El run deja el alta abierta (fixtures): la invitación sirve igual.
  */
 
@@ -65,42 +67,54 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   await makeStaff(fixtureDb, user.id)
   const planId = await foundersPlan(fixtureDb, tag)
   const email = `fundadora-${tag}@test.dev`
+  // La solicitud llega por la web, como la deja el formulario: con su cliente del ARM y su persona.
+  const sent = await api<{ ok: boolean }>(page, "POST", "/api/public/founders/waitlist", undefined, {
+    firstName: "Ana",
+    lastName: `Quispe ${tag}`,
+    email,
+    phone: "+51987654321",
+    clinicName: `Clínica Sonrisa ${tag}`,
+    countryCode: "PE",
+    city: "Arequipa",
+    professionals: "2-3",
+    currentTool: "cuaderno_excel",
+  })
+  expect(sent.status, JSON.stringify(sent.body)).toBe(201)
   const [request] = await fixtureDb
-    .insert(saasWaitlistRequest)
-    .values({
-      firstName: "Ana",
-      lastName: `Quispe ${tag}`,
-      email,
-      phone: "+51987654321",
-      clinicName: `Clínica Sonrisa ${tag}`,
-      countryCode: "PE",
-      city: "Arequipa",
-      professionals: "2-3",
-      currentTool: "cuaderno_excel",
-    })
-    .returning({ id: saasWaitlistRequest.id })
+    .select({ id: saasWaitlistRequest.id, clientId: saasWaitlistRequest.clientId })
+    .from(saasWaitlistRequest)
+    .where(eq(saasWaitlistRequest.email, email))
+  expect(request?.clientId).toBeTruthy()
 
-  // Lista de espera: la solicitud por revisar, con su plazo; se abre al lado y se invita con confirmación.
+  // La lista de espera de antes lleva a Clientes con su búsqueda: la solicitud es un cliente por vender.
   await gotoHydrated(page, hostUrl("admin", `/waitlist?q=${tag}`))
-  await expect(page.getByRole("heading", { name: "Lista de espera", level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/clients\?/)
+  await expect(page.getByRole("heading", { name: "Clientes", level: 1 })).toBeVisible()
   const row = page.getByRole("row").filter({ hasText: `Clínica Sonrisa ${tag}` })
   await expect(row).toBeVisible()
   await shot(page, "lista-de-espera")
   await row.click()
-  const panel = page.getByRole("region", { name: `Clínica Sonrisa ${tag}` })
-  await expect(panel).toBeVisible()
-  await expect(panel.getByText(email).first()).toBeVisible()
-  // El seguimiento: cada contacto es una entrada con quién la anotó; sin fecha elegida, el botón solo dice «Anotar».
-  await panel.getByLabel("¿Qué pasó?").fill("Llamada el lunes: usan WhatsApp Business.")
-  await panel.getByRole("button", { name: "Anotar", exact: true }).click()
-  await expect(page.getByText("Anotado", { exact: true })).toBeVisible()
-  const entries = panel.getByRole("list", { name: "Entradas del seguimiento" })
+  await expect(page.getByRole("heading", { name: `Clínica Sonrisa ${tag}`, level: 1 })).toBeVisible()
+  // En Venta, la solicitud de la web con quién pidió y su plazo.
+  await page.getByRole("tablist", { name: "Secciones del cliente" }).getByRole("tab", { name: "Venta" }).click()
+  const card = page.getByRole("region", { name: "La solicitud de la web" })
+  await expect(card.getByText(email).first()).toBeVisible()
+  await expect(card).toContainText("Plazo")
+  // El seguimiento: cada contacto es una entrada con quién la anotó; se anota con «Anotar» de la ficha.
+  await page.getByRole("button", { name: "Anotar", exact: true }).click()
+  const annotate = surface(page, "Anotar")
+  await annotate.getByLabel("¿Qué pasó?").fill("Llamada el lunes: usan WhatsApp Business.")
+  await annotate.getByRole("button", { name: "Guardar como nota" }).click()
+  await expect(page.getByText("Anotado en su historial")).toBeVisible()
+  await expect(annotate).toHaveCount(0)
+  const entries = card.getByRole("list", { name: "Entradas del seguimiento" })
   await expect(entries.getByRole("listitem").filter({ hasText: "Llamada el lunes: usan WhatsApp Business." })).toContainText(user.name)
-  await expect(panel.getByLabel("¿Qué pasó?")).toHaveValue("")
   await shot(page, "solicitud-abierta")
-  await panel.getByRole("button", { name: "Enviar invitación…" }).click()
-  const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog")).filter({ hasText: "¿Enviar la invitación" })
-  await dialog.getByRole("button", { name: "Enviar invitación" }).click()
+  // Invitar se decide en «Decides tú», con el correo de la solicitud ya puesto.
+  await page.getByRole("region", { name: "Decides tú" }).getByRole("button", { name: "Invitar", exact: true }).click()
+  const invite = surface(page, "Invitar a abrir su cuenta")
+  await expect(invite.getByLabel("Correo de quien abre la cuenta")).toHaveValue(email)
+  await invite.getByRole("button", { name: "Invitar y enviar el correo" }).click()
   await expect(page.getByText(`Invitación enviada a ${email}`)).toBeVisible()
   const [invited] = await fixtureDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, request!.id))
   expect(invited).toMatchObject({ status: "invitada", planId, note: null })
@@ -152,12 +166,14 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / DAY)).toBe(90)
   expect(sub?.guaranteedUntil).not.toBeNull()
 
+  // «Entró» de antes es «Con cuenta» en Clientes: el mismo cliente, ahora con su cuenta.
   await gotoHydrated(page, hostUrl("admin", `/waitlist?etapa=entro&q=${tag}`))
+  await expect(page).toHaveURL(/vista=con_cuenta/)
   await expect(page.getByRole("row").filter({ hasText: `Clínica Sonrisa ${tag}` })).toBeVisible()
   await shot(page, "lista-entraron")
 })
 
-test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", async ({ owner, fixtureDb }, testInfo) => {
+test("precio negociado: vence, se marca en Hoy, se renueva en su ficha y se avisa a la clínica", async ({ owner, fixtureDb }, testInfo) => {
   test.setTimeout(180_000)
   const { page, user, org } = owner
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
@@ -171,21 +187,29 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
     .set({ planId, discountBps: 1000, discountEndsAt: new Date(Date.now() + 6 * DAY - 60_000) })
     .where(eq(saasSubscription.organizationId, org.id))
 
-  // En Clínicas el precio negociado se marca con su vencimiento; su ficha dice quién paga.
-  await gotoHydrated(page, hostUrl("admin", "/organizations"))
-  await page.getByRole("textbox", { name: "Buscar clínicas" }).fill(org.slug)
-  await page.getByRole("button", { name: "Buscar" }).click()
-  await expect(page.getByText("10 % · vence en 6 días")).toBeVisible()
-  await shot("clinicas-precio-negociado")
-  await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
-  await page.getByRole("tab", { name: "Precio y prueba" }).click()
-  await expect(page.getByRole("columnheader", { name: "Paga esta clínica" })).toBeVisible()
+  // Su cuenta es un cliente (lo liga Kairós): en Clientes, «Con cuenta», con su búsqueda.
+  await accountClient(fixtureDb, { org, product: "dental" })
+  await gotoHydrated(page, hostUrl("admin", `/clients?vista=con_cuenta&q=${encodeURIComponent(org.name)}`))
+  await expect(page.getByRole("row").filter({ hasText: org.name })).toBeVisible()
 
+  // En Hoy el precio negociado se marca con su vencimiento y lleva a renovarlo en su ficha.
   await gotoHydrated(page, hostUrl("admin", "/"))
   const soon = page.getByRole("region", { name: "Precios especiales que vencen pronto" }).or(page.locator("section").filter({ hasText: "Precios especiales que vencen pronto" }))
-  await expect(soon.getByText(org.name)).toBeVisible()
-  await expect(soon.getByRole("link", { name: "Renovar…" }).first()).toBeVisible()
+  const deal = soon.getByRole("listitem").filter({ hasText: org.name })
+  await expect(deal).toContainText("Su precio especial termina el")
+  await expect(deal).toContainText("faltan 6 días")
   await shot("inicio-vencen-pronto")
+  await deal.getByRole("link", { name: "Renovar…" }).click()
+  // Su ficha, en Plan y pagos: el descuento con su vencimiento y lo que paga esta clínica.
+  await expect(page.getByRole("heading", { name: org.name, level: 1 })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Plan y pagos" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByLabel("Descuento en lo que se negocia (%)")).toHaveValue("10")
+  await expect(page.getByRole("columnheader", { name: "Paga esta clínica" })).toBeVisible()
+  await shot("clinicas-precio-negociado")
+  // El enlace de antes a la ficha de la clínica abre la de su cliente.
+  await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
+  await expect(page).toHaveURL(/\/clients\//)
+  await expect(page.getByRole("heading", { name: org.name, level: 1 })).toBeVisible()
 
   // La clínica ve el aviso arriba de su espacio, con el botón a su plan.
   await gotoHydrated(page, tenant(org.slug, "/home"))
