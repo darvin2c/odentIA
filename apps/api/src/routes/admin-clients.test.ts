@@ -661,6 +661,53 @@ describe("propuesta, invitar y dar de alta", () => {
     expect(proposal?.status).toBe("aceptada")
   })
 
+  it("«Dar de alta yo» no aplica la propuesta aceptada de una venta anterior", async () => {
+    const clientId = await newClient("Clínica Venta Vieja (ficticia)", "vieja@andes.test")
+    const created = await call("POST", `/${clientId}/proposals`, ADMIN, {
+      planId,
+      discountBps: 1000,
+      discountMonths: 12,
+      billingCycle: "mensual",
+      validUntil: day(15),
+    })
+    const proposalId = (await json(created)).data.id as string
+    const outreach = (
+      await json(
+        await call("POST", `/${clientId}/outreach`, ADMIN, {
+          channel: "whatsapp",
+          contactId: await primaryContact(clientId),
+          body: "Le dejo la propuesta.",
+          proposalId,
+        }),
+      )
+    ).data
+    await call("POST", `/outreach/${outreach.outreach.id}/resolve`, ADMIN, { outcome: "salio" })
+    await expectStatus(
+      await call("POST", `/proposals/${proposalId}/decide`, ADMIN, { accepted: true }),
+      200,
+    )
+    await expectStatus(
+      await call("POST", `/${clientId}/decide`, ADMIN, { decision: "perdido", reason: "precio" }),
+      200,
+    )
+    // La venta nueva se abre después: lo de la anterior ya no cuenta.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await expectStatus(await call("POST", `/${clientId}/reopen`, ADMIN), 200)
+    const assisted = await call("POST", `/${clientId}/assisted`, ADMIN, {
+      slug: "clinica-venta-vieja-arm",
+      email: "duena@vieja.test",
+      planCode: "arm-ruta",
+    })
+    await expectStatus(assisted, 201)
+    const result = (await json(assisted)).data
+    expect(result.proposal).toBeNull()
+    const [subscription] = await ownerDb
+      .select()
+      .from(saasSubscription)
+      .where(eq(saasSubscription.organizationId, result.organizationId))
+    expect(subscription?.discountBps ?? 0).toBe(0)
+  })
+
   it("invitar devuelve el enlace y envía el correo con la respuesta a contacto@", async () => {
     const clientId = await newClient("Clínica Invitada (ficticia)", "invitada@andes.test")
     const response = await call("POST", `/${clientId}/invite`, ADMIN, {

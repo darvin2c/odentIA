@@ -267,3 +267,40 @@ describe("borrado a los 30 días", () => {
     ])
   })
 })
+
+describe("el texto del correo", () => {
+  it("se borra a los 30 días de llegar, con o sin cliente; el de hoy se queda", async () => {
+    const now = new Date()
+    const old = new Date(now.getTime() - 31 * DAY)
+    const insert = async (messageId: string, receivedAt: Date, client: string | null) => {
+      const [row] = await ownerDb
+        .insert(saasInboundEmail)
+        .values({
+          clientId: client,
+          mailbox: "soporte",
+          product: "dental",
+          messageId,
+          fromAddress: "clinica@files.test",
+          toAddress: "soporte@odentia32.com",
+          textBody: "Rosa Díaz, DNI 12345678, 999 888 777",
+          receivedAt,
+        })
+        .returning({ id: saasInboundEmail.id })
+      return row?.id ?? ""
+    }
+    const oldWithClient = await insert("<texto-viejo@files.test>", old, clientId)
+    const oldOrphan = await insert("<texto-viejo-solo@files.test>", old, null)
+    const fresh = await insert("<texto-nuevo@files.test>", now, clientId)
+    await purgeDueClientFiles(ownerDb, fakeStorage(), now)
+    const text = async (id: string) =>
+      (
+        await ownerDb
+          .select({ text: saasInboundEmail.textBody })
+          .from(saasInboundEmail)
+          .where(eq(saasInboundEmail.id, id))
+      )[0]?.text
+    expect(await text(oldWithClient)).toBeNull()
+    expect(await text(oldOrphan)).toBeNull()
+    expect(await text(fresh)).toContain("Rosa")
+  })
+})

@@ -18,7 +18,12 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { type SQL, sql } from "drizzle-orm"
-import { CLIENT_ORIGIN_WORDS, LOST_REASON_WORDS, proposalReplacedSql } from "./admin-clients.js"
+import {
+  CLIENT_ORIGIN_WORDS,
+  LOST_REASON_WORDS,
+  proposalLiveSql,
+  proposalOfOpenSaleSql,
+} from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
@@ -839,9 +844,9 @@ export async function forecastReport(
       from ${saasProposal} p
       join ${saasClient} c on c.id = p.client_id
       join ${saasPlan} pl on pl.id = p.plan_id
-      where p.status = 'enviada' and p.valid_until >= ${today}::date
-        -- Solo la última vigente: una que reemplazó otra versión no suma dos veces.
-        and not ${proposalReplacedSql()}
+      -- Solo la última vigente (una que reemplazó otra versión no suma dos veces) y de la venta
+      -- abierta: la de una venta perdida o en «no por ahora» ya no está en juego.
+      where ${proposalLiveSql(today)} and ${proposalOfOpenSaleSql()}
         and c.archived_at is null and c.organization_id is null
       order by p.client_id, p.version desc`,
   )
@@ -877,7 +882,7 @@ export async function forecastReport(
       value: items.length,
       words: plural(items.length, "propuesta vigente", "propuestas vigentes"),
       howCalculated:
-        "Las propuestas enviadas que no se han respondido y cuya vigencia llega a hoy o después, de clínicas que todavía no tienen cuenta. Si una clínica tiene varias, cuenta solo la última versión.",
+        "Las propuestas enviadas que no se han respondido y cuya vigencia llega a hoy o después, de clínicas que todavía no tienen cuenta y con la venta abierta: la de una venta perdida o en «no por ahora» no cuenta. Si una clínica tiene varias, cuenta solo la última versión.",
     },
     total: moneyFigure(
       totals,

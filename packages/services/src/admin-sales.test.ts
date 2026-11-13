@@ -21,8 +21,10 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { clientTimeline, getClient, listClients } from "./admin-clients.js"
 import { forecastReport } from "./admin-reports.js"
 import {
+  acceptedProposalOfOpenSale,
   addActivity,
   applyInvitedProposal,
+  applyProposalTerms,
   approveSaasProposal,
   cancelClientTask,
   completeClientTask,
@@ -50,7 +52,7 @@ import {
   whatsappLink,
 } from "./admin-sales.js"
 import { limaDate } from "./peru-business-days.js"
-import { createSaasPlan } from "./saas-billing.js"
+import { createSaasPlan, updateSaasPlan } from "./saas-billing.js"
 import { completeFounderInvitation, submitWaitlistRequest } from "./saas-founders.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -885,7 +887,11 @@ describe("envíos", () => {
     expect(
       await ownerDb.select().from(saasFollowUp).where(eq(saasFollowUp.clientId, client.id)),
     ).toHaveLength(0)
-    const failed = await resolveOutreach(ownerDb, support, outreach.id, "no_salio")
+    // El de una propuesta es solo de Administración: Soporte no lo resuelve.
+    await expect(resolveOutreach(ownerDb, support, outreach.id, "no_salio")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    const failed = await resolveOutreach(ownerDb, admin, outreach.id, "no_salio")
     expect(failed.status).toBe("no_salio")
 
     const sent = await prepareOutreach(ownerDb, support, client.id, {
@@ -1155,5 +1161,200 @@ describe("embudo", () => {
     ])
     const none = await pipeline(ownerDb, admin, { product: "medical", origin: "evento" }, now)
     expect(none.columns.every((column) => column.cards.length === 0)).toBe(true)
+  })
+})
+
+describe("lo que encontró la revisión", () => {
+  it("el Embudo no le muestra a Soporte una tarea de cobro como próximo paso (ADR 0181)", async () => {
+    const now = new Date()
+    const { client } = await newClient({ product: "medical", name: "Consultorio Cobro (ficticio)" })
+    await reopenClientOpportunity(ownerDb, admin, client.id, now)
+    await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "cobro", title: "Hablar del comprobante rechazado", dueOn: day(-1, now) },
+      now,
+    )
+    await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "llamar", title: "Llamar para la presentación", dueOn: day(1, now) },
+      now,
+    )
+    const cardOf = async (who: typeof admin | typeof support) =>
+      (await pipeline(ownerDb, who, { product: "medical" }, now)).columns
+        .flatMap((column) => column.cards)
+        .find((card) => card.clientId === client.id)
+    expect((await cardOf(admin))?.nextStep?.title).toBe("Hablar del comprobante rechazado")
+    expect((await cardOf(support))?.nextStep).toMatchObject({
+      kind: "llamar",
+      title: "Llamar para la presentación",
+    })
+  })
+
+  it("una tarea de hoy con hora que ya pasó está vencida también en las tareas y en «Por venir»", async () => {
+    const { client } = await newClient()
+    const now = new Date()
+    const dueAt = new Date(now.getTime() - 60_000)
+    const [task] = await ownerDb
+      .insert(saasTask)
+      .values({
+        clientId: client.id,
+        kind: "presentacion",
+        title: "Presentación",
+        dueOn: limaDate(dueAt),
+        dueAt,
+      })
+      .returning({ id: saasTask.id })
+    const listed = await listClientTasks(ownerDb, admin, { clientId: client.id }, now)
+    expect(listed.find((t) => t.id === task?.id)?.overdue).toBe(true)
+    expect((await getClient(ownerDb, admin, client.id, now)).openTasks[0]?.overdue).toBe(true)
+  })
+
+  it("«Quién vende y la fecha» no abre una venta en un cliente con cuenta", async () => {
+    const { client } = await newClient()
+    const orgId = `sales-cuenta-${randomUUID().slice(0, 8)}`
+    await insertOrg(ownerDb, orgId, orgId)
+    await ownerDb
+      .update(saasClient)
+      .set({ organizationId: orgId })
+      .where(eq(saasClient.id, client.id))
+    await expect(
+      setOpportunity(ownerDb, admin, client.id, { expectedOn: day(10) }),
+    ).rejects.toMatchObject({ code: "CLIENT_HAS_ACCOUNT", status: 409 })
+    expect(
+      await ownerDb.select().from(saasOpportunity).where(eq(saasOpportunity.clientId, client.id)),
+    ).toEqual([])
+  })
+
+  it("si la cuota del plan cambió después de la propuesta, sus condiciones no se dan por aplicadas", async () => {
+    const plan = await createSaasPlan(ownerDb, admin.userId, {
+      code: `sales-sube-${randomUUID().slice(0, 6)}`,
+      name: "Plan que sube (ficticio)",
+      currency: "USD",
+      priceCents: 15_000,
+      creditCents: 0,
+      conversationMicros: 500_000,
+      consultationMicros: 400_000,
+      recoveryMicros: 4_000_000,
+      maxDiscountBps: 3000,
+    })
+    const { client, contact } = await newClient()
+    const now = new Date()
+    const proposal = await createSaasProposal(
+      ownerDb,
+      admin,
+      client.id,
+      { planId: plan.id, discountBps: 1000, billingCycle: "mensual", validUntil: day(10, now) },
+      now,
+    )
+    const outreach = await prepareOutreach(
+      ownerDb,
+      admin,
+      client.id,
+      { channel: "whatsapp", contactId: contact.id, body: "La propuesta", proposalId: proposal.id },
+      now,
+    )
+    await resolveOutreach(ownerDb, admin, outreach.id, "salio", now)
+    await decideSaasProposal(ownerDb, admin, proposal.id, { accepted: true }, now)
+    await updateSaasPlan(ownerDb, admin.userId, plan.id, { priceCents: 20_000 })
+    const orgId = `sales-sube-${randomUUID().slice(0, 8)}`
+    await insertOrg(ownerDb, orgId, orgId)
+    await ownerDb
+      .update(saasSubscription)
+      .set({ planId: plan.id })
+      .where(eq(saasSubscription.organizationId, orgId))
+    await expect(applyProposalTerms(ownerDb, admin, proposal.id, orgId, now)).rejects.toMatchObject(
+      { code: "PROPOSAL_PRICE_CHANGED", status: 409 },
+    )
+    const [sub] = await ownerDb
+      .select()
+      .from(saasSubscription)
+      .where(eq(saasSubscription.organizationId, orgId))
+    expect(sub?.discountBps ?? 0).toBe(0)
+  })
+
+  it("un envío con propuesta es solo de Administración: Soporte no lo ve ni lo resuelve", async () => {
+    const { client, contact } = await newClient()
+    const now = new Date()
+    const proposal = await createSaasProposal(
+      ownerDb,
+      admin,
+      client.id,
+      { planId, discountBps: 0, billingCycle: "mensual", validUntil: day(10, now) },
+      now,
+    )
+    const outreach = await prepareOutreach(
+      ownerDb,
+      admin,
+      client.id,
+      {
+        channel: "whatsapp",
+        contactId: contact.id,
+        body: "La propuesta por USD 26,10 al mes",
+        proposalId: proposal.id,
+      },
+      now,
+    )
+    const later = new Date(now.getTime() + 1000)
+    const entries = async (who: typeof admin | typeof support) =>
+      (await clientTimeline(ownerDb, who, client.id, {}, later)).items.map((i) => i.id)
+    expect(await entries(admin)).toContain(`envio:${outreach.id}`)
+    expect(await entries(support)).not.toContain(`envio:${outreach.id}`)
+    await expect(
+      resolveOutreach(ownerDb, support, outreach.id, "salio", now),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await resolveOutreach(ownerDb, admin, outreach.id, "salio", now)
+    const bodies = async (who: typeof admin | typeof support) =>
+      (await getClient(ownerDb, who, client.id, later)).recentActivities.map((a) => a.body)
+    expect((await bodies(admin)).some((body) => body.includes("USD 26,10"))).toBe(true)
+    expect((await bodies(support)).some((body) => body.includes("USD 26,10"))).toBe(false)
+  })
+
+  it("lo de una venta ya cerrada no cuenta: ni en la previsión ni para el alta", async () => {
+    const now = new Date()
+    const sent = async (client: { id: string }, contactId: string) => {
+      const proposal = await createSaasProposal(
+        ownerDb,
+        admin,
+        client.id,
+        { planId, discountBps: 3000, billingCycle: "mensual", validUntil: day(10, now) },
+        now,
+      )
+      const outreach = await prepareOutreach(
+        ownerDb,
+        admin,
+        client.id,
+        { channel: "whatsapp", contactId, body: "La propuesta", proposalId: proposal.id },
+        now,
+      )
+      await resolveOutreach(ownerDb, admin, outreach.id, "salio", now)
+      return proposal
+    }
+    // Perdida con la propuesta vigente: la previsión ya no la suma.
+    const lost = await newClient()
+    await sent(lost.client, lost.contact.id)
+    const inForecast = async () =>
+      (await forecastReport(ownerDb, admin, now)).rows.some((r) => r.clientId === lost.client.id)
+    expect(await inForecast()).toBe(true)
+    const currentSale = async () =>
+      (await listSaasProposals(ownerDb, admin, lost.client.id, now))[0]?.currentSale
+    expect(await currentSale()).toBe(true)
+    await decide(ownerDb, admin, lost.client.id, { decision: "perdido", reason: "precio" }, now)
+    expect(await inForecast()).toBe(false)
+    expect(await currentSale()).toBe(false)
+
+    // La aceptó en una venta que después se perdió y se reabrió: el alta no la toma.
+    const back = await newClient()
+    const accepted = await sent(back.client, back.contact.id)
+    await decideSaasProposal(ownerDb, admin, accepted.id, { accepted: true }, now)
+    expect(await acceptedProposalOfOpenSale(ownerDb, back.client.id)).toMatchObject({
+      id: accepted.id,
+    })
+    await decide(ownerDb, admin, back.client.id, { decision: "perdido", reason: "precio" }, now)
+    await reopenClientOpportunity(ownerDb, admin, back.client.id, new Date(now.getTime() + 1000))
+    expect(await acceptedProposalOfOpenSale(ownerDb, back.client.id)).toBeNull()
   })
 })

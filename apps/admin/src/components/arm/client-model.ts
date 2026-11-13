@@ -8,8 +8,12 @@
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { QueryClient } from "@tanstack/react-query"
 import { z } from "zod"
-import type { ClientListView, ClientOriginName, ClientStageName } from "../../lib/list-search"
-import { supportDay, supportTime } from "../../lib/support-words"
+import type { ClientListView, ClientStageName } from "../../lib/list-search"
+import { supportTime } from "../../lib/support-words"
+import { addDays, dayWords, limaDay, limaInstant, ORIGIN_WORDS } from "./sale-words"
+
+// Las palabras del origen y las fechas de Lima son las de la venta (`sale-words.ts`): una sola copia.
+export { dayWords, limaInstant, ORIGIN_WORDS }
 
 /* ---------- Palabras ---------- */
 
@@ -36,16 +40,6 @@ export const VIEW_WORDS: Record<ClientListView, string> = {
   no_por_ahora: "No por ahora",
   perdidos: "Perdidos",
   todos: "Todos",
-}
-
-export const ORIGIN_WORDS: Record<ClientOriginName, string> = {
-  web: "Web",
-  referido: "Referido",
-  evento: "Evento",
-  whatsapp: "WhatsApp directo",
-  redes: "Redes o anuncio",
-  busqueda: "Salimos a buscarla",
-  otro: "Otro",
 }
 
 export const PROFESSIONALS_WORDS: Record<string, string> = {
@@ -128,21 +122,8 @@ export const wordOf = (
 
 /* ---------- Fechas (en Lima) ---------- */
 
-const dayKeyFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Lima",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-})
-/** El día de Lima de un instante, `2026-11-12`. */
-export const limaDayOf = (date: Date): string => dayKeyFormat.format(date)
-/** Un día de Lima («2026-11-12») como «jue 12 nov», al mediodía de Lima para que ninguna zona lo corra. */
-export const dayWords = (day: string): string => supportDay(`${day}T17:00:00Z`)
-const addDays = (day: string, days: number): string => {
-  const date = new Date(`${day}T17:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return limaDayOf(date)
-}
+/** El día de Lima de un instante, `2026-11-12` (`limaDay`). */
+export const limaDayOf = (date: Date): string => limaDay(date)
 
 /** «hoy», «mañana», «ayer» o «jue 12 nov». */
 export function relativeDayWords(day: string, now: Date = new Date()): string {
@@ -160,10 +141,6 @@ export function whenWords(iso: string, now: Date = new Date()): string {
 
 /** La hora de Lima de un instante, `HH:MM`. */
 export const limaTimeOf = (iso: string): string => supportTime(iso)
-
-/** Un día y una hora de Lima (UTC−5 todo el año, sin horario de verano) como instante ISO 8601. */
-export const limaInstant = (day: string, time: string): string =>
-  new Date(`${day}T${time}:00-05:00`).toISOString()
 
 /* ---------- Esquemas de las respuestas ---------- */
 

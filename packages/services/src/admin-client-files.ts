@@ -28,7 +28,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError } from "./errors.js"
@@ -496,5 +496,26 @@ export async function purgeDueClientFiles(
     }
   }
   if (done.length > 0) await db.transaction((tx) => confirmClientFileDeletions(tx, done, now))
+  await purgeInboundEmailText(db, now)
   return { deleted: done.length, failed }
+}
+
+/**
+ * El texto de un correo que llegó (con o sin cliente) se borra a los 30 días,
+ * con sus adjuntos: puede traer lo que la clínica pegó, como una lista de
+ * pacientes. Quedan el asunto, el remitente y los adjuntos que hubo.
+ */
+export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> {
+  const cutoff = addDays(limaDate(now), -CLIENT_FILE_RETENTION_DAYS)
+  const cleared = await db
+    .update(saasInboundEmail)
+    .set({ textBody: null })
+    .where(
+      and(
+        isNotNull(saasInboundEmail.textBody),
+        sql`(${saasInboundEmail.receivedAt} at time zone 'America/Lima')::date <= ${cutoff}::date`,
+      ),
+    )
+    .returning({ id: saasInboundEmail.id })
+  return cleared.length
 }

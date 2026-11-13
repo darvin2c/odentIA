@@ -22,6 +22,7 @@ import {
   KairosUnconfirmed,
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
+import { limaDay } from "../../components/arm/sale-words"
 import { type ProductChoice, ProductFilter } from "../../components/product"
 import {
   KAIROS_SUBTITLE,
@@ -207,13 +208,6 @@ function KairosPage() {
   )
 }
 
-const dayKeyFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Lima",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-})
-
 /** «Lo que hizo»: frases por día, lo último arriba, con «Cargar más». */
 function KairosDone() {
   const done = useInfiniteQuery({
@@ -243,10 +237,10 @@ function KairosDone() {
         description="Cuando ponga una tarea, complete un dato vacío o avise de un cliente que se enfría, queda aquí con Deshacer cuando se puede."
       />
     )
-  const todayKey = dayKeyFormat.format(new Date())
+  const todayKey = limaDay()
   const days: { key: string; label: string; entries: DoneEntry[] }[] = []
   for (const entry of entries) {
-    const key = dayKeyFormat.format(new Date(entry.at))
+    const key = limaDay(new Date(entry.at))
     const last = days.at(-1)
     if (last?.key === key) last.entries.push(entry)
     else

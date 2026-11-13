@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { saasClient } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
@@ -1125,7 +1126,13 @@ export async function completeFounderInvitation(tx: Db, requestId: string, orgId
     .update(saasWaitlistRequest)
     .set({ status: "entro", organizationId: orgId, enteredAt: now, claimedAt: null, tokenHash: null, updatedAt: now })
     .where(eq(saasWaitlistRequest.id, requestId))
-  const clientId = await linkClientToOrganization(tx, null, { clientId: row.clientId, organizationId: orgId, origin: "web", now })
+  // Si su cliente ya tiene otra cuenta (una segunda clínica de la misma persona), la nueva es
+  // otro cliente: ligarla a esa ficha se rechazaría y desharía la entrada entera.
+  const [requested] = row.clientId
+    ? await tx.select({ organizationId: saasClient.organizationId }).from(saasClient).where(eq(saasClient.id, row.clientId)).limit(1)
+    : []
+  const sameClient = requested?.organizationId && requested.organizationId !== orgId ? null : row.clientId
+  const clientId = await linkClientToOrganization(tx, null, { clientId: sameClient, organizationId: orgId, origin: "web", now })
   if (clientId && clientId !== row.clientId) {
     await tx.update(saasWaitlistRequest).set({ clientId }).where(eq(saasWaitlistRequest.id, requestId))
   }

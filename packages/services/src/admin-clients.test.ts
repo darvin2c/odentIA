@@ -12,16 +12,19 @@ import {
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
-import { saasFollowUp, saasPayment, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import {
+  saasFollowUp,
+  saasPayment,
+  saasSubscription,
+  saasWaitlistRequest,
+} from "@odentia/db/schema/saas-billing"
 import { and, eq, isNull } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import {
   addClientContact,
   archiveClient,
   CLIENT_STAGES,
-  type ClientStageFacts,
   clientSignals,
-  clientStage,
   clientTimeline,
   createClient,
   getClient,
@@ -35,6 +38,7 @@ import {
 } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { createAssistedOrganization } from "./admin-organizations.js"
+import { listSaasProposals } from "./admin-sales.js"
 import { listProgressReports } from "./clinic-progress-report.js"
 import { createSaasPlan } from "./saas-billing.js"
 import {
@@ -132,32 +136,7 @@ beforeAll(async () => {
 })
 
 describe("la etapa se calcula", () => {
-  const base: ClientStageFacts = {
-    hasAccount: false,
-    openOpportunity: true,
-    proposalOut: false,
-    invited: false,
-    presentationDone: false,
-    presentationScheduled: false,
-    lastDecision: null,
-  }
-
-  it("en TS: con cuenta entró; con la venta abierta, lo más avanzado; sin ella, la última decisión", () => {
-    expect(clientStage(base)).toBe("contacto")
-    expect(clientStage({ ...base, presentationScheduled: true })).toBe("presentacion_agendada")
-    expect(clientStage({ ...base, presentationScheduled: true, presentationDone: true })).toBe(
-      "presentacion_hecha",
-    )
-    expect(clientStage({ ...base, presentationDone: true, invited: true })).toBe("propuesta")
-    expect(clientStage({ ...base, proposalOut: true })).toBe("propuesta")
-    expect(clientStage({ ...base, openOpportunity: false, lastDecision: "no_por_ahora" })).toBe(
-      "no_por_ahora",
-    )
-    expect(clientStage({ ...base, openOpportunity: false, lastDecision: null })).toBe("contacto")
-    expect(clientStage({ ...base, hasAccount: true, proposalOut: true })).toBe("entro")
-  })
-
-  it("en SQL da lo mismo que en TS, cliente por cliente", async () => {
+  it("la lista y la ficha dicen la misma, cliente por cliente", async () => {
     const contacto = await newClient()
     const agendada = await newClient()
     await ownerDb
@@ -173,9 +152,8 @@ describe("la etapa se calcula", () => {
     const noConecto = await newClient()
     await ownerDb.insert(saasFollowUp).values({
       clientId: noConecto,
-      kind: "presentacion",
-      body: "No entró",
-      outcome: "no_se_conecto",
+      kind: "nota",
+      body: "La presentación no se hizo: no se conectó",
     })
     const propuesta = await newClient()
     await ownerDb.insert(saasProposal).values({
@@ -1227,5 +1205,80 @@ describe("los informes de la carga", () => {
       [2, "enviado"],
       [1, "desconocido"],
     ])
+  })
+})
+
+describe("lo que encontró la revisión", () => {
+  it("al fusionar, las propuestas quedan numeradas por fecha: la vigente de la que se queda no pasa a reemplazada", async () => {
+    const keep = await newClient()
+    const drop = await newClient()
+    const proposal = async (clientId: string, daysAgo: number) => {
+      const at = new Date(Date.now() - daysAgo * DAY)
+      const [row] = await ownerDb
+        .insert(saasProposal)
+        .values({
+          clientId,
+          version: 1,
+          planId,
+          listPriceCents: 2900,
+          currency: "USD",
+          validUntil: "2099-12-31",
+          status: "enviada",
+          sentAt: at,
+          createdAt: at,
+          updatedAt: at,
+        })
+        .returning({ id: saasProposal.id })
+      return row?.id ?? ""
+    }
+    const older = await proposal(drop, 10)
+    const live = await proposal(keep, 2)
+    await mergeClients(ownerDb, admin, keep, drop)
+    const listed = await listSaasProposals(ownerDb, admin, keep)
+    expect(listed.map((p) => [p.id, p.version, p.displayStatus])).toEqual([
+      [live, 2, "enviada"],
+      [older, 1, "reemplazada"],
+    ])
+  })
+
+  it("una solicitud de quien ya es de una clínica con cuenta abre otro cliente; entrar con una de antes, pegada a esa ficha, liga la cuenta nueva", async () => {
+    const email = `segunda-${uniq()}@clinica.test`
+    const requestOf = async (id: string) =>
+      (await ownerDb.select().from(saasWaitlistRequest).where(eq(saasWaitlistRequest.id, id)))[0]
+    const { id: first } = await submitWaitlistRequest(ownerDb, request(email, "Clínica Primera"))
+    await inviteFromWaitlist(ownerDb, admin, first, { planId })
+    const orgA = `arm-a-${uniq()}`
+    await insertOrg(ownerDb, orgA, orgA)
+    await completeFounderInvitation(ownerDb, first, orgA)
+    const clientA = (await requestOf(first))?.clientId ?? ""
+
+    const { id: second } = await submitWaitlistRequest(ownerDb, request(email, "Clínica Segunda"))
+    const clientB = (await requestOf(second))?.clientId ?? ""
+    expect(clientB).not.toBe(clientA)
+    const [b] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, clientB))
+    expect(b).toMatchObject({ name: "Clínica Segunda", organizationId: null })
+
+    // Una solicitud de antes de este arreglo, pegada a la ficha que ya tiene cuenta.
+    await ownerDb
+      .update(saasWaitlistRequest)
+      .set({ clientId: clientA })
+      .where(eq(saasWaitlistRequest.id, second))
+    await inviteFromWaitlist(ownerDb, admin, second, { planId })
+    const orgB = `arm-b-${uniq()}`
+    await insertOrg(ownerDb, orgB, orgB)
+    await completeFounderInvitation(ownerDb, second, orgB)
+    const entered = await requestOf(second)
+    expect(entered?.status).toBe("entro")
+    expect(entered?.clientId).not.toBe(clientA)
+    const [linked] = await ownerDb
+      .select()
+      .from(saasClient)
+      .where(eq(saasClient.id, entered?.clientId ?? ""))
+    expect(linked?.organizationId).toBe(orgB)
+    const [subB] = await ownerDb
+      .select()
+      .from(saasSubscription)
+      .where(eq(saasSubscription.organizationId, orgB))
+    expect(subB?.planId).toBe(planId)
   })
 })

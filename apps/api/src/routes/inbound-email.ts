@@ -75,6 +75,11 @@ const emailBody = z.object({
     .array(attachmentBody)
     .max(INBOUND_ATTACHMENTS_MAX, "Demasiados adjuntos")
     .default([]),
+  /**
+   * El worker verificó el remitente con lo que agregó Cloudflare (DMARC, o SPF
+   * o DKIM alineados con el From). Sin el campo, no se da por verificado.
+   */
+  senderVerified: z.boolean().default(false),
 })
 
 type AttachmentKind = { contentType: string; ext: string }
@@ -98,10 +103,60 @@ function looksLikeText(bytes: Uint8Array): boolean {
   return true
 }
 
+/** Lo que nunca va dentro de un libro o una carta que se guarda: macros y ejecutables. */
+const OFFICE_FORBIDDEN =
+  /(^|\/)vbaproject\.bin$|\.(exe|dll|com|scr|bat|cmd|ps1|vbs|js|jar|class|msi|sh)$/i
+
+/**
+ * Los nombres del directorio central de un ZIP, o null si no se puede leer
+ * entero (truncado, ZIP64 o con más de 10 000 entradas): lo que no se puede
+ * comprobar se descarta.
+ */
+function zipEntryNames(bytes: Uint8Array): string[] | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  // El final del directorio central: 22 bytes más un comentario de hasta 64 KiB.
+  let end = -1
+  for (let i = bytes.byteLength - 22; i >= Math.max(0, bytes.byteLength - 22 - 65_535); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      end = i
+      break
+    }
+  }
+  if (end < 0) return null
+  const count = view.getUint16(end + 10, true)
+  const size = view.getUint32(end + 12, true)
+  const start = view.getUint32(end + 16, true)
+  if (count === 0xffff || start === 0xffffffff || count > 10_000 || start + size > end) return null
+  const names: string[] = []
+  const decoder = new TextDecoder()
+  let at = start
+  for (let n = 0; n < count; n++) {
+    if (at + 46 > end || view.getUint32(at, true) !== 0x02014b50) return null
+    const nameLength = view.getUint16(at + 28, true)
+    const extraLength = view.getUint16(at + 30, true)
+    const commentLength = view.getUint16(at + 32, true)
+    if (at + 46 + nameLength > end) return null
+    names.push(decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength)))
+    at += 46 + nameLength + extraLength + commentLength
+  }
+  return names
+}
+
+/** «xlsx» o «docx» si el ZIP trae sus partes de Office y nada prohibido; null si no. */
+function officeKindOf(bytes: Uint8Array): "xlsx" | "docx" | null {
+  const names = zipEntryNames(bytes)
+  if (!names || !names.includes("[Content_Types].xml")) return null
+  if (names.some((name) => OFFICE_FORBIDDEN.test(name))) return null
+  const workbook = names.includes("xl/workbook.xml")
+  const document = names.includes("word/document.xml")
+  if (workbook === document) return null
+  return workbook ? "xlsx" : "docx"
+}
+
 /**
  * El tipo real de un adjunto permitido, por sus bytes (y por su extensión en
- * los de Office, que son un ZIP, y en el CSV, que es texto); null si no es de
- * los permitidos. Nunca se confía solo en el tipo que declara el correo.
+ * los de Office, que son un ZIP con sus partes, y en el CSV, que es texto);
+ * null si no es de los permitidos. Nunca se confía solo en el tipo que declara el correo.
  */
 export function allowedInboundAttachment(
   bytes: Uint8Array,
@@ -127,8 +182,13 @@ export function allowedInboundAttachment(
   const ext = extOf(filename)
   const type = declared.trim().toLowerCase()
   if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) {
-    if (ext === "xlsx" || type === XLSX) return { contentType: XLSX, ext: "xlsx" }
-    if (ext === "docx" || type === DOCX) return { contentType: DOCX, ext: "docx" }
+    // Un .xlsx o un .docx es un ZIP con sus partes de Office; uno cualquiera, con macros o con
+    // un ejecutable adentro no pasa aunque se llame así.
+    const kind = officeKindOf(bytes)
+    if (kind === "xlsx" && (ext === "xlsx" || type === XLSX))
+      return { contentType: XLSX, ext: "xlsx" }
+    if (kind === "docx" && (ext === "docx" || type === DOCX))
+      return { contentType: DOCX, ext: "docx" }
     return null
   }
   if ((ext === "csv" || type === "text/csv") && looksLikeText(bytes))
@@ -269,6 +329,7 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
               text: email.text ?? null,
               receivedAt: new Date(email.receivedAt),
               attachments: uploaded,
+              senderVerified: email.senderVerified,
             },
             now,
           ),

@@ -17,7 +17,7 @@ import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
 import { CLIENT_STAGE_WORDS, type ClientStage, clientStageSql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { type KairosDrafter, saveKairosDraft } from "./admin-kairos.js"
+import { type KairosDrafter, kairosReadySql, saveKairosDraft } from "./admin-kairos.js"
 import { forecastReport, funnelReport, revenueReport } from "./admin-reports.js"
 import { dayWords } from "./document-kit.js"
 import { ServiceError } from "./errors.js"
@@ -183,7 +183,7 @@ export async function pendingKairosDraftJobs(
       and(
         eq(kairosItem.status, "espera"),
         inArray(kairosItem.kind, ["mensaje", "guion"]),
-        sql`coalesce(${kairosItem.payload} -> 'draft', 'null'::jsonb) = 'null'::jsonb`,
+        sql`not ${kairosReadySql}`,
         sql`${kairosItem.expiresAt} > ${now.toISOString()}::timestamptz`,
         sql`${saasClient.archivedAt} is null`,
       ),

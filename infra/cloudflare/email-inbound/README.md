@@ -30,7 +30,8 @@ Cuerpo JSON:
   "subject": "…",
   "text": "el texto, o el HTML pasado a texto",
   "receivedAt": "2026-11-12T15:00:00.000Z",
-  "attachments": [{ "filename": "lista.xlsx", "contentType": "…", "base64": "…" }]
+  "attachments": [{ "filename": "lista.xlsx", "contentType": "…", "base64": "…" }],
+  "senderVerified": true
 }
 ```
 
@@ -38,7 +39,14 @@ Cuerpo JSON:
   `product`, del dominio: `odentia32.com` → `dental`, `latidia72.com` → `medical`,
   `vistia20.com` → `optical`. Otro destinatario solo se reenvía.
 - Sin `Message-ID`, va uno fijo por el contenido del correo: la API entra cada correo una sola vez.
-- Adjuntos: solo PDF, imagen, xlsx, csv y docx (la API lo vuelve a comprobar por sus bytes),
+- `senderVerified` (`src/auth.ts`): el From se puede falsificar, así que la API liga el correo a
+  su cliente solo si es `true`. Lo es si en el resultado de más arriba de Cloudflare
+  (`ARC-Authentication-Results` o `Authentication-Results` de `mx.cloudflare.net`, o del
+  servidor que diga `AUTHSERV_ID`) DMARC pasa con el dominio del From, o SPF o DKIM pasan con un
+  dominio alineado. Si no, el correo llega igual y queda «sin cliente» en Kairós, marcado como de
+  un remitente no verificado, para que una persona diga de quién es. Pruebas: `npm test`.
+- Adjuntos: solo PDF, imagen, xlsx, csv y docx (la API lo vuelve a comprobar por sus bytes; un
+  xlsx o un docx tiene que traer sus partes de Office, sin macros ni ejecutables),
   hasta 10 MB y 20 en total. Lo que pasa se omite y se avisa al final del texto. Las imágenes
   de la firma no se mandan.
 
@@ -86,7 +94,10 @@ Con una persona que tenga acceso a la cuenta de Cloudflare de las zonas.
      `hola@` y `privacidad@` con «Send to an email» al buzón de siempre.
 5. **Probar**: escribir a `soporte@` de cada dominio desde una cuenta propia con un PDF chico.
    Tiene que llegar al buzón de siempre y aparecer en la administración (en la ficha del
-   cliente si el correo es de uno, o en Kairós como «correo sin cliente»). En Workers ›
+   cliente si el correo es de uno, o en Kairós como «correo sin cliente»). Antes, revisar en el
+   correo reenviado que Cloudflare deja arriba `ARC-Authentication-Results: i=1;
+   mx.cloudflare.net; …` (si su servidor se llama de otro modo, ponerlo con
+   `npx wrangler secret put AUTHSERV_ID`): sin eso, ningún correo se liga solo a su cliente. En Workers ›
    `sallca-correo-entrante` › Logs se ve si la API respondió otra cosa.
 
 Para volver atrás, las reglas de Email Routing vuelven a «Send to an email»: el Worker deja de

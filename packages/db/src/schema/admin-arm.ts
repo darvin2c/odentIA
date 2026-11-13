@@ -591,8 +591,11 @@ export const saasClientFile = adminSchema.table(
 /**
  * Un correo que llegó a soporte@ o contacto@ de un producto, firmado por el
  * worker de Cloudflare. Una vez por `message_id`. El cliente se busca por
- * correo exacto (contacto, solicitud, miembro); si hay más de uno, queda sin
- * cliente hasta que una persona lo asigna (`matched_by_user`).
+ * correo exacto (contacto, solicitud, miembro) solo si el remitente está
+ * verificado (`sender_verified`: DMARC, o SPF o DKIM alineados con el From,
+ * según Cloudflare); si no, o si hay más de uno, queda sin cliente hasta que
+ * una persona lo asigna (`matched_by_user`). El texto (`text_body`) se borra a
+ * los 30 días de llegar, con los adjuntos.
  */
 export const saasInboundEmail = adminSchema.table(
   "saas_inbound_email",
@@ -607,6 +610,7 @@ export const saasInboundEmail = adminSchema.table(
     toAddress: text("to_address").notNull(),
     subject: text("subject"),
     textBody: text("text_body"),
+    senderVerified: boolean("sender_verified").notNull().default(false),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     attachments: jsonb("attachments")
       .$type<SaasInboundAttachment[]>()

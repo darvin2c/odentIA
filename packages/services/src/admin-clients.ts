@@ -80,8 +80,8 @@ import { type WaitlistStage, waitlistStage } from "./saas-founders.js"
  * su cuenta) y para siempre. La solicitud y la cuenta son cosas que le pasan
  * al cliente, no el cliente.
  *
- * - La etapa se calcula al leer, nunca se guarda: `clientStage` (TS) y
- *   `clientStageSql` (SQL) son la misma regla; si cambia una, cambia la otra.
+ * - La etapa se calcula al leer, nunca se guarda: `clientStageSql` es la
+ *   única regla, en SQL, para la lista, la ficha y el Embudo.
  * - Un parecido nunca se fusiona solo: `createClient` avisa con 409
  *   `CLIENT_MAYBE_DUPLICATE` y una persona de Administración fusiona
  *   (`mergeClients`).
@@ -146,13 +146,6 @@ export const LOST_REASON_WORDS: Record<SaasLostReason, string> = {
   otro: "Otro",
 }
 
-/**
- * Lo que se anota en `outcome` cuando una presentación agendada no se hizo
- * (`recordPresentation` de admin-sales): esa actividad no cuenta como
- * «Presentación hecha».
- */
-export const PRESENTATION_NOT_DONE_OUTCOMES = ["no_se_conecto", "reprogramar"] as const
-
 /* ---------- Guardas ---------- */
 
 function forbidden(message: string): ServiceError {
@@ -184,82 +177,113 @@ export const seesTaskKind = (actor: AdminActor, kind: string): boolean =>
 export const visibleTaskSql = (actor: AdminActor): SQL | undefined =>
   actor.role === "admin" ? undefined : ne(saasTask.kind, "cobro")
 
-/* ---------- La etapa (TS y SQL gemelas) ---------- */
+/* ---------- Tareas ---------- */
 
 /**
- * Los hechos de los que sale la etapa. Lo de la venta (propuesta,
- * presentación) cuenta solo desde que se abrió la venta abierta: una
- * propuesta de una venta perdida no adelanta la nueva.
+ * ¿Vencida? Abierta y de un día anterior, o de hoy con una hora que ya pasó.
+ * La única regla: lista, ficha, Hoy, las tareas y «Por venir» de la Venta.
  */
-export interface ClientStageFacts {
-  /** Tiene cuenta (`organization_id`). */
-  hasAccount: boolean
-  /** Hay una venta sin decidir. */
-  openOpportunity: boolean
-  /** Una propuesta de esta venta enviada y vigente, o ya aceptada. */
-  proposalOut: boolean
-  /** Su solicitud está invitada (vigente o vencida: se ve dentro de «Propuesta»). */
-  invited: boolean
-  /** Una actividad de presentación de esta venta que sí se hizo. */
-  presentationDone: boolean
-  /** Una tarea de presentación abierta. */
-  presentationScheduled: boolean
-  /** La decisión de la última venta decidida. */
-  lastDecision: SaasOpportunityDecision | null
+export function taskOverdue(
+  task: { status?: string; dueOn: string; dueAt: Date | null },
+  now: Date,
+): boolean {
+  if (task.status !== undefined && task.status !== "abierta") return false
+  return task.dueOn < limaDate(now) || (task.dueAt !== null && task.dueAt.getTime() < now.getTime())
 }
 
-/**
- * La etapa de un cliente. Con cuenta, «Entró». Con la venta abierta, lo más
- * avanzado que pasó: propuesta (o invitación), presentación hecha,
- * presentación agendada o contacto. Sin venta abierta, la decisión de la
- * última; sin ninguna, «Contacto».
- */
-export function clientStage(facts: ClientStageFacts): ClientStage {
-  if (facts.hasAccount) return "entro"
-  if (facts.openOpportunity) {
-    if (facts.proposalOut || facts.invited) return "propuesta"
-    if (facts.presentationDone) return "presentacion_hecha"
-    if (facts.presentationScheduled) return "presentacion_agendada"
-    return "contacto"
-  }
-  return facts.lastDecision ?? "contacto"
-}
+/* ---------- Propuestas: reemplazada, vigente y de la venta abierta ---------- */
 
 /**
- * «Reemplazada»: una propuesta enviada a la que le salió después una versión
- * más nueva del mismo cliente. Se calcula al leer, como «vencida». `p` es el
- * alias de `saas_proposal` en la consulta. Gemelo de `proposalDisplayStatus`
- * (`admin-sales.ts`): si cambia uno, cambia el otro.
+ * La versión más nueva del mismo cliente que salió después de esta: la que la
+ * reemplaza, o null. `p` es el alias de `saas_proposal` en la consulta. La
+ * única regla de «reemplazada»: la usan la ficha (`replacedBy`), aceptar y
+ * reenviar y, con `proposalReplacedSql`, la etapa, el Embudo, la previsión y
+ * Kairós. Gemela de `proposalDisplayStatus` (`admin-sales.ts`): si cambia una,
+ * cambia la otra.
  */
-export function proposalReplacedSql(alias = "p"): SQL<boolean> {
+export function proposalReplacedBySql(alias = "p"): SQL<number | null> {
   const p = sql.raw(alias)
-  return sql<boolean>`exists (select 1 from admin.saas_proposal newer
+  return sql<number | null>`(select max(newer.version) from admin.saas_proposal newer
     where newer.client_id = ${p}.client_id and newer.version > ${p}.version and newer.sent_at is not null)`
 }
 
-/** Cada hecho de `ClientStageFacts` en SQL, sobre la fila de `saas_client` de la consulta. */
+/** «Reemplazada»: le salió después una versión más nueva. Se calcula al leer, como «vencida». */
+export function proposalReplacedSql(alias = "p"): SQL<boolean> {
+  return sql<boolean>`(${proposalReplacedBySql(alias)} is not null)`
+}
+
+/** Vigente: enviada, su último día llega a hoy y no la reemplazó otra. */
+export function proposalLiveSql(today: string, alias = "p"): SQL<boolean> {
+  const p = sql.raw(alias)
+  return sql<boolean>`(${p}.status = 'enviada' and ${p}.valid_until >= ${today}::date
+    and not ${proposalReplacedSql(alias)})`
+}
+
+/**
+ * De la venta abierta: el cliente tiene una venta sin decidir y la propuesta
+ * se armó desde que se abrió. La de una venta perdida, en «no por ahora» o ya
+ * entrada no cuenta: ni en la etapa, ni en el Embudo, ni en la previsión, ni
+ * para Kairós, ni en el alta.
+ */
+export function proposalOfOpenSaleSql(alias = "p"): SQL<boolean> {
+  const p = sql.raw(alias)
+  return sql<boolean>`exists (select 1 from admin.saas_opportunity sale
+    where sale.client_id = ${p}.client_id and sale.decision is null and ${p}.created_at >= sale.created_at)`
+}
+
+/**
+ * ¿Es solo de Administración un envío? Lleva una propuesta, o sale de algo de
+ * Kairós que solo ve Administración. `o` es el alias de `saas_outreach`.
+ */
+export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
+  const o = sql.raw(alias)
+  return sql<boolean>`(${o}.proposal_id is not null or exists (select 1 from admin.kairos_item ki
+    where ki.id = ${o}.kairos_item_id and ki.admin_only))`
+}
+
+/* ---------- La etapa ---------- */
+
+/**
+ * Los hechos de los que sale la etapa, en SQL sobre la fila de `saas_client`
+ * de la consulta. Lo de la venta (propuesta, presentación) cuenta solo desde
+ * que se abrió la venta abierta: una propuesta de una venta perdida no
+ * adelanta la nueva.
+ */
 function stageFactsSql(now: Date) {
   const today = limaDate(now)
   const openSince = sql`(select o.created_at from ${saasOpportunity} o where o.client_id = ${saasClient.id} and o.decision is null limit 1)`
-  const notDone = sql.raw(PRESENTATION_NOT_DONE_OUTCOMES.map((code) => `'${code}'`).join(","))
   return {
+    /** Tiene cuenta (`organization_id`). */
     hasAccount: sql<boolean>`(${saasClient.organizationId} is not null)`,
+    /** Hay una venta sin decidir. */
     openOpportunity: sql<boolean>`exists (select 1 from ${saasOpportunity} o where o.client_id = ${saasClient.id} and o.decision is null)`,
+    /** Una propuesta de esta venta enviada y vigente, o ya aceptada. */
     proposalOut: sql<boolean>`exists (select 1 from ${saasProposal} p where p.client_id = ${saasClient.id}
-      and p.created_at >= ${openSince}
-      and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date and not ${proposalReplacedSql()})))`,
+      and ${proposalOfOpenSaleSql()} and (p.status = 'aceptada' or ${proposalLiveSql(today)}))`,
+    /** Su solicitud está invitada (vigente o vencida: se ve dentro de «Propuesta»). */
     invited: sql<boolean>`exists (select 1 from ${saasWaitlistRequest} r where r.client_id = ${saasClient.id} and r.status = 'invitada')`,
+    /**
+     * Una presentación de esta venta. La que no se hizo («no se conectó»,
+     * «reprogramar») queda como nota (`recordPresentation`), no como presentación.
+     */
     presentationDone: sql<boolean>`exists (select 1 from ${saasFollowUp} f where f.client_id = ${saasClient.id}
-      and f.kind = 'presentacion' and f.happened_at >= ${openSince}
-      and (f.outcome is null or f.outcome not in (${notDone})))`,
+      and f.kind = 'presentacion' and f.happened_at >= ${openSince})`,
+    /** Una tarea de presentación abierta. */
     presentationScheduled: sql<boolean>`exists (select 1 from ${saasTask} t where t.client_id = ${saasClient.id} and t.kind = 'presentacion' and t.status = 'abierta')`,
+    /** La decisión de la última venta decidida. */
     lastDecision: sql<SaasOpportunityDecision | null>`(select o.decision from ${saasOpportunity} o
       where o.client_id = ${saasClient.id} and o.decision is not null
       order by o.decided_at desc, o.created_at desc limit 1)`,
   }
 }
 
-/** La misma regla de `clientStage`, en SQL: filtra y cuenta sin que el tope de filas la corte. */
+/**
+ * La etapa de un cliente, en SQL: la única regla (lista, ficha, Embudo y
+ * Kairós), que filtra y cuenta sin que el tope de filas la corte. Con cuenta,
+ * «Entró». Con la venta abierta, lo más avanzado que pasó: propuesta (o
+ * invitación), presentación hecha, presentación agendada o contacto. Sin venta
+ * abierta, la decisión de la última; sin ninguna, «Contacto».
+ */
 export function clientStageSql(now: Date): SQL<ClientStage> {
   const f = stageFactsSql(now)
   return sql<ClientStage>`(case
@@ -607,8 +631,8 @@ export async function clientSignals(
   return out
 }
 
-/** El próximo paso de cada cliente: su tarea abierta más próxima que el actor ve. */
-async function nextSteps(
+/** El próximo paso de cada cliente: su tarea abierta más próxima que el actor ve (lista, ficha y Embudo). */
+export async function nextSteps(
   tx: Db,
   actor: AdminActor,
   clientIds: string[],
@@ -648,7 +672,7 @@ async function nextSteps(
         title: row.title,
         dueOn: row.dueOn,
         dueAt: row.dueAt,
-        overdue: row.dueOn < today || (row.dueAt !== null && row.dueAt.getTime() < now.getTime()),
+        overdue: taskOverdue(row, now),
       },
     ]),
   )
@@ -1045,22 +1069,23 @@ export type ClientEmailMatch = "contacto" | "solicitud" | "miembro"
 export async function clientByEmail(
   tx: Db,
   email: string,
-  options: { members?: boolean } = {},
+  options: { members?: boolean; withoutAccount?: boolean } = {},
 ): Promise<{ clientId: string; matchedBy: ClientEmailMatch } | null> {
   const address = email.trim().toLowerCase()
   if (!address) return null
+  const noAccount = options.withoutAccount ? sql`and c.organization_id is null` : sql``
   const levels: Array<{ matchedBy: ClientEmailMatch; query: SQL }> = [
     {
       matchedBy: "contacto",
       query: sql`select distinct c.id from ${saasClientContact} k
         join ${saasClient} c on c.id = k.client_id
-        where k.email = ${address} and c.archived_at is null limit 2`,
+        where k.email = ${address} and c.archived_at is null ${noAccount} limit 2`,
     },
     {
       matchedBy: "solicitud",
       query: sql`select distinct c.id from ${saasWaitlistRequest} r
         join ${saasClient} c on c.id = r.client_id
-        where lower(r.email) = ${address} and c.archived_at is null limit 2`,
+        where lower(r.email) = ${address} and c.archived_at is null ${noAccount} limit 2`,
     },
   ]
   if (options.members)
@@ -1095,7 +1120,9 @@ export async function clientForWaitlistRequest(
   const email = input.email.trim().toLowerCase()
   const phone = normalizeClientPhone(input.phone)
   const name = `${input.firstName.trim()} ${input.lastName.trim()}`.trim().slice(0, 160)
-  const reused = (await clientByEmail(tx, email))?.clientId
+  // Solo un cliente sin cuenta: quien ya es de una clínica con cuenta y pide otra es otro
+  // cliente (Kairós propone fusionarlos si es la misma; `ruleDuplicates`).
+  const reused = (await clientByEmail(tx, email, { withoutAccount: true }))?.clientId
   if (reused) {
     await tx
       .update(saasClient)
@@ -1129,13 +1156,8 @@ export async function clientForWaitlistRequest(
         updatedAt: now,
       })
     }
-    const [row] = await tx
-      .select({ org: saasClient.organizationId })
-      .from(saasClient)
-      .where(eq(saasClient.id, reused))
-      .limit(1)
     // Vuelve una que dijo «no por ahora» o se perdió: otra venta; la anterior queda como historia.
-    if (!row?.org) await openSaleIfNone(tx, reused, null)
+    await openSaleIfNone(tx, reused, null)
     return reused
   }
   const professionals = (SAAS_CLIENT_PROFESSIONALS as readonly string[]).includes(
@@ -1413,19 +1435,12 @@ export async function getClient(
   now = new Date(),
 ): Promise<ClientDetail> {
   const staff = requireStaff(actor)
-  const facts = stageFactsSql(now)
   if (!UUID.test(id)) throw notFound("Cliente")
   const [row] = await tx
     .select({
       client: saasClient,
       ownerName: user.name,
-      hasAccount: facts.hasAccount,
-      openOpportunity: facts.openOpportunity,
-      proposalOut: facts.proposalOut,
-      invited: facts.invited,
-      presentationDone: facts.presentationDone,
-      presentationScheduled: facts.presentationScheduled,
-      lastDecision: facts.lastDecision,
+      stage: clientStageSql(now),
       lastContactAt: lastContactSql,
     })
     .from(saasClient)
@@ -1434,15 +1449,7 @@ export async function getClient(
     .limit(1)
   if (!row) throw notFound("Cliente")
   const client = row.client
-  const stage = clientStage({
-    hasAccount: Boolean(row.hasAccount),
-    openOpportunity: Boolean(row.openOpportunity),
-    proposalOut: Boolean(row.proposalOut),
-    invited: Boolean(row.invited),
-    presentationDone: Boolean(row.presentationDone),
-    presentationScheduled: Boolean(row.presentationScheduled),
-    lastDecision: row.lastDecision ?? null,
-  })
+  const stage = row.stage
 
   const [referred] = client.referredByClientId
     ? await tx
@@ -1577,7 +1584,7 @@ export async function getClient(
       contactId: task.contactId,
       demoId: task.demoId,
       byKairos: task.byKairos,
-      overdue: task.dueOn < today || (task.dueAt !== null && task.dueAt.getTime() < now.getTime()),
+      overdue: taskOverdue(task, now),
     })),
     recentActivities: activityRows.map(({ entry, authorName }) => ({
       id: entry.id,
@@ -1856,20 +1863,25 @@ export async function mergeClients(
       .returning({ id: saasOpportunity.id }),
   )
 
-  // Las propuestas siguen numeradas después de las de la que se queda.
-  const [top] = await tx
-    .select({ max: sql<number>`coalesce(max(${saasProposal.version}), 0)::int` })
-    .from(saasProposal)
+  // Las propuestas de las dos quedan numeradas por fecha (la que salió antes, versión menor):
+  // «reemplazada» compara versiones, así que la vigente de la que se queda no pasa a reemplazada
+  // por una más vieja de la otra. Primero fuera del rango, para no chocar con el índice único.
+  await tx
+    .update(saasProposal)
+    .set({ version: sql`${saasProposal.version} + 1000000` })
     .where(eq(saasProposal.clientId, keepId))
-  const offset = Number(top?.max ?? 0)
   count(
     "proposals",
     await tx
       .update(saasProposal)
-      .set({ clientId: keepId, version: sql`${saasProposal.version} + ${offset}` })
+      .set({ clientId: keepId, version: sql`${saasProposal.version} + 2000000` })
       .where(eq(saasProposal.clientId, dropId))
       .returning({ id: saasProposal.id }),
   )
+  await tx.execute(sql`update ${saasProposal} p set version = ordered.n
+    from (select id, row_number() over (order by coalesce(sent_at, created_at), created_at, id)::int as n
+      from ${saasProposal} where client_id = ${keepId}) ordered
+    where p.id = ordered.id`)
   count(
     "outreach",
     await tx
@@ -2734,7 +2746,7 @@ export async function clientTimeline(
   // Envíos que todavía no dejaron su actividad: por confirmar, inciertos o que no salieron.
   if (wants("contactos")) {
     const rows = await tx
-      .select()
+      .select({ outreach: saasOutreach, adminOnly: outreachAdminOnlySql(`"saas_outreach"`) })
       .from(saasOutreach)
       .where(
         and(
@@ -2745,7 +2757,7 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasOutreach.createdAt))
       .limit(one)
-    for (const o of rows) {
+    for (const { outreach: o, adminOnly } of rows) {
       const channel = o.channel === "whatsapp" ? "WhatsApp" : "correo"
       const title =
         o.status === "pendiente"
@@ -2760,7 +2772,8 @@ export async function clientTimeline(
         category: "contactos",
         title,
         detail: clip(o.subject ?? o.body, 140),
-        adminOnly: false,
+        // El de una propuesta o de algo de Kairós solo de Administración: Soporte no lo ve.
+        adminOnly: Boolean(adminOnly),
         link: { kind: "envio", id: o.id },
       })
     }

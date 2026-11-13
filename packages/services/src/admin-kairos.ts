@@ -24,10 +24,14 @@ import { alias } from "drizzle-orm/pg-core"
 import {
   clientDuplicatePairsSql,
   linkClientToOrganization,
-  proposalReplacedSql,
+  proposalLiveSql,
+  proposalOfOpenSaleSql,
+  taskOverdue,
+  visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
+import { PRESENTATION_OUTCOMES, type PresentationOutcome } from "./admin-sales.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
 import {
   type ClinicLoadRecord,
@@ -35,6 +39,7 @@ import {
   listProgressReports,
   PROGRESS_REPORT_ACTIONS,
   type ProgressReportRecord,
+  progressReportsOf,
 } from "./clinic-progress-report.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
@@ -289,12 +294,13 @@ export async function kairosCoolingRows(
         where r.client_id = c.id and r.status = 'invitada' and r.invite_expires_at <= ${nowSql}
           and not exists (select 1 from saas_follow_up f where f.client_id = c.id and f.kind = 'llamada' and f.happened_at >= r.invite_expires_at))`)} as invite_expired_at,
       ${iso(sql`(select max(p.sent_at) from saas_proposal p
-        where p.client_id = c.id and p.status = 'enviada' and p.sent_at <= ${proposalSince} and p.valid_until >= ${today}::date
-          and not ${proposalReplacedSql()})`)} as proposal_sent_at
+        where p.client_id = c.id and p.sent_at <= ${proposalSince}
+          and ${proposalLiveSql(today)} and ${proposalOfOpenSaleSql()})`)} as proposal_sent_at
     from saas_client c
     join saas_opportunity o on o.client_id = c.id and o.decision is null
     left join "user" u on u.id = c.owner_user_id
-    where c.archived_at is null ${only}`,
+    -- Una clínica con cuenta no se «enfría»: lo suyo es el riesgo (kairosRiskRows).
+    where c.archived_at is null and c.organization_id is null ${only}`,
   )
   const out: KairosCoolingRow[] = []
   for (const row of found) {
@@ -518,11 +524,12 @@ async function captureState(
   }
   const proposalId = str(payload.proposalId)
   if (proposalId) {
-    const [row] = await rows<{ status: string }>(
+    // Si su venta se cerró (perdida, «no por ahora» o entró), ya no es la misma propuesta.
+    const [row] = await rows<{ status: string; open: boolean }>(
       tx,
-      sql`select status from saas_proposal where id = ${proposalId}::uuid`,
+      sql`select p.status, ${proposalOfOpenSaleSql()} as open from saas_proposal p where p.id = ${proposalId}::uuid`,
     )
-    state.proposal = row?.status ?? null
+    state.proposal = row ? (row.open ? row.status : `${row.status}:venta_cerrada`) : null
   }
   const taskId = str(payload.taskId)
   if (taskId) {
@@ -679,6 +686,12 @@ const isReady = (kind: string, payload: Record<string, unknown>) =>
   !(DRAFT_KINDS as readonly string[]).includes(kind) ||
   Boolean(payload.draft && typeof payload.draft === "object")
 
+/** La regla de `isReady` en SQL: un mensaje o un guion está listo cuando ya tiene su borrador. */
+export const kairosReadySql: SQL<boolean> = sql<boolean>`(${kairosItem.kind} not in (${sql.join(
+  DRAFT_KINDS.map((kind) => sql`${kind}`),
+  sql`, `,
+)}) or coalesce(jsonb_typeof(${kairosItem.payload} -> 'draft') = 'object', false))`
+
 /** Quién redactó el borrador del ítem; los anteriores a esta marca son del modelo. */
 function draftAuthorOf(
   kind: string,
@@ -724,6 +737,8 @@ function toItemView(row: {
 export interface KairosItemFilter {
   /** «espera»: lo que espera un sí; «hecho»: lo ya decidido, vencido o ejecutado. */
   status: "espera" | "hecho"
+  /** Solo lo listo para decidir (`isReady`): lo que muestra Hoy. */
+  ready?: boolean
   clientId?: string
   limit?: number
 }
@@ -750,6 +765,7 @@ export async function listKairosItems(
     filter.status === "espera" ? eq(kairosItem.status, "espera") : ne(kairosItem.status, "espera"),
     filter.clientId ? eq(kairosItem.clientId, filter.clientId) : undefined,
     actor.role === "admin" ? undefined : eq(kairosItem.adminOnly, false),
+    filter.ready ? kairosReadySql : undefined,
   )
   const found = await tx
     .select({
@@ -799,7 +815,7 @@ export interface KairosClientPatch {
 }
 
 export interface KairosPresentationInput {
-  outcome: "se_hizo" | "no_se_conecto" | "reprogramar"
+  outcome: PresentationOutcome
   body: string
   nextDueOn?: string
 }
@@ -1001,7 +1017,7 @@ async function executeItem<O extends KairosOutreachPrepared>(
       const taskId = optText(payload.taskId)
       if (!taskId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta la presentación")
       const outcome = str(payload.outcome) ?? "se_hizo"
-      if (outcome !== "se_hizo" && outcome !== "no_se_conecto" && outcome !== "reprogramar") {
+      if (!(PRESENTATION_OUTCOMES as readonly string[]).includes(outcome)) {
         throw invalidField(
           "edited.outcome",
           "Elige si se hizo, no se conectó o hay que reprogramar",
@@ -1013,7 +1029,7 @@ async function executeItem<O extends KairosOutreachPrepared>(
       if (nextDueOn && !ISO_DAY.test(nextDueOn))
         throw invalidField("edited.nextDueOn", "La fecha no es válida")
       await executors.recordPresentation(tx, actor, taskId, {
-        outcome,
+        outcome: outcome as PresentationOutcome,
         body,
         ...(nextDueOn ? { nextDueOn } : {}),
       })
@@ -1261,24 +1277,6 @@ export async function saveKairosDraft(
 
 /* ---------- La pasada de reglas ---------- */
 
-/** Lo que el modelo tiene que redactar: solo lo necesario (nunca datos de pacientes, importes ni adjuntos). */
-export interface KairosDraftRequest {
-  itemId: string
-  kind: DraftKind
-  /** Para qué es: primera_respuesta, recordar_invitacion, recordar_propuesta, retomar, pedir_archivos, recordar_equipo, guion. */
-  goal: string
-  channel: SaasOutreachChannel | null
-  client: { id: string; name: string; city: string | null; product: ClinicalProduct }
-  contact: { name: string } | null
-  /** Quien firma: el responsable del cliente, si hay. */
-  sender: { name: string } | null
-  demo: { name: string } | null
-  /** Los hechos con que redactar, en frases. */
-  facts: string[]
-  /** Si es solo para Administración (puede citar la propuesta); si no, nada solo de administración. */
-  adminOnly: boolean
-}
-
 export interface KairosPassResult {
   clientsCreated: number
   clientsLinked: number
@@ -1287,7 +1285,6 @@ export interface KairosPassResult {
   items: number
   signals: number
   /** Lo que espera la redacción del modelo (el worker la pide, con tope). */
-  needsDraft: KairosDraftRequest[]
 }
 
 interface ClientInfo {
@@ -1329,7 +1326,6 @@ class Pass {
     tasks: 0,
     items: 0,
     signals: 0,
-    needsDraft: [],
   }
   private clients = new Map<string, ClientInfo>()
   private contacts = new Map<string, ContactInfo | null>()
@@ -1704,9 +1700,11 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     from_name: string | null
     subject: string | null
     received_at: string
+    sender_verified: boolean
   }>(
     tx,
-    sql`select id, mailbox, product, from_address, from_name, subject, ${iso(sql`received_at`)} as received_at
+    sql`select id, mailbox, product, from_address, from_name, subject, ${iso(sql`received_at`)} as received_at,
+      sender_verified
     from saas_inbound_email where client_id is null order by received_at asc`,
   )
   for (const email of unassigned) {
@@ -1717,7 +1715,11 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
       fact: email.id,
       kind: "correo_sin_cliente",
       title: `Correo sin cliente: ${who}`,
-      reason: `Llegó a ${email.mailbox}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} y su correo no es el de ningún cliente: di de quién es`,
+      reason: `Llegó a ${email.mailbox}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} ${
+        email.sender_verified
+          ? "y su correo no es el de ningún cliente"
+          : "de un remitente no verificado (puede no ser quien dice)"
+      }: di de quién es`,
       adminOnly: false,
       payload: {
         emailId: email.id,
@@ -1864,8 +1866,9 @@ async function ruleProposalsExpiring(pass: Pass): Promise<void> {
     pass.tx,
     sql`select p.id, p.client_id, p.valid_until::text as valid_until, p.version from saas_proposal p
     join saas_client c on c.id = p.client_id
-    where p.status = 'enviada' and c.archived_at is null and not ${proposalReplacedSql()}
-      and p.valid_until >= ${pass.today}::date and p.valid_until <= ${plusDays(pass.today, PROPOSAL_SOON_DAYS)}::date`,
+    where c.archived_at is null and c.organization_id is null
+      and ${proposalLiveSql(pass.today)} and ${proposalOfOpenSaleSql()}
+      and p.valid_until <= ${plusDays(pass.today, PROPOSAL_SOON_DAYS)}::date`,
   )
   for (const proposal of found) {
     await pass.message({
@@ -2255,7 +2258,14 @@ async function ruleRisk(pass: Pass): Promise<void> {
   for (const row of await kairosRiskRows(pass.tx, KAIROS_READER, pass.now)) {
     for (const signal of row.signals) {
       const task = TASKS[signal.code]
-      if (task) await pass.signalTask(row.clientId, signal, task)
+      // El caso que espera es de cobro (la señal es solo de Administración): su tarea también,
+      // para que Soporte no sepa de un caso que no puede ver (ADR 0181).
+      if (task)
+        await pass.signalTask(
+          row.clientId,
+          signal,
+          signal.code === "caso_esperando" && signal.adminOnly ? { ...task, kind: "cobro" } : task,
+        )
     }
   }
 }
@@ -2288,93 +2298,13 @@ async function ruleCoolingAndNextStep(pass: Pass): Promise<void> {
   }
 }
 
-/** Lo que espera la redacción del modelo, con lo justo para redactarlo. */
-async function draftRequests(pass: Pass): Promise<KairosDraftRequest[]> {
-  const { tx } = pass
-  const pending = await tx
-    .select({ item: kairosItem })
-    .from(kairosItem)
-    .where(
-      and(
-        eq(kairosItem.status, "espera"),
-        inArray(kairosItem.kind, [...DRAFT_KINDS]),
-        sql`coalesce(${kairosItem.payload} -> 'draft', 'null'::jsonb) = 'null'::jsonb`,
-        sql`${kairosItem.expiresAt} > ${pass.nowSql}`,
-      ),
-    )
-    .orderBy(asc(kairosItem.createdAt))
-  const out: KairosDraftRequest[] = []
-  for (const { item } of pending) {
-    if (!item.clientId) continue
-    const client = await pass.client(item.clientId)
-    if (!client) continue
-    const payload = item.payload
-    const contactId = str(payload.contactId)
-    const [contact] = contactId
-      ? await rows<{ name: string }>(
-          tx,
-          sql`select name from saas_client_contact where id = ${contactId}::uuid`,
-        )
-      : []
-    const [sender] = client.ownerUserId
-      ? await rows<{ name: string }>(
-          tx,
-          sql`select name from "user" where id = ${client.ownerUserId}`,
-        )
-      : []
-    const demoId = str(payload.demoId)
-    const [demo] = demoId
-      ? await rows<{ name: string }>(tx, sql`select name from saas_demo where id = ${demoId}::uuid`)
-      : []
-    // Lo último que se habló, sin lo que es solo de administración si el borrador no lo es.
-    const recent = await rows<{ kind: string; outcome: string | null; body: string }>(
-      tx,
-      sql`select kind, outcome, body from saas_follow_up where client_id = ${item.clientId}::uuid and not from_note
-        ${item.adminOnly ? sql`` : sql`and not admin_only`}
-        order by happened_at desc limit 3`,
-    )
-    const facts = [
-      item.reason,
-      ...(Array.isArray(payload.facts)
-        ? payload.facts.filter((fact): fact is string => typeof fact === "string")
-        : []),
-      ...recent.map(
-        (entry) =>
-          `Antes (${entry.kind}): ${entry.body.slice(0, 300)}${entry.outcome ? ` · quedó en: ${entry.outcome.slice(0, 200)}` : ""}`,
-      ),
-    ]
-    const channel = str(payload.channel)
-    out.push({
-      itemId: item.id,
-      kind: item.kind as DraftKind,
-      goal: str(payload.goal) ?? item.kind,
-      channel:
-        channel && (SAAS_OUTREACH_CHANNELS as readonly string[]).includes(channel)
-          ? (channel as SaasOutreachChannel)
-          : null,
-      client: {
-        id: client.id,
-        name: client.name,
-        city: client.city,
-        product: productOf(client.product),
-      },
-      contact: contact ? { name: contact.name } : null,
-      sender: sender ? { name: sender.name } : null,
-      demo: demo ? { name: demo.name } : null,
-      facts,
-      adminOnly: item.adminOnly,
-    })
-  }
-  return out
-}
-
 /**
  * Una pasada de Kairós sin modelo: cada regla del ARM, idempotente por su
  * clave (`regla:cliente:hecho:día`), con la pasada bloqueada para que dos
  * workers no la corran a la vez. Solo pone tareas, marca señales, liga o crea
  * el cliente de una cuenta nueva, anota los correos que llegan y deja ítems
- * en espera; nunca envía ni decide. `now` lo da la base. Devuelve lo que
- * necesita redacción del modelo (`needsDraft`).
+ * en espera; nunca envía ni decide. `now` lo da la base. Los borradores los
+ * pide después `draftPendingKairosItems` (`admin-kairos-drafts.ts`).
  */
 export async function kairosRulesPass(tx: Db, now: Date): Promise<KairosPassResult> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kairos:pass'))`)
@@ -2393,7 +2323,6 @@ export async function kairosRulesPass(tx: Db, now: Date): Promise<KairosPassResu
   await ruleOnboarding(pass)
   await ruleRisk(pass)
   await ruleCoolingAndNextStep(pass)
-  pass.result.needsDraft = await draftRequests(pass)
   return pass.result
 }
 
@@ -2850,28 +2779,13 @@ export async function todayForStaff(
   const admin = actor.role === "admin"
   const today = limaDate(now)
   await expireKairosItems(tx, now)
-  const readyWhere = and(
-    eq(kairosItem.status, "espera"),
-    admin ? undefined : eq(kairosItem.adminOnly, false),
-    sql`(${kairosItem.kind} not in ('mensaje', 'guion') or coalesce(${kairosItem.payload} -> 'draft', 'null'::jsonb) <> 'null'::jsonb)`,
+  // Lo listo de Kairós, con la consulta de Kairós: lo que todavía redacta el modelo sale allá, no aquí.
+  const kairosReady = await listKairosItems(
+    tx,
+    actor,
+    { status: "espera", ready: true, limit: READY_ON_TODAY },
+    now,
   )
-  const ready = await tx
-    .select({
-      item: kairosItem,
-      clientName: saasClient.name,
-      product: saasClient.product,
-      decidedByName: decider.name,
-    })
-    .from(kairosItem)
-    .leftJoin(saasClient, eq(saasClient.id, kairosItem.clientId))
-    .leftJoin(decider, eq(decider.id, kairosItem.decidedBy))
-    .where(readyWhere)
-    .orderBy(asc(kairosItem.expiresAt), asc(kairosItem.id))
-    .limit(READY_ON_TODAY)
-  const [readyCount] = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(kairosItem)
-    .where(readyWhere)
 
   const assignee = alias(user, "task_assignee")
   const taskRows = await tx
@@ -2891,24 +2805,24 @@ export async function todayForStaff(
         lte(saasTask.dueOn, today),
         sql`${saasClient.archivedAt} is null`,
         options.who === "mias" ? eq(saasTask.assigneeUserId, actor.userId) : undefined,
-        admin ? undefined : ne(saasTask.kind, "cobro"),
+        visibleTaskSql(actor),
       ),
     )
     .orderBy(asc(saasTask.dueOn), sql`${saasTask.dueAt} asc nulls last`, asc(saasTask.createdAt))
-  // Los informes de las tareas «Revisar en Zoho…», leídos del registro (solo Administración).
-  const reportsOf = new Map<string, ProgressReportRecord[]>()
-  if (admin)
-    for (const { task, organizationId } of taskRows)
-      if (
-        organizationId &&
-        task.byKairos &&
-        unknownReportNumberOf(task.kairosKey) !== null &&
-        !reportsOf.has(organizationId)
+  // Los informes de las tareas «Revisar en Zoho…», leídos del registro en una sola lectura (solo Administración).
+  const reportsOf = admin
+    ? await progressReportsOf(
+        tx,
+        taskRows.flatMap(({ task, organizationId }) =>
+          organizationId && task.byKairos && unknownReportNumberOf(task.kairosKey) !== null
+            ? [organizationId]
+            : [],
+        ),
       )
-        reportsOf.set(organizationId, await listProgressReports(tx, organizationId))
+    : new Map<string, ProgressReportRecord[]>()
   const tasks: TodayTaskRow[] = taskRows.map(
     ({ task, clientName, product, organizationId, assigneeName }) => {
-      const overdue = task.dueOn < today || (task.dueAt !== null && task.dueAt < now)
+      const overdue = taskOverdue(task, now)
       const when =
         task.dueOn < today
           ? `Vencida desde el ${dayText(task.dueOn)}`
@@ -2999,7 +2913,7 @@ export async function todayForStaff(
   return {
     today,
     answerWithin: businessDaysWords(waitlistAnswerDays),
-    kairosReady: { items: ready.map(toItemView), total: readyCount?.n ?? 0 },
+    kairosReady,
     tasks,
     cooling,
     atRisk,

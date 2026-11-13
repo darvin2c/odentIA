@@ -5,7 +5,9 @@
  * Por cada correo:
  * 1. Lo reenvía a `FORWARD_TO`, el buzón de siempre, para no perder nada aunque falle lo demás.
  * 2. Lo lee con postal-mime y lo manda firmado a `${API_URL}/api/inbound/email`, donde la
- *    administración lo liga a su cliente (`apps/api/src/routes/inbound-email.ts`).
+ *    administración lo liga a su cliente (`apps/api/src/routes/inbound-email.ts`) solo si el
+ *    remitente está verificado (`senderVerified`, de lo que comprobó Cloudflare: el From se
+ *    puede falsificar).
  *
  * Si el envío a la API falla, el correo ya se reenvió: se anota en el registro y no se
  * reintenta (la API entra un correo una sola vez por su Message-ID, pero aquí no se repite).
@@ -14,6 +16,7 @@
  * No se despliega desde el repositorio: los pasos están en el README.
  */
 import PostalMime from "postal-mime"
+import { CLOUDFLARE_AUTHSERV_ID, senderVerified } from "./auth"
 
 export interface Env {
   /** Origen de la API, sin barra final: `https://api.odentia32.com`. */
@@ -22,6 +25,11 @@ export interface Env {
   INBOUND_EMAIL_SECRET: string
   /** El buzón de siempre (o varios, separados por comas), verificado en Email Routing. */
   FORWARD_TO: string
+  /**
+   * El servidor que firma lo que comprobó Cloudflare (`ARC-Authentication-Results`); por
+   * defecto `mx.cloudflare.net`. Si no coincide, ningún remitente queda verificado.
+   */
+  AUTHSERV_ID?: string
 }
 
 /**
@@ -216,6 +224,7 @@ export async function inboundBody(
   envelope: { from: string; to: string },
   route: { mailbox: Mailbox; product: string },
   receivedAt: Date,
+  authservId: string = CLOUDFLARE_AUTHSERV_ID,
 ): Promise<string> {
   const email = await PostalMime.parse(raw, { attachmentEncoding: "base64" })
   const sender = email.from?.address ? email.from : email.from?.group?.[0]
@@ -229,17 +238,19 @@ export async function inboundBody(
     0,
     TEXT_MAX_CHARS - note.length,
   )
+  const from = (sender?.address || envelope.from).trim().toLowerCase().slice(0, 254)
   return JSON.stringify({
     mailbox: route.mailbox,
     product: route.product,
     messageId: messageId.slice(0, 998),
-    from: (sender?.address || envelope.from).trim().toLowerCase().slice(0, 254),
+    from,
     fromName: sender?.name ? sender.name.slice(0, 500) : null,
     to: envelope.to.trim().toLowerCase().slice(0, 254),
     subject: email.subject ? email.subject.slice(0, 5000) : null,
     text: text + note,
     receivedAt: receivedAt.toISOString(),
     attachments: kept,
+    senderVerified: senderVerified(email.headers, from, authservId),
   })
 }
 
@@ -301,7 +312,10 @@ export default {
       console.error("correo entrante: faltan API_URL o INBOUND_EMAIL_SECRET; no se mandó a la API")
     else {
       try {
-        posted = await postToApi(await inboundBody(raw, message, route, new Date()), env)
+        posted = await postToApi(
+          await inboundBody(raw, message, route, new Date(), env.AUTHSERV_ID || undefined),
+          env,
+        )
       } catch (error) {
         console.error("correo entrante: no se pudo leer el correo", String(error))
       }

@@ -47,7 +47,7 @@ export interface KairosClientFacts {
   professionals?: string | null
   /** «nada», «cuaderno_excel», «otro_software». */
   currentTool?: string | null
-  /** La etapa calculada (`clientStage`), en código o en palabras. */
+  /** La etapa calculada (`clientStageSql`), en código o en palabras. */
   stage: string
 }
 
@@ -160,7 +160,7 @@ const TOOL_WORDS: Record<string, string> = {
 
 /**
  * Para qué es cada mensaje que prepara la pasada de reglas (`goal` de
- * `KairosDraftRequest`): la indicación para el modelo y lo que escribe el
+ * `KairosDraftJob`): la indicación para el modelo y lo que escribe el
  * doble. Un `goal` que no está aquí se toma como la indicación misma.
  */
 export const KAIROS_GOALS: Record<

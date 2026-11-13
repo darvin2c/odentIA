@@ -62,6 +62,7 @@ function email(messageId: string, extra: Record<string, unknown> = {}) {
     text: "Adjunto el archivo.",
     receivedAt: new Date().toISOString(),
     attachments: [],
+    senderVerified: true,
     ...extra,
   }
 }
@@ -78,6 +79,39 @@ function send(body: unknown, opts: { timestamp?: number; signature?: string; tar
     },
     body: raw,
   })
+}
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+/** Un ZIP mínimo (sin comprimir) con esas entradas vacías: lo que trae un .xlsx o un .docx. */
+function zipOf(names: string[]): Uint8Array {
+  const parts: Buffer[] = []
+  const central: Buffer[] = []
+  let offset = 0
+  for (const name of names) {
+    const file = Buffer.from(name, "utf8")
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(file.length, 26)
+    parts.push(local, file)
+    const entry = Buffer.alloc(46)
+    entry.writeUInt32LE(0x02014b50, 0)
+    entry.writeUInt16LE(20, 4)
+    entry.writeUInt16LE(20, 6)
+    entry.writeUInt16LE(file.length, 28)
+    entry.writeUInt32LE(offset, 42)
+    central.push(entry, file)
+    offset += local.length + file.length
+  }
+  const dir = Buffer.concat(central)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(names.length, 8)
+  end.writeUInt16LE(names.length, 10)
+  end.writeUInt32LE(dir.length, 12)
+  end.writeUInt32LE(offset, 16)
+  return new Uint8Array(Buffer.concat([...parts, dir, end]))
 }
 
 async function code(response: Response): Promise<string> {
@@ -272,6 +306,29 @@ describe("el correo", () => {
     expect(row?.attachments).toHaveLength(1)
   })
 
+  it("si el worker no pudo verificar el remitente, no se liga al cliente aunque su correo coincida", async () => {
+    const response = await send(
+      email("<sin-verificar@test>", {
+        senderVerified: false,
+        attachments: [{ filename: "pacientes.pdf", contentType: "application/pdf", base64: PDF }],
+      }),
+    )
+    expect(response.status).toBe(201)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<sin-verificar@test>"))
+    expect(row).toMatchObject({ clientId: null, senderVerified: false })
+    // Sin el campo, tampoco: lo que no se sabe no se da por verificado.
+    const { senderVerified: _omit, ...withoutFlag } = email("<sin-campo@test>")
+    expect((await send(withoutFlag)).status).toBe(201)
+    const [other] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<sin-campo@test>"))
+    expect(other?.clientId).toBeNull()
+  })
+
   it("un cuerpo que no cumple se rechaza con su campo, ya firmado", async () => {
     const response = await send(email("<malo@test>", { mailbox: "ventas" }))
     expect(response.status).toBe(400)
@@ -287,8 +344,31 @@ describe("adjuntos permitidos", () => {
       allowedInboundAttachment(bytes("%PDF-1.7"), "x.bin", "application/octet-stream")?.ext,
     ).toBe("pdf")
     expect(allowedInboundAttachment(bytes("\xff\xd8\xff\xe0"), "foto", "")?.ext).toBe("jpg")
-    expect(allowedInboundAttachment(bytes("PK\x03\x04..."), "datos.xlsx", "")?.ext).toBe("xlsx")
-    expect(allowedInboundAttachment(bytes("PK\x03\x04..."), "carta.docx", "")?.ext).toBe("docx")
+    const workbook = zipOf(["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml"])
+    const letter = zipOf(["[Content_Types].xml", "word/document.xml"])
+    expect(allowedInboundAttachment(workbook, "datos.xlsx", "")?.ext).toBe("xlsx")
+    expect(allowedInboundAttachment(letter, "carta.docx", "")?.ext).toBe("docx")
+    // Un ZIP cualquiera con el nombre o el tipo de Office no pasa.
+    expect(allowedInboundAttachment(bytes("PK\x03\x04..."), "datos.xlsx", "")).toBeNull()
+    expect(allowedInboundAttachment(zipOf(["app/Main.class"]), "nomina.xlsx", "")).toBeNull()
+    expect(allowedInboundAttachment(zipOf(["META-INF/MANIFEST.MF"]), "x.jar", XLSX_TYPE)).toBeNull()
+    // Con macros o con un ejecutable adentro, tampoco.
+    expect(
+      allowedInboundAttachment(
+        zipOf(["[Content_Types].xml", "xl/workbook.xml", "xl/vbaProject.bin"]),
+        "nomina.xlsx",
+        "",
+      ),
+    ).toBeNull()
+    expect(
+      allowedInboundAttachment(
+        zipOf(["[Content_Types].xml", "word/document.xml", "word/embeddings/setup.exe"]),
+        "carta.docx",
+        "",
+      ),
+    ).toBeNull()
+    // El libro con extensión de carta no pasa por carta.
+    expect(allowedInboundAttachment(workbook, "carta.docx", "")).toBeNull()
     expect(
       allowedInboundAttachment(bytes("PK\x03\x04..."), "todo.zip", "application/zip"),
     ).toBeNull()

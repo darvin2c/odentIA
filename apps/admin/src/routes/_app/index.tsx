@@ -36,6 +36,7 @@ import {
   KairosUnconfirmed,
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
+import { WAITLIST_STAGE_WORDS } from "../../components/arm/sale-words"
 import { type ProductChoice, ProductFilter, useOrgProducts } from "../../components/product"
 import {
   HomeCountersSkeleton,
@@ -225,16 +226,6 @@ const overviewSchema = z.object({
 
 /** Las colas que ya son filas en Hoy: su número va en el menú, no entre «Otras colas». */
 const LISTED_QUEUES = new Set(["waitlist", "support-open"])
-
-/** La etapa de una solicitud, con las palabras de la lista de espera. */
-const STAGE_WORDS: Record<string, string> = {
-  por_revisar: "Por revisar",
-  invitada: "Invitada",
-  invitacion_vencida: "Invitación vencida",
-  entro: "Entró",
-  paga: "Paga",
-  descartada: "Descartada",
-}
 
 /** La pestaña de la ficha donde se resuelve una tarea. */
 function taskTab(kind: string, isAdmin: boolean): ClientTab {
@@ -537,7 +528,7 @@ function AdminHome() {
                         )
                       }
                     >
-                      <Line parts={[STAGE_WORDS[row.stage] ?? null, deadline]} />
+                      <Line parts={[WAITLIST_STAGE_WORDS[row.stage] ?? null, deadline]} />
                     </HomeRow>
                   )
                 })}

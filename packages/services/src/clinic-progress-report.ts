@@ -636,8 +636,16 @@ export interface ProgressReportRecord {
 
 /** Los informes de esa clínica, el último estado de cada número, del más nuevo al más viejo. */
 export async function listProgressReports(tx: Db, orgId: string): Promise<ProgressReportRecord[]> {
+  return (await progressReportsOf(tx, [orgId])).get(orgId) ?? []
+}
+
+/** Los informes de varias clínicas en una sola lectura (lo de `listProgressReports`, por clínica). */
+export async function progressReportsOf(tx: Db, orgIds: string[]): Promise<Map<string, ProgressReportRecord[]>> {
+  const out = new Map<string, ProgressReportRecord[]>()
+  if (!orgIds.length) return out
   const rows = await tx
     .select({
+      orgId: adminAudit.organizationId,
       at: adminAudit.createdAt,
       action: adminAudit.action,
       entityId: adminAudit.entityId,
@@ -646,10 +654,13 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
     })
     .from(adminAudit)
     .leftJoin(user, eq(user.id, adminAudit.actorUserId))
-    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), eq(adminAudit.organizationId, orgId)))
+    .where(and(inArray(adminAudit.action, Object.values(PROGRESS_REPORT_ACTIONS)), inArray(adminAudit.organizationId, [...new Set(orgIds)])))
     .orderBy(...latestReportFirst)
-  const seen = new Map<number, ProgressReportRecord>()
+  const seenOf = new Map<string, Map<number, ProgressReportRecord>>()
   for (const row of rows) {
+    if (!row.orgId) continue
+    const seen = seenOf.get(row.orgId) ?? new Map<number, ProgressReportRecord>()
+    seenOf.set(row.orgId, seen)
     const number = Number(row.entityId?.replace("informe-", ""))
     if (!Number.isInteger(number) || seen.has(number)) continue
     const state = (Object.entries(PROGRESS_REPORT_ACTIONS).find(([, action]) => action === row.action)?.[0] ?? "enviado") as ProgressReportState
@@ -669,7 +680,8 @@ export async function listProgressReports(tx: Db, orgId: string): Promise<Progre
       resent: meta.resent === true,
     })
   }
-  return [...seen.values()].sort((a, b) => b.number - a.number)
+  for (const [orgId, seen] of seenOf) out.set(orgId, [...seen.values()].sort((a, b) => b.number - a.number))
+  return out
 }
 
 /** Una carga en el registro de la clínica: la configuración o los pacientes de un plan. */

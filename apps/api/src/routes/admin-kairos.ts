@@ -306,10 +306,8 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
         now,
       )
       const weekly = parsed.data.weekly ? await writeKairosWeekly(deps.ownerDb, writer, now) : null
-      const { needsDraft, ...counts } = pass
       return {
-        ...counts,
-        needsDraft: needsDraft.length,
+        ...pass,
         drafted: drafts.drafted.length,
         draftsFailed: drafts.failed.length,
         // «plantilla» si el modelo no está configurado: lo redactado lo dice en su ítem.

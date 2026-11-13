@@ -1,11 +1,14 @@
 /**
  * Correo que llega a soporte@ y contacto@ de cada producto (lo manda firmado
  * el worker de Cloudflare a `/api/inbound/email`). Entra una sola vez por su
- * `Message-ID`. El cliente se busca por correo exacto, en este orden: un
+ * `Message-ID`. El From de un correo se puede falsificar: el cliente se busca
+ * solo si el worker verificó el remitente (`senderVerified`: DMARC, o SPF o
+ * DKIM alineados con el From). Entonces, por correo exacto, en este orden: un
  * contacto, una solicitud de la web, una persona del equipo de su cuenta. Si
- * en el primer lugar donde aparece hay más de un cliente, no se elige: queda
- * sin cliente y Kairós lo propone (`correo_sin_cliente`) para que una persona
- * lo asigne. Nunca se busca por teléfono ni por nombre.
+ * no está verificado, o en el primer lugar donde aparece hay más de un
+ * cliente, no se elige: queda sin cliente y Kairós lo propone
+ * (`correo_sin_cliente`) para que una persona lo asigne. Nunca se busca por
+ * teléfono ni por nombre.
  *
  * Con cliente, deja una actividad «correo» que entró y sus adjuntos pasan a
  * ser documentos del cliente, solo de Administración y con borrado a los 30
@@ -66,6 +69,8 @@ const inboundSchema = z.strictObject({
     .array(attachmentSchema)
     .max(INBOUND_ATTACHMENTS_MAX, "Demasiados adjuntos")
     .default([]),
+  /** El worker verificó el remitente; sin decirlo, no se da por verificado. */
+  senderVerified: z.boolean().default(false),
 })
 export type InboundEmailInput = z.input<typeof inboundSchema>
 
@@ -196,6 +201,7 @@ export async function ingestInboundEmail(
       toAddress: input.to,
       subject,
       textBody: input.text ? input.text.slice(0, TEXT_MAX) : null,
+      senderVerified: input.senderVerified,
       receivedAt: input.receivedAt,
       attachments: stored,
     })
@@ -221,7 +227,8 @@ export async function ingestInboundEmail(
       fileIds: [],
     }
   }
-  const match = await matchInboundClient(tx, input.from)
+  // Un remitente sin verificar no se liga solo: su From puede ser falso.
+  const match = input.senderVerified ? await matchInboundClient(tx, input.from) : null
   let fileIds: string[] = []
   if (match) {
     const attached = await attachToClient(tx, null, match.clientId, stored, input.receivedAt, now)
@@ -250,6 +257,7 @@ export async function ingestInboundEmail(
       product: input.product,
       matchedBy: match?.matchedBy ?? null,
       clientId: match?.clientId ?? null,
+      senderVerified: input.senderVerified,
       attachments: stored.length,
     },
   })

@@ -21,7 +21,6 @@ import {
   SAAS_TASK_STATUSES,
   type SaasClientFileKind,
   saasClient,
-  saasProposal,
 } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { invitation, user } from "@odentia/db/schema/auth"
@@ -30,6 +29,7 @@ import { saasPlan, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { invitationTemplate, type Mailer } from "@odentia/mail"
 import {
   type AdminActor,
+  acceptedProposalOfOpenSale,
   addActivity,
   addClientContact,
   applyProposalTerms,
@@ -969,7 +969,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
 
   /**
    * «Dar de alta yo»: el alta asistida de siempre, ligada a este cliente. Con
-   * una propuesta aceptada, la cuenta nace en su plan y sus condiciones se
+   * una propuesta aceptada de la venta abierta, la cuenta nace en su plan y sus condiciones se
    * aplican con las operaciones de «Precio y prueba»; si no se pueden, la
    * clínica queda creada igual y lo dice (`proposal.applied = false`).
    */
@@ -989,13 +989,8 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
           .where(eq(saasClient.id, clientId))
           .limit(1)
         if (!client) throw new ServiceError("NOT_FOUND", 404, "Cliente no encontrado")
-        const [accepted] = await tx
-          .select({ id: saasProposal.id, planCode: saasPlan.code })
-          .from(saasProposal)
-          .innerJoin(saasPlan, eq(saasPlan.id, saasProposal.planId))
-          .where(and(eq(saasProposal.clientId, clientId), eq(saasProposal.status, "aceptada")))
-          .orderBy(desc(saasProposal.version))
-          .limit(1)
+        // Solo la aceptada de la venta abierta: la de una venta anterior no se aplica.
+        const accepted = await acceptedProposalOfOpenSale(tx, clientId)
         const product: ClinicalProduct = isClinicalProduct(client.product)
           ? client.product
           : "dental"

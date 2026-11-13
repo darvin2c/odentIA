@@ -370,10 +370,7 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     errors: [],
   }
   try {
-    const { needsDraft: _needsDraft, ...counts } = await deps.ownerDb.transaction((tx) =>
-      kairosRulesPass(tx, now),
-    )
-    result.pass = counts
+    result.pass = await deps.ownerDb.transaction((tx) => kairosRulesPass(tx, now))
   } catch (error) {
     result.errors.push(`reglas: ${message(error)}`)
   }

@@ -13,7 +13,12 @@ import { adminAudit } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { supportCase } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
-import { saasFollowUp, saasPayment, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import {
+  saasFollowUp,
+  saasPayment,
+  saasPlan,
+  saasWaitlistRequest,
+} from "@odentia/db/schema/saas-billing"
 import { and, eq, like, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
@@ -21,6 +26,7 @@ import {
   decideKairosItem,
   type KairosExecutors,
   type KairosPassResult,
+  kairosCoolingRows,
   kairosDone,
   kairosDonePage,
   kairosRulesPass,
@@ -31,6 +37,7 @@ import {
   settleReportTasks,
   todayForStaff,
 } from "./admin-kairos.js"
+import { pendingKairosDraftJobs } from "./admin-kairos-drafts.js"
 import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
@@ -672,12 +679,12 @@ describe("la pasada de Kairós", () => {
       expect(await itemsOf(ids[key] as string, "duplicado")).toHaveLength(0)
   })
 
-  it("devuelve lo que necesita redacción del modelo, sin lo que es solo de administración en lo de Soporte", () => {
-    const drafts = first.needsDraft.map((draft) => draft.itemId)
-    expect(drafts).toEqual(
+  it("lo que espera redacción del modelo lo pide la pasada de borradores, con su ítem", async () => {
+    const jobs = await ownerDb.transaction((tx) => pendingKairosDraftJobs(tx, { limit: 50 }, NOW))
+    expect(jobs.map((job) => job.itemId)).toEqual(
       expect.arrayContaining([ids.webItem, ids.backItem, ids.scriptItem, ids.proposalItem]),
     )
-    const web = first.needsDraft.find((draft) => draft.itemId === ids.webItem)
+    const web = jobs.find((job) => job.itemId === ids.webItem)
     expect(web).toMatchObject({
       kind: "mensaje",
       goal: "primera_respuesta",
@@ -1129,5 +1136,108 @@ describe("gasto del modelo", () => {
     ).rejects.toMatchObject({
       fields: { inputTokens: expect.any(String) },
     })
+  })
+})
+
+describe("lo que encontró la revisión", () => {
+  it("la propuesta que vence no se recuerda a una venta perdida ni a una clínica con cuenta; y si se cerró después, no se aprueba", async () => {
+    const [plan] = await ownerDb
+      .select({ id: saasPlan.id })
+      .from(saasPlan)
+      .where(eq(saasPlan.code, "kz-plan"))
+    const proposalFor = async (clientId: string) => {
+      const [row] = await ownerDb
+        .insert(saasProposal)
+        .values({
+          clientId,
+          version: 1,
+          planId: plan?.id ?? "",
+          listPriceCents: 2900,
+          currency: "USD",
+          validUntil: plusDays(2),
+          status: "enviada",
+          sentAt: ago(1),
+        })
+        .returning({ id: saasProposal.id })
+      return row?.id ?? ""
+    }
+    const lost = await client("vence-perdida", "Clínica Vence Perdida (ficticia)", {
+      open: false,
+      createdAt: ago(10),
+    })
+    await ownerDb.insert(saasOpportunity).values({
+      clientId: lost,
+      decision: "perdido",
+      reason: "precio",
+      decidedAt: NOW,
+      createdAt: ago(10),
+    })
+    await proposalFor(lost)
+    await insertOrg(ownerDb, "kz-vence-cuenta", "kz-vence-cuenta")
+    const withAccount = await client("vence-cuenta", "Clínica Vence Con Cuenta (ficticia)", {
+      organizationId: "kz-vence-cuenta",
+      createdAt: ago(10),
+    })
+    await proposalFor(withAccount)
+    // Una que sí estaba viva cuando se preparó y se perdió después.
+    const later = await client("vence-despues", "Clínica Vence Después (ficticia)", {
+      createdAt: ago(10),
+    })
+    await proposalFor(later)
+    await pass()
+    const reminder = async (clientId: string) =>
+      (await itemsOf(clientId, "mensaje")).find(
+        (item) => (item.payload as { goal?: string }).goal === "recordar_propuesta",
+      )
+    expect(await reminder(lost)).toBeUndefined()
+    expect(await reminder(withAccount)).toBeUndefined()
+    const prepared = await reminder(later)
+    expect(prepared).toBeDefined()
+    await ownerDb
+      .update(saasOpportunity)
+      .set({ decision: "perdido", reason: "precio", decidedAt: NOW })
+      .where(eq(saasOpportunity.clientId, later))
+    const result = await decide(admin, prepared?.id ?? "", {
+      action: "aprobar",
+      edited: { body: "La propuesta vence pronto" },
+    })
+    expect(result.status).toBe("vencida")
+  })
+
+  it("una clínica con cuenta y una venta abierta por error no se «enfría»", async () => {
+    await insertOrg(ownerDb, "kz-enfria-cuenta", "kz-enfria-cuenta")
+    const id = await client("enfria-cuenta", "Clínica Enfría Con Cuenta (ficticia)", {
+      organizationId: "kz-enfria-cuenta",
+      createdAt: ago(20),
+    })
+    const rows = await ownerDb.transaction((tx) =>
+      kairosCoolingRows(tx, admin, NOW, { clientIds: [id] }),
+    )
+    expect(rows).toEqual([])
+  })
+
+  it("el caso de cobro que espera a la clínica es una tarea de cobro: Soporte no la ve", async () => {
+    await insertOrg(ownerDb, "kz-caso-cobro", "kz-caso-cobro")
+    const id = await client("caso-cobro", "Clínica Caso Cobro (ficticia)", {
+      organizationId: "kz-caso-cobro",
+      open: false,
+    })
+    await ownerDb
+      .insert(saasOpportunity)
+      .values({ clientId: id, decision: "entro", decidedAt: NOW })
+    await ownerDb.insert(supportCase).values({
+      organizationId: "kz-caso-cobro",
+      kind: "cobro",
+      question: "¿Por qué me cobraron dos veces?",
+      dedupeKey: "kz-caso-cobro-1",
+      openedBy: OWNER,
+      status: "esperando_clinica",
+      lastPublicMessageAt: ago(5),
+      createdAt: ago(6),
+      updatedAt: ago(5),
+    })
+    await pass()
+    const task = (await tasksOf(id)).find((t) => t.title.startsWith("Seguir el caso"))
+    expect(task?.kind).toBe("cobro")
   })
 })

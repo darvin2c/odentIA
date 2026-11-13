@@ -106,7 +106,11 @@ function DecideLoader({ clientId, onClose, decision }: DecideDrawerProps) {
       </FormDrawer>
     )
   }
-  const accepted = (proposals.data ?? []).find((proposal) => proposal.status === "aceptada") ?? null
+  // La aceptada de esta venta: la de una venta anterior (perdida y reabierta) ya no vale.
+  const accepted =
+    (proposals.data ?? []).find(
+      (proposal) => proposal.status === "aceptada" && proposal.currentSale !== false,
+    ) ?? null
   if (client.data.organization) {
     return (
       <FormDrawer

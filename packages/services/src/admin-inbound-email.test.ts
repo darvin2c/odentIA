@@ -50,6 +50,7 @@ function mail(overrides: Partial<InboundEmailInput> = {}): InboundEmailInput {
     text: "Hola, adjunto la agenda.",
     receivedAt: new Date(),
     attachments: [],
+    senderVerified: true,
     ...overrides,
   }
 }
@@ -232,6 +233,32 @@ describe("ingestInboundEmail", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "VALIDATION" })
+  })
+})
+
+describe("remitente sin verificar", () => {
+  it("no se liga solo aunque el correo sea de un contacto: queda para que una persona diga de quién es", async () => {
+    const key = inboundAttachmentKey("xlsx")
+    const result = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        from: "rosa@contacto.test",
+        subject: "pacientes.xlsx",
+        senderVerified: false,
+        attachments: [
+          { filename: "pacientes.xlsx", contentType: "text/csv", size: 10, fileKey: key },
+        ],
+      }),
+    )
+    expect(result).toMatchObject({ clientId: null, matchedBy: null, fileIds: [] })
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, result.id))
+    expect(row).toMatchObject({ clientId: null, senderVerified: false })
+    expect((await activities(byContact)).map((a) => a.body)).not.toContain(
+      "Escribió a soporte@: pacientes.xlsx (1 adjunto)",
+    )
   })
 })
 

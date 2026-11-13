@@ -83,9 +83,13 @@ import {
   clientStageSql,
   closeClientSaleAsEntered,
   LOST_REASON_WORDS,
-  PRESENTATION_NOT_DONE_OUTCOMES,
-  proposalReplacedSql,
+  nextSteps,
+  outreachAdminOnlySql,
+  proposalLiveSql,
+  proposalOfOpenSaleSql,
+  proposalReplacedBySql,
   seesTaskKind,
+  taskOverdue,
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
@@ -94,6 +98,7 @@ import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
+import { moneyText } from "./saas-emails.js"
 import { discardWaitlistRequest, inviteFromWaitlist } from "./saas-founders.js"
 import {
   type NegotiationOutcome,
@@ -549,7 +554,7 @@ function taskRowOf(
     product: string
     assigneeName: string | null
   },
-  today: string,
+  now: Date,
 ): TaskRow {
   const { task } = row
   return {
@@ -561,7 +566,7 @@ function taskRowOf(
     title: task.title,
     dueOn: task.dueOn,
     dueAt: task.dueAt,
-    overdue: task.status === "abierta" && task.dueOn < today,
+    overdue: taskOverdue(task, now),
     assignee: task.assigneeUserId
       ? { userId: task.assigneeUserId, name: row.assigneeName ?? "" }
       : null,
@@ -584,7 +589,7 @@ export async function getClientTask(tx: Db, id: string, now = new Date()): Promi
     .where(eq(saasTask.id, id))
     .limit(1)
   if (!row) throw notFound("Tarea")
-  return taskRowOf(row, limaDate(now))
+  return taskRowOf(row, now)
 }
 
 /**
@@ -710,8 +715,7 @@ export async function listClientTasks(
     .where(and(...where))
     .orderBy(asc(saasTask.dueOn), sql`${saasTask.dueAt} asc nulls last`, asc(saasTask.createdAt))
     .limit(500)
-  const today = limaDate(now)
-  return rows.map((row) => taskRowOf(row, today))
+  return rows.map((row) => taskRowOf(row, now))
 }
 
 /* ---------- Oportunidad y decisión ---------- */
@@ -802,7 +806,10 @@ export async function setOpportunity(
   now = new Date(),
 ): Promise<OpportunityRow> {
   requireAdmin(actor)
-  await lockClient(tx, clientId)
+  const client = await lockClient(tx, clientId)
+  // Una clínica que ya entró no tiene venta que cambiar: abrirle una haría que Kairós la siguiera.
+  if (client.organizationId)
+    throw new ServiceError("CLIENT_HAS_ACCOUNT", 409, "Ese cliente ya tiene su cuenta")
   const id = await ensureOpenOpportunity(tx, actor, clientId, now)
   const patch: Partial<typeof saasOpportunity.$inferInsert> = { updatedAt: now }
   if (input.sellerId !== undefined) {
@@ -1039,6 +1046,11 @@ export async function inviteClient(
     proposal = await proposalOfClient(tx, client.id, input.proposalId)
     if (proposal?.status !== "aceptada")
       throw invalidField("proposalId", "Solo se invita con una propuesta aceptada")
+    if (!(await proposalInOpenSale(tx, proposal.id)))
+      throw invalidField(
+        "proposalId",
+        "Esa propuesta es de una venta anterior: invita con la de esta venta o sin propuesta",
+      )
     if (input.planId && input.planId !== proposal.planId)
       throw invalidField("planId", "La invitación lleva el plan de la propuesta aceptada")
   }
@@ -1235,6 +1247,14 @@ export async function applyProposalTerms(
   const by: AdminActor = actor ?? { userId: decidedBy, role: "admin" }
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, proposal.planId)).limit(1)
   if (!plan) throw notFound("Plan")
+  // La clínica aceptó la cuota que dice la propuesta: si el plan cambió de precio o de moneda,
+  // no se da por aplicada; Administración resuelve la cuota a mano.
+  if (plan.priceCents !== proposal.listPriceCents || plan.currency !== proposal.currency)
+    throw new ServiceError(
+      "PROPOSAL_PRICE_CHANGED",
+      409,
+      `La cuota del plan ya no es la de la propuesta (${moneyText(proposal.currency, proposal.listPriceCents)}): sus condiciones no se aplican solas`,
+    )
   const discount =
     proposal.discountBps > 0
       ? await setSaasDiscount(
@@ -1455,6 +1475,8 @@ export interface ProposalRow {
   displayStatus: ProposalDisplayStatus
   /** La versión más nueva que salió después de esta (sin decidir): ya no se envía ni se acepta. */
   replacedBy: number | null
+  /** De la venta abierta (`proposalOfOpenSaleSql`): la de una venta ya cerrada no cuenta para el alta. */
+  currentSale: boolean
   sentAt: Date | null
   decidedAt: Date | null
   acceptedNote: string | null
@@ -1464,8 +1486,8 @@ export interface ProposalRow {
 
 /**
  * «Reemplazada»: enviada y después salió una versión más nueva (`replacedBy`);
- * «vencida»: enviada y su último día ya pasó. Lo único que las calcula; el SQL
- * gemelo es `proposalReplacedSql` y `proposalExpiredSql`.
+ * «vencida»: enviada y su último día ya pasó. El SQL gemelo es
+ * `proposalReplacedBySql` y `proposalLiveSql` (`admin-clients.ts`).
  */
 export function proposalDisplayStatus(
   row: { status: string; validUntil: string; replacedBy?: number | null },
@@ -1478,11 +1500,6 @@ export function proposalDisplayStatus(
 
 /** «Reemplazada por la v3»: lo que se dice de una propuesta que ya no vale porque salió otra. */
 export const replacedWords = (version: number) => `Reemplazada por la v${version}`
-
-/** El SQL gemelo de `proposalDisplayStatus`: si cambia una, cambia la otra. */
-export function proposalExpiredSql(today: string): SQL<boolean> {
-  return sql<boolean>`(${saasProposal.status} = 'enviada' AND ${saasProposal.validUntil} < ${today}::date)`
-}
 
 /**
  * ¿Pide aprobación? Cuando el descuento o la prueba pasan de lo que da el
@@ -1510,6 +1527,7 @@ function proposalRowOf(
     planPriceCents: number
     planCreditCents: number
     replacedBy: number | null
+    currentSale: boolean
   },
   today: string,
 ): ProposalRow {
@@ -1542,6 +1560,7 @@ function proposalRowOf(
     status: p.status as SaasProposalStatus,
     displayStatus: proposalDisplayStatus({ ...p, replacedBy }, today),
     replacedBy,
+    currentSale: Boolean(row.currentSale),
     sentAt: p.sentAt,
     decidedAt: p.decidedAt,
     acceptedNote: p.acceptedNote,
@@ -1550,35 +1569,55 @@ function proposalRowOf(
   }
 }
 
-/** La versión más nueva que salió después de una (`newer.sent_at`): la que la reemplaza. */
-const replacedBySql = sql<number | null>`(select max(newer.version) from admin.saas_proposal newer
-  where newer.client_id = ${saasProposal.clientId} and newer.version > ${saasProposal.version}
-    and newer.sent_at is not null)`
-
 const proposalFields = {
   proposal: saasProposal,
   planName: saasPlan.name,
   planPriceCents: saasPlan.priceCents,
   planCreditCents: saasPlan.creditCents,
-  replacedBy: replacedBySql,
+  replacedBy: proposalReplacedBySql("saas_proposal"),
+  currentSale: proposalOfOpenSaleSql("saas_proposal"),
 }
 
-/** ¿Salió después una versión más nueva de esta propuesta? Su número, o null. */
-async function newerSentVersion(
+/** ¿Salió después una versión más nueva de esta propuesta? Su número, o null (`proposalReplacedBySql`). */
+async function newerSentVersion(tx: Db, proposal: { id: string }): Promise<number | null> {
+  const [row] = await tx.execute(
+    sql`select ${proposalReplacedBySql()} as version from admin.saas_proposal p where p.id = ${proposal.id}`,
+  )
+  const version = (row as { version: number | null } | undefined)?.version
+  return version == null ? null : Number(version)
+}
+
+/** ¿Es de la venta abierta de su cliente (`proposalOfOpenSaleSql`)? */
+async function proposalInOpenSale(tx: Db, id: string): Promise<boolean> {
+  const [row] = await tx.execute(
+    sql`select ${proposalOfOpenSaleSql()} as open from admin.saas_proposal p where p.id = ${id}`,
+  )
+  return Boolean((row as { open?: boolean } | undefined)?.open)
+}
+
+/**
+ * La propuesta aceptada de la venta abierta del cliente, la última, o null:
+ * la que toma el alta («Dar de alta yo»). La de una venta anterior no cuenta.
+ */
+export async function acceptedProposalOfOpenSale(
   tx: Db,
-  proposal: { clientId: string; version: number },
-): Promise<number | null> {
+  clientId: string,
+): Promise<{ id: string; planId: string; planCode: string } | null> {
+  if (!UUID.test(clientId)) return null
   const [row] = await tx
-    .select({ version: max(saasProposal.version) })
+    .select({ id: saasProposal.id, planId: saasProposal.planId, planCode: saasPlan.code })
     .from(saasProposal)
+    .innerJoin(saasPlan, eq(saasPlan.id, saasProposal.planId))
     .where(
       and(
-        eq(saasProposal.clientId, proposal.clientId),
-        sql`${saasProposal.version} > ${proposal.version}`,
-        isNotNull(saasProposal.sentAt),
+        eq(saasProposal.clientId, clientId),
+        eq(saasProposal.status, "aceptada"),
+        proposalOfOpenSaleSql("saas_proposal"),
       ),
     )
-  return row?.version ?? null
+    .orderBy(desc(saasProposal.version))
+    .limit(1)
+  return row ?? null
 }
 
 export async function getSaasProposal(
@@ -2151,23 +2190,32 @@ export async function prepareOutreach(
   return outreachRowOf(row)
 }
 
-async function lockOutreach(tx: Db, id: string) {
+/**
+ * El envío, bloqueado, con si es solo de Administración (`outreachAdminOnlySql`:
+ * lleva una propuesta o sale de algo de Kairós solo de Administración). Para
+ * Soporte ese no existe: la misma respuesta que uno que no hay.
+ */
+async function lockOutreach(tx: Db, actor: AdminActor, id: string) {
   if (!UUID.test(id)) throw notFound("Envío")
-  const [row] = await tx
-    .select()
+  const [found] = await tx
+    .select({ row: saasOutreach, adminOnly: outreachAdminOnlySql(`"saas_outreach"`) })
     .from(saasOutreach)
     .where(eq(saasOutreach.id, id))
     .limit(1)
     .for("update")
-  if (!row) throw notFound("Envío")
-  return row
+  if (!found || (found.adminOnly && actor.role !== "admin")) throw notFound("Envío")
+  return { ...found.row, adminOnly: Boolean(found.adminOnly) }
 }
 
-/** Salió: deja la actividad en la bitácora y, si llevaba una propuesta lista, la pasa a enviada. */
+/**
+ * Salió: deja la actividad en la bitácora (solo de Administración si el envío
+ * lo es) y, si llevaba una propuesta lista, la pasa a enviada.
+ */
 async function outreachWentOut(
   tx: Db,
   actor: AdminActor,
   row: typeof saasOutreach.$inferSelect,
+  adminOnly: boolean,
   now: Date,
 ): Promise<void> {
   const [client] = await tx
@@ -2186,6 +2234,7 @@ async function outreachWentOut(
       body: (row.subject ? `${row.subject}\n\n${row.body}` : row.body).slice(0, 2000),
       contactId: row.contactId,
       proposalId: row.proposalId,
+      adminOnly,
     },
     now,
   )
@@ -2210,7 +2259,7 @@ export async function markOutreachSent(
   result: "enviado" | "incierto",
   now = new Date(),
 ): Promise<OutreachRow> {
-  const row = await lockOutreach(tx, id)
+  const row = await lockOutreach(tx, actor, id)
   if (row.channel !== "correo")
     throw new ServiceError("OUTREACH_NOT_EMAIL", 409, "Ese envío no es un correo")
   if (row.status !== "pendiente")
@@ -2221,7 +2270,7 @@ export async function markOutreachSent(
     .where(eq(saasOutreach.id, id))
     .returning()
   if (!updated) throw notFound("Envío")
-  if (result === "enviado") await outreachWentOut(tx, actor, updated, now)
+  if (result === "enviado") await outreachWentOut(tx, actor, updated, row.adminOnly, now)
   await writeAdminAudit(tx, actor, {
     action: result === "enviado" ? "arm.outreach_sent" : "arm.outreach_uncertain",
     entityId: row.clientId,
@@ -2244,7 +2293,7 @@ export async function resolveOutreach(
 ): Promise<OutreachRow> {
   if (outcome !== "salio" && outcome !== "no_salio")
     throw invalidField("outcome", "Elige si salió o no")
-  const row = await lockOutreach(tx, id)
+  const row = await lockOutreach(tx, actor, id)
   if (row.status !== "pendiente" && row.status !== "incierto")
     throw new ServiceError("OUTREACH_SETTLED", 409, "Ese envío ya tiene su resultado")
   const status: SaasOutreachStatus = outcome === "salio" ? "enviado" : "no_salio"
@@ -2260,7 +2309,7 @@ export async function resolveOutreach(
     .where(eq(saasOutreach.id, id))
     .returning()
   if (!updated) throw notFound("Envío")
-  if (outcome === "salio") await outreachWentOut(tx, actor, updated, now)
+  if (outcome === "salio") await outreachWentOut(tx, actor, updated, row.adminOnly, now)
   await writeAdminAudit(tx, actor, {
     action: outcome === "salio" ? "arm.outreach_resolved_sent" : "arm.outreach_resolved_failed",
     entityId: row.clientId,
@@ -2379,9 +2428,6 @@ type PipelineRaw = {
   proposal_at: Date | string | null
   presented_at: Date | string | null
   scheduled_at: Date | string | null
-  next_kind: string | null
-  next_title: string | null
-  next_due_on: string | null
 }
 
 const SELLING_COLUMNS: ReadonlySet<string> = new Set<PipelineColumn>([
@@ -2420,7 +2466,6 @@ export async function pipeline(
   const since = new Date(now.getTime() - PIPELINE_DECIDED_DAYS * DAY)
   // La etapa es la de la lista y la ficha (`clientStageSql`), leída sobre la misma fila del cliente.
   const stage = sql`(select ${clientStageSql(now)} from ${saasClient} where ${saasClient.id} = c.id)`
-  const notDone = sql.raw(PRESENTATION_NOT_DONE_OUTCOMES.map((code) => `'${code}'`).join(","))
   const rows = (await tx.execute(sql`
     with opp as (
       select distinct on (o.client_id) o.client_id, o.id, o.decision, o.decided_at, o.created_at
@@ -2436,24 +2481,16 @@ export async function pipeline(
       greatest(
         (select max(coalesce(p.decided_at, p.sent_at)) from admin.saas_proposal p
           where p.client_id = c.id and p.created_at >= opp.created_at
-            and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date
-              and not ${proposalReplacedSql()}))),
+            and (p.status = 'aceptada' or ${proposalLiveSql(today)})),
         (select max(r.invited_at) from admin.saas_waitlist_request r
           where r.client_id = c.id and r.status = 'invitada')
       ) as proposal_at,
       (select max(f.happened_at) from admin.saas_follow_up f
-        where f.client_id = c.id and f.kind = 'presentacion' and f.happened_at >= opp.created_at
-          and (f.outcome is null or f.outcome not in (${notDone}))) as presented_at,
+        where f.client_id = c.id and f.kind = 'presentacion' and f.happened_at >= opp.created_at) as presented_at,
       (select max(t.created_at) from admin.saas_task t
-        where t.client_id = c.id and t.kind = 'presentacion' and t.status = 'abierta') as scheduled_at,
-      nt.kind as next_kind, nt.title as next_title, nt.due_on::text as next_due_on
+        where t.client_id = c.id and t.kind = 'presentacion' and t.status = 'abierta') as scheduled_at
     from admin.saas_client c
     join opp on opp.client_id = c.id
-    left join lateral (
-      select t.kind, t.title, t.due_on from admin.saas_task t
-      where t.client_id = c.id and t.status = 'abierta'
-      order by t.due_on, t.due_at nulls last limit 1
-    ) nt on true
     where ${and(...where)}
       and (opp.decision is not null or c.organization_id is null)
     order by c.name
@@ -2465,9 +2502,17 @@ export async function pipeline(
     rows.filter((raw) => !raw.decision).map((raw) => raw.client_id),
     now,
   )
+  // El próximo paso, con la regla de la lista y la ficha: Soporte no ve las tareas de cobro.
+  const next = await nextSteps(
+    tx,
+    actor,
+    rows.map((raw) => raw.client_id),
+    now,
+  )
   const columns = new Map<PipelineColumn, PipelineCard[]>(PIPELINE_COLUMNS.map((key) => [key, []]))
   for (const raw of rows) {
     const decision = (raw.decision as SaasOpportunityDecision | null) ?? null
+    const step = next.get(raw.client_id)
     const opened = asDate(raw.opened_at) ?? now
     const column: PipelineColumn = decision
       ? "decidio"
@@ -2489,10 +2534,7 @@ export async function pipeline(
       clientId: raw.client_id,
       name: raw.name,
       product: productOf(raw.product),
-      nextStep:
-        raw.next_kind && raw.next_title && raw.next_due_on
-          ? { kind: raw.next_kind as SaasTaskKind, title: raw.next_title, dueOn: raw.next_due_on }
-          : null,
+      nextStep: step ? { kind: step.kind, title: step.title, dueOn: step.dueOn } : null,
       daysInStage: Math.max(0, Math.floor((now.getTime() - since.getTime()) / DAY)),
       owner: raw.owner_user_id ? { userId: raw.owner_user_id, name: raw.owner_name ?? "" } : null,
       signals: decision ? [] : (signals.get(raw.client_id) ?? []),
