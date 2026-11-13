@@ -4160,6 +4160,41 @@ await db.transaction((tx) =>
     },
   ),
 )
+// Lucero se registró sola por el QR, embarazada de 30 semanas: su embarazo queda con el día en que
+// lo dijo y sale arriba de su ficha y de la atención con la semana de hoy; todo lo que dijo lleva
+// la misma marca («Lo dijo ella…, sin revisar») hasta que alguien lo revise, y su «No» a las
+// enfermedades se lee «dijo que no», no «niega».
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: {
+          displayName: "Lucero Vega Paz",
+          givenNames: "Lucero",
+          familyName: "Vega Paz",
+          birthDate: "1995-08-22",
+          sex: "F",
+          phone: "+51987000931",
+          docType: "DNI",
+          docNumber: "70090814",
+        },
+        respondent: "patient",
+        privacyAccepted: true,
+        health: {
+          allergies: { state: "recorded", items: [{ substance: "Látex", severity: "desconocida" }] },
+          conditions: { state: "none", items: [] },
+          medications: { state: "recorded", items: [{ name: "Sulfato ferroso" }, { name: "Ácido fólico" }] },
+          personal: { embarazo: true, semanasEmbarazo: 30 },
+        },
+      },
+    },
+  ),
+)
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
 // de «Madre» espera «Confirmar» o «No es representante», tarea `confirmar_representante`)
