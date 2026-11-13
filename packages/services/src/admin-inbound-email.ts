@@ -27,6 +27,7 @@ import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   SAAS_INBOUND_MAILBOXES,
+  type SaasInboundMailbox,
   type SaasInboundMatch,
   saasClient,
   saasInboundEmail,
@@ -454,4 +455,101 @@ export async function assignInboundEmail(
     metadata: { clientId, attachments: attached.fileIds.length, replies },
   })
   return { id: email.id, clientId, fileIds: attached.fileIds }
+}
+
+/** Una respuesta que se le preparó a un correo, con su estado («¿Salió?»). */
+export interface InboundEmailReply {
+  id: string
+  status: string
+  /** La dirección que firmó. */
+  from: string | null
+  subject: string | null
+  body: string
+  createdBy: string | null
+  createdAt: Date
+  sentAt: Date | null
+}
+
+export interface InboundEmailDetail {
+  id: string
+  mailbox: SaasInboundMailbox
+  product: string
+  from: string
+  fromName: string | null
+  to: string
+  subject: string | null
+  /** Nulo después de 30 días: el texto se borra. */
+  text: string | null
+  receivedAt: Date
+  senderVerified: boolean
+  clientId: string | null
+  matchedBy: SaasInboundMatch | null
+  /** A quién del equipo le escribieron, si fue a su dirección. */
+  staff: { userId: string; name: string } | null
+  attachments: number
+  /** Si quien mira puede responderlo: Soporte, solo lo de soporte@. */
+  canReply: boolean
+  replies: InboundEmailReply[]
+}
+
+/**
+ * Un correo que llegó, para leerlo y responderlo, con sus respuestas. Soporte
+ * solo ve lo que llegó a soporte@ (lo comercial puede hablar de precios): lo
+ * demás no existe para él (404).
+ */
+export async function getInboundEmail(
+  tx: Db,
+  actor: AdminActor,
+  emailId: string,
+): Promise<InboundEmailDetail> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(emailId))
+    throw notFound("Correo")
+  const [email] = await tx
+    .select({
+      row: saasInboundEmail,
+      staffName: sql<
+        string | null
+      >`(select u.name from "user" u where u.id = ${saasInboundEmail.staffUserId})`,
+    })
+    .from(saasInboundEmail)
+    .where(eq(saasInboundEmail.id, emailId))
+    .limit(1)
+  if (!email || (actor.role !== "admin" && email.row.mailbox !== "soporte"))
+    throw notFound("Correo")
+  const { row } = email
+  const replies = await tx
+    .select()
+    .from(saasOutreach)
+    .where(eq(saasOutreach.inReplyToEmailId, row.id))
+    .orderBy(desc(saasOutreach.createdAt))
+  return {
+    id: row.id,
+    mailbox: row.mailbox as SaasInboundMailbox,
+    product: row.product,
+    from: row.fromAddress,
+    fromName: row.fromName,
+    to: row.toAddress,
+    subject: row.subject,
+    text: row.textBody,
+    receivedAt: row.receivedAt,
+    senderVerified: row.senderVerified,
+    clientId: row.clientId,
+    matchedBy: (row.matchedBy as SaasInboundMatch | null) ?? null,
+    staff:
+      row.staffUserId && email.staffName
+        ? { userId: row.staffUserId, name: email.staffName }
+        : null,
+    attachments: row.attachments.length,
+    canReply: actor.role === "admin" || row.mailbox === "soporte",
+    replies: replies.map((reply) => ({
+      id: reply.id,
+      status: reply.status,
+      from: reply.fromAddress,
+      subject: reply.subject,
+      body: reply.body,
+      createdBy: reply.createdBy,
+      createdAt: reply.createdAt,
+      sentAt: reply.sentAt,
+    })),
+  }
 }

@@ -66,7 +66,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { brandPaper, type MailBrand, renderEmail } from "@odentia/mail"
+import { brandPaper, type MailBrand, type MailMessage, renderEmail } from "@odentia/mail"
 import {
   and,
   asc,
@@ -2541,6 +2541,22 @@ export interface OutreachEmail {
   /** `In-Reply-To` y `References`, si responde un correo. */
   headers: Record<string, string>
   attachments: Array<{ filename: string; content: Uint8Array; contentType: string }>
+}
+
+/** El mensaje para `mailer.send`: quien firma, la respuesta a esa misma dirección, el Message-ID y el hilo. */
+export function outreachMailMessage(email: OutreachEmail): MailMessage {
+  return {
+    to: email.to,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+    replyTo: email.replyTo,
+    brand: email.brand,
+    from: email.from,
+    ...(email.messageId ? { messageId: email.messageId } : {}),
+    ...(Object.keys(email.headers).length ? { headers: email.headers } : {}),
+    attachments: email.attachments,
+  }
 }
 
 const QUOTE_MAX = 4000

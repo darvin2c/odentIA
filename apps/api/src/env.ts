@@ -60,6 +60,13 @@ const envSchema = z.object({
   // El de vistIA, igual.
   OPTICAL_SMTP_FROM: z.string().optional(),
   /**
+   * Un segundo usuario del mismo servidor (ZeptoMail: otro canal de envío) para
+   * las conversaciones de la administración: «Escribir» y las respuestas a un
+   * correo. Opcionales y van juntos: sin ellos salen por SMTP_USER/SMTP_PASS.
+   */
+  CONVERSATION_SMTP_USER: z.string().optional().default(""),
+  CONVERSATION_SMTP_PASS: z.string().optional().default(""),
+  /**
    * Correo de odentIA que recibe el aviso de cada Hoja de Reclamación (Libro de
    * Reclamaciones de la web). Opcional: sin él solo sale la copia al consumidor.
    */
@@ -67,13 +74,20 @@ const envSchema = z.object({
   /** Buzón que lee las respuestas a los correos de Fundadores (solicitud recibida e invitación). */
   FOUNDERS_EMAIL: z.preprocess((value) => (value === "" ? undefined : value), z.string().email().optional()),
   /**
+   * Buzón comercial (en producción, contacto@odentia32.com): recibe el aviso de
+   * cada cliente nuevo y las respuestas a la solicitud y a la invitación de
+   * Fundadores. Sin él, todo eso va a FOUNDERS_EMAIL.
+   */
+  SALES_EMAIL: z.preprocess((value) => (value === "" ? undefined : value), z.string().email().optional()),
+  /**
    * Buzón de soporte de odentIA. Los avisos los envía el worker; aquí se
    * valida igual para que una dirección mal escrita falle al arrancar.
    */
   SUPPORT_INBOX_EMAIL: z.union([z.literal(""), z.email()]).default(""),
   /**
-   * Secreto compartido con el worker de Cloudflare que recibe el correo de
-   * soporte@ y contacto@ y lo manda firmado (HMAC sha256) a `/api/inbound/email`.
+   * Secreto compartido con el worker de Cloudflare que recibe el correo de los
+   * buzones (soporte@, contacto@, hola@, fundadores@) y de la dirección de cada
+   * persona del equipo, y lo manda firmado (HMAC sha256) a `/api/inbound/email`.
    * Opcional: sin él esa ruta responde 503 y el correo solo se reenvía.
    */
   INBOUND_EMAIL_SECRET: z.preprocess(

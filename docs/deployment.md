@@ -40,14 +40,16 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   que es el panel. El Libro de Reclamaciones y la solicitud de Fundadores envían desde el
   navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y
   `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
-  `FOUNDERS_EMAIL` es el buzón de Fundadores: lee las respuestas a sus correos y recibe
-  «Solicitud nueva en la lista de espera» por cada solicitud nueva, con la clínica, el
-  producto, la ciudad y el país (nunca el correo ni el celular de quien pidió) y el botón
-  a esa solicitud en `ADMIN_URL`. El aviso sale una vez por solicitud, aparte de la copia a
-  quien pidió, sin reintentos y con un tope de 20 por hora por proceso; lo que no sale queda
-  en el registro con el id de la solicitud, que igual se ve en Inicio de la administración.
-  Sin `FOUNDERS_EMAIL` no sale ningún aviso, esos correos no prometen que alguien lea las
-  respuestas y la API lo advierte al arrancar en producción.
+  `SALES_EMAIL` es el buzón comercial (en producción, `contacto@odentia32.com`): lee las
+  respuestas a la solicitud y a la invitación de Fundadores (lo que recibe la clínica sigue
+  nombrando Fundadores) y recibe «Cliente nuevo: <clínica> pidió entrar a <marca>» por cada
+  solicitud nueva, con la clínica, el producto, la ciudad y el país (nunca el correo ni el
+  celular de quien pidió) y el botón «Abrir la ficha» a su cliente en `ADMIN_URL`. Sin él, todo
+  eso va a `FOUNDERS_EMAIL`, el buzón de Fundadores. El aviso sale una vez por solicitud, aparte
+  de la copia a quien pidió, sin reintentos y con un tope de 20 por hora por proceso; lo que no
+  sale queda en el registro con el id de la solicitud, que igual se ve en Clientes. Sin los dos
+  no sale ningún aviso, esos correos no prometen que alguien lea las respuestas y la API lo
+  advierte al arrancar en producción (sin `SALES_EMAIL`, también avisa que va a Fundadores).
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
@@ -377,12 +379,19 @@ borrado; el correo y su adjunto se borran al terminar la carga y, como máximo, 
 de recibidos, a mano: nada los borra solo. Es la constancia interna de cómo se cumple lo
 que promete la carta, no una evaluación de cumplimiento legal.
 
-### Correo entrante
+### Correo entrante y saliente de la administración
 
-`soporte@` y `contacto@` de los tres dominios pasan por el Email Worker
-`sallca-correo-entrante` (`infra/cloudflare/email-inbound`, ADR 0185): lo reenvía al buzón de
-siempre (`FORWARD_TO`) y además lo manda firmado a `POST /api/inbound/email`, donde la
-administración lo liga a su cliente. `INBOUND_EMAIL_SECRET` va en la API (entorno de
+`soporte@`, `contacto@`, `hola@` y `fundadores@` de los tres dominios, y por el atrapa todo
+la dirección de cada persona del equipo (`<mail_local>@`, la que se ve en Equipo), pasan por
+el Email Worker `sallca-correo-entrante` (`infra/cloudflare/email-inbound`, ADR 0185): los
+buzones los reenvía al buzón de siempre (`FORWARD_TO`) y la dirección de una persona, a su
+copia (`mail_copy_to`, que tiene que estar verificada en Email Routing); además los manda
+firmados a `POST /api/inbound/email`, donde la administración los liga a su cliente. Una
+dirección que no es de nadie se rechaza. Lo que se responde desde el ARM sale con el nombre
+y la dirección de quien responde (lo de `soporte@`, desde `soporte@`), con `Reply-To` igual
+al remitente, y no deja copia en el buzón. `CONVERSATION_SMTP_USER` y
+`CONVERSATION_SMTP_PASS` (opcionales, juntas) son otro canal de ZeptoMail del mismo
+`SMTP_HOST` para esas conversaciones; vacías, salen por el de siempre. `INBOUND_EMAIL_SECRET` va en la API (entorno de
 producción del proyecto) y, con el mismo valor, como secreto del Worker; sin él la ruta
 responde 503 y el correo sigue llegando solo al buzón. Se genera una vez (`openssl rand -hex 32`);
 rotarlo es cambiarlo en los dos lados a la vez. El Worker no se despliega desde el repositorio

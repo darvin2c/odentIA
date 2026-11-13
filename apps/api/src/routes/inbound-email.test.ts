@@ -6,7 +6,10 @@ import {
   saasClientContact,
   saasClientFile,
   saasInboundEmail,
+  saasOutreach,
 } from "@odentia/db/schema/admin-arm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
+import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import type { Storage } from "@odentia/services"
 import { eq } from "drizzle-orm"
@@ -334,6 +337,101 @@ describe("el correo", () => {
     expect(response.status).toBe(400)
     const body = (await response.json()) as { error: { fields: Record<string, string> } }
     expect(body.error.fields).toHaveProperty("mailbox")
+  })
+})
+
+describe("la dirección de una persona del equipo", () => {
+  beforeAll(async () => {
+    await ownerDb.insert(user).values([
+      { id: "ie-ada", name: "Ada Lovelace", email: "ada@gmail.test" },
+      { id: "ie-ido", name: "Gonzalo Ido", email: "gonzalo@gmail.test" },
+    ])
+    // La base les pone su dirección al crear la fila: ada.lovelace y gonzalo.ido.
+    await ownerDb.insert(adminStaff).values([
+      { userId: "ie-ada", role: "admin", mailCopyTo: "ada.copia@gmail.test" },
+      { userId: "ie-ido", role: "admin", active: false },
+    ])
+    await ownerDb.insert(saasOutreach).values({
+      clientId,
+      channel: "correo",
+      toAddress: "dra.ana@clinica-correo.test",
+      subject: "Hola",
+      body: "Hola, doctora.",
+      fromAddress: "gonzalo.ido@odentia32.com",
+      messageId: "<nuestro-1@odentia32.com>",
+    })
+  })
+
+  const toPerson = (messageId: string, localPart: string, extra: Record<string, unknown> = {}) =>
+    email(messageId, {
+      mailbox: "persona",
+      localPart,
+      to: `${localPart}@odentia32.com`,
+      ...extra,
+    })
+
+  it("existe: entra a su nombre y la API dice a dónde va su copia", async () => {
+    const response = await send(toPerson("<a-ada@test>", "ada.lovelace"))
+    expect(response.status).toBe(201)
+    const { data } = (await response.json()) as { data: { copyTo: string | null } }
+    expect(data.copyTo).toBe("ada.copia@gmail.test")
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<a-ada@test>"))
+    expect(row).toMatchObject({ mailbox: "persona", staffUserId: "ie-ada" })
+    // La misma entrega otra vez: también dice su copia.
+    const again = await send(toPerson("<a-ada@test>", "ada.lovelace"))
+    expect(((await again.json()) as { data: { copyTo: string | null } }).data.copyTo).toBe(
+      "ada.copia@gmail.test",
+    )
+  })
+
+  it("no es de nadie: 404 MAILBOX_UNKNOWN y no se guarda nada", async () => {
+    const before = objects.size
+    const response = await send(
+      toPerson("<a-nadie@test>", "nadie", {
+        attachments: [{ filename: "a.pdf", contentType: "application/pdf", base64: PDF }],
+      }),
+    )
+    expect(response.status).toBe(404)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "MAILBOX_UNKNOWN",
+    )
+    expect(objects.size).toBe(before)
+  })
+
+  it("ya no está en el equipo: solo entra si responde un correo que salió con su dirección", async () => {
+    expect((await send(toPerson("<a-ido-1@test>", "gonzalo.ido"))).status).toBe(404)
+    const reply = await send(
+      toPerson("<a-ido-2@test>", "gonzalo.ido", {
+        inReplyTo: "<nuestro-1@odentia32.com>",
+        references: "<otro@test> <nuestro-1@odentia32.com>",
+      }),
+    )
+    expect(reply.status).toBe(201)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<a-ido-2@test>"))
+    // Responde un envío nuestro a ese mismo correo, con el remitente verificado: se liga por el hilo.
+    expect(row).toMatchObject({
+      staffUserId: "ie-ido",
+      clientId,
+      matchedBy: "hilo",
+      inReplyTo: "<nuestro-1@odentia32.com>",
+      references: "<otro@test> <nuestro-1@odentia32.com>",
+    })
+  })
+
+  it("la parte local va solo con la dirección de una persona", async () => {
+    expect((await send(email("<a-mal-1@test>", { mailbox: "persona" }))).status).toBe(400)
+    expect(
+      (await send(email("<a-mal-2@test>", { mailbox: "hola", localPart: "ada.lovelace" }))).status,
+    ).toBe(400)
+    const hola = await send(email("<a-hola@test>", { mailbox: "hola", to: "hola@odentia32.com" }))
+    expect(hola.status).toBe(201)
+    expect(((await hola.json()) as { data: { copyTo: string | null } }).data.copyTo).toBeNull()
   })
 })
 

@@ -181,6 +181,16 @@ export interface AppDeps {
   complaintsEmail?: string | undefined
   /** Buzón que lee las respuestas a los correos de Fundadores (FOUNDERS_EMAIL). */
   foundersEmail?: string | undefined
+  /**
+   * Buzón comercial (SALES_EMAIL): el aviso de cliente nuevo y las respuestas a la
+   * solicitud y a la invitación. Sin él, `foundersEmail`.
+   */
+  salesEmail?: string | undefined
+  /**
+   * Las conversaciones de la administración («Escribir», las respuestas a un correo y lo
+   * que se aprueba de Kairós) por su propio canal (CONVERSATION_SMTP_*). Sin él, `mailer`.
+   */
+  conversationMailer?: Mailer
   /** La conexión LISTEN que comparten todos los streams del proceso (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -515,7 +525,7 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
       panelUrlOf,
-      replyTo: deps.foundersEmail,
+      replyTo: deps.salesEmail ?? deps.foundersEmail,
     }),
   )
   // El ARM (ADR 0185): clientes desde el primer contacto, Kairós y sus reportes.
@@ -524,6 +534,8 @@ export function createApp(deps: AppDeps) {
     createAdminClientsRoute({
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
+      ...(deps.conversationMailer ? { conversationMailer: deps.conversationMailer } : {}),
+      invitationReplyTo: deps.salesEmail ?? deps.foundersEmail,
       storage: deps.storage,
       panelUrlOf,
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
@@ -536,6 +548,7 @@ export function createApp(deps: AppDeps) {
     createAdminKairosRoute({
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
+      ...(deps.conversationMailer ? { conversationMailer: deps.conversationMailer } : {}),
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
     }),
   )
@@ -600,11 +613,11 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       mailer: deps.mailer,
       remoteAddress: deps.registrationRemoteAddress,
-      replyTo: deps.foundersEmail,
+      replyTo: deps.salesEmail ?? deps.foundersEmail,
       productOf: productOfRequest,
-      // El aviso «Solicitud nueva en la lista de espera»: al buzón de Fundadores, con el enlace a la solicitud.
+      // El aviso «Cliente nuevo»: al buzón comercial (o al de Fundadores), con el enlace a su ficha.
       adminURL: deps.adminURL,
-      teamEmail: deps.foundersEmail,
+      teamEmail: deps.salesEmail ?? deps.foundersEmail,
     }),
   )
   // Libro de Reclamaciones de odentIA.

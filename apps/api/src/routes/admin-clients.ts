@@ -58,6 +58,7 @@ import {
   founderInvitationEmail,
   founderOffer,
   getClient,
+  getInboundEmail,
   getSaasProposal,
   inviteClient,
   issueFields,
@@ -73,13 +74,16 @@ import {
   mergeClients,
   moveClientTask,
   type OrganizationBillingLoaders,
+  type OutreachEmail,
   type OutreachRow,
   onboardingSteps,
   outreachEmail,
+  outreachMailMessage,
+  outreachSender,
   PRESENTATION_OUTCOMES,
   pipeline,
+  prepareEmailReply,
   prepareOutreach,
-  productMailDomain,
   proposalPdf,
   recordPresentation,
   registerClientFile,
@@ -121,8 +125,16 @@ export interface AdminClientsDeps {
   storage: Storage
   /** El panel de cada producto: la invitación se acepta en el dominio de la clínica. */
   panelUrlOf: (product: ClinicalProduct) => string
-  /** A quién van las respuestas de lo que sale; por defecto, contacto@<dominio del producto>. */
-  replyToOf?: (product: ClinicalProduct) => string
+  /**
+   * Por dónde salen las conversaciones («Escribir» y las respuestas a un correo):
+   * el canal de ZeptoMail para conversaciones (`CONVERSATION_SMTP_*`); sin él, `mailer`.
+   */
+  conversationMailer?: Mailer
+  /**
+   * A dónde responde la clínica la invitación de Fundadores: el buzón comercial
+   * (SALES_EMAIL, con respaldo a FOUNDERS_EMAIL). Sin él, la invitación no promete respuesta.
+   */
+  invitationReplyTo?: string | undefined
   /** Kairós con modelo; sin él, el doble determinista (sin gasto). */
   kairos?: KairosWriter
   /** Lo mismo que usa «Alta asistida» en Organizaciones. */
@@ -350,6 +362,11 @@ const resolveBody = z.strictObject({
   outcome: z.enum(["salio", "no_salio"], "Elige si salió o no"),
 })
 const assignBody = z.strictObject({ clientId: z.uuid("Elige el cliente") })
+const replyBody = z.strictObject({
+  body: text(5000, "la respuesta"),
+  proposalId: optionalId("la propuesta"),
+  kairosItemId: optionalId("el borrador de Kairós"),
+})
 
 const annotatePreviewBody = z.strictObject({ text: text(4000, "qué pasó") })
 
@@ -450,8 +467,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   }
   const owner = <T>(fn: (tx: Db) => Promise<T>): Promise<T> =>
     deps.ownerDb.transaction((tx) => fn(tx as Db))
-  const replyToOf = (product: ClinicalProduct) =>
-    deps.replyToOf?.(product) ?? `contacto@${productMailDomain(product)}`
+  const conversations = deps.conversationMailer ?? deps.mailer
   const staffRun = <T>(c: Context, status: 200 | 201, fn: (actor: AdminActor) => Promise<T>) =>
     runService(c, status, () => fn(staffOf(c)))
   const adminRun = <T>(c: Context, status: 200 | 201, fn: (actor: AdminActor) => Promise<T>) =>
@@ -585,8 +601,19 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     try {
       const actor = adminOf(c)
       const pdf = await owner(async (tx) => {
-        await getSaasProposal(tx, actor, c.req.param("pid"))
-        return proposalPdf(tx, c.req.param("pid"))
+        const proposal = await getSaasProposal(tx, actor, c.req.param("pid"))
+        // Dice que se puede escribir a quien la mira (si la envía, sale con su dirección).
+        const [client] = await tx
+          .select({ product: saasClient.product })
+          .from(saasClient)
+          .where(eq(saasClient.id, proposal.clientId))
+          .limit(1)
+        const sender = await outreachSender(
+          tx,
+          actor,
+          isClinicalProduct(client?.product) ? client.product : "dental",
+        )
+        return proposalPdf(tx, c.req.param("pid"), sender.address)
       })
       return c.body(pdf.bytes.slice(), 200, {
         "content-type": "application/pdf",
@@ -660,6 +687,31 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       const body = parse(assignBody, raw)
       return owner((tx) => assignInboundEmail(tx, actor, c.req.param("emailId"), body.clientId))
     })
+  })
+
+  /** Un correo que llegó, para leerlo y responderlo. Soporte solo ve lo de soporte@. */
+  app.get("/inbound/:emailId", (c) =>
+    staffRun(c, 200, (actor) => owner((tx) => getInboundEmail(tx, actor, c.req.param("emailId")))),
+  )
+
+  /**
+   * Responder un correo que llegó (con o sin cliente): la misma reserva y el
+   * mismo envío de «Escribir». Lo de soporte@ sale desde soporte@ y lo responde
+   * Soporte o Administración; lo demás, solo Administración, con su dirección.
+   */
+  app.post("/inbound/:emailId/reply", async (c) => {
+    const raw = await bodyOf(c)
+    try {
+      const actor = staffOf(c)
+      const body = parse(replyBody, raw)
+      const { outreach, mail } = await owner(async (tx) => {
+        const row = await prepareEmailReply(tx, actor, c.req.param("emailId"), body)
+        return { outreach: row, mail: await outreachEmail(tx, row.id) }
+      })
+      return await sendReserved(c, actor, outreach, mail)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
   })
 
   /* ----- Clientes ----- */
@@ -947,7 +999,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
               url,
               expiresText: dayText(issued.expiresAt),
               offer: issued.offer,
-              replyTo: replyToOf(product),
+              replyTo: deps.invitationReplyTo,
               brand: productWords(product).brand,
             }),
           })
@@ -1094,10 +1146,69 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
   })
 
   /**
+   * El correo de un envío ya reservado, después del commit: sale por el canal
+   * de conversaciones con quien firma, su Message-ID y el hilo, y se marca
+   * `enviado`, o `incierto` si se cortó (502 `SEND_UNKNOWN`, nunca se reintenta:
+   * lo resuelve una persona con «¿Salió?»).
+   */
+  const sendReserved = async (
+    c: Context,
+    actor: AdminActor,
+    outreach: OutreachRow,
+    mail: OutreachEmail,
+  ) => {
+    let result: "enviado" | "incierto" = "enviado"
+    try {
+      await conversations.send(outreachMailMessage(mail))
+    } catch {
+      // Un corte a mitad no dice si salió: queda como incierto y no se repite solo.
+      result = "incierto"
+    }
+    let marked: OutreachRow
+    try {
+      marked = await owner(async (tx) => {
+        const row = await markOutreachSent(tx, actor, outreach.id, result)
+        await settleKairosOutreach(tx, row.id)
+        return row
+      })
+    } catch (error) {
+      // Salió (o quizá) pero no se pudo anotar: queda pendiente para que una persona diga si salió.
+      console.error(`ARM: no se anotó el resultado del envío ${outreach.id}`, error)
+      return c.json(
+        {
+          error: {
+            ...errorBody(
+              c,
+              "SEND_UNKNOWN",
+              "No se pudo anotar si el correo salió: revisa en Zoho y marca si salió o no",
+            ).error,
+            outreachId: outreach.id,
+          },
+        },
+        502,
+      )
+    }
+    if (result === "incierto")
+      return c.json(
+        {
+          error: {
+            ...errorBody(
+              c,
+              "SEND_UNKNOWN",
+              "No se sabe si el correo salió: revisa en Zoho y marca si salió o no antes de volver a enviarlo",
+            ).error,
+            outreachId: marked.id,
+          },
+        },
+        502,
+      )
+    return c.json({ data: { outreach: marked, url: null } }, 201)
+  }
+
+  /**
    * Escribir. Correo: se reserva (`pendiente`), sale después del commit con la
-   * marca del producto y se marca `enviado`, o `incierto` si se cortó (502
-   * `SEND_UNKNOWN`, nunca se reintenta: lo resuelve una persona). WhatsApp:
-   * devuelve el enlace con el texto y queda pendiente hasta «Salió»/«No salió».
+   * marca del producto y quien escribe (`sendReserved`). WhatsApp: devuelve el
+   * enlace con el texto y queda pendiente hasta «Salió»/«No salió».
    */
   app.post(`/${ID}/outreach`, async (c) => {
     const raw = await bodyOf(c)
@@ -1113,69 +1224,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
         }
       })
       if (!mail) return c.json({ data: { outreach, url: outreach.whatsappUrl } }, 201)
-      const [client] = await deps.ownerDb
-        .select({ product: saasClient.product })
-        .from(saasClient)
-        .where(eq(saasClient.id, outreach.clientId))
-        .limit(1)
-      const replyTo =
-        deps.replyToOf && isClinicalProduct(client?.product)
-          ? deps.replyToOf(client.product)
-          : mail.replyTo
-      let result: "enviado" | "incierto" = "enviado"
-      try {
-        await deps.mailer.send({
-          to: mail.to,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text,
-          replyTo,
-          brand: mail.brand,
-          attachments: mail.attachments,
-        })
-      } catch {
-        // Un corte a mitad no dice si salió: queda como incierto y no se repite solo.
-        result = "incierto"
-      }
-      let marked: OutreachRow
-      try {
-        marked = await owner(async (tx) => {
-          const row = await markOutreachSent(tx, actor, outreach.id, result)
-          await settleKairosOutreach(tx, row.id)
-          return row
-        })
-      } catch (error) {
-        // Salió (o quizá) pero no se pudo anotar: queda pendiente para que una persona diga si salió.
-        console.error(`ARM: no se anotó el resultado del envío ${outreach.id}`, error)
-        return c.json(
-          {
-            error: {
-              ...errorBody(
-                c,
-                "SEND_UNKNOWN",
-                "No se pudo anotar si el correo salió: revisa en Zoho y marca si salió o no",
-              ).error,
-              outreachId: outreach.id,
-            },
-          },
-          502,
-        )
-      }
-      if (result === "incierto")
-        return c.json(
-          {
-            error: {
-              ...errorBody(
-                c,
-                "SEND_UNKNOWN",
-                "No se sabe si el correo salió: revisa en Zoho y marca si salió o no antes de volver a enviarlo",
-              ).error,
-              outreachId: marked.id,
-            },
-          },
-          502,
-        )
-      return c.json({ data: { outreach: marked, url: null } }, 201)
+      return await sendReserved(c, actor, outreach, mail)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }

@@ -17,6 +17,7 @@ import type { MailMessage } from "@odentia/mail"
 import {
   type AdminActor,
   createSaasPlan,
+  ingestInboundEmail,
   limaDate,
   ServiceError,
   type Storage,
@@ -214,6 +215,7 @@ beforeAll(async () => {
       kairos,
       startTrial: startSaasTrial,
       panelUrlOf: () => "https://app.odentia.localhost",
+      invitationReplyTo: "contacto@odentia32.com",
       mailer: {
         send: async (message) => {
           mailAttempts += 1
@@ -550,7 +552,7 @@ describe("envíos", () => {
     expect(mailAttempts - attemptsBefore).toBe(1)
   })
 
-  it("el correo que sale va con la marca del producto, responde a contacto@ y queda enviado", async () => {
+  it("el correo que sale va con la marca del producto, firma quien escribe, le responden a ella y queda enviado", async () => {
     const clientId = await newClient("Consultorio Pardo (ficticio)", "bien@andes.test")
     const response = await call("POST", `/${clientId}/outreach`, SUPPORT, {
       channel: "correo",
@@ -565,9 +567,12 @@ describe("envíos", () => {
     expect(mail).toMatchObject({
       to: "bien@andes.test",
       subject: "Su demo",
-      replyTo: "contacto@odentia32.com",
+      from: { name: "Sara Soporte · odentIA", address: "sara.soporte@odentia32.com" },
+      replyTo: "sara.soporte@odentia32.com",
       brand: "odentia",
     })
+    expect(mail?.messageId).toMatch(/^<[0-9a-f-]{36}@odentia32\.com>$/)
+    expect(data.outreach.from).toBe("sara.soporte@odentia32.com")
   })
 
   it("WhatsApp devuelve el enlace con el texto y queda pendiente hasta «Salió»", async () => {
@@ -597,6 +602,105 @@ describe("envíos", () => {
         })
       ).status,
     ).toBe(409)
+  })
+})
+
+describe("responder un correo", () => {
+  async function arrived(mailbox: "soporte" | "hola", messageId: string, clientId?: string) {
+    const result = await ownerDb.transaction((tx) =>
+      ingestInboundEmail(tx as Db, {
+        mailbox,
+        product: "dental",
+        messageId,
+        from: clientId ? "responde@andes.test" : "nueva@gmail.test",
+        fromName: "Elena Quispe",
+        to: `${mailbox}@odentia32.com`,
+        subject: "Consulta",
+        text: "Hola,\n¿cómo empiezo?",
+        receivedAt: new Date(),
+        senderVerified: true,
+      }),
+    )
+    return result.id
+  }
+
+  it("Soporte responde lo de soporte@ desde soporte@; lo demás le responde 403", async () => {
+    const support = await arrived("soporte", "<r-soporte@gmail.test>")
+    const response = await call("POST", `/inbound/${support}/reply`, SUPPORT, {
+      body: "Ya lo revisamos.",
+    })
+    await expectStatus(response, 201)
+    expect((await json(response)).data.outreach).toMatchObject({
+      status: "enviado",
+      clientId: null,
+      from: "soporte@odentia32.com",
+      inReplyToEmailId: support,
+    })
+    expect(sent.at(-1)).toMatchObject({
+      to: "nueva@gmail.test",
+      subject: "Re: Consulta",
+      from: { name: "Soporte · odentIA", address: "soporte@odentia32.com" },
+      replyTo: "soporte@odentia32.com",
+      headers: { "In-Reply-To": "<r-soporte@gmail.test>", References: "<r-soporte@gmail.test>" },
+    })
+    expect(sent.at(-1)?.text).toContain("> ¿cómo empiezo?")
+    const commercial = await arrived("hola", "<r-hola@gmail.test>")
+    await expectStatus(
+      await call("POST", `/inbound/${commercial}/reply`, SUPPORT, { body: "Hola" }),
+      403,
+    )
+    // Tampoco lo lee: para Soporte no existe.
+    await expectStatus(await call("GET", `/inbound/${commercial}`, SUPPORT), 404)
+    const read = await call("GET", `/inbound/${support}`, SUPPORT)
+    await expectStatus(read, 200)
+    expect((await json(read)).data).toMatchObject({
+      id: support,
+      mailbox: "soporte",
+      text: "Hola,\n¿cómo empiezo?",
+      canReply: true,
+      replies: [expect.objectContaining({ status: "enviado", from: "soporte@odentia32.com" })],
+    })
+  })
+
+  it("Administración responde lo comercial con su dirección; sin cliente no adjunta propuesta", async () => {
+    const commercial = await arrived("hola", "<r-hola-2@gmail.test>")
+    const someId = "5e1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f"
+    await expectStatus(
+      await call("POST", `/inbound/${commercial}/reply`, ADMIN, {
+        body: "Hola",
+        proposalId: someId,
+      }),
+      400,
+    )
+    await expectStatus(
+      await call("POST", `/inbound/${commercial}/reply`, ADMIN, { body: " " }),
+      400,
+    )
+    const response = await call("POST", `/inbound/${commercial}/reply`, ADMIN, {
+      body: "Hola, Elena: le cuento cómo empezar.",
+    })
+    await expectStatus(response, 201)
+    expect(sent.at(-1)).toMatchObject({
+      from: { name: "Ada Admin · odentIA", address: "ada.admin@odentia32.com" },
+      replyTo: "ada.admin@odentia32.com",
+    })
+    await expectStatus(
+      await call("POST", `/inbound/5e1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f/reply`, ADMIN, {
+        body: "Hola",
+      }),
+      404,
+    )
+  })
+
+  it("si se corta, queda incierto y no se reintenta, como «Escribir»", async () => {
+    const email = await arrived("soporte", "<r-corte@gmail.test>")
+    failMail = true
+    const attempts = mailAttempts
+    const response = await call("POST", `/inbound/${email}/reply`, ADMIN, { body: "Hola" })
+    failMail = false
+    await expectStatus(response, 502)
+    expect((await json(response)).error.code).toBe("SEND_UNKNOWN")
+    expect(mailAttempts - attempts).toBe(1)
   })
 })
 
@@ -708,7 +812,7 @@ describe("propuesta, invitar y dar de alta", () => {
     expect(subscription?.discountBps ?? 0).toBe(0)
   })
 
-  it("invitar devuelve el enlace y envía el correo con la respuesta a contacto@", async () => {
+  it("invitar devuelve el enlace y envía el correo con la respuesta al buzón comercial (SALES_EMAIL)", async () => {
     const clientId = await newClient("Clínica Invitada (ficticia)", "invitada@andes.test")
     const response = await call("POST", `/${clientId}/invite`, ADMIN, {
       email: "invitada@andes.test",

@@ -2,11 +2,14 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { SAAS_INBOUND_MAILBOXES, saasInboundEmail } from "@odentia/db/schema/admin-arm"
+import { adminStaff } from "@odentia/db/schema/admin-core"
 import {
   INBOUND_ATTACHMENTS_MAX,
   inboundAttachmentKey,
+  inboundPersonOf,
   ingestInboundEmail,
   type Storage,
+  threadMessageIds,
 } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import type { Context } from "hono"
@@ -17,10 +20,15 @@ import { errorBody } from "../lib/error.js"
 import { serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Correo que llega a soporte@ y contacto@ de los tres productos (ADR 0185). Lo
- * recibe el worker de Cloudflare Email Routing (`infra/cloudflare/email-inbound`),
- * que lo reenvía como hoy y además lo manda aquí firmado. Montaje público, sin
- * cookie ni `Origin`: vale solo con la firma.
+ * Correo que llega a los buzones de los tres productos (soporte@, contacto@,
+ * hola@, fundadores@) y a la dirección de cada persona del equipo (`persona`,
+ * con su `localPart`). Lo recibe el worker de Cloudflare Email Routing
+ * (`infra/cloudflare/email-inbound`), que lo reenvía y además lo manda aquí
+ * firmado. Montaje público, sin cookie ni `Origin`: vale solo con la firma.
+ *
+ * La dirección de una persona que no es de nadie responde 404
+ * `MAILBOX_UNKNOWN` sin guardar nada (el worker rechaza el correo); si es de
+ * alguien, la respuesta dice `copyTo`, el buzón donde el worker deja su copia.
  *
  * Firma (contrato con el worker):
  * - `x-sallca-timestamp`: segundos Unix de cuando se firmó; se acepta ±5 min.
@@ -63,6 +71,11 @@ const attachmentBody = z.object({
 
 const emailBody = z.object({
   mailbox: z.enum(SAAS_INBOUND_MAILBOXES, "Buzón no válido"),
+  /** Solo con `persona`: la parte local del destinatario, sin `+etiqueta`. */
+  localPart: z.string().trim().toLowerCase().max(64).nullish(),
+  /** Las cabeceras del hilo, recortadas por el worker. */
+  inReplyTo: z.string().max(998).nullish(),
+  references: z.string().max(8000).nullish(),
   product: z.enum(CLINICAL_PRODUCTS, "Producto no válido"),
   messageId: z.string().trim().min(1, "Falta el Message-ID").max(998, "Message-ID demasiado largo"),
   from: z.string().trim().min(3).max(254),
@@ -260,15 +273,49 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
       const parsed = emailBody.safeParse(json)
       if (!parsed.success) return validationError(c, parsed.error.issues)
       const email = parsed.data
+      if ((email.mailbox === "persona") !== Boolean(email.localPart))
+        return c.json(
+          errorBody(c, "VALIDATION", "La dirección de una persona va con su parte local", {
+            localPart: "La dirección de una persona va con su parte local, y solo ella",
+          }),
+          400,
+        )
 
       // Ya llegó: no se sube nada otra vez (la repetición de una misma entrega).
       const [known] = await deps.ownerDb
-        .select({ id: saasInboundEmail.id })
+        .select({ id: saasInboundEmail.id, copyTo: adminStaff.mailCopyTo })
         .from(saasInboundEmail)
+        .leftJoin(adminStaff, eq(adminStaff.userId, saasInboundEmail.staffUserId))
         .where(eq(saasInboundEmail.messageId, email.messageId))
         .limit(1)
       if (known)
-        return c.json({ data: { id: known.id, duplicate: true, stored: 0, skipped: 0 } }, 200)
+        return c.json(
+          {
+            data: {
+              id: known.id,
+              duplicate: true,
+              stored: 0,
+              skipped: 0,
+              copyTo: known.copyTo ?? null,
+            },
+          },
+          200,
+        )
+
+      // La dirección de una persona: antes de subir nada, que sea de alguien.
+      if (email.localPart) {
+        try {
+          await inboundPersonOf(
+            deps.ownerDb,
+            email.localPart,
+            threadMessageIds(email.inReplyTo, email.references),
+          )
+        } catch (error) {
+          const response = serviceErrorResponse(c, error)
+          if (response) return response
+          throw error
+        }
+      }
 
       const accepted: { filename: string; kind: AttachmentKind; bytes: Uint8Array }[] = []
       let skipped = 0
@@ -320,6 +367,9 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
             tx as Db,
             {
               mailbox: email.mailbox,
+              localPart: email.localPart ?? null,
+              inReplyTo: email.inReplyTo ?? null,
+              references: email.references ?? null,
               product: email.product,
               messageId: email.messageId,
               from: email.from,
@@ -343,6 +393,7 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
               duplicate: result.duplicate,
               stored: result.duplicate ? 0 : uploaded.length,
               skipped,
+              copyTo: result.copyTo,
             },
           },
           result.duplicate ? 200 : 201,
