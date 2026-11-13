@@ -98,8 +98,14 @@ const duplicatesOf = (error: unknown): DuplicateHint[] | null => {
   return parsed.success ? parsed.data : []
 }
 
+/**
+ * El equipo, para elegir responsable. Solo Administración lo lee (y solo ella
+ * elige otro responsable): Soporte no lo pide, que la API le responde 403.
+ */
 export function useStaff() {
+  const isAdmin = useIsAdmin()
   return useQuery({
+    enabled: isAdmin,
     queryKey: ["admin", "staff"],
     queryFn: async () =>
       staffSchema

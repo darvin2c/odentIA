@@ -624,7 +624,7 @@ function RevenueTab({ months }: { months: number }) {
         <Kpi
           title="Pagan"
           value={count(data.paying.value)}
-          description={`${data.paying.words} · ${data.withDiscount.words} con descuento`}
+          description={`${data.paying.words} · ${data.withDiscount.words}`}
           how={`${data.paying.howCalculated} ${data.withDiscount.howCalculated}`}
         />
         <Kpi
