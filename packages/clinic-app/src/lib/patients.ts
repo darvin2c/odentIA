@@ -638,6 +638,25 @@ export function splitPlans<T extends TreatmentPlanWithStatus>(plans: readonly T[
   }
 }
 
+/**
+ * Un formulario finalizado, para leerlo: cada pregunta que se hizo con su respuesta
+ * en palabras, y sus adendas. Lo dice el servidor, igual que en la copia de la historia.
+ */
+export interface FormRecord {
+  id: string
+  title: string
+  version: number
+  /** Quién lo llenó y cuándo se finalizó, en una frase. */
+  byWords: string
+  sections: Array<{
+    id: string
+    title: string
+    /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
+    items: Array<{ id: string; label: string; words: string | null }>
+  }>
+  addenda: Array<{ id: string; text: string; authorName: string | null; createdAt: string }>
+}
+
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
 export interface EncounterDetail {
   encounter: Encounter
@@ -661,6 +680,8 @@ export interface EncounterDetail {
    */
   odontogramEntries?: SiteFinding[]
   documents: PatientDocument[]
+  /** Los formularios finalizados en la atención, con sus respuestas: algo que se anotó en ella. */
+  forms?: FormRecord[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
   /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
@@ -775,6 +796,8 @@ export interface TimelineItem {
   /** Quién firmó la atención y cuándo. */
   signerName?: string | null
   signedAt?: string | null
+  /** Un formulario: quién lo llenó, dicho por el servidor («Lo llenó Ana Torres»). */
+  byText?: string | null
   /** Hecho de una atención que sigue en curso, sin firmar. */
   openEncounter?: boolean
   voidedByName?: string | null
@@ -792,7 +815,8 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /** Los formularios finalizados en ella, con lo respondido en una línea. */
+  forms: Array<{ id: string; title: string; summary: string }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 

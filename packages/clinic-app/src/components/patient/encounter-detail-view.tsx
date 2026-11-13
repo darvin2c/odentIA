@@ -15,6 +15,7 @@ import { formatTakenAt, takenAt } from "./document-labels"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
+import { FormRecordView } from "./form-record"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -153,6 +154,8 @@ export function EncounterDetailView({
   const canRead = usePermission("clinical.read")
   const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, documents, addenda } = detail
+  // Los formularios finalizados en ella son algo que se anotó: van con sus respuestas.
+  const forms = detail.forms ?? []
   // La misma consulta (y caché) que el bloque «Documentos» de la atención: sus recetas.
   const prescriptions = useQuery({
     queryKey: ["prescriptions", patientId],
@@ -184,13 +187,14 @@ export function EncounterDetailView({
   const indicatedRetired = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && isRetiredPlanStatus(item.status))
   const liveBudgets = (detail.budgets ?? []).filter((budget) => budget.status !== "cancelado")
   // Lo que no se registró, en una sola línea: así nadie cree que está escondido.
-  // Una receta emitida en ella es una indicación y un documento registrados (E9).
+  // Una receta emitida en ella es una indicación y un documento registrados (E9); un formulario
+  // finalizado también es un documento suyo (QA de formularios del 13 nov).
   const unrecorded = [
     diagnoses.length === 0 ? "diagnóstico" : "",
     procedures.length === 0 ? "procedimientos" : "",
     encounter.evolution ? "" : "evolución",
     encounter.indications || issuedPrescription ? "" : "indicaciones",
-    showDocuments && documents.length === 0 && !issuedPrescription ? "documentos" : "",
+    showDocuments && documents.length === 0 && !issuedPrescription && forms.length === 0 ? "documentos" : "",
   ].filter(Boolean)
 
   return (
@@ -440,6 +444,17 @@ export function EncounterDetailView({
       ) : null}
 
       <ProductDetail patientId={patientId} detail={detail} slot="recorded" />
+
+      {forms.length > 0 ? (
+        <section aria-label="Formularios">
+          <h4 className="mb-2 text-sm font-medium">Formularios</h4>
+          <div className="flex flex-col gap-3">
+            {forms.map((form) => (
+              <FormRecordView key={form.id} form={form} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {showDocuments && documents.length > 0 ? (
       <section aria-label="Documentos vinculados">

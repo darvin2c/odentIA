@@ -81,6 +81,7 @@ import {
   cancelDerivationTask,
   getEncounterConsentNeeds,
 } from "./clinical-forms.js"
+import { type FormRecord, loadFormRecords } from "./form-record.js"
 import {
   type ClosingResolvable,
   resolvableDiagnosesOf,
@@ -290,6 +291,11 @@ export interface EncounterDetailBase {
   /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
   documents: EncounterDocumentRow[]
+  /**
+   * Los formularios finalizados en la atención, con sus respuestas: son algo que se
+   * anotó en ella, no un archivo. Un borrador aún no es registro y no viene.
+   */
+  forms: FormRecord[]
   /** clinical_note con kind='adenda', orden ascendente determinista, con quién la escribió. */
   addenda: Array<EncounterNoteRow & { authorName: string | null }>
   /** Ítems del plan vinculados a la atención (aceptados al vincular; su estado clínico no cambia al abrir). */
@@ -1226,6 +1232,7 @@ export async function getEncounterDetail(
     // Lo del producto (odentIA: los hallazgos del odontograma de la atención).
     ...(await (await productHooks(tx, orgId)).encounterDetailParts(tx, { orgId, patientId, encounterId })),
     documents,
+    forms: await loadFormRecords(tx, orgId, patientId, { encounterIds: [encounterId] }),
     addenda: addenda.map((row) => withSite(site, row)),
     plannedItems: plannedItems.map((link) => withProgress(withSite(site, link.item))),
     indicatedItems: indicatedItems.map((item) => withProgress(withSite(site, item))),

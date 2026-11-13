@@ -10,6 +10,7 @@ import { productUi } from "../../product/product-ui"
 import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
+import { FormViewButton } from "./form-record"
 import { useOpenWide } from "./wide-section"
 
 /** «mié 4 nov, 10:30»: el día y la hora, siempre absolutos. */
@@ -69,11 +70,11 @@ function Part({ label, children }: { label: string; children: React.ReactNode })
 
 /**
  * Lo que nació en la atención (QA de la ficha del 8 nov: un día eran 14
- * tarjetas sueltas): lo que se indicó, se pidió y se firmó, cada cosa una vez.
- * Lo anulado o cancelado va plegado al pie, dicho por lo que es; una receta
- * anulada se ve, porque la impresa pudo salir.
+ * tarjetas sueltas): lo que se anotó en un formulario, lo que se indicó, se pidió
+ * y se firmó, cada cosa una vez. Lo anulado o cancelado va plegado al pie, dicho
+ * por lo que es; una receta anulada se ve, porque la impresa pudo salir.
  */
-function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: boolean }) {
+function BornParts({ patientId, born, retired = false }: { patientId: string; born: EncounterBorn; retired?: boolean }) {
   const openWide = useOpenWide()
   const pick = <T extends { retired?: boolean }>(rows: T[]) => rows.filter((row) => !!row.retired === retired)
   const indicated = pick(born.indicated)
@@ -91,9 +92,26 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
   const prescriptions = retired ? [] : born.prescriptions
   const orders = retired ? [] : born.orders
   const forms = retired ? [] : born.forms
-  const indicatedSomething = indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + forms.length > 0
+  const indicatedSomething = indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length > 0
   return (
     <>
+      {/* Un formulario finalizado es algo que se anotó en la atención, no que se indicó:
+          va aparte, con lo respondido en una línea y «Ver» (QA de formularios del 13 nov). */}
+      {forms.length > 0 ? (
+        <Part label={forms.length === 1 ? "Formulario" : "Formularios"}>
+          <ul className="flex flex-col gap-2 text-sm">
+            {forms.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <span className="min-w-0 flex-1 basis-64">
+                  <span className="font-medium">{row.title}</span>
+                  {row.summary ? <span className="text-muted-foreground"> · {row.summary}</span> : null}
+                </span>
+                <FormViewButton patientId={patientId} formId={row.id} title={row.title} />
+              </li>
+            ))}
+          </ul>
+        </Part>
+      ) : null}
       {indicatedSomething ? (
         <Part label={retired ? "Ya no vigente" : "Se indicó"}>
           <ul className="flex flex-col gap-1 text-sm">
@@ -147,9 +165,6 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
                 Se pidió: {row.title}
                 <span className="text-muted-foreground"> · {row.state}</span>
               </li>
-            ))}
-            {forms.map((row) => (
-              <li key={row.id}>Formulario: {row.title}</li>
             ))}
           </ul>
         </Part>
@@ -282,7 +297,7 @@ export function EncounterHistoryCard({
             </ul>
           </Part>
         ) : null}
-        {born ? <BornParts born={born} /> : null}
+        {born ? <BornParts patientId={patientId} born={born} /> : null}
         {planned.length > 0 ? (
           <Part label={productUi().plan.budgetRequired ? "Tratamientos vinculados del presupuesto" : "Tratamientos vinculados"}>
             <ul className="flex flex-col gap-1 text-sm" aria-label="Tratamientos vinculados">
@@ -375,7 +390,7 @@ export function EncounterHistoryCard({
             </Button>
             {showRetired ? (
               <div id={retiredId} className="flex flex-col gap-3 text-muted-foreground">
-                <BornParts born={born} retired />
+                <BornParts patientId={patientId} born={born} retired />
               </div>
             ) : null}
           </div>
@@ -412,7 +427,7 @@ export function EncounterHistoryCard({
  * anuló y cuándo, y lo que se anuló con ella. No se tacha ni va arriba de lo
  * vigente (QA de la ficha del 8 nov).
  */
-export function VoidedEncounterLine({ item }: { item: TimelineItem }) {
+export function VoidedEncounterLine({ patientId, item }: { patientId: string; item: TimelineItem }) {
   const born = item.born
   const withIt = born
     ? listWords([
@@ -440,7 +455,7 @@ export function VoidedEncounterLine({ item }: { item: TimelineItem }) {
           receta que salió siguen siendo hechos (revisión de código del 9 nov). */}
       {born ? (
         <div className="mt-1 flex flex-col gap-2 text-muted-foreground">
-          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [] }} />
+          <BornParts patientId={patientId} born={{ ...born, indicated: [], budgets: [], followUps: [] }} />
         </div>
       ) : null}
     </div>

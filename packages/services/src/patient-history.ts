@@ -25,7 +25,7 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
+import { clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
@@ -38,6 +38,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
+import { loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -706,6 +707,8 @@ export interface TimelineItemBase {
   /** Quién firmó la atención y cuándo. */
   signerName?: string | null
   signedAt?: Date | null
+  /** Un formulario: quién lo llenó, dicho en palabras («Lo llenó Ana Torres»). */
+  byText?: string | null
   /** Hecho de una atención que sigue en curso (sin firmar): la historia lo dice. */
   openEncounter?: boolean
   voidedByName?: string | null
@@ -728,7 +731,8 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /** Los formularios finalizados en ella, con lo respondido en una línea: se anotaron, no se indicaron. */
+  forms: Array<{ id: string; title: string; summary: string }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
 
@@ -794,18 +798,7 @@ async function loadBornForEncounters(
       .from(clinicalOrder)
       .where(and(eq(clinicalOrder.organizationId, orgId), eq(clinicalOrder.patientId, patientId), inArray(clinicalOrder.encounterId, encounterIds)))
       .orderBy(asc(clinicalOrder.createdAt), asc(clinicalOrder.id)),
-    tx
-      .select()
-      .from(clinicalFormResponse)
-      .where(
-        and(
-          eq(clinicalFormResponse.organizationId, orgId),
-          eq(clinicalFormResponse.patientId, patientId),
-          inArray(clinicalFormResponse.encounterId, encounterIds),
-          eq(clinicalFormResponse.status, "finalizado"),
-        ),
-      )
-      .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
+    loadFormRecords(tx, orgId, patientId, { encounterIds }),
     tx
       .select()
       .from(clinicalFollowUp)
@@ -933,9 +926,9 @@ async function loadBornForEncounters(
       state: row.status === "completado" ? "con resultado" : row.status === "cancelado" ? "cancelada" : "sin resultado",
     })
   }
-  for (const row of forms) {
-    if (!row.encounterId) continue
-    of(row.encounterId).forms.push({ id: row.id, title: row.templateTitle ?? "Formulario clínico" })
+  for (const form of forms) {
+    if (!form.encounterId) continue
+    of(form.encounterId).forms.push({ id: form.id, title: form.title, summary: form.summary })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")
@@ -1515,25 +1508,22 @@ export async function getTimeline(
         encounterId: row.encounterId,
       })
     }
-  const formIds = ids("form")
-  if (formIds.length)
-    for (const row of await tx
-      .select()
-      .from(clinicalFormResponse)
-      .where(and(eq(clinicalFormResponse.organizationId, orgId), inArray(clinicalFormResponse.id, formIds)))) {
-      hydrated.set(row.id, {
-        id: row.id,
-        refId: row.id,
-        type: "form",
-        createdAt: row.finalizedAt ?? row.createdAt,
-        title: `Se completó el formulario: ${row.templateTitle ?? "Formulario clínico"}`,
-        detail: row.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : null,
-        status: row.status,
-        toothNumbers: [],
-        authorId: row.authorUserId,
-        encounterId: row.encounterId,
-      })
-    }
+  // El formulario finalizado es su título con lo respondido en una línea; «Ver» lo abre con todo.
+  for (const form of await loadFormRecords(tx, orgId, patientId, { ids: ids("form") })) {
+    hydrated.set(form.id, {
+      id: form.id,
+      refId: form.id,
+      type: "form",
+      createdAt: form.finalizedAt,
+      title: form.title,
+      detail: form.summary || null,
+      byText:
+        form.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : form.filledBy ? `Lo llenó ${form.filledBy}` : null,
+      status: "finalizado",
+      toothNumbers: [],
+      encounterId: form.encounterId,
+    })
+  }
   // Lo de una atención que sigue en curso sale suelto (el borrador no es todavía un
   // hecho de la historia) y lo dice, para no leerlo como cerrado (segunda mesa del 9 nov).
   const drafts = new Set(

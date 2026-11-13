@@ -21,7 +21,9 @@ import {
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { DocumentKit } from "./document-kit.js"
+import { finalizeEncounter, getEncounterDetail } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
+import { getTimeline } from "./patient-history.js"
 import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -320,4 +322,32 @@ it("latidIA: su entrevista va en la copia con el embarazo y su fecha, por el gan
   } finally {
     await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, "org_a"))
   }
+})
+
+it("la atención firmada muestra sus formularios, y la Historia los lleva con su resumen", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const inside = await finalizedForm(f, f.encounter.id)
+  const loose = await finalizedForm(f, null, "Evaluación periodontal")
+  await f.ready(f.encounter.id)
+  await run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+
+  const detail = await run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))
+  expect(detail.forms).toHaveLength(1)
+  expect(detail.forms[0]).toMatchObject({ id: inside.id, title: "Evaluación de endodoncia", filledBy: "Clínico" })
+  expect(detail.forms[0]!.sections[1]!.items[0]).toMatchObject({ label: "Pruebas de vitalidad", words: "Frío +, Percusión +" })
+
+  // Lo que no cabe en una línea (la fecha) queda para «Ver»: ninguna respuesta se corta por la mitad.
+  const summary =
+    "Presenta dolor: Sí · Intensidad del dolor: 8 de 10 · Pieza 46 · Pruebas de vitalidad: Frío +, Percusión + · Pulpitis irreversible sintomática, periodonto apical normal. · …"
+  const timeline = await run((tx) => getTimeline(tx, "org_a", f.patient.id, {}))
+  const card = timeline.data.find((item) => item.type === "encounter" && item.refId === f.encounter.id)
+  expect(card?.born?.forms).toEqual([{ id: inside.id, title: "Evaluación de endodoncia", summary }])
+  // El que se llenó fuera de una atención es un hecho suelto, también con su resumen.
+  expect(timeline.data.find((item) => item.type === "form")).toMatchObject({
+    refId: loose.id,
+    title: "Evaluación periodontal",
+    detail: summary,
+    byText: "Lo llenó Clínico",
+  })
 })
