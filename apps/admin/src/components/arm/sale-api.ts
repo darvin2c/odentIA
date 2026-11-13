@@ -121,6 +121,7 @@ export const proposalSchema = z.object({
   validUntil: z.string(),
   status: z.enum(["borrador", "por_aprobar", "enviada", "aceptada", "no_aceptada"]),
   displayStatus: z.enum(PROPOSAL_STATUSES),
+  replacedBy: z.number().nullable().optional(),
   sentAt: z.string().nullable(),
   decidedAt: z.string().nullable(),
   acceptedNote: z.string().nullable(),

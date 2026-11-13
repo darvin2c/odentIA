@@ -13,6 +13,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
+import { useState } from "react"
 import { z } from "zod"
 import { ClientName, invalidateArm } from "../../components/arm/hoy-links"
 import { kairosSearchOf } from "../../components/arm/hoy-search"
@@ -55,19 +56,25 @@ const undoSchema = z
     field: z.string().optional(),
   })
   .nullable()
+const doneMemberSchema = z.object({
+  id: z.string(),
+  words: z.string(),
+  clientId: z.string().nullable(),
+  clientName: z.string().nullable(),
+  undo: undoSchema,
+})
 const doneSchema = z.object({
   items: z.array(
-    z.object({
-      id: z.string(),
+    doneMemberSchema.extend({
       at: z.string(),
-      words: z.string(),
-      clientId: z.string().nullable(),
-      clientName: z.string().nullable(),
-      undo: undoSchema,
+      // Lo repetido de una pasada, en una frase; cada ficha con su Deshacer.
+      members: z.array(doneMemberSchema).optional(),
     }),
   ),
+  nextBefore: z.string().nullable().optional(),
 })
 type DoneEntry = z.infer<typeof doneSchema>["items"][number]
+type DoneMember = z.infer<typeof doneMemberSchema>
 const DONE_PAGE = 50
 
 const runSchema = z.object({
@@ -217,8 +224,9 @@ function KairosDone() {
         await api<unknown>(
           `/api/admin/kairos/done?limit=${DONE_PAGE}${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ""}`,
         ),
-      ).items,
-    getNextPageParam: (last) => (last.length < DONE_PAGE ? null : (last.at(-1)?.at ?? null)),
+      ),
+    // Agrupar acorta la página: la siguiente la dice el servidor, no el largo.
+    getNextPageParam: (last) => last.nextBefore ?? null,
   })
   if (done.isPending)
     return (
@@ -227,7 +235,7 @@ function KairosDone() {
       </SkeletonRegion>
     )
   if (done.isError) return <ErrorState error={done.error} onRetry={() => void done.refetch()} />
-  const entries = done.data.pages.flat()
+  const entries = done.data.pages.flatMap((page) => page.items)
   if (entries.length === 0)
     return (
       <EmptyState
@@ -282,6 +290,73 @@ function KairosDone() {
 
 /** Una frase de lo que hizo, con su cliente y Deshacer si todavía se puede. */
 function DoneRow({ entry }: { entry: DoneEntry }) {
+  const [open, setOpen] = useState(false)
+  const members = entry.members ?? []
+  if (members.length > 1)
+    return (
+      <li className="flex flex-wrap items-start gap-3 p-4">
+        <span className="w-11 shrink-0 pt-0.5 text-xs text-muted-foreground tabular-nums">
+          {supportTime(entry.at)}
+        </span>
+        <AgentMark size="sm" />
+        <div className="min-w-0 flex-1 basis-56 space-y-2">
+          <p className="text-sm [overflow-wrap:anywhere]">{entry.words}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2"
+            aria-expanded={open}
+            aria-controls={`hizo-${entry.id}`}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? "Ocultar cada una" : `Ver cada una (${members.length})`}
+          </Button>
+          {open ? (
+            <ul id={`hizo-${entry.id}`} className="divide-y rounded-lg border">
+              {members.map((member) => (
+                <DoneMemberRow key={member.id} member={member} />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </li>
+    )
+  return <DoneSingleRow entry={entry} />
+}
+
+/** Una ficha de un grupo: su frase, su cliente y su Deshacer. */
+function DoneMemberRow({ member }: { member: DoneMember }) {
+  const { canUndo, undo } = useDoneUndo(member)
+  return (
+    <li className="flex flex-wrap items-center gap-3 p-3">
+      <div className="min-w-0 flex-1 basis-48">
+        <p className="text-sm [overflow-wrap:anywhere]">{member.words}</p>
+        {member.clientId && member.clientName ? (
+          <p className="text-xs text-muted-foreground">
+            <ClientName clientId={member.clientId} tab="historial">
+              {member.clientName}
+            </ClientName>
+          </p>
+        ) : null}
+      </div>
+      {canUndo ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={undo.isPending}
+          onClick={() => undo.mutate()}
+        >
+          Deshacer
+        </Button>
+      ) : null}
+    </li>
+  )
+}
+
+/** Deshacer lo que hizo Kairós con la operación de siempre: cancelar la tarea o vaciar el dato. */
+function useDoneUndo(entry: DoneMember) {
   const queryClient = useQueryClient()
   const undo = useMutation({
     mutationFn: async () => {
@@ -307,6 +382,11 @@ function DoneRow({ entry }: { entry: DoneEntry }) {
   const canUndo =
     (entry.undo?.kind === "cancelar_tarea" && Boolean(entry.undo.taskId)) ||
     (entry.undo?.kind === "vaciar_dato" && Boolean(entry.undo.clientId && entry.undo.field))
+  return { canUndo, undo }
+}
+
+function DoneSingleRow({ entry }: { entry: DoneEntry }) {
+  const { canUndo, undo } = useDoneUndo(entry)
   return (
     <li className="flex flex-wrap items-start gap-3 p-4">
       <span className="w-11 shrink-0 pt-0.5 text-xs text-muted-foreground tabular-nums">

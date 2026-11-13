@@ -173,6 +173,17 @@ function requireAdmin(actor: AdminActor | null): AdminActor {
 
 const isAdmin = (actor: AdminActor) => actor.role === "admin"
 
+/**
+ * ¿Ve este actor una tarea de este tipo? Las de cobro son solo de la
+ * administración: para Soporte no existen, como los casos de cobro (ADR 0181).
+ */
+export const seesTaskKind = (actor: AdminActor, kind: string): boolean =>
+  kind !== "cobro" || actor.role === "admin"
+
+/** La condición SQL de `seesTaskKind`: sin nada para la administración. */
+export const visibleTaskSql = (actor: AdminActor): SQL | undefined =>
+  actor.role === "admin" ? undefined : ne(saasTask.kind, "cobro")
+
 /* ---------- La etapa (TS y SQL gemelas) ---------- */
 
 /**
@@ -214,6 +225,18 @@ export function clientStage(facts: ClientStageFacts): ClientStage {
   return facts.lastDecision ?? "contacto"
 }
 
+/**
+ * «Reemplazada»: una propuesta enviada a la que le salió después una versión
+ * más nueva del mismo cliente. Se calcula al leer, como «vencida». `p` es el
+ * alias de `saas_proposal` en la consulta. Gemelo de `proposalDisplayStatus`
+ * (`admin-sales.ts`): si cambia uno, cambia el otro.
+ */
+export function proposalReplacedSql(alias = "p"): SQL<boolean> {
+  const p = sql.raw(alias)
+  return sql<boolean>`exists (select 1 from admin.saas_proposal newer
+    where newer.client_id = ${p}.client_id and newer.version > ${p}.version and newer.sent_at is not null)`
+}
+
 /** Cada hecho de `ClientStageFacts` en SQL, sobre la fila de `saas_client` de la consulta. */
 function stageFactsSql(now: Date) {
   const today = limaDate(now)
@@ -224,7 +247,7 @@ function stageFactsSql(now: Date) {
     openOpportunity: sql<boolean>`exists (select 1 from ${saasOpportunity} o where o.client_id = ${saasClient.id} and o.decision is null)`,
     proposalOut: sql<boolean>`exists (select 1 from ${saasProposal} p where p.client_id = ${saasClient.id}
       and p.created_at >= ${openSince}
-      and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date)))`,
+      and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date and not ${proposalReplacedSql()})))`,
     invited: sql<boolean>`exists (select 1 from ${saasWaitlistRequest} r where r.client_id = ${saasClient.id} and r.status = 'invitada')`,
     presentationDone: sql<boolean>`exists (select 1 from ${saasFollowUp} f where f.client_id = ${saasClient.id}
       and f.kind = 'presentacion' and f.happened_at >= ${openSince}
@@ -584,9 +607,10 @@ export async function clientSignals(
   return out
 }
 
-/** El próximo paso de cada cliente: su tarea abierta más próxima. */
+/** El próximo paso de cada cliente: su tarea abierta más próxima que el actor ve. */
 async function nextSteps(
   tx: Db,
+  actor: AdminActor,
   clientIds: string[],
   now: Date,
 ): Promise<Map<string, ClientNextStep>> {
@@ -602,7 +626,13 @@ async function nextSteps(
       dueAt: saasTask.dueAt,
     })
     .from(saasTask)
-    .where(and(inArray(saasTask.clientId, clientIds), eq(saasTask.status, "abierta")))
+    .where(
+      and(
+        inArray(saasTask.clientId, clientIds),
+        eq(saasTask.status, "abierta"),
+        visibleTaskSql(actor),
+      ),
+    )
     .orderBy(
       saasTask.clientId,
       asc(saasTask.dueOn),
@@ -684,7 +714,9 @@ export async function listClients(
     .leftJoin(user, eq(user.id, saasClient.ownerUserId))
     .where(and(base, viewSql(view, stage)))
     .orderBy(
-      sql`(select min(t.due_on) from ${saasTask} t where t.client_id = ${saasClient.id} and t.status = 'abierta') asc nulls last`,
+      // Soporte no ordena por una tarea de cobro que no ve.
+      sql`(select min(t.due_on) from ${saasTask} t where t.client_id = ${saasClient.id} and t.status = 'abierta'
+        and (t.kind <> 'cobro' or ${isAdmin(staff)})) asc nulls last`,
       desc(saasClient.createdAt),
       asc(saasClient.id),
     )
@@ -692,7 +724,7 @@ export async function listClients(
     .offset(offset)
 
   const ids = rows.map((row) => row.id)
-  const steps = await nextSteps(tx, ids, now)
+  const steps = await nextSteps(tx, staff, ids, now)
   const signals = await clientSignals(tx, staff, ids, now)
   const items = rows.map((row): ClientListItem => {
     const nextStep = steps.get(row.id) ?? null
@@ -1465,7 +1497,7 @@ export async function getClient(
       ).length > 0
     : false
 
-  const steps = await nextSteps(tx, [id], now)
+  const steps = await nextSteps(tx, staff, [id], now)
   const nextStep = steps.get(id) ?? null
   const lastContactAt = toDate(row.lastContactAt)
   const today = limaDate(now)
@@ -1474,7 +1506,7 @@ export async function getClient(
     .select({ task: saasTask, assigneeName: user.name })
     .from(saasTask)
     .leftJoin(user, eq(user.id, saasTask.assigneeUserId))
-    .where(and(eq(saasTask.clientId, id), eq(saasTask.status, "abierta")))
+    .where(and(eq(saasTask.clientId, id), eq(saasTask.status, "abierta"), visibleTaskSql(staff)))
     .orderBy(asc(saasTask.dueOn), sql`${saasTask.dueAt} asc nulls last`, asc(saasTask.createdAt))
   const activityRows = await tx
     .select({ entry: saasFollowUp, authorName: user.name })
@@ -2599,7 +2631,8 @@ export async function clientTimeline(
         category: taskCategory(t.kind),
         title: `Hecho: ${t.title}`,
         detail: clip(t.doneNote),
-        adminOnly: false,
+        // Una tarea de cobro es solo de la administración (ADR 0181).
+        adminOnly: t.kind === "cobro",
         link: { kind: "tarea", id: t.id },
       })
     }

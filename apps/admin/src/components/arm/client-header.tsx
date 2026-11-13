@@ -192,7 +192,7 @@ export function ClientNextStep({
                 variant="outline"
                 onClick={() => actions.onDecide("invitar")}
               >
-                Invitar
+                {client.waitlistRequest?.status === "invitada" ? "Invitar otra vez" : "Invitar"}
               </Button>
               <Button
                 type="button"

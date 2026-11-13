@@ -1474,7 +1474,8 @@ async function seedSummaries(tx: Db, now: Date, clientIds: string[]): Promise<vo
     await writeAdminAudit(tx, null, {
       action: "kairos.summary_written",
       entityId: clientId,
-      metadata: { clientId, sources: sources.length },
+      // La misma pasada: en «Lo que hizo» se lee «Resumió N fichas: …».
+      metadata: { clientId, sources: sources.length, passAt: now.toISOString() },
     })
   }
 }

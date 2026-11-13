@@ -22,6 +22,7 @@ import {
   type KairosExecutors,
   type KairosPassResult,
   kairosDone,
+  kairosDonePage,
   kairosRulesPass,
   listKairosItems,
   recordKairosAiUse,
@@ -982,6 +983,52 @@ describe("lo que hizo", () => {
     ).toBe(true)
     expect(forSupport.some((entry) => entry.words.startsWith("Se cargó"))).toBe(false)
     expect(forAdmin.every((entry) => !entry.words.includes("kairos."))).toBe(true)
+  })
+
+  it("lo repetido de una misma pasada va en una frase, con cada ficha y su Deshacer adentro", async () => {
+    const passAt = new Date(NOW.getTime() - 3 * 86_400_000)
+    const summary = (key: string, at: Date, pass: Date | null) => ({
+      actorUserId: null,
+      actorRole: "system",
+      action: "kairos.summary_written",
+      entityId: ids[key] as string,
+      metadata: {
+        clientId: ids[key] as string,
+        sources: 2,
+        ...(pass ? { passAt: pass.toISOString() } : {}),
+      },
+      createdAt: at,
+    })
+    await ownerDb.insert(adminAudit).values([
+      // Una pasada: cada resumen en su transacción, segundos después.
+      summary("fria", new Date(passAt.getTime() + 1_000), passAt),
+      summary("nueva", new Date(passAt.getTime() + 2_000), passAt),
+      summary("web", new Date(passAt.getTime() + 3_000), passAt),
+      // Otra pasada, el día anterior: va aparte.
+      summary("propuesta", new Date(passAt.getTime() - 86_400_000), null),
+    ])
+    const page = await kairosDonePage(ownerDb, admin, {
+      limit: 200,
+      before: new Date(passAt.getTime() + 60_000),
+    })
+    const grouped = page.items.filter((entry) => entry.words.startsWith("Resumió"))
+    expect(grouped.map((entry) => entry.words)).toEqual([
+      "Resumió 3 fichas: Clínica Web (ficticia), Clínica Nueva (ficticia) y Clínica Fría (ficticia)",
+      "Resumió la ficha de Clínica Propuesta (ficticia)",
+    ])
+    expect(grouped[0]?.members?.map((member) => member.clientId)).toEqual([
+      ids.web,
+      ids.nueva,
+      ids.fria,
+    ])
+    expect(grouped[0]).toMatchObject({ clientId: null, undo: null })
+    expect(grouped[1]?.members).toBeUndefined()
+    // La lista de siempre no agrupa.
+    const raw = await kairosDone(ownerDb, admin, {
+      limit: 200,
+      before: new Date(passAt.getTime() + 60_000),
+    })
+    expect(raw.filter((entry) => entry.words.startsWith("Resumió"))).toHaveLength(4)
   })
 })
 

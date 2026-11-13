@@ -21,7 +21,11 @@ import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
-import { clientDuplicatePairsSql, linkClientToOrganization } from "./admin-clients.js"
+import {
+  clientDuplicatePairsSql,
+  linkClientToOrganization,
+  proposalReplacedSql,
+} from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
@@ -285,7 +289,8 @@ export async function kairosCoolingRows(
         where r.client_id = c.id and r.status = 'invitada' and r.invite_expires_at <= ${nowSql}
           and not exists (select 1 from saas_follow_up f where f.client_id = c.id and f.kind = 'llamada' and f.happened_at >= r.invite_expires_at))`)} as invite_expired_at,
       ${iso(sql`(select max(p.sent_at) from saas_proposal p
-        where p.client_id = c.id and p.status = 'enviada' and p.sent_at <= ${proposalSince} and p.valid_until >= ${today}::date)`)} as proposal_sent_at
+        where p.client_id = c.id and p.status = 'enviada' and p.sent_at <= ${proposalSince} and p.valid_until >= ${today}::date
+          and not ${proposalReplacedSql()})`)} as proposal_sent_at
     from saas_client c
     join saas_opportunity o on o.client_id = c.id and o.decision is null
     left join "user" u on u.id = c.owner_user_id
@@ -1859,7 +1864,7 @@ async function ruleProposalsExpiring(pass: Pass): Promise<void> {
     pass.tx,
     sql`select p.id, p.client_id, p.valid_until::text as valid_until, p.version from saas_proposal p
     join saas_client c on c.id = p.client_id
-    where p.status = 'enviada' and c.archived_at is null
+    where p.status = 'enviada' and c.archived_at is null and not ${proposalReplacedSql()}
       and p.valid_until >= ${pass.today}::date and p.valid_until <= ${plusDays(pass.today, PROPOSAL_SOON_DAYS)}::date`,
   )
   for (const proposal of found) {
@@ -2407,6 +2412,39 @@ export interface KairosDoneEntry {
   clientName: string | null
   /** Cómo deshacerlo, si todavía se puede (la ruta usa la operación de siempre: cancelar la tarea, vaciar el dato). */
   undo: KairosUndo | null
+  /**
+   * Lo mismo en varias fichas de una misma pasada, agrupado en una frase
+   * («Resumió 4 fichas: A, B, C y D»): cada una con su cliente y su Deshacer.
+   */
+  members?: KairosDoneMember[]
+}
+
+export interface KairosDoneMember {
+  id: string
+  words: string
+  clientId: string | null
+  clientName: string | null
+  undo: KairosUndo | null
+}
+
+/** Para agrupar: qué hizo (`key`), la frase de varias fichas y su pasada. Sin esto, la entrada va sola. */
+interface DoneGroupable {
+  key: string
+  many: (names: string, count: number) => string
+  /** La pasada: el instante de su transacción, o el que anotó la pasada (`passAt`). */
+  pass: string
+}
+
+type RawDoneEntry = KairosDoneEntry & { group?: DoneGroupable }
+
+const NAMES_SHOWN = 5
+
+/** «A, B, C y D»; con más de cinco, «A, B, C, D, E y 3 más». */
+function namesList(names: string[]): string {
+  const unique = [...new Set(names)]
+  if (unique.length <= NAMES_SHOWN)
+    return new Intl.ListFormat("es", { type: "conjunction" }).format(unique)
+  return `${unique.slice(0, NAMES_SHOWN).join(", ")} y ${unique.length - NAMES_SHOWN} más`
 }
 
 const SIGNAL_WORDS: Record<KairosSignalCode, string> = {
@@ -2437,6 +2475,14 @@ export async function kairosDone(
   actor: AdminActor,
   options: { limit?: number; before?: Date } = {},
 ): Promise<KairosDoneEntry[]> {
+  return (await kairosDoneRaw(tx, actor, options)).map(({ group: _group, ...entry }) => entry)
+}
+
+async function kairosDoneRaw(
+  tx: Db,
+  actor: AdminActor,
+  options: { limit?: number; before?: Date },
+): Promise<RawDoneEntry[]> {
   requireStaff(actor)
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 200)
   const admin = actor.role === "admin"
@@ -2539,12 +2585,19 @@ export async function kairosDone(
       : []
     ).map((client) => [client.id, client]),
   )
-  const out: KairosDoneEntry[] = []
+  const out: RawDoneEntry[] = []
+  const taskGroup = (title: string, pass: string): DoneGroupable => ({
+    key: `tarea:${title}`,
+    many: (names) => `Puso la tarea «${title}» a ${names}`,
+    pass,
+  })
   for (const a of audits) {
     const clientId = meta(a.metadata, "clientId")
     const client = clientId ? clients.get(clientId) : undefined
+    const pass = meta(a.metadata, "passAt") ?? a.at.toISOString()
     let words: string | null = null
     let undo: KairosUndo | null = null
+    let group: DoneGroupable | undefined
     switch (a.action) {
       case "kairos.task_created": {
         const task = a.entityId ? tasks.get(a.entityId) : undefined
@@ -2552,6 +2605,7 @@ export async function kairosDone(
         if (!admin && task.kind === "cobro") break
         words = `Puso la tarea «${task.title}»`
         if (task.status === "abierta") undo = { kind: "cancelar_tarea", taskId: task.id }
+        group = taskGroup(task.title, pass)
         break
       }
       case "kairos.item_prepared": {
@@ -2572,14 +2626,19 @@ export async function kairosDone(
         words = client ? `Ligó la cuenta nueva a ${client.name}, el cliente de su solicitud` : null
         break
       case "kairos.email_recorded":
-        words = client ? `Anotó un correo que llegó de ${client.name}` : null
+        if (!client) break
+        words = `Anotó un correo que llegó de ${client.name}`
+        group = { key: "correo", many: (names) => `Anotó correos que llegaron de ${names}`, pass }
         break
       case "kairos.signal": {
         const code = meta(a.metadata, "code") as KairosSignalCode | null
-        words =
-          code && SIGNAL_WORDS[code] && client
-            ? `Avisó que ${client.name}: ${SIGNAL_WORDS[code]}`
-            : null
+        if (!code || !SIGNAL_WORDS[code] || !client) break
+        words = `Avisó que ${client.name}: ${SIGNAL_WORDS[code]}`
+        group = {
+          key: `senal:${code}`,
+          many: (names) => `Avisó que ${SIGNAL_WORDS[code]}: ${names}`,
+          pass,
+        }
         break
       }
       case "kairos.client_data_filled": {
@@ -2587,10 +2646,21 @@ export async function kairosDone(
         if (!field || !DATA_FIELDS[field] || !client) break
         words = `Completó ${DATA_FIELDS[field]} de ${client.name}`
         if (client[field] !== null && clientId) undo = { kind: "vaciar_dato", clientId, field }
+        group = {
+          key: `dato:${field}`,
+          many: (names) => `Completó ${DATA_FIELDS[field]} de ${names}`,
+          pass,
+        }
         break
       }
       case "kairos.summary_written":
-        words = client ? `Resumió la ficha de ${client.name}` : null
+        if (!client) break
+        words = `Resumió la ficha de ${client.name}`
+        group = {
+          key: "resumen",
+          many: (names, count) => `Resumió ${count} fichas: ${names}`,
+          pass,
+        }
         break
       case "kairos.load_noticed": {
         const kind = meta(a.metadata, "loadKind") as ClinicLoadRecord["kind"] | null
@@ -2628,6 +2698,7 @@ export async function kairosDone(
       clientId: client ? (clientId as string) : null,
       clientName: client?.name ?? null,
       undo,
+      ...(group ? { group } : {}),
     })
   }
   for (const entry of loose) {
@@ -2641,9 +2712,57 @@ export async function kairosDone(
       clientId: task.clientId,
       clientName: client?.name ?? null,
       undo: task.status === "abierta" ? { kind: "cancelar_tarea", taskId: task.id } : null,
+      group: taskGroup(task.title, entry.at.toISOString()),
     })
   }
   return out.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit)
+}
+
+/**
+ * «Lo que hizo» para la pantalla: lo repetido del mismo tipo en una misma
+ * pasada va en una frase («Resumió 4 fichas: A, B, C y D»), con cada ficha y
+ * su Deshacer adentro. `nextBefore` sigue la página aunque agrupar la acorte.
+ */
+export async function kairosDonePage(
+  tx: Db,
+  actor: AdminActor,
+  options: { limit?: number; before?: Date } = {},
+): Promise<{ items: KairosDoneEntry[]; nextBefore: Date | null }> {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 200)
+  const raw = await kairosDoneRaw(tx, actor, { ...options, limit })
+  const items: KairosDoneEntry[] = []
+  const groups = new Map<
+    string,
+    { entry: KairosDoneEntry; group: DoneGroupable; members: KairosDoneMember[] }
+  >()
+  for (const { group, ...entry } of raw) {
+    const member: KairosDoneMember = {
+      id: entry.id,
+      words: entry.words,
+      clientId: entry.clientId,
+      clientName: entry.clientName,
+      undo: entry.undo,
+    }
+    const key = group ? `${group.key}@${group.pass}` : null
+    const found = key ? groups.get(key) : undefined
+    if (found) {
+      found.members.push(member)
+      continue
+    }
+    items.push(entry)
+    if (key && group) groups.set(key, { entry, group, members: [member] })
+  }
+  for (const { entry, group, members } of groups.values()) {
+    if (members.length < 2) continue
+    const names = members.map((m) => m.clientName).filter((name): name is string => Boolean(name))
+    // La frase de varias es la más nueva; cada ficha y su Deshacer quedan en `members`.
+    entry.words = group.many(namesList(names), new Set(names).size)
+    entry.clientId = null
+    entry.clientName = null
+    entry.undo = null
+    entry.members = members
+  }
+  return { items, nextBefore: raw.length === limit ? (raw.at(-1)?.at ?? null) : null }
 }
 
 /* ---------- Hoy ---------- */

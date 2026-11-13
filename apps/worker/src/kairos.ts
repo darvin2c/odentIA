@@ -335,7 +335,8 @@ export async function renewClientSummaries(
         await writeAdminAudit(tx, null, {
           action: "kairos.summary_written",
           entityId: client.id,
-          metadata: { clientId: client.id, sources: sources.length },
+          // `passAt`: los resúmenes de una pasada se leen juntos en «Lo que hizo».
+          metadata: { clientId: client.id, sources: sources.length, passAt: now.toISOString() },
         })
       })
       out.written += 1

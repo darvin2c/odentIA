@@ -38,6 +38,7 @@ import {
   limaDay,
   PROPOSAL_STATUS_WORDS,
   percentWords,
+  proposalStatusWords,
 } from "./sale-words"
 import { DayField } from "./task-drawer"
 import { type WriteChannel, WriteDrawer } from "./write-drawer"
@@ -446,7 +447,8 @@ function SavedProposal({
   })
   const sendable =
     (proposal.status === "borrador" || proposal.status === "enviada") &&
-    proposal.displayStatus !== "vencida"
+    proposal.displayStatus !== "vencida" &&
+    proposal.replacedBy == null
   const message = writing ? proposalMessage(client, proposal, writing) : null
 
   return (
@@ -462,9 +464,7 @@ function SavedProposal({
       >
         <div className="flex flex-col gap-5">
           <DetailList>
-            <DetailField label="Estado">
-              {PROPOSAL_STATUS_WORDS[proposal.displayStatus]}
-            </DetailField>
+            <DetailField label="Estado">{proposalStatusWords(proposal)}</DetailField>
             <DetailField label="Plan">{proposal.plan.name}</DetailField>
             <DetailField label="Precio de lista">{`${money(proposal.listPriceCents, proposal.currency)} cada mes`}</DetailField>
             <DetailField label="Descuento">
@@ -552,6 +552,10 @@ function SavedProposal({
                 cambia.
               </p>
             </div>
+          ) : proposal.replacedBy != null ? (
+            <p className="text-sm text-muted-foreground">
+              Ya salió la v{proposal.replacedBy}: esta no se envía ni se acepta.
+            </p>
           ) : proposal.displayStatus === "vencida" ? (
             <p className="text-sm text-muted-foreground">
               Venció: para otra vigencia, arma una versión nueva.

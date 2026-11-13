@@ -152,6 +152,7 @@ export const PROPOSAL_STATUSES = [
   "aceptada",
   "no_aceptada",
   "vencida",
+  "reemplazada",
 ] as const
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number]
 export const PROPOSAL_STATUS_WORDS: Record<ProposalStatus, string> = {
@@ -161,6 +162,17 @@ export const PROPOSAL_STATUS_WORDS: Record<ProposalStatus, string> = {
   aceptada: "Aceptada",
   no_aceptada: "No aceptada",
   vencida: "Vencida",
+  reemplazada: "Reemplazada",
+}
+
+/** El estado en palabras; una reemplazada dice por cuál: «Reemplazada por la v3». */
+export function proposalStatusWords(proposal: {
+  displayStatus: ProposalStatus
+  replacedBy?: number | null
+}): string {
+  if (proposal.displayStatus === "reemplazada" && proposal.replacedBy != null)
+    return `Reemplazada por la v${proposal.replacedBy}`
+  return PROPOSAL_STATUS_WORDS[proposal.displayStatus]
 }
 export const BILLING_CYCLES = ["mensual", "quincenal"] as const
 export type BillingCycle = (typeof BILLING_CYCLES)[number]

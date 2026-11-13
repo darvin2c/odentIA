@@ -20,11 +20,10 @@ import { CalendarPlus, ExternalLink, FileText } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { z } from "zod"
 import { money } from "../../lib/cost-format"
-import { fichaDecisionArea, focusInsideLater } from "../../lib/focus"
+import { focusInsideLater } from "../../lib/focus"
 import { invitationDueWords } from "../../lib/invitation-words"
 import { supportDay, supportDayTime } from "../../lib/support-words"
 import { useDemos, useOpenDemo } from "../demos"
-import { DecideDrawer, type SaleDecision } from "./decide-drawer"
 import { PresentationDrawer } from "./presentation-drawer"
 import { ProposalDrawer } from "./proposal-drawer"
 import {
@@ -46,8 +45,8 @@ import {
   dueWords,
   limaDay,
   PROFESSIONALS_WORDS,
-  PROPOSAL_STATUS_WORDS,
   percentWords,
+  proposalStatusWords,
   STAGE_FACT,
   STAGE_WORDS,
   TASK_WORDS,
@@ -77,7 +76,6 @@ export interface ClientSaleTabProps {
 type Open =
   | { kind: "presentation"; taskId: string | null }
   | { kind: "proposal"; proposalId: string | null }
-  | { kind: "decide"; decision: SaleDecision }
   | { kind: "opportunity" }
   | null
 
@@ -122,9 +120,7 @@ export function ClientSaleTab({ clientId, organizationId, product, isAdmin }: Cl
       </div>
       <div className="flex min-w-0 flex-col gap-4">
         {data.waitlistRequest ? <RequestCard clientId={clientId} client={data} /> : null}
-        {!hasAccount || data.waitlistRequest ? (
-          <InvitationCard client={data} isAdmin={isAdmin} selling={selling} onOpen={setOpen} />
-        ) : null}
+        {!hasAccount || data.waitlistRequest ? <InvitationCard client={data} /> : null}
         <PastSalesCard clientId={clientId} />
       </div>
 
@@ -140,17 +136,6 @@ export function ClientSaleTab({ clientId, organizationId, product, isAdmin }: Cl
         proposalId={open?.kind === "proposal" ? open.proposalId : null}
         onClose={() => setOpen(null)}
       />
-      {open?.kind === "decide" ? (
-        <DecideDrawer
-          clientId={clientId}
-          open
-          decision={open.decision}
-          onClose={() => {
-            setOpen(null)
-            focusInsideLater(fichaDecisionArea)
-          }}
-        />
-      ) : null}
       {open?.kind === "opportunity" ? (
         <OpportunityDrawer clientId={clientId} client={data} onClose={() => setOpen(null)} />
       ) : null}
@@ -309,49 +294,21 @@ function StageCard({
             Agendar presentación
           </Button>
           {isAdmin ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onOpen({ kind: "proposal", proposalId: null })}
-              >
-                Nueva propuesta
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onOpen({ kind: "decide", decision: "invitar" })}
-              >
-                Invitar
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onOpen({ kind: "decide", decision: "alta" })}
-              >
-                Dar de alta
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onOpen({ kind: "decide", decision: "no_por_ahora" })}
-              >
-                No por ahora
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="text-destructive"
-                onClick={() => onOpen({ kind: "decide", decision: "perdido" })}
-              >
-                Perdido
-              </Button>
-            </>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onOpen({ kind: "proposal", proposalId: null })}
+            >
+              Nueva propuesta
+            </Button>
+          ) : null}
+          {/* Las decisiones (invitar, dar de alta, no por ahora, perdido) viven en un solo
+              lugar: «Decides tú», en la cabecera de la ficha. */}
+          {isAdmin ? (
+            <p className="basis-full text-xs text-muted-foreground">
+              Invitar, dar de alta o cerrar la venta se decide arriba, en «Decides tú».
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -719,6 +676,7 @@ function ProposalsCard({
         <ul className="divide-y rounded-lg border">
           {proposals.data.map((proposal) => {
             const expired = proposal.displayStatus === "vencida"
+            const replaced = proposal.displayStatus === "reemplazada"
             return (
               <li
                 key={proposal.id}
@@ -737,20 +695,22 @@ function ProposalsCard({
                     variant={
                       proposal.status === "aceptada"
                         ? "success"
-                        : expired || proposal.status === "no_aceptada"
+                        : expired || replaced || proposal.status === "no_aceptada"
                           ? "secondary"
                           : "outline"
                     }
                   >
-                    {PROPOSAL_STATUS_WORDS[proposal.displayStatus]}
+                    {proposalStatusWords(proposal)}
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {proposal.status === "aceptada" || proposal.status === "no_aceptada"
                     ? `${proposal.status === "aceptada" ? "La aceptó" : "No la aceptó"}${proposal.decidedAt ? ` el ${supportDay(proposal.decidedAt)}` : ""}${proposal.acceptedNote ? `: ${proposal.acceptedNote}` : ""}`
-                    : expired
-                      ? `Venció el ${dayWords(proposal.validUntil)}`
-                      : `${proposal.sentAt ? `Enviada el ${supportDay(proposal.sentAt)} · ` : ""}Vale hasta el ${dayWords(proposal.validUntil)}`}
+                    : replaced
+                      ? `${proposal.sentAt ? `Enviada el ${supportDay(proposal.sentAt)} · ` : ""}Ya no vale: la que cuenta es la v${proposal.replacedBy}`
+                      : expired
+                        ? `Venció el ${dayWords(proposal.validUntil)}`
+                        : `${proposal.sentAt ? `Enviada el ${supportDay(proposal.sentAt)} · ` : ""}Vale hasta el ${dayWords(proposal.validUntil)}`}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -773,7 +733,7 @@ function ProposalsCard({
                       Aprobar
                     </SubmitButton>
                   ) : null}
-                  {proposal.status === "enviada" ? (
+                  {proposal.status === "enviada" && !replaced ? (
                     <>
                       {!expired ? (
                         <Button
@@ -971,17 +931,8 @@ function RequestCard({ clientId, client }: { clientId: string; client: ClientSal
 
 /* ---------- La invitación ---------- */
 
-function InvitationCard({
-  client,
-  isAdmin,
-  selling,
-  onOpen,
-}: {
-  client: ClientSale
-  isAdmin: boolean
-  selling: boolean
-  onOpen: (open: Open) => void
-}) {
+/** La invitación solo dice en qué está: invitar (u otra vez) se decide en «Decides tú». */
+function InvitationCard({ client }: { client: ClientSale }) {
   const request = client.waitlistRequest
   const invited = request && (request.status === "invitada" || request.invitedAt)
   const due =
@@ -989,22 +940,7 @@ function InvitationCard({
       ? invitationDueWords(request.inviteExpiresAt)
       : null
   return (
-    <Card
-      title="La invitación"
-      id="venta-invitacion"
-      action={
-        isAdmin && selling ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onOpen({ kind: "decide", decision: "invitar" })}
-          >
-            {request?.status === "invitada" ? "Invitar otra vez" : "Invitar"}
-          </Button>
-        ) : undefined
-      }
-    >
+    <Card title="La invitación" id="venta-invitacion">
       {request?.enteredAt ? (
         <p className="text-sm">
           Entró el {supportDay(request.enteredAt)}
@@ -1026,7 +962,7 @@ function InvitationCard({
       )}
       {request?.stage === "invitacion_vencida" ? (
         <p className="text-xs text-muted-foreground">
-          Su enlace ya venció y no entró: invitar otra vez da uno nuevo.
+          Su enlace ya venció y no entró: invitarla otra vez le da uno nuevo.
         </p>
       ) : null}
     </Card>

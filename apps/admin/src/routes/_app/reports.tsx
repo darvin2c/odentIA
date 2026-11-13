@@ -696,7 +696,12 @@ function RevenueTab({ months }: { months: number }) {
           how={margin.charged.howCalculated}
         >
           <dl className="divide-y text-sm">
-            <Pair label="Cobrado" value={margin.charged.words} how={margin.charged.howCalculated} />
+            {/* Lo facturado del mes, no lo pagado: «Cobrado en <mes>» de arriba es lo que entró. */}
+            <Pair
+              label="Facturado"
+              value={margin.charged.words}
+              how={margin.charged.howCalculated}
+            />
             <Pair label="Nos costó" value={margin.cost.words} how={margin.cost.howCalculated} />
             <Pair label="Margen" value={margin.margin.words} how={margin.margin.howCalculated} />
             <Pair

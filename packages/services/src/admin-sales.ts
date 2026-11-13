@@ -64,7 +64,19 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { brandPaper, type MailBrand, renderEmail } from "@odentia/mail"
-import { and, asc, desc, eq, inArray, isNull, lte, max, type SQL, sql } from "drizzle-orm"
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  max,
+  type SQL,
+  sql,
+} from "drizzle-orm"
 import {
   type ClientSignal,
   clientSignals,
@@ -72,6 +84,9 @@ import {
   closeClientSaleAsEntered,
   LOST_REASON_WORDS,
   PRESENTATION_NOT_DONE_OUTCOMES,
+  proposalReplacedSql,
+  seesTaskKind,
+  visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { productMailDomain } from "./clinic-progress-report.js"
@@ -445,6 +460,8 @@ async function insertTask(
 ): Promise<string> {
   if (!(SAAS_TASK_KINDS as readonly string[]).includes(input.kind))
     throw invalidField("kind", "Elige qué hay que hacer")
+  if (!seesTaskKind(actor, input.kind))
+    throw invalidField("kind", "Las tareas de cobro las pone la administración")
   const title = trimmed("title", input.title, 200, "la tarea")
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
   if (input.dueAt && Number.isNaN(input.dueAt.getTime()))
@@ -495,10 +512,11 @@ export async function createClientTask(
   return getClientTask(tx, id, now)
 }
 
-async function lockTask(tx: Db, id: string) {
+async function lockTask(tx: Db, actor: AdminActor, id: string) {
   if (!UUID.test(id)) throw notFound("Tarea")
   const [row] = await tx.select().from(saasTask).where(eq(saasTask.id, id)).limit(1).for("update")
-  if (!row) throw notFound("Tarea")
+  // Una tarea de cobro, para Soporte, no existe: la misma respuesta que una que no hay.
+  if (!row || !seesTaskKind(actor, row.kind)) throw notFound("Tarea")
   return row
 }
 
@@ -581,7 +599,7 @@ export async function completeClientTask(
   input: { note?: string | null; activity?: ActivityInput | null } = {},
   now = new Date(),
 ): Promise<{ task: TaskRow; activity: ActivityRow | null }> {
-  const task = await lockTask(tx, id)
+  const task = await lockTask(tx, actor, id)
   requireOpenTask(task)
   const client = await lockClient(tx, task.clientId)
   const note = optionalText("note", input.note, 2000)
@@ -613,7 +631,7 @@ export async function cancelClientTask(
   id: string,
   now = new Date(),
 ): Promise<TaskRow> {
-  const task = await lockTask(tx, id)
+  const task = await lockTask(tx, actor, id)
   requireOpenTask(task)
   await tx
     .update(saasTask)
@@ -640,7 +658,7 @@ export async function moveClientTask(
   input: { dueOn: string; dueAt?: Date | null },
   now = new Date(),
 ): Promise<TaskRow> {
-  const task = await lockTask(tx, id)
+  const task = await lockTask(tx, actor, id)
   requireOpenTask(task)
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
   if (input.dueAt && (Number.isNaN(input.dueAt.getTime()) || limaDate(input.dueAt) !== dueOn))
@@ -678,6 +696,8 @@ export async function listClientTasks(
     isNull(saasClient.archivedAt),
   ]
   if (filter.who === "mias") where.push(eq(saasTask.assigneeUserId, actor.userId))
+  const visible = visibleTaskSql(actor)
+  if (visible) where.push(visible)
   if (filter.clientId) {
     if (!UUID.test(filter.clientId)) return []
     where.push(eq(saasTask.clientId, filter.clientId))
@@ -1323,7 +1343,7 @@ export async function recordPresentation(
   },
   now = new Date(),
 ): Promise<{ task: TaskRow; activity: ActivityRow }> {
-  const task = await lockTask(tx, taskId)
+  const task = await lockTask(tx, actor, taskId)
   if (task.kind !== "presentacion") throw notFound("Presentación")
   requireOpenTask(task)
   const client = await lockClient(tx, task.clientId)
@@ -1411,8 +1431,11 @@ export interface ProposalInput {
   validUntil: string
 }
 
-/** Lo que se ve de una propuesta: `vencida` se calcula (enviada y su vigencia ya pasó). */
-export type ProposalDisplayStatus = SaasProposalStatus | "vencida"
+/**
+ * Lo que se ve de una propuesta. Se calculan al leer: `reemplazada` (enviada y
+ * después salió una versión más nueva) y `vencida` (enviada y su vigencia ya pasó).
+ */
+export type ProposalDisplayStatus = SaasProposalStatus | "vencida" | "reemplazada"
 
 export interface ProposalRow {
   id: string
@@ -1430,6 +1453,8 @@ export interface ProposalRow {
   validUntil: string
   status: SaasProposalStatus
   displayStatus: ProposalDisplayStatus
+  /** La versión más nueva que salió después de esta (sin decidir): ya no se envía ni se acepta. */
+  replacedBy: number | null
   sentAt: Date | null
   decidedAt: Date | null
   acceptedNote: string | null
@@ -1437,14 +1462,22 @@ export interface ProposalRow {
   createdAt: Date
 }
 
-/** «Vencida»: enviada y su último día ya pasó. Lo único que la calcula. */
+/**
+ * «Reemplazada»: enviada y después salió una versión más nueva (`replacedBy`);
+ * «vencida»: enviada y su último día ya pasó. Lo único que las calcula; el SQL
+ * gemelo es `proposalReplacedSql` y `proposalExpiredSql`.
+ */
 export function proposalDisplayStatus(
-  row: { status: string; validUntil: string },
+  row: { status: string; validUntil: string; replacedBy?: number | null },
   today: string,
 ): ProposalDisplayStatus {
+  if (row.status === "enviada" && row.replacedBy != null) return "reemplazada"
   if (row.status === "enviada" && row.validUntil < today) return "vencida"
   return row.status as SaasProposalStatus
 }
+
+/** «Reemplazada por la v3»: lo que se dice de una propuesta que ya no vale porque salió otra. */
+export const replacedWords = (version: number) => `Reemplazada por la v${version}`
 
 /** El SQL gemelo de `proposalDisplayStatus`: si cambia una, cambia la otra. */
 export function proposalExpiredSql(today: string): SQL<boolean> {
@@ -1476,10 +1509,17 @@ function proposalRowOf(
     planName: string
     planPriceCents: number
     planCreditCents: number
+    replacedBy: number | null
   },
   today: string,
 ): ProposalRow {
   const p = row.proposal
+  // Una decidida no se reemplaza: queda como se decidió. Una sin enviar con otra más nueva ya
+  // enviada tampoco sale (`prepareOutreach`), aunque se siga leyendo «Borrador».
+  const replacedBy =
+    p.status !== "aceptada" && p.status !== "no_aceptada" && row.replacedBy !== null
+      ? Number(row.replacedBy)
+      : null
   return {
     id: p.id,
     clientId: p.clientId,
@@ -1500,7 +1540,8 @@ function proposalRowOf(
     billingCycle: p.billingCycle as "mensual" | "quincenal",
     validUntil: p.validUntil,
     status: p.status as SaasProposalStatus,
-    displayStatus: proposalDisplayStatus(p, today),
+    displayStatus: proposalDisplayStatus({ ...p, replacedBy }, today),
+    replacedBy,
     sentAt: p.sentAt,
     decidedAt: p.decidedAt,
     acceptedNote: p.acceptedNote,
@@ -1509,11 +1550,35 @@ function proposalRowOf(
   }
 }
 
+/** La versión más nueva que salió después de una (`newer.sent_at`): la que la reemplaza. */
+const replacedBySql = sql<number | null>`(select max(newer.version) from admin.saas_proposal newer
+  where newer.client_id = ${saasProposal.clientId} and newer.version > ${saasProposal.version}
+    and newer.sent_at is not null)`
+
 const proposalFields = {
   proposal: saasProposal,
   planName: saasPlan.name,
   planPriceCents: saasPlan.priceCents,
   planCreditCents: saasPlan.creditCents,
+  replacedBy: replacedBySql,
+}
+
+/** ¿Salió después una versión más nueva de esta propuesta? Su número, o null. */
+async function newerSentVersion(
+  tx: Db,
+  proposal: { clientId: string; version: number },
+): Promise<number | null> {
+  const [row] = await tx
+    .select({ version: max(saasProposal.version) })
+    .from(saasProposal)
+    .where(
+      and(
+        eq(saasProposal.clientId, proposal.clientId),
+        sql`${saasProposal.version} > ${proposal.version}`,
+        isNotNull(saasProposal.sentAt),
+      ),
+    )
+  return row?.version ?? null
 }
 
 export async function getSaasProposal(
@@ -1725,6 +1790,16 @@ export async function decideSaasProposal(
         ? "Esa propuesta ya se decidió"
         : "Esa propuesta todavía no se envió",
     )
+  }
+  if (input.accepted) {
+    // Aceptar una que otra versión ya reemplazó dejaría dos condiciones vivas.
+    const newer = await newerSentVersion(tx, proposal)
+    if (newer !== null)
+      throw new ServiceError(
+        "PROPOSAL_REPLACED",
+        409,
+        `${replacedWords(newer)}: la que vale es la v${newer}; marca la respuesta en esa`,
+      )
   }
   if (input.accepted && proposal.validUntil < limaDate(now))
     throw new ServiceError(
@@ -2022,6 +2097,13 @@ export async function prepareOutreach(
       )
     if (proposal.status === "aceptada" || proposal.status === "no_aceptada")
       throw new ServiceError("PROPOSAL_DECIDED", 409, "Esa propuesta ya se decidió")
+    const newer = await newerSentVersion(tx, proposal)
+    if (newer !== null)
+      throw new ServiceError(
+        "PROPOSAL_REPLACED",
+        409,
+        `Ya salió la v${newer}: envía esa o haz una versión nueva`,
+      )
     if (proposal.validUntil < limaDate(now))
       throw new ServiceError(
         "PROPOSAL_EXPIRED",
@@ -2354,7 +2436,8 @@ export async function pipeline(
       greatest(
         (select max(coalesce(p.decided_at, p.sent_at)) from admin.saas_proposal p
           where p.client_id = c.id and p.created_at >= opp.created_at
-            and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date))),
+            and (p.status = 'aceptada' or (p.status = 'enviada' and p.valid_until >= ${today}::date
+              and not ${proposalReplacedSql()}))),
         (select max(r.invited_at) from admin.saas_waitlist_request r
           where r.client_id = c.id and r.status = 'invitada')
       ) as proposal_at,

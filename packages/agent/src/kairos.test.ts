@@ -83,6 +83,19 @@ describe("fakeKairosWriter", () => {
     expect(read.newContacts).toEqual([{ name: "Pedro Ruiz", title: "Socio", roles: ["decide"] }])
   })
 
+  it("a «su socio» sin nombre lo propone como «Socio (nombre por preguntar)», con los papeles por confirmar", async () => {
+    const read = await fakeKairosWriter.parseAnnotation({
+      text: "Hablé con Rosa. Su socio es quien decide, lo vemos el lunes.",
+      today,
+      client,
+      contacts,
+      demos,
+    })
+    expect(read.newContacts).toEqual([
+      { name: "Socio (nombre por preguntar)", title: "Socio", roles: [] },
+    ])
+  })
+
   it("ordena un WhatsApp sin respuesta con la llamada de mañana, sin hora", async () => {
     const read = await fakeKairosWriter.parseAnnotation({
       text: "Le escribí por WhatsApp a Luis, no contestó. Volver a llamar mañana.",
@@ -279,7 +292,11 @@ describe("createKairosWriter con el proveedor", () => {
         contactId: "c-inventado",
         demoId: "d-1",
       },
-      newContacts: [{ name: "Pedro Ruiz", title: "Socio", roles: ["decide"] }],
+      newContacts: [
+        { name: "Pedro Ruiz", title: "Socio", roles: ["decide"] },
+        // El modelo escribió «Su socia» como nombre: se propone como la plantilla.
+        { name: "Su socia", title: null, roles: ["paga"] },
+      ],
       data: { city: null, professionals: "4-9", currentTool: null },
     }
     const { provider, uses, writer } = await withProvider((_n, response) =>
@@ -318,7 +335,10 @@ describe("createKairosWriter con el proveedor", () => {
           contactId: null,
           demoId: "d-1",
         },
-        newContacts: [{ name: "Pedro Ruiz", title: "Socio", roles: ["decide"] }],
+        newContacts: [
+          { name: "Pedro Ruiz", title: "Socio", roles: ["decide"] },
+          { name: "Socia (nombre por preguntar)", title: "Socia", roles: [] },
+        ],
         data: { professionals: "4-9" },
       })
       const body = provider.requests[0]?.body as {
@@ -332,6 +352,8 @@ describe("createKairosWriter con el proveedor", () => {
       // Lo que cambia (hoy, la anotación) va en el mensaje del turno; lo fijo, marcado para la caché.
       expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("text"))
       expect(JSON.stringify(body.messages[1])).toContain("Hoy: 2026-11-12 (jueves)")
+      // El prompt pide lo mismo que la plantilla para quien no tiene nombre.
+      expect(JSON.stringify(body.messages[0])).toContain("Socio (nombre por preguntar)")
       expect(uses).toEqual([
         {
           purpose: "anotar",

@@ -18,7 +18,7 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { type SQL, sql } from "drizzle-orm"
-import { CLIENT_ORIGIN_WORDS, LOST_REASON_WORDS } from "./admin-clients.js"
+import { CLIENT_ORIGIN_WORDS, LOST_REASON_WORDS, proposalReplacedSql } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
@@ -728,7 +728,7 @@ export async function revenueReport(
       (chargedByCurrency.get(clinic.currency) ?? 0) + clinic.chargedCents,
     )
   const marginHow =
-    "Es la misma cuenta de «Costo y margen»: lo cobrado sin impuesto en lo que va del mes de cada clínica activa o en gracia (sin demos, y la prueba no se cobra) frente a lo que nos costó: la IA que reportó cada proveedor, el espacio guardado y una parte estimada del servidor y los gastos fijos."
+    "Es la misma cuenta de «Costo y margen»: lo facturado sin impuesto en lo que va del mes de cada clínica activa o en gracia, la cuota y lo que pasó del crédito, se haya pagado o no (sin demos, y la prueba no se cobra), frente a lo que nos costó: la IA que reportó cada proveedor, el espacio guardado y una parte estimada del servidor y los gastos fijos."
 
   return {
     month: monthKey(current),
@@ -840,6 +840,8 @@ export async function forecastReport(
       join ${saasClient} c on c.id = p.client_id
       join ${saasPlan} pl on pl.id = p.plan_id
       where p.status = 'enviada' and p.valid_until >= ${today}::date
+        -- Solo la última vigente: una que reemplazó otra versión no suma dos veces.
+        and not ${proposalReplacedSql()}
         and c.archived_at is null and c.organization_id is null
       order by p.client_id, p.version desc`,
   )

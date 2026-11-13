@@ -5460,6 +5460,41 @@ await db.transaction(async (tx) => {
     .where(eq(saasDemo.id, demo.id))
 })
 
+// --- odentIA: una clínica dental para presentar, con el motor de «Crear demo» (ADR 0096) ---
+// «Agendar presentación» del ARM ofrece la demo lista del producto del cliente: sin esta,
+// las clínicas dentales no tenían ninguna. La arma igual que la administración.
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "dental",
+      kind: "general",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Dental Sonrisa Lince",
+      slug: "seed-dental-sonrisa-lince",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_112,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo dental de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "dental", size: "pequeno" }, { secretsKey, fetch })
+  await tx
+    .update(saasDemo)
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
+    .where(eq(saasDemo.id, demo.id))
+})
+
 // --- vistIA: una óptica para presentar, con el motor de «Crear demo» (ADR 0096) ---
 // La arma igual que la administración: su equipo, su biblioteca, meses de historia y
 // las próximas dos semanas. Se entra desde Clínicas › «Demos».

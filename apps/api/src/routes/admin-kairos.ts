@@ -12,7 +12,7 @@ import {
   type KairosDraftWriter,
   type KairosExecutors,
   type KairosWeeklyWriter,
-  kairosDone,
+  kairosDonePage,
   kairosRulesPass,
   linkContactToUser,
   listKairosItems,
@@ -269,12 +269,12 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { limit, before } = parsed.data
     return runService(c, 200, () =>
-      deps.ownerDb.transaction(async (tx) => ({
-        items: await kairosDone(tx, actor, {
+      deps.ownerDb.transaction((tx) =>
+        kairosDonePage(tx, actor, {
           ...(limit ? { limit } : {}),
           ...(before ? { before: new Date(before) } : {}),
         }),
-      })),
+      ),
     )
   })
 

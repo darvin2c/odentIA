@@ -18,6 +18,8 @@ import {
 } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
+import { clientTimeline, getClient, listClients } from "./admin-clients.js"
+import { forecastReport } from "./admin-reports.js"
 import {
   addActivity,
   applyInvitedProposal,
@@ -289,6 +291,62 @@ describe("tareas", () => {
       ),
     ).rejects.toMatchObject({ fields: { assigneeUserId: expect.any(String) } })
   })
+
+  it("Soporte no ve las tareas de cobro: ni en la ficha, ni en listas, ni en el historial (ADR 0181)", async () => {
+    const { client } = await newClient()
+    const now = new Date()
+    const cobro = await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "cobro", title: "Hablar del comprobante", dueOn: day(-1, now) },
+      now,
+    )
+    const llamar = await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "llamar", title: "Llamar", dueOn: day(1, now) },
+      now,
+    )
+    // La administración la ve primero: es la más próxima.
+    const forAdmin = await getClient(ownerDb, admin, client.id, now)
+    expect(forAdmin.nextStep?.taskId).toBe(cobro.id)
+    expect(forAdmin.openTasks.map((t) => t.id)).toEqual([cobro.id, llamar.id])
+    // Para Soporte no existe: el próximo paso es la llamada.
+    const forSupport = await getClient(ownerDb, support, client.id, now)
+    expect(forSupport.nextStep?.taskId).toBe(llamar.id)
+    expect(forSupport.openTasks.map((t) => t.id)).toEqual([llamar.id])
+    const listed = await listClients(ownerDb, support, { view: "todos", q: client.name }, now)
+    expect(listed.items.find((c) => c.id === client.id)?.nextStep?.taskId).toBe(llamar.id)
+    expect(
+      (await listClientTasks(ownerDb, support, { clientId: client.id }, now)).map((t) => t.id),
+    ).toEqual([llamar.id])
+    expect(
+      (await listClientTasks(ownerDb, admin, { clientId: client.id }, now)).map((t) => t.id),
+    ).toEqual([cobro.id, llamar.id])
+    // Ni la mueve, ni la hace, ni la cancela, ni la pone: la misma respuesta que una que no hay.
+    for (const attempt of [
+      () => moveClientTask(ownerDb, support, cobro.id, { dueOn: day(2, now) }, now),
+      () => completeClientTask(ownerDb, support, cobro.id),
+      () => cancelClientTask(ownerDb, support, cobro.id),
+    ])
+      await expect(attempt()).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      createClientTask(ownerDb, support, client.id, {
+        kind: "cobro",
+        title: "x",
+        dueOn: day(0, now),
+      }),
+    ).rejects.toMatchObject({ fields: { kind: expect.any(String) } })
+    // Hecha, sale en el historial solo para la administración.
+    await completeClientTask(ownerDb, admin, cobro.id, { note: "Pagó" }, now)
+    const later = new Date(now.getTime() + 1000)
+    const titles = async (who: typeof admin | typeof support) =>
+      (await clientTimeline(ownerDb, who, client.id, {}, later)).items.map((i) => i.title)
+    expect(await titles(admin)).toContain("Hecho: Hablar del comprobante")
+    expect(await titles(support)).not.toContain("Hecho: Hablar del comprobante")
+  })
 })
 
 describe("presentaciones", () => {
@@ -543,6 +601,69 @@ describe("propuestas", () => {
     ).rejects.toMatchObject({
       code: "PROPOSAL_NOT_SENT",
     })
+  })
+
+  it("al salir una versión nueva, la anterior se lee «Reemplazada por la vN», no se acepta ni se reenvía y la previsión cuenta solo la última", async () => {
+    const { client, contact } = await newClient()
+    const now = new Date()
+    const input = {
+      planId,
+      discountBps: 1000,
+      billingCycle: "mensual" as const,
+      validUntil: day(10, now),
+    }
+    const v1 = await createSaasProposal(ownerDb, admin, client.id, input, now)
+    const v2 = await createSaasProposal(
+      ownerDb,
+      admin,
+      client.id,
+      { ...input, discountBps: 0 },
+      now,
+    )
+    const sent = async (id: string) =>
+      ownerDb
+        .update(saasProposal)
+        .set({ status: "enviada", sentAt: now })
+        .where(eq(saasProposal.id, id))
+    await sent(v1.id)
+    // Mientras la v2 no sale, la v1 sigue vigente.
+    expect(
+      (await listSaasProposals(ownerDb, admin, client.id, now)).find((p) => p.id === v1.id),
+    ).toMatchObject({ displayStatus: "enviada", replacedBy: null })
+    await sent(v2.id)
+    const listed = await listSaasProposals(ownerDb, admin, client.id, now)
+    expect(listed.map((p) => [p.version, p.displayStatus, p.replacedBy])).toEqual([
+      [2, "enviada", null],
+      [1, "reemplazada", 2],
+    ])
+    expect(
+      proposalDisplayStatus(
+        { status: "enviada", validUntil: "2026-11-10", replacedBy: 2 },
+        "2026-11-11",
+      ),
+    ).toBe("reemplazada")
+    await expect(
+      decideSaasProposal(ownerDb, admin, v1.id, { accepted: true }, now),
+    ).rejects.toMatchObject({
+      code: "PROPOSAL_REPLACED",
+      status: 409,
+      message: expect.stringContaining("v2"),
+    })
+    await expect(
+      prepareOutreach(
+        ownerDb,
+        admin,
+        client.id,
+        { channel: "whatsapp", contactId: contact.id, body: "La propuesta", proposalId: v1.id },
+        now,
+      ),
+    ).rejects.toMatchObject({ code: "PROPOSAL_REPLACED" })
+    const forecast = await forecastReport(ownerDb, admin, now)
+    expect(forecast.rows.filter((p) => p.clientId === client.id).map((p) => p.version)).toEqual([2])
+    // La vigente sí se acepta.
+    expect((await decideSaasProposal(ownerDb, admin, v2.id, { accepted: true }, now)).status).toBe(
+      "aceptada",
+    )
   })
 
   it("pide aprobación cuando pasa de lo que da el vendedor y no la arma Administración", async () => {

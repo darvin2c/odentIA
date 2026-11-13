@@ -296,7 +296,7 @@ const ANNOTATION_SYSTEM = `${VOICE}
 Tu tarea ahora: ordenar lo que anotó una persona del equipo sobre un cliente en las piezas de la herramienta «ordenar_anotacion». Llama siempre a la herramienta.
 - activity: lo que pasó. kind: llamada, whatsapp, correo, reunion, presentacion (solo si la presentación ya se hizo), propuesta o nota. direction: «salio» si lo hicimos nosotros, «entro» si nos buscó la clínica, null si es una nota. outcome: en qué quedó, en pocas palabras, o null. body: lo anotado, limpio y fiel, sin agregar nada. contactId: el id de la persona de la lista si la nombra, o null.
 - task: solo si dijo qué hacer después y cuándo. dueOn es el día (AAAA-MM-DD) contando desde «Hoy»; «el jueves» es el próximo jueves después de hoy. time: «HH:MM» en 24 horas si dijo una hora, si no null. kind: llamar, escribir, presentacion, propuesta, alta, cobro u otro. title: corto, en infinitivo. demoId: el id de la demo de la lista si la nombra, o null. Si no dijo cuándo, task es null.
-- newContacts: personas nuevas que nombra y no están en la lista (con su cargo si lo dijo y sus papeles: decide, usa, paga, solo si lo dijo).
+- newContacts: personas nuevas que nombra y no están en la lista (con su cargo si lo dijo y sus papeles: decide, usa, paga, solo si lo dijo). Si la menciona sin su nombre («su socio», «la gerente»), name es el cargo y «(nombre por preguntar)», como «Socio (nombre por preguntar)», title es el cargo y roles va vacío: se confirman después. Nunca uses «Su socio» como nombre.
 - data: solo lo que dijo de la clínica: city, professionals (1, 2-3, 4-9 o 10+), currentTool (nada, cuaderno_excel u otro_software). Lo que no dijo va en null.
 - Nunca inventes: lo que no está en la anotación va en null o vacío.`
 
@@ -382,13 +382,30 @@ function annotationOf(
           demoId: known(read.task.demoId, demoIds),
         }
       : null,
-    newContacts: read.newContacts.map((contact) => ({
-      name: contact.name.trim(),
-      title: contact.title?.trim() || null,
-      roles: [...new Set(contact.roles)],
-    })),
+    newContacts: read.newContacts.map((contact) => {
+      const name = contact.name.trim()
+      const title = contact.title?.trim() || null
+      // Si el modelo igual escribió «Su socio» como nombre, se propone como la plantilla.
+      const unnamed = /^(?:[Ss]us?|[Ee]l|[Ll]a)\s+(\p{Ll}+)$/u.exec(name)
+      if (unnamed?.[1]) return unnamedPerson(unnamed[1], title)
+      return { name, title, roles: [...new Set(contact.roles)] }
+    }),
     data,
   }
+}
+
+/**
+ * Una persona que se menciona sin su nombre («su socio»): se propone con su
+ * cargo y «(nombre por preguntar)», sin papeles (se confirman después). Nunca
+ * «Su socio» como si fuera un nombre.
+ */
+export function unnamedPerson(
+  role: string,
+  title: string | null = null,
+): KairosAnnotation["newContacts"][number] {
+  const word = role.trim().toLocaleLowerCase("es")
+  const cargo = word.charAt(0).toLocaleUpperCase("es") + word.slice(1)
+  return { name: `${cargo} (nombre por preguntar)`, title: title ?? cargo, roles: [] }
 }
 
 /* ---------- Lectura de lo que escribió el modelo ---------- */
@@ -800,9 +817,10 @@ function fakeAnnotation(input: Parameters<KairosWriter["parseAnnotation"]>[0]): 
     )
   if (partner) {
     const title = partner[1] === "socia" ? "Socia" : "Socio"
-    const name = partner[2] ?? `Su ${partner[1]}`
-    const known = input.contacts.some((contact) => plain(contact.name) === plain(name))
-    if (!known) newContacts.push({ name, title, roles: ["decide"] })
+    const name = partner[2]
+    if (!name) newContacts.push(unnamedPerson(title))
+    else if (!input.contacts.some((contact) => plain(contact.name) === plain(name)))
+      newContacts.push({ name, title, roles: ["decide"] })
   }
   const data: KairosAnnotation["data"] = {}
   const people =

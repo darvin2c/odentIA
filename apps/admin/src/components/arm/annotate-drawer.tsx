@@ -582,6 +582,11 @@ function AnnotateForm({ clientId, onClose }: AnnotateDrawerProps) {
                                   </span>
                                 )
                               })}
+                              {field.state.value.length === 0 ? (
+                                <span className="text-xs text-muted-foreground">
+                                  Papeles por confirmar
+                                </span>
+                              ) : null}
                             </fieldset>
                           )}
                         </form.Field>
