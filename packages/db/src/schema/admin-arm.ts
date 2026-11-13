@@ -119,6 +119,7 @@ export const KAIROS_ITEM_KINDS = [
   "demo",
   "presentacion_hecha",
   "correo_sin_cliente",
+  "responder_correo",
 ] as const
 export type KairosItemKind = (typeof KAIROS_ITEM_KINDS)[number]
 export const KAIROS_ITEM_STATUSES = [
@@ -141,9 +142,20 @@ export const SAAS_CLIENT_FILE_KINDS = [
 export type SaasClientFileKind = (typeof SAAS_CLIENT_FILE_KINDS)[number]
 export const SAAS_CLIENT_FILE_SOURCES = ["persona", "kairos", "correo"] as const
 export type SaasClientFileSource = (typeof SAAS_CLIENT_FILE_SOURCES)[number]
-export const SAAS_INBOUND_MAILBOXES = ["soporte", "contacto"] as const
+/**
+ * A dónde llegó un correo: un buzón fijo de cada dominio (soporte@, contacto@, hola@,
+ * fundadores@) o la dirección de una persona del equipo (`persona`, con su `staff_user_id`).
+ */
+export const SAAS_INBOUND_MAILBOXES = [
+  "soporte",
+  "contacto",
+  "hola",
+  "fundadores",
+  "persona",
+] as const
 export type SaasInboundMailbox = (typeof SAAS_INBOUND_MAILBOXES)[number]
-export const SAAS_INBOUND_MATCHES = ["contacto", "solicitud", "miembro", "persona"] as const
+/** Cómo se ligó al cliente: por correo exacto (contacto, solicitud, miembro), por respuesta a un envío nuestro (`hilo`) o una persona. */
+export const SAAS_INBOUND_MATCHES = ["contacto", "solicitud", "miembro", "hilo", "persona"] as const
 export type SaasInboundMatch = (typeof SAAS_INBOUND_MATCHES)[number]
 export const KAIROS_AI_PURPOSES = [
   "borrador",
@@ -512,14 +524,18 @@ export const kairosItem = adminSchema.table(
  * persona dice «Salió» o «No salió». Solo avanza de pendiente a enviado,
  * incierto o no salió, y de incierto a enviado o no salió; lo demás no cambia
  * (`saas_outreach_guard`).
+ *
+ * Un correo lleva su remitente (`from_address`: quien escribe, soporte@ u
+ * hola@ de la marca) y su propio `Message-ID` (`message_id`), para que una
+ * respuesta de la clínica vuelva a su hilo. La respuesta a un correo que llegó
+ * (`in_reply_to_email_id`) lleva además la cadena del hilo (`references`) y
+ * puede salir sin cliente: solo ella (`saas_outreach_client_check`).
  */
 export const saasOutreach = adminSchema.table(
   "saas_outreach",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    clientId: uuid("client_id")
-      .notNull()
-      .references(() => saasClient.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "cascade" }),
     contactId: uuid("contact_id").references(() => saasClientContact.id, { onDelete: "set null" }),
     channel: text("channel").notNull(),
     toAddress: text("to_address").notNull(),
@@ -532,18 +548,41 @@ export const saasOutreach = adminSchema.table(
     sentAt: timestamp("sent_at", { withTimezone: true }),
     resolvedBy: text("resolved_by").references(() => user.id),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** El correo que responde: nunca se borra (el texto sí, a los 30 días). */
+    inReplyToEmailId: uuid("in_reply_to_email_id").references(
+      (): AnyPgColumn => saasInboundEmail.id,
+    ),
+    /** La dirección que firma, sin nombre: `ada@odentia32.com`, `soporte@…`, `hola@…`. */
+    fromAddress: text("from_address"),
+    /** Nuestro `Message-ID`, con sus `<>`: `<uuid@odentia32.com>`. */
+    messageId: text("message_id"),
+    /** La cabecera `References` con que salió: la del correo que responde más su Message-ID. */
+    references: text("references"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     index("saas_outreach_client_idx").on(table.clientId, table.createdAt),
     index("saas_outreach_status_idx").on(table.status),
+    index("saas_outreach_reply_idx").on(table.inReplyToEmailId),
+    uniqueIndex("saas_outreach_message_uidx").on(table.messageId),
     check("saas_outreach_channel_check", oneOf(table.channel, SAAS_OUTREACH_CHANNELS)),
     check("saas_outreach_status_check", oneOf(table.status, SAAS_OUTREACH_STATUSES)),
     check(
       "saas_outreach_text_check",
       sql`length(trim(${table.body})) BETWEEN 1 AND 5000 AND length(trim(${table.toAddress})) BETWEEN 3 AND 254
         AND (${table.subject} IS NULL OR length(${table.subject}) <= 200)`,
+    ),
+    check(
+      "saas_outreach_client_check",
+      sql`${table.clientId} IS NOT NULL OR ${table.inReplyToEmailId} IS NOT NULL`,
+    ),
+    check(
+      "saas_outreach_mail_check",
+      sql`(${table.fromAddress} IS NULL OR (${table.fromAddress} = lower(${table.fromAddress}) AND length(${table.fromAddress}) BETWEEN 3 AND 254))
+        AND (${table.messageId} IS NULL OR length(${table.messageId}) BETWEEN 3 AND 998)
+        AND (${table.references} IS NULL OR length(${table.references}) <= 8000)
+        AND (${table.inReplyToEmailId} IS NULL OR ${table.channel} = 'correo')`,
     ),
   ],
 )
@@ -589,12 +628,15 @@ export const saasClientFile = adminSchema.table(
 )
 
 /**
- * Un correo que llegó a soporte@ o contacto@ de un producto, firmado por el
- * worker de Cloudflare. Una vez por `message_id`. El cliente se busca por
- * correo exacto (contacto, solicitud, miembro) solo si el remitente está
- * verificado (`sender_verified`: DMARC, o SPF o DKIM alineados con el From,
- * según Cloudflare); si no, o si hay más de uno, queda sin cliente hasta que
- * una persona lo asigna (`matched_by_user`). El texto (`text_body`) se borra a
+ * Un correo que llegó a un buzón de un producto (soporte@, contacto@, hola@,
+ * fundadores@) o a la dirección de una persona del equipo (`persona`, con
+ * `staff_user_id`), firmado por el worker de Cloudflare. Una vez por
+ * `message_id`. Solo si el remitente está verificado (`sender_verified`:
+ * DMARC, o SPF o DKIM alineados con el From, según Cloudflare) se liga solo:
+ * por el hilo (`in_reply_to`/`references` con el Message-ID de un envío
+ * nuestro a ese mismo correo) o por correo exacto (contacto, solicitud,
+ * miembro); si no, o si hay más de uno, queda sin cliente hasta que una
+ * persona lo asigna (`matched_by_user`). El texto (`text_body`) se borra a
  * los 30 días de llegar, con los adjuntos.
  */
 export const saasInboundEmail = adminSchema.table(
@@ -608,6 +650,11 @@ export const saasInboundEmail = adminSchema.table(
     fromAddress: text("from_address").notNull(),
     fromName: text("from_name"),
     toAddress: text("to_address").notNull(),
+    /** A quién del equipo le escribió (`mailbox = 'persona'`); nulo si se borró su cuenta. */
+    staffUserId: text("staff_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** Cabeceras del hilo, recortadas: `In-Reply-To` y `References` tal como llegaron. */
+    inReplyTo: text("in_reply_to"),
+    references: text("references"),
     subject: text("subject"),
     textBody: text("text_body"),
     senderVerified: boolean("sender_verified").notNull().default(false),
@@ -625,6 +672,7 @@ export const saasInboundEmail = adminSchema.table(
     uniqueIndex("saas_inbound_email_message_uidx").on(table.messageId),
     index("saas_inbound_email_client_idx").on(table.clientId, table.receivedAt),
     index("saas_inbound_email_from_idx").on(table.fromAddress),
+    index("saas_inbound_email_staff_idx").on(table.staffUserId, table.receivedAt),
     check("saas_inbound_email_mailbox_check", oneOf(table.mailbox, SAAS_INBOUND_MAILBOXES)),
     check("saas_inbound_email_product_check", oneOf(table.product, SAAS_CLIENT_PRODUCTS)),
     check(
@@ -635,7 +683,13 @@ export const saasInboundEmail = adminSchema.table(
       "saas_inbound_email_text_check",
       sql`length(trim(${table.messageId})) BETWEEN 1 AND 998
         AND (${table.textBody} IS NULL OR length(${table.textBody}) <= 20000)
-        AND (${table.subject} IS NULL OR length(${table.subject}) <= 998)`,
+        AND (${table.subject} IS NULL OR length(${table.subject}) <= 998)
+        AND (${table.inReplyTo} IS NULL OR length(${table.inReplyTo}) <= 998)
+        AND (${table.references} IS NULL OR length(${table.references}) <= 8000)`,
+    ),
+    check(
+      "saas_inbound_email_staff_check",
+      sql`${table.mailbox} = 'persona' OR ${table.staffUserId} IS NULL`,
     ),
   ],
 )
