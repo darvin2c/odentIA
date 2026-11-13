@@ -696,6 +696,24 @@ describe("lo que corrigió la revisión", () => {
     expect(beto?.copyTo).toBeNull()
   })
 
+  it("a una persona de Soporte no se le copia lo que llega a su dirección: es comercial", async () => {
+    await ownerDb
+      .update(adminStaff)
+      .set({ active: true, role: "support", mailCopyTo: "beto@gmail.com" })
+      .where(eq(adminStaff.userId, other.userId))
+    try {
+      expect(await inboundPersonOf(ownerDb, "beto", [])).toEqual({
+        userId: other.userId,
+        copyTo: null,
+      })
+    } finally {
+      await ownerDb
+        .update(adminStaff)
+        .set({ active: false, role: "admin", mailCopyTo: null })
+        .where(eq(adminStaff.userId, other.userId))
+    }
+  })
+
   it("si alguien ya respondió, el borrador de Kairós no sale (409)", async () => {
     const inbound = await ingestInboundEmail(ownerDb, mail({ from: "carrera@gmail.com" }))
     const item = await replyItem(inbound.id)

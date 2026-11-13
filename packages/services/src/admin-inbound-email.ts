@@ -176,7 +176,12 @@ export async function inboundPersonOf(
         : []
     if (!ours) throw unknown()
   }
-  return { userId: staff.userId, copyTo: staff.active ? staff.copyTo : null }
+  // Lo que llega a la dirección de una persona es comercial (solo Administración): a quien ya no
+  // está, o a quien es de Soporte, no se le copia.
+  return {
+    userId: staff.userId,
+    copyTo: staff.active && staff.role === "admin" ? staff.copyTo : null,
+  }
 }
 
 /**

@@ -192,13 +192,14 @@ export async function markStaffMailUsed(tx: Db, userId: string, now = new Date()
 export async function staffByMailLocal(
   tx: Db,
   local: string,
-): Promise<{ userId: string; active: boolean; copyTo: string | null } | null> {
+): Promise<{ userId: string; active: boolean; role: string; copyTo: string | null } | null> {
   const clean = local.trim().toLowerCase().split("+")[0] ?? ""
   if (!clean || staffMailLocalProblem(clean)) return null
   const [row] = await tx
     .select({
       userId: adminStaff.userId,
       active: adminStaff.active,
+      role: adminStaff.role,
       copyTo: adminStaff.mailCopyTo,
     })
     .from(adminStaff)
