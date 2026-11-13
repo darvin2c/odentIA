@@ -131,10 +131,10 @@ export interface AdminClientsDeps {
    */
   conversationMailer?: Mailer
   /**
-   * A dónde responde la clínica la invitación de Fundadores: el buzón comercial
-   * (SALES_EMAIL, con respaldo a FOUNDERS_EMAIL). Sin él, la invitación no promete respuesta.
+   * A dónde responde la clínica la invitación de Fundadores: hola@ de su marca, que
+   * entra al ARM. Sin él, la invitación no promete respuesta.
    */
-  invitationReplyTo?: string | undefined
+  invitationReplyToOf?: (product: ClinicalProduct) => string | undefined
   /** Kairós con modelo; sin él, el doble determinista (sin gasto). */
   kairos?: KairosWriter
   /** Lo mismo que usa «Alta asistida» en Organizaciones. */
@@ -999,7 +999,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
               url,
               expiresText: dayText(issued.expiresAt),
               offer: issued.offer,
-              replyTo: deps.invitationReplyTo,
+              replyTo: deps.invitationReplyToOf?.(product),
               brand: productWords(product).brand,
             }),
           })

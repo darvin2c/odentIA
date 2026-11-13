@@ -86,13 +86,6 @@ for (const [product, domain] of Object.entries(env.productDomains) as [DomainPro
 if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
   console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
 }
-if (env.NODE_ENV === "production" && !env.SALES_EMAIL) {
-  console.warn(
-    env.FOUNDERS_EMAIL
-      ? "SALES_EMAIL vacío: el aviso de cliente nuevo y las respuestas a la solicitud y a la invitación van a FOUNDERS_EMAIL (docs/deployment.md)."
-      : "SALES_EMAIL y FOUNDERS_EMAIL vacíos: el equipo no recibe los clientes nuevos (docs/deployment.md).",
-  )
-}
 
 // El modelo de la plataforma (el mismo `LLM_*`), y su gasto, como gasto de Sallca: Kairós prepara, nunca envía.
 const llm = platformLlmFromEnv(env)
@@ -128,8 +121,6 @@ const app = createApp({
   adminURL: env.ADMIN_URL,
   mailer,
   complaintsEmail: env.COMPLAINTS_EMAIL || undefined,
-  foundersEmail: env.FOUNDERS_EMAIL || undefined,
-  salesEmail: env.SALES_EMAIL || undefined,
   ...(conversationMailer ? { conversationMailer } : {}),
   listenUrl: env.APP_DATABASE_URL,
   // La dirección real de quien llama a las rutas públicas (el chat web, el

@@ -215,7 +215,7 @@ beforeAll(async () => {
       kairos,
       startTrial: startSaasTrial,
       panelUrlOf: () => "https://app.odentia.localhost",
-      invitationReplyTo: "contacto@odentia32.com",
+      invitationReplyToOf: (product) => `hola@${product === "dental" ? "odentia32.com" : "otra.test"}`,
       mailer: {
         send: async (message) => {
           mailAttempts += 1
@@ -812,7 +812,7 @@ describe("propuesta, invitar y dar de alta", () => {
     expect(subscription?.discountBps ?? 0).toBe(0)
   })
 
-  it("invitar devuelve el enlace y envía el correo con la respuesta al buzón comercial (SALES_EMAIL)", async () => {
+  it("invitar devuelve el enlace y envía el correo con la respuesta a hola@ de su marca", async () => {
     const clientId = await newClient("Clínica Invitada (ficticia)", "invitada@andes.test")
     const response = await call("POST", `/${clientId}/invite`, ADMIN, {
       email: "invitada@andes.test",
@@ -827,7 +827,7 @@ describe("propuesta, invitar y dar de alta", () => {
     expect(data.emailSent).toBe(true)
     expect(sent.at(-1)).toMatchObject({
       to: "invitada@andes.test",
-      replyTo: "contacto@odentia32.com",
+      replyTo: "hola@odentia32.com",
     })
   })
 })

@@ -158,11 +158,14 @@ it("la solicitud de la web se guarda, envía su copia una vez y valida lo que ll
   const res = await send(request("ana@sonrisa.test"))
   expect(res.status).toBe(201)
   expect(res.headers.get("access-control-allow-origin")).toBe("https://www.odentia.localhost")
-  expect(mailer.sent.map((m) => m.to)).toEqual(["ana@sonrisa.test"])
+  // La copia a quien pidió, que responde a hola@ de su marca, y el aviso «Cliente nuevo» a ese mismo hola@.
+  expect(mailer.sent.map((m) => m.to)).toEqual(["ana@sonrisa.test", "hola@odentia32.com"])
   expect(mailer.sent[0]?.subject).toBe("Clínica Sonrisa está en la lista de odentIA")
-  // Pedirlo otra vez no duplica la solicitud ni la copia.
+  expect(mailer.sent[0]?.replyTo).toBe("hola@odentia32.com")
+  expect(mailer.sent[1]?.subject).toContain("Cliente nuevo: Clínica Sonrisa")
+  // Pedirlo otra vez no duplica la solicitud, ni la copia ni el aviso.
   expect((await send(request("ana@sonrisa.test"))).status).toBe(201)
-  expect(mailer.sent).toHaveLength(1)
+  expect(mailer.sent).toHaveLength(2)
   const bad = await send({ ...request("x@y.test"), professionals: "muchos" })
   expect(bad.status).toBe(400)
   expect(((await bad.json()) as { error: { message: string } }).error.message).toBe("Elige cuántos odontólogos atienden")
@@ -179,7 +182,7 @@ describe("el aviso al equipo de cada solicitud nueva", () => {
       // Una dirección por envío: el límite por dirección no entra en estas pruebas.
       remoteAddress: () => `10.9.${Math.floor(ip / 250)}.${ip++ % 250}`,
       adminURL: "https://admin.odentia.localhost/",
-      teamEmail: teamEmail ?? undefined,
+      teamEmailOf: () => teamEmail ?? undefined,
     })
   }
   const post = (route: ReturnType<typeof foundersRoute>, payload: unknown) =>

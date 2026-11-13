@@ -40,16 +40,15 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   que es el panel. El Libro de Reclamaciones y la solicitud de Fundadores envían desde el
   navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y
   `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
-  `SALES_EMAIL` es el buzón comercial (en producción, `contacto@odentia32.com`): lee las
-  respuestas a la solicitud y a la invitación de Fundadores (lo que recibe la clínica sigue
-  nombrando Fundadores) y recibe «Cliente nuevo: <clínica> pidió entrar a <marca>» por cada
-  solicitud nueva, con la clínica, el producto, la ciudad y el país (nunca el correo ni el
-  celular de quien pidió) y el botón «Abrir la ficha» a su cliente en `ADMIN_URL`. Sin él, todo
-  eso va a `FOUNDERS_EMAIL`, el buzón de Fundadores. El aviso sale una vez por solicitud, aparte
-  de la copia a quien pidió, sin reintentos y con un tope de 20 por hora por proceso; lo que no
-  sale queda en el registro con el id de la solicitud, que igual se ve en Clientes. Sin los dos
-  no sale ningún aviso, esos correos no prometen que alguien lea las respuestas y la API lo
-  advierte al arrancar en producción (sin `SALES_EMAIL`, también avisa que va a Fundadores).
+  `hola@` de la marca de cada solicitud (ADR 0186) recibe «Cliente nuevo: <clínica> pidió
+  entrar a <marca>», con la clínica, el producto, la ciudad y el país (nunca el correo ni el
+  celular de quien pidió) y el botón «Abrir la ficha» a su cliente en `ADMIN_URL`, y las
+  respuestas de la clínica a su confirmación y a su invitación (lo que recibe la clínica sigue
+  nombrando Fundadores). hola@ entra al ARM por el Email Worker; desde ahí se responde con la
+  dirección de quien escribe. No hay variable: sale de la marca. El aviso sale una vez por
+  solicitud, aparte de la copia a quien pidió, sin reintentos y con un tope de 20 por hora por
+  proceso; lo que no sale queda en el registro con el id de la solicitud, que igual se ve en
+  Clientes.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 

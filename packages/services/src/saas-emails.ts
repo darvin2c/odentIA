@@ -248,7 +248,7 @@ export function waitlistReceivedEmail(input: {
   clinicName: string
   phone: string
   answerDays: number
-  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, el correo no promete que alguien lea las respuestas. */
+  /** hola@ de la marca, que entra al ARM; sin él, el correo no promete que alguien lea las respuestas. */
   replyTo?: string | undefined
   /** La marca del dominio donde se pidió (issue 229). */
   brand?: MailBrand
@@ -272,7 +272,7 @@ export function waitlistReceivedEmail(input: {
 }
 
 /**
- * Aviso al buzón comercial (SALES_EMAIL, con respaldo a FOUNDERS_EMAIL) de
+ * Aviso a hola@ de la marca de la solicitud (ADR 0186) de
  * cada cliente nuevo que pidió entrar desde la web: qué clínica, de qué
  * producto y de dónde, con el botón a su ficha en la administración. Es
  * interno, así que va con la marca de odentIA aunque sea de otro producto.
@@ -317,7 +317,7 @@ export function founderInvitationEmail(input: {
   /** «domingo 1 de noviembre». */
   expiresText: string
   offer: { currency: string; priceCents: number; trialCreditCents: number; discountPercent: number | null; guaranteeMonths: number | null }
-  /** Buzón de Fundadores (FOUNDERS_EMAIL); sin él, se pide otra invitación desde la web. */
+  /** hola@ de la marca, que entra al ARM; sin él, se pide otra invitación desde la web. */
   replyTo?: string | undefined
   /** La marca de la solicitud (issue 229). */
   brand?: MailBrand

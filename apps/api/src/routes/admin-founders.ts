@@ -33,8 +33,8 @@ export interface AdminFoundersDeps {
   mailer: Mailer
   /** Origen del panel (`app.`) de cada producto: la invitación lleva a crear la cuenta en el de su solicitud. */
   panelUrlOf: (product: ClinicalProduct) => string
-  /** Buzón que lee las respuestas (FOUNDERS_EMAIL). */
-  replyTo?: string | undefined
+  /** A dónde responde la clínica la invitación: hola@ de la marca de su solicitud. */
+  replyToOf?: (product: ClinicalProduct) => string | undefined
 }
 
 function staffOf(c: Context): AdminActor {
@@ -187,7 +187,7 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
               url,
               expiresText: dayText(issued.expiresAt),
               offer: issued.offer,
-              replyTo: deps.replyTo,
+              replyTo: deps.replyToOf?.(issued.request.product),
               brand: productWords(issued.request.product).brand,
             }),
           })
