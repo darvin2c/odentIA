@@ -31,7 +31,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft, Plus, X } from "lucide-react"
-import { type ReactNode, useId, useMemo, useState } from "react"
+import { type ReactNode, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ConsentSheetPage, ConsentTemplatesList } from "../../components/settings/consent-templates"
 import { SettingsLoadError } from "../../components/settings/load-error"
@@ -49,9 +49,24 @@ import {
   fetchFormTemplates,
   fetchSpecialties,
   publishFormTemplate,
+  reuseFormTemplate,
   updateFormTemplate,
 } from "../../lib/clinical-forms"
+import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import {
+  currentLine,
+  leaveWords,
+  NEW_FIELD_PLACEHOLDER,
+  newField,
+  publishedButNotReaching,
+  publishWords,
+  reuseWords,
+  settleFieldKeys,
+  templateGroups,
+  uniqueKey,
+  versionStatusWords,
+} from "../../lib/form-templates"
 import { FormTemplatesPageSkeleton, TemplatesSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/forms")({
@@ -68,13 +83,6 @@ const TITLE = "Consentimientos"
 const SUBTITLE = "Lo que firma el paciente antes de un tratamiento. La atención lo prepara solo cuando registras uno de estos servicios."
 
 const FIELD_TYPES = Object.keys(FIELD_TYPE_LABELS) as FormFieldType[]
-
-/** El estado de una versión, con las mismas palabras en las dos pestañas. */
-const TEMPLATE_STATUS_LABELS: Record<"borrador" | "publicado" | "archivado", string> = {
-  borrador: "borrador",
-  publicado: "vigente",
-  archivado: "archivada",
-}
 
 /** La tarjeta de página, la misma en toda la plataforma. */
 const CARD = "elevated flex flex-col gap-3 rounded-xl border bg-card p-4"
@@ -119,19 +127,6 @@ function FormulariosPage() {
   )
 }
 
-/** Las versiones de una plantilla, de la más nueva a la más antigua. */
-function byTemplate<T extends { key: string; version: number; title: string }>(templates: T[]): T[][] {
-  const byKey = new Map<string, T[]>()
-  for (const item of templates) {
-    const list = byKey.get(item.key) ?? []
-    list.push(item)
-    byKey.set(item.key, list)
-  }
-  return [...byKey.values()]
-    .map((versions) => versions.sort((a, b) => b.version - a.version))
-    .sort((a, b) => (a[0]?.title ?? "").localeCompare(b[0]?.title ?? "", "es"))
-}
-
 /** Las acciones de la lista: iguales de sitio en las dos pestañas. */
 function PanelActions({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap justify-end gap-2">{children}</div>
@@ -141,26 +136,20 @@ function PanelActions({ children }: { children: ReactNode }) {
 // Formularios clínicos
 // ---------------------------------------------------------------------------
 
-function slugifyLabel(label: string): string {
-  const base = label
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 48)
-  return base || "campo"
-}
-
 function FormTemplatesPanel() {
   const queryClient = useQueryClient()
+  const unusedTitleId = useId()
   const canAdmin = usePermission("settings.write")
   // Al lado: una plantilla nueva, un borrador o la versión de la que parte la siguiente.
   const builder = useSideForm<FormTemplate>()
   const openBuilder = builder.open
   const [confirm, setConfirm] = useState<
-    { kind: "publish"; draft: FormTemplate } | { kind: "archive"; draft: FormTemplate } | null
+    | { kind: "publish"; draft: FormTemplate }
+    | { kind: "archive"; draft: FormTemplate }
+    // «Dejar de usar» la versión en uso, y «Volver a usar» la última que lo estuvo.
+    | { kind: "leave"; current: FormTemplate }
+    | { kind: "reuse"; last: FormTemplate }
+    | null
   >(null)
 
   const listQuery = useQuery({
@@ -169,9 +158,44 @@ function FormTemplatesPanel() {
     retry: 1,
   })
   const templates = listQuery.data?.data ?? []
-  const grouped = useMemo(() => byTemplate(templates), [templates])
+  const { listed, unused } = useMemo(() => templateGroups(templates), [templates])
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["form-templates"] })
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["form-templates"] })
+    // Lo que «Nuevo» › «Formulario» ofrece en la ficha y en la atención.
+    void queryClient.invalidateQueries({ queryKey: ["form-templates-published"] })
+  }
+
+  const leaveMutation = useMutation({
+    mutationFn: (current: FormTemplate) => archiveFormTemplate(current.id),
+    onSuccess: (_result, current) => {
+      setConfirm(null)
+      toast.success(`«${current.title}» ya no se usa. Lo ya llenado sigue en cada paciente.`)
+      invalidate()
+    },
+    onError: (error) => {
+      setConfirm(null)
+      toast.error(submitErrorMessage(error))
+    },
+  })
+
+  const reuseMutation = useMutation({
+    mutationFn: (last: FormTemplate) => reuseFormTemplate(last.id),
+    onSuccess: (result, last) => {
+      setConfirm(null)
+      toast.success(`«${last.title}» está en uso otra vez, como versión ${result.data.version}`)
+      invalidate()
+    },
+    onError: (error) => {
+      setConfirm(null)
+      toast.error(submitErrorMessage(error))
+    },
+  })
+  /** Uno del equipo vuelve sin preguntar; el que responde el paciente dice antes a quién le llega. */
+  const reuse = (last: FormTemplate) => {
+    if (reuseWords(last, templates) === null) reuseMutation.mutate(last)
+    else setConfirm({ kind: "reuse", last })
+  }
 
   const publishMutation = useMutation({
     mutationFn: (draft: FormTemplate) => publishFormTemplate(draft.id),
@@ -201,13 +225,13 @@ function FormTemplatesPanel() {
 
   const neverLoaded = listQuery.isError && listQuery.data === undefined
   const publishing = confirm?.kind === "publish" ? confirm.draft : null
-  const replaced = publishing
-    ? templates.find((template) => template.key === publishing.key && template.status === "publicado")
-    : undefined
+  const leaving = confirm?.kind === "leave" ? confirm.current : null
+  const reusing = confirm?.kind === "reuse" ? confirm.last : null
+  const empty = listed.length === 0 && unused.length === 0
 
   return (
     <div className="flex flex-col gap-4">
-      {canAdmin && grouped.length > 0 ? (
+      {canAdmin && !empty ? (
         <PanelActions>
           <Button type="button" className="min-h-11" onClick={() => openBuilder(null)}>
             <Plus aria-hidden />
@@ -227,15 +251,15 @@ function FormTemplatesPanel() {
           {listQuery.isError ? (
             <SettingsLoadError stale what="las plantillas de formularios" onRetry={() => void listQuery.refetch()} />
           ) : null}
-          {grouped.length === 0 ? (
+          {empty ? (
             <EmptyState
               title="Aún no hay plantillas de formularios"
               description="Prepara la primera con sus secciones y campos y publícala para usarla en la ficha del paciente."
               {...(canAdmin ? { actionLabel: "Nueva plantilla", onAction: () => openBuilder(null) } : {})}
             />
-          ) : (
+          ) : listed.length === 0 ? null : (
             <ul className="flex flex-col gap-3">
-              {grouped.map((versions) => {
+              {listed.map((versions) => {
                 const latest = versions[0]
                 if (!latest) return null
                 const draft = versions.find((version) => version.status === "borrador")
@@ -245,15 +269,16 @@ function FormTemplatesPanel() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-medium">{latest.title}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {current ? `Vigente: versión ${current.version}` : "Sin versión vigente"}
-                          {draft ? ` · borrador de la versión ${draft.version}` : ""}
-                        </p>
+                        <p className="text-sm text-muted-foreground">{currentLine(versions, templates)}</p>
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {versions.map((version) => (
-                          <Badge key={version.id} variant={version.status === "publicado" ? "default" : "secondary"}>
-                            Versión {version.version} · {TEMPLATE_STATUS_LABELS[version.status]}
+                          <Badge
+                            key={version.id}
+                            // De los cuestionarios del paciente, solo el que les llega va resaltado.
+                            variant={version.status === "publicado" && !publishedButNotReaching(version) ? "default" : "secondary"}
+                          >
+                            Versión {version.version} · {versionStatusWords(version)}
                           </Badge>
                         ))}
                         {latest.respondent === "portal" ? <Badge variant="outline">Lo responde el paciente</Badge> : null}
@@ -278,6 +303,17 @@ function FormTemplatesPanel() {
                             Nueva versión desde la {latest.version}
                           </Button>
                         )}
+                        {current ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className={ROW_BUTTON}
+                            onClick={() => setConfirm({ kind: "leave", current })}
+                          >
+                            Dejar de usar
+                          </Button>
+                        ) : null}
                       </div>
                     ) : null}
                   </li>
@@ -285,6 +321,43 @@ function FormTemplatesPanel() {
               })}
             </ul>
           )}
+          {unused.length > 0 ? (
+            <section aria-labelledby={unusedTitleId} className={CARD}>
+              <div>
+                <h2 id={unusedTitleId} className="font-medium">
+                  Ya no se usan ({unused.length})
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Lo ya llenado sigue en cada paciente. «Volver a usar» lo pone otra vez en uso, con las mismas preguntas.
+                </p>
+              </div>
+              <ul className="flex flex-col divide-y">
+                {unused.map(({ last, leftAt }) => (
+                  <li key={last.key} className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="font-medium">{last.title}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Se dejó de usar el {formatDate(leftAt)}
+                        {last.respondent === "portal" ? " · lo responde el paciente" : ""}
+                      </p>
+                    </div>
+                    {canAdmin ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className={ROW_BUTTON}
+                        disabled={reuseMutation.isPending}
+                        onClick={() => reuse(last)}
+                      >
+                        Volver a usar
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </>
       )}
 
@@ -306,15 +379,32 @@ function FormTemplatesPanel() {
         open={confirm?.kind === "publish"}
         variant="default"
         title={publishing ? `Publicar la versión ${publishing.version}` : "Publicar"}
-        description={
-          replaced
-            ? `La versión ${replaced.version} se archiva y los formularios nuevos usarán la ${publishing?.version}. Lo ya respondido conserva su título y sus preguntas.`
-            : "Quedará disponible para responder en la ficha. Una versión publicada ya no se edita: para cambiarla se prepara la siguiente."
-        }
+        // Lo que de verdad pasa: el del paciente dice a quién le llega y a cuál reemplaza, por su nombre.
+        description={publishing ? publishWords(publishing, templates) : ""}
         confirmLabel="Publicar"
         pending={publishMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "publish" && publishMutation.mutate(confirm.draft)}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "leave"}
+        variant="default"
+        title={leaving ? `¿Dejar de usar «${leaving.title}»?` : "Dejar de usar"}
+        description={leaving ? leaveWords(leaving, templates) : ""}
+        confirmLabel="Dejar de usar"
+        pending={leaveMutation.isPending}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => confirm?.kind === "leave" && leaveMutation.mutate(confirm.current)}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "reuse"}
+        variant="default"
+        title={reusing ? `¿Volver a usar «${reusing.title}»?` : "Volver a usar"}
+        description={reusing ? (reuseWords(reusing, templates) ?? "") : ""}
+        confirmLabel="Volver a usar"
+        pending={reuseMutation.isPending}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => confirm?.kind === "reuse" && reuseMutation.mutate(confirm.last)}
       />
       <ConfirmDialog
         open={confirm?.kind === "archive"}
@@ -343,20 +433,6 @@ const CHOICE_TYPES: readonly FormFieldType[] = ["opcion_unica", "opcion_multiple
 
 /** Las preguntas de las que puede depender otra («Mostrar si»): Sí/No y de opciones. */
 const conditionsOn = (field: FormFieldDef) => field.type === "booleano" || CHOICE_TYPES.includes(field.type)
-
-/**
- * Una clave que no tiene ninguna otra sección o pregunta de la plantilla:
- * `base` o, si ya está, `base_2`, `base_3`… Así quitar una pregunta y agregar
- * otra no repite la clave de una que sigue (el servidor las rechaza repetidas).
- */
-function uniqueKey(base: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(base)) return base
-  // El servidor admite claves de hasta 49 caracteres.
-  const stem = base.slice(0, 44)
-  let n = 2
-  while (taken.has(`${stem}_${n}`)) n += 1
-  return `${stem}_${n}`
-}
 
 /**
  * Lo que se revisa antes de guardar, con las reglas y las palabras del
@@ -492,9 +568,15 @@ function TemplateBuilder({
           createFormTemplate({ ...body, ...(initial ? { key: initial.key } : {}) }),
   })
 
+  // Las preguntas agregadas en esta apertura: su clave provisional se cambia al guardar.
+  const provisional = useRef(new Set<string>())
+  // La última agregada: nace con el cursor en su texto.
+  const [added, setAdded] = useState<string | null>(null)
+
   const form = useTemplateForm(initial, async (value) => {
     const schema: FormSchemaDef = {
-      sections: value.sections.map((section) => ({
+      // La clave de cada pregunta nueva sale de su texto completo, recién al guardar.
+      sections: settleFieldKeys(value.sections, provisional.current).map((section) => ({
         ...section,
         fields: section.fields.map(({ definition, ...field }) => ({
           ...field,
@@ -639,6 +721,7 @@ function TemplateBuilder({
                                   previous={[...before, ...section.fields.slice(0, fi)]}
                                   declaresHealth={respondent === "portal"}
                                   disabled={!canAdmin}
+                                  autoFocus={field.id === added}
                                   onRemove={() => fieldsField.removeValue(fi)}
                                 />
                               ))}
@@ -649,16 +732,13 @@ function TemplateBuilder({
                                   variant="outline"
                                   className={`self-start ${ROW_BUTTON}`}
                                   aria-describedby={fieldErrors.length > 0 ? fieldsErrorId : undefined}
-                                  onClick={() =>
-                                    fieldsField.pushValue({
-                                      id: uniqueKey(
-                                        `campo_${allFields.length + 1}`,
-                                        new Set(allFields.map((f) => f.id)),
-                                      ),
-                                      label: "Nuevo campo",
-                                      type: "texto",
-                                    })
-                                  }
+                                  onClick={() => {
+                                    // Vacía, con un texto de ejemplo, y con el cursor en ella.
+                                    const field = newField(allFields)
+                                    provisional.current.add(field.id)
+                                    setAdded(field.id)
+                                    fieldsField.pushValue(field)
+                                  }}
                                 >
                                   Agregar campo
                                 </Button>
@@ -713,6 +793,7 @@ function FieldEditor({
   previous,
   declaresHealth,
   disabled,
+  autoFocus,
   onRemove,
 }: {
   form: TemplateForm
@@ -724,6 +805,8 @@ function FieldEditor({
   /** Lo responde el paciente: una respuesta de texto puede pasar a sus antecedentes. */
   declaresHealth: boolean
   disabled: boolean
+  /** Recién agregada: el cursor nace en su texto. */
+  autoFocus: boolean
   onRemove: () => void
 }) {
   const sources = previous.filter(conditionsOn)
@@ -740,22 +823,17 @@ function FieldEditor({
   return (
     <div className="rounded-xl bg-muted/40 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
-        <form.AppField
-          name={`sections[${si}].fields[${fi}].label`}
-          listeners={{
-            onChange: ({ value }) => {
-              // La clave provisional (`campo_N`) toma el texto de la pregunta, sin repetir la de otra.
-              if (!form.getFieldValue(`sections[${si}].fields[${fi}].id`).startsWith("campo_")) return
-              const taken = new Set(
-                form.state.values.sections.flatMap((section, i) =>
-                  section.fields.filter((_, j) => i !== si || j !== fi).map((other) => other.id),
-                ),
-              )
-              form.setFieldValue(`sections[${si}].fields[${fi}].id`, uniqueKey(slugifyLabel(value), taken))
-            },
-          }}
-        >
-          {(labelField) => <labelField.TextField label="Pregunta" maxLength={200} disabled={disabled} />}
+        <form.AppField name={`sections[${si}].fields[${fi}].label`}>
+          {(labelField) => (
+            <labelField.TextField
+              label="Pregunta"
+              placeholder={NEW_FIELD_PLACEHOLDER}
+              maxLength={200}
+              disabled={disabled}
+              // Solo la pregunta que la persona acaba de agregar: si no, el foco se queda en el botón.
+              autoFocus={autoFocus}
+            />
+          )}
         </form.AppField>
         <form.AppField
           name={`sections[${si}].fields[${fi}].type`}

@@ -73,6 +73,11 @@ export interface FormTemplate {
   publishedAt: string | null
   createdAt: string
   updatedAt: string
+  /**
+   * De los publicados «que responde el paciente» les llega uno solo: lo dice el
+   * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
+   */
+  reachesPatients?: boolean
 }
 
 export interface FormResponse {
@@ -435,6 +440,11 @@ export function publishFormTemplate(id: string) {
 
 export function archiveFormTemplate(id: string) {
   return post<FormTemplate>(`${BASE}/form-templates/${id}/archive`, {})
+}
+
+/** «Volver a usar»: publica la versión siguiente con las mismas preguntas. */
+export function reuseFormTemplate(id: string) {
+  return post<FormTemplate>(`${BASE}/form-templates/${id}/reuse`, {})
 }
 
 // --- Capturas ---

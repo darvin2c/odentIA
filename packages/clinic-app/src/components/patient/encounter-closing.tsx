@@ -1097,6 +1097,33 @@ export function AnesthesiaHealthLine({
   )
 }
 
+/** Los formularios de la atención que siguen a medias, dichos al cerrar: título y cuáles. */
+export function openFormsWords(forms: ReadonlyArray<{ title: string }>): { title: string; detail: string } | null {
+  if (forms.length === 0) return null
+  const names = listWords(forms.map((form) => `«${form.title}»`))
+  return forms.length === 1
+    ? {
+        title: "Queda un formulario a medias",
+        detail: `${names}. Puedes firmar igual: se termina después, desde Documentos de la ficha, y lleva su propia fecha.`,
+      }
+    : {
+        title: `Quedan ${forms.length} formularios a medias`,
+        detail: `${names}. Puedes firmar igual: se terminan después, desde Documentos de la ficha, y llevan su propia fecha.`,
+      }
+}
+
+/** Un formulario a medias no frena la firma: el cierre lo avisa y dice dónde se termina. */
+export function OpenFormsLine({ forms }: { forms: ReadonlyArray<{ title: string }> }): React.JSX.Element | null {
+  const words = openFormsWords(forms)
+  if (!words) return null
+  return (
+    <div role="note" className="flex min-w-0 flex-col gap-0.5 rounded-lg border p-3">
+      <span className="font-medium">{words.title}</span>
+      <span className="text-xs text-muted-foreground">{words.detail}</span>
+    </div>
+  )
+}
+
 export function EncounterClosingDialog({
   open,
   form,
@@ -1273,6 +1300,7 @@ export function EncounterClosingDialog({
                 onComplete={onCompleteHealth}
                 disabled={busy}
               />
+              <OpenFormsLine forms={closing?.openForms ?? []} />
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (

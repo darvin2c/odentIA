@@ -205,7 +205,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo un formulario de la clínica en su ficha?",
-        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. El que respondió el paciente antes de venir dice «Declarado por el paciente»: revísalo con él y «Finalizar…». Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo.",
+        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. El que respondió el paciente antes de venir dice «Declarado por el paciente»: revísalo con él y «Finalizar…». Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo. Si firmas la atención con un formulario a medias, el cierre lo avisa y no te frena: lo terminas después con «Completar», y lleva su propia fecha.",
         forms: ["donde veo el cuestionario que respondio antes de venir", "como finalizo un formulario", "descartar un formulario en borrador"],
         area: "clinica",
         needs: "clinical.write",
@@ -312,6 +312,12 @@ export const CLINICA: readonly HelpMore[] = [
         q: "¿Cómo hago un formulario propio o un cuestionario para antes de la cita?",
         a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios»; ahí, «Nueva plantilla»: pones el título, eliges en «Quién lo responde» si lo llena el equipo desde la ficha o el paciente desde el portal, y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». No se usa hasta que tocas «Publicar». Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas.",
         forms: ["como publico un formulario", "cuestionario para que el paciente llene antes de venir", "pregunta que sale solo si responde que si", "nueva plantilla de formulario"],
+      },
+      {
+        id: "formularios-formulario-dejar-de-usar",
+        q: "¿Cómo dejo de usar un formulario?",
+        a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios». En el formulario que está en uso, toca «Dejar de usar» y confirma: deja de ofrecerse para llenarlo, y lo ya llenado sigue en cada paciente con sus preguntas. Queda abajo, en «Ya no se usan», con la fecha en que se dejó. Ahí mismo, «Volver a usar» lo pone otra vez en uso con las mismas preguntas, como una versión nueva. Si es un cuestionario que responde el paciente, la confirmación dice qué recibirán los pacientes desde ese momento.",
+        forms: ["quitar un formulario que ya no uso", "volver a usar un formulario que deje de usar", "que el paciente deje de recibir el cuestionario", "retirar un formulario publicado"],
       },
     ],
   },
