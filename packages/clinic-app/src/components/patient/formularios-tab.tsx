@@ -6,9 +6,11 @@ import {
   clearSubmitErrors,
   focusFirstInvalid,
   FormDrawer,
+  setSubmitErrors,
   submitErrorMessage,
   submitForm,
   useAppForm,
+  useDraftSaved,
   useFormSubmitError,
   useFormSurface,
 } from "@odentia/ui-patterns"
@@ -16,7 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useStore } from "@tanstack/react-form"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
   createFormResponse,
@@ -148,7 +150,14 @@ export function NewResponseDrawer({
   )
 }
 
-type SaveState = "guardado" | "pendiente" | "guardando" | "error"
+/** `parcial`: se guardó todo menos las respuestas que no valen, que siguen marcadas en su pregunta. */
+type SaveState = "guardado" | "pendiente" | "guardando" | "error" | "parcial"
+
+/** Lo que no se guardó, en una frase para cuando la pantalla ya no está para decirlo en su pregunta. */
+function rejectedWords(rejected: Record<string, string>): string {
+  const reasons = Object.values(rejected)
+  return `${reasons.length === 1 ? "No se guardó una respuesta" : `No se guardaron ${reasons.length} respuestas`}: ${reasons.join("; ")}. Lo demás quedó guardado.`
+}
 
 /**
  * Para finalizar, cada obligatoria visible tiene respuesta: lo que falta se
@@ -212,6 +221,11 @@ export function ResponseDetail({
   // Si el último guardado falló: el autoguardado corre con el estado de su render, que
   // ya dice «pendiente» por el cambio que lo disparó, así que el fallo se recuerda aquí.
   const saveFailed = useRef(false)
+  // Lo que el último guardado no aceptó (`answers.<id>` → por qué): sigue en pantalla, sin guardar.
+  const rejected = useRef<Record<string, string>>({})
+  // En la columna lateral, el aviso de «salir sin guardar» sigue a lo guardado de verdad.
+  const draftSaved = useDraftSaved()
+  useEffect(() => draftSaved(!editable || saveState === "guardado"), [draftSaved, editable, saveState])
 
   const validators = useMemo(() => ({ onSubmit: finalizeSchema(schema) }), [schema])
   const form = useAppForm({
@@ -225,7 +239,9 @@ export function ResponseDetail({
     },
     // «Finalizar…»: con todo respondido y guardado, se pide la confirmación.
     onSubmit: async () => {
-      await persist()
+      const unsaved = await persist()
+      // Una respuesta que no vale no se finaliza a medias: se corrige antes, en su pregunta.
+      if (Object.keys(unsaved).length > 0) throw new ApiError(400, { fields: unsaved })
       setFinalizeOpen(true)
     },
   })
@@ -243,13 +259,16 @@ export function ResponseDetail({
     label: `${d.label} · ${imageTypeLabel(d.imageType) ?? d.category}`,
   }))
 
-  /** Guarda lo pendiente; si el servidor lo rechaza, lanza su error. */
-  const persist = async (): Promise<void> => {
+  /**
+   * Guarda lo pendiente; si el servidor lo rechaza, lanza su error. Devuelve las respuestas que
+   * no valen (un «15» en una escala de 0 a 10): esas no se guardaron y las demás sí.
+   */
+  const persist = async (): Promise<Record<string, string>> => {
     clearTimeout(timer.current ?? undefined)
     // Si hay uno en curso se espera: el siguiente sale con la base al día.
     while (inFlight.current) await inFlight.current.catch(() => {})
     const target = version.current
-    if (target === saved.current) return
+    if (target === saved.current) return rejected.current
     setSaveState("guardando")
     const run = (async () => {
       try {
@@ -258,11 +277,13 @@ export function ResponseDetail({
           // De qué respuestas guardadas partió: si otra pestaña guardó otras, se avisa en vez de pisarlas.
           baseAnswers: savedAnswers.current,
         })
-        savedAnswers.current = updated.data.answers ?? {}
-        remember(updated.data)
+        const { rejected: unsaved = {}, ...row } = updated.data
+        rejected.current = unsaved
+        savedAnswers.current = row.answers ?? {}
+        remember(row)
         saved.current = target
         saveFailed.current = false
-        setSaveState(version.current === target ? "guardado" : "pendiente")
+        setSaveState(version.current !== target ? "pendiente" : Object.keys(unsaved).length > 0 ? "parcial" : "guardado")
       } catch (error) {
         setSaveState("error")
         saveFailed.current = true
@@ -275,14 +296,17 @@ export function ResponseDetail({
     } finally {
       if (inFlight.current === run) inFlight.current = null
     }
+    return rejected.current
   }
   // Guardado automático 1,2 s después del último cambio: lo que el servidor
   // rechaza se dice en su pregunta (`answers.<id>`) o junto a los botones.
   const autosave = () => {
     const failedBefore = saveFailed.current
     persist()
-      .then(() => {
-        if (failedBefore) clearSubmitErrors(form)
+      .then((unsaved) => {
+        // Lo que no vale se marca en su pregunta; su aviso se va solo al corregirla.
+        if (Object.keys(unsaved).length > 0) setSubmitErrors(form, { fields: unsaved })
+        else if (failedBefore) clearSubmitErrors(form)
       })
       .catch((error: unknown) => applySubmitError(form, error))
   }
@@ -304,13 +328,20 @@ export function ResponseDetail({
       // Primero termina el guardado en curso; después, si aún falta algo, sale con la base que dejó.
       void (async () => {
         while (inFlight.current) await inFlight.current.catch(() => {})
-        if (version.current === saved.current) return
+        // Lo que no valía se queda sin guardar: se dice al salir, ya sin su pregunta a la vista.
+        const warn = (unsaved: Record<string, string>) => {
+          if (Object.keys(unsaved).length > 0)
+            toast.warning(`«${title}»: ${rejectedWords(unsaved)}`, { description: "Vuelve a abrirlo para corregirlas." })
+        }
+        if (version.current === saved.current) return warn(rejected.current)
         try {
           const updated = await updateFormResponse(response.id, {
             answers: answersForServer(schema, form.state.values.answers),
             baseAnswers: savedAnswers.current,
           })
-          remember(updated.data)
+          const { rejected: unsaved = {}, ...row } = updated.data
+          remember(row)
+          warn(unsaved)
         } catch (error) {
           toast.error(`No se guardaron los últimos cambios de «${title}». ${submitErrorMessage(error)}`, {
             description: "Vuelve a abrirlo y revisa las respuestas.",
@@ -369,6 +400,7 @@ export function ResponseDetail({
     onSubmit: async ({ value }) => {
       await addAddendum.mutateAsync(value.text.trim())
       addendumForm.reset()
+      draftSaved(true)
       await queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
       toast.success("Adenda registrada")
     },
@@ -407,7 +439,9 @@ export function ResponseDetail({
                   ? "Cambios sin guardar"
                   : saveState === "error"
                     ? "No se guardó"
-                    : "Guardado"}
+                    : saveState === "parcial"
+                      ? "Guardado, menos lo marcado"
+                      : "Guardado"}
             </span>
           ) : null}
         </span>
@@ -526,9 +560,12 @@ export function ResponseDetail({
         onClose={() => setDiscardOpen(false)}
         onConfirm={() => void submitForm(discardForm)}
       >
-        <discardForm.AppField name="reason">
-          {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
-        </discardForm.AppField>
+        {/* El motivo acompaña a «Descartar»: escribirlo no es un cambio del formulario que se pierda al salir. */}
+        <div data-draft-ignore>
+          <discardForm.AppField name="reason">
+            {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
+          </discardForm.AppField>
+        </div>
       </ConfirmDialog>
     </article>
   )

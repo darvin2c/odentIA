@@ -790,11 +790,14 @@ function isEmptyAnswer(value: unknown): boolean {
  * permite captura parcial pero rechaza claves desconocidas y tipos inválidos.
  * Lanza 400 con todos los campos culpables en `fields` (`answers.<id>`), para
  * decirlo junto a cada pregunta. `false` booleano es respuesta válida.
+ * Con `rejected` (el guardado del borrador que hace el equipo), un valor que no
+ * vale no frena a los demás: esa pregunta queda sin respuesta y su motivo se
+ * anota ahí, para decirlo junto a ella.
  */
 export function assertAnswers(
   schema: FormSchemaDef,
   answers: unknown,
-  options: { requireAll?: boolean; site?: ProductSite } = {},
+  options: { requireAll?: boolean; site?: ProductSite; rejected?: Record<string, string> } = {},
 ): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
     throw validation("Las respuestas deben ser un objeto por campo")
@@ -818,7 +821,7 @@ export function assertAnswers(
         out[field.id] = assertAnswer(field, value, requireAll, options.site)
       } catch (error) {
         if (!(error instanceof ServiceError) || error.code !== "VALIDATION") throw error
-        errors[`answers.${field.id}`] = error.message
+        ;(options.rejected ?? errors)[`answers.${field.id}`] = error.message
         out[field.id] = null
       }
     }
@@ -1326,7 +1329,8 @@ export async function updateFormResponseDraft(
     /** Las respuestas guardadas de las que partió quien escribe: otra pestaña no se pisa (`STALE_DRAFT`). */
     baseAnswers?: unknown
   },
-): Promise<FormResponseRow> {
+  // `rejected`: las preguntas cuyo valor no valía (`answers.<id>` → por qué); no se guardaron, lo demás sí.
+): Promise<FormResponseRow & { rejected: Record<string, string> }> {
   const [current] = await tx
     .select()
     .from(clinicalFormResponse)
@@ -1346,7 +1350,8 @@ export async function updateFormResponseDraft(
     )
   }
   const schema = assertFormSchema(current.templateSnapshot)
-  const answers = assertAnswers(schema, input.answers, { requireAll: false, site: await siteOf(tx, orgId) })
+  const rejected: Record<string, string> = {}
+  const answers = assertAnswers(schema, input.answers, { requireAll: false, site: await siteOf(tx, orgId), rejected })
   // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas. Si lo
   // guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
   if (
@@ -1381,7 +1386,7 @@ export async function updateFormResponseDraft(
     .returning()
   if (!row) throw notFound("Formulario")
   await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {})
-  return row
+  return { ...row, rejected }
 }
 
 export async function finalizeFormResponse(

@@ -16,6 +16,7 @@ import {
   ensureClinicConsents,
   discardFormResponse,
   finalizeFormResponse,
+  listFormResponses,
   listFormTemplates,
   publishFormTemplate,
   updateFormResponseDraft,
@@ -561,12 +562,27 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   await expect(
     run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers: { dolor: false }, baseAnswers: response.answers ?? {} })),
   ).resolves.toMatchObject({ answers: { dolor: false } })
-  await expect(save({ pieza: 19 })).rejects.toMatchObject({ status: 400 })
-  await expect(save({ dolor: true, intensidad: 11 })).rejects.toMatchObject({ status: 400 })
-  await expect(save({ foto: crypto.randomUUID() })).rejects.toMatchObject({ status: 400 })
-  await expect(save({ firma: { strokes: [[[1, 1], [2, 2]]] } })).rejects.toMatchObject({
-    status: 400,
+  // Mesa de formularios del 13 nov (F21): «dolor 15 de 10» dejaba todo en «No se guardó». Un valor
+  // que no vale se dice en su pregunta (`rejected`) y no se guarda; las demás respuestas sí.
+  const partial = await save({ dolor: true, intensidad: 15, pieza: 19, hallazgos: "Percusión positiva" })
+  expect(partial.answers).toMatchObject({ dolor: true, intensidad: null, pieza: null, hallazgos: "Percusión positiva" })
+  expect(partial.rejected).toEqual({
+    "answers.intensidad": expect.stringContaining("0 a 10"),
+    "answers.pieza": expect.stringContaining("Pieza"),
   })
+  const stored = await run((tx) => listFormResponses(tx, "org_a", { patientId: patient.id }))
+  expect(stored.find((row) => row.id === response.id)?.answers).toMatchObject({ intensidad: null, hallazgos: "Percusión positiva" })
+  // La firma sin el nombre de quien firma tampoco frena lo demás.
+  const unsigned = await save({ dolor: false, firma: { strokes: [[[1, 1], [2, 2]]] } })
+  expect(unsigned.answers).toMatchObject({ dolor: false, firma: null })
+  expect(Object.keys(unsigned.rejected)).toEqual(["answers.firma"])
+  // Con todo bien no hay nada que señalar.
+  expect((await save({ dolor: false })).rejected).toEqual({})
+  // Lo que no es un valor mal escrito sigue sin guardar nada: una pregunta que el formulario no
+  // tiene o un archivo que no es del paciente.
+  await expect(save({ dolor: true, inventada: 1 })).rejects.toMatchObject({ status: 400 })
+  await expect(save({ foto: crypto.randomUUID() })).rejects.toMatchObject({ status: 400 })
+  expect((await run((tx) => listFormResponses(tx, "org_a", { patientId: patient.id }))).find((row) => row.id === response.id)?.answers).toMatchObject({ dolor: false })
   // Sin dolor, la intensidad queda oculta: no se exige ni se guarda.
   const saved = await save({ dolor: false, intensidad: 7, pieza: 36 })
   expect(saved.answers).toMatchObject({ dolor: false, intensidad: null, pieza: 36 })
