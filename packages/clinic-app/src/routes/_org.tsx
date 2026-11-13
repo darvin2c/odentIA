@@ -148,16 +148,19 @@ async function checkOrgAccess(
   const termsCheck = requireTermsAccepted(location)
   const orgRead = slug ? readOrganization(slug, fetchOptions) : null
   const found = await supportCheck
+  if (found) {
+    // Con soporte, mirando o terminado, lo de la sesión de la clínica no aplica: sus rechazos
+    // no quedan sin atender.
+    sessionCheck.catch(() => undefined)
+    termsCheck.catch(() => undefined)
+    orgRead?.catch(() => undefined)
+  }
   // Tenía sesión de soporte y el acceso terminó: «El acceso terminó», nunca la sesión normal
   // de ese navegador (la de la administración llevaría a otra pantalla). Quien no la tenía (el
   // equipo de la clínica) recibe nulo y sigue con su sesión de siempre.
   if (found === "terminado") throw redirect({ href: "/soporte?terminado=1" })
   const support = found
   if (support) {
-    // Lo de la sesión de la clínica no aplica: sus rechazos no quedan sin atender.
-    sessionCheck.catch(() => undefined)
-    termsCheck.catch(() => undefined)
-    orgRead?.catch(() => undefined)
     if (typeof window !== "undefined") orgChecks.access = { slug: support.org.slug, at: Date.now(), ...support }
     return support
   }

@@ -14,25 +14,34 @@ test("el equipo de la clínica sigue en ella al navegar pasados los dos minutos"
   const menu = page.getByRole("navigation", { name: "Principal" })
   await expect(menu.getByRole("link", { name: "Pacientes", exact: true })).toBeVisible()
 
-  // Sin esperar dos minutos de verdad: el reloj de esta página se adelanta tres.
-  await page.evaluate(() => {
-    const now = Date.now.bind(Date)
-    Date.now = () => now() + 3 * 60_000
-  })
+  // Sin esperar dos minutos de verdad: cada vez, el reloj de esta página se adelanta tres más.
+  const threeMinutesLater = () =>
+    page.evaluate(() => {
+      const now = Date.now.bind(Date)
+      Date.now = () => now() + 3 * 60_000
+    })
+  // La pregunta por la sesión de soporte (la lectura, no su consulta previa de CORS).
+  const supportAsked = () =>
+    page.waitForResponse(
+      (response) => response.url().endsWith("/api/support-session/me") && response.request().method() === "GET",
+    )
 
-  // La pregunta por la sesión de soporte sale otra vez, y responde sin error y sin datos.
-  const asked = page.waitForResponse((response) => response.url().endsWith("/api/support-session/me"))
+  // Vencido lo comprobado, la pregunta sale otra vez y responde sin error y sin datos.
+  await threeMinutesLater()
+  const asked = supportAsked()
   await menu.getByRole("link", { name: "Pacientes", exact: true }).click()
   const answer = await asked
   expect(answer.status()).toBe(200)
   expect(await answer.json()).toEqual({ data: null })
-
   await expect(page).toHaveURL(tenantPattern(org.slug, "/people"))
   await expect(page.getByRole("heading", { level: 1, name: "Pacientes" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "El acceso terminó" })).toHaveCount(0)
 
-  // Y en cada navegación siguiente, igual.
+  // Y la vez siguiente que vence, igual.
+  await threeMinutesLater()
+  const askedAgain = supportAsked()
   await menu.getByRole("link", { name: "Inicio", exact: true }).click()
+  expect((await askedAgain).status()).toBe(200)
   await expect(page).toHaveURL(tenantPattern(org.slug, "/home"))
   await expect(page.getByRole("heading", { name: "El acceso terminó" })).toHaveCount(0)
 })
