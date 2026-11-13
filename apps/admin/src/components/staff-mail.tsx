@@ -22,6 +22,8 @@ export interface StaffMailRow {
   mailLocal?: string | null
   mailCopyTo?: string | null
   mailFirstSentAt?: string | null
+  /** Soporte siempre escribe desde soporte@, aunque tenga dirección propia. */
+  role?: "admin" | "support"
 }
 
 const BRANDS = "odentIA, latidIA y vistIA"
@@ -31,7 +33,9 @@ export function StaffMailLine({ row }: { row: StaffMailRow }) {
   return (
     <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
       <p className="[overflow-wrap:anywhere]">
-        {row.mailLocal ? (
+        {row.role === "support" ? (
+          `Escribe desde soporte@ (${BRANDS}), como todo Soporte`
+        ) : row.mailLocal ? (
           <>
             Escribe como <span className="font-medium text-foreground">{row.mailLocal}@</span> (
             {BRANDS})

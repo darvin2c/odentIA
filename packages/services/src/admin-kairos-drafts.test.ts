@@ -65,7 +65,7 @@ function recordingWriter(failFor: Set<string> = new Set()) {
     },
     async draftReply(input) {
       seen.push({ op: "draftReply", input: { ...input } })
-      return { body: `Gracias por tu correo. ${input.senderName}` }
+      return { body: "Gracias por tu correo." }
     },
     async weeklySummary(input) {
       seen.push({ op: "weeklySummary", input })
@@ -438,7 +438,7 @@ describe("la respuesta a un correo que llegó", () => {
     expect(kairosAllowedEmailText(null, { adminOnly: true })).toEqual({ lines: [], omitted: 0 })
   })
 
-  it("Kairós la prepara una vez por correo, la firma quien lo recibió y no vale si alguien ya respondió", async () => {
+  it("Kairós la prepara una vez por correo, sin firma ni hechos internos, y no vale si alguien ya respondió", async () => {
     const at = new Date(NOW.getTime() - 2 * HOUR)
     const emails = await ownerDb
       .insert(saasInboundEmail)
@@ -505,9 +505,18 @@ describe("la respuesta a un correo que llegó", () => {
       subject: "La demo del jueves",
       lines: ["Ada, ¿podemos ver la demo con mi socio?"],
       omitted: 0,
-      senderName: "Ada Administración",
-      client: { name: "Clínica Borrador (ficticia)", stage: "Contacto" },
+      // Solo lo que se le podría decir a quien escribe: el correo puede pedir que lo repita.
+      facts: [],
+      client: {
+        name: "Clínica Borrador (ficticia)",
+        product: "optical",
+        stage: "Contacto",
+        city: null,
+        professionals: null,
+        currentTool: null,
+      },
     })
+    expect(JSON.stringify(job?.ask)).not.toMatch(/descuento|120|Arequipa|senderName/)
     const { writer, seen } = recordingWriter()
     const outcome = await draftPendingKairosItems(ownerDb, writer, { limit: 50 }, NOW)
     expect(outcome.drafted).toContain(reply?.id)
@@ -516,7 +525,7 @@ describe("la respuesta a un correo que llegó", () => {
       .select()
       .from(kairosItem)
       .where(eq(kairosItem.id, reply?.id ?? ""))
-    expect(drafted?.payload.body).toBe("Gracias por tu correo. Ada Administración")
+    expect(drafted?.payload.body).toBe("Gracias por tu correo.")
 
     // Si alguien la respondió a mano mientras tanto, el sí ya no vale.
     await ownerDb.insert(saasOutreach).values({
@@ -555,5 +564,47 @@ describe("la respuesta a un correo que llegó", () => {
       .from(kairosItem)
       .where(eq(kairosItem.kind, "responder_correo"))
     expect(after).toHaveLength(1)
+  })
+
+  it("no la prepara para un remitente sin verificar, y como mucho una en espera por remitente", async () => {
+    const at = new Date(NOW.getTime() - HOUR)
+    const emails = await ownerDb
+      .insert(saasInboundEmail)
+      .values([
+        {
+          mailbox: "hola",
+          product: "optical",
+          messageId: "<kd-sin-verificar@example.test>",
+          fromAddress: "quien.sea@example.test",
+          toAddress: "hola@vistia20.com",
+          subject: "Ganaste un premio",
+          senderVerified: false,
+          receivedAt: at,
+        },
+        ...[1, 2, 3].map((n) => ({
+          mailbox: "contacto",
+          product: "optical",
+          messageId: `<kd-insiste-${n}@example.test>`,
+          fromAddress: "insiste@example.test",
+          toAddress: "contacto@vistia20.com",
+          subject: `Insisto ${n}`,
+          senderVerified: true,
+          receivedAt: new Date(at.getTime() + n * 60_000),
+        })),
+      ])
+      .returning({ id: saasInboundEmail.id, from: saasInboundEmail.fromAddress })
+    const later = new Date(NOW.getTime() + 180_000)
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, later))
+    await ownerDb.transaction((tx) => kairosRulesPass(tx, new Date(later.getTime() + 60_000)))
+    const mine = new Set(emails.map((email) => email.id))
+    const prepared = (
+      await ownerDb.select().from(kairosItem).where(eq(kairosItem.kind, "responder_correo"))
+    ).filter((row) => mine.has(String(row.payload.emailId)))
+    // Ni el sin verificar ni una por cada correo del que insiste: la del primero.
+    expect(prepared).toHaveLength(1)
+    expect(prepared[0]?.payload).toMatchObject({
+      from: "insiste@example.test",
+      subject: "Insisto 1",
+    })
   })
 })

@@ -520,7 +520,12 @@ export async function setAdminStaffActive(
         throw new ServiceError("LAST_ADMIN", 409, "No se puede desactivar al último admin activo")
       }
     }
-    await tx.update(adminStaff).set({ active }).where(eq(adminStaff.userId, targetUserId))
+    // Quien deja el equipo ya no recibe la copia de lo que llega a su dirección (su
+    // buzón personal no es de Sallca); si vuelve, Administración la pone otra vez.
+    await tx
+      .update(adminStaff)
+      .set(active ? { active } : { active, mailCopyTo: null })
+      .where(eq(adminStaff.userId, targetUserId))
     if (!active) {
       // La baja invalida sesiones reales: una cookie conservada no debe seguir operando.
       await tx.delete(session).where(eq(session.userId, targetUserId))

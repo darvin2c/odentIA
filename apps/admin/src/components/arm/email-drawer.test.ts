@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { inboundEmailSchema } from "./email-drawer"
-import { type KairosItem, kairosItemSchema, newClientFromEmail } from "./kairos-items"
+import { inboundEmailSchema, replyHint, replyToWords } from "./email-drawer"
+import { canAnswer, type KairosItem, kairosItemSchema, newClientFromEmail } from "./kairos-items"
 
 /** Un correo como lo devuelve `GET /api/admin/clients/inbound/:emailId`. */
 const email = {
@@ -83,7 +83,7 @@ describe("el correo que llegó", () => {
       origin: "otro",
       originDetail: "Nos escribió a hola@",
     })
-    // A la dirección de una persona y sin nombre: no se inventa nada.
+    // A la dirección de una persona y sin nombre: no se inventa nada; su dirección real, si viene.
     expect(
       newClientFromEmail(item({ emailId: "e2", mailbox: "persona", from: "x@example.test" })),
     ).toEqual({
@@ -92,5 +92,38 @@ describe("el correo que llegó", () => {
       origin: "otro",
       originDetail: "Nos escribió a una persona del equipo",
     })
+    expect(
+      newClientFromEmail(
+        item({
+          emailId: "e3",
+          mailbox: "persona",
+          to: "ana.torres+ventas@odentia32.com",
+          from: "x@example.test",
+        }),
+      ).originDetail,
+    ).toBe("Nos escribió a ana.torres@")
+  })
+
+  it("Responder y Crear cliente: Soporte solo con lo que llegó a soporte@", () => {
+    const hola = item({ emailId: "e1", mailbox: "hola" })
+    const soporte = item({ emailId: "e2", mailbox: "soporte" })
+    expect([canAnswer(hola, false), canAnswer(soporte, false)]).toEqual([false, true])
+    expect(canAnswer(hola, true)).toBe(true)
+  })
+
+  it("responder dice a dónde va (su Reply-To) y con qué firma sale", () => {
+    const read = inboundEmailSchema.parse({
+      ...email,
+      replyTo: "recepcion@example.test",
+      replySignature: "Ada Lovelace · odentIA",
+    })
+    expect(replyToWords(read)).toBe(
+      "recepcion@example.test (la dirección que pidió para responderle)",
+    )
+    expect(replyHint(read)).toContain("firmada «Ada Lovelace · odentIA»")
+    // Sin Reply-To, al remitente; de un servidor viejo, sin aviso ni firma.
+    const plain = inboundEmailSchema.parse(email)
+    expect(replyToWords(plain)).toBe("Elena Quispe <elena@example.test>")
+    expect(plain).toMatchObject({ notice: null, replySignature: null })
   })
 })

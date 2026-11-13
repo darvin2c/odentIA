@@ -43,15 +43,21 @@ import {
   registerClientFile,
   type StoredInboundAttachment,
 } from "./admin-client-files.js"
-import { clientByEmail } from "./admin-clients.js"
+import { clientByEmail, inboundMailboxWords, outreachAdminOnlySql } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
-import { replySubject, settleRepliesOfEmail, threadMessageIds } from "./admin-sales.js"
+import {
+  replySignature,
+  replySubject,
+  settleRepliesOfEmail,
+  threadMessageIds,
+} from "./admin-sales.js"
 import { outreachSenderPreview, staffByMailLocal } from "./admin-staff-mail.js"
 import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 
 const TEXT_MAX = 20_000
 const SUBJECT_MAX = 998
+const NOTICE_MAX = 2000
 export const INBOUND_ATTACHMENTS_MAX = 20
 
 const attachmentSchema = z.strictObject({
@@ -91,6 +97,19 @@ const inboundSchema = z
     to: z.string().trim().toLowerCase().pipe(z.email("Correo de destino no válido").max(254)),
     subject: z.string().nullish(),
     text: z.string().nullish(),
+    /**
+     * La primera dirección de su Reply-To: la respuesta va ahí. Una que no es un
+     * correo no rechaza el correo: se ignora y la respuesta va al remitente.
+     */
+    replyTo: z
+      .string()
+      .nullish()
+      .transform((value) => {
+        const clean = (value ?? "").trim().toLowerCase()
+        return clean && z.email().max(254).safeParse(clean).success ? clean : null
+      }),
+    /** El aviso del worker (adjuntos que no se guardaron), aparte del texto. */
+    notice: z.string().nullish(),
     receivedAt: z.date("Fecha de llegada no válida"),
     attachments: z
       .array(attachmentSchema)
@@ -127,8 +146,9 @@ function threadHeader(value: string | null | undefined, max: number): string | n
 
 /**
  * A quién del equipo le escribieron a `<localPart>@`: una persona activa, o
- * una que ya no está si el correo responde uno que salió con su dirección. Si
- * no es de nadie, 404 `MAILBOX_UNKNOWN` (el worker lo rechaza sin reenviarlo).
+ * una que ya no está si el correo responde uno que salió con su dirección
+ * (entonces sin copia: ya no es suya). Si no es de nadie, 404
+ * `MAILBOX_UNKNOWN` (el worker lo rechaza sin reenviarlo).
  */
 export async function inboundPersonOf(
   tx: Db,
@@ -156,7 +176,7 @@ export async function inboundPersonOf(
         : []
     if (!ours) throw unknown()
   }
-  return { userId: staff.userId, copyTo: staff.copyTo }
+  return { userId: staff.userId, copyTo: staff.active ? staff.copyTo : null }
 }
 
 /**
@@ -201,20 +221,31 @@ export async function matchInboundClient(
   return clientByEmail(tx, email, { members: true })
 }
 
-/** La actividad «correo que entró» del cliente. Sin `request_id`: no es un contacto nuestro ni mueve la fecha de volver. */
+/**
+ * La actividad «correo que entró» del cliente. Sin `request_id`: no es un
+ * contacto nuestro ni mueve la fecha de volver. Lo que no llegó a soporte@ es
+ * comercial (puede hablar de precios): solo de Administración.
+ */
 async function recordInboundActivity(
   tx: Db,
   clientId: string,
-  email: { mailbox: string; subject: string | null; receivedAt: Date; attachments: number },
+  email: {
+    mailbox: SaasInboundMailbox
+    toAddress: string
+    subject: string | null
+    receivedAt: Date
+    attachments: number
+  },
 ): Promise<void> {
   const files =
     email.attachments > 0
       ? ` (${email.attachments} adjunto${email.attachments === 1 ? "" : "s"})`
       : ""
-  const body = `Escribió a ${email.mailbox}@: ${email.subject ?? "(sin asunto)"}${files}`.slice(
-    0,
-    2000,
-  )
+  const body =
+    `Escribió a ${inboundMailboxWords(email)}@: ${email.subject ?? "(sin asunto)"}${files}`.slice(
+      0,
+      2000,
+    )
   await tx.insert(saasFollowUp).values({
     clientId,
     authorUserId: null,
@@ -222,7 +253,7 @@ async function recordInboundActivity(
     kind: "correo",
     direction: "entro",
     happenedAt: email.receivedAt,
-    adminOnly: false,
+    adminOnly: email.mailbox !== "soporte",
   })
 }
 
@@ -287,8 +318,6 @@ export async function ingestInboundEmail(
   const references = threadHeader(input.references, REFERENCES_MAX)
   const thread = threadMessageIds(inReplyTo, references)
   const person = input.localPart ? await inboundPersonOf(tx, input.localPart, thread) : null
-  // «Escribió a ada.lovelace@» o «Escribió a hola@».
-  const mailboxWords = input.localPart ?? input.mailbox
   const stored: StoredInboundAttachment[] = input.attachments.map((attachment) => ({
     filename: cleanFilename(attachment.filename),
     contentType: attachment.contentType,
@@ -308,8 +337,10 @@ export async function ingestInboundEmail(
       staffUserId: person?.userId ?? null,
       inReplyTo,
       references,
+      replyTo: input.replyTo,
       subject,
       textBody: input.text ? input.text.slice(0, TEXT_MAX) : null,
+      notice: trimTo(input.notice, NOTICE_MAX),
       senderVerified: input.senderVerified,
       receivedAt: input.receivedAt,
       attachments: stored,
@@ -358,7 +389,8 @@ export async function ingestInboundEmail(
       })
       .where(eq(saasInboundEmail.id, created.id))
     await recordInboundActivity(tx, match.clientId, {
-      mailbox: mailboxWords,
+      mailbox: input.mailbox,
+      toAddress: input.to,
       subject,
       receivedAt: input.receivedAt,
       attachments: stored.length,
@@ -407,7 +439,8 @@ export async function assignInboundEmail(
     .where(eq(saasInboundEmail.id, emailId))
     .for("update")
     .limit(1)
-  if (!email) throw notFound("Correo")
+  // Lo que no llegó a soporte@ es comercial: para Soporte no existe (como al leerlo).
+  if (!email || (actor.role !== "admin" && email.mailbox !== "soporte")) throw notFound("Correo")
   if (email.clientId === clientId) return { id: email.id, clientId, fileIds: [] }
   if (email.clientId) throw new ServiceError("CONFLICT", 409, "Ese correo ya es de otro cliente")
   const [client] = await tx
@@ -439,10 +472,8 @@ export async function assignInboundEmail(
     })
     .where(eq(saasInboundEmail.id, email.id))
   await recordInboundActivity(tx, clientId, {
-    mailbox:
-      email.mailbox === "persona"
-        ? (email.toAddress.split("@")[0] ?? email.mailbox)
-        : email.mailbox,
+    mailbox: email.mailbox as SaasInboundMailbox,
+    toAddress: email.toAddress,
     subject: email.subject,
     receivedAt: email.receivedAt,
     attachments: (email.attachments as StoredInboundAttachment[]).length,
@@ -480,6 +511,10 @@ export interface InboundEmailDetail {
   subject: string | null
   /** Nulo después de 30 días: el texto se borra. */
   text: string | null
+  /** El aviso del correo entrante (adjuntos que no se guardaron), aparte del texto; se borra con él. */
+  notice: string | null
+  /** A dónde iría la respuesta: su Reply-To, o el remitente. */
+  replyTo: string
   receivedAt: Date
   senderVerified: boolean
   clientId: string | null
@@ -494,6 +529,8 @@ export interface InboundEmailDetail {
    * del envío; null si no puede responder.
    */
   replyFrom: { name: string; address: string } | null
+  /** La firma que el envío agrega al final de la respuesta (`replySignature`); null si no puede responder. */
+  replySignature: string | null
   /** El asunto con que saldría la respuesta («Re: …»). */
   replySubject: string
   replies: InboundEmailReply[]
@@ -524,10 +561,16 @@ export async function getInboundEmail(
   if (!email || (actor.role !== "admin" && email.row.mailbox !== "soporte"))
     throw notFound("Correo")
   const { row } = email
+  // Soporte no ve las respuestas solo de Administración (con propuesta o de un ítem de Kairós suyo).
   const replies = await tx
     .select()
     .from(saasOutreach)
-    .where(eq(saasOutreach.inReplyToEmailId, row.id))
+    .where(
+      and(
+        eq(saasOutreach.inReplyToEmailId, row.id),
+        actor.role === "admin" ? undefined : sql`not ${outreachAdminOnlySql(`"saas_outreach"`)}`,
+      ),
+    )
     .orderBy(desc(saasOutreach.createdAt))
   const canReply = actor.role === "admin" || row.mailbox === "soporte"
   // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
@@ -554,6 +597,8 @@ export async function getInboundEmail(
     to: row.toAddress,
     subject: row.subject,
     text: row.textBody,
+    notice: row.notice,
+    replyTo: row.replyTo ?? row.fromAddress,
     receivedAt: row.receivedAt,
     senderVerified: row.senderVerified,
     clientId: row.clientId,
@@ -565,6 +610,7 @@ export async function getInboundEmail(
     attachments: row.attachments.length,
     canReply,
     replyFrom: sender ? { name: sender.name, address: sender.address } : null,
+    replySignature: sender && product ? replySignature(sender, product) : null,
     replySubject: replySubject(row.subject),
     replies: replies.map((reply) => ({
       id: reply.id,

@@ -160,8 +160,12 @@ const senderOf = (item: KairosItem): string => {
   return name ? `${name} <${from}>` : from
 }
 
-/** Soporte responde solo lo que llegó a soporte@ (lo demás es comercial; el servidor lo niega igual). */
-const canAnswer = (item: KairosItem, isAdmin: boolean) =>
+/**
+ * Responder o crear el cliente de un correo: Soporte, solo lo que llegó a
+ * soporte@ (lo demás es comercial; el servidor lo niega igual y Kairós ni
+ * siquiera se lo muestra).
+ */
+export const canAnswer = (item: KairosItem, isAdmin: boolean) =>
   isAdmin || text(item.payload.mailbox) === "soporte"
 
 const outreachWords = (item: KairosItem): string | null => {
@@ -394,19 +398,17 @@ export function KairosItemCard({
             Cambiar
           </Button>
         ) : null}
-        {item.kind === "correo_sin_cliente" && emailId ? (
+        {item.kind === "correo_sin_cliente" && emailId && canAnswer(item, isAdmin) ? (
           <>
-            {canAnswer(item, isAdmin) ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={pending}
-                onClick={() => setReplying(true)}
-              >
-                Responder
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setReplying(true)}
+            >
+              Responder
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -490,6 +492,8 @@ export function KairosItemCard({
 export function newClientFromEmail(item: KairosItem): Partial<NewClientValues> {
   const product = text(item.payload.product)
   const mailbox = text(item.payload.mailbox)
+  // La dirección real de la persona («ana.torres@»), si el ítem la trae.
+  const personal = text(item.payload.to)?.split("@")[0]?.split("+")[0]
   return {
     contactName: text(item.payload.fromName) ?? "",
     email: text(item.payload.from) ?? "",
@@ -498,7 +502,7 @@ export function newClientFromEmail(item: KairosItem): Partial<NewClientValues> {
       : {}),
     origin: "otro",
     originDetail: mailbox
-      ? `Nos escribió a ${mailbox === "persona" ? "una persona del equipo" : `${mailbox}@`}`
+      ? `Nos escribió a ${mailbox === "persona" ? (personal ? `${personal}@` : "una persona del equipo") : `${mailbox}@`}`
       : "",
   }
 }

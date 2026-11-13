@@ -16,7 +16,12 @@ import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
-import { CLIENT_STAGE_WORDS, type ClientStage, clientStageSql } from "./admin-clients.js"
+import {
+  CLIENT_STAGE_WORDS,
+  type ClientStage,
+  clientStageSql,
+  inboundMailboxWords,
+} from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { type KairosDrafter, kairosReadySql, saveKairosDraft } from "./admin-kairos.js"
 import { forecastReport, funnelReport, revenueReport } from "./admin-reports.js"
@@ -74,16 +79,20 @@ export interface KairosDraftWriter {
   }): Promise<{ script: string }>
   /**
    * La respuesta a un correo que llegó (`responder_correo`): solo el cuerpo,
-   * firmado; el asunto es «Re: …» y lo pone el envío. Del correo viaja solo
-   * lo que pasa el filtro (`kairosAllowedEmailText`).
+   * sin firma; el asunto («Re: …») y la firma de quien la envía los pone el
+   * envío. Del correo viaja solo lo que pasa el filtro (`kairosAllowedEmailText`).
    */
   draftReply(input: KairosReplyAsk): Promise<{ body: string }>
 }
 
-/** Lo que ve el modelo para responder un correo. */
+/**
+ * Lo que ve el modelo para responder un correo: solo lo que se le podría decir
+ * a quien escribe. El correo puede pedirle al modelo que repita lo que sabe,
+ * así que nada solo de Administración (notas, importes) ni la bitácora.
+ */
 export interface KairosReplyAsk {
   product: ClinicalProduct
-  /** La clínica, si el correo ya es de un cliente; null si aún no se sabe de quién es. */
+  /** La clínica (su nombre, el producto y la etapa en palabras), si el correo ya es de un cliente. */
   client: KairosDraftClientFacts | null
   from: { name: string | null; address: string }
   /** A qué buzón escribió, en palabras («hola@», «ana.torres@»). */
@@ -93,8 +102,8 @@ export interface KairosReplyAsk {
   lines: string[]
   /** Cuántas frases se quitaron por parecer de un paciente. */
   omitted: number
+  /** Siempre vacío por ahora: los hechos de la venta son internos. */
   facts: string[]
-  senderName: string
 }
 
 export interface KairosWeeklyWriter {
@@ -408,8 +417,9 @@ export interface KairosReplyJob {
  * Las respuestas a correos que esperan redacción: `responder_correo` en
  * espera, vigentes y sin borrador, las más viejas primero. Del correo viaja
  * solo lo que pasa el filtro (`kairosAllowedEmailText`); del cliente, si lo
- * tiene, lo mismo que en un mensaje. Firma quien recibió el correo en su
- * dirección, o quien lleva al cliente, o el equipo de la marca. Solo lee.
+ * tiene, solo lo que se le podría decir a quien escribe (su nombre, el
+ * producto y la etapa en palabras): nada de su bitácora, sus notas ni sus
+ * importes. Sin firma: la pone el envío con quien la aprueba. Solo lee.
  */
 export async function pendingKairosReplyJobs(
   tx: Db,
@@ -433,7 +443,6 @@ export async function pendingKairosReplyJobs(
         subject: saasInboundEmail.subject,
         text: saasInboundEmail.textBody,
         clientId: saasInboundEmail.clientId,
-        staffUserId: saasInboundEmail.staffUserId,
       },
     })
     .from(kairosItem)
@@ -459,10 +468,6 @@ export async function pendingKairosReplyJobs(
           .select({
             name: saasClient.name,
             product: saasClient.product,
-            city: saasClient.city,
-            professionals: saasClient.professionals,
-            currentTool: saasClient.currentTool,
-            ownerUserId: saasClient.ownerUserId,
             stage: clientStageSql(now),
           })
           .from(saasClient)
@@ -472,30 +477,30 @@ export async function pendingKairosReplyJobs(
     const product: ClinicalProduct = isClinicalProduct(client?.product ?? email.product)
       ? ((client?.product ?? email.product) as ClinicalProduct)
       : "dental"
-    const signerId = email.staffUserId ?? client?.ownerUserId ?? null
-    const [signer] = signerId
-      ? await tx.select({ name: user.name }).from(user).where(eq(user.id, signerId)).limit(1)
-      : []
     const text = kairosAllowedEmailText(email.text, { adminOnly: item.adminOnly })
     const told = (value: string) => kairosAllowedFact(value, { adminOnly: item.adminOnly })
-    const facts = email.clientId ? await recentClientFacts(tx, email.clientId, item.adminOnly) : []
     const subject = email.subject ? told(email.subject) : null
     jobs.push({
       itemId: item.id,
       ask: {
         product,
-        client: client ? clientFactsOf(client, product, client.stage) : null,
+        client: client
+          ? clientFactsOf(
+              { name: client.name, city: null, professionals: null, currentTool: null },
+              product,
+              client.stage,
+            )
+          : null,
         from: {
           name: email.fromName ? told(email.fromName) : null,
           address: email.from,
         },
-        mailbox: `${email.mailbox === "persona" ? (email.to.split("@")[0] ?? "persona") : email.mailbox}@`,
+        mailbox: `${inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to })}@`,
         subject,
         lines: text.lines,
         // Un asunto que no puede viajar cuenta como una frase quitada.
         omitted: text.omitted + (email.subject && !subject ? 1 : 0),
-        facts,
-        senderName: signer?.name?.trim() || `El equipo de ${productWords(product).name}`,
+        facts: [],
       },
     })
   }

@@ -8,11 +8,12 @@
  * dominio nuestro, o «nombre.apellido». Administración la corrige mientras no
  * haya salido nada con ella; después queda fija (la base también lo impide).
  *
- * Quién firma: lo que llegó a soporte@ sale desde soporte@ de la marca
- * («Soporte · odentIA»); todo lo demás (hola@, contacto@, fundadores@, la
- * dirección de una persona, «Escribir» y las propuestas) sale con el nombre y
- * la dirección de quien escribe, o desde hola@ si aún no tiene dirección. Las
- * respuestas van a la misma dirección del remitente.
+ * Quién firma: lo que llegó a soporte@, y todo lo que escribe Soporte, sale
+ * desde soporte@ de la marca («Soporte · odentIA»); lo demás que escribe
+ * Administración (hola@, contacto@, fundadores@, la dirección de una persona,
+ * «Escribir» y las propuestas) sale con su nombre y su dirección, o desde
+ * hola@ si aún no tiene dirección. Las respuestas van a la misma dirección
+ * del remitente.
  */
 
 import { type ClinicalProduct, productWords } from "@odentia/clinical"
@@ -86,7 +87,7 @@ export function brandMailbox(product: ClinicalProduct, mailbox: "soporte" | "hol
 
 /**
  * Quién firma lo que escribe `actor` para un cliente de `product`: soporte@ si
- * responde lo que llegó a soporte@; si no, la persona con su dirección, o
+ * responde lo que llegó a soporte@ o si es de Soporte; si no, la persona con su dirección, o
  * hola@ si aún no tiene. La fila de la persona queda bloqueada hasta el final
  * de la transacción: nadie le cambia la dirección mientras sale con ella. Una
  * persona que ya no está activa no escribe.
@@ -133,7 +134,8 @@ async function senderFor(
   const [staff] = await (lock ? query.for("update").limit(1) : query.limit(1))
   if (!staff?.active)
     throw new ServiceError("STAFF_INACTIVE", 403, "Tu acceso al equipo ya no está activo")
-  if (mailbox === "soporte") return brandMailbox(product, "soporte")
+  // Soporte siempre sale desde soporte@ («Escribir» incluido): su dirección no queda fija.
+  if (mailbox === "soporte" || actor.role !== "admin") return brandMailbox(product, "soporte")
   if (!staff.mailLocal) return brandMailbox(product, "hola")
   const [person] = await tx
     .select({ name: user.name })

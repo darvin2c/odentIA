@@ -655,8 +655,18 @@ export const saasInboundEmail = adminSchema.table(
     /** Cabeceras del hilo, recortadas: `In-Reply-To` y `References` tal como llegaron. */
     inReplyTo: text("in_reply_to"),
     references: text("references"),
+    /**
+     * La primera dirección de su `Reply-To`, si trae: la respuesta va ahí (RFC 5322 §3.6.2).
+     * El cliente se sigue ligando por el From verificado, nunca por esta.
+     */
+    replyTo: text("reply_to"),
     subject: text("subject"),
     textBody: text("text_body"),
+    /**
+     * El aviso del Worker (adjuntos que no se guardaron), aparte del texto: no se cita en la
+     * respuesta ni viaja al modelo. Se borra a los 30 días con el texto.
+     */
+    notice: text("notice"),
     senderVerified: boolean("sender_verified").notNull().default(false),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     attachments: jsonb("attachments")
@@ -685,7 +695,9 @@ export const saasInboundEmail = adminSchema.table(
         AND (${table.textBody} IS NULL OR length(${table.textBody}) <= 20000)
         AND (${table.subject} IS NULL OR length(${table.subject}) <= 998)
         AND (${table.inReplyTo} IS NULL OR length(${table.inReplyTo}) <= 998)
-        AND (${table.references} IS NULL OR length(${table.references}) <= 8000)`,
+        AND (${table.references} IS NULL OR length(${table.references}) <= 8000)
+        AND (${table.replyTo} IS NULL OR (${table.replyTo} = lower(${table.replyTo}) AND length(${table.replyTo}) BETWEEN 3 AND 254))
+        AND (${table.notice} IS NULL OR length(${table.notice}) <= 2000)`,
     ),
     check(
       "saas_inbound_email_staff_check",

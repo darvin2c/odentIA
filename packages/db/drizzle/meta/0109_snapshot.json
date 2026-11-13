@@ -1,5 +1,5 @@
 {
-  "id": "f18bf218-4012-4e94-a5d7-565296945700",
+  "id": "11358620-da5b-458c-b566-ccd83b2cf4fa",
   "prevId": "cbe77e10-339b-4c9a-afb7-dc8cdca14385",
   "version": "7",
   "dialect": "postgresql",
@@ -1151,6 +1151,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "reply_to": {
+          "name": "reply_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "subject": {
           "name": "subject",
           "type": "text",
@@ -1159,6 +1165,12 @@
         },
         "text_body": {
           "name": "text_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notice": {
+          "name": "notice",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1345,7 +1357,7 @@
         },
         "saas_inbound_email_text_check": {
           "name": "saas_inbound_email_text_check",
-          "value": "length(trim(\"admin\".\"saas_inbound_email\".\"message_id\")) BETWEEN 1 AND 998\n        AND (\"admin\".\"saas_inbound_email\".\"text_body\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"text_body\") <= 20000)\n        AND (\"admin\".\"saas_inbound_email\".\"subject\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"subject\") <= 998)\n        AND (\"admin\".\"saas_inbound_email\".\"in_reply_to\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"in_reply_to\") <= 998)\n        AND (\"admin\".\"saas_inbound_email\".\"references\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"references\") <= 8000)"
+          "value": "length(trim(\"admin\".\"saas_inbound_email\".\"message_id\")) BETWEEN 1 AND 998\n        AND (\"admin\".\"saas_inbound_email\".\"text_body\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"text_body\") <= 20000)\n        AND (\"admin\".\"saas_inbound_email\".\"subject\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"subject\") <= 998)\n        AND (\"admin\".\"saas_inbound_email\".\"in_reply_to\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"in_reply_to\") <= 998)\n        AND (\"admin\".\"saas_inbound_email\".\"references\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"references\") <= 8000)\n        AND (\"admin\".\"saas_inbound_email\".\"reply_to\" IS NULL OR (\"admin\".\"saas_inbound_email\".\"reply_to\" = lower(\"admin\".\"saas_inbound_email\".\"reply_to\") AND length(\"admin\".\"saas_inbound_email\".\"reply_to\") BETWEEN 3 AND 254))\n        AND (\"admin\".\"saas_inbound_email\".\"notice\" IS NULL OR length(\"admin\".\"saas_inbound_email\".\"notice\") <= 2000)"
         },
         "saas_inbound_email_staff_check": {
           "name": "saas_inbound_email_staff_check",

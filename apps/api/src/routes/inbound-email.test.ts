@@ -345,11 +345,13 @@ describe("la dirección de una persona del equipo", () => {
     await ownerDb.insert(user).values([
       { id: "ie-ada", name: "Ada Lovelace", email: "ada@gmail.test" },
       { id: "ie-ido", name: "Gonzalo Ido", email: "gonzalo@gmail.test" },
+      { id: "ie-beto", name: "Beto Paz", email: "beto@gmail.test" },
     ])
     // La base les pone su dirección al crear la fila: ada.lovelace y gonzalo.ido.
     await ownerDb.insert(adminStaff).values([
       { userId: "ie-ada", role: "admin", mailCopyTo: "ada.copia@gmail.test" },
-      { userId: "ie-ido", role: "admin", active: false },
+      { userId: "ie-ido", role: "admin", active: false, mailCopyTo: "ido.copia@gmail.test" },
+      { userId: "ie-beto", role: "admin", mailCopyTo: "beto.copia@gmail.test" },
     ])
     await ownerDb.insert(saasOutreach).values({
       clientId,
@@ -421,6 +423,50 @@ describe("la dirección de una persona del equipo", () => {
       matchedBy: "hilo",
       inReplyTo: "<nuestro-1@odentia32.com>",
       references: "<otro@test> <nuestro-1@odentia32.com>",
+    })
+  })
+
+  it("el mismo correo a otra dirección: primero quién es, y la copia es la de esa persona", async () => {
+    // Un correo con copia a dos personas llega dos veces con el mismo Message-ID.
+    const first = await send(toPerson("<a-dos@test>", "ada.lovelace"))
+    expect(first.status).toBe(201)
+    const second = await send(toPerson("<a-dos@test>", "beto.paz"))
+    expect(second.status).toBe(200)
+    expect(((await second.json()) as { data: { copyTo: string | null } }).data).toMatchObject({
+      duplicate: true,
+      copyTo: "beto.copia@gmail.test",
+    })
+    // A una dirección que no es de nadie, o de quien ya no está sin hilo: 404 aunque se repita.
+    const nobody = await send(toPerson("<a-dos@test>", "nadie"))
+    expect(nobody.status).toBe(404)
+    expect((await send(toPerson("<a-dos@test>", "gonzalo.ido"))).status).toBe(404)
+  })
+
+  it("quien ya no está: su respuesta entra, pero sin copia", async () => {
+    const reply = await send(
+      toPerson("<a-ido-3@test>", "gonzalo.ido", { inReplyTo: "<nuestro-1@odentia32.com>" }),
+    )
+    expect(reply.status).toBe(201)
+    expect(((await reply.json()) as { data: { copyTo: string | null } }).data.copyTo).toBeNull()
+  })
+
+  it("guarda el Reply-To y el aviso del Worker aparte del texto", async () => {
+    const response = await send(
+      email("<a-reply-to@test>", {
+        replyTo: " Recepcion@Clinica-Correo.test ",
+        text: "Les mando la lista.",
+        notice: "No se guardaron por su tipo: lista.zip.",
+      }),
+    )
+    expect(response.status).toBe(201)
+    const [row] = await ownerDb
+      .select()
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.messageId, "<a-reply-to@test>"))
+    expect(row).toMatchObject({
+      replyTo: "recepcion@clinica-correo.test",
+      textBody: "Les mando la lista.",
+      notice: "No se guardaron por su tipo: lista.zip.",
     })
   })
 

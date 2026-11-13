@@ -244,6 +244,15 @@ export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
     where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte'))`
 }
 
+/**
+ * «soporte», «hola» o, en la dirección de una persona, su parte local real
+ * («ana.torres», sin `+etiqueta`): el «a quién escribió» de los textos.
+ */
+export function inboundMailboxWords(email: { mailbox: string; toAddress: string }): string {
+  if (email.mailbox !== "persona") return email.mailbox
+  return email.toAddress.split("@")[0]?.split("+")[0]?.trim().toLowerCase() || "persona"
+}
+
 /* ---------- La etapa ---------- */
 
 /**
@@ -2969,16 +2978,14 @@ export async function clientTimeline(
         at: e.receivedAt,
         who: { kind: "clinica", name: e.fromName?.trim() || e.fromAddress },
         category: "contactos",
-        title: `Nos escribió a ${e.mailbox}@`,
+        title: `Nos escribió a ${inboundMailboxWords(e)}@`,
         detail:
           [clip(e.subject, 140), files ? `${files} ${files === 1 ? "adjunto" : "adjuntos"}` : null]
             .filter(Boolean)
             .join(" · ") || undefined,
-        adminOnly: false,
-        // Soporte abre solo lo que llegó a soporte@ (lo demás es comercial).
-        ...(admin || e.mailbox === "soporte"
-          ? { link: { kind: "correo" as const, id: e.id } }
-          : {}),
+        // Lo que no llegó a soporte@ es comercial: Soporte no lo ve.
+        adminOnly: e.mailbox !== "soporte",
+        link: { kind: "correo" as const, id: e.id },
       })
     }
   }

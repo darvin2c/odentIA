@@ -2264,12 +2264,47 @@ export function threadMessageIds(...values: ReadonlyArray<string | null | undefi
   return out
 }
 
-/** La cabecera References de una respuesta: la del correo más su Message-ID, hasta 8000 caracteres. */
-export function replyReferences(email: { references: string | null; messageId: string }): string {
-  const ids = threadMessageIds(email.references, email.messageId)
+/** El que pone el worker de Cloudflare a un correo que no traía Message-ID: no es de nadie. */
+const INVENTED_MESSAGE_ID = /^<sin-id-[^<>\s]*@entrante\.sallca>$/i
+
+/**
+ * El Message-ID de un correo que llegó, listo para una cabecera: con «<>» (se
+ * agregan si llegó sin ellos), o null si no es uno (sin «@», con espacios) o
+ * si lo inventó el worker porque el correo no traía.
+ */
+export function replyableMessageId(value: string | null | undefined): string | null {
+  const clean = (value ?? "").trim()
+  const id = /^<[^<>\s]+@[^<>\s]+>$/.test(clean)
+    ? clean
+    : /^[^<>\s]+@[^<>\s]+$/.test(clean)
+      ? `<${clean}>`
+      : null
+  return id && !INVENTED_MESSAGE_ID.test(id) ? id : null
+}
+
+/**
+ * La cabecera References de una respuesta (RFC 5322 §3.6.4): la References del
+ * correo o, si no trae, su In-Reply-To (solo si es un único id), más su
+ * Message-ID; hasta 8000 caracteres. Null si no queda ninguno.
+ */
+export function replyReferences(email: {
+  references: string | null
+  inReplyTo: string | null
+  messageId: string
+}): string | null {
+  const parent = threadMessageIds(email.references)
+  if (parent.length === 0) {
+    const inReplyTo = threadMessageIds(email.inReplyTo)
+    if (inReplyTo.length === 1) parent.push(...inReplyTo)
+  }
+  const own = replyableMessageId(email.messageId)
+  const ids = (own ? threadMessageIds(parent.join(" "), own) : parent).filter(
+    (id) => !INVENTED_MESSAGE_ID.test(id),
+  )
   // Se conservan el primero (el que abrió el hilo) y los últimos: así lo hace todo cliente de correo.
   while (ids.length > 2 && ids.join(" ").length > 8000) ids.splice(1, 1)
-  return ids.join(" ").slice(0, 8000)
+  const joined = ids.join(" ")
+  return joined && joined.length <= 8000 ? joined : null
 }
 
 /**
@@ -2289,10 +2324,12 @@ export async function prepareEmailReply(
   now = new Date(),
 ): Promise<OutreachRow> {
   if (!UUID.test(emailId)) throw notFound("Correo")
+  // Bloqueado: una respuesta a mano y el sí de Kairós no se cruzan.
   const [email] = await tx
     .select()
     .from(saasInboundEmail)
     .where(eq(saasInboundEmail.id, emailId))
+    .for("update")
     .limit(1)
   if (!email) throw notFound("Correo")
   const mailbox = email.mailbox as SaasInboundMailbox
@@ -2319,6 +2356,18 @@ export async function prepareEmailReply(
       .limit(1)
     if (!item || item.emailId !== email.id)
       throw invalidField("kairosItemId", "Ese borrador de Kairós no es de este correo")
+    // El borrador se preparó cuando nadie había respondido: si alguien respondió, no sale.
+    const [answered] = await tx
+      .select({ id: saasOutreach.id })
+      .from(saasOutreach)
+      .where(eq(saasOutreach.inReplyToEmailId, email.id))
+      .limit(1)
+    if (answered)
+      throw new ServiceError(
+        "ALREADY_REPLIED",
+        409,
+        "Alguien ya respondió este correo: revisa su respuesta en el correo antes de enviar otra",
+      )
     kairosItemId = item.id
   }
   const [contact] = client
@@ -2339,7 +2388,8 @@ export async function prepareEmailReply(
       clientId: client?.id ?? null,
       contactId: contact?.id ?? null,
       channel: "correo",
-      toAddress: email.fromAddress,
+      // Su Reply-To, si trae (RFC 5322 §3.6.2); si no, el remitente.
+      toAddress: email.replyTo ?? email.fromAddress,
       subject: replySubject(email.subject),
       body,
       proposalId,
@@ -2561,6 +2611,22 @@ export function outreachMailMessage(email: OutreachEmail): MailMessage {
 
 const QUOTE_MAX = 4000
 
+/**
+ * La firma de una respuesta: la de quien sale como remitente. «Ada Lovelace ·
+ * odentIA», «Soporte · odentIA» o, desde hola@, «El equipo de odentIA».
+ */
+export function replySignature(sender: MailSender, product: ClinicalProduct): string {
+  return sender.address === brandMailbox(product, "hola").address
+    ? `El equipo de ${sender.name}`
+    : sender.name
+}
+
+/** El cuerpo ya termina con la firma (en su última línea): no se repite. */
+function endsWithSignature(body: string, signature: string): boolean {
+  const last = body.trimEnd().split("\n").at(-1)?.trim() ?? ""
+  return last.toLowerCase() === signature.toLowerCase()
+}
+
 /** «El 12 de noviembre de 2026, 10:15, Rosa Mamani escribió:» y el texto con «> ». */
 export function quotedEmail(email: {
   fromName: string | null
@@ -2620,7 +2686,12 @@ export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> 
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean)
-  if (email) paragraphs.push(...quotedEmail(email))
+  if (email) {
+    // Una respuesta firma con quien sale como remitente (el borrador de Kairós viene sin firma).
+    const signature = replySignature(sender, product)
+    if (!endsWithSignature(outreach.body, signature)) paragraphs.push(signature)
+    paragraphs.push(...quotedEmail(email))
+  }
   const attachments: OutreachEmail["attachments"] = []
   if (outreach.proposalId) {
     const pdf = await proposalPdf(tx, outreach.proposalId, sender.address)
@@ -2638,11 +2709,11 @@ export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> 
     replies: "Si responde este correo, le llega a quien le escribe.",
     replyTo: sender.address,
   })
+  // El hilo (RFC 5322 §3.6.4), nunca con un Message-ID inventado ni sin «<>».
   const headers: Record<string, string> = {}
-  if (email) {
-    headers["In-Reply-To"] = email.messageId
-    if (outreach.references) headers.References = outreach.references
-  }
+  const parentId = email ? replyableMessageId(email.messageId) : null
+  if (parentId) headers["In-Reply-To"] = parentId
+  if (email && outreach.references) headers.References = outreach.references
   return {
     to: outreach.toAddress,
     subject: template.subject,

@@ -1,15 +1,21 @@
-import { saasClient, saasClientContact, saasInboundEmail } from "@odentia/db/schema/admin-arm"
+import {
+  kairosItem,
+  saasClient,
+  saasClientContact,
+  saasInboundEmail,
+} from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clientTimeline } from "./admin-clients.js"
-import type { AdminActor } from "./admin-core.js"
+import { type AdminActor, setAdminStaffActive } from "./admin-core.js"
 import {
   assignInboundEmail,
   getInboundEmail,
   type InboundEmailInput,
+  inboundPersonOf,
   ingestInboundEmail,
 } from "./admin-inbound-email.js"
 import {
@@ -282,10 +288,12 @@ describe("responder un correo", () => {
     expect(replySubject("Precios")).toBe("Re: Precios")
     expect(replySubject("RE:  Precios")).toBe("RE: Precios")
     expect(replySubject(null)).toBe("Re: su correo")
-    expect(replyReferences({ references: "<a@x> <b@x>", messageId: "<c@x>" })).toBe(
-      "<a@x> <b@x> <c@x>",
+    expect(
+      replyReferences({ references: "<a@x> <b@x>", inReplyTo: null, messageId: "<c@x>" }),
+    ).toBe("<a@x> <b@x> <c@x>")
+    expect(replyReferences({ references: "<c@x>", inReplyTo: null, messageId: "<c@x>" })).toBe(
+      "<c@x>",
     )
-    expect(replyReferences({ references: "<c@x>", messageId: "<c@x>" })).toBe("<c@x>")
     const quote = quotedEmail({
       fromName: "Rosa",
       fromAddress: "rosa@x.test",
@@ -393,6 +401,8 @@ describe("leer un correo y su historial", () => {
       canReply: true,
       replySubject: "Re: Una duda",
       replyFrom: { name: "Ada Lovelace · odentIA", address: "ada.lovelace@odentia32.com" },
+      replySignature: "Ada Lovelace · odentIA",
+      replyTo: "rosa@hilo.test",
       text: "¿Tienen agenda en línea?",
     })
     // Sin dirección, la respuesta saldría desde hola@; quien ya no está, no responde.
@@ -426,5 +436,267 @@ describe("leer un correo y su historial", () => {
     )
     expect(forSupport.items.some((entry) => entry.link?.id === inbound.id)).toBe(false)
     expect(forSupport.items.some((entry) => entry.title === "Le respondimos su correo")).toBe(false)
+  })
+})
+
+/** Un ítem de Kairós de un correo, como lo deja la pasada (`responder_correo`). */
+async function replyItem(emailId: string, adminOnly = true): Promise<string> {
+  const [row] = await ownerDb
+    .insert(kairosItem)
+    .values({
+      kind: "responder_correo",
+      title: "Responder",
+      reason: "Le escribió a hola@",
+      payload: { emailId, body: "Hola, le cuento." },
+      expectedState: {},
+      idempotencyKey: `prueba:${crypto.randomUUID()}`,
+      expiresAt: new Date(Date.now() + 48 * 3_600_000),
+      adminOnly,
+    })
+    .returning({ id: kairosItem.id })
+  if (!row) throw new Error("sin ítem")
+  return row.id
+}
+
+async function activitiesOf(id: string) {
+  return ownerDb
+    .select({ body: saasFollowUp.body, adminOnly: saasFollowUp.adminOnly })
+    .from(saasFollowUp)
+    .where(eq(saasFollowUp.clientId, id))
+}
+
+describe("lo que corrigió la revisión", () => {
+  it("Soporte no ve lo comercial: ni su actividad, ni su fila en el historial, ni lo asigna", async () => {
+    const hola = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", subject: "Precio por sede" }),
+    )
+    const soporte = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        from: "rosa@hilo.test",
+        mailbox: "soporte",
+        to: "soporte@odentia32.com",
+        subject: "No entra",
+      }),
+    )
+    expect([hola.clientId, soporte.clientId]).toEqual([clientId, clientId])
+    const acts = await activitiesOf(clientId)
+    expect(acts).toContainEqual({ body: "Escribió a hola@: Precio por sede", adminOnly: true })
+    expect(acts).toContainEqual({ body: "Escribió a soporte@: No entra", adminOnly: false })
+    // Un correo del cliente sin su actividad: la fila del historial sale del correo.
+    await ownerDb.insert(saasInboundEmail).values({
+      clientId,
+      mailbox: "persona",
+      staffUserId: other.userId,
+      product: "dental",
+      messageId: "<sin-actividad@hilo.test>",
+      fromAddress: "rosa@hilo.test",
+      toAddress: "beto+ventas@odentia32.com",
+      subject: "Sin actividad",
+      receivedAt: new Date(Date.now() - 3_600_000),
+    })
+    const titles = async (actor: AdminActor) =>
+      (
+        await ownerDb.transaction((tx) =>
+          clientTimeline(tx, actor, clientId, { filter: "contactos", limit: 100 }),
+        )
+      ).items.map((entry) => entry.title)
+    // La dirección de la persona, no «persona@».
+    expect(await titles(admin)).toContain("Nos escribió a beto@")
+    expect((await titles(support)).some((title) => title.startsWith("Nos escribió a"))).toBe(false)
+    // Asignar lo comercial: para Soporte no existe.
+    const orphan = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "nadie.revision@gmail.com", mailbox: "contacto" }),
+    )
+    await expect(assignInboundEmail(ownerDb, support, orphan.id, clientId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    })
+    const orphanSupport = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "nadie.revision@gmail.com", mailbox: "soporte", to: "soporte@odentia32.com" }),
+    )
+    expect(await assignInboundEmail(ownerDb, support, orphanSupport.id, clientId)).toMatchObject({
+      clientId,
+    })
+    // Lo comercial que asigna Administración queda solo suyo.
+    await assignInboundEmail(ownerDb, admin, orphan.id, clientId)
+    expect(await activitiesOf(clientId)).toContainEqual({
+      body: "Escribió a contacto@: Quiero saber más",
+      adminOnly: true,
+    })
+  })
+
+  it("Soporte siempre escribe desde soporte@, también en «Escribir», y su dirección no queda fija", async () => {
+    const row = await ownerDb.transaction((tx) =>
+      prepareOutreach(tx, support, clientId, {
+        channel: "correo",
+        to: "rosa@hilo.test",
+        subject: "Su acceso",
+        body: "Hola, Rosa.",
+      }),
+    )
+    expect(row.from).toBe("soporte@odentia32.com")
+    const email = await ownerDb.transaction((tx) => outreachEmail(tx, row.id))
+    expect(email.from).toEqual({ name: "Soporte · odentIA", address: "soporte@odentia32.com" })
+    expect(email.replyTo).toBe("soporte@odentia32.com")
+    expect((await mailLocalOf(support.userId))?.firstSentAt).toBeNull()
+  })
+
+  it("el cajón no le muestra a Soporte las respuestas solo de Administración", async () => {
+    const inbound = await ingestInboundEmail(
+      ownerDb,
+      mail({ mailbox: "soporte", to: "soporte@odentia32.com", from: "otra.cosa@gmail.com" }),
+    )
+    const item = await replyItem(inbound.id)
+    const reserved = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "Lo vemos.", kairosItemId: item }),
+    )
+    const shown = async (actor: AdminActor) =>
+      (await ownerDb.transaction((tx) => getInboundEmail(tx, actor, inbound.id))).replies.map(
+        (reply) => reply.id,
+      )
+    expect(await shown(admin)).toEqual([reserved.id])
+    expect(await shown(support)).toEqual([])
+  })
+
+  it("la respuesta va al Reply-To; el cliente se liga por el From verificado", async () => {
+    const inbound = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", replyTo: " Recepcion@Hilo.test " }),
+    )
+    expect(inbound.clientId).toBe(clientId)
+    const [row] = await ownerDb
+      .select({ replyTo: saasInboundEmail.replyTo })
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, inbound.id))
+    expect(row?.replyTo).toBe("recepcion@hilo.test")
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "Hola." }),
+    )
+    expect(reply.to).toBe("recepcion@hilo.test")
+    // Un Reply-To que no es un correo no se guarda: la respuesta va al remitente.
+    const odd = await ingestInboundEmail(ownerDb, mail({ replyTo: "no es correo" }))
+    const [oddRow] = await ownerDb
+      .select({ replyTo: saasInboundEmail.replyTo })
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, odd.id))
+    expect(oddRow?.replyTo).toBeNull()
+  })
+
+  it("el aviso del Worker se guarda aparte: no se cita ni es parte del texto", async () => {
+    const notice = "No se guardaron por su tipo (solo PDF, imagen, xlsx, csv y docx): lista.zip."
+    const inbound = await ingestInboundEmail(ownerDb, mail({ text: "Les mando la lista.", notice }))
+    const detail = await ownerDb.transaction((tx) => getInboundEmail(tx, admin, inbound.id))
+    expect(detail).toMatchObject({ text: "Les mando la lista.", notice })
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "Recibido." }),
+    )
+    const email = await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))
+    expect(email.text).toContain("> Les mando la lista.")
+    expect(email.text).not.toContain("lista.zip")
+  })
+
+  it("la respuesta lleva la firma de quien sale como remitente, una sola vez", async () => {
+    const signed = async (actor: AdminActor, mailbox: "hola" | "soporte", body: string) => {
+      const inbound = await ingestInboundEmail(
+        ownerDb,
+        mail({ mailbox, to: `${mailbox}@odentia32.com`, from: "firma@gmail.com" }),
+      )
+      const reply = await ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, actor, inbound.id, { body }),
+      )
+      return (await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))).text
+    }
+    const ada = await signed(admin, "hola", "Hola, le cuento.")
+    expect(ada).toMatch(/Hola, le cuento\.\s+Ada Lovelace · odentIA\s+El .+ escribió:/s)
+    // Si ya termina con la firma, no se repite.
+    const once = await signed(admin, "hola", "Hola.\n\nAda Lovelace · odentIA")
+    expect(once.split("Ada Lovelace · odentIA")).toHaveLength(2)
+    expect(await signed(plain, "hola", "Hola.")).toMatch(/Hola\.\s+El equipo de odentIA/)
+    expect(await signed(support, "soporte", "Ya lo vemos.")).toMatch(
+      /Ya lo vemos\.\s+Soporte · odentIA/,
+    )
+  })
+
+  it("las cabeceras del hilo: References del padre o su In-Reply-To, más su Message-ID; nada inventado", async () => {
+    expect(
+      replyReferences({ references: null, inReplyTo: "<padre@x>", messageId: "<hijo@x>" }),
+    ).toBe("<padre@x> <hijo@x>")
+    expect(replyReferences({ references: "<a@x>", inReplyTo: "<b@x>", messageId: "<c@x>" })).toBe(
+      "<a@x> <c@x>",
+    )
+    expect(
+      replyReferences({ references: null, inReplyTo: "<a@x> <b@x>", messageId: "<c@x>" }),
+    ).toBe("<c@x>")
+    expect(
+      replyReferences({
+        references: null,
+        inReplyTo: null,
+        messageId: "<sin-id-abc@entrante.sallca>",
+      }),
+    ).toBeNull()
+    const headersOf = async (input: Partial<InboundEmailInput>) => {
+      const inbound = await ingestInboundEmail(ownerDb, mail(input))
+      const reply = await ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, inbound.id, { body: "Hola." }),
+      )
+      return (await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))).headers
+    }
+    // Sin «<>»: se normaliza.
+    expect(
+      await headersOf({ messageId: "sin-corchetes-1@gmail.com", inReplyTo: "<padre-1@gmail.com>" }),
+    ).toEqual({
+      "In-Reply-To": "<sin-corchetes-1@gmail.com>",
+      References: "<padre-1@gmail.com> <sin-corchetes-1@gmail.com>",
+    })
+    // El que puso el Worker porque el correo no traía: no va.
+    expect(
+      await headersOf({ messageId: `<sin-id-${crypto.randomUUID()}@entrante.sallca>` }),
+    ).toEqual({})
+  })
+
+  it("quien deja el equipo: su respuesta entra sin copia, y al desactivarla se borra su copia", async () => {
+    await ownerDb
+      .update(adminStaff)
+      .set({ active: true, mailCopyTo: "gonzalo@gmail.com" })
+      .where(eq(adminStaff.userId, gone.userId))
+    const out = await ownerDb.transaction((tx) =>
+      prepareOutreach(tx, gone, clientId, {
+        channel: "correo",
+        to: "rosa@hilo.test",
+        subject: "Antes de irme, otra vez",
+        body: "Hola.",
+      }),
+    )
+    await ownerDb
+      .update(adminStaff)
+      .set({ active: false })
+      .where(eq(adminStaff.userId, gone.userId))
+    const { messageId } = await ownerDb.transaction((tx) => outreachEmail(tx, out.id))
+    expect(await inboundPersonOf(ownerDb, "gonzalo", [messageId ?? ""])).toEqual({
+      userId: gone.userId,
+      copyTo: null,
+    })
+    // Desactivar a alguien borra su copia.
+    await setAdminStaffActive(ownerDb, admin, other.userId, false, "Dejó el equipo hoy")
+    const [beto] = await ownerDb
+      .select({ copyTo: adminStaff.mailCopyTo })
+      .from(adminStaff)
+      .where(eq(adminStaff.userId, other.userId))
+    expect(beto?.copyTo).toBeNull()
+  })
+
+  it("si alguien ya respondió, el borrador de Kairós no sale (409)", async () => {
+    const inbound = await ingestInboundEmail(ownerDb, mail({ from: "carrera@gmail.com" }))
+    const item = await replyItem(inbound.id)
+    await ownerDb.transaction((tx) => prepareEmailReply(tx, admin, inbound.id, { body: "A mano." }))
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, inbound.id, { body: "De Kairós.", kairosItemId: item }),
+      ),
+    ).rejects.toMatchObject({ code: "ALREADY_REPLIED", status: 409 })
   })
 })

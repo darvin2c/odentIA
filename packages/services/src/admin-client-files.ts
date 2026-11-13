@@ -28,7 +28,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError } from "./errors.js"
@@ -509,10 +509,11 @@ export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> 
   const cutoff = addDays(limaDate(now), -CLIENT_FILE_RETENTION_DAYS)
   const cleared = await db
     .update(saasInboundEmail)
-    .set({ textBody: null })
+    // El aviso del correo entrante nombra sus adjuntos: se va con el texto.
+    .set({ textBody: null, notice: null })
     .where(
       and(
-        isNotNull(saasInboundEmail.textBody),
+        or(isNotNull(saasInboundEmail.textBody), isNotNull(saasInboundEmail.notice)),
         sql`(${saasInboundEmail.receivedAt} at time zone 'America/Lima')::date <= ${cutoff}::date`,
       ),
     )

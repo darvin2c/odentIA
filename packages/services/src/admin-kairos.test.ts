@@ -492,6 +492,20 @@ beforeAll(async () => {
     subject: "Una pregunta",
     receivedAt: ago(0.5),
   })
+  // A la dirección de una persona del equipo, sin cliente.
+  const [toPerson] = await ownerDb
+    .insert(saasInboundEmail)
+    .values({
+      mailbox: "persona",
+      product: "dental",
+      messageId: "<a-una-persona@kairos.test>",
+      fromAddress: "otra@nadie.test",
+      toAddress: "ana.torres@odentia32.com",
+      subject: "Para Ana",
+      receivedAt: ago(1),
+    })
+    .returning({ id: saasInboundEmail.id })
+  ids.personEmail = toPerson?.id ?? ""
 
   first = await pass()
 })
@@ -667,9 +681,18 @@ describe("la pasada de Kairós", () => {
       byKairos: true,
       requestId: null,
       body: "Correo recibido: Una pregunta",
+      // Llegó a contacto@: es comercial, Soporte no lo ve.
+      adminOnly: true,
     })
-    const [orphan] = await itemsOf(null, "correo_sin_cliente")
+    const orphans = await itemsOf(null, "correo_sin_cliente")
+    const orphan = orphans.find((item) => item.payload.emailId === ids.orphanEmail)
     expect(orphan?.payload).toMatchObject({ emailId: ids.orphanEmail, from: "alguien@nadie.test" })
+    // Lo comercial es solo de Administración, y dice que el remitente no está verificado.
+    expect(orphan?.adminOnly).toBe(true)
+    expect(orphan?.reason).toContain("de un remitente no verificado")
+    // La dirección real de la persona, no «persona@».
+    const toPerson = orphans.find((item) => item.payload.emailId === ids.personEmail)
+    expect(toPerson?.reason).toContain("Llegó a ana.torres@ de odentIA")
     ids.orphanItem = orphan?.id ?? ""
   })
 
@@ -829,15 +852,19 @@ describe("lo que espera un sí", () => {
     expect(expired?.status).toBe("vencida")
     await pass()
     const fresh = (await itemsOf(null, "correo_sin_cliente")).find(
-      (item) => item.status === "espera",
+      (item) => item.status === "espera" && item.payload.emailId === ids.orphanEmail,
     )
     expect(fresh).toBeDefined()
     ids.orphanItem = fresh?.id ?? ""
   })
 
   it("asignar un correo pide el cliente; con él, usa la operación de los correos", async () => {
+    // Llegó a contacto@: para Soporte no existe.
     await expect(
       decide(support, ids.orphanItem as string, { action: "aprobar" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      decide(admin, ids.orphanItem as string, { action: "aprobar" }),
     ).rejects.toMatchObject({
       code: "VALIDATION",
       fields: { "edited.clientId": expect.any(String) },
@@ -847,16 +874,12 @@ describe("lo que espera un sí", () => {
       .from(kairosItem)
       .where(eq(kairosItem.id, ids.orphanItem as string))
     expect(still?.status).toBe("espera")
-    const decision = await decide(support, ids.orphanItem as string, {
+    const decision = await decide(admin, ids.orphanItem as string, {
       action: "aprobar",
       edited: { clientId: ids.nueva },
     })
     expect(decision.status).toBe("ejecutada")
-    expect(lastCall("assignInboundEmail")?.args).toEqual([
-      support.userId,
-      ids.orphanEmail,
-      ids.nueva,
-    ])
+    expect(lastCall("assignInboundEmail")?.args).toEqual([admin.userId, ids.orphanEmail, ids.nueva])
   })
 
   it("solo deja cambiar lo que ese tipo permite", async () => {

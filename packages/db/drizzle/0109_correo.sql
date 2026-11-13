@@ -6,6 +6,8 @@ ALTER TABLE "admin"."saas_outreach" ALTER COLUMN "client_id" DROP NOT NULL;--> s
 ALTER TABLE "admin"."saas_inbound_email" ADD COLUMN "staff_user_id" text;--> statement-breakpoint
 ALTER TABLE "admin"."saas_inbound_email" ADD COLUMN "in_reply_to" text;--> statement-breakpoint
 ALTER TABLE "admin"."saas_inbound_email" ADD COLUMN "references" text;--> statement-breakpoint
+ALTER TABLE "admin"."saas_inbound_email" ADD COLUMN "reply_to" text;--> statement-breakpoint
+ALTER TABLE "admin"."saas_inbound_email" ADD COLUMN "notice" text;--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "in_reply_to_email_id" uuid;--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "from_address" text;--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD COLUMN "message_id" text;--> statement-breakpoint
@@ -27,7 +29,9 @@ ALTER TABLE "admin"."saas_inbound_email" ADD CONSTRAINT "saas_inbound_email_text
         AND ("admin"."saas_inbound_email"."text_body" IS NULL OR length("admin"."saas_inbound_email"."text_body") <= 20000)
         AND ("admin"."saas_inbound_email"."subject" IS NULL OR length("admin"."saas_inbound_email"."subject") <= 998)
         AND ("admin"."saas_inbound_email"."in_reply_to" IS NULL OR length("admin"."saas_inbound_email"."in_reply_to") <= 998)
-        AND ("admin"."saas_inbound_email"."references" IS NULL OR length("admin"."saas_inbound_email"."references") <= 8000));--> statement-breakpoint
+        AND ("admin"."saas_inbound_email"."references" IS NULL OR length("admin"."saas_inbound_email"."references") <= 8000)
+        AND ("admin"."saas_inbound_email"."reply_to" IS NULL OR ("admin"."saas_inbound_email"."reply_to" = lower("admin"."saas_inbound_email"."reply_to") AND length("admin"."saas_inbound_email"."reply_to") BETWEEN 3 AND 254))
+        AND ("admin"."saas_inbound_email"."notice" IS NULL OR length("admin"."saas_inbound_email"."notice") <= 2000));--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD CONSTRAINT "saas_outreach_client_check" CHECK ("admin"."saas_outreach"."client_id" IS NOT NULL OR "admin"."saas_outreach"."in_reply_to_email_id" IS NOT NULL);--> statement-breakpoint
 ALTER TABLE "admin"."saas_outreach" ADD CONSTRAINT "saas_outreach_mail_check" CHECK (("admin"."saas_outreach"."from_address" IS NULL OR ("admin"."saas_outreach"."from_address" = lower("admin"."saas_outreach"."from_address") AND length("admin"."saas_outreach"."from_address") BETWEEN 3 AND 254))
         AND ("admin"."saas_outreach"."message_id" IS NULL OR length("admin"."saas_outreach"."message_id") BETWEEN 3 AND 998)

@@ -57,6 +57,10 @@ export const inboundEmailSchema = z.object({
   subject: z.string().nullable(),
   /** Nulo pasados 30 días: el texto se borra. */
   text: z.string().nullable(),
+  /** Lo que avisó el correo entrante (adjuntos que no se guardaron), aparte del texto. */
+  notice: z.string().nullable().default(null),
+  /** A dónde va la respuesta: su Reply-To o el remitente. */
+  replyTo: z.string().nullable().default(null),
   receivedAt: z.string(),
   senderVerified: z.boolean(),
   attachments: z.number().int().nonnegative(),
@@ -64,6 +68,8 @@ export const inboundEmailSchema = z.object({
   staff: z.object({ userId: z.string(), name: z.string() }).nullable(),
   canReply: z.boolean(),
   replyFrom: z.object({ name: z.string(), address: z.string() }).nullable().default(null),
+  /** La firma que agrega el envío al final de la respuesta. */
+  replySignature: z.string().nullable().default(null),
   replySubject: z.string().default(""),
   replies: z.array(replySchema),
 })
@@ -96,6 +102,25 @@ const mailboxWords = (email: InboundEmail) =>
 
 const senderWords = (email: InboundEmail) =>
   email.fromName ? `${email.fromName} <${email.from}>` : email.from
+
+/** A quién va la respuesta: el remitente o, si pidió otra dirección (Reply-To), esa. */
+export const replyToWords = (email: InboundEmail) =>
+  email.replyTo && email.replyTo !== email.from
+    ? `${email.replyTo} (la dirección que pidió para responderle)`
+    : senderWords(email)
+
+/** «Sale una sola vez, firmada como …»: lo que dice el campo de la respuesta. */
+export const replyHint = (email: InboundEmail) =>
+  `Sale una sola vez${email.replySignature ? `, firmada «${email.replySignature}»` : ""}, con el correo citado debajo. Si responde, vuelve a la dirección de «Desde».`
+
+/** El aviso de remitente sin verificar: al leerlo y al responderlo (también desde Kairós). */
+function UnverifiedNotice({ email }: { email: InboundEmail }) {
+  return email.senderVerified ? null : (
+    <PageNotice tone="aviso" label="Remitente sin verificar">
+      No se pudo comprobar que lo envió esa dirección: puede no ser quien dice.
+    </PageNotice>
+  )
+}
 
 /** Lo que quedó sin saber si salió: se resuelve antes de responder otra vez. */
 const unsettled = (email: InboundEmail) =>
@@ -229,11 +254,7 @@ function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: 
         <dt className="text-muted-foreground">De</dt>
         <dd className="[overflow-wrap:anywhere]">{senderWords(email)}</dd>
       </dl>
-      {email.senderVerified ? null : (
-        <PageNotice tone="aviso" label="Remitente sin verificar">
-          No se pudo comprobar que lo envió esa dirección: puede no ser quien dice.
-        </PageNotice>
-      )}
+      <UnverifiedNotice email={email} />
       <section aria-label="Lo que dice" className="flex flex-col gap-2">
         {email.text ? (
           <p className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm [overflow-wrap:anywhere]">
@@ -252,6 +273,11 @@ function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: 
               ? ": están en Documentos de su ficha."
               : ": se guardan al ligarlo a un cliente."}
           </p>
+        ) : null}
+        {email.notice ? (
+          <PageNotice tone="aviso" label="Adjuntos que no entraron">
+            {email.notice}
+          </PageNotice>
         ) : null}
       </section>
       <section aria-labelledby="correo-respuestas" className="flex flex-col gap-2">
@@ -402,7 +428,7 @@ function ReplyForm({
       <div className="flex flex-col gap-4">
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
           <dt className="text-muted-foreground">Para</dt>
-          <dd className="[overflow-wrap:anywhere]">{senderWords(email)}</dd>
+          <dd className="[overflow-wrap:anywhere]">{replyToWords(email)}</dd>
           <dt className="text-muted-foreground">Desde</dt>
           <dd className="[overflow-wrap:anywhere]">
             {email.replyFrom ? `${email.replyFrom.name} <${email.replyFrom.address}>` : "—"}
@@ -410,6 +436,7 @@ function ReplyForm({
           <dt className="text-muted-foreground">Asunto</dt>
           <dd className="[overflow-wrap:anywhere]">{email.replySubject}</dd>
         </dl>
+        <UnverifiedNotice email={email} />
         {email.replyFrom ? null : (
           <PageNotice tone="alarma" label="No puedes responder">
             Tu acceso al equipo ya no está activo: la respuesta no saldría.
@@ -428,10 +455,7 @@ function ReplyForm({
               <field.TextareaField
                 id="responder-texto"
                 label="Respuesta"
-                description={
-                  draftNote ??
-                  "Sale una sola vez, con el correo citado debajo. Si responde, vuelve a la dirección de «Desde»."
-                }
+                description={draftNote ? `${draftNote} ${replyHint(email)}` : replyHint(email)}
                 rows={8}
                 maxLength={5000}
                 autoFocus

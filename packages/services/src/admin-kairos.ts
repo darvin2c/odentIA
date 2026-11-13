@@ -23,6 +23,7 @@ import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm
 import { alias } from "drizzle-orm/pg-core"
 import {
   clientDuplicatePairsSql,
+  inboundMailboxWords,
   linkClientToOrganization,
   proposalLiveSql,
   proposalOfOpenSaleSql,
@@ -1715,9 +1716,10 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     // Sin `request_id`: un correo que llega no es haberle respondido (la lista de espera no lo cuenta).
     const [entry] = await rows<{ id: string }>(
       tx,
-      sql`insert into saas_follow_up (client_id, body, kind, direction, happened_at, by_kairos)
+      // Lo que no llegó a soporte@ es comercial (puede hablar de precios): solo de Administración.
+      sql`insert into saas_follow_up (client_id, body, kind, direction, happened_at, by_kairos, admin_only)
       values (${email.client_id}::uuid, ${(subject ? `Correo recibido: ${subject}` : "Correo recibido, sin asunto").slice(0, 2000)},
-        'correo', 'entro', ${email.received_at}::timestamptz, true)
+        'correo', 'entro', ${email.received_at}::timestamptz, true, ${email.mailbox !== "soporte"})
       returning id`,
     )
     if (!entry) continue
@@ -1735,32 +1737,36 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     product: string
     from_address: string
     from_name: string | null
+    to_address: string
     subject: string | null
     received_at: string
     sender_verified: boolean
   }>(
     tx,
-    sql`select id, mailbox, product, from_address, from_name, subject, ${iso(sql`received_at`)} as received_at,
-      sender_verified
+    sql`select id, mailbox, product, from_address, from_name, to_address, subject,
+      ${iso(sql`received_at`)} as received_at, sender_verified
     from saas_inbound_email where client_id is null order by received_at asc`,
   )
   for (const email of unassigned) {
     const who = email.from_name?.trim() || email.from_address
+    const to = inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to_address })
     await pass.item({
       rule: "correo_sin_cliente",
       clientId: null,
       fact: email.id,
       kind: "correo_sin_cliente",
       title: `Correo sin cliente: ${who}`,
-      reason: `Llegó a ${email.mailbox}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} ${
+      reason: `Llegó a ${to}@ de ${productWords(productOf(email.product)).name} el ${dayText(limaDate(new Date(email.received_at)))} ${
         email.sender_verified
           ? "y su correo no es el de ningún cliente"
           : "de un remitente no verificado (puede no ser quien dice)"
       }: di de quién es`,
-      adminOnly: false,
+      // Lo que no llegó a soporte@ es comercial: Soporte no lo ve, ni lo liga ni lo responde.
+      adminOnly: email.mailbox !== "soporte",
       payload: {
         emailId: email.id,
         mailbox: email.mailbox,
+        to: email.to_address,
         product: email.product,
         from: email.from_address,
         fromName: email.from_name,
@@ -1781,7 +1787,10 @@ const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
  * deja `responder_correo` en espera y el modelo redacta el borrador después
  * (`draftPendingKairosItems`). Nunca lo de soporte@ (puede traer datos de
  * pacientes). Una sola vez por correo: si se descartó, venció o alguien lo
- * respondió a mano, no se vuelve a preparar. Solo de Administración.
+ * respondió a mano, no se vuelve a preparar. Solo de un remitente verificado
+ * (lo demás puede ser falso o spam: queda para leerlo) y como mucho una en
+ * espera por remitente a la vez: quien escribe diez veces no llena la
+ * bandeja. Solo de Administración.
  */
 async function ruleReplyEmails(pass: Pass): Promise<void> {
   const { tx } = pass
@@ -1801,17 +1810,24 @@ async function ruleReplyEmails(pass: Pass): Promise<void> {
       ${iso(sql`e.received_at`)} as received_at
     from saas_inbound_email e
     where e.mailbox in ('hola', 'contacto', 'fundadores', 'persona')
+      and e.sender_verified
       and e.received_at > ${pass.ago(REPLY_LOOKBACK_HOURS / 24)}
       and not exists (select 1 from saas_outreach o where o.in_reply_to_email_id = e.id)
       and not exists (select 1 from kairos_item k
         where k.kind = 'responder_correo' and k.payload ->> 'emailId' = e.id::text)
+      and not exists (select 1 from kairos_item k
+        where k.kind = 'responder_correo' and k.status = 'espera' and k.expires_at > ${pass.nowSql}
+          and k.payload ->> 'from' = e.from_address)
       and (e.client_id is null or exists (select 1 from saas_client c where c.id = e.client_id and c.archived_at is null))
     order by e.received_at asc`,
   )
+  const senders = new Set<string>()
   for (const email of fresh) {
+    // Uno por remitente en esta pasada también: el primero que llegó.
+    if (senders.has(email.from_address)) continue
+    senders.add(email.from_address)
     const who = email.from_name?.trim() || email.from_address
-    const to =
-      email.mailbox === "persona" ? (email.to_address.split("@")[0] ?? "persona") : email.mailbox
+    const to = inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to_address })
     const subject = email.subject?.trim()
     await pass.item({
       rule: "responder_correo",

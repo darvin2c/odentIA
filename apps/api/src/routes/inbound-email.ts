@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { SAAS_INBOUND_MAILBOXES, saasInboundEmail } from "@odentia/db/schema/admin-arm"
-import { adminStaff } from "@odentia/db/schema/admin-core"
 import {
   INBOUND_ATTACHMENTS_MAX,
   inboundAttachmentKey,
@@ -83,6 +82,10 @@ const emailBody = z.object({
   to: z.string().trim().min(3).max(254),
   subject: z.string().max(5000).nullish(),
   text: z.string().max(200_000).nullish(),
+  /** La primera dirección del Reply-To; una que no es un correo se ignora (la respuesta va al From). */
+  replyTo: z.string().max(1000).nullish(),
+  /** El aviso del worker (adjuntos que no se mandaron), aparte del texto. */
+  notice: z.string().max(2000).nullish(),
   receivedAt: z.iso.datetime({ offset: true, message: "Fecha de llegada no válida" }),
   attachments: z
     .array(attachmentBody)
@@ -281,31 +284,13 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
           400,
         )
 
-      // Ya llegó: no se sube nada otra vez (la repetición de una misma entrega).
-      const [known] = await deps.ownerDb
-        .select({ id: saasInboundEmail.id, copyTo: adminStaff.mailCopyTo })
-        .from(saasInboundEmail)
-        .leftJoin(adminStaff, eq(adminStaff.userId, saasInboundEmail.staffUserId))
-        .where(eq(saasInboundEmail.messageId, email.messageId))
-        .limit(1)
-      if (known)
-        return c.json(
-          {
-            data: {
-              id: known.id,
-              duplicate: true,
-              stored: 0,
-              skipped: 0,
-              copyTo: known.copyTo ?? null,
-            },
-          },
-          200,
-        )
-
-      // La dirección de una persona: antes de subir nada, que sea de alguien.
+      // La dirección de una persona: antes de nada (también antes de ver si se repite), que sea
+      // de alguien. Un correo con copia a dos personas llega dos veces con el mismo Message-ID:
+      // cada entrega dice la copia de su persona, y la de nadie se rechaza aunque se repita.
+      let person: { copyTo: string | null } | null = null
       if (email.localPart) {
         try {
-          await inboundPersonOf(
+          person = await inboundPersonOf(
             deps.ownerDb,
             email.localPart,
             threadMessageIds(email.inReplyTo, email.references),
@@ -316,6 +301,26 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
           throw error
         }
       }
+
+      // Ya llegó: no se sube nada otra vez (la repetición de una misma entrega).
+      const [known] = await deps.ownerDb
+        .select({ id: saasInboundEmail.id })
+        .from(saasInboundEmail)
+        .where(eq(saasInboundEmail.messageId, email.messageId))
+        .limit(1)
+      if (known)
+        return c.json(
+          {
+            data: {
+              id: known.id,
+              duplicate: true,
+              stored: 0,
+              skipped: 0,
+              copyTo: person?.copyTo ?? null,
+            },
+          },
+          200,
+        )
 
       const accepted: { filename: string; kind: AttachmentKind; bytes: Uint8Array }[] = []
       let skipped = 0
@@ -377,6 +382,8 @@ export function createInboundEmailRoute(deps: InboundEmailDeps) {
               to: email.to,
               subject: email.subject ?? null,
               text: email.text ?? null,
+              replyTo: email.replyTo ?? null,
+              notice: email.notice ?? null,
               receivedAt: new Date(email.receivedAt),
               attachments: uploaded,
               senderVerified: email.senderVerified,
