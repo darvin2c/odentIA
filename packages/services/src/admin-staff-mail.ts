@@ -97,12 +97,40 @@ export async function outreachSender(
   product: ClinicalProduct,
   mailbox: SaasInboundMailbox | null = null,
 ): Promise<MailSender> {
-  const [staff] = await tx
+  return senderFor(tx, actor, product, mailbox, true)
+}
+
+/**
+ * Quién firmaría lo que escribe `actor` (la misma regla de `outreachSender`),
+ * para mostrar el «Desde» antes de enviar: solo lee, sin bloquear. Null si
+ * la persona ya no está activa (no puede escribir).
+ */
+export async function outreachSenderPreview(
+  tx: Db,
+  actor: AdminActor,
+  product: ClinicalProduct,
+  mailbox: SaasInboundMailbox | null = null,
+): Promise<MailSender | null> {
+  try {
+    return await senderFor(tx, actor, product, mailbox, false)
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "STAFF_INACTIVE") return null
+    throw error
+  }
+}
+
+async function senderFor(
+  tx: Db,
+  actor: AdminActor,
+  product: ClinicalProduct,
+  mailbox: SaasInboundMailbox | null,
+  lock: boolean,
+): Promise<MailSender> {
+  const query = tx
     .select({ active: adminStaff.active, mailLocal: adminStaff.mailLocal })
     .from(adminStaff)
     .where(eq(adminStaff.userId, actor.userId))
-    .for("update")
-    .limit(1)
+  const [staff] = await (lock ? query.for("update").limit(1) : query.limit(1))
   if (!staff?.active)
     throw new ServiceError("STAFF_INACTIVE", 403, "Tu acceso al equipo ya no está activo")
   if (mailbox === "soporte") return brandMailbox(product, "soporte")

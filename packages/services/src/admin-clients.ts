@@ -2579,10 +2579,29 @@ export async function clientTimeline(
     }
   }
 
-  // La bitácora (las actividades).
+  // La bitácora (las actividades). La de un correo que entró se abre en ese
+  // correo (misma hora y cliente), y la de una respuesta que salió, en el
+  // correo que respondió (salió a la hora del envío). Soporte solo abre lo
+  // que llegó a soporte@.
   if (wants("contactos") || wants("venta")) {
+    const mailboxOk = admin ? sql`true` : sql`e.mailbox = 'soporte'`
+    // La fila de afuera, con su nombre completo: drizzle no califica las columnas de una sola tabla.
+    const outer = sql.raw(`"admin"."saas_follow_up"`)
     const rows = await tx
-      .select()
+      .select({
+        f: saasFollowUp,
+        inboundId: sql<
+          string | null
+        >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'entro' then
+          (select e.id::text from ${saasInboundEmail} e where e.client_id = ${outer}.client_id
+            and e.received_at = ${outer}.happened_at and ${mailboxOk} order by e.id limit 1) end`,
+        repliedId: sql<
+          string | null
+        >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'salio' then
+          (select o.in_reply_to_email_id::text from ${saasOutreach} o join ${saasInboundEmail} e on e.id = o.in_reply_to_email_id
+            where o.client_id = ${outer}.client_id and o.status = 'enviado'
+              and o.sent_at = ${outer}.happened_at and ${mailboxOk} order by o.id limit 1) end`,
+      })
       .from(saasFollowUp)
       .where(
         and(
@@ -2593,15 +2612,17 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const f of rows) {
+    for (const { f, inboundId, repliedId } of rows) {
       const kind = f.kind as SaasActivityKind
       const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
-      const title =
-        f.direction === "entro"
+      const title = repliedId
+        ? "Le respondimos su correo"
+        : f.direction === "entro"
           ? titles.entro
           : f.direction === "salio"
             ? titles.salio
             : titles.nota
+      const emailId = inboundId ?? repliedId
       push({
         id: `actividad:${f.id}`,
         at: f.happenedAt,
@@ -2618,6 +2639,7 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ") || undefined,
         adminOnly: f.adminOnly,
+        ...(emailId ? { link: { kind: "correo" as const, id: emailId } } : {}),
       })
     }
   }
@@ -2953,7 +2975,10 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ") || undefined,
         adminOnly: false,
-        link: { kind: "correo", id: e.id },
+        // Soporte abre solo lo que llegó a soporte@ (lo demás es comercial).
+        ...(admin || e.mailbox === "soporte"
+          ? { link: { kind: "correo" as const, id: e.id } }
+          : {}),
       })
     }
   }

@@ -4,9 +4,11 @@ import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
+import { clientTimeline } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import {
   assignInboundEmail,
+  getInboundEmail,
   type InboundEmailInput,
   ingestInboundEmail,
 } from "./admin-inbound-email.js"
@@ -376,5 +378,53 @@ describe("responder un correo", () => {
       [reply.id, commercial.id].map((id) => ownerDb.transaction((tx) => outreachEmail(tx, id))),
     )
     expect(a?.messageId).not.toBe(b?.messageId)
+  })
+})
+
+describe("leer un correo y su historial", () => {
+  it("el correo dice desde dónde saldría la respuesta de quien mira, y el historial lo abre", async () => {
+    const inbound = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", subject: "Una duda", text: "¿Tienen agenda en línea?" }),
+    )
+    expect(inbound.clientId).toBe(clientId)
+    const detail = await ownerDb.transaction((tx) => getInboundEmail(tx, admin, inbound.id))
+    expect(detail).toMatchObject({
+      canReply: true,
+      replySubject: "Re: Una duda",
+      replyFrom: { name: "Ada Lovelace · odentIA", address: "ada.lovelace@odentia32.com" },
+      text: "¿Tienen agenda en línea?",
+    })
+    // Sin dirección, la respuesta saldría desde hola@; quien ya no está, no responde.
+    expect(
+      (await ownerDb.transaction((tx) => getInboundEmail(tx, plain, inbound.id))).replyFrom,
+    ).toEqual({ name: "odentIA", address: "hola@odentia32.com" })
+    expect(
+      (await ownerDb.transaction((tx) => getInboundEmail(tx, gone, inbound.id))).replyFrom,
+    ).toBeNull()
+    // Lo comercial no existe para Soporte.
+    await expect(
+      ownerDb.transaction((tx) => getInboundEmail(tx, support, inbound.id)),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "Sí, la tenemos." }),
+    )
+    await ownerDb.transaction((tx) => markOutreachSent(tx, admin, reply.id, "enviado"))
+    const history = await ownerDb.transaction((tx) =>
+      clientTimeline(tx, admin, clientId, { filter: "contactos", limit: 100 }),
+    )
+    const came = history.items.find(
+      (entry) => entry.title === "Nos escribió un correo" && entry.link?.id === inbound.id,
+    )
+    expect(came?.link).toEqual({ kind: "correo", id: inbound.id })
+    const answered = history.items.find((entry) => entry.title === "Le respondimos su correo")
+    expect(answered?.link).toEqual({ kind: "correo", id: inbound.id })
+    // Soporte ve que llegó, pero no lo abre ni ve la respuesta (es comercial).
+    const forSupport = await ownerDb.transaction((tx) =>
+      clientTimeline(tx, support, clientId, { filter: "contactos", limit: 100 }),
+    )
+    expect(forSupport.items.some((entry) => entry.link?.id === inbound.id)).toBe(false)
+    expect(forSupport.items.some((entry) => entry.title === "Le respondimos su correo")).toBe(false)
   })
 })

@@ -23,7 +23,7 @@
  * días. Los adjuntos se guardan; nadie ni nada los abre ni los manda al modelo.
  */
 
-import { CLINICAL_PRODUCTS } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   SAAS_INBOUND_MAILBOXES,
@@ -46,8 +46,8 @@ import {
 import { clientByEmail } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
-import { settleRepliesOfEmail, threadMessageIds } from "./admin-sales.js"
-import { staffByMailLocal } from "./admin-staff-mail.js"
+import { replySubject, settleRepliesOfEmail, threadMessageIds } from "./admin-sales.js"
+import { outreachSenderPreview, staffByMailLocal } from "./admin-staff-mail.js"
 import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 
 const TEXT_MAX = 20_000
@@ -489,6 +489,13 @@ export interface InboundEmailDetail {
   attachments: number
   /** Si quien mira puede responderlo: Soporte, solo lo de soporte@. */
   canReply: boolean
+  /**
+   * Quién firmaría la respuesta de quien mira («Desde»), con la misma regla
+   * del envío; null si no puede responder.
+   */
+  replyFrom: { name: string; address: string } | null
+  /** El asunto con que saldría la respuesta («Re: …»). */
+  replySubject: string
   replies: InboundEmailReply[]
 }
 
@@ -522,6 +529,22 @@ export async function getInboundEmail(
     .from(saasOutreach)
     .where(eq(saasOutreach.inReplyToEmailId, row.id))
     .orderBy(desc(saasOutreach.createdAt))
+  const canReply = actor.role === "admin" || row.mailbox === "soporte"
+  // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
+  const [client] = row.clientId
+    ? await tx
+        .select({ product: saasClient.product })
+        .from(saasClient)
+        .where(eq(saasClient.id, row.clientId))
+        .limit(1)
+    : []
+  const product = [client?.product, row.product].find(
+    (value): value is (typeof CLINICAL_PRODUCTS)[number] => !!value && isClinicalProduct(value),
+  )
+  const sender =
+    canReply && product
+      ? await outreachSenderPreview(tx, actor, product, row.mailbox as SaasInboundMailbox)
+      : null
   return {
     id: row.id,
     mailbox: row.mailbox as SaasInboundMailbox,
@@ -540,7 +563,9 @@ export async function getInboundEmail(
         ? { userId: row.staffUserId, name: email.staffName }
         : null,
     attachments: row.attachments.length,
-    canReply: actor.role === "admin" || row.mailbox === "soporte",
+    canReply,
+    replyFrom: sender ? { name: sender.name, address: sender.address } : null,
+    replySubject: replySubject(row.subject),
     replies: replies.map((reply) => ({
       id: reply.id,
       status: reply.status,
