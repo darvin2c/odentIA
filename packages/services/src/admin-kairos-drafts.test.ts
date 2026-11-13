@@ -223,6 +223,15 @@ describe("lo que puede ver el modelo", () => {
     expect(kairosAllowedFact("Cuesta USD 29", { adminOnly: true })).toBe("Cuesta USD 29")
     expect(kairosAllowedFact("Su historia clínica dice…", { adminOnly: true })).toBeNull()
     expect(kairosAllowedFact("DNI 45678912", { adminOnly: true })).toBeNull()
+    // Lo que pasaba en la medición del 12 nov: el número con espacios y el monto sin moneda.
+    expect(kairosAllowedFact("Su número es 4567 8912", { adminOnly: true })).toBeNull()
+    expect(kairosAllowedFact("Le cobramos 350 y debe 1.180", { adminOnly: false })).toBe(
+      "Le cobramos [importe] y debe [importe]",
+    )
+    expect(kairosAllowedFact("Le cobramos 350", { adminOnly: true })).toBe("Le cobramos 350")
+    expect(kairosAllowedFact("Tienen 4 sedes y 12 profesionales", { adminOnly: false })).toBe(
+      "Tienen 4 sedes y 12 profesionales",
+    )
     // Un paciente con su nombre no viaja; «sus pacientes» en la venta, sí.
     expect(
       kairosAllowedFact("La paciente Juana Pérez tiene caries en la 16", { adminOnly: true }),

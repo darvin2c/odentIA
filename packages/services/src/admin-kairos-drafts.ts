@@ -119,7 +119,13 @@ const MONEY =
  * Lo que parece un dato de un paciente (su historia, un diagnóstico, un DNI):
  * ese hecho no viaja al modelo. Hablar de «sus pacientes» en la venta sí.
  */
-const PATIENT = /historia cl[ií]nica|diagn[oó]stic|\bDNI\b|\b\d{8}\b/iu
+const PATIENT = /historia cl[ií]nica|diagn[oó]stic|\bDNI\b|\b\d{8}\b|\b\d{4}[\s.-]\d{4}\b/iu
+/**
+ * Un monto sin moneda junto a lo que se cobra o se debe («le cobramos 350»,
+ * «debe 1.180»): pasaba el filtro de Soporte (medición del 12 nov).
+ */
+const BARE_AMOUNT =
+  /\b((?:cobr|pag|deb|deud|import|mont|preci|cuot|sald)\p{L}*)(\s+(?:de\s+|unos\s+|como\s+)?)\d[\d.,]*/giu
 /**
  * Un paciente con su nombre («la paciente Juana Pérez tiene caries»): pasaba
  * el filtro (medición del 12 nov). Sin la marca `i`, para que el nombre sea el
@@ -135,7 +141,9 @@ const NAMED_PATIENT = /\b[Pp]acientes?\s+(?:[Ss]r\.?\s+|[Ss]ra\.?\s+)?\p{Lu}\p{L
 export function kairosAllowedFact(text: string, options: { adminOnly: boolean }): string | null {
   const clean = text.replace(/\s+/g, " ").trim()
   if (!clean || PATIENT.test(clean) || NAMED_PATIENT.test(clean)) return null
-  const told = options.adminOnly ? clean : clean.replace(MONEY, "[importe]")
+  const told = options.adminOnly
+    ? clean
+    : clean.replace(MONEY, "[importe]").replace(BARE_AMOUNT, "$1$2[importe]")
   return told.length > FACT_MAX ? `${told.slice(0, FACT_MAX - 1)}…` : told
 }
 
