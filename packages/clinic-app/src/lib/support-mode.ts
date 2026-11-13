@@ -24,16 +24,29 @@ interface SupportMe extends SupportMode {
   members: FullOrganization["members"]
 }
 
-/** La sesión de soporte de este navegador para esta clínica, o nulo si no hay. */
+/**
+ * La sesión de soporte de este navegador para esta clínica.
+ *
+ * - Nulo: no hay. Es lo de siempre para el equipo de la clínica, que nunca tuvo cookie de
+ *   soporte y sigue con su sesión normal: la API le responde sin error y sin datos.
+ * - `"terminado"`: había y terminó (venció, la quitaron o salió). Lo dice la API a quien trae
+ *   la cookie de soporte.
+ *
+ * `alreadySupport`: esta pantalla ya miraba como soporte. La cookie dura lo que el permiso, así
+ * que al vencer deja de viajar y la API ya no ve ninguna: para esa pantalla, que no haya sesión
+ * también es que terminó, y no cae en la sesión normal de ese navegador.
+ */
 export async function loadSupportSession(
   slug: string,
   fetchOptions?: { headers?: Record<string, string> },
+  alreadySupport = false,
 ): Promise<{ session: SessionInfo; org: FullOrganization; support: SupportMode } | "terminado" | null> {
   try {
-    const { data } = await apiFetch<{ data: SupportMe }>(
+    const { data } = await apiFetch<{ data: SupportMe | null }>(
       "/api/support-session/me",
       fetchOptions?.headers ? { headers: fetchOptions.headers } : undefined,
     )
+    if (!data) return alreadySupport ? "terminado" : null
     if (data.organization.slug !== slug) return null
     const org = {
       id: data.organization.id,
@@ -77,6 +90,7 @@ export async function loadSupportSession(
     // Tenía cookie de soporte y el acceso terminó: «El acceso terminó», no la sesión normal
     // de ese navegador (la de la administración llevaría a otra pantalla).
     if (isSupportEnded(error)) return "terminado"
+    // Un fallo de red o del servidor no dice que terminó: no se sabe.
     return null
   }
 }

@@ -57,7 +57,9 @@ function SupportEntryPage() {
 
   useEffect(() => {
     if (state !== "terminado") return
-    orgChecks.access = null
+    // Lo comprobado deja de valer, pero se conserva que esta pantalla miraba como soporte: al
+    // volver atrás se pregunta otra vez y, sin sesión de soporte, sigue siendo «El acceso terminó».
+    if (orgChecks.access) orgChecks.access = { ...orgChecks.access, at: 0 }
     void supportEnding()
       .then(setEnding)
       .catch(() => undefined)
