@@ -395,6 +395,45 @@ export const patientRegistration = pgTable(
   ],
 )
 
+/** Por dónde declaró la persona su salud después del alta: hoy, «Tus datos y tu salud» de su enlace. */
+export const HEALTH_DECLARATION_VIAS = ["enlace"] as const
+
+/**
+ * Lo que la persona, o quien habla por ella, declaró de su salud después del
+ * alta, tal como llegó: solo se agrega y se lee (la del alta vive en
+ * `patient_registration`). Antecedentes guarda lo vigente, que el equipo
+ * corrige; esta fila es lo que se envió, para «Ver declaración original».
+ */
+export const patientHealthDeclaration = pgTable(
+  "patient_health_declaration",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    via: text("via").$type<(typeof HEALTH_DECLARATION_VIAS)[number]>().notNull(),
+    /** Quién la envió: la persona o quien decide por ella. */
+    respondent: text("respondent").$type<"patient" | "representative">().notNull(),
+    health: jsonb("health").$type<NonNullable<RegistrationAnswers["health"]>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("patient_health_declaration_org_patient_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.createdAt,
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }).onDelete("cascade"),
+    check("patient_health_declaration_via_check", sql`${table.via} IN ('enlace')`),
+    check(
+      "patient_health_declaration_respondent_check",
+      sql`${table.respondent} IN ('patient','representative')`,
+    ),
+  ],
+)
+
 /** Correlativos por organización (patient → HC-000123; futuros comprobantes). */
 export const orgCounter = pgTable(
   "org_counter",

@@ -778,6 +778,20 @@
       "when": 1794586456662,
       "tag": "0110_correo_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1794606989369,
+      "tag": "0111_lo_que_dijo_el_paciente",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1794606999369,
+      "tag": "0112_lo_que_dijo_el_paciente_reglas",
+      "breakpoints": true
     }
   ]
 }
