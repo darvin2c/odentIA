@@ -80,6 +80,51 @@ describe("BirthDateInput", () => {
     expect(onChange).toHaveBeenLastCalledWith("1990-04-11", expect.anything())
   })
 
+  // Mesa de formularios del 13 nov (F15): «3/4/1990», como se dice, quedaba «34/19/90».
+  it("escrita con barras y sin ceros se entiende: 3/4/1990 es el 3 de abril", async () => {
+    const onChange = vi.fn()
+    render(<Harness onChange={onChange} />)
+    await userEvent.type(field(), "3/4/1990")
+    expect(field().value).toBe("03/04/1990")
+    expect(onChange).toHaveBeenLastCalledWith("1990-04-03", expect.objectContaining({ iso: "1990-04-03" }))
+  })
+
+  /** Lo que queda en un campo recién abierto al teclear o pegar eso. */
+  async function written(text: string, how: "type" | "paste" = "type"): Promise<string> {
+    const { unmount } = render(<Harness />)
+    if (how === "type") await userEvent.type(field(), text)
+    else {
+      await userEvent.click(field())
+      await userEvent.paste(text)
+    }
+    const value = field().value
+    unmount()
+    return value
+  }
+
+  it("con guiones o puntos también, y pegada entera", async () => {
+    expect(await written("3-4-1990")).toBe("03/04/1990")
+    expect(await written("3.12.1990")).toBe("03/12/1990")
+    expect(await written("3/4/1990", "paste")).toBe("03/04/1990")
+    expect(await written("3 4 1990", "paste")).toBe("03/04/1990")
+  })
+
+  it("un separador de más o antes de tiempo no rompe lo escrito", async () => {
+    // Con el día ya completo, la barra es la que el campo iba a poner.
+    expect(await written("30/07/1995")).toBe("30/07/1995")
+    // Sin ningún dígito no hay nada que completar.
+    expect(await written("/3/4/1990")).toBe("03/04/1990")
+    // Dos barras seguidas: la segunda no inventa una parte.
+    expect(await written("3//4/1990")).toBe("03/04/1990")
+  })
+
+  it("en el orden de otro país completa igual el mes y el día", async () => {
+    setFormatRegion({ locale: "en-US", timeZone: "America/New_York" })
+    render(<Harness />)
+    await userEvent.type(field(), "4/3/1990")
+    expect(field().value).toBe("04/03/1990")
+  })
+
   it("sin la edad sirve para las demás fechas pasadas", async () => {
     render(<Harness showAge={false} />)
     await userEvent.type(field(), "01032020")
