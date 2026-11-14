@@ -212,11 +212,14 @@ export function AnswerAppField({
   field,
   disabled = false,
   attachments,
+  describedBy,
   enterKeyHint,
 }: {
   field: FormFieldDef
   disabled?: boolean
   attachments?: AttachmentOption[]
+  /** Otro texto que describe la pregunta (la respuesta anterior): se oye con ella. */
+  describedBy?: string
   /** En un cuestionario donde Enter pasa de pregunta (`advanceOnEnter`): la tecla del teléfono dice «Siguiente», no «Ir». */
   enterKeyHint?: "next"
 }): React.JSX.Element | null {
@@ -245,7 +248,7 @@ export function AnswerAppField({
           invalid={control.invalid}
           onBlur={control.onBlur}
           aria-labelledby={labelId}
-          aria-describedby={control.describedBy}
+          aria-describedby={[control.describedBy, describedBy].filter(Boolean).join(" ") || undefined}
         />
       )}
     </AnswerFrame>
@@ -370,6 +373,8 @@ export function AnswerInput({
           options={options.map((option) => ({ value: String(option.value), label: option.text }))}
           onChange={(picked) => onChange(options.find((option) => String(option.value) === picked)?.value ?? null)}
           onClear={field.required ? undefined : () => onChange(null)}
+          // La escala se detiene en 0 y en 10 (← en 0 no marca 10); los Sí/No dan la vuelta.
+          ordered={field.type === "escala"}
           className={ANSWER_CHOICES}
         />
       )

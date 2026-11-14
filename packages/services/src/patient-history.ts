@@ -728,7 +728,24 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /**
+   * Sus formularios del equipo: el que sigue a medias y el finalizado, con cuándo
+   * se terminó y si fue después de firmar la atención. `retired`: la atención se
+   * anuló y lo finalizado en ella va con lo que ya no vale. De una atención
+   * anulada vienen además los descartados, con su motivo: es el único lugar donde
+   * la persona ve qué pasó con lo que había empezado (`discardedWithAttention`:
+   * lo descartó la propia anulación).
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: Date | null
+    afterSigning: boolean
+    retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
+  }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
 
@@ -795,14 +812,33 @@ async function loadBornForEncounters(
       .where(and(eq(clinicalOrder.organizationId, orgId), eq(clinicalOrder.patientId, patientId), inArray(clinicalOrder.encounterId, encounterIds)))
       .orderBy(asc(clinicalOrder.createdAt), asc(clinicalOrder.id)),
     tx
-      .select()
+      .select({
+        id: clinicalFormResponse.id,
+        encounterId: clinicalFormResponse.encounterId,
+        templateTitle: clinicalFormResponse.templateTitle,
+        status: clinicalFormResponse.status,
+        finalizedAt: clinicalFormResponse.finalizedAt,
+        discardedAt: clinicalFormResponse.discardedAt,
+        discardReason: clinicalFormResponse.discardReason,
+        attentionStatus: encounter.status,
+        attentionSignedAt: encounter.finalizedAt,
+        attentionVoidedAt: encounter.voidedAt,
+      })
       .from(clinicalFormResponse)
+      .innerJoin(
+        encounter,
+        and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
+      )
       .where(
         and(
           eq(clinicalFormResponse.organizationId, orgId),
           eq(clinicalFormResponse.patientId, patientId),
           inArray(clinicalFormResponse.encounterId, encounterIds),
-          eq(clinicalFormResponse.status, "finalizado"),
+          // Lo finalizado y lo que el equipo dejó a medias. Lo descartado no es de la historia, salvo
+          // en una atención anulada: ahí se dice qué formularios tenía y qué pasó con cada uno.
+          sql`(${clinicalFormResponse.status} = 'finalizado'
+            or (${clinicalFormResponse.status} = 'borrador' and ${clinicalFormResponse.source} = 'staff')
+            or (${clinicalFormResponse.status} = 'descartado' and ${encounter.status} = 'anulada'))`,
         ),
       )
       .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
@@ -935,7 +971,21 @@ async function loadBornForEncounters(
   }
   for (const row of forms) {
     if (!row.encounterId) continue
-    of(row.encounterId).forms.push({ id: row.id, title: row.templateTitle ?? "Formulario clínico" })
+    const finalized = row.status === "finalizado"
+    const discarded = row.status === "descartado"
+    of(row.encounterId).forms.push({
+      id: row.id,
+      title: row.templateTitle ?? "Ficha de consulta",
+      state: finalized ? "finalizado" : discarded ? "descartado" : "a_medias",
+      finalizedAt: row.finalizedAt,
+      // Terminado después de firmar la atención: lleva su propia fecha, y la Historia lo dice.
+      afterSigning: finalized && !!row.finalizedAt && !!row.attentionSignedAt && row.finalizedAt > row.attentionSignedAt,
+      retired: row.attentionStatus === "anulada",
+      discardReason: discarded ? row.discardReason : null,
+      // La anulación lo descartó en su misma transacción: el mismo instante.
+      discardedWithAttention:
+        discarded && !!row.discardedAt && !!row.attentionVoidedAt && row.discardedAt.getTime() === row.attentionVoidedAt.getTime(),
+    })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")
@@ -1527,7 +1577,11 @@ export async function getTimeline(
         refId: row.id,
         type: "form",
         createdAt: row.finalizedAt ?? row.createdAt,
-        title: `Se completó el formulario: ${row.templateTitle ?? "Formulario clínico"}`,
+        // Lo del equipo es una ficha de consulta; lo del paciente se dice como lo que es.
+        title:
+          row.source === "portal"
+            ? `Lo que respondió el paciente: ${row.templateTitle ?? "Cuestionario"}`
+            : `Se completó la ficha de consulta: ${row.templateTitle ?? "Ficha de consulta"}`,
         // Lo que envió el paciente: quién lo revisó, si quedó guardado; nunca se afirma sin saberlo.
         detail:
           row.source === "portal"

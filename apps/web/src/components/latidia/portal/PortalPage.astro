@@ -31,7 +31,7 @@ const steps = [
   },
 ]
 
-// El registro por QR o enlace (Configuración › Registro de pacientes) y el color de la marca.
+// El registro por QR o enlace (Configuración › Preguntas al paciente) y el color de la marca.
 const regPoints = [
   { title: "Tú eliges qué preguntar", text: "Dato por dato: «No preguntar», «Opcional» u «Obligatorio». Y el aviso de privacidad que acepta." },
   { title: "Sin fichas repetidas", text: "Si coincide con alguien que ya tienes, recepción revisa dato por dato antes de guardar." },
@@ -135,7 +135,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
             <span>Escanea el código y llena tus datos antes de tu cita.</span>
           </div>
           <div class="pt-ask" aria-hidden="true">
-            <span class="pt-ask-k">Registro de pacientes · tú eliges</span>
+            <span class="pt-ask-k">Preguntas al paciente · tú eliges</span>
             {regAsks.map(([name, choice, tone]) => (
               <span class="pt-ask-row"><span>{name}</span><span class:list={["pt-ask-pill", tone]}>{choice}</span></span>
             ))}

@@ -720,6 +720,18 @@ export async function getPatientHealth(
   }
 }
 
+/**
+ * Si una salud declarada dice algo: la misma regla con que el registro y el
+ * enlace deciden si dejan declaración (`declaredHealthAnswered`), también para
+ * leerlas: la copia de 0114 trajo también los registros con todo «sin
+ * responder», y esos no son una declaración (QA del 14 nov, H9 de desarrollo;
+ * la migración no se cambia porque otras ramas ya la tienen). Un «no tomo
+ * anticoagulantes» sí lo es.
+ */
+export function hasMeaningfulHealth(health: Partial<NonNullable<RegistrationAnswers["health"]>> | null | undefined): boolean {
+  return !!health && typeof health === "object" && declaredHealthAnswered(health as RegistrationAnswers["health"])
+}
+
 /** Los datos de salud del registro que ya se saben de la persona (`knownHealthQuestions`). */
 export function knownHealthQuestionsOf(health: PatientHealth): Set<RegistrationFieldKey> {
   return knownHealthQuestions({
@@ -732,7 +744,7 @@ export function knownHealthQuestionsOf(health: PatientHealth): Set<RegistrationF
   })
 }
 
-/** Las declaraciones de salud de la persona, de la más nueva a la más antigua. */
+/** Las declaraciones de salud de la persona que dicen algo, de la más nueva a la más antigua. */
 async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): Promise<HealthDeclaration[]> {
   const rows = await tx
     .select()
@@ -740,7 +752,7 @@ async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): P
     .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
     .orderBy(desc(patientHealthDeclaration.createdAt))
     .limit(50)
-  return rows.map((row) => ({
+  return rows.filter((row) => hasMeaningfulHealth(row.health as Parameters<typeof hasMeaningfulHealth>[0])).map((row) => ({
     at: row.saidAt,
     enteredAt: row.createdAt,
     via: row.via,
@@ -852,6 +864,59 @@ export async function allergiesSaidNoByPatient(
   if (!allergiesSaidNo("none", null, authorship)) return null
   const said = (await healthDeclarationsOf(tx, orgId, patientId)).find((row) => row.health.allergies?.state === "none")
   return said ? { by: said.by, at: said.at } : { by: UNKNOWN_DECLARANT, at: authorship.declaredAt }
+}
+
+/**
+ * Lo que recepción (`clinical.alerts`) puede saber de lo declarado: qué alergias
+ * activas dijo la persona y nadie revisó, y su «No» a las alergias, con quién lo
+ * dijo y cuándo (QA del 14 nov, H5 de clínica). Es la misma regla de
+ * `health.declared` (`declaredGroupsOf`), leída solo con las alergias: sin
+ * enfermedades, medicación ni embarazo, y la salida se arma campo por campo
+ * para que nada más viaje aunque la regla crezca.
+ */
+export async function declaredAllergiesByPatient(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<Array<{ by: HealthDeclarant; at: Date | null; allergies: string[]; saidNo: boolean }>> {
+  const [header] = await tx
+    .select({ reviewStatus: patient.healthReviewStatus, allergiesReviewedAt: patient.allergiesReviewedAt })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  if (!header) throw notFound("Paciente")
+  const allergies = await tx
+    .select()
+    .from(patientAllergy)
+    .where(
+      and(
+        eq(patientAllergy.patientId, patientId),
+        eq(patientAllergy.organizationId, orgId),
+        eq(patientAllergy.isActive, true),
+      ),
+    )
+  const state = (header.reviewStatus as { allergies?: unknown } | null)?.allergies
+  const groups = declaredGroupsOf({
+    health: {
+      allergies,
+      conditions: [],
+      medications: [],
+      reviewStatus: {
+        allergies: state === "none" || state === "recorded" ? state : "unknown",
+        conditions: "unknown",
+        medications: "unknown",
+      },
+      allergiesReviewedAt: header.allergiesReviewedAt,
+    },
+    reviewPending: false,
+    authorship: await healthAuthorshipOf(tx, orgId, patientId),
+    declarations: await healthDeclarationsOf(tx, orgId, patientId),
+    latest: null,
+    pregnancy: null,
+  })
+  return groups
+    .filter((group) => group.allergies.length > 0 || group.saidNo.allergies)
+    .map((group) => ({ by: group.by, at: group.at, allergies: group.allergies, saidNo: group.saidNo.allergies }))
 }
 
 /**

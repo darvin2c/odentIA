@@ -166,7 +166,8 @@ export function LinkConsentStep({
   }
   return (
     // La hoja es la del papel que recibe: se lee entera en la página, sin otra barra que la de siempre.
-    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+    // Enter en el documento pasa a la firma: solo «Firmar» firma (antes la marcaba en rojo sin haber llegado).
+    <form className="flex flex-col gap-4" onSubmit={submit} onKeyDown={advanceOnEnter} noValidate>
       <ConsentSheet
         className="-mx-2 sm:mx-0"
         clinic={consent.clinic}
@@ -217,6 +218,9 @@ export function LinkConsentStep({
                     description="Lo comparamos con el de tu ficha; no lo mostramos."
                     inputClassName="min-h-11"
                     autoComplete="off"
+                    // El DNI son solo números: el teléfono abre su teclado, como en «Tus datos».
+                    inputMode={docLabel === "DNI" ? "numeric" : undefined}
+                    enterKeyHint="next"
                     maxLength={20}
                   />
                 )}

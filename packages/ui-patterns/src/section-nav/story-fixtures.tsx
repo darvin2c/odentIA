@@ -102,6 +102,7 @@ export const configuracionGrupos: SectionNavGroup[] = [
     items: [
       { label: "Especialidades", to: "/settings/specialties" },
       { label: "Consentimientos", to: "/settings/forms" },
+      { label: "Fichas de consulta", to: "/settings/consultation-forms" },
     ],
   },
   {

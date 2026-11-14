@@ -141,6 +141,12 @@ export const clinicalFormTemplate = pgTable(
     schema: jsonb("schema").notNull(),
     /** Quién lo responde: el equipo o el paciente desde el portal (cuestionario previo). */
     respondent: text("respondent").notNull().default("staff"),
+    /**
+     * «En uso» o «Sin usar» (ADR 0117), aparte del estado de la versión: apagar una ficha no la
+     * archiva ni crea otra versión, y encenderla de nuevo vuelve a usar la misma. Solo cuenta en
+     * la publicada; la base deja cambiarlo en ella sin tocar nada más.
+     */
+    inUse: boolean("in_use").notNull().default(true),
     createdBy: text("created_by").references(() => user.id),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     ...timestamps,

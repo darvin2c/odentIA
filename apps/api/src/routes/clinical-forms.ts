@@ -22,11 +22,13 @@ import {
   discardFormResponse,
   finalizeFormResponse,
   findOrgCountry,
+  FORM_TEMPLATE_CHANGES,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
   getConsentPrint,
   getConsentSheetFrame,
   getEncounterConsentNeeds,
+  getEncounterFormOffers,
   getOrderPrint,
   getOwnProfessionalProfile,
   getProfessionalProfile,
@@ -36,10 +38,10 @@ import {
   listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
+  listClinicFormTemplates,
   listConsentTemplates,
   listFormAddenda,
-  listFormResponses,
-  listFormTemplates,
+  listPatientFormResponses,
   listProfessionalProfiles,
   listProfessionalSpecialties,
   listSpecialties,
@@ -48,11 +50,14 @@ import {
   loadDocumentClinic,
   markConsentSentByLink,
   markConsentTemplateReviewed,
+  markFormTemplateLooked,
   parseConsentDraft,
   prepareEncounterConsents,
+  previewPatientQuestionnaire,
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
+  reuseFormTemplate,
   revokeConsentDocument,
   ServiceError,
   saveConsentTemplate,
@@ -163,7 +168,7 @@ const formSchemaInput = z
           .strict(),
       )
       .min(1, "Agrega al menos una sección")
-      .max(30, "El formulario admite hasta 30 secciones"),
+      .max(30, "La ficha admite hasta 30 secciones"),
   })
   .strict()
 
@@ -228,8 +233,9 @@ const addendumInput = z
     text: z
       .string()
       .trim()
-      .min(1, "Escribe la adenda.")
-      .max(5000, "La adenda admite hasta 5000 caracteres."),
+      // Las mismas palabras que la pantalla: lo que el paciente envió se corrige con una «corrección».
+      .min(1, "Escribe la corrección.")
+      .max(5000, "La corrección admite hasta 5000 caracteres."),
   })
   .strict()
 
@@ -294,7 +300,7 @@ const consentTemplateActive = z.object({ active: z.boolean() }).strict()
 
 const consentCreate = z
   .object({
-    templateId: z.uuid({ message: "Elige una plantilla publicada" }),
+    templateId: z.uuid({ message: "Elige una ficha de consulta en uso" }),
     patientId: uuid,
     encounterId: uuid.nullish(),
     planItemId: uuid.nullish(),
@@ -421,8 +427,23 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/consents/:id", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
   app.use("/consents/:id/*", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
   app.use("/orders/:id/*", paperLock(clinicalOrderPatientId, "Orden no encontrada"))
-  app.use("/form-responses/:id", paperLock(formResponsePatientId, "Formulario no encontrado"))
-  app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Formulario no encontrado"))
+  app.use("/form-responses/:id", paperLock(formResponsePatientId, "Ficha no encontrada"))
+  app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Ficha no encontrada"))
+
+  // Un id mal escrito no existe: se responde lo mismo que con uno que no se encuentra, en vez de
+  // dejar que la base lo rechace como un error interno.
+  const notFoundResponse = (c: Context, missing: string) => c.json(errorBody(c, "NOT_FOUND", missing), 404)
+  const knownId = (missing: string) => async (c: Context, next: Next) => {
+    if (!canonicalUuid(c.req.param("id"))) return notFoundResponse(c, missing)
+    await next()
+  }
+  // A la base va el id ya normalizado, nunca como llegó: lo que `canonicalUuid` acepta (un guion
+  // en otro sitio, un espacio de más) PostgreSQL no siempre lo lee, y sería otra vez un error interno.
+  const formId = (c: Context) => canonicalUuid(c.req.param("id")) ?? ""
+  app.use("/form-templates/:id", knownId("Ficha no encontrada"))
+  app.use("/form-templates/:id/*", knownId("Ficha no encontrada"))
+  app.use("/form-responses/:id", knownId("Ficha no encontrada"))
+  app.use("/form-responses/:id/*", knownId("Ficha no encontrada"))
 
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
@@ -612,10 +633,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
+    const specialtyId = query.specialtyId ? canonicalUuid(query.specialtyId) : undefined
+    if (specialtyId === null) return notFoundResponse(c, "Especialidad no encontrada")
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listFormTemplates(tx, orgId, {
-          specialtyId: query.specialtyId,
+        // Con cuál de los cuestionarios del paciente le llega, para que la lista lo diga.
+        listClinicFormTemplates(tx, orgId, {
+          specialtyId,
           status: query.status,
           q: query.q,
           // Desde la atención: primero los de las especialidades de quien atiende.
@@ -628,7 +652,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración diseña formularios")
+      return forbidden(c, "Solo administración crea fichas de consulta")
     }
     const parsed = formTemplateCreate.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -640,13 +664,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.patch("/form-templates/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración edita formularios")
+      return forbidden(c, "Solo administración cambia las fichas de consulta")
     }
     const parsed = formTemplatePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateFormTemplate(tx, orgId, userId, c.req.param("id"), parsed.data),
+        updateFormTemplate(tx, orgId, userId, formId(c), parsed.data),
       ),
     )
   })
@@ -654,11 +678,11 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates/:id/publish", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración publica formularios")
+      return forbidden(c, "Solo administración publica fichas de consulta")
     }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        publishFormTemplate(tx, orgId, userId, c.req.param("id")),
+        publishFormTemplate(tx, orgId, userId, formId(c)),
       ),
     )
   })
@@ -666,13 +690,67 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates/:id/archive", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración archiva formularios")
+      return forbidden(c, "Solo administración deja de usar o archiva fichas de consulta")
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        archiveFormTemplate(tx, orgId, userId, c.req.param("id")),
+        archiveFormTemplate(tx, orgId, userId, formId(c)),
       ),
     )
+  })
+
+  // «Volver a usar»: la versión siguiente, ya publicada, con las mismas preguntas.
+  app.post("/form-templates/:id/reuse", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración vuelve a usar una ficha de consulta")
+    }
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reuseFormTemplate(tx, orgId, userId, formId(c)),
+      ),
+    )
+  })
+
+  // A quién le llega: el cuestionario que hoy reciben los pacientes y el que recibirán después de
+  // publicar, dejar de usar o volver a usar esta plantilla. La confirmación lo dice; no lo calcula.
+  app.get("/form-templates/:id/reach", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración cambia las fichas de consulta")
+    }
+    const change = z.enum(FORM_TEMPLATE_CHANGES).safeParse(c.req.query("change"))
+    if (!change.success) return missingParam(c, "change es publish, leave o reuse")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => previewPatientQuestionnaire(tx, orgId, formId(c), change.data)),
+    )
+  })
+
+  // «La miraste»: alguien de la clínica abrió una ficha que vino con el producto.
+  app.post("/form-templates/:id/looked", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración revisa las fichas de la clínica")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => markFormTemplateLooked(tx, orgId, userId, formId(c))),
+    )
+  })
+
+  // Las fichas que la atención ofrece solas: por la especialidad de la cita, por la edad y, sin
+  // servicio, por la de quien atiende. Ofrecer no es pedir: nada de esto frena la atención.
+  app.get("/form-offers", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    const parsed = consentNeedsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId, encounterId } = parsed.data
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getEncounterFormOffers(tx, orgId, patientId, encounterId)),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "formularios" })
+    return response
   })
 
   // --- Capturas ---
@@ -681,13 +759,19 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
-    const patientId = query.patientId
+    const patientId = canonicalUuid(query.patientId)
+    if (!patientId) return notFoundResponse(c, "Paciente no encontrado")
+    const encounterId = query.encounterId ? canonicalUuid(query.encounterId) : undefined
+    if (encounterId === null) return notFoundResponse(c, "Atención no encontrada")
+    const templateId = query.templateId ? canonicalUuid(query.templateId) : undefined
+    if (templateId === null) return notFoundResponse(c, "Ficha no encontrada")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listFormResponses(tx, orgId, {
+        // Cada ficha con la anterior del mismo tipo, para verla al lado de la de hoy.
+        listPatientFormResponses(tx, orgId, {
           patientId,
-          encounterId: query.encounterId,
-          templateId: query.templateId,
+          encounterId,
+          templateId,
         }),
       ),
     )
@@ -699,7 +783,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para registrar formularios")
+      return forbidden(c, "Sin permiso para empezar fichas de consulta")
     }
     const parsed = responseCreate.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -711,13 +795,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.patch("/form-responses/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para editar formularios")
+      return forbidden(c, "Sin permiso para llenar fichas de consulta")
     }
     const parsed = responsePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateFormResponseDraft(tx, orgId, userId, c.req.param("id"), parsed.data),
+        updateFormResponseDraft(tx, orgId, userId, formId(c), parsed.data),
       ),
     )
   })
@@ -725,7 +809,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses/:id/finalize", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para finalizar formularios")
+      return forbidden(c, "Sin permiso para finalizar fichas de consulta")
     }
     // Sin cuerpo, como siempre. Desde la atención viaja cuál es: lo revisado queda ligado a ella.
     const text = await c.req.text()
@@ -741,7 +825,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeFormResponse(tx, orgId, userId, c.req.param("id"), { encounterId: parsed.data.encounterId ?? null }),
+        finalizeFormResponse(tx, orgId, userId, formId(c), { encounterId: parsed.data.encounterId ?? null }),
       ),
     )
   })
@@ -749,7 +833,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses/:id/discard", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para descartar formularios")
+      return forbidden(c, "Sin permiso para descartar fichas de consulta")
     }
     const parsed = z
       .object({
@@ -764,7 +848,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        discardFormResponse(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
+        discardFormResponse(tx, orgId, userId, formId(c), parsed.data.reason),
       ),
     )
   })
@@ -775,8 +859,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        patientId = await formResponsePatientId(tx, orgId, c.req.param("id"))
-        return listFormAddenda(tx, orgId, c.req.param("id"))
+        patientId = await formResponsePatientId(tx, orgId, formId(c))
+        return listFormAddenda(tx, orgId, formId(c))
       }),
     )
     if (response.status === 200 && patientId)
@@ -793,7 +877,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        addFormAddendum(tx, orgId, userId, c.req.param("id"), parsed.data.text),
+        addFormAddendum(tx, orgId, userId, formId(c), parsed.data.text),
       ),
     )
   })

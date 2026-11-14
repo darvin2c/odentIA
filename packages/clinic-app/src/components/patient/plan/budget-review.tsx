@@ -11,7 +11,7 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
@@ -21,6 +21,7 @@ import {
   type BudgetPresentationBody,
   type BudgetWithTotals,
   budgetNumberLabel,
+  budgetOptionApi,
   fetchBudgetDetail,
   fetchBudgetPresentation,
   PLAN_QUERY_KEYS,
@@ -44,6 +45,13 @@ import {
   sameGuide,
 } from "../../service-guide"
 import { DocumentPaperPanel } from "../document-paper-panel"
+import {
+  inSentence,
+  optionHeading,
+  recommendedNotice,
+  recommendedSavedText,
+  withRecommendation,
+} from "./budget-recommended"
 import { useBudgetSendPreview } from "./budget-send"
 
 /** Lo que dice el aviso cuando sale: la misma frase de `BudgetSendButton`. */
@@ -177,6 +185,7 @@ export function BudgetReviewDrawer({
   onClose,
   onSent,
   beforeSend,
+  onRevise,
 }: {
   patientId: string
   budgetId: string
@@ -184,6 +193,8 @@ export function BudgetReviewDrawer({
   onSent?: () => void
   /** Lo que hay que guardar antes (el borrador de la atención). */
   beforeSend?: () => Promise<void>
+  /** «Crear revisión» de lo entregado, si quien abre el cajón puede hacerla. */
+  onRevise?: () => void
 }) {
   const presentation = useQuery({
     queryKey: ["budget-presentation", patientId, budgetId],
@@ -207,6 +218,7 @@ export function BudgetReviewDrawer({
         onClose={onClose}
         onSent={onSent}
         beforeSend={beforeSend}
+        onRevise={onRevise}
       />
     )
   }
@@ -242,17 +254,65 @@ export function BudgetReviewDrawer({
 }
 
 /**
- * Las opciones para quien no las escribe: lo que tienen, como texto; lo vacío no
- * aparece. En el borrador dice quién las escribe, para que no parezca un olvido.
+ * La recomendada en un aviso suave (borde ámbar), junto a las opciones o a lo que
+ * se le propuso: informa y no frena. Lo entregado ya no se marca: la salida es
+ * «Crear revisión», si quien mira puede hacerla.
  */
-function OptionsText({
+export function RecommendedNote({
+  text,
+  onRevise,
+}: {
+  text: string
+  onRevise?: () => void
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+      <p className="min-w-0 flex-1 basis-60">
+        {text}
+        {onRevise ? " Para cambiar la recomendada, crea una revisión." : ""}
+      </p>
+      {onRevise ? (
+        <Button type="button" size="sm" variant="outline" onClick={onRevise}>
+          Crear revisión
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Un solo pedido por opción a la vez: el segundo clic llega antes de que el botón
+ * se desactive en el render siguiente (QA del 14 nov: dos POST y dos auditorías).
+ */
+export function markGuard(): { start: (id: string) => boolean; end: () => void } {
+  let busy: string | null = null
+  return {
+    start: (id) => {
+      if (busy !== null) return false
+      busy = id
+      return true
+    },
+    end: () => {
+      busy = null
+    },
+  }
+}
+
+/**
+ * Las opciones para quien no las escribe: lo que tienen, como texto; lo vacío no
+ * aparece, salvo la recomendada, que se dice siempre. En el borrador dice quién
+ * las escribe, para que no parezca un olvido.
+ */
+export function OptionsText({
   options,
   draft,
 }: {
   options: BudgetPresentation["options"]
   draft: boolean
 }): React.JSX.Element | null {
-  const filled = options.filter((option) => option.name || option.pros || option.cons)
+  const filled = options.filter(
+    (option) => option.name || option.pros || option.cons || option.isRecommended,
+  )
   if (filled.length === 0 && !draft) return null
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -263,7 +323,7 @@ function OptionsText({
           className="flex flex-col gap-1.5 rounded-lg border p-3"
         >
           <h3 className="font-medium">
-            {option.label}
+            {optionHeading(option)}
             {option.name ? ` · ${option.name}` : ""}
           </h3>
           {option.pros || option.cons ? (
@@ -301,6 +361,7 @@ function ReviewForm({
   onClose,
   onSent,
   beforeSend,
+  onRevise,
 }: {
   patientId: string
   budgetId: string
@@ -309,6 +370,7 @@ function ReviewForm({
   onClose: () => void
   onSent?: () => void
   beforeSend?: () => Promise<void>
+  onRevise?: () => void
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("budgets.write")
@@ -424,8 +486,63 @@ function ReviewForm({
   const findingsValue = useStore(form.store, (state) => state.values.findings)
   const dated = useStore(form.store, (state) => state.values.validUntil)
   const lineValues = useStore(form.store, (state) => state.values.lines)
+  const optionValues = useStore(form.store, (state) => state.values.options)
   const several = data.options.length > 1
-  const busy = surface.isSubmitting
+
+  // La recomendada se cambia aquí mismo, con la operación del Plan, y se guarda al
+  // pulsarla, aparte del formulario: volver a leer lo que explica reiniciaría lo
+  // que se está escribiendo. La marca que se muestra es la del detalle del
+  // presupuesto, que se vuelve a leer al volver a la pestaña: si otra persona la
+  // cambió, el cajón lo dice (QA del 14 nov). Mientras se guarda, la pedida.
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [savedLabel, setSavedLabel] = useState<string | null>(null)
+  const [recommendError, setRecommendError] = useState<string | null>(null)
+  const guard = useRef(markGuard())
+  const legends = useRef(new Map<string, HTMLLegendElement>())
+  const recommend = useMutation({
+    mutationFn: (optionId: string) => budgetOptionApi(patientId, budgetId, optionId, "recommend"),
+    onMutate: (optionId) => {
+      setRecommendError(null)
+      setPendingId(optionId)
+    },
+    onSuccess: async (_result, optionId) => {
+      setPdfRevision((revision) => revision + 1)
+      // Lo que explica queda viejo, sin volver a leerlo ahora (lo escrito sigue).
+      void queryClient.invalidateQueries({
+        queryKey: ["budget-presentation", patientId, budgetId],
+        refetchType: "none",
+      })
+      await Promise.all(
+        PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
+      setSavedLabel(data.options.find((option) => option.id === optionId)?.label ?? null)
+    },
+    onError: (err) => setRecommendError(submitErrorMessage(err)),
+    onSettled: () => {
+      setPendingId(null)
+      guard.current.end()
+    },
+  })
+  const markRecommended = (optionId: string) => {
+    if (!guard.current.start(optionId)) return
+    recommend.mutate(optionId)
+    // El botón desaparece al marcar: el foco va al nombre de la opción, que ya dice «recomendada».
+    legends.current.get(optionId)?.focus()
+  }
+  const options = withRecommendation(data.options, budget.options, pendingId)
+  // Sin elegir todavía: lo elegido ya no depende de la marca.
+  const chosen = budget.options.some((option) => option.decision === "elegida")
+  const recommendedLine = recommendedNotice(options, {
+    audience: !draft ? "entregado" : editable ? "propone" : "envia",
+    names: Object.fromEntries(
+      options.map((option) => [
+        option.label,
+        optionValues.find((row) => row.id === option.id)?.name ?? option.name ?? "",
+      ]),
+    ),
+    lines: data.lines,
+  })
+  const busy = surface.isSubmitting || recommend.isPending
 
   const ownOf = (lineId: string): GuideDraft | null =>
     lineValues.find((row) => row.id === lineId)?.own ?? null
@@ -443,6 +560,12 @@ function ReviewForm({
     <>
       <FormDrawer
         {...surface}
+        // La marca se guardó al pulsarla: salir solo pierde lo escrito.
+        unsavedDescription={
+          savedLabel
+            ? `Se pierde lo que escribiste. La recomendada ya quedó guardada: la ${inSentence(savedLabel)}.`
+            : undefined
+        }
         open
         dock={false}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
@@ -457,7 +580,9 @@ function ReviewForm({
         hideSubmit={!(sendable || editable)}
         cancelLabel={sendable || editable ? undefined : "Cerrar"}
         submitLabel={sendable ? (preview.data?.data.label ?? "Enviar") : "Guardar"}
-        submitDisabled={sendable ? preview.isPending || blocked != null : false}
+        submitDisabled={
+          recommend.isPending || (sendable ? preview.isPending || blocked != null : false)
+        }
         secondaryAction={{
           label: "Ver el PDF",
           disabled: busy,
@@ -511,6 +636,11 @@ function ReviewForm({
               />
             )}
           </form.AppField>
+
+          {/* Lo entregado: la marca, junto a lo que se le propuso, y cómo cambiarla. */}
+          {!draft && several && !chosen && recommendedLine ? (
+            <RecommendedNote text={recommendedLine} onRevise={onRevise} />
+          ) : null}
 
           {editable ? (
             <form.AppField name="validUntil">
@@ -616,11 +746,43 @@ function ReviewForm({
             </ul>
           </FieldSet>
 
-          {several && !editable ? <OptionsText options={data.options} draft={draft} /> : null}
+          {draft && several && recommendedLine ? <RecommendedNote text={recommendedLine} /> : null}
+          {several && editable ? (
+            // Siempre montada: así se anuncia el cambio al marcar.
+            <p role="status" className={savedLabel ? "text-sm text-muted-foreground" : "sr-only"}>
+              {savedLabel ? recommendedSavedText(savedLabel) : ""}
+            </p>
+          ) : null}
+          {several && !editable ? <OptionsText options={options} draft={draft} /> : null}
+          {several && editable && recommendError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {recommendError}
+            </p>
+          ) : null}
           {several && editable
-            ? data.options.map((option, index) => (
+            ? options.map((option, index) => (
                 <FieldSet key={option.id}>
-                  <FieldLegend>{option.label}</FieldLegend>
+                  <FieldLegend
+                    tabIndex={-1}
+                    className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    ref={(node) => {
+                      if (node) legends.current.set(option.id, node)
+                      else legends.current.delete(option.id)
+                    }}
+                  >
+                    {optionHeading(option)}
+                  </FieldLegend>
+                  {option.isRecommended ? null : (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto self-start p-0"
+                      disabled={busy}
+                      onClick={() => markRecommended(option.id)}
+                    >
+                      Marcar como recomendada
+                    </Button>
+                  )}
                   <FieldGroup>
                     <form.AppField name={`options[${index}].name`}>
                       {(field) => <field.TextField label="Nombre" maxLength={120} />}

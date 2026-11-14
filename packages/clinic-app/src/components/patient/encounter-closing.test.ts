@@ -7,6 +7,7 @@ import {
   continuingAfterSign,
   controlBesideAccepted,
   needsNextControlDay,
+  openFormsWords,
 } from "./encounter-closing"
 
 const values = (over: Partial<ClosingValues> = {}): ClosingValues => ({
@@ -94,5 +95,20 @@ describe("el control que se pide junto a la corona ya ofrecida (QA del 9 nov)", 
     expect(controlBesideAccepted([], "")).toBeNull()
     const going = continuingAfterSign({ finishing: [], continuing: [endo] }, {})
     expect(controlBesideAccepted(going, "")?.line).toMatch(/^Sin plazo, el control no queda anotado: solo «.+».$/)
+  })
+})
+
+describe("un formulario a medias al cerrar", () => {
+  it("lo avisa con su nombre y dice que se puede firmar igual y dónde se termina", () => {
+    expect(openFormsWords([])).toBeNull()
+    const one = openFormsWords([{ title: "Evaluación de endodoncia" }])
+    expect(one?.title).toBe("Queda una ficha a medias")
+    // El camino más corto ya no es «Documentos de la ficha»: se termina en la misma atención.
+    expect(one?.detail).toBe(
+      "«Evaluación de endodoncia». Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.",
+    )
+    const two = openFormsWords([{ title: "Evaluación de endodoncia" }, { title: "Ficha periodontal" }])
+    expect(two?.title).toBe("Quedan 2 fichas a medias")
+    expect(two?.detail).toContain("«Evaluación de endodoncia» y «Ficha periodontal». Puedes firmar igual")
   })
 })

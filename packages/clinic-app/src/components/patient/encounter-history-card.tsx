@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { voidedAttentionFormWords } from "../../lib/clinical-forms"
+import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
@@ -53,6 +55,7 @@ function retiredWords(born: EncounterBorn): string {
       count(born.indicated.filter((row) => row.retired).length, "tratamiento", "tratamientos"),
       count(born.followUps.filter((row) => row.retired).length, "control", "controles"),
       count(born.consents.filter((row) => row.status === "anulado").length, "consentimiento", "consentimientos"),
+      count(born.forms.filter((row) => row.retired).length, "ficha", "fichas"),
     ].filter((part): part is string => part !== null),
   )
 }
@@ -90,7 +93,8 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
   }
   const prescriptions = retired ? [] : born.prescriptions
   const orders = retired ? [] : born.orders
-  const forms = retired ? [] : born.forms
+  // Los de una atención anulada van con lo que ya no vale, no como algo indicado.
+  const forms = pick(born.forms)
   const indicatedSomething = indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + forms.length > 0
   return (
     <>
@@ -149,7 +153,18 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
               </li>
             ))}
             {forms.map((row) => (
-              <li key={row.id}>Formulario: {row.title}</li>
+              <li key={row.id}>
+                {row.state === "a_medias" ? "Ficha a medias" : "Ficha"}: {row.title}
+                <span className="text-muted-foreground">
+                  {retired
+                    ? " · de una atención anulada"
+                    : row.state === "a_medias"
+                      ? " · falta terminarlo"
+                      : row.finalizedAt
+                        ? ` · finalizado ${formatDateTime(row.finalizedAt)}${row.afterSigning ? ", después de firmar la atención" : ""}`
+                        : ""}
+                </span>
+              </li>
             ))}
           </ul>
         </Part>
@@ -436,11 +451,20 @@ export function VoidedEncounterLine({ item }: { item: TimelineItem }) {
         {item.voidedByName ? ` por ${item.voidedByName}` : ""} · Motivo: {item.voidReason ?? "sin registrar"}
       </p>
       {withIt ? <p className="text-muted-foreground">Se anuló con ella: {withIt}</p> : null}
+      {/* Sus formularios, cada uno con lo que pasó: el que quedó sin terminar se descartó al anular
+          (no sale en Documentos), y el finalizado se conserva. Aquí es donde la persona lo ve. */}
+      {born && born.forms.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-0.5 text-muted-foreground" aria-label="Formularios de esta atención">
+          {born.forms.map((form) => (
+            <li key={form.id}>{voidedAttentionFormWords(form, formatDateTime)}</li>
+          ))}
+        </ul>
+      ) : null}
       {/* Lo firmado, recetado o pedido en ella no desaparece: un consentimiento firmado o una
           receta que salió siguen siendo hechos (revisión de código del 9 nov). */}
       {born ? (
         <div className="mt-1 flex flex-col gap-2 text-muted-foreground">
-          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [] }} />
+          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [], forms: [] }} />
         </div>
       ) : null}
     </div>

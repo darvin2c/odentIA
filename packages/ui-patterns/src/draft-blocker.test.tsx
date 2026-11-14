@@ -5,9 +5,11 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import * as React from "react"
 import { afterEach, beforeAll, expect, it } from "vitest"
 
+import { common } from "./common.js"
 import { DetailDrawer } from "./detail/detail-drawer.js"
 import { useDraftSaved } from "./docked-surface.js"
 import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
+import { useAppForm, useFormSurface } from "./form/app-form.js"
 import { FormDrawer } from "./form/form-drawer.js"
 import { RadioChips } from "./radio-chips.js"
 import { DraftKeptInPage, SideDockProvider, SideDockSlot } from "./side-dock.js"
@@ -41,14 +43,14 @@ afterEach(() => {
 })
 
 /** El aviso de la app, como `PageDraftGuard` de clinic-app. */
-function Guard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage | null }) {
+function Guard({ dirty, keptInPage, lost }: { dirty: boolean; keptInPage?: KeptInPage | null; lost?: string | null }) {
   const blocker = useDraftBlocker({ disabled: !dirty, enableBeforeUnload: false, shouldBlockFn: () => dirty, keptInPage })
   if (blocker.status !== "blocked") return null
   return (
     <div role="alertdialog">
-      Si sales, se perderán
+      {lost ?? "Si sales, se perderán"}
       <button type="button" onClick={blocker.reset}>
-        Continuar editando
+        Seguir aquí
       </button>
       <button type="button" onClick={blocker.proceed}>
         Descartar y salir
@@ -98,7 +100,7 @@ it("con la pantalla que conserva sus cajones, cambiar de pestaña no pregunta; c
   // Otra sede sí pregunta: lo escrito se guardaría en ella.
   void router.navigate({ href: "/finance?tab=caja&branch=norte" })
   await screen.findByRole("alertdialog")
-  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
   expect(router.state.location.search).toEqual({ tab: "caja", branch: "centro" })
 
@@ -118,6 +120,8 @@ it("sin eso, cualquier navegación con lo escrito pregunta, como hasta ahora", a
   expect(router.state.location.searchStr).toBe("")
 })
 
+const LOST = "No se guardó «15» en «Intensidad del dolor (0–10)». Lo demás ya está guardado."
+
 /** Un detalle que se guarda solo, como un formulario clínico: nunca hace `submit`. */
 function Autosaved() {
   return (
@@ -130,10 +134,15 @@ function Autosaved() {
 function AutosavedAnswers() {
   const draftSaved = useDraftSaved()
   const [state, setState] = React.useState<"guardado" | "pendiente" | "error">("guardado")
-  React.useEffect(() => draftSaved(state === "guardado"), [draftSaved, state])
+  React.useEffect(
+    () => draftSaved(state === "guardado", state === "error" ? LOST : null),
+    [draftSaved, state],
+  )
   return (
     <>
       <input aria-label="Hallazgos" onInput={() => setState("pendiente")} />
+      {/* Un campo que escribe sin que el contenido lo cuente aparte: lo que se pierde lo sigue diciendo él. */}
+      <input aria-label="Notas" />
       <button type="button" onClick={() => setState("guardado")}>
         Termina el autoguardado
       </button>
@@ -161,7 +170,7 @@ it("lo que se guarda solo: con todo guardado salir no pregunta, y un cambio que 
   // Aún sin guardar: avisa, como siempre.
   void router.navigate({ href: "/agenda" })
   await screen.findByRole("alertdialog")
-  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
 
   fireEvent.click(screen.getByRole("button", { name: "Termina el autoguardado" }))
@@ -298,4 +307,125 @@ it("al quitarse lo que no se guardó, el panel deja de avisar por él", async ()
   await router.navigate({ href: "/agenda" })
   await screen.findByText("Agenda")
   expect(screen.queryByRole("alertdialog")).toBeNull()
+})
+
+/** Un formulario de verdad (`useAppForm`) que no pasa: falta el celular. */
+function Rejected() {
+  const form = useAppForm({
+    defaultValues: { phone: "" },
+    validators: {
+      onSubmit: ({ value }) => (value.phone ? undefined : { fields: { phone: "Escribe el celular" } }),
+    },
+    onSubmit: () => {},
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormDrawer {...surface} open title="Nuevo paciente" onClose={() => {}}>
+      <input aria-label="Nombres" />
+    </FormDrawer>
+  )
+}
+
+// QA de la entrega 3 (14 nov): en «Nuevo paciente», «Registrar» rechazado por un dato que faltaba
+// desarmaba el aviso, y salir por el menú perdía todo lo escrito sin preguntar.
+it("un envío que no pasa deja armado el aviso: salir con lo escrito pregunta igual que antes de enviar", async () => {
+  const router = appWith(
+    [
+      ["/pacientes", () => <Rejected />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/pacientes",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.input(await screen.findByLabelText("Nombres"), { target: { value: "Ana" } })
+  fireEvent.click(screen.getByRole("button", { name: "Guardar" }))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  void router.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
+  expect(router.state.location.pathname).toBe("/pacientes")
+})
+
+/** Lo que se guarda solo, en el panel o en el cajón, con su cierre propio. */
+function AutosavedClosable({ onClose }: { onClose: () => void }) {
+  return (
+    <DetailDrawer open title="Evaluación" onClose={onClose}>
+      <AutosavedAnswers />
+    </DetailDrawer>
+  )
+}
+
+// QA de la entrega 3 (14 nov): con «Guardado, menos lo marcado», × y Escape cerraban el formulario
+// y perdían el 15 sin preguntar, mientras que salir por el menú sí preguntaba (y con otro texto).
+it("con algo que no se guardó, ×, Escape y el menú preguntan lo mismo y dicen qué se pierde", async () => {
+  let closed = 0
+  const router = appWith(
+    [
+      ["/ficha", () => <AutosavedClosable onClose={() => (closed += 1)} />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ficha",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.keepEditing }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+  fireEvent.keyDown(window, { key: "Escape" })
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.keepEditing }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+  // También después de escribir algo más: el diálogo del menú dice lo mismo que × y Escape.
+  fireEvent.input(screen.getByLabelText("Notas"), { target: { value: "más" } })
+  void router.navigate({ href: "/agenda" })
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  expect(closed).toBe(0)
+})
+
+it("en el cajón (sin columna, el teléfono), × también pregunta por lo que no se guardó", async () => {
+  let closed = 0
+  render(<AutosavedClosable onClose={() => (closed += 1)} />)
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  const dialog = await screen.findByRole("alertdialog", { hidden: true })
+  expect(dialog.textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.discard, hidden: true }))
+  await waitFor(() => expect(closed).toBe(1))
+})
+
+it("con todo guardado, × cierra sin preguntar", async () => {
+  let closed = 0
+  render(<AutosavedClosable onClose={() => (closed += 1)} />)
+  fireEvent.click(await screen.findByRole("button", { name: common.actions.close }))
+  expect(closed).toBe(1)
+  expect(screen.queryByRole("alertdialog")).toBeNull()
+})
+
+// Verificación de la entrega 3 (14 nov): a 390, con un valor que no se guardó en la hoja, «Atrás» del
+// navegador salía sin preguntar (la hoja no es la columna, que es la que vigila la navegación).
+it("en el cajón del teléfono, salir de la pantalla con algo que no se guardó también pregunta", async () => {
+  const wide = window.matchMedia
+  window.matchMedia = ((query: string) => ({ ...wide(query), matches: false })) as typeof window.matchMedia
+  try {
+    const router = appWith(
+      [
+        ["/ficha", () => <AutosavedClosable onClose={() => {}} />],
+        ["/agenda", () => <p>Agenda</p>],
+      ],
+      "/ficha",
+    )
+    render(<RouterProvider router={router} />)
+    fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+    await screen.findByText("error")
+    void router.navigate({ href: "/agenda" })
+    expect((await screen.findByRole("alertdialog", { hidden: true })).textContent).toContain(LOST)
+    expect(router.state.location.pathname).toBe("/ficha")
+  } finally {
+    window.matchMedia = wide
+  }
 })

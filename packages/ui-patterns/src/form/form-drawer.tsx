@@ -1,7 +1,7 @@
 import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
-import { SideDockScopeProvider } from "../side-dock.js"
-import { DockedSurface, useDockDecision } from "../docked-surface.js"
+import { SideDockScopeProvider, useSideDockDraftGuard } from "../side-dock.js"
+import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
 import { useCloseGuard } from "../surface.js"
 import { FormPanel } from "./form-panel.js"
 import { type FormSecondaryAction, FormSurface } from "./form-surface.js"
@@ -16,6 +16,8 @@ export interface FormDrawerProps {
   children: React.ReactNode
   onSubmit: (event: React.FormEvent) => void
   isDirty?: boolean
+  /** Lo que dice «¿Salir sin guardar?» si parte ya se guardó aparte (`useCloseGuard`). */
+  unsavedDescription?: string
   isSubmitting?: boolean
   isLoading?: boolean
   error?: string | null
@@ -74,6 +76,7 @@ export function FormDrawer({
   children,
   onSubmit,
   isDirty = false,
+  unsavedDescription,
   isSubmitting = false,
   isLoading = false,
   error,
@@ -86,7 +89,19 @@ export function FormDrawer({
   dock = true,
 }: FormDrawerProps) {
   const isMobile = useIsMobile()
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  // Lo que el contenido guarda solo (`useDraftSaved`): ×, Escape y el menú preguntan igual.
+  const draft = useDraftSavedScope()
+  const dirty = isDirty || draft.unsaved
+  const lost = draft.unsaved && !isDirty ? draft.lost : null
+  const { handleClose, confirmDialog } = useCloseGuard({
+    isSubmitting,
+    isDirty: dirty,
+    lost,
+    unsavedDescription,
+    onDiscard: draft.discard,
+    onClose,
+  })
+  const DraftGuard = useSideDockDraftGuard()
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
@@ -114,26 +129,30 @@ export function FormDrawer({
         finalFocus={() => (opener.current?.isConnected ? opener.current : true)}
       >
         <SideDockScopeProvider value="overlay">
-          <FormSurface
-            title={title}
-            description={description}
-            headerContent={headerContent}
-            titleId={titleId}
-            descriptionId={descriptionId}
-            onCancel={handleClose}
-            onSubmit={onSubmit}
-            isSubmitting={isSubmitting}
-            isLoading={isLoading}
-            error={error}
-            submitLabel={submitLabel}
-            cancelLabel={cancelLabel}
-            submitDisabled={submitDisabled}
-            hideSubmit={hideSubmit}
-            secondaryAction={secondaryAction}
-          >
-            {children}
-          </FormSurface>
+          <DraftSavedProvider scope={draft}>
+            <FormSurface
+              title={title}
+              description={description}
+              headerContent={headerContent}
+              titleId={titleId}
+              descriptionId={descriptionId}
+              onCancel={handleClose}
+              onSubmit={onSubmit}
+              isSubmitting={isSubmitting}
+              isLoading={isLoading}
+              error={error}
+              submitLabel={submitLabel}
+              cancelLabel={cancelLabel}
+              submitDisabled={submitDisabled}
+              hideSubmit={hideSubmit}
+              secondaryAction={secondaryAction}
+            >
+              {children}
+            </FormSurface>
+          </DraftSavedProvider>
           {confirmDialog}
+          {/* En el cajón (el teléfono), «Atrás» del navegador también pregunta por lo que no se guardó. */}
+          {DraftGuard && draft.unsaved ? <DraftGuard dirty lost={lost || unsavedDescription} onDiscard={draft.discard} /> : null}
         </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>
@@ -145,6 +164,8 @@ export function FormDrawer({
         bounds={dockBounds}
         dirty={isDirty && !isSubmitting}
         fallback={drawer(true)}
+        draft={draft}
+        unsavedDescription={unsavedDescription}
       >
         <FormPanel
           title={title}
@@ -152,7 +173,10 @@ export function FormDrawer({
           headerContent={headerContent}
           onClose={onClose}
           onSubmit={onSubmit}
-          isDirty={isDirty}
+          isDirty={dirty}
+          lost={lost}
+          unsavedDescription={unsavedDescription}
+          onDiscard={draft.discard}
           isSubmitting={isSubmitting}
           isLoading={isLoading}
           error={error}

@@ -320,6 +320,7 @@ export async function archiveSpecialty(
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.specialtyId, specialtyId),
         eq(clinicalFormTemplate.status, "publicado"),
+        eq(clinicalFormTemplate.inUse, true),
       ),
     )
     .limit(1)
@@ -335,9 +336,14 @@ export async function archiveSpecialty(
     )
     .limit(1)
   if (publishedForm || publishedConsent) {
+    // Cada traba con su nombre: una ficha de consulta en uso, un consentimiento publicado, o las dos.
     throw conflict(
       "HAS_PUBLISHED",
-      "Archiva primero las plantillas publicadas de esta especialidad",
+      publishedForm && publishedConsent
+        ? "Deja de usar primero las fichas de consulta y los consentimientos de esta especialidad"
+        : publishedForm
+          ? "Deja de usar primero las fichas de consulta de esta especialidad"
+          : "Deja de usar primero los consentimientos de esta especialidad",
     )
   }
   return updateSpecialty(tx, orgId, actorUserId, specialtyId, { isActive: false })
@@ -575,11 +581,11 @@ const FIELD_ID_RE = /^[a-z0-9][a-z0-9_-]{0,48}$/i
 export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
   const pathOf = (rest: string) => (at ? `${at}.${rest}` : rest)
   if (!raw || typeof raw !== "object" || !("sections" in raw)) {
-    throw validation("El esquema del formulario es obligatorio")
+    throw validation("Las preguntas de la ficha son obligatorias")
   }
   const sections: unknown = raw.sections
   if (!Array.isArray(sections) || sections.length === 0 || sections.length > 30) {
-    throw invalidField(pathOf("sections"), "El formulario necesita entre 1 y 30 secciones")
+    throw invalidField(pathOf("sections"), "La ficha necesita entre 1 y 30 secciones")
   }
   const errors: Record<string, string> = {}
   const fail = (path: string, message: string) => {
@@ -790,13 +796,55 @@ function isEmptyAnswer(value: unknown): boolean {
   return false
 }
 
-/** Qué quedó guardado en una pregunta cuyo valor nuevo no se aceptó: su aviso no promete de más ni de menos. */
-function keptWords(stored: unknown): string {
-  if (isEmptyAnswer(stored)) return "No se guardó: la pregunta sigue sin respuesta."
-  if (typeof stored === "boolean") return `No se guardó: sigue guardado «${stored ? "Sí" : "No"}».`
-  if (typeof stored === "number" || (typeof stored === "string" && stored.length <= 60))
-    return `No se guardó: sigue guardado «${stored}».`
-  return "No se guardó: sigue guardada la respuesta de antes."
+/**
+ * Lo que dice el problema de una pregunta debajo de ella, donde ya se ve cuál es: sin su etiqueta
+ * entre comillas ni signos de sistema («Va de 0 a 10.»). Fuera de ella se usa `message`.
+ */
+const localWords = new WeakMap<ServiceError, string>()
+
+/** Un problema de una pregunta: `"Intensidad" va de 0 a 10` fuera de ella, y `local` bajo ella. */
+function fieldIssue(field: FormFieldDef, words: string, local = `${words.charAt(0).toUpperCase()}${words.slice(1)}.`): ServiceError {
+  const error = validation(`"${field.label}" ${words}`)
+  localWords.set(error, local)
+  return error
+}
+
+/** El rango de un número, con palabras: «va de 0 a 10», «es de 1 o más». */
+function rangeWords(min: number | null | undefined, max: number | null | undefined): string {
+  if (min != null && max != null) return `va de ${min} a ${max}`
+  if (min != null) return `es de ${min} o más`
+  return `es de ${max} o menos`
+}
+
+/** Una fecha civil (`AAAA-MM-DD`) en el formato de la clínica; lo demás, tal cual. */
+function answerWords(value: unknown, locale: string): string {
+  if (typeof value === "boolean") return value ? "Sí" : "No"
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00Z`)
+    if (!Number.isNaN(date.getTime()))
+      return new Intl.DateTimeFormat(locale, { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" }).format(date)
+  }
+  return String(value)
+}
+
+/**
+ * El aviso de una pregunta cuyo valor nuevo no se aceptó, dicho bajo ella: qué pide, qué no se
+ * guardó y qué quedó guardado, sin prometer de más ni de menos. «Va de 0 a 10. El 15 no se
+ * guardó; sigue «8».»
+ */
+function rejectedWords(problem: string, sent: unknown, stored: unknown, locale: string): string {
+  const what =
+    typeof sent === "number"
+      ? `El ${sent} no se guardó`
+      : typeof sent === "string" && sent.trim() && sent.trim().length <= 40
+        ? `«${sent.trim()}» no se guardó`
+        : "No se guardó"
+  const kept = isEmptyAnswer(stored)
+    ? "la pregunta sigue sin respuesta"
+    : typeof stored === "boolean" || typeof stored === "number" || (typeof stored === "string" && stored.length <= 60)
+      ? `sigue «${answerWords(stored, locale)}»`
+      : "sigue la respuesta de antes"
+  return `${problem} ${what}; ${kept}.`
 }
 
 
@@ -819,6 +867,8 @@ export function assertAnswers(
     site?: ProductSite
     rejected?: Record<string, string>
     stored?: Record<string, unknown> | null
+    /** El idioma de la clínica, para decir una fecha guardada en su formato (`rejected`). */
+    locale?: string
   } = {},
 ): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
@@ -844,7 +894,13 @@ export function assertAnswers(
       } catch (error) {
         if (!(error instanceof ServiceError) || error.code !== "VALIDATION") throw error
         const kept = options.rejected ? (options.stored?.[field.id] ?? null) : null
-        if (options.rejected) options.rejected[`answers.${field.id}`] = `${error.message}. ${keptWords(kept)}`
+        if (options.rejected)
+          options.rejected[`answers.${field.id}`] = rejectedWords(
+            localWords.get(error) ?? `${error.message}.`,
+            value,
+            kept,
+            options.locale ?? "es",
+          )
         else errors[`answers.${field.id}`] = error.message
         out[field.id] = kept
       }
@@ -856,6 +912,16 @@ export function assertAnswers(
   const first = Object.values(errors)[0]
   if (first) throw validation(first, errors)
   return out
+}
+
+/**
+ * El número de una respuesta: un número o su texto («7», «36.5»). Un sí/no o una
+ * lista no lo son, aunque `Number(true)` dé 1.
+ */
+function answerNumber(value: unknown): number {
+  if (typeof value === "number") return value
+  if (typeof value === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return Number(value)
+  return Number.NaN
 }
 
 /** Una respuesta validada (o `null` si está vacía y se permite); lanza el problema de esa pregunta. */
@@ -884,13 +950,10 @@ function assertAnswer(
       return text
     }
     case "numero": {
-      const num = typeof value === "number" ? value : Number(value)
-      if (!Number.isFinite(num)) throw validation(`"${field.label}" debe ser un número`)
-      if (field.min != null && num < field.min) {
-        throw validation(`"${field.label}" debe ser ≥ ${field.min}`)
-      }
-      if (field.max != null && num > field.max) {
-        throw validation(`"${field.label}" debe ser ≤ ${field.max}`)
+      const num = answerNumber(value)
+      if (!Number.isFinite(num)) throw fieldIssue(field, "debe ser un número", "Escribe un número.")
+      if ((field.min != null && num < field.min) || (field.max != null && num > field.max)) {
+        throw fieldIssue(field, rangeWords(field.min, field.max))
       }
       return num
     }
@@ -920,10 +983,12 @@ function assertAnswer(
     }
     case "fecha": {
       if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        throw validation(`"${field.label}" debe ser una fecha (AAAA-MM-DD)`)
+        throw fieldIssue(field, "debe ser una fecha completa", "Escribe la fecha completa: día, mes y año.")
       }
       const date = new Date(`${value}T00:00:00Z`)
-      if (Number.isNaN(date.getTime())) throw validation(`"${field.label}" no es una fecha válida`)
+      // Un día que no existe (31 de febrero) no pasa: `Date` lo correría al 3 de marzo.
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+        throw fieldIssue(field, "no es una fecha que exista", "Esa fecha no existe.")
       return value
     }
     case "firma": {
@@ -941,15 +1006,17 @@ function assertAnswer(
     }
     case "pieza": {
       // Un sitio suelto del producto (odentIA: una pieza FDI).
-      const tooth = typeof value === "number" ? value : Number(value)
+      const tooth = answerNumber(value)
+      // Lo que no es un número se dice así, sin repetir el valor que llegó («inválida: true»).
+      if (site && !Number.isFinite(tooth)) throw validation(`"${field.label}" debe ser el número de una pieza`)
       if (!site || site.code(tooth) === null)
         throw validation(`"${field.label}": ${site?.invalid(value) ?? "esta clínica no registra dónde"}`)
       return tooth
     }
     case "escala": {
-      const num = typeof value === "number" ? value : Number(value)
+      const num = answerNumber(value)
       if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
-        throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
+        throw fieldIssue(field, `${rangeWords(field.min ?? 0, field.max ?? 10)}${Number.isInteger(num) ? "" : ", en números enteros"}`)
       return num
     }
     case "adjunto": {
@@ -1002,6 +1069,8 @@ export async function listFormTemplates(
     q?: string
     /** Primero los de las especialidades de este profesional (desde la atención). */
     forUserId?: string
+    /** Con `status: "publicado"`, también las apagadas («Sin usar»). */
+    includeOff?: boolean
   } = {},
 ): Promise<FormTemplateRow[]> {
   const conditions = [eq(clinicalFormTemplate.organizationId, orgId)]
@@ -1011,6 +1080,8 @@ export async function listFormTemplates(
       throw validation("Estado inválido: borrador|publicado|archivado")
     }
     conditions.push(eq(clinicalFormTemplate.status, query.status))
+    // «Publicada» es la que se puede llenar: una apagada («Sin usar») no se ofrece.
+    if (query.status === "publicado" && !query.includeOff) conditions.push(eq(clinicalFormTemplate.inUse, true))
   }
   const q = (query.q ?? "").trim()
   if (q) conditions.push(foldedWordsMatch([clinicalFormTemplate.title], q))
@@ -1035,14 +1106,39 @@ export async function listFormTemplates(
   return [...rows].sort((a, b) => first(a) - first(b))
 }
 
+/**
+ * La clave de un formulario nuevo: la de su título o, si otro formulario de la
+ * clínica ya la tiene (el mismo título, o uno que empieza igual: la clave se
+ * recorta a 40), la misma con «-2», «-3»… Nadie la ve.
+ */
+async function newFormTemplateKey(tx: Db, orgId: string, title: string): Promise<string> {
+  const base = keyFromName(title, "title")
+  const taken = new Set(
+    (
+      await tx
+        .selectDistinct({ key: clinicalFormTemplate.key })
+        .from(clinicalFormTemplate)
+        .where(eq(clinicalFormTemplate.organizationId, orgId))
+    ).map((row) => row.key),
+  )
+  if (!taken.has(base)) return base
+  for (let n = 2; ; n += 1) {
+    const suffix = `-${n}`
+    const key = `${base.slice(0, 40 - suffix.length).replace(/-+$/, "")}${suffix}`
+    if (!taken.has(key)) return key
+  }
+}
+
 export async function createFormTemplate(
   tx: Db,
   orgId: string,
   actorUserId: string,
   input: CreateFormTemplateInput,
 ): Promise<FormTemplateRow> {
-  const title = assertName(input.title, "Título del formulario", 200)
-  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title, "title")
+  const title = assertName(input.title, "Título de la ficha", 200)
+  // Con clave, es la versión siguiente de esa plantilla. Sin ella es un formulario nuevo y nunca
+  // se une a otro: dos títulos iguales, o que empiezan igual, son dos formularios.
+  const key = input.key ? assertKey(input.key, "Clave") : await newFormTemplateKey(tx, orgId, title)
   const description = assertOptionalText(input.description, "Descripción", 2000)
   const schema = assertFormSchema(input.schema)
   let specialtyId: string | null = null
@@ -1051,14 +1147,14 @@ export async function createFormTemplate(
     if (!specialty.isActive) throw invalidField("specialtyId", "La especialidad está inactiva")
     specialtyId = specialty.id
   }
-  // La versión arranca en 1; si la clave ya existe se crea la siguiente versión.
+  // La versión arranca en 1; con la clave de una plantilla se crea su versión siguiente.
   const existing = await tx
     .select({ version: clinicalFormTemplate.version, status: clinicalFormTemplate.status })
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, key)))
     .orderBy(desc(clinicalFormTemplate.version))
   if (existing.some((row) => row.status === "borrador")) {
-    const message = "Ya hay un borrador de este formulario: edítalo o publícalo"
+    const message = "Ya hay un borrador de esta ficha: edítalo o publícalo"
     throw new ServiceError("DRAFT_EXISTS", 409, message, { title: message })
   }
   const version = (existing[0]?.version ?? 0) + 1
@@ -1086,7 +1182,7 @@ export async function createFormTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la plantilla")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión del consentimiento")
     throw e
   }
 }
@@ -1114,11 +1210,11 @@ export async function updateFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Plantilla")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador") {
     throw conflict("IMMUTABLE", "Solo un borrador puede editarse: publica una versión nueva")
   }
-  const title = patch.title !== undefined ? assertName(patch.title, "Título del formulario", 200) : current.title
+  const title = patch.title !== undefined ? assertName(patch.title, "Título de la ficha", 200) : current.title
   const description =
     patch.description !== undefined
       ? assertOptionalText(patch.description, "Descripción", 2000)
@@ -1149,7 +1245,7 @@ export async function updateFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Plantilla")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_template.update", "clinical_form_template", row.id, {
     version: row.version,
   })
@@ -1186,7 +1282,7 @@ export async function publishFormTemplate(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Plantilla")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
   assertFormSchema(current.schema)
   if (current.specialtyId) {
@@ -1203,13 +1299,15 @@ export async function publishFormTemplate(
         eq(clinicalFormTemplate.status, "publicado"),
       ),
     )
-    .returning({ version: clinicalFormTemplate.version })
+    .returning({ version: clinicalFormTemplate.version, inUse: clinicalFormTemplate.inUse })
+  // La versión nueva sigue como estaba la anterior: en uso, o apagada si se había dejado de usar.
+  const inUse = previous[0]?.inUse ?? true
   const [published] = await tx
     .update(clinicalFormTemplate)
-    .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "publicado", inUse, publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(clinicalFormTemplate.id, current.id))
     .returning()
-  if (!published) throw notFound("Plantilla")
+  if (!published) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_template.publish", "clinical_form_template", published.id, {
     key: current.key,
     version: published.version,
@@ -1224,6 +1322,52 @@ export async function archiveFormTemplate(
   actorUserId: string,
   templateId: string,
 ): Promise<FormTemplateRow> {
+  // Bloqueada, como al publicar: el segundo clic de un doble clic espera aquí y encuentra la fila
+  // ya archivada. Sin esto pasaba la comprobación y chocaba con la regla de la base (error interno).
+  const [current] = await tx
+    .select()
+    .from(clinicalFormTemplate)
+    .where(
+      and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
+    )
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Ficha")
+  if (current.status === "archivado" || (current.status === "publicado" && !current.inUse))
+    throw conflict("ARCHIVED", "Esta ficha ya no se usa")
+  // La que está en uso se apaga («Sin usar»): la misma versión, que se vuelve a encender igual.
+  // Un borrador, en cambio, se archiva.
+  const [row] = await tx
+    .update(clinicalFormTemplate)
+    .set(current.status === "publicado" ? { inUse: false, updatedAt: new Date() } : { status: "archivado", updatedAt: new Date() })
+    .where(
+      and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
+    )
+    .returning()
+  if (!row) throw notFound("Ficha")
+  // «Dejar de usar» la que estaba en uso no es lo mismo que archivar un borrador: «Actividad del
+  // equipo» lo dice con las palabras de la pantalla.
+  const action = current.status === "publicado" ? "form_template.leave" : "form_template.archive"
+  await audit(tx, orgId, actorUserId, action, "clinical_form_template", row.id, {
+    key: row.key,
+    version: row.version,
+  })
+  return row
+}
+
+/**
+ * «Volver a usar» una ficha que se dejó de usar: enciende la misma versión
+ * (`in_use`), sin crear otra; lo llenado con ella no cambia. Una ficha que se
+ * dejó de usar antes de que existiera el interruptor tiene todas sus versiones
+ * archivadas, y de ahí no se sale: para ella nace la versión siguiente, ya
+ * publicada, con el mismo título y las mismas preguntas que la última que estuvo en uso.
+ */
+export async function reuseFormTemplate(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  templateId: string,
+): Promise<FormTemplateRow> {
   const [current] = await tx
     .select()
     .from(clinicalFormTemplate)
@@ -1231,17 +1375,94 @@ export async function archiveFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Plantilla")
-  if (current.status === "archivado") throw conflict("ARCHIVED", "La plantilla ya está archivada")
-  const [row] = await tx
-    .update(clinicalFormTemplate)
-    .set({ status: "archivado", updatedAt: new Date() })
-    .where(
-      and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
+  if (!current) throw notFound("Ficha")
+  // Un «Volver a usar» a la vez por formulario: el segundo espera aquí y, al leer las versiones,
+  // ya ve la que publicó el primero. Bloquear las filas no alcanza, porque el primero solo inserta.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('form-template:' || ${orgId} || ':' || ${current.key}))`,
+  )
+  const versions = await tx
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)))
+    .orderBy(desc(clinicalFormTemplate.version))
+  const published = versions.find((row) => row.status === "publicado")
+  if (published?.inUse) throw conflict("IN_USE", "Esta ficha ya está en uso")
+  if (published) {
+    const [row] = await tx
+      .update(clinicalFormTemplate)
+      .set({ inUse: true, updatedAt: new Date() })
+      .where(and(eq(clinicalFormTemplate.id, published.id), eq(clinicalFormTemplate.organizationId, orgId)))
+      .returning()
+    if (!row) throw notFound("Ficha")
+    await audit(tx, orgId, actorUserId, "form_template.reuse", "clinical_form_template", row.id, {
+      key: row.key,
+      version: row.version,
+      from: row.version,
+    })
+    return row
+  }
+  if (versions.some((row) => row.status === "borrador")) {
+    throw conflict("DRAFT_EXISTS", "Esta ficha tiene un borrador: publícalo para volver a usarla, o archívalo")
+  }
+  // La última que estuvo en uso: un borrador archivado nunca se llegó a usar.
+  const last = versions.find((row) => row.publishedAt !== null)
+  if (!last || last.id !== current.id)
+    throw conflict("NOT_LAST_USED", "Solo se vuelve a usar la última versión que estuvo en uso")
+  // Como al publicar: si las reglas de las preguntas cambiaron desde que se archivó, no se pone en
+  // uso algo con lo que «Empezar» fallaría. Se dice qué pregunta es y cómo seguir.
+  try {
+    assertFormSchema(last.schema)
+  } catch (error) {
+    if (!(error instanceof ServiceError) || error.status !== 400) throw error
+    throw conflict(
+      "SCHEMA_OUTDATED",
+      `«${last.title}» tiene una pregunta que hoy no se puede publicar como quedó (${error.message}). Prepara una versión nueva, corrígela y publícala.`,
     )
+  }
+  // Una especialidad que ya no está activa no frena volver a usarlo: queda sin especialidad.
+  const [specialty] = last.specialtyId
+    ? await tx
+        .select({ id: orgSpecialty.id })
+        .from(orgSpecialty)
+        .where(
+          and(
+            eq(orgSpecialty.id, last.specialtyId),
+            eq(orgSpecialty.organizationId, orgId),
+            eq(orgSpecialty.isActive, true),
+          ),
+        )
+        .limit(1)
+    : []
+  const now = new Date()
+  const [row] = await tx
+    .insert(clinicalFormTemplate)
+    .values({
+      organizationId: orgId,
+      specialtyId: specialty?.id ?? null,
+      key: last.key,
+      title: last.title,
+      description: last.description,
+      version: (versions[0]?.version ?? last.version) + 1,
+      status: "publicado",
+      schema: last.schema,
+      respondent: last.respondent,
+      createdBy: actorUserId,
+      publishedAt: now,
+    })
     .returning()
-  if (!row) throw notFound("Plantilla")
-  await audit(tx, orgId, actorUserId, "form_template.archive", "clinical_form_template", row.id, {})
+    .catch((error: unknown) => {
+      // Otra operación creó esa versión mientras tanto (una versión nueva desde el constructor):
+      // el índice único lo impide y se responde como un choque, no como un error interno.
+      if (isUniqueViolation(error)) throw conflict("DUPLICATE", "Esta ficha cambió mientras tanto: recarga para ver cómo quedó")
+      throw error
+    })
+  if (!row) throw notFound("Ficha")
+  await audit(tx, orgId, actorUserId, "form_template.reuse", "clinical_form_template", row.id, {
+    key: row.key,
+    version: row.version,
+    from: last.version,
+  })
   return row
 }
 
@@ -1280,6 +1501,64 @@ async function requireVisibleEncounter(
   return row
 }
 
+/**
+ * Al anular una atención (`voidEncounter`, en su misma transacción): sus
+ * formularios a medias se descartan con el motivo de la anulación. Nada se
+ * borra: quedan con quién, cuándo y por qué. Lo ya finalizado no se toca (es
+ * inmutable); las pantallas lo dicen «de una atención anulada».
+ */
+export async function discardVoidedEncounterForms(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<void> {
+  const discarded = await tx
+    .update(clinicalFormResponse)
+    .set({ status: "descartado", discardedAt: at, discardedBy: actorUserId, discardReason: reason, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFormResponse.organizationId, orgId),
+        eq(clinicalFormResponse.encounterId, encounterId),
+        eq(clinicalFormResponse.status, "borrador"),
+        // Lo que declaró el paciente no es de la atención: lo revisa el equipo aparte.
+        eq(clinicalFormResponse.source, "staff"),
+      ),
+    )
+    .returning({ id: clinicalFormResponse.id })
+  for (const form of discarded)
+    await audit(tx, orgId, actorUserId, "form_response.discard", "clinical_form_response", form.id, { encounterId, reason })
+}
+
+/** Cuánto dura «seguidos»: un segundo «Empezar» igual dentro de estos minutos es el mismo borrador. */
+const DOUBLE_START_MINUTES = 2
+
+/**
+ * Los formularios del equipo que la atención tiene a medias. El cierre los
+ * avisa y no frena: se terminan después de firmar, con su propia fecha.
+ */
+export async function listOpenEncounterForms(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+): Promise<Array<{ id: string; title: string }>> {
+  const rows = await tx
+    .select({ id: clinicalFormResponse.id, title: clinicalFormResponse.templateTitle })
+    .from(clinicalFormResponse)
+    .where(
+      and(
+        eq(clinicalFormResponse.organizationId, orgId),
+        eq(clinicalFormResponse.encounterId, encounterId),
+        eq(clinicalFormResponse.status, "borrador"),
+        eq(clinicalFormResponse.source, "staff"),
+      ),
+    )
+    .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id))
+  return rows.map((row) => ({ id: row.id, title: row.title ?? "Ficha" }))
+}
+
 export async function createFormResponse(
   tx: Db,
   orgId: string,
@@ -1297,15 +1576,33 @@ export async function createFormResponse(
       ),
     )
     .limit(1)
-  if (!template) throw notFound("Plantilla")
-  if (template.status !== "publicado") {
-    throw invalidField("templateId", "Solo una plantilla publicada admite capturas")
+  if (!template) throw notFound("Ficha")
+  if (template.status !== "publicado" || !template.inUse) {
+    throw invalidField(
+      "templateId",
+      template.status === "borrador"
+        ? "Esta ficha aún es un borrador: publícala para empezar a llenarla"
+        : "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración",
+    )
+  }
+  // La pantalla ya no lo ofrece; el servidor tampoco lo acepta.
+  if (template.respondent === "portal") {
+    throw invalidField("templateId", "Esto lo responde el paciente: el equipo no lo llena por él")
   }
   const schema = assertFormSchema(template.schema)
   let encounterId: string | null = null
   let attendingUserId: string | null = null
   if (input.encounterId) {
     const visible = await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
+    // Solo empezarlo: el que ya estaba empezado se sigue llenando y se finaliza después de firmar.
+    // La pantalla que recibe este rechazo lo empieza sin unirlo a la atención (`ENCOUNTER_CLOSED`).
+    if (visible.status !== "borrador")
+      throw conflict(
+        "ENCOUNTER_CLOSED",
+        visible.status === "anulada"
+          ? "La atención está anulada: la ficha se empieza sin unirla a ella"
+          : "La atención ya está firmada: la ficha se empieza sin unirla a ella",
+      )
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
   }
@@ -1319,6 +1616,35 @@ export async function createFormResponse(
   }
   const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
+  // Dos «Empezar» seguidos (o a la vez) de la misma persona, del mismo formulario, para el mismo
+  // paciente y la misma atención, son el mismo borrador: se devuelve el que acaba de nacer, tal
+  // como nació. El de otra persona, el de hace un rato o uno con algo escrito no son «el mismo»:
+  // se empieza otro, con su autor y su fecha.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('form-response:' || ${input.patientId} || ':' || ${template.id}))`,
+  )
+  const drafts = await tx
+    .select()
+    .from(clinicalFormResponse)
+    .where(
+      and(
+        eq(clinicalFormResponse.organizationId, orgId),
+        eq(clinicalFormResponse.templateId, template.id),
+        eq(clinicalFormResponse.patientId, input.patientId),
+        encounterId ? eq(clinicalFormResponse.encounterId, encounterId) : isNull(clinicalFormResponse.encounterId),
+        eq(clinicalFormResponse.status, "borrador"),
+        eq(clinicalFormResponse.source, "staff"),
+        eq(clinicalFormResponse.authorUserId, actorUserId),
+        sql`${clinicalFormResponse.createdAt} > now() - make_interval(mins => ${DOUBLE_START_MINUTES})`,
+      ),
+    )
+    .orderBy(asc(clinicalFormResponse.createdAt))
+  const same = drafts.find(
+    (draft) =>
+      draft.professionalUserId === professionalUserId &&
+      canonicalJson(draft.answers ?? {}) === canonicalJson(answers),
+  )
+  if (same) return same
   const [row] = await tx
     .insert(clinicalFormResponse)
     .values({
@@ -1363,14 +1689,14 @@ export async function updateFormResponseDraft(
     )
     .limit(1)
     .for("update")
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
 
   if (current.status !== "borrador") {
     throw conflict(
       "FINALIZED",
       current.status === "descartado"
-        ? "El formulario está descartado"
-        : "El formulario está finalizado: usa una adenda",
+        ? "La ficha está descartada"
+        : "La ficha está finalizada: usa una adenda",
     )
   }
   // Lo que respondió el paciente es suyo: enviado, queda como llegó y se corrige aparte
@@ -1390,6 +1716,7 @@ export async function updateFormResponseDraft(
     site: await siteOf(tx, orgId),
     rejected,
     stored: current.answers as Record<string, unknown> | null,
+    locale: (await findOrgLocale(tx, orgId)).locale,
   })
   // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas. Si lo
   // guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
@@ -1400,7 +1727,7 @@ export async function updateFormResponseDraft(
   ) {
     throw conflict(
       "STALE_DRAFT",
-      "Otra pestaña o persona guardó otras respuestas de este formulario mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
+      "Otra pestaña o persona guardó otras respuestas de esta ficha mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
     )
   }
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
@@ -1423,7 +1750,7 @@ export async function updateFormResponseDraft(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Formulario")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {})
   return { ...row, rejected }
 }
@@ -1455,11 +1782,11 @@ export async function finalizeFormResponse(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador")
     throw conflict(
       "FINALIZED",
-      current.status === "descartado" ? "El formulario está descartado" : "El formulario ya está finalizado",
+      current.status === "descartado" ? "La ficha está descartada" : "La ficha ya está finalizada",
     )
   // Lo que el paciente aún no envió no se da por revisado: lo sigue respondiendo.
   if (current.source === "portal" && !current.submittedAt)
@@ -1481,7 +1808,7 @@ export async function finalizeFormResponse(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Formulario")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
   // Lo declarado sobre alergias pasa a los antecedentes sin confirmar, para que
   // la receta avise; la misma transacción: si no se puede, no se finaliza.
@@ -1557,7 +1884,7 @@ export async function discardFormResponse(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador")
     throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
   const clean = (reason ?? "").trim()
@@ -1600,12 +1927,12 @@ export async function addFormAddendum(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   // Lo finalizado y lo que el paciente ya envió, esté o no revisado: ninguno se edita, así
   // que la corrección va aparte. Un borrador del equipo se corrige en el mismo formulario.
   const declared = current.status === "borrador" && current.source === "portal" && current.submittedAt !== null
   if (current.status !== "finalizado" && !declared) {
-    throw validation("La corrección se agrega a un formulario finalizado o a lo que ya envió el paciente")
+    throw validation("La corrección se agrega a una ficha finalizada o a lo que ya envió el paciente")
   }
   const clean = (text ?? "").trim()
   if (!clean) throw invalidField("text", "Escribe la corrección")
@@ -1619,9 +1946,12 @@ export async function addFormAddendum(
 }
 
 /**
- * Una respuesta con quien la envió, si fue el paciente o quien habla por él: la
- * misma forma con que la ficha nombra a quien dijo algo (`declarantOfLink`), para
- * que el detalle del cuestionario y la franja digan la misma persona.
+ * Una respuesta con lo que la pantalla necesita decir de ella:
+ * - quien la envió, si fue el paciente o quien habla por él: la misma forma con
+ *   que la ficha nombra a quien dijo algo (`declarantOfLink`), para que el
+ *   detalle del cuestionario y la franja digan la misma persona;
+ * - lo de su atención: si está firmada (y desde cuándo: «finalizado después de
+ *   firmar») o anulada («de una atención anulada»). Sin atención, vienen nulas.
  */
 export type ListedFormResponse = FormResponseRow & {
   respondent: (HealthDeclarant & { name: string }) | null
@@ -1631,6 +1961,8 @@ export type ListedFormResponse = FormResponseRow & {
    * no es lo que él envió, y el original no se conserva. null si nadie las tocó.
    */
   editedByTeamAt: Date | null
+  encounterStatus: string | null
+  encounterFinalizedAt: Date | null
 }
 
 export async function listFormResponses(
@@ -1652,8 +1984,14 @@ export async function listFormResponses(
       relationship: patientContact.relationship,
       relationshipDetail: patientContact.relationshipDetail,
       kinship: patientContact.kinship,
+      encounterStatus: encounter.status,
+      encounterFinalizedAt: encounter.finalizedAt,
     })
     .from(clinicalFormResponse)
+    .leftJoin(
+      encounter,
+      and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
+    )
     .leftJoin(
       contact,
       and(
@@ -1714,6 +2052,8 @@ export async function listFormResponses(
             name: row.name,
           },
     editedByTeamAt: editedAt(row.response),
+    encounterStatus: row.encounterStatus,
+    encounterFinalizedAt: row.encounterFinalizedAt,
   }))
 }
 
@@ -1730,7 +2070,7 @@ export async function formResponsePatientId(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   return current.patientId
 }
 
@@ -1884,7 +2224,7 @@ export async function createConsentTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la plantilla")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión del consentimiento")
     throw e
   }
 }

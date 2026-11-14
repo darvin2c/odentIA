@@ -62,15 +62,20 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import {
+  advanceOnEnter,
   BirthDateInput,
+  clinicDateLocale,
   type FieldControl,
   normalizeCountry,
   PhoneInput,
+  readWrittenDate,
   setSubmitErrors,
   submitForm,
   useAppForm,
   useFieldControl,
   useFormSubmitError,
+  writtenDateFormat,
+  writtenDateProblemText,
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
@@ -1005,6 +1010,15 @@ export function RegistrationQuestionnaire({
         : null
   const needs = (condition: boolean, field: keyof Draft, message: string): Found =>
     condition ? { field, message } : null
+  /**
+   * Lo que no vale de la fecha escrita, con las palabras del campo («Ese mes tiene 28 días: revisa
+   * el día.»): la pantalla lo dice una sola vez (el campo no lo repite, `problemOutside`).
+   */
+  const birthDateProblem = (): string => {
+    const format = writtenDateFormat(clinicDateLocale(countryCode))
+    const problem = readWrittenDate(draft.birthDate, today, format).problem
+    return problem ? `${writtenDateProblemText(problem, format)}.` : "Revisa la fecha: escribe día, mes y año."
+  }
   /** Lo que la regla de la ficha dice de lo escrito en un campo, con sus mismas palabras. */
   const says = (field: keyof Draft, problem: string | null): Found => (problem ? { field, message: problem } : null)
 
@@ -1083,11 +1097,7 @@ export function RegistrationQuestionnaire({
             needs(wants("givenNames") && !draft.givenNames.trim(), "givenNames", "Escribe los nombres.") ??
             needs(wants("familyName") && !draft.surnames.trim(), "surnames", "Escribe los apellidos.") ??
             needs(wants("birthDate") && !draft.birthDate, "birthDate", "Escribe la fecha de nacimiento.") ??
-            needs(
-              wants("birthDate") && !isRealDate(draft.birthDate),
-              "birthDate",
-              "Revisa la fecha: escribe día, mes y año.",
-            ) ??
+            needs(wants("birthDate") && !isRealDate(draft.birthDate), "birthDate", birthDateProblem()) ??
             needs(
               !fill && !forOther && minor,
               "birthDate",
@@ -1147,6 +1157,7 @@ export function RegistrationQuestionnaire({
                 today={today}
                 country={countryCode}
                 invalid={control.invalid}
+                problemOutside={control.invalid}
                 aria-describedby={control.describedBy}
                 onBlur={control.onBlur}
               />
@@ -1371,6 +1382,8 @@ export function RegistrationQuestionnaire({
               {(control) => (
                 <Input
                   {...control.props}
+                  // El DNI y el certificado de nacido vivo son solo números: el teléfono abre su teclado.
+                  inputMode={draft.docType === "DNI" || draft.docType === "CNV" ? "numeric" : undefined}
                   autoComplete="off"
                   maxLength={20}
                   value={draft.docNumber}
@@ -1769,9 +1782,10 @@ export function RegistrationQuestionnaire({
             <DeclaredField
               name="allergies"
               optional={!required("allergies")}
+              // Sin género: el sexo puede no estar elegido aún, y la pregunta es la misma para todos.
               label={you(
-                "¿Eres alérgico a algún medicamento o material?",
-                `¿${first || "La persona"} es alérgico a algún medicamento o material?`,
+                "¿Tienes alergia a algún medicamento o material?",
+                `¿${first || "La persona"} tiene alergia a algún medicamento o material?`,
               )}
               hint="Por ejemplo, penicilina, anestesia o látex."
               detailLabel="¿A qué? Si son varias cosas, sepáralas con comas."
@@ -2673,30 +2687,10 @@ function Question({
           event.preventDefault()
           return
         }
-        if (event.key !== "Enter" || event.nativeEvent.isComposing || !typing) return
-        // En el buscador de país, Enter elige el país; nunca envía el formulario.
-        if (target.getAttribute("role") === "combobox") {
-          event.preventDefault()
-          return
-        }
-        // Enter pasa al campo siguiente; en el último, sigue a la otra pantalla.
-        event.preventDefault()
-        const fields = [
-          ...event.currentTarget.querySelectorAll<HTMLInputElement>(
-            "input:not([hidden]):not([type=hidden]):not([type=radio]):not([type=checkbox]):not(:disabled)",
-          ),
-        ].filter((input) => input.tabIndex !== -1)
-        const next = fields[fields.indexOf(target as HTMLInputElement) + 1]
-        if (next) {
-          next.focus()
-          return
-        }
-        if (!blocked(event.currentTarget))
-          event.currentTarget
-            .querySelector<HTMLButtonElement>(
-              "[data-slot=questionnaire-next]:not([hidden]), [data-slot=questionnaire-submit]:not([hidden])",
-            )
-            ?.click()
+        // Enter (o «Siguiente» del teléfono) pasa a la pregunta siguiente, también a las de
+        // botones (Sí, No, No sé), y en la última lleva a «Siguiente» o «Enviar» sin pulsarlo:
+        // nunca salta de pantalla con preguntas sin ver ni envía. Lo que falta lo dice el botón.
+        advanceOnEnter(event)
       }}
     >
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
@@ -2722,8 +2716,9 @@ function Question({
         // Cuando se envía desde aquí, «Saltar» sobra: todo es opcional y «Enviar» ya lo deja en blanco.
         className={finish ? "has-[>[data-slot=questionnaire-submit]:not([hidden])]:[&>[data-slot=questionnaire-skip]]:hidden" : undefined}
       >
-        <QuestionnairePrevious>Anterior</QuestionnairePrevious>
-        {required ? null : <QuestionnaireSkip>Saltar</QuestionnaireSkip>}
+        {/* Enter (`advanceOnEnter`) va de la última pregunta a «Siguiente» o «Enviar»: no se detiene en volver ni en saltar. */}
+        <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
+        {required ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
         {submit ?? finish ? (
           <QuestionnaireSubmit
             disabled={submit ? sending : finish?.sending}

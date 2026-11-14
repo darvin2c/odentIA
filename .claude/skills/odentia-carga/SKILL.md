@@ -173,7 +173,7 @@ Deja `clinica.json` (el plan, con el logo y la hoja dentro) y `plan-de-carga-<n>
 - **Gastos fijos** con su `key`: volver a cargar no los anota dos veces. Sin día de pago en lo que envió, se propone en «Para decidir».
 - **Asistente**: las de «Lo que solo tú sabes» por su `basicKey` (`KNOWLEDGE_BASICS`); se cargan publicadas.
 - **Equipo**: la propietaria ya está invitada desde el alta; a los demás la carga los invita (les llega un correo). Horarios con `weekday` 0 domingo … 6 sábado.
-- **Formatos propios** (consentimientos y formularios): se cargan en borrador; la clínica los revisa y los publica.
+- **Formatos propios** (consentimientos y formularios): se cargan en borrador; la clínica los revisa y los publica. Un formulario «ya está» si su título completo es el mismo: volver a cargar no lo repite, tampoco si el título va dos veces en el plan. Dos formularios distintos pueden empezar igual; cada uno lleva su título completo, como lo usa la clínica.
 - **`slug`**: la dirección de la clínica en odentIA («dra-marialicia-calderon»). La carga no acepta el plan en otra clínica.
 
 Con `import:produccion`: `ensayo` dice, área por área, qué se crea, qué se actualiza, qué ya está igual, qué espera a una persona y qué no entra y por qué; `cargar` lo guarda y envía las invitaciones. Con la primera sede, la clínica se enciende como en su alta. Cuando una persona del equipo acepta su invitación, se vuelve a ensayar y a cargar el mismo plan.

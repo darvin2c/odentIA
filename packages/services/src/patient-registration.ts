@@ -57,6 +57,7 @@ import {
   addDeclaredHealth,
   declarantOfContact,
   declarantOfRegistration,
+  hasMeaningfulHealth,
   getPatientHealth,
   initializeDeclaredPatientHealth,
   knownHealthQuestionsOf,
@@ -200,18 +201,6 @@ async function advisoryExclusive(tx: Db, value: string): Promise<void> {
 
 async function advisoryShared(tx: Db, value: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock_shared(${advisoryKey(value)})`)
-}
-
-function hasMeaningfulHealth(health: NonNullable<RegistrationAnswers["health"]> | undefined): boolean {
-  if (!health) return false
-  if (health.bloodGroup != null) return true
-  for (const group of [health.allergies, health.conditions, health.medications]) {
-    if (group && group.state !== "unanswered") return true
-  }
-  // Lo de la entrevista también cuenta: un registro que solo dice el embarazo no se pierde.
-  return [health.personal, health.dental, health.medical].some((group) =>
-    Object.values(group ?? {}).some((v) => v !== undefined && v !== ""),
-  )
 }
 
 /**
