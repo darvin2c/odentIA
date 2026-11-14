@@ -451,6 +451,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         faq.a,
         ["(«overjet de seis milímetros, clase uno molar izquierda»)", "(«Pesa veintidós kilos», «Sin fiebre en casa»)"],
         ["de una o varias opciones, de número, de escala o de pieza", "de una o varias opciones, de número o de escala"],
+        ["un dato que preguntan dos fichas (el ceod)", "un dato que preguntan dos fichas (el peso)"],
       ),
       forms: ["clio puede llenar la ficha", "llenar la ficha con el dictado", "que significa clio propone en la ficha", "dictar el peso en la ficha"],
     },
