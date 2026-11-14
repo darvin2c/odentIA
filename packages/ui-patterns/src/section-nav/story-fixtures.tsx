@@ -76,7 +76,7 @@ export const configuracion: SectionNavItem[] = [
   ["Correo", "/settings/mail"],
   ["Agente", "/settings/agent"],
   ["Pipelines", "/settings/pipelines"],
-  ["Registro de pacientes", "/settings/patient-registration"],
+  ["Preguntas al paciente", "/settings/patient-registration"],
   ["Acceso de pacientes", "/settings/patient-access"],
   ["Auditoría", "/settings/audit"],
 ].map(([label, to]) => ({
@@ -107,7 +107,7 @@ export const configuracionGrupos: SectionNavGroup[] = [
   {
     label: "Pacientes",
     items: [
-      { label: "Registro de pacientes", to: "/settings/patient-registration" },
+      { label: "Preguntas al paciente", to: "/settings/patient-registration" },
       { label: "Portal del paciente", to: "/settings/patient-access" },
     ],
   },

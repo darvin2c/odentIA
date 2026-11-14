@@ -82,7 +82,7 @@ const ROW_BUTTON = "min-h-11 sm:min-h-8"
 
 /**
  * Los consentimientos son lo principal y ya vienen activos. Los formularios propios
- * son para lo poco que la ficha y «Registro de pacientes» no preguntan: se abren
+ * son para lo poco que la ficha y «Preguntas al paciente» no preguntan: se abren
  * desde un enlace, con las mismas versiones (lo publicado no se edita).
  */
 function FormulariosPage() {
@@ -101,7 +101,7 @@ function FormulariosPage() {
       <div className="flex flex-col gap-6">
         <PageHeader
           title="Formularios propios"
-          subtitle="Preguntas que solo tu clínica hace. Lo de salud y datos del paciente ya se pregunta en «Registro de pacientes»."
+          subtitle="Preguntas que solo tu clínica hace. Lo de salud y datos del paciente ya se pregunta en «Preguntas al paciente»."
         />
         <Link to="/settings/forms" className="flex w-fit items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
           <ArrowLeft aria-hidden className="size-4" />

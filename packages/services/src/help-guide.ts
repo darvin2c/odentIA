@@ -651,7 +651,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "significa-faltan-datos-atencion",
         q: "¿Qué significa «Faltan datos para la atención»?",
-        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Registro de pacientes; sin su sexo registrado se dice «para la atención». Si es menor de edad, también el documento de su representante legal cuando su ficha no lo tiene: se escribe en la ficha de esa persona o al firmar el consentimiento, y queda guardado en ella. «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
+        a: "Que le falta algo de lo necesario para atenderla o atenderlo (nombres, apellidos, fecha de nacimiento y un teléfono o correo, suyo o de quien habla en su nombre) o de lo que tu clínica marcó como obligatorio en Configuración › Preguntas al paciente; sin su sexo registrado se dice «para la atención». Si es menor de edad, también el documento de su representante legal cuando su ficha no lo tiene: se escribe en la ficha de esa persona o al firmar el consentimiento, y queda guardado en ella. «Completar» abre solo lo que falta; al guardar, sus apellidos quedan confirmados. Lo ven recepción y quien dirige la clínica.",
       },
       {
         id: "documento-seguro-direccion-cambian-segun-clinica",
@@ -2193,11 +2193,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
   {
     id: "registro_pacientes",
     path: "/settings/patient-registration",
-    title: "Registro de pacientes",
+    title: "Preguntas al paciente",
     parent: SETTINGS,
     purpose:
-      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Aquí están también el enlace público y el código QR del registro, y el interruptor «Que se registren solos», que lo apaga o lo enciende. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
+      "El único lugar donde la clínica decide qué se le pregunta al paciente: sus datos y su salud (alergias, enfermedades, sus medicinas, el corazón y la anestesia, la lactancia, si fuma), al registrarse y en su enlace, y el aviso de privacidad que acepta. Lo marcado se pregunta desde que guardas, y a quien ya respondió solo se le pregunta lo que le falta. Aquí están también el enlace público y el código QR del registro, y el interruptor «Que se registren solos», que lo apaga o lo enciende. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
     terms: [
+      "registro de pacientes",
+      "preguntas al paciente",
+      "anticoagulantes",
+      "medicinas para los huesos",
+      "preguntas de salud",
+      "pregunta nueva",
       "formulario de registro",
       "enlace de registro",
       "aviso de privacidad",
@@ -2217,6 +2223,21 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "volver-obligatorio-estado-civil-ocupacion",
         q: "¿Puedo volver obligatorio el estado civil o la ocupación?",
         a: "No. El estado civil, el nivel educativo, la ocupación, cómo nos conoció y la procedencia solo pueden ser «Opcional» o «No preguntar»: nadie los usa para atender. Nombres y apellidos, fecha de nacimiento y un teléfono o correo se piden siempre.",
+      },
+      {
+        id: "preguntar-anticoagulantes",
+        q: "¿Cómo le pregunto a mis pacientes si toman anticoagulantes?",
+        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicinas para los huesos». Si lo escribe solo en «otro medicamento», no sale la marca: pregúntaselo en la consulta.",
+      },
+      {
+        id: "preguntas-nuevas",
+        q: "¿Por qué dice «Hay preguntas nuevas»?",
+        a: "Porque odentIA sumó preguntas de salud que cambian lo que se hace en la cita. Ya se le preguntan a tus pacientes como «Opcional»: nada es obligatorio ni impide atender. Si no las quieres, márcalas «No preguntar» y guarda; si te parecen bien, «Entendido».",
+      },
+      {
+        id: "falta-una-pregunta",
+        q: "Quiero preguntar algo que no está en la lista",
+        a: "Lo que tu clínica pregunta y no está en «Preguntas al paciente», pregúntalo en la consulta y anótalo en una ficha de consulta. Si crees que toda clínica debería preguntarlo, cuéntanoslo desde Ayuda.",
       },
     ],
   },
@@ -2808,7 +2829,7 @@ export function matchHelpTopics(
     let best: HelpMatch = {
       topic: entry.topic,
       faq: null,
-      // Lo que dijo tal cual desempata: «Registro de pacientes» es esa pantalla, no la de Pacientes.
+      // Lo que dijo tal cual desempata: «Preguntas al paciente» es esa pantalla, no la de Pacientes.
       score: emptyPhrase ? TOPIC_SCORE + literal : anchored && askedWeight > 0 ? (TOPIC_SCORE * explained) / askedWeight + Math.min(literal, 4) * LITERAL_WORD : 0,
     }
     let bestFaq = 0

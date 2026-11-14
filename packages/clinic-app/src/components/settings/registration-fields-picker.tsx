@@ -4,7 +4,7 @@ import type {
   RegistrationFieldKey,
   RegistrationFieldMode,
 } from "@odentia/clinical"
-import { FieldError } from "@odentia/ui"
+import { Badge, FieldError } from "@odentia/ui"
 import { Lock } from "lucide-react"
 import { useId } from "react"
 import { ChoiceButtons } from "../choice-buttons"
@@ -43,11 +43,32 @@ const CLINIC: PickerItem[] = [
     hint: "Cuál tiene, la aseguradora y el número de afiliación",
   },
 ]
-const HEALTH: PickerItem[] = [
-  { keys: ["allergies"], label: "Alergias" },
-  { keys: ["conditions"], label: "Enfermedades" },
-  { keys: ["medications"], label: "Medicación" },
+/** «Su salud»: lo que sale arriba de su ficha y de la atención. Lo de cada producto va en `PRODUCT_FIELDS.health`. */
+const HEALTH_FIRST: PickerItem[] = [
+  { keys: ["allergies"], label: "Alergias y qué le pasó" },
+  {
+    keys: ["conditions"],
+    label: "Enfermedades",
+    hint: "Se marcan de una lista: diabetes, presión alta, asma, epilepsia, hepatitis, problemas de sangrado, radioterapia en cabeza o cuello… y «Otra».",
+  },
+]
+const HEALTH_MEDICINES: PickerItem[] = [
+  {
+    keys: ["anticoagulants"],
+    label: "Anticoagulantes o aspirina diaria",
+    hint: "Warfarina, rivaroxabán, apixabán, clopidogrel. Se pregunta en «Tus medicinas», aparte.",
+  },
+  {
+    keys: ["boneMedicines"],
+    label: "Medicinas para los huesos",
+    hint: "Pastillas o inyección, por osteoporosis o por un cáncer, ahora o antes.",
+  },
+  { keys: ["medications"], label: "Otros medicamentos de todos los días" },
   { keys: ["bloodGroup"], label: "Grupo sanguíneo" },
+]
+const DENTAL_HEALTH: PickerItem[] = [
+  { keys: ["dental.corazon"], label: "Corazón: válvula, endocarditis o antibiótico antes del dentista" },
+  { keys: ["dental.problemaAnestesia"], label: "Problemas con la anestesia o sangrado tras una extracción" },
 ]
 const PERSONAL: PickerItem[] = [
   { keys: ["personal.embarazo"], label: "Embarazo", hint: "Solo a mujeres de 12 a 55 años" },
@@ -68,14 +89,17 @@ const DENTAL: PickerItem[] = [
     hint: "Fumar, morderse las uñas, respirar por la boca…",
   },
 ]
-/** Lo que pregunta latidIA (issue 229): la lactancia, junto al embarazo, y los hábitos. */
-const MEDICAL_PERSONAL: PickerItem[] = [
-  { keys: ["medical.lactancia"], label: "Lactancia", hint: "Solo a mujeres de 12 a 55 años" },
-]
-const MEDICAL_HABITS: PickerItem[] = [
-  { keys: ["medical.tabaco"], label: "Si fuma" },
-  { keys: ["medical.alcohol"], label: "Si toma alcohol" },
-]
+/**
+ * La lactancia, junto al embarazo, la preguntan odentIA y latidIA (issue 229); el tabaco
+ * también, con cuántos al día: es el mismo dato en los dos.
+ */
+const LACTATION: PickerItem = { keys: ["medical.lactancia"], label: "Lactancia", hint: "Solo a mujeres de 12 a 55 años" }
+const TOBACCO: PickerItem = {
+  keys: ["medical.tabaco"],
+  label: "Fuma y cuántos cigarrillos al día",
+  hint: "No fumo · Fumo (menos de 10 o 10 o más) · Lo dejé.",
+}
+const MEDICAL_HABITS: PickerItem[] = [TOBACCO, { keys: ["medical.alcohol"], label: "Si toma alcohol" }]
 /**
  * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
  * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA). vistIA
@@ -83,17 +107,23 @@ const MEDICAL_HABITS: PickerItem[] = [
  */
 const PRODUCT_FIELDS: Record<
   ClinicalProduct,
-  { personal: PickerItem[]; own: { title: string; help: string; items: PickerItem[] } | null }
+  {
+    health: PickerItem[]
+    personal: PickerItem[]
+    own: { title: string; help: string; items: PickerItem[] } | null
+  }
 > = {
   dental: {
-    personal: [],
+    health: DENTAL_HEALTH,
+    personal: [LACTATION, TOBACCO],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
   },
   medical: {
-    personal: MEDICAL_PERSONAL,
+    health: [],
+    personal: [LACTATION],
     own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
   },
-  optical: { personal: [], own: null },
+  optical: { health: [], personal: [], own: null },
 }
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -122,8 +152,10 @@ function Row({
   onMode,
   disabled,
   errors,
+  isNew,
 }: {
   item: PickerItem
+  isNew: boolean
   fields: Fields
   options: ReadonlyArray<{ value: RegistrationFieldMode; label: string }>
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
@@ -138,7 +170,15 @@ function Row({
     <div className="flex flex-col gap-1 border-b py-3 last:border-b-0">
       <div className="@container flex min-w-0 flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
         <div className="flex min-w-0 flex-col">
-          <span id={labelId} className="text-sm font-medium">{item.label}</span>
+          <span id={labelId} className="text-sm font-medium">
+            {item.label}
+            {/* Las que sumó la lista y nadie de la clínica vio aún: ya se preguntan, como «Opcional». */}
+            {isNew ? (
+              <Badge variant="secondary" className="ml-2 align-middle">
+                Nueva
+              </Badge>
+            ) : null}
+          </span>
           {item.hint ? <span className="text-xs text-muted-foreground">{item.hint}</span> : null}
         </div>
         <ChoiceButtons
@@ -167,10 +207,12 @@ function Group({
   onMode,
   disabled,
   errors,
+  newKeys,
 }: {
   title: string
   help: string
   items: PickerItem[]
+  newKeys: ReadonlySet<RegistrationFieldKey>
   fields: Fields
   options: ReadonlyArray<{ value: RegistrationFieldMode; label: string }>
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
@@ -193,6 +235,7 @@ function Group({
             onMode={onMode}
             disabled={disabled}
             errors={errors}
+            isNew={item.keys.some((key) => newKeys.has(key))}
           />
         ))}
       </div>
@@ -206,8 +249,11 @@ export function RegistrationFieldsPicker({
   disabled,
   showOrigin,
   errors = {},
+  newKeys = new Set(),
 }: {
   fields: Fields
+  /** Las preguntas que sumó la lista y nadie de la clínica vio aún. */
+  newKeys?: ReadonlySet<RegistrationFieldKey>
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
   disabled: boolean
   /** «Procedencia» solo en clínicas de Perú. */
@@ -267,6 +313,7 @@ export function RegistrationFieldsPicker({
         title="Datos de la persona"
         help="Lo que tu clínica necesita además para atenderlo."
         items={CLINIC}
+        newKeys={newKeys}
         fields={fields}
         options={THREE}
         onMode={onMode}
@@ -275,8 +322,9 @@ export function RegistrationFieldsPicker({
       />
       <Group
         title="Su salud"
-        help="Se la pregunta antes de su atención; quien atiende la revisa."
-        items={HEALTH}
+        help="Sale arriba de su ficha y de la atención; quien atiende la revisa con él."
+        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...HEALTH_MEDICINES]}
+        newKeys={newKeys}
         fields={fields}
         options={THREE}
         onMode={onMode}
@@ -287,6 +335,7 @@ export function RegistrationFieldsPicker({
         title="Otros antecedentes"
         help="Llegan a su entrevista de salud. Nunca son obligatorios."
         items={[...PERSONAL, ...PRODUCT_FIELDS[product].personal]}
+        newKeys={newKeys}
         fields={fields}
         options={TWO}
         onMode={onMode}
@@ -298,6 +347,7 @@ export function RegistrationFieldsPicker({
           title={own.title}
           help={own.help}
           items={own.items}
+          newKeys={newKeys}
           fields={fields}
           options={TWO}
           onMode={onMode}
@@ -309,6 +359,7 @@ export function RegistrationFieldsPicker({
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."
         items={showOrigin ? CENSUS : CENSUS.filter((item) => item.keys[0] !== "origin")}
+        newKeys={newKeys}
         fields={fields}
         options={TWO}
         onMode={onMode}

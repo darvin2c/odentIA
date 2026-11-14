@@ -33,6 +33,8 @@ import {
   leaveRegistrationHold,
   registerPatient,
   resolveRegistrationHold,
+  markRegistrationQuestionsSeen,
+  newRegistrationQuestionsOf,
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
@@ -1866,4 +1868,24 @@ it("quien registra a otra persona no da su consentimiento por ella, y un permiso
   expect(mine.consent).toBe("guardado")
   const [novedades] = await ownerDb.select().from(automationConsent).where(and(eq(automationConsent.contactId, jose.personId), eq(automationConsent.purpose, "novedades")))
   expect(novedades).toMatchObject({ status: "revoked" })
+})
+
+it("«Hay preguntas nuevas»: a una clínica que ya existía se le avisa, y guardar o «Entendido» lo da por visto", async () => {
+  const orgId = `org_preguntas_${randomUUID().slice(0, 8)}`
+  await insertOrg(ownerDb, orgId, orgId)
+  await seedActor()
+  await publish(orgId)
+  // Como quedó la clínica antes de la entrega: con la versión 1 de la lista.
+  await ownerDb.execute(sql`update patient_registration_config set questions_version = 1 where organization_id = ${orgId}`)
+  const news = () => withOrgContext(appDb, orgId, (tx) => newRegistrationQuestionsOf(tx, orgId))
+  expect((await news()).map((item) => item.key)).toEqual(expect.arrayContaining(["anticoagulants", "boneMedicines"]))
+  // Ya se preguntan, como «Opcional», sin que nadie toque nada.
+  const config = await withOrgContext(appDb, orgId, (tx) => getPatientRegistrationConfig(tx, orgId))
+  expect(config.fields.anticoagulants).toBe("optional")
+  await withOrgContext(appDb, orgId, (tx) => markRegistrationQuestionsSeen(tx, orgId, ACTOR))
+  expect(await news()).toEqual([])
+  // Una clínica que guarda su configuración ya ve la lista de hoy.
+  await ownerDb.execute(sql`update patient_registration_config set questions_version = 1 where organization_id = ${orgId}`)
+  await publish(orgId)
+  expect(await news()).toEqual([])
 })

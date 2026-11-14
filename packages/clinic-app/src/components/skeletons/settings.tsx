@@ -823,9 +823,9 @@ export function PatientRegistrationSkeleton() {
 export function PatientRegistrationPageSkeleton() {
   return (
     <SettingsPage
-      title="Registro de pacientes"
+      title="Preguntas al paciente"
       subtitle="Qué le pedimos a cada paciente, lo registre recepción o se registre solo, y el aviso de privacidad."
-      message="Cargando el registro de pacientes…"
+      message="Cargando las preguntas al paciente…"
       className="flex max-w-6xl flex-col gap-6"
     >
       <PatientRegistrationSkeleton />

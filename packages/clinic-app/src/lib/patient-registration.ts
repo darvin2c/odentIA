@@ -1,4 +1,4 @@
-import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
+import type { RegistrationAnswers, RegistrationConfig, RegistrationFieldKey } from "@odentia/clinical"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
 
@@ -26,7 +26,13 @@ export interface PublicRegistrationInfo {
 export interface RegistrationConfigResponse {
   data: RegistrationConfig
   /** `noticeSuggested`: el aviso es aún el que armó odentIA al nacer la clínica (ADR 0141). */
-  meta: { today: string; noticeSuggested?: boolean; noticeShown?: string }
+  meta: {
+    today: string
+    noticeSuggested?: boolean
+    noticeShown?: string
+    /** Las preguntas que sumó la lista y nadie de la clínica vio: ya se preguntan como «Opcional». */
+    newQuestions?: Array<{ key: RegistrationFieldKey; label: string }>
+  }
 }
 
 export interface SaveRegistrationConfigInput {
@@ -105,6 +111,11 @@ export async function submitPublicRegistration(
 /** Configuración privada (requiere sesión de la organización). */
 export async function fetchRegistrationConfig(): Promise<RegistrationConfigResponse> {
   return apiFetch<RegistrationConfigResponse>("/api/patient-registration/config")
+}
+
+/** «Entendido»: quien administra ya vio las preguntas nuevas. */
+export async function markRegistrationQuestionsSeen(): Promise<{ data: { seen: true } }> {
+  return apiFetch<{ data: { seen: true } }>("/api/patient-registration/questions-seen", { method: "POST" })
 }
 
 export async function saveRegistrationConfig(

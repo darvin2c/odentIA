@@ -6,6 +6,8 @@ import {
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
+  markRegistrationQuestionsSeen,
+  newRegistrationQuestionsOf,
   privacyNoticeOf,
   registrationNoticeSuggested,
   patientOrganizationToday,
@@ -60,6 +62,8 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
           noticeSuggested: await registrationNoticeSuggested(tx, orgId),
           // El aviso que ve quien completa sus datos: el de la clínica o, sin uno, el sugerido.
           noticeShown: await privacyNoticeOf(tx, orgId),
+          // Las preguntas que la lista sumó y nadie de la clínica vio aún: ya se preguntan como «Opcional».
+          newQuestions: await newRegistrationQuestionsOf(tx, orgId),
         },
       }))
       c.header("Cache-Control", "no-store")
@@ -74,6 +78,18 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     const parsed = z.strictObject({ enabled: z.boolean(), fields: registrationConfigSchema.shape.fields, privacyNotice: registrationConfigSchema.shape.privacyNotice, askReminders: z.boolean().optional(), askMessages: z.boolean().optional(), noticeReviewed: z.boolean().optional(), expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => savePatientRegistrationConfig(tx, orgId, userId, parsed.data)))
+  })
+  app.post("/patient-registration/questions-seen", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar el registro"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async tx => {
+        await markRegistrationQuestionsSeen(tx, orgId, userId)
+        return { seen: true }
+      }),
+    )
   })
   app.post("/contacts/:id/registration-links", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)

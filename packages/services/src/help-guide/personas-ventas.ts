@@ -198,13 +198,13 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
       {
         id: "registro-pacientes-enlace-y-qr",
         q: "¿Dónde saco el código QR o el enlace para que los pacientes se registren solos?",
-        a: "En Configuración › Registro de pacientes, en «Enlace público y código QR»: «Copiar enlace», «Generar código QR» y, ya generado, «Descargar la hoja para imprimir» para el mostrador o «Descargar el código QR». Lleva al registro de tu clínica, para quien llega sin ficha. Lo cambian la dueña y el administrador.",
+        a: "En Configuración › Preguntas al paciente, en «Enlace público y código QR»: «Copiar enlace», «Generar código QR» y, ya generado, «Descargar la hoja para imprimir» para el mostrador o «Descargar el código QR». Lleva al registro de tu clínica, para quien llega sin ficha. Lo cambian la dueña y el administrador.",
         forms: ["qr para que se registren en recepcion", "enlace publico de registro de pacientes", "hoja para imprimir con el codigo qr del registro"],
       },
       {
         id: "registro-pacientes-aviso-y-apagar",
         q: "¿Cómo cambio el aviso de privacidad o apago el registro por internet?",
-        a: "En Configuración › Registro de pacientes, en «Aviso de privacidad y publicación». El aviso lo escribe tu clínica: si dice «Sugerido, sin revisar», léelo y pulsa «Usarlo como base» para editarlo o «Lo revisé: guardarlo como el aviso de la clínica». El interruptor «Que se registren solos» apaga o enciende el registro público; apagado, el enlace y el código QR no admiten registros. La casilla «Novedades y promociones de la clínica» decide si el registro lo pregunta. «Así lo ve el paciente» es una vista previa que no guarda datos; al terminar, «Guardar».",
+        a: "En Configuración › Preguntas al paciente, en «Aviso de privacidad y publicación». El aviso lo escribe tu clínica: si dice «Sugerido, sin revisar», léelo y pulsa «Usarlo como base» para editarlo o «Lo revisé: guardarlo como el aviso de la clínica». El interruptor «Que se registren solos» apaga o enciende el registro público; apagado, el enlace y el código QR no admiten registros. La casilla «Novedades y promociones de la clínica» decide si el registro lo pregunta. «Así lo ve el paciente» es una vista previa que no guarda datos; al terminar, «Guardar».",
         forms: ["como cambio el aviso de privacidad", "como apago el registro publico de pacientes", "como veo el registro como lo ve el paciente"],
       },
     ],

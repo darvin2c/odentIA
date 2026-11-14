@@ -39,7 +39,7 @@ const grupos: SectionNavGroup[] = [
   {
     label: "Pacientes",
     items: [
-      { label: "Registro de pacientes", to: "/settings/patient-registration" },
+      { label: "Preguntas al paciente", to: "/settings/patient-registration" },
       { label: "Portal del paciente", to: "/settings/patient-access" },
     ],
   },

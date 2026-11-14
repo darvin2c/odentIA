@@ -16,7 +16,9 @@ import {
   missingPersonData,
   normalizePhone,
   healthQuestionsToAsk,
+  newRegistrationQuestions,
   pendingRegistrationFields,
+  REGISTRATION_QUESTIONS_VERSION,
   type RegistrationFieldKey,
   REPRESENTATIVE_DOC_GAP,
   type RegistrationAnswers,
@@ -634,6 +636,52 @@ export async function registrationNoticeSuggested(tx: Db, orgId: string): Promis
   return !!row?.at || !row?.notice.trim()
 }
 
+/**
+ * Las preguntas que la lista sumó después de la última vez que alguien de la clínica guardó o vio
+ * «Preguntas al paciente» (mesa del 13 nov, decisión 10): ya se preguntan como «Opcional» y a quien
+ * la administra se le avisa cuáles son. Una clínica sin configuración guardada es de antes de la
+ * lista: también se le avisa.
+ */
+export async function newRegistrationQuestionsOf(
+  tx: Db,
+  orgId: string,
+): Promise<Array<{ key: RegistrationFieldKey; label: string }>> {
+  const [row] = await tx
+    .select({ seen: patientRegistrationConfig.questionsVersion })
+    .from(patientRegistrationConfig)
+    .where(eq(patientRegistrationConfig.organizationId, orgId))
+    .limit(1)
+  return newRegistrationQuestions(row?.seen ?? 1, await orgProduct(tx, orgId))
+}
+
+/** «Entendido»: quien administra ya vio las preguntas nuevas, aunque no cambie nada. */
+export async function markRegistrationQuestionsSeen(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+  const updated = await tx
+    .update(patientRegistrationConfig)
+    .set({ questionsVersion: REGISTRATION_QUESTIONS_VERSION })
+    .where(eq(patientRegistrationConfig.organizationId, orgId))
+    .returning({ id: patientRegistrationConfig.organizationId })
+  // Sin configuración guardada, se guarda la de siempre (la que ya se pregunta): así queda dicho que la vio.
+  if (updated.length === 0) {
+    const current = await getPatientRegistrationConfig(tx, orgId)
+    await savePatientRegistrationConfig(tx, orgId, actorUserId, {
+      expectedVersion: current.version,
+      enabled: current.enabled,
+      fields: current.fields,
+      privacyNotice: current.privacyNotice,
+    })
+    return
+  }
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "patient-registration.questions_seen",
+    entity: "patient_registration_config",
+    entityId: orgId,
+    metadata: { version: REGISTRATION_QUESTIONS_VERSION },
+  })
+}
+
 export async function savePatientRegistrationConfig(
   tx: Db,
   orgId: string,
@@ -674,6 +722,9 @@ export async function savePatientRegistrationConfig(
   const nextVersion = input.expectedVersion + 1
   const askReminders = input.askReminders ?? current?.askReminders ?? true
   const askMessages = input.askMessages ?? current?.askMessages ?? true
+  // Quien guarda ya vio la lista de preguntas de hoy, también al nacer la clínica (todo encendido).
+  // Rearmar el aviso sugerido lo hace el sistema: no cuenta como que alguien las vio.
+  const questionsVersion = input.suggested && current ? current.questionsVersion : REGISTRATION_QUESTIONS_VERSION
   // El sugerido deja de serlo cuando alguien lo cambia o dice que lo revisó.
   const noticeSuggestedAt = input.suggested
     ? new Date()
@@ -691,6 +742,7 @@ export async function savePatientRegistrationConfig(
       askReminders,
       askMessages,
       noticeSuggestedAt,
+      questionsVersion,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -703,6 +755,7 @@ export async function savePatientRegistrationConfig(
         askReminders,
         askMessages,
         noticeSuggestedAt,
+        questionsVersion,
         updatedAt: new Date(),
       },
     })
