@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
@@ -53,6 +54,7 @@ function retiredWords(born: EncounterBorn): string {
       count(born.indicated.filter((row) => row.retired).length, "tratamiento", "tratamientos"),
       count(born.followUps.filter((row) => row.retired).length, "control", "controles"),
       count(born.consents.filter((row) => row.status === "anulado").length, "consentimiento", "consentimientos"),
+      count(born.forms.filter((row) => row.retired).length, "formulario", "formularios"),
     ].filter((part): part is string => part !== null),
   )
 }
@@ -90,7 +92,8 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
   }
   const prescriptions = retired ? [] : born.prescriptions
   const orders = retired ? [] : born.orders
-  const forms = retired ? [] : born.forms
+  // Los de una atención anulada van con lo que ya no vale, no como algo indicado.
+  const forms = pick(born.forms)
   const indicatedSomething = indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + forms.length > 0
   return (
     <>
@@ -149,7 +152,18 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
               </li>
             ))}
             {forms.map((row) => (
-              <li key={row.id}>Formulario: {row.title}</li>
+              <li key={row.id}>
+                {row.state === "a_medias" ? "Formulario a medias" : "Formulario"}: {row.title}
+                <span className="text-muted-foreground">
+                  {retired
+                    ? " · de una atención anulada"
+                    : row.state === "a_medias"
+                      ? " · falta terminarlo"
+                      : row.finalizedAt
+                        ? ` · finalizado ${formatDateTime(row.finalizedAt)}${row.afterSigning ? ", después de firmar la atención" : ""}`
+                        : ""}
+                </span>
+              </li>
             ))}
           </ul>
         </Part>

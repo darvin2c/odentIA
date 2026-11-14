@@ -25,6 +25,7 @@ import {
   type FormSchemaDef,
   type FormTemplate,
   fetchFormAddenda,
+  finalizedWords,
   finalizeFormResponse,
   startFormResponse,
   updateFormResponse,
@@ -39,10 +40,15 @@ import {
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
-import { activeOrgLocale } from "../../lib/locale"
+import { templateOptionLabel } from "../../lib/form-templates"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
+
+/** «13 nov 2026, 9:51 p. m.», en la hora de la clínica. */
+const whenAt = (value: string) =>
+  new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short", timeZone: activeOrgTimeZone() })
 
 function statusOf(response: FormResponse): {
   label: string
@@ -139,7 +145,8 @@ export function NewResponseDrawer({
             <field.SelectField
               label="Formulario"
               placeholder="Elige el formulario"
-              options={templates.map((t) => ({ value: t.id, label: t.title }))}
+              // Dos formularios con el mismo título llevan lo que los distingue: preguntas y fecha.
+              options={templates.map((t) => ({ value: t.id, label: templateOptionLabel(t, templates, whenAt) }))}
             />
           )}
         </form.AppField>
@@ -405,7 +412,9 @@ export function ResponseDetail({
               : response.professionalUserId
                 ? memberName(response.professionalUserId)
                 : "Sin profesional asignado"}
-            {response.finalizedAt ? ` · finalizado ${when(response.finalizedAt)}` : ""}
+            {/* Con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
+            {response.finalizedAt ? ` · ${finalizedWords(response, whenAt)}` : ""}
+            {response.encounterStatus === "anulada" ? " · de una atención anulada" : ""}
           </p>
         </div>
         <span className="flex items-center gap-2">

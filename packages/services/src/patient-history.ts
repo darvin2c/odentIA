@@ -728,7 +728,19 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /**
+   * Sus formularios del equipo: el que sigue a medias y el finalizado, con cuándo
+   * se terminó y si fue después de firmar la atención. `retired`: la atención se
+   * anuló y lo finalizado en ella va con lo que ya no vale.
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado"
+    finalizedAt: Date | null
+    afterSigning: boolean
+    retired: boolean
+  }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
 
@@ -795,14 +807,27 @@ async function loadBornForEncounters(
       .where(and(eq(clinicalOrder.organizationId, orgId), eq(clinicalOrder.patientId, patientId), inArray(clinicalOrder.encounterId, encounterIds)))
       .orderBy(asc(clinicalOrder.createdAt), asc(clinicalOrder.id)),
     tx
-      .select()
+      .select({
+        id: clinicalFormResponse.id,
+        encounterId: clinicalFormResponse.encounterId,
+        templateTitle: clinicalFormResponse.templateTitle,
+        status: clinicalFormResponse.status,
+        finalizedAt: clinicalFormResponse.finalizedAt,
+        attentionStatus: encounter.status,
+        attentionSignedAt: encounter.finalizedAt,
+      })
       .from(clinicalFormResponse)
+      .innerJoin(
+        encounter,
+        and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
+      )
       .where(
         and(
           eq(clinicalFormResponse.organizationId, orgId),
           eq(clinicalFormResponse.patientId, patientId),
           inArray(clinicalFormResponse.encounterId, encounterIds),
-          eq(clinicalFormResponse.status, "finalizado"),
+          // Lo finalizado y lo que el equipo dejó a medias; lo descartado no es de la historia.
+          sql`(${clinicalFormResponse.status} = 'finalizado' or (${clinicalFormResponse.status} = 'borrador' and ${clinicalFormResponse.source} = 'staff'))`,
         ),
       )
       .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
@@ -935,7 +960,16 @@ async function loadBornForEncounters(
   }
   for (const row of forms) {
     if (!row.encounterId) continue
-    of(row.encounterId).forms.push({ id: row.id, title: row.templateTitle ?? "Formulario clínico" })
+    const finalized = row.status === "finalizado"
+    of(row.encounterId).forms.push({
+      id: row.id,
+      title: row.templateTitle ?? "Formulario clínico",
+      state: finalized ? "finalizado" : "a_medias",
+      finalizedAt: row.finalizedAt,
+      // Terminado después de firmar la atención: lleva su propia fecha, y la Historia lo dice.
+      afterSigning: finalized && !!row.finalizedAt && !!row.attentionSignedAt && row.finalizedAt > row.attentionSignedAt,
+      retired: row.attentionStatus === "anulada",
+    })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")

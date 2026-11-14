@@ -792,7 +792,15 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /** Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una atención anulada. */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado"
+    finalizedAt: string | null
+    afterSigning: boolean
+    retired: boolean
+  }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 

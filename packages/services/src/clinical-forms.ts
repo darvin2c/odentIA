@@ -1772,11 +1772,21 @@ export async function addFormAddendum(
   return row
 }
 
+/**
+ * Un formulario con lo de su atención que la pantalla necesita decir: si está
+ * firmada (y desde cuándo: «finalizado después de firmar») o anulada («de una
+ * atención anulada»). Sin atención, las dos vienen nulas.
+ */
+export type FormResponseListed = FormResponseRow & {
+  encounterStatus: string | null
+  encounterFinalizedAt: Date | null
+}
+
 export async function listFormResponses(
   tx: Db,
   orgId: string,
   query: { patientId: string; encounterId?: string; templateId?: string },
-): Promise<FormResponseRow[]> {
+): Promise<FormResponseListed[]> {
   await requirePatient(tx, orgId, query.patientId)
   const conditions = [
     eq(clinicalFormResponse.organizationId, orgId),
@@ -1784,11 +1794,24 @@ export async function listFormResponses(
   ]
   if (query.encounterId) conditions.push(eq(clinicalFormResponse.encounterId, query.encounterId))
   if (query.templateId) conditions.push(eq(clinicalFormResponse.templateId, query.templateId))
-  return tx
-    .select()
+  const rows = await tx
+    .select({
+      response: clinicalFormResponse,
+      encounterStatus: encounter.status,
+      encounterFinalizedAt: encounter.finalizedAt,
+    })
     .from(clinicalFormResponse)
+    .leftJoin(
+      encounter,
+      and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
+    )
     .where(and(...conditions))
     .orderBy(desc(clinicalFormResponse.createdAt))
+  return rows.map((row) => ({
+    ...row.response,
+    encounterStatus: row.encounterStatus,
+    encounterFinalizedAt: row.encounterFinalizedAt,
+  }))
 }
 
 /** Paciente dueño de un formulario: para dejar traza de su lectura (404 si no existe). */

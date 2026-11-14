@@ -15,6 +15,7 @@ import {
   createFormResponse,
   createFormTemplate,
   finalizeFormResponse,
+  listFormResponses,
   listFormTemplates,
   publishFormTemplate,
   reuseFormTemplate,
@@ -22,8 +23,10 @@ import {
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createEncounter, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
+import { getTimeline } from "./patient-history.js"
 import { listClinicFormTemplates, previewPatientQuestionnaire } from "./portal-questionnaire.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { listWorkspaceAudit } from "./workspace.js"
 
 setupTestDb()
 
@@ -39,6 +42,7 @@ const schema = {
         { id: "intensidad", label: "Intensidad", type: "numero", min: 0, max: 10 },
         { id: "dolor", label: "Dolor", type: "escala", min: 0, max: 10 },
         { id: "hallazgos", label: "Hallazgos", type: "texto_largo" },
+        { id: "pieza", label: "Pieza", type: "pieza" },
       ],
     },
   ],
@@ -419,4 +423,149 @@ it("antes de publicar, dejar de usar o volver a usar, el servidor dice qué cues
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, previo.id))
   expect(await preview(previo.id, "reuse")).toEqual({ now: null, after: named(previo) })
   await expect(preview("00000000-0000-4000-8000-000000000000", "publish")).rejects.toMatchObject({ status: 404 })
+})
+
+it("dos «Dejar de usar» a la vez: uno lo deja y el otro recibe que ya no se usa, no un error interno", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Ficha que se deja dos veces")
+  const results = await Promise.allSettled(
+    [1, 2, 3].map(() => f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))),
+  )
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+  for (const result of results)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ code: "ARCHIVED", status: 409 })
+  // Y un borrador que se archiva dos veces, igual.
+  const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador que se archiva dos veces", schema }))
+  const again = await Promise.allSettled([1, 2].map(() => f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, draft.id))))
+  expect(again.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+  for (const result of again)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ code: "ARCHIVED", status: 409 })
+})
+
+it("anular la atención descarta sus formularios a medias con el motivo de la anulación; lo ya finalizado se conserva", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Evaluación de una atención que se anula")
+  const start = (answers: Record<string, unknown>) =>
+    f.run((tx) =>
+      createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id, answers }),
+    )
+  const finished = await start({ hallazgos: "Percusión negativa" })
+  await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, finished.id))
+  const halfway = await start({ hallazgos: "Anotado para otra persona" })
+  // Uno suelto de la misma persona, sin atención: anularla no lo toca.
+  const loose = await f.run((tx) =>
+    createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, answers: { hallazgos: "Suelto" } }),
+  )
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Se abrió para el paciente equivocado" }))
+  const byId = new Map(
+    (await ownerDb.select().from(clinicalFormResponse).where(eq(clinicalFormResponse.patientId, f.patient.id))).map((row) => [row.id, row]),
+  )
+  // Nada se borra: el borrador queda descartado, con quién, cuándo y por qué.
+  expect(byId.get(halfway.id)).toMatchObject({
+    status: "descartado",
+    discardedBy: f.actor,
+    discardReason: "Atención anulada: Se abrió para el paciente equivocado",
+    answers: { hallazgos: "Anotado para otra persona" },
+  })
+  expect(byId.get(halfway.id)?.discardedAt).toBeInstanceOf(Date)
+  expect(byId.get(finished.id)).toMatchObject({ status: "finalizado", encounterId: f.encounter.id })
+  expect(byId.get(loose.id)).toMatchObject({ status: "borrador" })
+  // Descartado ya no se llena ni se finaliza.
+  await expect(f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, halfway.id))).rejects.toMatchObject({ status: 409 })
+  const [trace] = await ownerDb
+    .select()
+    .from(auditEvent)
+    .where(and(eq(auditEvent.action, "form_response.discard"), eq(auditEvent.entityId, halfway.id)))
+  expect(trace?.metadata).toMatchObject({ encounterId: f.encounter.id })
+})
+
+it("los rechazos al empezar o llenar un formulario se dicen con palabras de la persona", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Evaluación con mensajes claros")
+  const response = await f.run((tx) =>
+    createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id }),
+  )
+  // Un sí/no donde va una pieza: se dice qué va ahí, no «inválida: true».
+  await expect(
+    f.run((tx) => updateFormResponseDraft(tx, ORG, f.actor, response.id, { answers: { pieza: true } })),
+  ).rejects.toMatchObject({ status: 400, fields: { "answers.pieza": '"Pieza" debe ser el número de una pieza' } })
+  const start = (templateId: string) =>
+    f.run((tx) => createFormResponse(tx, ORG, f.actor, { templateId, patientId: f.patient.id }))
+  // Uno que ya no se usa.
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))
+  await expect(start(template.id)).rejects.toMatchObject({
+    status: 400,
+    fields: { templateId: "Este formulario ya no se usa: elige otro, o vuelve a usarlo desde Configuración" },
+  })
+  // Uno que todavía es un borrador.
+  const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador con mensajes claros", schema }))
+  await expect(start(draft.id)).rejects.toMatchObject({
+    status: 400,
+    fields: { templateId: "Este formulario aún es un borrador: publícalo para empezar a llenarlo" },
+  })
+})
+
+it("«Actividad del equipo» dice de qué formulario se trata al publicarlo, dejarlo de usar y volver a usarlo", async () => {
+  const f = await clinicalFixture()
+  // Crear y publicar en dos pasos, como en la pantalla: cada uno es su fila.
+  const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Ficha con nombre en la actividad", schema }))
+  const template = await f.run((tx) => publishFormTemplate(tx, ORG, f.actor, draft.id))
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))
+  const back = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, template.id))
+  const { items } = await f.run((tx) => listWorkspaceAudit(tx, ORG, { area: "configuracion" }))
+  const about = (id: string, action: string) => items.find((item) => item.entityId === id && item.action === action)
+  expect(about(template.id, "form_template.publish")).toMatchObject({
+    what: "Publicó una versión de una plantilla de formulario",
+    about: "«Ficha con nombre en la actividad» · versión 1",
+  })
+  expect(about(template.id, "form_template.leave")).toMatchObject({
+    what: "Dejó de usar un formulario",
+    about: "«Ficha con nombre en la actividad» · versión 1",
+  })
+  expect(about(back.id, "form_template.reuse")).toMatchObject({
+    what: "Volvió a usar un formulario",
+    about: "«Ficha con nombre en la actividad» · versión 2",
+  })
+})
+
+it("la Historia y la lista dicen el formulario a medias, cuándo se terminó después de firmar y el de una atención anulada", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Evaluación con su propia fecha")
+  const draft = await f.run((tx) =>
+    createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id }),
+  )
+  await f.ready(f.encounter.id)
+  const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const formsOf = async (patientId: string) =>
+    (await f.run((tx) => getTimeline(tx, ORG, patientId))).data.find((row) => row.type === "encounter")?.born?.forms
+  // Firmada con el formulario a medias: la tarjeta de la atención lo dice.
+  expect(await formsOf(f.patient.id)).toEqual([
+    { id: draft.id, title: "Evaluación con su propia fecha", state: "a_medias", finalizedAt: null, afterSigning: false, retired: false },
+  ])
+  let [listed] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: f.patient.id }))
+  expect(listed).toMatchObject({ id: draft.id, encounterStatus: "finalizada" })
+  expect(listed?.encounterFinalizedAt?.getTime()).toBe(signed.encounter.finalizedAt?.getTime())
+  // Terminado después: su propia fecha y hora, y «después de firmar».
+  const done = await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, draft.id))
+  expect(await formsOf(f.patient.id)).toEqual([
+    { id: draft.id, title: "Evaluación con su propia fecha", state: "finalizado", finalizedAt: done.finalizedAt, afterSigning: true, retired: false },
+  ])
+  ;[listed] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: f.patient.id }))
+  expect(listed?.finalizedAt?.getTime()).toBeGreaterThan(listed?.encounterFinalizedAt?.getTime() ?? Number.POSITIVE_INFINITY)
+
+  // Otra persona: finalizado dentro de una atención que después se anula. Va con lo que ya no vale.
+  const g = await clinicalFixture()
+  const inVoided = await g.run((tx) =>
+    createFormResponse(tx, ORG, g.actor, { templateId: template.id, patientId: g.patient.id, encounterId: g.encounter.id }),
+  )
+  await g.run((tx) => finalizeFormResponse(tx, ORG, g.actor, inVoided.id))
+  await g.run((tx) => voidEncounter(tx, ...g.args, g.encounter.id, { reason: "Paciente equivocado" }))
+  expect(await formsOf(g.patient.id)).toMatchObject([{ id: inVoided.id, state: "finalizado", afterSigning: false, retired: true }])
+  expect(await g.run((tx) => listFormResponses(tx, ORG, { patientId: g.patient.id }))).toMatchObject([
+    { id: inVoided.id, status: "finalizado", encounterStatus: "anulada" },
+  ])
+  // Uno suelto no tiene atención.
+  const loose = await g.run((tx) => createFormResponse(tx, ORG, g.actor, { templateId: template.id, patientId: g.patient.id }))
+  const rows = await g.run((tx) => listFormResponses(tx, ORG, { patientId: g.patient.id }))
+  expect(rows.find((row) => row.id === loose.id)).toMatchObject({ encounterStatus: null, encounterFinalizedAt: null })
 })

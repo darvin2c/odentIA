@@ -307,6 +307,10 @@ export function EncounterVoidDialog({
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
                       <li>Sus diagnósticos, procedimientos y lo registrado en ella.</li>
                       <li>{voidedPapersText()}</li>
+                      <li>
+                        Sus formularios a medias se descartan con este motivo. Los que ya finalizaste se
+                        conservan, marcados como de una atención anulada.
+                      </li>
                       <li>Lo que se dio por hecho aquí vuelve a quedar pendiente, sin cargos.</li>
                       <li>
                         Un papel que ya entregaste dirá «Anulado» al comprobarlo; lo que la persona
