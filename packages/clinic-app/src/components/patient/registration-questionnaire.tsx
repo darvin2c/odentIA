@@ -3056,10 +3056,13 @@ function DeclaredField({
           {state === "recorded" ? (
             <>
               {before}
+              {/* Una etiqueta que se ve, no solo el ejemplo dentro de la caja (QA del 14 nov, B14). */}
+              <span className="text-sm" aria-hidden>
+                {detailLabel}
+              </span>
               <Input
                 aria-label={detailLabel}
                 aria-describedby={control.describedBy}
-                placeholder={detailLabel}
                 autoComplete="off"
                 maxLength={detailMax}
                 value={text}
