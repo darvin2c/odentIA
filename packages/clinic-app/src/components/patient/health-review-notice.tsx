@@ -102,6 +102,7 @@ export function HealthReviewNotice({
   const today = clinicToday()
   const pregnancy = health.pregnancy ?? null
   // Una lista por declaración: cada cosa con quien la dijo y su día, sin juntar lo de dos fechas.
+  const lastGroup = (health.declared ?? []).at(-1)
   const saidGroups = (health.declared ?? []).map((group) => {
     const no = saidNoWords(group.by, sex).toLocaleLowerCase("es")
     const rows: Array<{ label: string; value: string }> = []
@@ -135,11 +136,21 @@ export function HealthReviewNotice({
     // Lo que tiene marca (anticoagulante, huesos) va en su propia fila, como arriba de la ficha.
     for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
       const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
+      const label = key === "anticoagulants" ? "Anticoagulante" : "Medicina para los huesos"
       if (inClass.length > 0)
         rows.push({
-          label: key === "anticoagulants" ? "Anticoagulante" : "Medicinas para los huesos",
-          value: inClass.map((row) => [row.name, row.dose].filter(Boolean).join(" ")).join(", "),
+          label,
+          // «Anticoagulante · Anticoagulante (no dijo cuál)» se leía dos veces (B9): sin nombre, «no dijo cuál».
+          value: inClass
+            .map((row) => (row.name === MEDICATION_CLASSES[key].unnamed ? "no dijo cuál" : [row.name, row.dose].filter(Boolean).join(" ")))
+            .join(", "),
         })
+      else if (group === lastGroup) {
+        // Su «No» o su «No sé» a la clase también se revisa con ella (B9), en su última declaración.
+        const known = health.medicineClasses?.[key]
+        if (known?.said && known.answer === "unknown") rows.push({ label, value: "no sabe" })
+        else if (known?.said && known.answer === "no") rows.push({ label, value: no })
+      }
     }
     const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
     if (otherMedications.length > 0)

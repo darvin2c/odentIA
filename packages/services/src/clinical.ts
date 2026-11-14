@@ -28,7 +28,6 @@ import {
   type RegistrationAnswers,
   REPORT_STATUSES,
   type ReportStatus,
-  DECLARED_ONLINE_NOTE,
   registrationAnswersSchema,
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
@@ -1517,8 +1516,8 @@ export async function addDeclaredHealth(
   actorUserId: string | null,
   patientId: string,
   input: DeclaredPatientHealthInput,
-  /** `words`: cómo empieza la nota de cada fila; sin ellas, la del registro en línea. */
-  origin: { entity: string; entityId: string; at: Date; words?: string },
+  /** De dónde vino y cuándo lo dijo: su origen va en la auditoría, no en las notas. */
+  origin: { entity: string; entityId: string; at: Date },
 ): Promise<{ conditions: number; medications: number; interview: boolean; saidNo: Array<"allergies" | "conditions" | "medications"> }> {
   const parsed = registrationAnswersSchema.shape.health.safeParse(input)
   if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
@@ -1535,8 +1534,9 @@ export async function addDeclaredHealth(
   const bloodGroup = !locked.bloodGroup && declared.bloodGroup ? declared.bloodGroup : null
   const today = await clinicToday(tx, orgId)
   const saidOn = await clinicToday(tx, orgId, origin.at)
-  const note = `${origin.words ?? DECLARED_ONLINE_NOTE} el ${saidOn.split("-").reverse().join("/")}.`
-  const withNote = (notes: string | undefined) => (notes?.trim() ? `${note} ${notes.trim()}` : note).slice(0, 2000)
+  // De dónde vino y cuándo lo dice su marca («Lo dijo ella el …»): no se escribe en sus notas, que son
+  // texto libre de quien atiende (QA del 14 nov, B9).
+  const withNote = (notes: string | undefined) => (notes?.trim() ? notes.trim().slice(0, 2000) : null)
 
   // Enfermedades: no se repite una activa con el mismo nombre.
   const activeConditions = new Set(

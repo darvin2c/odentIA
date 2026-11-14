@@ -1487,7 +1487,8 @@ it("QR general con el celular de alguien que ya está: no se crea a nadie y rece
   const healthNotes = JSON.stringify(await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", diego.id)))
   expect(healthNotes).not.toContain("Asma")
   const declaredHealth = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", same.patientId))
-  expect(declaredHealth.conditions.find((row) => row.name === "Asma")?.notes).toMatch(/^Lo declaró en su registro en línea el \d{2}\/\d{2}\/\d{4}\.$/)
+  // De dónde vino lo dice su marca, no sus notas (QA del 14 nov, B9).
+  expect(declaredHealth.conditions.find((row) => row.name === "Asma")?.notes ?? null).toBeNull()
   expect(declaredHealth).toMatchObject({ reviewPending: true, reviewStatus: { conditions: "recorded" } })
   const [quiet] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, third!.id))
   expect(quiet).toMatchObject({ status: "done", settledReason: "Era la misma persona: no se cambió ningún dato" })

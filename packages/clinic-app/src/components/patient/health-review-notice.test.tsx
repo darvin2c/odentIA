@@ -317,7 +317,7 @@ describe("«Pregúntale» con representante", () => {
       </QueryClientProvider>,
     ).replace(/<[^>]+>/g, "|")
     expect(page).toMatch(/Anticoagulante\|+[^|]*warfarina 5 mg/)
-    expect(page).toMatch(/Medicinas para los huesos\|+[^|]*alendronato/)
+    expect(page).toMatch(/Medicina para los huesos\|+[^|]*alendronato/)
     expect(page).toMatch(/Medicinas\|+[^|]*Losartán/)
   })
 })
@@ -363,4 +363,30 @@ describe("«Revisa con él» trae lo que dijo de su corazón", () => {
       declareProduct(bareProduct("dental"))
     }
   })
+})
+
+// QA del 14 nov (B9): «Revisa con ella» no traía su «No sé» al anticoagulante, y «Anticoagulante (no dijo
+// cuál)» repetía la palabra.
+it("su «No sé» al anticoagulante se revisa con ella, y lo dicho sin nombre dice «no dijo cuál»", () => {
+  const ernesto = {
+    ...health,
+    reviewPending: true,
+    medications: [{ id: "m1", name: "Medicina para los huesos (no dijo cuál)", atcCode: "M05B", endDate: null, isActive: true }],
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "yes", said: false } },
+    declared: [
+      {
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: ["m1"],
+        pregnancy: false,
+        saidNo: { allergies: false, conditions: false, medications: false },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = render(ernesto).replace(/<[^>]+>/g, "|")
+  expect(page).toMatch(/Anticoagulante\|+[^|]*no sabe/)
+  expect(page).toMatch(/Medicina para los huesos\|+[^|]*no dijo cuál/)
+  expect(page).not.toContain("(no dijo cuál)")
 })

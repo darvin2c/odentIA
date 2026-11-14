@@ -1092,7 +1092,7 @@ async function saveLinkData(
         allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
         origin,
       )
-      await addDeclaredHealth(tx, orgId, null, patientId, said, { ...origin, at: new Date(), words: "Lo dijo en su enlace" })
+      await addDeclaredHealth(tx, orgId, null, patientId, said, { ...origin, at: new Date() })
     }
   }
   const person = await requirePatient(tx, orgId, patientId)
