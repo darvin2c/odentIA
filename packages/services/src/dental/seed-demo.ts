@@ -46,6 +46,7 @@ import {
   patientContact,
   patientDocument,
   patientDocumentContext,
+  patientHealthDeclaration,
   patientMedication,
   patientPayment,
   patientPaymentApplication,
@@ -4857,6 +4858,84 @@ await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaTod
     action: "visit_answer.sent",
     metadata: { patientId: martaRow.patientId, appointmentId: martaToday.id, via: "enlace" },
     createdAt: yesterday,
+  })
+}
+
+// «¿Cambió algo?» (mesa del 13 nov, entrega 10, caso C6): Elena se registró sola hace dos meses, antes
+// de su limpieza de entonces, y dijo que toma warfarina. Pasado el mes, su enlace para la cita de
+// pasado mañana empieza con «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?»;
+// recepción ve en su página «Antes de su cita: por responder», sin nada de lo que dijo.
+{
+  const twoMonthsAgo = new Date(lima(-60, "18:20"))
+  await db.transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "public", entryPoint: "qr" },
+      {
+        submissionId: randomUUID(),
+        formVersion: registrationConfig.version,
+        answers: {
+          demographics: {
+            displayName: "Elena Vargas Núñez",
+            givenNames: "Elena",
+            familyName: "Vargas Núñez",
+            birthDate: "1958-08-02",
+            sex: "F",
+            phone: "+51987000939",
+            docType: "DNI",
+            docNumber: "70090816",
+          },
+          respondent: "patient",
+          privacyAccepted: true,
+          health: {
+            allergies: { state: "none", items: [] },
+            conditions: { state: "recorded", items: [{ name: "Fibrilación auricular" }] },
+            anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
+            boneMedicines: { state: "none" },
+            medications: { state: "none", items: [] },
+          },
+        },
+      },
+    ),
+  )
+  const [elena] = await db
+    .select({ patientId: patient.id })
+    .from(patient)
+    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
+    .where(and(eq(patient.organizationId, ORG_A), eq(contact.docNumber, "70090816")))
+    .limit(1)
+  const elenaId = elena?.patientId
+  if (!elenaId) throw new Error("Falta Elena en la semilla")
+  // Lo dijo hace dos meses: la declaración guarda ese día (se siembra con el dueño de la base).
+  await db
+    .update(patientHealthDeclaration)
+    .set({ saidAt: twoMonthsAgo })
+    .where(and(eq(patientHealthDeclaration.organizationId, ORG_A), eq(patientHealthDeclaration.patientId, elenaId)))
+  // Su limpieza de entonces, antes de que abra la sede: no choca con la historia de Reportes.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: elenaId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: new Date(lima(-59, "07:10")),
+    endsAt: new Date(lima(-59, "07:40")),
+    durationMin: 30,
+    status: "atendida",
+    createdBy: ANA_ID,
+  })
+  await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: elenaId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: lima(2, "07:15"),
+    endsAt: lima(2, "07:45"),
+    notice: false,
+    outsideSchedule: true,
   })
 }
 
