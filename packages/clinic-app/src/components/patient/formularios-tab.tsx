@@ -161,6 +161,33 @@ function rejectedWords(rejected: Record<string, string>): string {
   return `${Object.values(rejected).join(" ")} Lo demás quedó guardado.`
 }
 
+/** Una respuesta dicha tal cual, si es corta; `null` si no cabe en una frase. */
+function shownValue(value: unknown): string | null {
+  if (typeof value === "boolean") return value ? "Sí" : "No"
+  if (typeof value === "number") return String(value)
+  if (typeof value === "string" && value.trim() && value.trim().length <= 40) return value.trim()
+  return null
+}
+
+/**
+ * Lo que se pierde al salir, en palabras de quien decide: «No se guardó «15» en «Intensidad del
+ * dolor (0–10)». Lo demás ya está guardado.» `pending`: además hay un cambio que aún no se guardó
+ * y que «Descartar y salir» tampoco guardará.
+ */
+export function lostWords(lost: Array<{ label: string; value: unknown }>, pending: boolean): string {
+  const parts = lost.map(({ label, value }) => {
+    const shown = shownValue(value)
+    return shown === null ? `lo que escribiste en «${label}»` : `«${shown}» en «${label}»`
+  })
+  const what =
+    parts.length === 1
+      ? `No se guardó ${parts[0]}.`
+      : `No se guardaron ${parts.slice(0, -1).join(", ")} ni ${parts.at(-1)}.`
+  return `${what} ${pending ? "Tampoco lo último que cambiaste, que aún no se guardaba." : "Lo demás ya está guardado."}`
+}
+
+const SAVE_FAILED_WORDS = "Tus últimos cambios no se guardaron. Si sales, se pierden."
+
 /**
  * Para finalizar, cada obligatoria visible tiene respuesta: lo que falta se
  * dice en su pregunta (la misma regla que el servidor al cerrar).
@@ -225,17 +252,27 @@ export function ResponseDetail({
   const saveFailed = useRef(false)
   // Lo que el último guardado no aceptó (`answers.<id>` → por qué): sigue en pantalla, sin guardar.
   const rejected = useRef<Record<string, string>>({})
-  // En la columna lateral, el aviso de «salir sin guardar» sigue a lo guardado de verdad.
-  const draftSaved = useDraftSaved()
-  useEffect(() => draftSaved(!editable || saveState === "guardado"), [draftSaved, editable, saveState])
+  // El valor que se mandó en cada una de esas preguntas: mientras siga ahí, es lo que se pierde.
+  const rejectedValues = useRef<Record<string, unknown>>({})
+  // Las preguntas que cambiaron desde el último guardado que salió.
+  const changed = useRef(new Set<string>())
+  // «Descartar y salir»: lo que estaba por guardarse ya no se guarda al cerrarse.
+  const discarded = useRef(false)
+  const draftSaved = useDraftSaved({
+    onDiscard: () => {
+      discarded.current = true
+      clearTimeout(timer.current ?? undefined)
+    },
+  })
 
   const validators = useMemo(() => ({ onSubmit: finalizeSchema(schema) }), [schema])
   const form = useAppForm({
     defaultValues: { answers: { ...response.answers } as Record<string, unknown> },
     validators,
     listeners: {
-      onChange: () => {
+      onChange: ({ fieldApi }) => {
         version.current += 1
+        changed.current.add(fieldApi.name)
         setSaveState("pendiente")
       },
     },
@@ -249,6 +286,27 @@ export function ResponseDetail({
   })
   const answers = useStore(form.store, (state) => state.values.answers)
   const formError = useFormSubmitError(form)
+
+  // El aviso de «salir sin guardar» (×, Escape y el menú) sale solo si algo se pierde de verdad:
+  // lo pendiente se guarda al cerrarse, así que no cuenta. Se pierde lo que el servidor no aceptó
+  // (mientras siga escrito) o lo que no se pudo guardar.
+  const lostAnswers = Object.keys(rejected.current).flatMap((name) => {
+    const id = name.replace(/^answers\./, "")
+    const field = schema.sections.flatMap((section) => section.fields).find((f) => f.id === id)
+    const value = rejectedValues.current[name]
+    return field && JSON.stringify(answers[id] ?? null) === JSON.stringify(value ?? null) ? [{ label: field.label, value }] : []
+  })
+  const lostNames = new Set(Object.keys(rejected.current))
+  const pendingElse = [...changed.current].some((name) => !lostNames.has(name))
+  const lost =
+    !editable
+      ? null
+      : saveState === "error"
+        ? SAVE_FAILED_WORDS
+        : lostAnswers.length > 0
+          ? lostWords(lostAnswers, pendingElse && (saveState === "pendiente" || saveState === "guardando"))
+          : null
+  useEffect(() => draftSaved(lost === null, lost), [draftSaved, lost])
 
   const documentsQuery = useQuery({
     queryKey: ["patient-documents", response.patientId, "activos"],
@@ -272,21 +330,28 @@ export function ResponseDetail({
     const target = version.current
     if (target === saved.current) return rejected.current
     setSaveState("guardando")
+    const sent = { ...form.state.values.answers }
+    const sentNames = [...changed.current]
+    changed.current.clear()
     const run = (async () => {
       try {
         const updated = await updateFormResponse(response.id, {
-          answers: answersForServer(schema, form.state.values.answers),
+          answers: answersForServer(schema, sent),
           // De qué respuestas guardadas partió: si otra pestaña guardó otras, se avisa en vez de pisarlas.
           baseAnswers: savedAnswers.current,
         })
         const { rejected: unsaved = {}, ...row } = updated.data
         rejected.current = unsaved
+        rejectedValues.current = Object.fromEntries(
+          Object.keys(unsaved).map((name) => [name, sent[name.replace(/^answers\./, "")]]),
+        )
         savedAnswers.current = row.answers ?? {}
         remember(row)
         saved.current = target
         saveFailed.current = false
         setSaveState(version.current !== target ? "pendiente" : Object.keys(unsaved).length > 0 ? "parcial" : "guardado")
       } catch (error) {
+        for (const name of sentNames) changed.current.add(name)
         setSaveState("error")
         saveFailed.current = true
         throw error
@@ -323,14 +388,16 @@ export function ResponseDetail({
     }
   }, [answers])
   // Al cambiar de formulario o salir, se guarda lo pendiente; si falla, se avisa
-  // (la pantalla ya no está para decirlo junto a la pregunta).
+  // (la pantalla ya no está para decirlo junto a la pregunta). Con «Descartar y salir», no.
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al desmontar; lee el borrador vigente al salir.
   useEffect(
     () => () => {
+      if (discarded.current) return
       const title = response.templateTitle ?? "el formulario"
       // Primero termina el guardado en curso; después, si aún falta algo, sale con la base que dejó.
       void (async () => {
         while (inFlight.current) await inFlight.current.catch(() => {})
+        if (discarded.current) return
         // Lo que no valía se queda sin guardar: se dice al salir, ya sin su pregunta a la vista.
         const warn = (unsaved: Record<string, string>) => {
           if (Object.keys(unsaved).length > 0)
