@@ -419,6 +419,52 @@ export function findHabitualMedication(
   return entries.find((entry) => normalizeDrugText(entry.dci) === key) ?? null
 }
 
+/**
+ * Las dos clases de medicinas que cambian lo que se hace en la cita y por eso
+ * llevan su marca arriba de la ficha y de la atención. Cada una es un grupo de
+ * la clasificación ATC de la OMS, que es jerárquica: el código de un
+ * medicamento empieza por el de su grupo (warfarina, B01AA03, es de B01A).
+ * - `anticoagulants`: B01A, agentes antitrombóticos (antagonistas de la
+ *   vitamina K, heparinas, antiagregantes como el clopidogrel o la aspirina
+ *   diaria, e inhibidores directos de la trombina y del factor Xa).
+ * - `boneMedicines`: M05B, medicamentos que afectan la estructura ósea y la
+ *   mineralización (bifosfonatos y denosumab).
+ *
+ * La marca sale del código, nunca del nombre escrito: lo tiene la medicina que
+ * el paciente dijo al responder «Sí» a la pregunta de su clase (con el código
+ * del grupo, `declaredMedicineAtc`) y la que el equipo eligió de la lista (con
+ * el suyo). «Sintrom» escrito a mano en «otro medicamento» no lleva código ni
+ * marca: reconocer la clase por el nombre queda fuera, a propósito.
+ */
+export const MEDICATION_CLASSES = {
+  anticoagulants: { atc: "B01A", label: "Anticoagulante" },
+  boneMedicines: { atc: "M05B", label: "Huesos" },
+} as const
+export type MedicationClass = keyof typeof MEDICATION_CLASSES
+
+/** La clase con marca de un código ATC; null si no es de ninguna. */
+export function medicationClassOf(atc: string | null | undefined): MedicationClass | null {
+  if (!atc) return null
+  for (const [key, group] of Object.entries(MEDICATION_CLASSES))
+    if (atc.startsWith(group.atc)) return key as MedicationClass
+  return null
+}
+
+/**
+ * El código ATC de la medicina que alguien dijo al responder «Sí» a la pregunta
+ * de una clase: el del medicamento si lo que escribió es exactamente uno de la
+ * lista y es de esa clase; si no (lo escribió a su manera, con la dosis, o no
+ * dijo cuál), el del grupo. Nunca un código de otra clase: la respuesta manda.
+ */
+export function declaredMedicineAtc(
+  group: MedicationClass,
+  written: string | null | undefined,
+  entries: readonly HabitualMedicationEntry[] = HABITUAL_MEDICATIONS,
+): string {
+  const found = written ? findHabitualMedication(written, entries) : null
+  return found && medicationClassOf(found.atc) === group ? found.atc : MEDICATION_CLASSES[group].atc
+}
+
 /** Medicamentos que coinciden con lo escrito, para elegir la DCI. */
 export function searchHabitualMedications(
   query: string,
