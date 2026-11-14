@@ -213,7 +213,7 @@ export function DeclaredResponse({
               className="h-auto min-h-5 max-w-full border-dashed border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning"
             >
               {/* Lo que el equipo ya cambió no se presenta como dicho por ella. */}
-              {edited ? "Por revisar" : `Lo dijo ${who || "la persona"} · por revisar`}
+              {edited ? "Sin revisar" : `Lo dijo ${who || "la persona"} · sin revisar`}
             </Badge>
           ) : response.status === "descartado" ? (
             <Badge variant="outline">Descartado</Badge>

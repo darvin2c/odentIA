@@ -28,7 +28,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle, MoreHorizontal } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
@@ -105,11 +105,13 @@ export function clinicalAlerts(
  * Franja clínica reutilizable (cabecera y editor de atención): alergias,
  * enfermedades, lo que toma y el embarazo, sin botones. Sin alergias
  * registradas dice si niega o si no se le preguntó (`allergyReview`): no es lo
- * mismo. Lo que se dijo y nadie revisó va junto, bajo la marca de su
- * declaración («Lo dijo ella el 13 nov, sin revisar»), alergias incluidas.
- * Quién lo dijo, cuándo y qué entra ahí lo dice el servidor
+ * mismo. Lo que se dijo y nadie revisó va en una caja cerrada por
+ * declaración, con su marca adentro («Lo dijo ella el 13 nov, sin revisar»),
+ * alergias incluidas; lo confirmado queda fuera de toda caja. Lo grave va
+ * primero, sea de quien sea, y el límite solo corta por la cola (QA del 14
+ * nov). Quién lo dijo, cuándo y qué entra ahí lo dice el servidor
  * (`health.declared`, un grupo por declaración): con dos fechas o dos personas
- * salen dos marcas, y nada se le atribuye a quien no lo dijo.
+ * salen dos cajas, y nada se le atribuye a quien no lo dijo.
  */
 export function PatientClinicalStrip({
   detail,
@@ -130,6 +132,7 @@ export function PatientClinicalStrip({
   /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
   sex?: string | null
 }) {
+  const stripId = useId()
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
   // Quien solo ve las alergias (recepción) recibe una sola cosa de lo declarado: su «No», con quién lo dijo.
   const groups: DeclaredHealthGroup[] =
@@ -176,14 +179,23 @@ export function PatientClinicalStrip({
       ),
     })),
   ]
-  // Primero lo que se dijo y nadie revisó, declaración por declaración; después lo demás.
+  // Lo grave primero, sea de quien sea (QA del 14 nov, H1): las alergias severas que confirmó el
+  // equipo; después cada declaración sin revisar, con su severa delante; después lo demás.
+  const severe = (alert: (typeof alerts)[number]) => alert.tone === "destructive"
+  const confirmed = alerts.filter((alert) => alert.group === null)
   const ordered = [
-    ...groups.flatMap((_group, index) => alerts.filter((alert) => alert.group === index)),
-    ...alerts.filter((alert) => alert.group === null),
+    ...confirmed.filter(severe),
+    ...groups.flatMap((_group, index) =>
+      alerts.filter((alert) => alert.group === index).sort((a, b) => Number(severe(b)) - Number(severe(a))),
+    ),
+    ...confirmed.filter((alert) => !severe(alert)),
   ]
-  const shown = ordered.slice(0, 6)
-  const hidden = ordered.length - shown.length
-  const rest = shown.filter((alert) => alert.group === null)
+  // El límite corta solo por la cola: una alergia severa nunca se va a «+N».
+  const shownIds = new Set(
+    ordered.filter((alert, index) => index < STRIP_LIMIT || severe(alert)).map((alert) => alert.id),
+  )
+  const isShown = (alert: (typeof alerts)[number]) => shownIds.has(alert.id)
+  const hidden = ordered.length - shownIds.size
   const allergyWord =
     saidNoAllergies !== null
       ? null
@@ -205,65 +217,87 @@ export function PatientClinicalStrip({
       className={cn(
         "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
         alert.tone === "warning" && "border-warning/30 bg-warning-soft text-warning",
-        // Lo que se dijo y nadie revisó se distingue también por el borde, no solo por el texto que lo encabeza.
-        alert.group !== null && "border-dashed",
       )}
     >
       {alert.label}
     </Badge>
   )
+  const more = onAntecedentes ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-auto min-h-11 max-w-full shrink py-1 text-left whitespace-normal sm:min-h-8"
+      onClick={onAntecedentes}
+    >
+      {moreLabel} · ver antecedentes
+    </Button>
+  ) : (
+    <Badge variant="outline" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+      {moreLabel}
+    </Badge>
+  )
+  const item = (alert: (typeof alerts)[number]) => (
+    <li key={alert.id} className="flex min-w-0 max-w-full">
+      {chip(alert)}
+    </li>
+  )
   return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="Alertas clínicas">
-      {groups.map((group, index) => {
-        const said = shown.filter((alert) => alert.group === index)
-        if (said.length === 0) return null
-        return (
-          // La marca va escrita delante de lo que encabeza: se lee igual con la vista y con el lector de pantalla.
-          <span key={`${group.by.kind}-${group.by.name ?? ""}-${group.at ?? index}`} className="flex max-w-full flex-wrap items-center gap-2">
-            <span className="text-xs font-medium">{declaredMarkWords(group.by, group.at, sex)}:</span>
-            {said.map(chip)}
-          </span>
-        )
-      })}
-      {allergyWord ? (
-        // «No preguntado» es el estado peligroso: se distingue de «niega» (mesa del 9 nov).
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
-            detail.allergyReview === "unknown" && "border-warning/30 bg-warning-soft text-warning",
-          )}
-        >
-          {allergyWord}
-        </Badge>
-      ) : null}
-      {medicationWord ? (
-        <Badge variant="outline" className="h-auto min-h-5 max-w-full border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning">
-          {medicationWord}
-        </Badge>
-      ) : null}
-      {rest.map(chip)}
-      {hidden > 0 && onAntecedentes ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-auto min-h-11 max-w-full shrink py-1 text-left whitespace-normal sm:min-h-8"
-          onClick={onAntecedentes}
-        >
-          {moreLabel} · ver antecedentes
-        </Button>
-      ) : hidden > 0 ? (
-        <Badge
-          variant="outline"
-          className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal"
-        >
-          {moreLabel}
-        </Badge>
-      ) : null}
-    </div>
+    // Una lista y no un texto suelto: el lector de pantalla dice cuántas alertas hay y qué cae dentro
+    // de cada declaración, y lo que viene después de una caja queda fuera de ella.
+    <section aria-label="Alertas clínicas" className="min-w-0">
+      <ul className="flex flex-wrap items-center gap-2">
+        {confirmed.filter((alert) => severe(alert) && isShown(alert)).map(item)}
+        {groups.map((group, index) => {
+          const said = ordered.filter((alert) => alert.group === index && isShown(alert))
+          if (said.length === 0) return null
+          const markId = `${stripId}-${index}`
+          return (
+            // Cada declaración en su caja cerrada, con su marca adentro: lo de otra persona o lo ya
+            // revisado nunca queda «detrás» de ella. A lo ancho del teléfono la caja ocupa la línea.
+            <li
+              key={`${group.by.kind}-${group.by.name ?? ""}-${group.at ?? index}`}
+              className="flex w-full min-w-0 max-w-full flex-col gap-1.5 rounded-md border border-dashed border-warning/40 bg-warning-soft/40 px-2 py-1 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center"
+            >
+              <span id={markId} className="text-xs font-medium">
+                {declaredMarkWords(group.by, group.at, sex)}
+              </span>
+              <ul aria-labelledby={markId} className="flex min-w-0 flex-wrap items-center gap-2">
+                {said.map(item)}
+              </ul>
+            </li>
+          )
+        })}
+        {confirmed.filter((alert) => !severe(alert) && isShown(alert)).map(item)}
+        {allergyWord ? (
+          <li className="flex min-w-0 max-w-full">
+            {/* «No preguntado» es el estado peligroso: se distingue de «niega» (mesa del 9 nov). */}
+            <Badge
+              variant="outline"
+              className={cn(
+                "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
+                detail.allergyReview === "unknown" && "border-warning/30 bg-warning-soft text-warning",
+              )}
+            >
+              {allergyWord}
+            </Badge>
+          </li>
+        ) : null}
+        {medicationWord ? (
+          <li className="flex min-w-0 max-w-full">
+            <Badge variant="outline" className="h-auto min-h-5 max-w-full border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning">
+              {medicationWord}
+            </Badge>
+          </li>
+        ) : null}
+        {hidden > 0 ? <li className="flex min-w-0 max-w-full">{more}</li> : null}
+      </ul>
+    </section>
   )
 }
+
+/** Cuántas alertas caben en la franja antes de «+N»; las severas no cuentan para el corte. */
+const STRIP_LIMIT = 6
 
 /** La ficha con lo clínico de la salud: enfermedades activas y lo que toma hoy (la regla del Resumen). */
 function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {

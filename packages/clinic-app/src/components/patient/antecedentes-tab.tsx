@@ -1171,7 +1171,7 @@ function AntecedentesSummary({
   // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
   // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
   const asa = asaLabel(asaClass)
-  // Lo que dijo y nadie revisó se dice igual que en la franja: «lo dijo ella · por revisar», y su
+  // Lo que dijo y nadie revisó se dice igual que en la franja: «lo dijo ella · sin revisar», y su
   // «No» como «dijo que no», nunca como el «niega» que anota quien se lo pregunta.
   const capital = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
   const saidWord = (topic: "conditions" | "medications", ids: string[]): string | undefined => {
@@ -1184,7 +1184,7 @@ function AntecedentesSummary({
         return group ? [saidByWords(group.by, sex)] : []
       })),
     ]
-    return who.length > 0 ? `${capital(who.join(" y "))} · por revisar` : undefined
+    return who.length > 0 ? `${capital(who.join(" y "))} · sin revisar` : undefined
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancyText = pregnancy ? pregnancyWords(pregnancy) : null
@@ -1243,7 +1243,7 @@ function AntecedentesSummary({
           </span>
           {pregnancyGroup ? (
             <Badge variant="outline" className="mt-1 h-auto w-fit max-w-full border-dashed py-px text-left whitespace-normal">
-              {capital(saidByWords(pregnancyGroup.by, sex))} · por revisar
+              {capital(saidByWords(pregnancyGroup.by, sex))} · sin revisar
             </Badge>
           ) : null}
         </div>

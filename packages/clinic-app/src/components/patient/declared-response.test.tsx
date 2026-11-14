@@ -65,7 +65,7 @@ describe("lo que envió el paciente, para leer", () => {
     expect(page).toContain("8 de 10")
     expect(page).toContain("No respondió")
     expect(page).not.toMatch(/<input|<textarea|role="radio"|role="switch"/)
-    expect(page).toContain("Lo dijo ella · por revisar")
+    expect(page).toContain("Lo dijo ella · sin revisar")
     expect(page).toContain("Agregar una corrección")
     expect(page).toContain("Marcar como revisado")
     // Ya no se «completa» ni se «pasa a Antecedentes».
@@ -87,9 +87,9 @@ describe("lo que envió el paciente, para leer", () => {
       />,
     )
     expect(byMother).toContain("Lo envió Carla Paz desde su enlace")
-    expect(byMother).toContain("Lo dijo su madre, Carla · por revisar")
+    expect(byMother).toContain("Lo dijo su madre, Carla · sin revisar")
     // Sin sexo registrado no se supone ninguno.
-    expect(render(<DeclaredResponse response={sent} canWrite />)).toContain("Lo dijo la persona · por revisar")
+    expect(render(<DeclaredResponse response={sent} canWrite />)).toContain("Lo dijo la persona · sin revisar")
   })
 
   it("revisado, sigue a la vista con quién y cuándo, y aún se le agrega una corrección", () => {
@@ -139,8 +139,8 @@ describe("lo que envió el paciente, para leer", () => {
     expect(edited).toContain("lo que envió no se conserva")
     // Ni «es lo que ella escribió» ni «lo dijo ella»: ya no se sabe.
     expect(edited).not.toContain("Es lo que ella escribió y no se cambia")
-    expect(edited).not.toContain("Lo dijo ella · por revisar")
-    expect(edited).toContain("Por revisar")
+    expect(edited).not.toContain("Lo dijo ella · sin revisar")
+    expect(edited).toContain("Sin revisar")
     // Lo que nadie tocó sí se dice intacto.
     const intact = render(<DeclaredResponse response={sent} canWrite sex="F" />)
     expect(intact).toContain("Es lo que ella escribió y no se cambia")

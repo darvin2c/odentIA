@@ -173,7 +173,7 @@ export function ClinicalAlertsCard({
   const groups = health?.declared
   const said = (topic: "allergies" | "conditions" | "medications", id: string): string | null => {
     const group = declaredGroupOf(groups, topic, id)
-    return group ? `${saidByWords(group.by, sex)} · por revisar` : null
+    return group ? `${saidByWords(group.by, sex)} · sin revisar` : null
   }
   const saidNo = (topic: "allergies" | "conditions" | "medications"): string | null => {
     const group = saidNoGroupOf(groups, topic)
@@ -220,7 +220,7 @@ export function ClinicalAlertsCard({
                 : health.pregnancy.weeksToday === null
                   ? pregnancy.detail
                   : `dijo ${health.pregnancy.weeksSaid} ${health.pregnancy.weeksSaid === 1 ? "semana" : "semanas"} el ${shortDay(health.pregnancy.saidOn ?? "")}`,
-              pregnancyGroup ? `${saidByWords(pregnancyGroup.by, sex)} · por revisar` : null,
+              pregnancyGroup ? `${saidByWords(pregnancyGroup.by, sex)} · sin revisar` : null,
             ]
               .filter(Boolean)
               .join(" · ")}
