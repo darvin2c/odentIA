@@ -90,7 +90,9 @@ describe("fichas ofrecidas en la atención", () => {
 })
 
 it("en Documentos y en la Historia se llama «Ficha»; lo del paciente, como lo que es", () => {
-  expect(formRowTitle({ source: "staff", templateTitle: "Ficha de ortodoncia" })).toBe("Ficha · Ficha de ortodoncia")
+  // Sin repetir: «Ficha de ortodoncia», no «Ficha · Ficha de ortodoncia».
+  expect(formRowTitle({ source: "staff", templateTitle: "Ficha de ortodoncia" })).toBe("Ficha de ortodoncia")
+  expect(formRowTitle({ source: "staff", templateTitle: "Evaluación de endodoncia" })).toBe("Ficha · Evaluación de endodoncia")
   expect(formRowTitle({ source: "portal", templateTitle: "Cuestionario previo a la cita" })).toBe(
     "Lo que respondió el paciente · Cuestionario previo a la cita",
   )

@@ -213,7 +213,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-terminar-tras-firmar",
         q: "Firmé la atención y me quedó una ficha a medias, ¿qué hago?",
-        a: "Termínala cuando puedas: firmar la atención no la cierra. El cierre te lo avisa sin frenarte, con «Completar ahora» por si prefieres terminarla antes de firmar. Ya firmada, «Atención finalizada» la nombra con «Completar», y en la atención, en Documentos, sale arriba «Falta terminar una ficha». También está en Documentos de la ficha del paciente, en «Requieren acción». Ábrela, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, sus fichas a medias se descartan con el motivo de la anulación.",
+        a: "Termínala cuando puedas: firmar la atención no la cierra. El cierre te lo avisa sin frenarte, con «Completar ahora» por si prefieres terminarla antes de firmar. Ya firmada, «Atención finalizada» la nombra con «Completar», y en la atención, en Documentos, sale arriba «Falta terminar una ficha». También está en Documentos, en la página del paciente, en «Requieren acción». Ábrela, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, sus fichas a medias se descartan con el motivo de la anulación.",
         forms: ["firme la atencion y quedo un formulario a medias", "terminar un formulario despues de firmar", "desde donde termino el formulario que deje a medias"],
         area: "clinica",
         needs: "clinical.write",

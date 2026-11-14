@@ -1670,7 +1670,7 @@ export function EncounterEditor({
   const showTranscript = () => setTranscriptOpen(true)
   const contextSurface = {
     title: "Antecedentes y última atención",
-    description: "Solo lectura: se editan en Antecedentes de su ficha.",
+    description: "Solo lectura: se editan en Antecedentes, en su página.",
     onClose: () => setContextOpen(false),
     children: <EncounterContextBody patientId={patientId} encounterId={encounterId} />,
   }

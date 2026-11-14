@@ -125,7 +125,7 @@ export function NewResponseDrawer({
         // La pantalla tenía un dato viejo (la atención se firmó o se anuló en otra pestaña): se
         // dice lo que pasó y se vuelve a pedir todo, para que deje de ofrecer esa atención.
         toast.info(
-          "La atención ya no está en curso, así que la ficha se empezó sin unirla a ella. Queda en Documentos de la ficha.",
+          "La atención ya no está en curso: la ficha de consulta se empezó suelta y quedó en Documentos, en la página del paciente.",
           { duration: 10_000 },
         )
         void queryClient.invalidateQueries()

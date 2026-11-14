@@ -362,7 +362,7 @@ export function EncounterDocumentsBlock({
                 search={{ tab: "documentos" }}
                 className="font-medium text-primary underline-offset-4 hover:underline"
               >
-                Documentos de la ficha
+                los Documentos de {firstName(patient)}
               </Link>
               .
             </>

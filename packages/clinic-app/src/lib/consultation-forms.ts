@@ -129,5 +129,8 @@ export function formKindWords(response: Pick<FormResponse, "source">): "Ficha" |
 
 /** El título de una fila: «Ficha · Ficha de ortodoncia», «Lo que respondió el paciente · Cuestionario previo a la cita». */
 export function formRowTitle(response: Pick<FormResponse, "source" | "templateTitle">): string {
-  return `${formKindWords(response)} · ${response.templateTitle ?? "Sin título"}`
+  const title = response.templateTitle ?? "Sin título"
+  // «Ficha de ortodoncia» ya dice lo que es: no se repite «Ficha · Ficha de ortodoncia».
+  if (response.source !== "portal" && /^ficha\b/i.test(title)) return title
+  return `${formKindWords(response)} · ${title}`
 }

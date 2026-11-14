@@ -82,7 +82,7 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
         Consultas a la historia clínica
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Las {rows.length} consultas más recientes, agrupadas por persona, parte de la ficha y hora.
+        Las {rows.length} consultas más recientes, agrupadas por persona, sección y hora.
         Los cambios quedan registrados aparte, en Configuración › Actividad del equipo.
       </p>
       {query.isError ? (

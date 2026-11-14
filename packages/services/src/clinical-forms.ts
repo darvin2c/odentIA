@@ -327,9 +327,14 @@ export async function archiveSpecialty(
     )
     .limit(1)
   if (publishedForm || publishedConsent) {
+    // Cada traba con su nombre: una ficha de consulta en uso, un consentimiento publicado, o las dos.
     throw conflict(
       "HAS_PUBLISHED",
-      "Deja de usar primero las fichas de esta especialidad",
+      publishedForm && publishedConsent
+        ? "Deja de usar primero las fichas de consulta y los consentimientos de esta especialidad"
+        : publishedForm
+          ? "Deja de usar primero las fichas de consulta de esta especialidad"
+          : "Deja de usar primero los consentimientos de esta especialidad",
     )
   }
   return updateSpecialty(tx, orgId, actorUserId, specialtyId, { isActive: false })
@@ -1098,7 +1103,7 @@ export async function createFormTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la ficha")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión del consentimiento")
     throw e
   }
 }
@@ -1981,7 +1986,7 @@ export async function createConsentTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la ficha")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión del consentimiento")
     throw e
   }
 }

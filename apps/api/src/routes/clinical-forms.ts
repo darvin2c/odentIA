@@ -168,7 +168,7 @@ const formSchemaInput = z
           .strict(),
       )
       .min(1, "Agrega al menos una sección")
-      .max(30, "El formulario admite hasta 30 secciones"),
+      .max(30, "La ficha admite hasta 30 secciones"),
   })
   .strict()
 
@@ -299,7 +299,7 @@ const consentTemplateActive = z.object({ active: z.boolean() }).strict()
 
 const consentCreate = z
   .object({
-    templateId: z.uuid({ message: "Elige una plantilla publicada" }),
+    templateId: z.uuid({ message: "Elige una ficha de consulta en uso" }),
     patientId: uuid,
     encounterId: uuid.nullish(),
     planItemId: uuid.nullish(),
@@ -651,7 +651,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración diseña formularios")
+      return forbidden(c, "Solo administración crea fichas de consulta")
     }
     const parsed = formTemplateCreate.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -663,7 +663,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.patch("/form-templates/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración edita formularios")
+      return forbidden(c, "Solo administración cambia las fichas de consulta")
     }
     const parsed = formTemplatePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -677,7 +677,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates/:id/publish", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración publica formularios")
+      return forbidden(c, "Solo administración publica fichas de consulta")
     }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -689,7 +689,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates/:id/archive", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración archiva formularios")
+      return forbidden(c, "Solo administración deja de usar o archiva fichas de consulta")
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -702,7 +702,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-templates/:id/reuse", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración vuelve a usar un formulario")
+      return forbidden(c, "Solo administración vuelve a usar una ficha de consulta")
     }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -716,7 +716,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.get("/form-templates/:id/reach", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración cambia los formularios")
+      return forbidden(c, "Solo administración cambia las fichas de consulta")
     }
     const change = z.enum(FORM_TEMPLATE_CHANGES).safeParse(c.req.query("change"))
     if (!change.success) return missingParam(c, "change es publish, leave o reuse")
@@ -782,7 +782,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para registrar formularios")
+      return forbidden(c, "Sin permiso para empezar fichas de consulta")
     }
     const parsed = responseCreate.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -794,7 +794,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.patch("/form-responses/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para editar formularios")
+      return forbidden(c, "Sin permiso para llenar fichas de consulta")
     }
     const parsed = responsePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -808,7 +808,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses/:id/finalize", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para finalizar formularios")
+      return forbidden(c, "Sin permiso para finalizar fichas de consulta")
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
@@ -820,7 +820,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.post("/form-responses/:id/discard", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) {
-      return forbidden(c, "Sin permiso para descartar formularios")
+      return forbidden(c, "Sin permiso para descartar fichas de consulta")
     }
     const parsed = z
       .object({

@@ -187,7 +187,7 @@ export function FormTemplatesPanel() {
     onSuccess: (result, last) => {
       setConfirm(null)
       toast.success(`«${last.title}» está en uso otra vez, como versión ${result.data.version}`)
-      follow(last, "reuse", `«${last.title}» volvió a la lista de formularios en uso.`)
+      follow(last, "reuse", `«${last.title}» volvió a la lista de fichas en uso.`)
       invalidate()
     },
     onError: (error, last) => {
@@ -577,7 +577,7 @@ const templateSchema = z
   .superRefine(({ respondent, sections }, ctx) => {
     const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: "custom", path, message })
     if (sections.length === 0) issue(["sections"], "Agrega al menos una sección")
-    if (sections.length > 30) issue(["sections"], "El formulario admite hasta 30 secciones")
+    if (sections.length > 30) issue(["sections"], "La ficha admite hasta 30 secciones")
     // Las preguntas ya recorridas: una pregunta solo depende de una anterior.
     const previous = new Map<string, FormFieldDef>()
     sections.forEach((section, si) => {

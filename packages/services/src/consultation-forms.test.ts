@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   archiveFormTemplate,
+  archiveSpecialty,
   createFormResponse,
   createFormTemplate,
   finalizeFormResponse,
@@ -28,6 +29,7 @@ import {
   markFormTemplateLooked,
 } from "./consultation-forms.js"
 import { finalizeEncounter, voidEncounter } from "./encounters.js"
+import { getTimeline } from "./patient-history.js"
 import { listClinicFormTemplates } from "./portal-questionnaire.js"
 import { ensureClinicSpecialties } from "./specialties.js"
 import { setTestPatientIdentity } from "./test-patient.js"
@@ -434,4 +436,23 @@ it("nada traba la atención: con una ficha ofrecida y sin tocarla, la atención 
   expect(closed.encounter.status).toBe("finalizada")
   // Firmada, la oferta sigue ahí y sigue sin haberse empezado: ofrecer no es pedir.
   expect(await c.offers(c.encounter.id)).toMatchObject([{ key: "evaluacion-de-endodoncia", today: null }])
+})
+
+it("un solo nombre: desactivar una especialidad nombra la ficha de consulta que la traba, y la Historia dice «ficha de consulta»", async () => {
+  const c = await clinic()
+  const orthodontics = c.specialties.get("ortodoncia_ortopedia_maxilar")!
+  await expect(c.run((tx) => archiveSpecialty(tx, c.orgId, c.actor, orthodontics.id))).rejects.toMatchObject({
+    code: "HAS_PUBLISHED",
+    message: "Deja de usar primero las fichas de consulta de esta especialidad",
+  })
+  // Una ficha sin atención sale suelta en la Historia, con su nombre.
+  const template = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find(
+    (row) => row.key === "ficha-de-ortodoncia",
+  )!
+  const loose = await c.run((tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: template.id, patientId: c.patient.id, encounterId: null }),
+  )
+  await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, loose.id))
+  const { data } = await c.run((tx) => getTimeline(tx, c.orgId, c.patient.id, { types: ["form"] }))
+  expect(data.find((row) => row.refId === loose.id)?.title).toBe("Se completó la ficha de consulta: Ficha de ortodoncia")
 })

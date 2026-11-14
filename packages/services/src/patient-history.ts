@@ -963,7 +963,7 @@ async function loadBornForEncounters(
     const finalized = row.status === "finalizado"
     of(row.encounterId).forms.push({
       id: row.id,
-      title: row.templateTitle ?? "Formulario clínico",
+      title: row.templateTitle ?? "Ficha de consulta",
       state: finalized ? "finalizado" : "a_medias",
       finalizedAt: row.finalizedAt,
       // Terminado después de firmar la atención: lleva su propia fecha, y la Historia lo dice.
@@ -1560,7 +1560,11 @@ export async function getTimeline(
         refId: row.id,
         type: "form",
         createdAt: row.finalizedAt ?? row.createdAt,
-        title: `Se completó el formulario: ${row.templateTitle ?? "Formulario clínico"}`,
+        // Lo del equipo es una ficha de consulta; lo del paciente se dice como lo que es.
+        title:
+          row.source === "portal"
+            ? `Lo que respondió el paciente: ${row.templateTitle ?? "Cuestionario"}`
+            : `Se completó la ficha de consulta: ${row.templateTitle ?? "Ficha de consulta"}`,
         detail: row.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : null,
         status: row.status,
         toothNumbers: [],
