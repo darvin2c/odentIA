@@ -13,6 +13,10 @@ export interface FormPanelProps {
   onSubmit: (event: React.FormEvent) => void
   isDirty?: boolean
   isSubmitting?: boolean
+  /** Qué se pierde al cerrar, si el contenido lo dijo (ver `useCloseGuard`). */
+  lost?: string | null
+  /** «Descartar y salir» (ver `useCloseGuard`). */
+  onDiscard?: () => void
   isLoading?: boolean
   error?: string | null
   submitLabel?: string
@@ -40,6 +44,8 @@ export function FormPanel({
   onClose,
   isDirty = false,
   isSubmitting = false,
+  lost,
+  onDiscard,
   className,
   title,
   description,
@@ -54,7 +60,7 @@ export function FormPanel({
   hideSubmit = false,
   secondaryAction,
 }: FormPanelProps) {
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, lost, onDiscard, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
 

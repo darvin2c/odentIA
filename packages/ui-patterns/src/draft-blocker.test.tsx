@@ -5,6 +5,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import * as React from "react"
 import { afterEach, beforeAll, expect, it } from "vitest"
 
+import { common } from "./common.js"
 import { DetailDrawer } from "./detail/detail-drawer.js"
 import { useDraftSaved } from "./docked-surface.js"
 import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
@@ -42,12 +43,12 @@ afterEach(() => {
 })
 
 /** El aviso de la app, como `PageDraftGuard` de clinic-app. */
-function Guard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage | null }) {
+function Guard({ dirty, keptInPage, lost }: { dirty: boolean; keptInPage?: KeptInPage | null; lost?: string | null }) {
   const blocker = useDraftBlocker({ disabled: !dirty, enableBeforeUnload: false, shouldBlockFn: () => dirty, keptInPage })
   if (blocker.status !== "blocked") return null
   return (
     <div role="alertdialog">
-      Si sales, se perderán
+      {lost ?? "Si sales, se perderán"}
       <button type="button" onClick={blocker.reset}>
         Seguir aquí
       </button>
@@ -119,6 +120,8 @@ it("sin eso, cualquier navegación con lo escrito pregunta, como hasta ahora", a
   expect(router.state.location.searchStr).toBe("")
 })
 
+const LOST = "No se guardó «15» en «Intensidad del dolor (0–10)». Lo demás ya está guardado."
+
 /** Un detalle que se guarda solo, como un formulario clínico: nunca hace `submit`. */
 function Autosaved() {
   return (
@@ -131,7 +134,10 @@ function Autosaved() {
 function AutosavedAnswers() {
   const draftSaved = useDraftSaved()
   const [state, setState] = React.useState<"guardado" | "pendiente" | "error">("guardado")
-  React.useEffect(() => draftSaved(state === "guardado"), [draftSaved, state])
+  React.useEffect(
+    () => draftSaved(state === "guardado", state === "error" ? LOST : null),
+    [draftSaved, state],
+  )
   return (
     <>
       <input aria-label="Hallazgos" onInput={() => setState("pendiente")} />
@@ -335,4 +341,63 @@ it("un envío que no pasa deja armado el aviso: salir con lo escrito pregunta ig
   void router.navigate({ href: "/agenda" })
   await screen.findByRole("alertdialog")
   expect(router.state.location.pathname).toBe("/pacientes")
+})
+
+/** Lo que se guarda solo, en el panel o en el cajón, con su cierre propio. */
+function AutosavedClosable({ onClose }: { onClose: () => void }) {
+  return (
+    <DetailDrawer open title="Evaluación" onClose={onClose}>
+      <AutosavedAnswers />
+    </DetailDrawer>
+  )
+}
+
+// QA de la entrega 3 (14 nov): con «Guardado, menos lo marcado», × y Escape cerraban el formulario
+// y perdían el 15 sin preguntar, mientras que salir por el menú sí preguntaba (y con otro texto).
+it("con algo que no se guardó, ×, Escape y el menú preguntan lo mismo y dicen qué se pierde", async () => {
+  let closed = 0
+  const router = appWith(
+    [
+      ["/ficha", () => <AutosavedClosable onClose={() => (closed += 1)} />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/ficha",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.keepEditing }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+  fireEvent.keyDown(window, { key: "Escape" })
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.keepEditing }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+
+  void router.navigate({ href: "/agenda" })
+  expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
+  expect(closed).toBe(0)
+})
+
+it("en el cajón (sin columna, el teléfono), × también pregunta por lo que no se guardó", async () => {
+  let closed = 0
+  render(<AutosavedClosable onClose={() => (closed += 1)} />)
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+  fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+  const dialog = await screen.findByRole("alertdialog", { hidden: true })
+  expect(dialog.textContent).toContain(LOST)
+  fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.discard, hidden: true }))
+  await waitFor(() => expect(closed).toBe(1))
+})
+
+it("con todo guardado, × cierra sin preguntar", async () => {
+  let closed = 0
+  render(<AutosavedClosable onClose={() => (closed += 1)} />)
+  fireEvent.click(await screen.findByRole("button", { name: common.actions.close }))
+  expect(closed).toBe(1)
+  expect(screen.queryByRole("alertdialog")).toBeNull()
 })

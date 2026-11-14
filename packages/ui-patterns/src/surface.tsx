@@ -183,6 +183,10 @@ function SurfaceError({ error, className }: { error: string; className?: string 
 export interface CloseGuardOptions {
   isSubmitting?: boolean
   isDirty?: boolean
+  /** Qué se pierde, si el contenido lo dijo (`useDraftSaved`); sin él, el texto común. */
+  lost?: string | null
+  /** Se llama con «Descartar y salir», antes de cerrar: lo pendiente ya no se guarda. */
+  onDiscard?: () => void
   onClose: () => void
 }
 
@@ -210,6 +214,8 @@ export interface CloseGuard {
 export function useCloseGuard({
   isSubmitting = false,
   isDirty = false,
+  lost = null,
+  onDiscard,
   onClose,
 }: CloseGuardOptions): CloseGuard {
   const [asking, setAsking] = React.useState(false)
@@ -225,9 +231,11 @@ export function useCloseGuard({
   const confirmDialog = (
     <UnsavedDialog
       open={asking}
+      lost={lost}
       onStay={() => setAsking(false)}
       onDiscard={() => {
         setAsking(false)
+        onDiscard?.()
         onClose()
       }}
     />

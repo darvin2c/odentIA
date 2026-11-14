@@ -1,7 +1,7 @@
 import { Drawer, DrawerContent, cn, useIsMobile } from "@odentia/ui"
 import * as React from "react"
 import { SideDockScopeProvider } from "../side-dock.js"
-import { DockedSurface, useDockDecision } from "../docked-surface.js"
+import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
 import { DOCK_SIZES, type DetailPanelSize } from "../master-detail.js"
 import { useCloseGuard } from "../surface.js"
 import { DetailSurface } from "./detail-surface.js"
@@ -36,12 +36,22 @@ export function DetailDrawer({
   onClose,
   isDirty = false,
   isSubmitting = false,
+  lost: given,
+  onDiscard: discardGiven,
   size = "md",
   className,
   ...surface
 }: DetailDrawerProps) {
   const isMobile = useIsMobile()
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  // Lo que el contenido guarda solo (`useDraftSaved`): ×, Escape y el menú preguntan igual.
+  const draft = useDraftSavedScope()
+  const dirty = isDirty || draft.unsaved
+  const lost = given ?? (draft.unsaved && !isDirty ? draft.lost : null)
+  const onDiscard = () => {
+    draft.discard()
+    discardGiven?.()
+  }
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty: dirty, lost, onDiscard, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { bounds: DOCK_SIZES[size] })
@@ -70,7 +80,9 @@ export function DetailDrawer({
         aria-describedby={surface.description ? descriptionId : undefined}
       >
         <SideDockScopeProvider value="overlay">
-          <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
+          <DraftSavedProvider scope={draft}>
+            <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
+          </DraftSavedProvider>
           {confirmDialog}
         </SideDockScopeProvider>
       </DrawerContent>
@@ -80,8 +92,15 @@ export function DetailDrawer({
   // Con columna lateral y ventana ancha, el detalle va ahí (ver `FormDrawer`).
   if (open && dockBounds) {
     return (
-      <DockedSurface bounds={dockBounds} dirty={isDirty && !isSubmitting} fallback={drawer(true)}>
-        <DetailPanel {...surface} onClose={onClose} isDirty={isDirty} isSubmitting={isSubmitting} />
+      <DockedSurface bounds={dockBounds} dirty={isDirty && !isSubmitting} fallback={drawer(true)} draft={draft}>
+        <DetailPanel
+          {...surface}
+          onClose={onClose}
+          isDirty={dirty}
+          lost={lost}
+          onDiscard={onDiscard}
+          isSubmitting={isSubmitting}
+        />
       </DockedSurface>
     )
   }

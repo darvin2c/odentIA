@@ -1,7 +1,7 @@
 import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
 import { SideDockScopeProvider } from "../side-dock.js"
-import { DockedSurface, useDockDecision } from "../docked-surface.js"
+import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
 import { useCloseGuard } from "../surface.js"
 import { FormPanel } from "./form-panel.js"
 import { type FormSecondaryAction, FormSurface } from "./form-surface.js"
@@ -86,7 +86,17 @@ export function FormDrawer({
   dock = true,
 }: FormDrawerProps) {
   const isMobile = useIsMobile()
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  // Lo que el contenido guarda solo (`useDraftSaved`): ×, Escape y el menú preguntan igual.
+  const draft = useDraftSavedScope()
+  const dirty = isDirty || draft.unsaved
+  const lost = draft.unsaved && !isDirty ? draft.lost : null
+  const { handleClose, confirmDialog } = useCloseGuard({
+    isSubmitting,
+    isDirty: dirty,
+    lost,
+    onDiscard: draft.discard,
+    onClose,
+  })
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
@@ -114,25 +124,27 @@ export function FormDrawer({
         finalFocus={() => (opener.current?.isConnected ? opener.current : true)}
       >
         <SideDockScopeProvider value="overlay">
-          <FormSurface
-            title={title}
-            description={description}
-            headerContent={headerContent}
-            titleId={titleId}
-            descriptionId={descriptionId}
-            onCancel={handleClose}
-            onSubmit={onSubmit}
-            isSubmitting={isSubmitting}
-            isLoading={isLoading}
-            error={error}
-            submitLabel={submitLabel}
-            cancelLabel={cancelLabel}
-            submitDisabled={submitDisabled}
-            hideSubmit={hideSubmit}
-            secondaryAction={secondaryAction}
-          >
-            {children}
-          </FormSurface>
+          <DraftSavedProvider scope={draft}>
+            <FormSurface
+              title={title}
+              description={description}
+              headerContent={headerContent}
+              titleId={titleId}
+              descriptionId={descriptionId}
+              onCancel={handleClose}
+              onSubmit={onSubmit}
+              isSubmitting={isSubmitting}
+              isLoading={isLoading}
+              error={error}
+              submitLabel={submitLabel}
+              cancelLabel={cancelLabel}
+              submitDisabled={submitDisabled}
+              hideSubmit={hideSubmit}
+              secondaryAction={secondaryAction}
+            >
+              {children}
+            </FormSurface>
+          </DraftSavedProvider>
           {confirmDialog}
         </SideDockScopeProvider>
       </DrawerContent>
@@ -145,6 +157,7 @@ export function FormDrawer({
         bounds={dockBounds}
         dirty={isDirty && !isSubmitting}
         fallback={drawer(true)}
+        draft={draft}
       >
         <FormPanel
           title={title}
@@ -152,7 +165,9 @@ export function FormDrawer({
           headerContent={headerContent}
           onClose={onClose}
           onSubmit={onSubmit}
-          isDirty={isDirty}
+          isDirty={dirty}
+          lost={lost}
+          onDiscard={draft.discard}
           isSubmitting={isSubmitting}
           isLoading={isLoading}
           error={error}
