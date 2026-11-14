@@ -205,8 +205,22 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo un formulario de la clínica en su ficha?",
-        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. El que respondió el paciente antes de venir dice «Declarado por el paciente»: revísalo con él y «Finalizar…». Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo.",
+        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. Lo que el paciente respondió antes de venir sale arriba en la atención («respondió «Antes de tu cita»… desde su enlace»): revísalo con él y «Finalizar…». Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo.",
         forms: ["donde veo el cuestionario que respondio antes de venir", "como finalizo un formulario", "descartar un formulario en borrador"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-formulario-salir-sin-guardar",
+        q: "Me pregunta «¿Salir sin guardar?» en un formulario, ¿se perdió lo que llené?",
+        a: "Arriba del formulario dice cómo va. «Guardado»: todo está guardado y salir no pregunta. «Cambios sin guardar» o «Guardando…»: se está guardando, y si sales se guarda igual al cerrar. «Guardado, menos lo marcado»: quedó guardado todo menos la respuesta marcada en rojo, que no vale (un 15 en una escala de 0 a 10); bajo ella dice qué sigue guardado. «No se guardó»: tus últimos cambios no llegaron. Solo en esos dos casos, al salir con ×, Escape o el menú, pregunta «¿Salir sin guardar?» y dice qué se pierde. «Seguir aquí» te deja corregirlo; «Descartar y salir» sale sin guardar eso ni lo último que cambiaste, y lo que ya estaba guardado se queda.",
+        forms: [
+          "me dice que salga sin guardar aunque ya guarde se perdio",
+          "que significa guardado menos lo marcado",
+          "que pasa si le doy descartar y salir",
+          "se perdio lo que llene en el formulario",
+          "dice no se guardo en el formulario",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
