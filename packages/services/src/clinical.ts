@@ -331,6 +331,17 @@ export interface DeclaredHealthGroup {
  * dice su declaración y dónde queda en la entrevista. Con eso cada dato sabe quién lo dijo y cuándo,
  * como las alergias y las medicinas, y no se lee como anotado por el equipo.
  */
+/**
+ * Si su «No» a los medicamentos quiere decir que no toma ninguno (QA del 14 nov, B1). Desde que «Tus
+ * medicinas» pregunta aparte por el anticoagulante y los huesos, «¿algún otro medicamento?» con «No»
+ * solo dice eso: es «ninguno» si también dijo que no a las dos clases que se le preguntaron. Un
+ * registro de antes, con una sola pregunta, lo decía todo.
+ */
+export function declaredTakesNoMedicine(declared: Pick<DeclaredPatientHealthInput, "medications" | "anticoagulants" | "boneMedicines">): boolean {
+  if (declared.medications?.state !== "none") return false
+  return (["anticoagulants", "boneMedicines"] as const).every((key) => !declared[key] || declared[key]?.state === "none")
+}
+
 export const DECLARED_INTERVIEW = {
   corazon: { said: ["dental", "corazon", "riesgoEndocarditis"], kept: ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"] },
   antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
@@ -339,6 +350,13 @@ export const DECLARED_INTERVIEW = {
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
+
+/** Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día. */
+function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
+  if (said === undefined) return false
+  if (key === "lactancia") return isPlainObject(kept) && kept.estado === (said === true ? "si" : said === false ? "no" : undefined)
+  return said === kept
+}
 
 /** Lo que hay en `value` siguiendo `path`, o undefined. */
 function atPath(value: unknown, path: readonly string[]): unknown {
@@ -427,13 +445,25 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
 
 /** Lo declarado encima de la entrevista guardada, campo por campo: un grupo no reemplaza al otro entero. */
-function mergeInterview(saved: Record<string, unknown>, said: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Lo que dijo, sumado a la entrevista que había, campo por campo: llena lo que falta y no pisa lo
+ * que ya estaba (QA del 14 nov, B2: volver a registrarse y «Sí, sin cambios» cambiaba el tabaco, la
+ * anestesia y la lactancia que había anotado el equipo). Lo distinto queda en su declaración, a la
+ * vista en «Ver declaración original». El embarazo y la lactancia sí toman lo último que dijo: son de
+ * un momento y llevan el día en que se dijo.
+ */
+function mergeInterview(saved: Record<string, unknown>, said: Record<string, unknown>, path: string[] = []): Record<string, unknown> {
   const out: Record<string, unknown> = { ...saved }
   for (const [key, value] of Object.entries(said)) {
-    out[key] = isPlainObject(out[key]) && isPlainObject(value) ? mergeInterview(out[key], value) : value
+    const here = [...path, key]
+    if (isPlainObject(out[key]) && isPlainObject(value) && !DATED_INTERVIEW.has(here.join("."))) out[key] = mergeInterview(out[key], value, here)
+    else if (out[key] === undefined || DATED_INTERVIEW.has(here.join("."))) out[key] = value
   }
   return out
 }
+
+/** Lo de la entrevista que es de un momento: lo último que dijo reemplaza lo de antes. */
+const DATED_INTERVIEW = new Set(["embarazoLactancia.embarazo", "embarazoLactancia.lactancia", "antecedentesPersonales.embarazo"])
 
 /** Sin lo que ya no pertenece a la entrevista (`assertNewInterview`): sigue en las versiones de antes. */
 function withoutRetiredInterview(answers: Record<string, unknown>): Record<string, unknown> {
@@ -851,8 +881,10 @@ function declaredGroupsOf(input: {
     if (latest && sinceStaff(latest.createdAt)) {
       // Cada dato de la entrevista que está y que dijo una declaración: de la última que lo respondió.
       for (const [key, where] of Object.entries(DECLARED_INTERVIEW) as Array<[DeclaredInterviewKey, (typeof DECLARED_INTERVIEW)[DeclaredInterviewKey]]>) {
-        if (atPath(latest.answers, where.kept) === undefined) continue
-        const said = declarations.find((row) => atPath(row.health, where.said) !== undefined)
+        const kept = atPath(latest.answers, where.kept)
+        if (kept === undefined) continue
+        // Lo que anotó el equipo no lleva la marca de ella aunque ella haya dicho otra cosa.
+        const said = declarations.find((row) => sameInterviewValue(key, atPath(row.health, where.said), kept))
         if (said) groupOf(said, latest.createdAt).interview.push(key)
       }
     }
@@ -1187,8 +1219,13 @@ export async function initializeDeclaredPatientHealth(
     reviewStatus: {
       allergies: state(declared.allergies?.state),
       conditions: state(declared.conditions?.state),
-      // Con una medicina dicha (también la de una clase), el grupo queda «registrado».
-      medications: medications.length ? "recorded" : state(declared.medications?.state),
+      // Con una medicina dicha (también la de una clase), el grupo queda «registrado»; su «No» es
+      // «ninguno» solo si también dijo que no al anticoagulante y a los huesos.
+      medications: medications.length
+        ? "recorded"
+        : declared.medications?.state === "none" && !declaredTakesNoMedicine(declared)
+          ? "unknown"
+          : state(declared.medications?.state),
     },
     allergies: (declared.allergies?.items ?? []).map((item) => ({ ...item, isActive: true })),
     conditions: (declared.conditions?.items ?? []).map((item) => ({ ...item, status: "activa" })),
@@ -1547,11 +1584,10 @@ export async function addDeclaredHealth(
       .orderBy(desc(patientAnamnesis.version))
       .limit(1)
     const merged = withoutRetiredInterview(mergeInterview((latest?.answers ?? {}) as Record<string, unknown>, said))
-    // Cuántos al día va solo con «fuma»: si dijo que no fuma o que lo dejó, el número que anotó el
-    // equipo ya no vale, y dejarlo haría que la entrevista entera no pase y se pierda lo que dijo.
-    const saidHabits = said["habitos"] as Record<string, unknown> | undefined
+    // Cuántos al día va solo con «fuma»: si lo que queda no es «fuma», un número suelto haría que la
+    // entrevista entera no pase y se pierda lo que dijo.
     const habits = merged["habitos"] as Record<string, unknown> | undefined
-    if (saidHabits && "tabaco" in saidHabits && saidHabits["tabaco"] !== "fuma" && !("cigarrillos" in saidHabits) && habits) {
+    if (habits && habits["tabaco"] !== "fuma" && "cigarrillos" in habits) {
       const { cigarrillos: _stale, ...rest } = habits
       merged["habitos"] = rest
     }
@@ -1563,7 +1599,8 @@ export async function addDeclaredHealth(
       if (!(error instanceof ServiceError)) throw error
     }
     if (answers && (!latest || canonicalJson(latest.answers) !== canonicalJson(answers))) {
-      await tx.insert(patientAnamnesis).values({ organizationId: orgId, patientId, version: (latest?.version ?? 0) + 1, answers, createdBy: actorUserId })
+      // La dijo la persona: la versión no es «Registrado por personal clínico». Quién la aplicó queda en la auditoría.
+      await tx.insert(patientAnamnesis).values({ organizationId: orgId, patientId, version: (latest?.version ?? 0) + 1, answers, createdBy: null })
       interview = true
     }
   }
@@ -1575,7 +1612,7 @@ export async function addDeclaredHealth(
   const saidNo: Array<"allergies" | "conditions" | "medications"> = []
   if (declared.conditions?.state === "none" && unasked("conditions") && !addedConditions && activeConditions.size === 0)
     saidNo.push("conditions")
-  if (declared.medications?.state === "none" && unasked("medications") && !addedMedications && currentMedications.size === 0)
+  if (declaredTakesNoMedicine(declared) && unasked("medications") && !addedMedications && currentMedications.size === 0)
     saidNo.push("medications")
   if (declared.allergies?.state === "none" && unasked("allergies")) {
     const [header] = await tx

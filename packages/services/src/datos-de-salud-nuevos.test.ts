@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { declaredMedications } from "./clinical.js"
+import { declaredMedications, declaredTakesNoMedicine } from "./clinical.js"
 
 // Sin base: las reglas puras de cómo entra lo que declaró en «Tus medicinas».
 describe("declaredMedications", () => {
@@ -39,5 +39,22 @@ describe("declaredMedications", () => {
       medications: { state: "recorded", items: [{ name: "Sintrom" }] },
     })
     expect(rows).toEqual([{ name: "Sintrom", declaredClass: null }])
+  })
+})
+
+// QA del 14 nov (B1): el «No» a «¿algún otro medicamento?» se guardaba como «no toma ninguno», al lado de
+// un «No sé» al anticoagulante.
+describe("declaredTakesNoMedicine", () => {
+  it("«No» a «algún otro» es «ninguno» solo si también dijo que no a las dos clases", () => {
+    expect(declaredTakesNoMedicine({ medications: { state: "none", items: [] }, anticoagulants: { state: "unknown" } })).toBe(false)
+    expect(
+      declaredTakesNoMedicine({
+        medications: { state: "none", items: [] },
+        anticoagulants: { state: "none" },
+        boneMedicines: { state: "none" },
+      }),
+    ).toBe(true)
+    // Un registro de antes, con una sola pregunta.
+    expect(declaredTakesNoMedicine({ medications: { state: "none", items: [] } })).toBe(true)
   })
 })
