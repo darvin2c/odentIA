@@ -354,8 +354,8 @@ it("«Antes de su cita» lo ve quien edita sus datos, sin permiso nuevo; quien n
   const { data } = (await created.json()) as { data: { id: string } }
   const reception = await app.request(`/api/patients/${data.id}/personal-link/before-visit`, { headers: authed("reception", SLUG_A) })
   expect(reception.status).toBe(200)
-  // Sin cita por venir no hay nada que decir.
-  expect(((await reception.json()) as { data: unknown }).data).toBeNull()
+  // Sin cita por venir ni nada declarado no hay nada que decir.
+  expect(((await reception.json()) as { data: unknown }).data).toEqual({ visit: null, healthToReview: null })
   const member = await app.request(`/api/patients/${data.id}/personal-link/before-visit`, { headers: authed("member", SLUG_A) })
   expect(member.status).toBe(403)
 })

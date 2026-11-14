@@ -70,7 +70,7 @@ import { StaleEncounterNotice } from "./stale-encounter"
 import { UpcomingLine, usePersonUpcoming } from "./next-up"
 import { PatientAvatar } from "./patient-avatar"
 import { PersonalLinkActions } from "./send-personal-link"
-import { beforeVisitKey, beforeVisitWords, fetchBeforeVisit } from "../../lib/before-visit"
+import { beforeVisitKey, beforeVisitWords, fetchBeforeVisit, healthToReviewWords } from "../../lib/before-visit"
 import { useOpenWide } from "./wide-section"
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
@@ -359,7 +359,7 @@ function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {
  * ahí mismo (mesa de formularios del 13 nov, entrega 10, C10). Es estado, no contenido: lo ve quien
  * edita sus datos (`patients.write`, como «Faltan datos»), sin abrir nada. Sin nada que decir, nada.
  */
-function BeforeVisitLine({ patientId }: { patientId: string }) {
+function BeforeVisitLine({ patientId, sex }: { patientId: string; sex?: string | null }) {
   const canEdit = usePermission("patients.write")
   const status = useQuery({
     queryKey: beforeVisitKey(patientId),
@@ -370,16 +370,25 @@ function BeforeVisitLine({ patientId }: { patientId: string }) {
   const data = status.data?.data
   // Un fallo no tapa la cabecera: la línea simplemente no sale.
   if (!canEdit || !data) return null
-  const words = beforeVisitWords(data)
+  const visit = data.visit
+  const words = visit ? beforeVisitWords(visit) : null
   return (
-    <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center">
-      <p>
-        <span className="text-muted-foreground">Antes de su cita: </span>
-        <span className="font-medium">{words.state}</span>
-        {data.state === "respondio" ? `. ${words.detail}` : ` · ${words.detail}`}
-      </p>
-      {data.state === "por_responder" ? <PersonalLinkActions patientId={patientId} missing="" /> : null}
-    </div>
+    <>
+      {visit && words ? (
+        <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center">
+          <p>
+            <span className="text-muted-foreground">Antes de su cita: </span>
+            <span className="font-medium">{words.state}</span>
+            {visit.state === "respondio" ? `. ${words.detail}` : ` · ${words.detail}`}
+          </p>
+          {visit.state === "por_responder" ? <PersonalLinkActions patientId={patientId} missing="" /> : null}
+        </div>
+      ) : null}
+      {data.healthToReview ? (
+        // Decisión del dueño (entrega 10): una línea neutra, sin qué dijo; sale aunque no tenga cita.
+        <p className="text-sm text-muted-foreground">{healthToReviewWords(data.healthToReview.at, sex)}</p>
+      ) : null}
+    </>
   )
 }
 
@@ -394,10 +403,13 @@ function HeaderStatus({
   personId,
   patientId,
   onAccount,
+  sex,
 }: {
   personId: string
   patientId: string | null
   onAccount: boolean
+  /** Para «los revisa quien la atiende»: sin sexo registrado no se supone. */
+  sex?: string | null
 }) {
   const canAppointments = usePermission("appointments.read")
   const canFinance = usePermission("finance.read")
@@ -410,11 +422,13 @@ function HeaderStatus({
   const locale = useOrgLocale() ?? "es"
   const balances = (account.data?.data.byCurrency ?? []).filter((row) => row.saldo !== 0)
   const showMoney = canFinance && Boolean(patientId)
-  if (!upcoming && !showMoney) return null
+  const canEditPerson = usePermission("patients.write")
+  if (!upcoming && !showMoney && !(canEditPerson && patientId)) return null
   return (
     <section aria-label="Lo que viene" className="flex flex-col gap-1">
       {upcoming ? <UpcomingLine {...upcoming} /> : null}
-      {upcoming?.appointment && patientId ? <BeforeVisitLine patientId={patientId} /> : null}
+      {/* «Antes de su cita» va con su próxima cita; «Declaró datos de su salud…» sale aunque no tenga una. */}
+      {patientId ? <BeforeVisitLine patientId={patientId} sex={sex} /> : null}
       {showMoney ? (
         <p className="text-sm">
           <span className="text-muted-foreground">Cuenta: </span>
@@ -762,7 +776,7 @@ export function PersonHeader({
             )}
           </p>
         ) : null}
-        <HeaderStatus personId={person.id} patientId={patient?.id ?? null} onAccount={onAccount} />
+        <HeaderStatus personId={person.id} patientId={patient?.id ?? null} onAccount={onAccount} sex={person.sex} />
         {detail ? (
           <PatientClinicalStrip
             detail={clinicalHealth ? withHealth(detail, clinicalHealth) : detail}

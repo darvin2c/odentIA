@@ -10,6 +10,7 @@ import { appointment } from "@odentia/db/schema/agenda"
 import { patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { appointmentVisitAnswer } from "@odentia/db/schema/clinical-forms"
 import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm"
+import { getPatientHealth } from "./clinical.js"
 import { healthCheckOf } from "./health-check.js"
 import { patientHealthToAsk } from "./patient-registration.js"
 import { nextAppointmentIdOf, visitAskOf } from "./visit-answers.js"
@@ -121,5 +122,36 @@ export async function beforeVisitStatus(
     state: pending ? "por_responder" : "respondio",
     answeredAt,
     linkSent: await linkSentOf(tx, orgId, patientId),
+  }
+}
+
+/**
+ * «Declaró datos de su salud el 14 nov: los revisa quien la atiende» (decisión del dueño sobre la
+ * entrega 10): para recepción, solo que la persona (o quien habla por ella) dijo algo de su salud
+ * que nadie revisó todavía, y cuándo. Nunca qué: ni cuántas cosas, ni de qué grupo. Sale aunque no
+ * tenga cita por venir. Lo que anotó el equipo no cuenta (no es lo que declaró). Lo decide la misma
+ * regla de «sin revisar» de la ficha (`PatientHealth.declared`), leída aquí en el servidor; a la
+ * pantalla solo viaja la fecha. Nulo: nada por revisar.
+ */
+export async function healthToReviewOf(tx: Db, orgId: string, patientId: string): Promise<{ at: Date } | null> {
+  const health = await getPatientHealth(tx, orgId, patientId)
+  const said = health.declared
+    .filter((group) => group.by.kind === "patient" || group.by.kind === "representative")
+    .map((group) => group.at)
+    .filter((at): at is Date => at !== null)
+  if (said.length === 0) return null
+  return { at: new Date(Math.max(...said.map((at) => at.getTime()))) }
+}
+
+/** Lo que ve recepción en la cabecera: «Antes de su cita…» y, aparte, si declaró algo de su salud por revisar. */
+export interface ReceptionHealthStatus {
+  visit: BeforeVisitStatus | null
+  healthToReview: { at: Date } | null
+}
+
+export async function receptionHealthStatus(tx: Db, orgId: string, patientId: string): Promise<ReceptionHealthStatus> {
+  return {
+    visit: await beforeVisitStatus(tx, orgId, patientId),
+    healthToReview: await healthToReviewOf(tx, orgId, patientId),
   }
 }

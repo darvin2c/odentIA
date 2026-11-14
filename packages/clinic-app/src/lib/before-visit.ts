@@ -16,10 +16,29 @@ export interface BeforeVisitStatus {
   linkSent: { at: string; channel: string } | null
 }
 
+/**
+ * Lo que ve recepción: «Antes de su cita…» (con cita por venir) y, aparte, si declaró algo de su
+ * salud que nadie revisó, con solo la fecha (decisión del dueño sobre la entrega 10).
+ */
+export interface ReceptionHealthStatus {
+  visit: BeforeVisitStatus | null
+  healthToReview: { at: string } | null
+}
+
 export const beforeVisitKey = (patientId: string) => ["before-visit", patientId]
 
-export function fetchBeforeVisit(patientId: string): Promise<{ data: BeforeVisitStatus | null }> {
+export function fetchBeforeVisit(patientId: string): Promise<{ data: ReceptionHealthStatus | null }> {
   return apiFetch(`/api/patients/${patientId}/personal-link/before-visit`)
+}
+
+/**
+ * «Declaró datos de su salud el 14 nov: los revisa quien la atiende.» Sin qué ni cuánto: lo
+ * clínico lo lee el equipo clínico. Sin sexo registrado no se supone ninguno.
+ */
+export function healthToReviewWords(at: string, sex: string | null | undefined): string {
+  const day = shortDay(at)
+  const who = sex === "F" ? "quien la atiende" : sex === "M" ? "quien lo atiende" : "quien atiende al paciente"
+  return `Declaró datos de su salud${day ? ` el ${day}` : ""}: los revisa ${who}.`
 }
 
 /** Por dónde salió, dicho como lo diría recepción; vacío si es otro canal. */

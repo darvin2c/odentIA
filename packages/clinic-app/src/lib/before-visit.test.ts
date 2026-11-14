@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { beforeVisitWords } from "./before-visit"
+import { beforeVisitWords, healthToReviewWords } from "./before-visit"
 import { setOrgLocale } from "./locale"
 
 // Mesa de formularios del 13 nov, entrega 10 (C10): recepción sabe si respondió, sin ver qué.
@@ -27,5 +27,15 @@ describe("antes de su cita, para recepción", () => {
     expect(beforeVisitWords({ ...base, state: "por_responder", answeredAt: null, linkSent: null }).detail).toBe(
       "aún no se le envió su enlace",
     )
+  })
+})
+
+// Decisión del dueño sobre la entrega 10: una línea neutra, sin qué dijo.
+describe("declaró datos de su salud, para recepción", () => {
+  beforeAll(() => void setOrgLocale("es-PE", "America/Lima", "PE"))
+  it("dice el día y quién lo revisa, y sin sexo registrado no supone ninguno", () => {
+    expect(healthToReviewWords("2026-11-14T15:00:00.000Z", "F")).toBe("Declaró datos de su salud el 14 nov: los revisa quien la atiende.")
+    expect(healthToReviewWords("2026-11-14T15:00:00.000Z", "M")).toBe("Declaró datos de su salud el 14 nov: los revisa quien lo atiende.")
+    expect(healthToReviewWords("2026-11-14T15:00:00.000Z", null)).toBe("Declaró datos de su salud el 14 nov: los revisa quien atiende al paciente.")
   })
 })

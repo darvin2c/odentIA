@@ -1108,7 +1108,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // Mesa de formularios del 13 nov, entrega 10 (C10).
         id: "recepcion-puedo-ver-lo-que-respondio",
         q: "¿Puedo ver lo que respondió?",
-        a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
+        a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Si declaró algo de su salud que nadie revisó todavía, dice «Declaró datos de su salud» con el día, también sin cita por venir: lo revisa quien lo atiende, y tú no ves qué. Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
         forms: [
           "ya respondio lo de antes de su cita",
           "como se si el paciente respondio",

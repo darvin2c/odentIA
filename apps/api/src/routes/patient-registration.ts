@@ -2,8 +2,8 @@ import { registrationConfigSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { conversation } from "@odentia/db/schema/crm"
 import {
-  beforeVisitStatus,
   clinicOriginOf,
+  receptionHealthStatus,
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
@@ -167,7 +167,8 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     }
     const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
     if (!params.success) return validationError(c, params.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => beforeVisitStatus(tx, orgId, params.data.id)))
+    // Con «Declaró datos de su salud el …»: solo la fecha y que hay algo por revisar, nunca qué.
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => receptionHealthStatus(tx, orgId, params.data.id)))
   })
 
   app.post("/patients/:id/personal-link", async c => {

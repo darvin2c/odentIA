@@ -5,13 +5,13 @@
  */
 import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { patientHealthDeclaration } from "@odentia/db/schema/clinical"
+import { patient, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createRoom } from "./appointments.js"
-import { beforeVisitStatus } from "./before-visit.js"
+import { beforeVisitStatus, healthToReviewOf, receptionHealthStatus } from "./before-visit.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
@@ -319,4 +319,41 @@ it("C10: recepción ve si respondió y cuándo salió su enlace, sin nada de lo 
   // Sin cita por venir no hay nada que decir.
   await ownerDb.update(appointment).set({ status: "cancelada" }).where(and(eq(appointment.patientId, marta.patientId)))
   expect(await f.run((tx) => beforeVisitStatus(tx, ORG, marta.patientId))).toBeNull()
+})
+
+// Decisión del dueño sobre la entrega 10: recepción ve una línea neutra si declaró algo sin revisar.
+it("recepción sabe que declaró algo de su salud sin revisar y cuándo, sin nada de lo que dijo, aunque no tenga cita", async () => {
+  const f = await clinicalFixture()
+  const marta = await martaBack(f)
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.patientId, marta.patientId))
+  const status = await f.run((tx) => receptionHealthStatus(tx, ORG, marta.patientId))
+  expect(status.visit).toBeNull()
+  expect(status.healthToReview).not.toBeNull()
+  // Lo que dijo hace dos meses (su declaración guarda ese día).
+  expect(status.healthToReview!.at.getTime()).toBeLessThan(Date.now() - 59 * DAY)
+  expect(Object.keys(status.healthToReview!)).toEqual(["at"])
+  for (const secret of ["Warfarina", "Penicilina"]) expect(JSON.stringify(status)).not.toContain(secret)
+
+  // Revisado por el equipo, ya no hay nada que decir.
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, marta.patientId, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "recorded", conditions: "none", medications: "recorded" },
+      conditions: [],
+      medications: health.medications.map((row) => ({ id: row.id, name: row.name })),
+    }),
+  )
+  await ownerDb.update(patient).set({ allergiesReviewedAt: new Date() }).where(eq(patient.id, marta.patientId))
+  expect(await f.run((tx) => healthToReviewOf(tx, ORG, marta.patientId))).toBeNull()
+})
+
+it("lo que anotó el equipo no sale como «Declaró datos de su salud»", async () => {
+  const f = await clinicalFixture()
+  const ana = await f.run((tx) => createPatient(tx, ORG, f.actor, { displayName: "Ana Paz", givenNames: "Ana", familyName: "Paz", phone: "+51987000555" }))
+  await f.run(async (tx) => {
+    await recordHealthDeclaration(tx, ORG, ana.id, { via: "registro", by: { kind: "staff", name: null, relation: null }, health: SAID_BEFORE })
+    await initializeDeclaredPatientHealth(tx, ORG, ana.id, SAID_BEFORE, f.actor)
+  })
+  expect(await f.run((tx) => healthToReviewOf(tx, ORG, ana.id))).toBeNull()
 })
