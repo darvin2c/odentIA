@@ -4,6 +4,8 @@
  * el servidor al recibirlo: cada error con la ruta de su dato en la entrevista.
  */
 
+import { CIGARETTE_BANDS, INTERVIEW_ANSWERS, TOBACCO_ANSWERS } from "@odentia/clinical"
+
 /** Cuántos hábitos se registran como mucho. */
 export const DENTAL_HABITS_MAX = 10
 /** Cepillados al día: de 0 a este número. */
@@ -34,5 +36,32 @@ export function dentalInterviewErrors(answers: Record<string, unknown>): Record<
     errors["antecedentesOdontologicos.habitos"] =
       `Hábitos: escribe como mucho ${DENTAL_HABITS_MAX}, separados por coma.`
   }
+  const { corazon, problemaAnestesia } = group as Record<string, unknown>
+  const isAnswer = (value: unknown) => value === undefined || (INTERVIEW_ANSWERS as readonly unknown[]).includes(value)
+  if (corazon !== undefined) {
+    const heart = corazon && typeof corazon === "object" ? (corazon as Record<string, unknown>) : null
+    if (!heart || !isAnswer(heart.riesgoEndocarditis) || !isAnswer(heart.antibioticoPrevio))
+      errors["antecedentesOdontologicos.corazon"] = "Corazón: elige Sí, No o No sabe."
+  }
+  if (!isAnswer(problemaAnestesia))
+    errors["antecedentesOdontologicos.problemaAnestesia"] = "Problemas con la anestesia: elige Sí, No o No sabe."
+  return errors
+}
+
+/**
+ * Los hábitos de odentIA en la entrevista (`habitos`, la forma de latidIA): si
+ * fuma y, de quien fuma, cuánto. Lo demás de ese grupo no es de odentIA.
+ */
+export function dentalHabitsErrors(answers: Record<string, unknown>): Record<string, string> {
+  const group = answers.habitos
+  if (group === undefined) return {}
+  if (!group || typeof group !== "object" || Array.isArray(group)) return { habitos: "Hábitos: revisa lo escrito." }
+  const { tabaco, cigarrillos, ...rest } = group as Record<string, unknown>
+  const errors: Record<string, string> = {}
+  if (tabaco !== undefined && !(TOBACCO_ANSWERS as readonly unknown[]).includes(tabaco))
+    errors["habitos.tabaco"] = "Tabaco: elige una opción."
+  if (cigarrillos !== undefined && (tabaco !== "fuma" || !(CIGARETTE_BANDS as readonly unknown[]).includes(cigarrillos)))
+    errors["habitos.cigarrillos"] = "Cuántos al día se dice solo de quien fuma."
+  if (Object.keys(rest).length) errors.habitos = "Hábitos: solo el tabaco y cuánto fuma."
   return errors
 }

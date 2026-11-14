@@ -14,7 +14,7 @@
  *
  * Las demás claves de la entrevista son comunes y no se tocan aquí.
  */
-import { pregnancyToday } from "@odentia/clinical"
+import { CIGARETTE_BAND_LABELS, type CigaretteBand, pregnancyToday } from "@odentia/clinical"
 
 export const MEDICAL_INTERVIEW_GROUPS = [
   "embarazoLactancia",
@@ -68,6 +68,8 @@ export interface MedicalHistory {
   habitos?: {
     tabaco?: keyof typeof TOBACCO
     cigarrillosDia?: number
+    /** Lo que dijo en su registro: menos de 10 o 10 o más al día. */
+    cigarrillos?: CigaretteBand
     alcohol?: keyof typeof ALCOHOL
     actividadFisica?: keyof typeof ACTIVITY
   }
@@ -199,18 +201,24 @@ export function parseMedicalHistory(
     if (habits !== undefined) {
       if (!isRec(habits)) fail("Hábitos debe ser un objeto", "habitos")
       const group = habits as Rec
-      only(group, "Hábitos", ["tabaco", "cigarrillosDia", "alcohol", "actividadFisica"], "habitos")
+      only(group, "Hábitos", ["tabaco", "cigarrillosDia", "cigarrillos", "alcohol", "actividadFisica"], "habitos")
       const tabaco = choice(group.tabaco, TOBACCO, "Tabaco", "habitos.tabaco")
       // Los cigarrillos al día solo se dicen de quien fuma.
       const cigarrillosDia =
         tabaco === "fuma"
           ? count(group.cigarrillosDia, "Cigarrillos al día", 100, "habitos.cigarrillosDia")
           : undefined
+      // Lo que dijo el paciente en su registro (menos de 10 o 10 o más al día), si nadie anotó el número.
+      const cigarrillos =
+        tabaco === "fuma"
+          ? choice(group.cigarrillos, CIGARETTE_BAND_LABELS, "Cigarrillos al día", "habitos.cigarrillos")
+          : undefined
       const alcohol = choice(group.alcohol, ALCOHOL, "Alcohol", "habitos.alcohol")
       const actividadFisica = choice(group.actividadFisica, ACTIVITY, "Actividad física", "habitos.actividadFisica")
       set("habitos", {
         ...(tabaco ? { tabaco } : {}),
         ...(cigarrillosDia === undefined ? {} : { cigarrillosDia }),
+        ...(cigarrillos ? { cigarrillos } : {}),
         ...(alcohol ? { alcohol } : {}),
         ...(actividadFisica ? { actividadFisica } : {}),
       })
@@ -309,7 +317,7 @@ export function medicalHistoryLines(history: MedicalHistory, today: string): str
   if (habits) {
     const parts = [
       habits.tabaco
-        ? `tabaco: ${TOBACCO[habits.tabaco].toLowerCase()}${habits.cigarrillosDia === undefined ? "" : `, ${habits.cigarrillosDia} al día`}`
+        ? `tabaco: ${TOBACCO[habits.tabaco].toLowerCase()}${habits.cigarrillosDia !== undefined ? `, ${habits.cigarrillosDia} al día` : habits.cigarrillos ? `, ${CIGARETTE_BAND_LABELS[habits.cigarrillos]}` : ""}`
         : "",
       habits.alcohol ? `alcohol: ${ALCOHOL[habits.alcohol].toLowerCase()}` : "",
       habits.actividadFisica

@@ -296,6 +296,8 @@ export const INTERVIEW_ANSWER_LABELS: Record<InterviewAnswer, string> = { si: "S
  * exacto (`cigarrillosDia`) lo anota el profesional si lo pregunta.
  */
 export const CIGARETTE_BANDS = ["menos_10", "10_o_mas"] as const
+/** Si fuma, como lo responde el paciente (la forma de `habitos.tabaco` en la entrevista). */
+export const TOBACCO_ANSWERS = ["nunca", "fuma", "dejo"] as const
 export type CigaretteBand = (typeof CIGARETTE_BANDS)[number]
 export const CIGARETTE_BAND_LABELS: Record<CigaretteBand, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
 /**
@@ -361,7 +363,7 @@ export const registrationAnswersSchema = z.strictObject({
      * de latidIA. La lactancia y el tabaco los pregunta también odentIA; el alcohol, solo latidIA.
      */
     medical: z.strictObject({
-      lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
+      lactancia: z.boolean().optional(), tabaco: z.enum(TOBACCO_ANSWERS).optional(),
       /** Cuánto, solo de quien fuma. */
       cigarrillos: z.enum(CIGARETTE_BANDS).optional(),
       alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
@@ -561,6 +563,28 @@ export function declaredHealthAnswered(health: RegistrationAnswers["health"]): b
   return [health.personal, health.dental, health.medical].some((group) =>
     Object.values(group ?? {}).some((value) => value !== undefined && value !== ""),
   )
+}
+
+/**
+ * La lactancia y el tabaco que declaró, con las claves de la entrevista de la
+ * ficha: la lactancia con el día en que se dijo (`embarazoLactancia.lactancia`,
+ * como el embarazo) y el tabaco con cuánto fuma (`habitos.tabaco` y
+ * `habitos.cigarrillos`). Una sola forma para odentIA y latidIA: no hay dos
+ * datos para lo mismo. El alcohol lo suma solo latidIA.
+ */
+export function declaredLactationAndTobacco(
+  medical: NonNullable<RegistrationAnswers["health"]>["medical"],
+  today: string,
+): { embarazoLactancia?: { lactancia: { estado: "si" | "no"; fecha: string } }; habitos?: Record<string, string> } {
+  const out: ReturnType<typeof declaredLactationAndTobacco> = {}
+  if (typeof medical?.lactancia === "boolean")
+    out.embarazoLactancia = { lactancia: { estado: medical.lactancia ? "si" : "no", fecha: today } }
+  if (medical?.tabaco)
+    out.habitos = {
+      tabaco: medical.tabaco,
+      ...(medical.tabaco === "fuma" && medical.cigarrillos ? { cigarrillos: medical.cigarrillos } : {}),
+    }
+  return out
 }
 
 /**

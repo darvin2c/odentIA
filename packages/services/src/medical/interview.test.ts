@@ -35,4 +35,13 @@ describe("la entrevista de latidIA (issue 229, decisión 13)", () => {
       habitos: { tabaco: "nunca" },
     })
   })
+
+  it("cuántos fuma, como lo dijo en su registro, se guarda solo de quien fuma", () => {
+    expect(medicalInterview.declared({ medical: { tabaco: "fuma", cigarrillos: "menos_10" } }, today)).toEqual({
+      habitos: { tabaco: "fuma", cigarrillos: "menos_10" },
+    })
+    expect(medicalInterview.check({ habitos: { tabaco: "dejo", cigarrillos: "menos_10" } }, today)).toEqual({
+      habitos: { tabaco: "dejo" },
+    })
+  })
 })

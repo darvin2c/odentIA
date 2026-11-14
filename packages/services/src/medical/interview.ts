@@ -1,4 +1,4 @@
-import { declaredPregnancy } from "@odentia/clinical"
+import { declaredLactationAndTobacco, declaredPregnancy } from "@odentia/clinical"
 import { parseMedicalHistory } from "@odentia/medical"
 import { invalidField, validation } from "../errors.js"
 import { answeredOf, type ProductInterview } from "../product-hooks.js"
@@ -19,14 +19,11 @@ export const medicalInterview: ProductInterview = {
     // El embarazo del registro va con la fecha en que se dijo, para que la receta sepa si sigue vigente
     // (la forma común, `declaredPregnancy`).
     const { statement, rest: personal } = declaredPregnancy(answeredOf(health.personal), today)
-    const medical = health.medical ?? {}
-    const pregnancy = {
-      ...(statement ? { embarazo: statement } : {}),
-      ...(typeof medical.lactancia === "boolean"
-        ? { lactancia: { estado: medical.lactancia ? "si" : "no", fecha: today } }
-        : {}),
-    }
-    const habits = answeredOf({ tabaco: medical.tabaco, alcohol: medical.alcohol })
+    // La lactancia y el tabaco, con la regla común (`declaredLactationAndTobacco`, la misma de odentIA);
+    // el alcohol es solo de latidIA.
+    const shared = declaredLactationAndTobacco(health.medical, today)
+    const pregnancy = { ...(statement ? { embarazo: statement } : {}), ...shared.embarazoLactancia }
+    const habits = { ...shared.habitos, ...answeredOf({ alcohol: health.medical?.alcohol }) }
     return {
       ...(Object.keys(personal).length ? { antecedentesPersonales: personal } : {}),
       ...(Object.keys(pregnancy).length ? { embarazoLactancia: pregnancy } : {}),

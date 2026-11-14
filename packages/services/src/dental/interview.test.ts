@@ -36,4 +36,34 @@ describe("la entrevista de odentIA", () => {
       ),
     ).toEqual({ embarazoLactancia: { embarazo: { estado: "si", fecha: today, semanas: 10 } } })
   })
+
+  it("el corazón y la anestesia van con su boca; la lactancia y el tabaco, con la forma de latidIA", () => {
+    expect(
+      dentalInterview.declared(
+        {
+          personal: { embarazo: false },
+          dental: { corazon: { riesgoEndocarditis: "si", antibioticoPrevio: "no_sabe" }, problemaAnestesia: "no" },
+          medical: { lactancia: true, tabaco: "fuma", cigarrillos: "10_o_mas" },
+        },
+        today,
+      ),
+    ).toEqual({
+      embarazoLactancia: { embarazo: { estado: "no", fecha: today }, lactancia: { estado: "si", fecha: today } },
+      habitos: { tabaco: "fuma", cigarrillos: "10_o_mas" },
+      antecedentesOdontologicos: {
+        corazon: { riesgoEndocarditis: "si", antibioticoPrevio: "no_sabe" },
+        problemaAnestesia: "no",
+      },
+    })
+  })
+
+  it("lo que no es una respuesta de la lista no se guarda, y cuántos fuma solo de quien fuma", () => {
+    expect(() =>
+      dentalInterview.check({ antecedentesOdontologicos: { problemaAnestesia: "quizá" } }, today),
+    ).toThrow()
+    expect(() => dentalInterview.check({ habitos: { tabaco: "nunca", cigarrillos: "menos_10" } }, today)).toThrow()
+    expect(() => dentalInterview.check({ habitos: { alcohol: "no" } }, today)).toThrow()
+    const ok = { habitos: { tabaco: "fuma", cigarrillos: "menos_10" } }
+    expect(dentalInterview.check(ok, today)).toBe(ok)
+  })
 })
