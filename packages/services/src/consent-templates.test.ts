@@ -425,6 +425,10 @@ it("«Hay preguntas nuevas» llega a la campana de quien administra y se va con 
   await ownerDb.execute(
     sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${randomUUID()}, ${orgId}, ${ACTOR}, 'owner', now())`,
   )
+  // Sin configuración guardada (una clínica nueva) no hay aviso.
+  expect((await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))).items).toEqual([])
+  // Una clínica que ya existía: su configuración quedó en la versión 1 de la lista.
+  await ownerDb.execute(sql`insert into patient_registration_config (organization_id, fields, questions_version) values (${orgId}, '{}'::jsonb, 1)`)
   const before = await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))
   expect(before.items.map((item) => item.title)).toContain("Hay preguntas nuevas para tus pacientes")
   await run((tx) => markRegistrationQuestionsSeen(tx, orgId, ACTOR))

@@ -662,8 +662,9 @@ export async function registrationNoticeSuggested(tx: Db, orgId: string): Promis
 /**
  * Las preguntas que la lista sumó después de la última vez que alguien de la clínica guardó o vio
  * «Preguntas al paciente» (mesa del 13 nov, decisión 10): ya se preguntan como «Opcional» y a quien
- * la administra se le avisa cuáles son. Una clínica sin configuración guardada es de antes de la
- * lista: también se le avisa.
+ * la administra se le avisa cuáles son. Una clínica sin configuración guardada nunca eligió qué
+ * preguntar: no hay nada que la lista le haya cambiado, y una clínica nueva no recibe el aviso
+ * (lo atrapó el e2e: la campana de una clínica recién creada decía «Hay preguntas nuevas»).
  */
 export async function newRegistrationQuestionsOf(
   tx: Db,
@@ -674,7 +675,8 @@ export async function newRegistrationQuestionsOf(
     .from(patientRegistrationConfig)
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
-  return newRegistrationQuestions(row?.seen ?? 1, await orgProduct(tx, orgId))
+  if (!row) return []
+  return newRegistrationQuestions(row.seen, await orgProduct(tx, orgId))
 }
 
 /** «Entendido»: quien administra ya vio las preguntas nuevas, aunque no cambie nada. */
