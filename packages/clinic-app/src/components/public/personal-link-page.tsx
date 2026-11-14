@@ -237,7 +237,11 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
         : view.data?.health
           ? "Tus datos y tu salud"
           : "Tus datos",
-      badge: missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`,
+      // Lo de su salud cuenta como una cosa más: «Faltan 3» se lee con lo que dice la tarjeta (B15).
+      badge: (() => {
+        const count = missing.length + (view.data?.health ? 1 : 0)
+        return count === 1 ? "Falta 1" : `Faltan ${count}`
+      })(),
       text: `${capital(missing.map((item) => item.label.toLowerCase()).join(", "))}${view.data?.health ? `; y ${healthAsk(name)}` : ""}.`,
       action: "Completar",
       next: name ? `Completar los datos de ${name}` : "Completar tus datos",

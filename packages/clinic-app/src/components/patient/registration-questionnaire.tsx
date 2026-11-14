@@ -1998,6 +1998,7 @@ export function RegistrationQuestionnaire({
               asked("medications") && required("medications"),
               draft.medications,
               draft.medicationsText,
+              true,
             )
           }
         >
@@ -2046,7 +2047,8 @@ export function RegistrationQuestionnaire({
                   ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
                   : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
               }
-              detailLabel="¿Cuál? Si son varios, sepáralos con comas."
+              detailLabel="¿Cuál? (si lo sabes) Si son varios, sepáralos con comas."
+              detailOptional
               state={draft.medications}
               text={draft.medicationsText}
               onState={(value) => set({ medications: value })}

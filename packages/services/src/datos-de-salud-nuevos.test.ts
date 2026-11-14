@@ -1,3 +1,4 @@
+import { registrationAnswersSchema } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import { declaredMedications, declaredTakesNoMedicine } from "./clinical.js"
 
@@ -57,4 +58,13 @@ describe("declaredTakesNoMedicine", () => {
     // Un registro de antes, con una sola pregunta.
     expect(declaredTakesNoMedicine({ medications: { state: "none", items: [] } })).toBe(true)
   })
+})
+
+// QA del 14 nov (B15): «Sí» a «algún otro medicamento» sin decir cuál no dejaba seguir; ahora es
+// opcional como en las dos clases y deja una fila que lo dice.
+it("«Sí» a «algún otro medicamento» sin decir cuál deja «Otro medicamento (no dijo cuál)»", () => {
+  expect(registrationAnswersSchema.shape.health.safeParse({ medications: { state: "recorded", items: [] } }).success).toBe(true)
+  expect(declaredMedications({ medications: { state: "recorded", items: [] } })).toEqual([
+    { name: "Otro medicamento (no dijo cuál)", declaredClass: null },
+  ])
 })

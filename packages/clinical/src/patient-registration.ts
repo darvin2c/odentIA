@@ -273,9 +273,10 @@ export const healthMedicationDeclarationSchema = z.strictObject({
 export type HealthAllergyDeclaration = z.infer<typeof healthAllergyDeclarationSchema>
 export type HealthConditionDeclaration = z.infer<typeof healthConditionDeclarationSchema>
 export type HealthMedicationDeclaration = z.infer<typeof healthMedicationDeclarationSchema>
-const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
+/** `emptyYes`: un Sí sin decir cuál vale (los medicamentos, QA del 14 nov, B15). */
+const declaration = <T extends z.ZodType>(item: T, options: { emptyYes?: boolean } = {}) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
-}).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+}).refine(v => v.state === "recorded" ? options.emptyYes === true || v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
 /**
  * Una medicina que se pregunta por su clase («¿Tomas algún anticoagulante?»):
  * Sí (`recorded`), No (`none`) o No sé (`unknown`), con los mismos estados de
@@ -335,7 +336,7 @@ export const registrationAnswersSchema = z.strictObject({
     allergies: declaration(healthAllergyDeclarationSchema).optional(),
     conditions: declaration(healthConditionDeclarationSchema).optional(),
     /** «¿Algún otro medicamento todos los días?»: lo que no es anticoagulante ni para los huesos. */
-    medications: declaration(healthMedicationDeclarationSchema).optional(),
+    medications: declaration(healthMedicationDeclarationSchema, { emptyYes: true }).optional(),
     /** Anticoagulantes o aspirina diaria (grupo ATC B01A) y medicinas para los huesos (M05B), ahora o antes. */
     anticoagulants: directedMedicineSchema.optional(),
     boneMedicines: directedMedicineSchema.optional(),

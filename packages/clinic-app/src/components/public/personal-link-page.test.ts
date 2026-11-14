@@ -3,7 +3,7 @@ import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-l
 import { setOrgLocale } from "../../lib/locale"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
-import { toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
+import { pendingItems, toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
 
 declareProduct(bareProduct("dental"))
 
@@ -172,5 +172,26 @@ describe("mientras dura la entrega", () => {
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()
     expect(() => whatFollows(old as PersonalLinkView, { key: "datos", at: THURSDAY })).toThrow()
+  })
+})
+
+// QA del 14 nov (B15): «Faltan 2: tipo de documento, número de documento; y unas preguntas de tu salud» se leía como 3.
+describe("la tarjeta de sus datos cuenta lo de su salud", () => {
+  it("dos datos y su salud: «Faltan 3»", () => {
+    const [datos] = pendingItems(
+      view({
+        consents: [],
+        toSchedule: [],
+        data: {
+          missing: [
+            { key: "docType", label: "Tipo de documento" },
+            { key: "docNumber", label: "Número de documento" },
+          ],
+          health: true,
+        },
+      }),
+    )
+    expect(datos?.badge).toBe("Faltan 3")
+    expect(datos?.text).toBe("Tipo de documento, número de documento; y unas preguntas de tu salud.")
   })
 })

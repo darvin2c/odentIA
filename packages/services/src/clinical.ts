@@ -1190,8 +1190,14 @@ export function declaredMedications(
     seen.add(key)
     rows.push({ ...item, declaredClass: null })
   }
+  // «Sí» a «algún otro» sin decir cuál, que ahora es opcional como en las dos clases (QA del 14 nov, B15).
+  if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
+    rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
 }
+
+/** La fila de «algún otro medicamento» dicho sin decir cuál. */
+export const OTHER_MEDICINE_UNNAMED = "Otro medicamento (no dijo cuál)"
 
 export async function initializeDeclaredPatientHealth(
   tx: Db,
