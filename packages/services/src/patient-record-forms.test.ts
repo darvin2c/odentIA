@@ -5,8 +5,15 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { patientAnamnesis, patientDocument, patientRegistration } from "@odentia/db/schema/clinical"
-import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
+import {
+  patient,
+  patientAllergy,
+  patientAnamnesis,
+  patientDocument,
+  patientHealthDeclaration,
+  patientRegistration,
+} from "@odentia/db/schema/clinical"
+import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, it, vi } from "vitest"
@@ -195,7 +202,8 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   ])
   const [form, sentOnly, fromPerson] = record.forms
   expect(sentOnly).toMatchObject({ id: unreviewed!.id, source: "portal", finalizedAt: null, finalizedBy: null })
-  expect(sentOnly!.byWords).toMatch(/^Lo respondió Paciente de prueba \(paciente\) desde su enlace el .+ · sin revisar$/)
+  // Quién lo respondió, con las palabras de la ficha: sin su sexo registrado, «el paciente».
+  expect(sentOnly!.byWords).toMatch(/^Lo respondió el paciente desde su enlace el .+ · sin revisar$/)
   expect(form).toMatchObject({
     version: 1,
     encounterId: f.encounter.id,
@@ -223,14 +231,14 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   })
   // Quién lo envió, por dónde y cuándo; y quién lo revisó, que es quien lo finalizó.
   expect(fromPerson!.byWords).toMatch(
-    /^Lo respondió Paciente de prueba \(paciente\) desde su enlace el .+ · lo revisó Clínico el /,
+    /^Lo respondió el paciente desde su enlace el .+ · lo revisó Clínico el /,
   )
 
   // La entrevista, como la cuenta odentIA, con lo que ella declaró dicho como suyo. El embarazo se
   // guarda con el día en que lo dijo: la copia dice la semana a su fecha y la que dijo ese día.
-  const said = (await run((tx) => clinicToday(tx, "org_a"))).split("-").reverse().join("/")
-  // Dicho hoy: la semana se dice una vez, con su día (QA de la entrega 2).
-  const pregnancy = `Sí · 30 semanas (lo dijo el ${said})`
+  // Dicho hoy, el día que ya dice el encabezado («Lo registró Clínico el …»): la semana va una vez y
+  // el día no se repite (verificador, QA de la entrega 2).
+  const pregnancy = "Sí · 30 semanas"
   expect(record.interview).toMatchObject({ version: 2, said: { kind: "recorded", by: "Clínico" } })
   expect(record.interview!.entries.map((entry) => [entry.label, entry.value, entry.since?.kind ?? null])).toEqual([
     ["Cirugías", "Apendicectomía en 2010", null],
@@ -254,7 +262,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     "Pieza 46",
     "Sin respuesta",
     "La prueba al frío se repitió a los 10 minutos.",
-    "Lo respondió Paciente de prueba (paciente) desde su enlace el",
+    "Lo respondió el paciente desde su enlace el",
     "Me duele la muela de abajo",
     "Entrevista de salud",
     pregnancy,
@@ -269,7 +277,9 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   expect(text).not.toContain("¿Desde cuándo no le duele?")
   // El equipo ya guardó sus antecedentes después de lo que ella dijo: de su salud nada queda «sin
   // revisar», y dice quién los revisó. Lo único sin revisar es el cuestionario que nadie miró.
-  expect(text).toContain(`Antecedentes revisados por Clínico el ${dayWords(new Date(), ZONE)}`)
+  // La revisión no tocó enfermedades ni medicación («no se le preguntó»): no se dice que las revisó.
+  expect(text).not.toContain("revisadas por")
+  expect(text).not.toContain("revisada por")
   expect(text.match(/sin revisar/g)).toHaveLength(1)
 
   // El archivo para otro sistema: cada formulario como QuestionnaireResponse de FHIR R4.
@@ -394,18 +404,17 @@ it("latidIA: su entrevista va en la copia con el embarazo y su fecha, por el gan
       }),
     )
     const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
-    const [day, month, year] = [today.slice(8, 10), today.slice(5, 7), today.slice(0, 4)]
     expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
       ["antecedentesPersonales.hospitalizaciones", "Hospitalizaciones", "Neumonía en 2019"],
       // Una sola vez, y con las palabras comunes: latidIA no lo vuelve a decir en su grupo.
-      // Dicho hoy: la semana va una vez, con su día.
-      ["embarazoLactancia.embarazo", "Embarazo", `Sí · 12 semanas (lo dijo el ${day}/${month}/${year})`],
+      // Dicho hoy, el día del encabezado: la semana va una vez y sin repetir el día.
+      ["embarazoLactancia.embarazo", "Embarazo", "Sí · 12 semanas"],
       ["habitos", "Hábitos", "tabaco: nunca fumó"],
     ])
     // Una sola vez: ya no va además en una sección aparte del producto.
     expect(record.productSections).toEqual([])
     const interview = resourcesOf(record).find((resource) => resource.id === `${f.patient.id}-entrevista`)
-    expect(JSON.stringify(interview)).toContain("Sí · 12 semanas (lo dijo el")
+    expect(JSON.stringify(interview)).toContain(`Lo registró Clínico el`)
     expect(JSON.stringify(interview)).not.toContain("Embarazada")
   } finally {
     await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, "org_a"))
@@ -615,23 +624,27 @@ it("lo que respondió quien habla por el paciente lo dice así, y en FHIR apunta
   const text = await printedText(record)
   expect(text).toContain("Correcciones")
   expect(text).not.toContain("Adendas")
-  expect(record.forms[0]!.byWords).toMatch(/^Lo respondió Marta Tutora \(en nombre del paciente\) el /)
+  // Con las palabras de la ficha y de Documentos: «su madre, Marta».
+  expect(record.forms[0]!.byWords).toMatch(/^Lo respondió su madre, Marta, el /)
 
   // La misma frase en la Historia: una sola regla para decir quién lo llenó.
   const timeline = await run((tx) => getTimeline(tx, "org_a", child.id, {}))
   expect(timeline.data.find((item) => item.type === "form")?.byText).toBe(
-    "Lo respondió Marta Tutora (en nombre del paciente) · lo revisó Clínico",
+    "Lo respondió su madre, Marta · lo revisó Clínico",
   )
 
   const resources = resourcesOf(record)
   // FHIR R4: un id tiene hasta 64 caracteres, de letras, números, guion y punto.
   expect(resources.filter((resource) => !/^[A-Za-z0-9.-]{1,64}$/.test(resource.id)).map((resource) => resource.id)).toEqual([])
   const related = resources.find((resource) => resource.resourceType === "RelatedPerson")
-  expect(related).toMatchObject({ id: mother.id, patient: { reference: `Patient/${child.id}` }, name: [{ text: "Marta Tutora" }] })
+  // El vínculo, no la persona: su id es de este paciente, no el del contacto (que choca en la copia de un hermano).
+  expect(related).toMatchObject({ patient: { reference: `Patient/${child.id}` }, name: [{ text: "Marta Tutora" }] })
+  expect(related!.id).not.toBe(mother.id)
+  expect(related!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
   const answered = resources.find((resource) => resource.id === sent!.id)
   expect(answered).toMatchObject({
     resourceType: "QuestionnaireResponse",
-    source: { reference: `RelatedPerson/${mother.id}`, display: "Marta Tutora" },
+    source: { reference: `RelatedPerson/${related!.id}`, display: "Marta Tutora" },
   })
   expect((answered!.text as { div: string }).div).toContain("Corrección: Dice que es el diente de arriba, no el de abajo.")
 })
@@ -649,10 +662,10 @@ it("un embarazo guardado antes, sin fecha, sale con el día en que se anotó y l
     createdBy: f.actor,
     createdAt: twoWeeksAgo,
   })
-  const day = (await run((tx) => clinicToday(tx, "org_a", twoWeeksAgo))).split("-").reverse().join("/")
   const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
   expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
-    ["embarazoLactancia.embarazo", "Embarazo", `Sí · 32 semanas a la fecha de esta copia (30 semanas el ${day})`],
+    // El día en que se anotó es el del encabezado («Versión 1 · Lo registró Clínico el …»): no se repite.
+    ["embarazoLactancia.embarazo", "Embarazo", "Sí · 32 semanas a la fecha de esta copia (30 semanas ese día)"],
   ])
 })
 
@@ -901,7 +914,9 @@ it("QA de la entrega 2: la copia dice quién revisó los antecedentes, y el «no
   expect(record.reviews.history).toMatchObject({ by: "Clínico" })
   const text = await printedText(record)
   const day = dayWords(new Date(), ZONE)
-  expect(text).toContain(`Antecedentes revisados por Clínico el ${day}`)
+  // Dice lo que revisó: la medicación; enfermedades quedó «no se le preguntó» y las alergias tienen su revisión.
+  expect(text).toContain(`Medicación revisada por Clínico el ${day}`)
+  expect(text).not.toContain("Antecedentes revisados")
   // Las alergias tienen su propia revisión: su «no» sigue sin revisar, como suyo.
   expect(text).toContain(`Alergias: Dijo que no el ${day}, sin revisar`)
   // En la clínica nadie le preguntó por sus enfermedades, pero ella dijo que no: se dicen las dos cosas.
@@ -990,5 +1005,126 @@ it("QA de la entrega 2: en la Historia, lo que respondió va el día en que lo e
   // El día en que lo envió, no el de su revisión (auditor: «hace 11 min» cuando era de hace 15).
   expect(new Date(item!.createdAt).getTime()).toBe(sentAt.getTime())
   expect(item!.detail).toBe("Cuánto te duele (0 sin dolor, 10 el peor dolor): 7 de 10 · con 1 corrección")
-  expect(item!.byText).toBe("Lo respondió Paciente de prueba (paciente) · lo revisó Clínico")
+  expect(item!.byText).toBe("Lo respondió el paciente · lo revisó Clínico")
+})
+
+it("QA de la entrega 2 (revisor): la revisión de alergias apunta solo a lo que existía al revisar y está confirmado", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const reviewedAt = new Date(Date.now() - 7 * 86_400_000)
+  const allergy = async (substance: string, verification: string, createdAt: Date) =>
+    (
+      await ownerDb
+        .insert(patientAllergy)
+        .values({ organizationId: "org_a", patientId: f.patient.id, substance, severity: "desconocida", verification, createdAt })
+        .returning()
+    )[0]!
+  const before = await allergy("Penicilina", "confirmada", new Date(reviewedAt.getTime() - 86_400_000))
+  await allergy("Ibuprofeno", "no_confirmada", new Date(reviewedAt.getTime() - 86_400_000))
+  // Anotada una semana después de la revisión: esa revisión no la vio.
+  await allergy("Látex", "confirmada", new Date(reviewedAt.getTime() + 86_400_000))
+  await ownerDb
+    .update(patient)
+    .set({ allergiesReviewedAt: reviewedAt, allergiesReviewedBy: f.actor })
+    .where(eq(patient.id, f.patient.id))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const provenance = resourcesOf(record).find((resource) => resource.id === `${f.patient.id}-alergias-revisadas`)
+  expect(provenance).toMatchObject({ resourceType: "Provenance", recorded: reviewedAt.toISOString() })
+  expect(provenance!.target).toEqual([{ reference: `AllergyIntolerance/${before.id}` }])
+  // Dice qué se revisó, no «antecedentes».
+  const text = await printedText(record)
+  expect(text).toContain(`Alergias revisadas por Clínico el ${dayWords(reviewedAt, ZONE)}`)
+  expect(text).not.toContain("Antecedentes revisados")
+})
+
+it("QA de la entrega 2 (revisor): la madre de dos hermanos es un vínculo distinto en cada copia, y cada fullUrl es un urn:uuid", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const mother = await run((tx) => createContact(tx, "org_a", { displayName: "Carla Ríos" }))
+  const child = (displayName: string) =>
+    run((tx) =>
+      createPatient(tx, "org_a", f.actor, {
+        displayName,
+        birthDate: "2018-02-03",
+        contacts: [{ contactId: mother.id, relationship: "guardian", relationshipDetail: "Madre", isPreferred: true }],
+      }),
+    )
+  const [ana, luis] = [await child("Ana Ríos"), await child("Luis Ríos")]
+  const relatedOf = async (patientId: string) =>
+    resourcesOf(await run((tx) => loadPatientRecord(tx, "org_a", patientId))).find(
+      (resource) => resource.resourceType === "RelatedPerson",
+    )!.id
+  const [first, again, sibling] = [await relatedOf(ana.id), await relatedOf(ana.id), await relatedOf(luis.id)]
+  expect(first).toBe(again)
+  expect(first).not.toBe(sibling)
+  // Un urn:uuid lleva un UUID, también para lo que no tiene uno de id (la entrevista, una revisión).
+  await run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, ana.id, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "Ácido fólico" }],
+      anamnesis: { expectedVersion: 0, answers: { antecedentesPersonales: { cirugias: "Ninguna" } } },
+    }),
+  )
+  const bundle = patientRecordFhirBundle(await run((tx) => loadPatientRecord(tx, "org_a", ana.id))) as {
+    entry: Array<{ fullUrl: string; resource: Resource }>
+  }
+  const uuid = /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  expect(bundle.entry.filter((entry) => !uuid.test(entry.fullUrl)).map((entry) => entry.fullUrl)).toEqual([])
+  expect(new Set(bundle.entry.map((entry) => entry.fullUrl)).size).toBe(bundle.entry.length)
+  expect(bundle.entry.map((entry) => entry.resource.id)).toContain(`${ana.id}-entrevista`)
+})
+
+it("QA de la entrega 2 (revisor): lo que respondió va en la copia por el día en que lo envió, no por el de su revisión", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  // Lo envió hace tres días; el equipo finalizó una ficha y, después, revisó lo enviado.
+  const sent = await sentForm(
+    f,
+    "Antes de tu cita",
+    { sections: [{ id: "motivo", title: "Motivo", fields: [{ id: "motivo", label: "¿Por qué vienes?", type: "texto" }] }] },
+    { motivo: "Control" },
+    new Date(Date.now() - 3 * 86_400_000),
+  )
+  const staff = await finalizedForm(f, null)
+  await run((tx) => finalizeFormResponse(tx, "org_a", f.actor, sent.id))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.forms.map((form) => form.id)).toEqual([sent.id, staff.id])
+})
+
+it("QA de la entrega 2 (revisor): la copia trae todas sus declaraciones, también las de hace más de 50", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const base = Date.now() - 60 * 86_400_000
+  await ownerDb.insert(patientHealthDeclaration).values(
+    Array.from({ length: 55 }, (_, index) => ({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      via: "enlace" as const,
+      respondent: "patient" as const,
+      health: { allergies: { state: "none" as const, items: [] } },
+      saidAt: new Date(base + index * 86_400_000),
+      createdAt: new Date(base + index * 86_400_000),
+    })),
+  )
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.declarations).toHaveLength(55)
+  // La ficha sigue leyendo las últimas 50.
+  expect((await run((tx) => getPatientHealth(tx, "org_a", f.patient.id))).declarations).toHaveLength(50)
+})
+
+it("QA de la entrega 2 (revisor): el motivo de una corrección, si se guarda, no va vacío ni pasa de 2000 caracteres en la base", async () => {
+  const f = await clinicalFixture()
+  const sent = await sentForm(
+    f,
+    "Cuestionario previo",
+    { sections: [{ id: "motivo", title: "Motivo", fields: [{ id: "motivo", label: "¿Por qué vienes?", type: "texto" }] }] },
+    { motivo: "Control" },
+  )
+  const row = (reason: string | null) => ({ organizationId: "org_a", responseId: sent.id, text: "Corrección", reason })
+  await expect(ownerDb.insert(clinicalFormAddendum).values(row(""))).rejects.toThrow()
+  await expect(ownerDb.insert(clinicalFormAddendum).values(row("x".repeat(2001)))).rejects.toThrow()
+  await ownerDb.insert(clinicalFormAddendum).values(row(null))
+  await ownerDb.insert(clinicalFormAddendum).values(row("Lo confirmó en consulta"))
 })

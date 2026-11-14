@@ -3,6 +3,7 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
+  isCurrentMedication,
   type HealthDeclarant,
   type MissingPersonDatum,
   type PregnancyToday,
@@ -330,10 +331,8 @@ export function unaskedHealthGroups(health: PatientHealth, today: string): Array
   return groups
 }
 
-/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta. */
-export function isCurrentMedication(row: Pick<Medication, "endDate">, today: string): boolean {
-  return !row.endDate || row.endDate >= today
-}
+/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta (la regla común). */
+export { isCurrentMedication }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
   unknown: "No se le preguntó",

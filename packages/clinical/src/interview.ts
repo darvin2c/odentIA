@@ -6,6 +6,16 @@
  */
 import { type PregnancyReading, pregnancyRecordOf, pregnancyToday } from "./pregnancy.js"
 
+/**
+ * Cómo leer la entrevista para la copia: lo que se sabe de un embarazo sin fecha
+ * (`PregnancyReading`) y `shownDay`, el día que la copia ya dice arriba («Versión 2 ·
+ * Lo dijo ella el 14 nov»): si el embarazo se dijo ese día, no se repite (verificador,
+ * QA de la entrega 2).
+ */
+export interface InterviewReading extends PregnancyReading {
+  shownDay?: string | null
+}
+
 /** Un dato de la entrevista: su nombre y lo respondido, en palabras. */
 export interface InterviewEntry {
   /** La ruta del dato en la entrevista («antecedentesPersonales.embarazo»). */
@@ -58,7 +68,7 @@ const weeksWords = (weeks: number): string => `${weeks} ${weeks === 1 ? "semana"
  * que se dijo y su día. Pasado su término o sin fecha ya no se afirma. null si
  * no se respondió.
  */
-function pregnancyWords(answers: unknown, today: string, reading: PregnancyReading): string | null {
+function pregnancyWords(answers: unknown, today: string, reading: InterviewReading): string | null {
   const record = pregnancyRecordOf(answers)
   if (!record) return null
   if (record.estado === "no") return record.fecha ? `No · lo dijo el ${dayWords(record.fecha)}` : "No"
@@ -68,22 +78,26 @@ function pregnancyWords(answers: unknown, today: string, reading: PregnancyReadi
   if (view.state === "por_confirmar")
     return `Por confirmar: lo dijo el ${day}${view.weeksSaid === null ? "" : `, con ${weeksWords(view.weeksSaid)},`} y ya pasó el tiempo de un embarazo`
   if (view.weeksToday === null) return `Sí · lo dijo el ${day}, sin las semanas`
+  // El día que la copia ya dice arriba no se repite aquí.
+  const shown = reading.shownDay === view.saidOn
   // La misma semana que dijo no se repite: «30 semanas a la fecha de esta copia (30 el …)» decía
   // dos veces lo mismo (QA de la entrega 2, como en la ficha).
-  if (view.weeksSaid === view.weeksToday) return `Sí · ${weeksWords(view.weeksToday)} (lo dijo el ${day})`
-  return `Sí · ${weeksWords(view.weeksToday)} a la fecha de esta copia (${view.weeksSaid === null ? "lo dijo" : weeksWords(view.weeksSaid)} el ${day})`
+  if (view.weeksSaid === view.weeksToday)
+    return shown ? `Sí · ${weeksWords(view.weeksToday)}` : `Sí · ${weeksWords(view.weeksToday)} (lo dijo el ${day})`
+  const said = view.weeksSaid === null ? "lo dijo" : weeksWords(view.weeksSaid)
+  return `Sí · ${weeksWords(view.weeksToday)} a la fecha de esta copia (${shown ? `${said} ese día` : `${said} el ${day}`})`
 }
 
 /**
  * Los antecedentes personales de la entrevista, en el orden de la pantalla, y
  * el embarazo, que es común a los productos. `today` es el día de la clínica;
- * `reading`, lo que se sabe de un embarazo guardado sin fecha. Lo que no se
- * respondió no sale.
+ * `reading`, lo que se sabe de un embarazo guardado sin fecha y el día que la copia
+ * ya dice arriba. Lo que no se respondió no sale.
  */
 export function commonInterviewEntries(
   answers: unknown,
   today: string,
-  reading: PregnancyReading = {},
+  reading: InterviewReading = {},
 ): InterviewEntry[] {
   const all = recordOf(answers)
   const personal = recordOf(all.antecedentesPersonales)

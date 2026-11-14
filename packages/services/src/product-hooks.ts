@@ -9,7 +9,7 @@ import {
   type ImagingType,
   type InterviewEntry,
   type MedicationCatalog,
-  type PregnancyReading,
+  type InterviewReading,
   type RegistrationAnswers,
   SUGGESTED_CONSENT_TEMPLATES,
   type SuggestedConsentTemplate,
@@ -249,9 +249,9 @@ export interface ProductInterview {
    * La entrevista guardada en la copia de la historia, dato por dato y en el
    * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
    * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un
-   * embarazo guardado sin fecha. Vacío si nada se respondió.
+   * embarazo guardado sin fecha y el día que la copia ya dice arriba. Vacío si nada se respondió.
    */
-  record(answers: unknown, today: string, reading?: PregnancyReading): InterviewEntry[]
+  record(answers: unknown, today: string, reading?: InterviewReading): InterviewEntry[]
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */

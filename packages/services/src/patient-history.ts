@@ -38,7 +38,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
-import { addedWords, loadFormRecords } from "./form-record.js"
+import { addedWords, formRecordAtSql, loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -1094,8 +1094,9 @@ export async function getTimeline(
     )
   if (types.includes("form") && tooth == null)
     branches.push(
-      // Lo que respondió la persona, a la hora en que lo envió; lo del equipo, a la que se finalizó.
-      sql`select id, 'form'::text as kind, coalesce(case when source = 'portal' then submitted_at end, finalized_at) as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
+      // Lo que respondió la persona, a la hora en que lo envió; lo del equipo, a la que se finalizó: la
+      // misma expresión con que ordena la copia (`formRecordAtSql`).
+      sql`select id, 'form'::text as kind, ${formRecordAtSql} as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
     )
   if (types.includes("note") && tooth == null)
     branches.push(

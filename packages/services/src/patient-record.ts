@@ -7,6 +7,7 @@
  * clínica (`clinical.read`). El envío a la propia persona lo hace el servidor
  * sin mostrarla a quien lo pide (Recepción).
  */
+import { createHash } from "node:crypto"
 import {
   ALLERGY_CATEGORY_FHIR,
   ALLERGY_CRITICALITY_FHIR,
@@ -40,9 +41,9 @@ import {
   hl7DocumentTypeCode,
   type InterviewEntry,
   isDiagnosisSystem,
+  isCurrentMedication,
   isImageDocumentCategory,
   KINSHIP_LABELS,
-  legacyPregnancySaidOn,
   PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
   saidNoWords,
@@ -132,8 +133,11 @@ export interface RecordInterview {
   entries: Array<
     InterviewEntry & {
       since: RecordSaid | null
-      /** Lo dijo alguien y ningún profesional lo revisó todavía (hoy, el embarazo): quién y cuándo. */
-      unreviewed?: { by: HealthDeclarant; at: Date | null }
+      /**
+       * Lo dijo alguien y ningún profesional lo revisó todavía (hoy, el embarazo): quién y cuándo.
+       * `repeatsVersion`: es quien y el día que ya dice el encabezado de la entrevista.
+       */
+      unreviewed?: { by: HealthDeclarant; at: Date | null; repeatsVersion?: boolean }
     }
   >
 }
@@ -300,15 +304,16 @@ function declarationEntries(
 /** La entrevista vigente y, de cada dato, desde qué versión consta igual. */
 function interviewOf(
   versions: Array<{ version: number; answers: unknown; createdAt: Date; createdBy: string | null; authorName: string | null }>,
-  /** `current`: es la versión vigente (lo que se sabe de un embarazo sin fecha solo vale para ella). */
-  entriesOf: (answers: unknown, current: boolean) => InterviewEntry[],
+  /**
+   * `current`: es la versión vigente (lo que se sabe de un embarazo sin fecha solo vale para ella).
+   * `shownDay`: el día que el encabezado ya dice, para no repetirlo en el embarazo.
+   */
+  entriesOf: (answers: unknown, current: boolean, shownDay: string | null) => InterviewEntry[],
   health: { declarations: HealthDeclaration[]; declared: DeclaredHealthGroup[] },
+  /** El día de la clínica de un instante (YYYY-MM-DD). */
+  dayOf: (at: Date) => string,
 ): RecordInterview | null {
   const latest = versions.at(-1)
-  const current = latest ? entriesOf(latest.answers, true) : []
-  // Sin ningún dato vigente no hay entrevista que mostrar: un encabezado solo, con quién y cuándo, no dice nada.
-  if (!latest || current.length === 0) return null
-  const told = versions.map((row) => new Map(entriesOf(row.answers, false).map((entry) => [entry.key, entry.value])))
   // Una versión que entró con una declaración comparte su instante: de ella salen quién lo dijo y
   // cuándo. Sin declaración, la escribió el equipo; la que no tiene autor (lo de antes de guardarse
   // quién fue) se declaró, y no se afirma quién.
@@ -319,10 +324,24 @@ function interviewOf(
       return { kind: "declared", by: { kind: "unknown", name: null, relation: null }, at: row.createdAt }
     return { kind: "recorded", by: row.authorName, at: row.createdAt }
   }
+  const said = latest ? saidOf(latest) : null
+  const current = latest && said ? entriesOf(latest.answers, true, dayOf(said.at)) : []
+  // Sin ningún dato vigente no hay entrevista que mostrar: un encabezado solo, con quién y cuándo, no dice nada.
+  if (!latest || !said || current.length === 0) return null
+  const told = versions.map((row) => new Map(entriesOf(row.answers, false, null).map((entry) => [entry.key, entry.value])))
   const unreviewedPregnancy = health.declared.find((group) => group.pregnancy)
+  // Lo dijo la misma persona el mismo día que dice el encabezado: la marca queda en «sin revisar»,
+  // sin repetir quién ni cuándo (verificador, QA de la entrega 2: Lucero lo leía tres veces).
+  const repeatsVersion =
+    !!unreviewedPregnancy &&
+    said.kind === "declared" &&
+    said.by.kind === unreviewedPregnancy.by.kind &&
+    said.by.name === unreviewedPregnancy.by.name &&
+    !!unreviewedPregnancy.at &&
+    dayOf(unreviewedPregnancy.at) === dayOf(said.at)
   return {
     version: latest.version,
-    said: saidOf(latest),
+    said,
     entries: current.map((entry) => {
       let first = versions.length - 1
       // El embarazo trae su propio día (el que se dijo): no se le busca otro en las versiones.
@@ -333,7 +352,7 @@ function interviewOf(
         ...entry,
         since: from && from !== latest ? saidOf(from) : null,
         ...(entry.key === PREGNANCY_ENTRY_KEY && unreviewedPregnancy
-          ? { unreviewed: { by: unreviewedPregnancy.by, at: unreviewedPregnancy.at } }
+          ? { unreviewed: { by: unreviewedPregnancy.by, at: unreviewedPregnancy.at, repeatsVersion } }
           : {}),
       }
     }),
@@ -389,11 +408,6 @@ export async function loadPatientRecord(
     .leftJoin(user, eq(user.id, patientAnamnesis.createdBy))
     .where(byPatient(patientAnamnesis))
     .orderBy(asc(patientAnamnesis.version))
-  const familyHistory = await tx
-    .select()
-    .from(patientFamilyHistory)
-    .where(byPatient(patientFamilyHistory))
-    .orderBy(asc(patientFamilyHistory.createdAt))
   const encounters = await tx
     .select()
     .from(encounter)
@@ -481,8 +495,9 @@ export async function loadPatientRecord(
   const hooks = await productHooks(tx, orgId)
   const productSections = await hooks.recordSections(tx, { orgId, patientId })
   const today = await clinicToday(tx, orgId)
-  // Quién dijo cada cosa y qué sigue sin revisar lo decide el servidor, igual que para la ficha.
-  const health = await getPatientHealth(tx, orgId, patientId)
+  // Quién dijo cada cosa y qué sigue sin revisar lo decide el servidor, igual que para la ficha. La
+  // copia entrega todas sus declaraciones, sin el tope de la pantalla.
+  const health = await getPatientHealth(tx, orgId, patientId, { allDeclarations: true })
   // Quién revisó los antecedentes y las alergias, con su nombre, como lo dice la ficha.
   const reviewerIds = [health.reviewedBy, health.allergiesReviewedBy].filter((id): id is string => !!id)
   const reviewers = new Map(
@@ -502,13 +517,9 @@ export async function loadPatientRecord(
     })
     return last && last.health[topic]?.state === "none" ? { by: last.by, at: last.at } : null
   }
-  // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: sale de las
-  // versiones de la entrevista (de la más nueva a la más antigua), como en la ficha.
-  const legacySaidOn = legacyPregnancySaidOn(
-    interviewVersions
-      .map((row) => ({ answers: row.answers, day: clinicDay(row.createdAt, establishmentRow?.timezone || "UTC") }))
-      .reverse(),
-  )
+  // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: lo calcula la
+  // ficha (`getPatientHealth`), y la copia usa el mismo día.
+  const legacySaidOn = health.pregnancy?.saidOn ?? null
   const planItems = await listPlanItems(tx, orgId, patientId)
   const site = hooks.site
   const recordSite = (row: SiteColumns): RecordSite => ({
@@ -574,10 +585,11 @@ export async function loadPatientRecord(
       .reverse(),
     interview: interviewOf(
       interviewVersions,
-      (answers, current) => hooks.interview.record(answers, today, current ? { legacySaidOn } : {}),
+      (answers, current, shownDay) => hooks.interview.record(answers, today, current ? { legacySaidOn, shownDay } : {}),
       health,
+      (at) => clinicDay(at, establishmentRow?.timezone || "UTC"),
     ),
-    familyHistory,
+    familyHistory: health.familyHistory,
     encounters: encounters.map((row) => ({
       row,
       diagnoses: diagnoses
@@ -683,7 +695,7 @@ function unreviewedWords(said: { by: HealthDeclarant; at: Date | null }, sex: st
 
 /** Lo que acompaña a un dato de la entrevista: que sigue sin revisar, o de qué versión anterior viene. */
 function entryNote(entry: RecordInterview["entries"][number], sex: string | null, zone: Zone): string | null {
-  if (entry.unreviewed) return unreviewedWords(entry.unreviewed, sex, zone)
+  if (entry.unreviewed) return entry.unreviewed.repeatsVersion ? "sin revisar" : unreviewedWords(entry.unreviewed, sex, zone)
   return entry.since ? saidWords(entry.since, sex, zone) : null
 }
 
@@ -751,10 +763,52 @@ function voidedFormWords(form: FormRecord, zone: Zone): string | null {
   return `Se conserva, pero ya no vale: es de una atención anulada el ${dayTimeWords(form.voidedAttention.at, zone)}${why}`
 }
 
-/** «Ya no lo toma (hasta el 10/11/2026)»: una medicina con fin anterior a la copia ya no es vigente. */
-function medicationEnded(row: { endDate: string | null }, today: string): boolean {
-  return !!row.endDate && row.endDate < today
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Un UUID versión 5 (RFC 9562, con SHA-1): siempre el mismo para el mismo espacio y
+ * nombre. Da a un recurso de la copia un id que no choca con el de la copia de otro
+ * paciente (la madre de dos hermanos) y un `urn:uuid` válido para lo que no tiene uno.
+ */
+function uuidV5(namespace: string, name: string): string {
+  const bytes = createHash("sha1")
+    .update(Buffer.from(namespace.replace(/-/g, ""), "hex"))
+    .update(name, "utf8")
+    .digest()
+    .subarray(0, 16)
+  bytes[6] = ((bytes[6] as number) & 0x0f) | 0x50
+  bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80
+  const hex = bytes.toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
+
+/** El id del vínculo de una persona con este paciente (`RelatedPerson`). */
+const relatedPersonId = (patientId: string, contactId: string): string => uuidV5(patientId, `RelatedPerson:${contactId}`)
+
+type HealthTopic = "allergies" | "conditions" | "medications"
+
+/**
+ * Lo que cubrió cada revisión, con quién y cuándo. «Revisar antecedentes» cubre las
+ * enfermedades y la medicación, salvo el grupo que quedó «no se le preguntó»; las
+ * alergias tienen su propia revisión. Así la copia no dice «Antecedentes revisados»
+ * encima de lo que nadie revisó (verificador, QA de la entrega 2).
+ */
+function reviewScopes(
+  record: Pick<PatientRecord, "reviews" | "groups">,
+): Array<{ label: string; review: { at: Date; by: string | null }; topics: HealthTopic[] }> {
+  const out: Array<{ label: string; review: { at: Date; by: string | null }; topics: HealthTopic[] }> = []
+  if (record.reviews.history) {
+    const topics = (["conditions", "medications"] as const).filter((topic) => record.groups[topic].state !== "unknown")
+    const label =
+      topics.length === 2 ? "Enfermedades y medicación revisadas" : topics[0] === "conditions" ? "Enfermedades revisadas" : "Medicación revisada"
+    if (topics.length) out.push({ label, review: record.reviews.history, topics: [...topics] })
+  }
+  if (record.reviews.allergies) out.push({ label: "Alergias revisadas", review: record.reviews.allergies, topics: ["allergies"] })
+  return out
+}
+
+/** «Ya no lo toma (hasta el 10/11/2026)»: la que no es vigente con la regla común (`isCurrentMedication`). */
+const medicationEnded = (row: { endDate: string | null }, today: string): boolean => !isCurrentMedication(row, today)
 
 /** «13/11/2026»: un día de calendario, igual en cualquier zona. */
 const civilDayWords = (day: string): string => day.split("-").reverse().join("/")
@@ -854,16 +908,11 @@ export async function renderPatientRecordPdf(
           `${label}: ${saidNoWords(group.by, p.sex)}${group.at ? ` el ${dayWords(group.at, zone)}` : ""}, sin revisar`,
       ),
   )
-  // Quién los revisó con ella y cuándo, como lo dice la ficha: lo que ya no lleva «sin revisar» no
-  // queda sin dueño (QA de la entrega 2).
-  const reviewed = [
-    record.reviews.history
-      ? `Antecedentes revisados${record.reviews.history.by ? ` por ${record.reviews.history.by}` : ""} el ${dayWords(record.reviews.history.at, zone)}`
-      : null,
-    record.reviews.allergies
-      ? `Alergias revisadas${record.reviews.allergies.by ? ` por ${record.reviews.allergies.by}` : ""} el ${dayWords(record.reviews.allergies.at, zone)}`
-      : null,
-  ].filter((line): line is string => !!line)
+  // Quién revisó qué con ella y cuándo, como lo dice la ficha: lo que ya no lleva «sin revisar» no
+  // queda sin dueño, y lo que la revisión no tocó no se lee como revisado (QA de la entrega 2).
+  const reviewed = reviewScopes(record).map(
+    (scope) => `${scope.label}${scope.review.by ? ` por ${scope.review.by}` : ""} el ${dayWords(scope.review.at, zone)}`,
+  )
   if (reviewed.length) kit.text(reviewed.join(" · "), { size: SIZE.second, tone: "gray" })
   // Un grupo sin nada anotado dice cómo quedó: «niega» si el equipo lo preguntó; tras una revisión,
   // «no se le preguntó», con el «no» que ella dijo, que no se pierde (auditor, QA de la entrega 2).
@@ -1321,9 +1370,11 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
   for (const c of record.contacts)
     resources.push({
       resourceType: "RelatedPerson",
-      // El id de la persona vinculada: en la copia de un paciente es única, y cabe en los 64
-      // caracteres de un id de FHIR (con el del paciente delante eran 73).
-      id: c.contactId,
+      // `RelatedPerson` es el vínculo con este paciente, no la persona: la madre de dos hermanos
+      // es una en cada copia, y con su id de contacto las dos chocaban al cargarlas en otro
+      // sistema (revisor, QA de la entrega 2). Un UUID v5 del paciente y el contacto: siempre el
+      // mismo para este vínculo y en los 64 caracteres de un id de FHIR.
+      id: relatedPersonId(p.patientId, c.contactId),
       patient: patientRef,
       name: [{ text: c.displayName }],
       relationship: [{ text: c.detail ?? c.relationship }],
@@ -1440,23 +1491,37 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       ],
     })
   }
-  reviewProvenance(
-    `${p.patientId}-antecedentes-revisados`,
-    record.reviews.history,
-    [
-      ...record.conditions.filter((c) => !declaredGroupOf(record, "conditions", c.id)).map((c) => ({ reference: `Condition/${c.id}` })),
-      ...record.medications
-        .filter((m) => !declaredGroupOf(record, "medications", m.id))
-        .map((m) => ({ reference: `MedicationStatement/${m.id}` })),
-    ],
-  )
-  reviewProvenance(
-    `${p.patientId}-alergias-revisadas`,
-    record.reviews.allergies,
-    record.allergies
-      .filter((a) => !declaredGroupOf(record, "allergies", a.id))
-      .map((a) => ({ reference: `AllergyIntolerance/${a.id}` })),
-  )
+  // Solo lo que esa revisión pudo ver: lo que ya existía al revisar, del grupo que cubrió, y no lo que
+  // sigue sin revisar ni la alergia «no confirmada» (revisor, QA de la entrega 2: una alergia anotada
+  // el 8 salía verificada el 1).
+  const reviewedBefore = (row: { createdAt: Date }, at: Date) => row.createdAt.getTime() <= at.getTime()
+  for (const scope of reviewScopes(record)) {
+    const at = scope.review.at
+    const targets = [
+      ...(scope.topics.includes("conditions")
+        ? record.conditions
+            .filter((c) => reviewedBefore(c, at) && !declaredGroupOf(record, "conditions", c.id))
+            .map((c) => ({ reference: `Condition/${c.id}` }))
+        : []),
+      ...(scope.topics.includes("medications")
+        ? record.medications
+            .filter((m) => reviewedBefore(m, at) && !declaredGroupOf(record, "medications", m.id))
+            .map((m) => ({ reference: `MedicationStatement/${m.id}` }))
+        : []),
+      ...(scope.topics.includes("allergies")
+        ? record.allergies
+            .filter(
+              (a) => reviewedBefore(a, at) && a.verification !== "no_confirmada" && !declaredGroupOf(record, "allergies", a.id),
+            )
+            .map((a) => ({ reference: `AllergyIntolerance/${a.id}` }))
+        : []),
+    ]
+    reviewProvenance(
+      `${p.patientId}-${scope.topics.includes("allergies") ? "alergias-revisadas" : "antecedentes-revisados"}`,
+      scope.review,
+      targets,
+    )
+  }
   for (const { row, diagnoses, procedures, exam } of record.encounters) {
     const encounterRef = { reference: `Encounter/${row.id}` }
     // Lo observado vale como la atención: definitivo solo si se firmó, en curso si no, y
@@ -1665,7 +1730,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         : form.filledByPatient
           ? patientRef
           : related
-            ? { reference: `RelatedPerson/${related.contactId}`, display: related.displayName }
+            ? { reference: `RelatedPerson/${relatedPersonId(p.patientId, related.contactId)}`, display: related.displayName }
             : form.filledBy
               ? { display: form.filledBy }
               : null
@@ -1838,7 +1903,14 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     type: "collection",
     meta: { tag: [{ system: "https://odentia32.com/fhir", code: `fhir-${FHIR_VERSION}` }] },
     timestamp: record.generatedAt.toISOString(),
-    entry: resources.map((resource) => ({ fullUrl: `urn:uuid:${resource.id}`, resource })),
+    // R4 pide que `fullUrl` sea una dirección absoluta, y un `urn:uuid` lleva un UUID: el id que no lo
+    // es (`…-entrevista`, `…-examen-abdomen`) va con un UUID v5 suyo, que no tiene por qué ser su id
+    // cuando es un `urn:uuid` (Bundle.entry.fullUrl). Así no se arma un `urn:uuid` que no lo es
+    // (revisor, QA de la entrega 2) ni un `fullUrl` relativo.
+    entry: resources.map((resource) => ({
+      fullUrl: `urn:uuid:${UUID_RE.test(resource.id) ? resource.id : uuidV5(p.patientId, `${resource.resourceType}/${resource.id}`)}`,
+      resource,
+    })),
   }
 }
 

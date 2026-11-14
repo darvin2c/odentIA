@@ -8,13 +8,15 @@
  * persona envió y el equipo aún no revisó, solo si se pide (`unreviewed`): la copia
  * de la historia lo trae marcado «sin revisar», como lo que declaró de su salud.
  */
+import { whoWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { encounter, patient, patientDocument } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientContact, patientDocument } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
+import { declarantOfLink } from "./clinical.js"
 import { conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
 import { dayTimeWords, type Zone } from "./document-kit.js"
 import { findOrgLocale } from "./locale.js"
@@ -61,6 +63,12 @@ export interface FormRecord {
   filledByPatient: boolean | null
   /** El contacto que lo respondió, para nombrarlo en FHIR (`RelatedPerson`). */
   respondentContactId: string | null
+  /**
+   * Quién lo respondió, con las palabras de la ficha y de Documentos (`whoWords`):
+   * «ella», «su madre, Carla», «el paciente» si no se sabe su sexo. null en lo del equipo
+   * o si no consta quién.
+   */
+  respondentWords: string | null
   /** El profesional a cargo, si se indicó. */
   professionalName: string | null
   /** Cuándo lo envió la persona, si lo respondió ella. */
@@ -190,9 +198,7 @@ type FormHead = Omit<FormRecord, "whoWords" | "byWords" | "summary" | "sections"
  */
 function filledWordsOf(form: FormHead): string {
   if (form.source !== "portal") return `Lo llenó ${form.filledBy ?? "el equipo"}`
-  const role =
-    form.filledByPatient === true ? " (paciente)" : form.filledByPatient === false ? " (en nombre del paciente)" : ""
-  return `Lo respondió ${form.filledBy ?? "la persona"}${role}`
+  return `Lo respondió ${form.respondentWords ?? "la persona"}`
 }
 
 /**
@@ -227,7 +233,9 @@ function byWordsOf(form: FormHead, zone: Zone): string {
   if (form.source === "portal") {
     const via = form.via === "enlace" ? " desde su enlace" : form.via === "portal" ? " desde el portal" : ""
     const sent = form.submittedAt ? ` el ${dayTimeWords(form.submittedAt, zone)}` : ""
-    return `${filledWordsOf(form)}${via}${sent} · ${closedWordsOf(form)}${closedAt}`
+    // Con quien habla por ella, su nombre va entre comas: «Lo respondió su madre, Carla, desde su enlace».
+    const comma = form.respondentWords?.includes(",") && (via || sent) ? "," : ""
+    return `${filledWordsOf(form)}${comma}${via}${sent} · ${closedWordsOf(form)}${closedAt}`
   }
   const charge =
     form.professionalName && form.professionalName !== form.filledBy ? ` · a cargo de ${form.professionalName}` : ""
@@ -235,6 +243,13 @@ function byWordsOf(form: FormHead, zone: Zone): string {
   if (sameHandOf(form) && form.filledBy) return `Lo llenó y lo finalizó ${form.filledBy}${closedAt}${charge}`
   return `${filledWordsOf(form)}${charge} · ${closedWordsOf(form)}${closedAt}`
 }
+
+/**
+ * Cuándo va en la historia: lo que respondió la persona, cuando lo envió (aunque se
+ * revise días después); lo del equipo, cuando se finalizó. Una sola expresión para la
+ * copia y la Historia (`getTimeline`), que ordenan igual.
+ */
+export const formRecordAtSql = sql`coalesce(case when ${clinicalFormResponse.source} = 'portal' then ${clinicalFormResponse.submittedAt} end, ${clinicalFormResponse.finalizedAt}, ${clinicalFormResponse.submittedAt})`
 
 /**
  * «con 1 corrección», «con 2 adendas»: lo agregado después, para que una línea
@@ -298,6 +313,9 @@ export async function loadFormRecords(
       professionalName: professional.name,
       finalizerName: finalizer.name,
       respondentName: contact.displayName,
+      respondentRelationship: patientContact.relationship,
+      respondentRelationshipDetail: patientContact.relationshipDetail,
+      respondentKinship: patientContact.kinship,
       encounterStatus: encounter.status,
       encounterVoidedAt: encounter.voidedAt,
       encounterVoidReason: encounter.voidReason,
@@ -309,6 +327,15 @@ export async function loadFormRecords(
     .leftJoin(
       contact,
       and(eq(contact.id, clinicalFormResponse.respondentContactId), eq(contact.organizationId, orgId)),
+    )
+    // Su vínculo con el paciente, para nombrarlo como la ficha y Documentos («su madre, Carla»).
+    .leftJoin(
+      patientContact,
+      and(
+        eq(patientContact.organizationId, clinicalFormResponse.organizationId),
+        eq(patientContact.patientId, clinicalFormResponse.patientId),
+        eq(patientContact.contactId, clinicalFormResponse.respondentContactId),
+      ),
     )
     .leftJoin(encounter, and(eq(encounter.id, clinicalFormResponse.encounterId), eq(encounter.organizationId, orgId)))
     .where(
@@ -330,11 +357,9 @@ export async function loadFormRecords(
         ...(scope.ids ? [inArray(clinicalFormResponse.id, [...scope.ids])] : []),
       ),
     )
-    // Lo que envió sin revisar va en el momento en que lo envió.
-    .orderBy(
-      asc(sql`coalesce(${clinicalFormResponse.finalizedAt}, ${clinicalFormResponse.submittedAt})`),
-      asc(clinicalFormResponse.id),
-    )
+    // Lo que respondió la persona va en el momento en que lo envió, revisado o no; lo del equipo, en
+    // el que se finalizó (revisor, QA de la entrega 2).
+    .orderBy(asc(formRecordAtSql), asc(clinicalFormResponse.id))
   if (rows.length === 0) return []
   const responseIds = rows.map(({ row }) => row.id)
   const addenda = await tx
@@ -378,13 +403,31 @@ export async function loadFormRecords(
   const context = { site: (await productHooks(tx, orgId)).site, documentLabels }
   const zone = await findOrgLocale(tx, orgId)
   // Persona única: el paciente es una persona, y quien respondió puede ser ella u otra que la representa.
-  const [self] = await tx
-    .select({ personId: patient.personId })
+  const self = alias(contact, "form_self")
+  const [patientRow] = await tx
+    .select({ personId: patient.personId, sex: self.sex })
     .from(patient)
+    .leftJoin(self, and(eq(self.id, patient.personId), eq(self.organizationId, orgId)))
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
   return rows.map((joined) => {
     const { row, authorName, professionalName, finalizerName, respondentName } = joined
+    // Quién respondió, con las palabras de la ficha y de Documentos: «ella», «su madre, Carla».
+    const byPatient = row.respondentContactId !== null && row.respondentContactId === patientRow?.personId
+    const respondentWords =
+      row.source !== "portal" || (!byPatient && respondentName === null)
+        ? null
+        : whoWords(
+            byPatient
+              ? { kind: "patient", name: respondentName, relation: null }
+              : declarantOfLink({
+                  name: respondentName ?? "",
+                  relationship: joined.respondentRelationship,
+                  relationshipDetail: joined.respondentRelationshipDetail,
+                  kinship: joined.respondentKinship,
+                }),
+            patientRow?.sex ?? null,
+          ) || (byPatient ? "el paciente" : null)
     const answers = (row.answers ?? {}) as Record<string, unknown>
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({
@@ -413,7 +456,8 @@ export async function loadFormRecords(
       source: fromPerson ? ("portal" as const) : ("staff" as const),
       via,
       filledBy: fromPerson ? respondentName : authorName,
-      filledByPatient: fromPerson && row.respondentContactId ? row.respondentContactId === self?.personId : null,
+      filledByPatient: fromPerson && row.respondentContactId ? byPatient : null,
+      respondentWords,
       respondentContactId: fromPerson ? row.respondentContactId : null,
       professionalName,
       submittedAt: row.submittedAt,

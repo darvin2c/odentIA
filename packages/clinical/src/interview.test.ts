@@ -55,6 +55,18 @@ describe("la entrevista de salud en palabras (copia de la historia)", () => {
     )
   })
 
+  it("el día que la copia ya dice arriba no se repite en el embarazo (verificador, QA de la entrega 2)", () => {
+    const said = { embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-11-13", semanas: 30 } } }
+    const read = (shownDay: string) =>
+      commonInterviewEntries(said, TODAY, { shownDay }).find((entry) => entry.key === PREGNANCY_ENTRY_KEY)?.value
+    expect(read("2026-11-13")).toBe("Sí · 32 semanas a la fecha de esta copia (30 semanas ese día)")
+    expect(read("2026-11-20")).toBe("Sí · 32 semanas a la fecha de esta copia (30 semanas el 13/11/2026)")
+    const today = { embarazoLactancia: { embarazo: { estado: "si", fecha: TODAY, semanas: 30 } } }
+    expect(commonInterviewEntries(today, TODAY, { shownDay: TODAY }).find((entry) => entry.key === PREGNANCY_ENTRY_KEY)?.value).toBe(
+      "Sí · 30 semanas",
+    )
+  })
+
   it("lo que no se respondió no sale", () => {
     expect(commonInterviewEntries({ antecedentesPersonales: { cirugias: "" } }, TODAY)).toEqual([])
     expect(commonInterviewEntries(null, TODAY)).toEqual([])

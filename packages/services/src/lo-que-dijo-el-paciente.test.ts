@@ -315,7 +315,8 @@ it("«Marcar como revisado» dice lo que pasó de verdad, guarda quién lo revis
     type: "form",
     // Lo que llenó el paciente se dice como lo que es; «ficha de consulta» es lo del equipo.
     title: "Lo que respondió el paciente: Cuestionario con alergias",
-    byText: "Lo respondió Rosa Luna (paciente) · lo revisó Clínico",
+    // Quién lo respondió, con las palabras de la ficha: sin su sexo registrado, «el paciente».
+    byText: "Lo respondió el paciente · lo revisó Clínico",
   })
   expect((await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))).allergies.map((row) => row.substance)).toEqual([
     "Penicilina",
