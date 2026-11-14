@@ -5,9 +5,15 @@
  * fecha se dice la semana de hoy y se deja de afirmar cuando ya no puede ser
  * cierto. La fecha es la del día en que se dijo: guardar otro dato no la mueve.
  *
+ * `pregnancyToday` es la única regla de si un embarazo sigue en pie, para la
+ * franja de la ficha y de la atención, Antecedentes y la receta de los tres
+ * productos. Sin las semanas, las cuenta desde la última regla
+ * (`ginecoObstetricos.fur`, que hoy solo pregunta latidIA) si está anotada.
+ *
  * Lo guardado antes en odentIA y vistIA (`antecedentesPersonales.embarazo`, un
- * sí o no sin fecha) se sigue leyendo: sin fecha no hay semana de hoy y se pide
- * confirmarlo.
+ * sí o no sin fecha) se sigue leyendo. Su fecha es la del día en que se anotó
+ * ese «sí» (`legacyPregnancySaidOn`, de las versiones de la entrevista); solo
+ * queda «sin fecha», y por confirmar, lo que de verdad no la tiene.
  */
 
 /** Un embarazo dura hasta 42 semanas (el mismo tope de la pregunta del registro). */
@@ -55,6 +61,36 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 }
 
+/** Cuándo se anotó un embarazo guardado sin fecha: lo que se sabe por las versiones de la entrevista. */
+export interface PregnancyReading {
+  /** El día (YYYY-MM-DD) en que se anotó el «sí» vigente, si lo guardado no trae su fecha. */
+  legacySaidOn?: string | null
+}
+
+/** Una versión de la entrevista, con su día en la clínica (YYYY-MM-DD). */
+export interface InterviewVersionDay {
+  answers: unknown
+  day: string
+}
+
+/**
+ * El día en que se anotó el embarazo vigente cuando se guardó sin fecha
+ * (`antecedentesPersonales.embarazo`): el de la primera versión seguida que ya
+ * decía ese «sí» con las mismas semanas. `versions` va de la más nueva a la más
+ * antigua. null si lo vigente ya trae su fecha o no es un embarazo.
+ */
+export function legacyPregnancySaidOn(versions: readonly InterviewVersionDay[]): string | null {
+  const current = versions[0] ? pregnancyRecordOf(versions[0].answers) : null
+  if (!current || current.estado !== "si" || current.fecha) return null
+  let day: string | null = null
+  for (const version of versions) {
+    const record = pregnancyRecordOf(version.answers)
+    if (!record || record.estado !== "si" || record.fecha || record.semanas !== current.semanas) break
+    day = version.day
+  }
+  return day
+}
+
 /** El embarazo guardado en la entrevista, con fecha o como se guardaba antes; null si no se respondió. */
 export function pregnancyRecordOf(answers: unknown): PregnancyRecord | null {
   if (!isRec(answers)) return null
@@ -81,20 +117,26 @@ export function pregnancyRecordOf(answers: unknown): PregnancyRecord | null {
 /**
  * El embarazo a hoy, para avisarlo donde se decide: la semana calculada y si
  * sigue en pie. Pasada la semana 42 de lo dicho (o 42 semanas desde el día en
- * que se dijo, si no se dijeron las semanas) ya no es una alerta: se pide
- * confirmarlo. null si no está embarazada o no se respondió.
+ * que se dijo, si no se saben las semanas) ya no es una alerta: se pide
+ * confirmarlo. Las semanas son las que se dijeron o, sin ellas, las que dan la
+ * última regla. null si no está embarazada o no se respondió.
  */
-export function pregnancyToday(answers: unknown, today: string): PregnancyToday | null {
+export function pregnancyToday(answers: unknown, today: string, reading: PregnancyReading = {}): PregnancyToday | null {
   const record = pregnancyRecordOf(answers)
   if (record?.estado !== "si") return null
-  if (!record.fecha) return { state: "por_confirmar", saidOn: null, weeksSaid: record.semanas, weeksToday: null }
-  const weeksSince = Math.max(0, Math.floor(daysBetween(record.fecha, today) / 7))
-  const weeksToday = record.semanas === null ? null : record.semanas + weeksSince
+  const saidOn = record.fecha ?? (isDay(reading.legacySaidOn) ? reading.legacySaidOn : null)
+  if (!saidOn) return { state: "por_confirmar", saidOn: null, weeksSaid: record.semanas, weeksToday: null }
+  const weeksSince = Math.max(0, Math.floor(daysBetween(saidOn, today) / 7))
+  // Sin las semanas dichas, las de la última regla al día en que se dijo.
+  const gyneco = isRec(answers) ? answers.ginecoObstetricos : undefined
+  const fur = isRec(gyneco) && isDay(gyneco.fur) && gyneco.fur <= saidOn ? gyneco.fur : null
+  const weeksSaid = record.semanas ?? (fur ? Math.floor(daysBetween(fur, saidOn) / 7) : null)
+  const weeksToday = weeksSaid === null ? null : weeksSaid + weeksSince
   const past = (weeksToday ?? weeksSince) > PREGNANCY_TERM_WEEKS
   return {
     state: past ? "por_confirmar" : "vigente",
-    saidOn: record.fecha,
-    weeksSaid: record.semanas,
+    saidOn,
+    weeksSaid,
     weeksToday: past ? null : weeksToday,
   }
 }

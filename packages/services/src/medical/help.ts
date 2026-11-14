@@ -551,7 +551,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-receta-avisos",
       q: "¿Por qué la receta me pide el peso o no me deja un medicamento controlado?",
-      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo: se emite igual y queda guardado que viste el aviso.",
+      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
       forms: ["no me deja recetar tramadol", "la receta me pide el peso", "aviso de embarazo en la receta"],
       area: "clinica",
       needs: "clinical.write",
