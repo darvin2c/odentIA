@@ -171,3 +171,23 @@ export function pregnancyChip(pregnancy: PregnancyToday): string {
     ? `${words.title} (${words.detail})`
     : `${words.title} · ${words.detail}`
 }
+
+/**
+ * Lo que quedó sin revisar, en una línea para el cierre de la atención: «lo que
+ * dijo ella de su salud el 13 nov». Informa y no frena la firma (QA del 14 nov,
+ * H6 de clínica). null si no queda nada.
+ */
+export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefined, sex: Sex): string | null {
+  const parts = (groups ?? []).map((group) => {
+    const day = group.at ? shortDay(group.at) : ""
+    const when = day ? ` el ${day}` : ""
+    if (group.by.kind === "staff") return `lo que anotó el equipo de su salud${when}`
+    if (group.by.kind === "unknown") return `lo declarado de su salud${when}`
+    const who = whoWords(group.by, sex)
+    // Con quien habla por ella, su nombre va entre comas: «lo que dijo de su salud su madre, Carla, el 1 nov».
+    if (who.includes(",")) return `lo que dijo de su salud ${who}${when ? `,${when}` : ""}`
+    return `lo que dijo${who ? ` ${who}` : ""} de su salud${when}`
+  })
+  if (parts.length === 0) return null
+  return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
+}

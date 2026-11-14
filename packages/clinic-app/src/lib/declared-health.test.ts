@@ -11,6 +11,7 @@ import {
   saidNoGroupOf,
   saidNoWords,
   shortDay,
+  unreviewedWords,
   whoWords,
 } from "./declared-health"
 import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
@@ -115,5 +116,33 @@ describe("las palabras de lo que dijo el paciente", () => {
     expect(pregnancyChip({ state: "por_confirmar", saidOn: null, weeksSaid: 12, weeksToday: null })).toBe(
       "Embarazo por confirmar · anotado sin fecha",
     )
+  })
+})
+
+// QA del 14 nov (H6 de clínica): al firmar con lo declarado sin revisar, el cierre no lo decía.
+describe("lo que quedó sin revisar, al firmar", () => {
+  const base = {
+    at: "2026-11-13T19:27:00.000Z",
+    allergies: ["a1"],
+    conditions: [],
+    medications: [],
+    pregnancy: false,
+    saidNo: { allergies: false, conditions: false, medications: false },
+  }
+  it("dice quién lo dijo y su día; nada si no queda nada", () => {
+    expect(unreviewedWords([{ ...base, by: { kind: "patient", name: null, relation: null } }], "F")).toBe(
+      "lo que dijo ella de su salud el 13 nov",
+    )
+    expect(
+      unreviewedWords(
+        [
+          { ...base, at: "2026-11-01T15:00:00.000Z", by: { kind: "representative", name: "Carla Paz", relation: "madre" } },
+          { ...base, by: { kind: "patient", name: null, relation: null } },
+        ],
+        "M",
+      ),
+    ).toBe("lo que dijo de su salud su madre, Carla, el 1 nov y lo que dijo él de su salud el 13 nov")
+    expect(unreviewedWords([], "F")).toBeNull()
+    expect(unreviewedWords(undefined, "F")).toBeNull()
   })
 })

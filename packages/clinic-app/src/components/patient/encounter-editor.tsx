@@ -52,6 +52,7 @@ import {
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
+import { unreviewedWords } from "../../lib/declared-health"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
@@ -1643,8 +1644,10 @@ export function EncounterEditor({
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   // En pocas líneas, una por bloque: el párrafo de todo junto no se leía (producción, 10 nov).
+  // Lo que dijo de su salud y nadie revisó: se dice al firmar, sin frenar la firma (QA del 14 nov, H6).
+  const unreviewed = unreviewedWords(stripHealth.data?.data.declared, patient.patient.sex)
   const finalizeDescription =
-    recorded.length > 0 || unrecordedAll.length > 0 ? (
+    recorded.length > 0 || unrecordedAll.length > 0 || unreviewed ? (
       <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
         {recorded.map((section) => (
           <li key={section.key}>
@@ -1652,6 +1655,7 @@ export function EncounterEditor({
           </li>
         ))}
         {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
+        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual.</li> : null}
       </ul>
     ) : null
 
