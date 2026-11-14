@@ -34,17 +34,30 @@ function isChoice(target: EventTarget | null): boolean {
   return target.closest("[data-draft-ignore]") === null
 }
 
-const DraftSavedContext = React.createContext<(saved: boolean) => void>(() => {})
+/** Lo que la columna ofrece a su contenido: decir cómo quedó lo escrito y retirarse al cerrarse. */
+interface DraftSavedChannel {
+  report: (saved: boolean) => void
+  release: () => void
+}
+
+const DraftSavedContext = React.createContext<DraftSavedChannel | null>(null)
+const nothingToTell = () => {}
 
 /**
  * Para una superficie que guarda sin `submit` (un autoguardado, una nota que se agrega con su
  * botón): le dice a la columna cómo quedó lo escrito. `true`, ya está guardado: el aviso de
  * «salir sin guardar» se desarma hasta que se vuelva a escribir. `false`, hay algo que no se
- * guardó: avisa aunque el cambio no haya sido una tecla. Fuera de la columna no hace nada: en
- * un cajón el aviso es el del propio cajón (`isDirty`).
+ * guardó: avisa aunque el cambio no haya sido una tecla.
+ *
+ * Solo habla el contenido de la propia columna. Lo que se abre desde ella es un cajón aparte
+ * (regla 2 de `side-dock`): ahí no hace nada, como en cualquier cajón, donde el aviso es el del
+ * cajón (`isDirty`). Y al quitarse quien lo usa, la columna deja de avisar por él.
  */
 export function useDraftSaved(): (saved: boolean) => void {
-  return React.useContext(DraftSavedContext)
+  const channel = React.useContext(DraftSavedContext)
+  const own = useSideDockScope() === "column" ? channel : null
+  React.useEffect(() => own?.release, [own])
+  return own?.report ?? nothingToTell
 }
 
 /** Un cajón más ancho que esto es una vista inmersiva (visor, comparador): no va a la columna. */
@@ -138,10 +151,17 @@ function DockedColumn({
   const [armed, setArmed] = React.useState(true)
   // Lo que guarda sin `submit` lo dice la propia superficie (`useDraftSaved`).
   const [unsaved, setUnsaved] = React.useState(false)
-  const draftSaved = React.useCallback((saved: boolean) => {
-    setUnsaved(!saved)
-    if (saved) setTouched(false)
-  }, [])
+  const draftSaved = React.useMemo<DraftSavedChannel>(
+    () => ({
+      report: (saved) => {
+        setUnsaved(!saved)
+        if (saved) setTouched(false)
+      },
+      // Quien avisaba se cerró y el panel sigue con otra cosa: lo suyo ya no está para perderse.
+      release: () => setUnsaved(false),
+    }),
+    [],
+  )
 
   // Quién la abrió se anota al renderizar, antes de que un campo con
   // `autoFocus` del formulario tome el foco y pase por ser el que la abrió.

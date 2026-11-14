@@ -9,6 +9,7 @@ import { DetailDrawer } from "./detail/detail-drawer.js"
 import { useDraftSaved } from "./docked-surface.js"
 import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
 import { FormDrawer } from "./form/form-drawer.js"
+import { RadioChips } from "./radio-chips.js"
 import { DraftKeptInPage, SideDockProvider, SideDockSlot } from "./side-dock.js"
 
 beforeAll(() => {
@@ -133,10 +134,6 @@ function AutosavedAnswers() {
   return (
     <>
       <input aria-label="Hallazgos" onInput={() => setState("pendiente")} />
-      {/* biome-ignore lint/a11y/useSemanticElements: imita la opción apagada que pinta la librería, un botón con rol. */}
-      <button type="button" role="radio" aria-checked="false" aria-disabled="true">
-        No
-      </button>
       <button type="button" onClick={() => setState("guardado")}>
         Termina el autoguardado
       </button>
@@ -194,18 +191,110 @@ it("lo que el servidor no guardó avisa aunque el cambio no haya sido una tecla"
   await screen.findByRole("alertdialog")
 })
 
+const YES_NO = [
+  { value: "si", label: "Sí" },
+  { value: "no", label: "No" },
+]
+
+/** Un formulario con su grupo de opciones de verdad, apagado (solo se lee) o no. */
+function Answered({ readOnly }: { readOnly: boolean }) {
+  const [pain, setPain] = React.useState<string | null>("si")
+  return (
+    <DetailDrawer open title="Evaluación" onClose={() => {}}>
+      <p id="pain">¿Tienes dolor?</p>
+      <RadioChips aria-labelledby="pain" value={pain} options={YES_NO} onChange={setPain} disabled={readOnly} />
+    </DetailDrawer>
+  )
+}
+
 // Un formulario finalizado o descartado se abre solo para leer: tocar una opción apagada no cambia nada.
-it("tocar una opción deshabilitada no cuenta como cambio sin guardar", async () => {
+it("tocar una opción deshabilitada del grupo de verdad no cuenta como cambio sin guardar; elegir una que sí cambia, sí", async () => {
+  const pages: Array<[string, () => React.ReactNode]> = [
+    ["/leer", () => <Answered readOnly />],
+    ["/llenar", () => <Answered readOnly={false} />],
+    ["/agenda", () => <p>Agenda</p>],
+  ]
+  const reading = appWith(pages, "/leer")
+  const first = render(<RouterProvider router={reading} />)
+  fireEvent.click(await screen.findByRole("radio", { name: "No" }))
+  fireEvent.keyDown(screen.getByRole("radio", { name: "No" }), { key: " " })
+  expect(screen.getByRole("radio", { name: "Sí" }).getAttribute("aria-checked")).toBe("true")
+  await reading.navigate({ href: "/agenda" })
+  await screen.findByText("Agenda")
+  expect(screen.queryByRole("alertdialog")).toBeNull()
+  first.unmount()
+
+  const filling = appWith(pages, "/llenar")
+  render(<RouterProvider router={filling} />)
+  fireEvent.click(await screen.findByRole("radio", { name: "No" }))
+  await waitFor(() => expect(screen.getByRole("radio", { name: "No" }).getAttribute("aria-checked")).toBe("true"))
+  void filling.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
+})
+
+/** Lo que guarda solo dentro de un cajón abierto desde el panel: dice «guardado» al montarse. */
+function SavedNote() {
+  const draftSaved = useDraftSaved()
+  React.useEffect(() => draftSaved(true), [draftSaved])
+  return <p>Nota guardada</p>
+}
+
+/** Un formulario en el panel que abre encima un cajón con otra cosa que se guarda sola. */
+function WithNestedDrawer() {
+  const [nested, setNested] = React.useState(false)
+  return (
+    <FormDrawer open title="Editar paciente" onClose={() => {}} onSubmit={() => {}}>
+      <input aria-label="Nombre" />
+      <button type="button" onClick={() => setNested(true)}>
+        Abrir la nota
+      </button>
+      <DetailDrawer open={nested} title="Nota" onClose={() => setNested(false)}>
+        <SavedNote />
+      </DetailDrawer>
+    </FormDrawer>
+  )
+}
+
+// Revisión de la entrega 3: lo que se abre desde el panel es un cajón aparte. Si ese cajón dice
+// «ya guardé», no puede desarmar el aviso del formulario del panel, que sigue con lo suyo escrito.
+it("un cajón abierto desde el panel no habla por el panel: su «guardado» no desarma el aviso de lo escrito ahí", async () => {
+  const router = appWith([["/ficha", () => <WithNestedDrawer />]], "/ficha")
+  render(<RouterProvider router={router} />)
+  fireEvent.input(await screen.findByLabelText("Nombre"), { target: { value: "Ana" } })
+  fireEvent.click(screen.getByRole("button", { name: "Abrir la nota" }))
+  await screen.findByText("Nota guardada")
+  void router.navigate({ href: "/ficha?tab=otra" })
+  // El cajón de encima es modal y deja lo demás fuera del árbol accesible: se busca también ahí.
+  await screen.findByRole("alertdialog", { hidden: true })
+  expect(router.state.location.searchStr).toBe("")
+})
+
+/** El contenido que guarda solo se quita y el panel sigue abierto con otra cosa. */
+function Swapped() {
+  const [open, setOpen] = React.useState(true)
+  return (
+    <DetailDrawer open title="Documentos" onClose={() => {}}>
+      {open ? <AutosavedAnswers /> : <p>Sin formulario abierto</p>}
+      <button type="button" onClick={() => setOpen(false)}>
+        Quitar el formulario
+      </button>
+    </DetailDrawer>
+  )
+}
+
+it("al quitarse lo que no se guardó, el panel deja de avisar por él", async () => {
   const router = appWith(
     [
-      ["/ficha", () => <Autosaved />],
+      ["/ficha", () => <Swapped />],
       ["/agenda", () => <p>Agenda</p>],
     ],
     "/ficha",
   )
   render(<RouterProvider router={router} />)
-  fireEvent.click(await screen.findByRole("radio", { name: "No" }))
-  fireEvent.keyDown(screen.getByRole("radio", { name: "No" }), { key: " " })
+  fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+  await screen.findByText("error")
+  fireEvent.click(screen.getByRole("button", { name: "Quitar el formulario" }))
+  await screen.findByText("Sin formulario abierto")
   await router.navigate({ href: "/agenda" })
   await screen.findByText("Agenda")
   expect(screen.queryByRole("alertdialog")).toBeNull()
