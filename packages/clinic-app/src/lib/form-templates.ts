@@ -237,12 +237,14 @@ function questionWords(template: FormTemplate): string {
  * Lo que distingue a un formulario de otro con su mismo título, entre los que
  * se muestran juntos (`shown`): cuántas preguntas tiene y cuándo se creó (`when`
  * lo escribe). Null si su título no se repite: entonces no hace falta decir más.
- * Dos versiones de un mismo formulario no son dos formularios.
+ * Dos versiones de un mismo formulario no son dos formularios. La fecha es la
+ * del formulario (su primera versión, `formCreatedAt`), no la de la versión que
+ * se muestra: así no cambia al volver a usarlo o al publicar otra versión.
  */
 export function twinDetail(template: FormTemplate, shown: readonly FormTemplate[], when: (iso: string) => string): string | null {
   const wanted = foldTitle(template.title)
   const repeated = shown.some((other) => other.key !== template.key && foldTitle(other.title) === wanted)
-  return repeated ? `${questionWords(template)} · creado el ${when(template.createdAt)}` : null
+  return repeated ? `${questionWords(template)} · creado el ${when(template.formCreatedAt ?? template.createdAt)}` : null
 }
 
 /** El nombre de un formulario en un desplegable: su título y, si otro se llama igual, lo que los distingue. */

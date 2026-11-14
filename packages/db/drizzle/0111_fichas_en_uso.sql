@@ -1,1 +1,0 @@
-ALTER TABLE "clinical_form_template" ADD COLUMN "in_use" boolean DEFAULT true NOT NULL;

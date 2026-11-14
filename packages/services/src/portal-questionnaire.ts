@@ -4,7 +4,7 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, isNull, ne } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, min, ne } from "drizzle-orm"
 import {
   assertAnswers,
   assertFormSchema,
@@ -17,11 +17,13 @@ import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
+import { contactDecides } from "./responsibilities.js"
 
 /**
- * Cuestionario previo a la cita desde el portal: lo responde el paciente o su
- * representante (quien tiene la sesión), queda «declarado» al enviarlo y el
- * equipo lo revisa y finaliza. Usa la misma validación que la ficha.
+ * Cuestionario previo a la cita desde el portal: lo responde quien decide por
+ * el paciente (él mismo o su representante legal vigente, `requireDecisionContact`:
+ * la misma regla de «Su enlace»), queda «declarado» al enviarlo y el equipo lo
+ * revisa y finaliza. Usa la misma validación que la ficha.
  */
 export interface PortalQuestionnaireView {
   template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
@@ -129,16 +131,31 @@ export async function previewPatientQuestionnaire(
  * Y de cada ficha, si vino con el producto y si la clínica ya la miró
  * (`fromProduct`, `looked`) y si además se ofrece por la edad
  * (`offeredUnderYears`): lo dice el servidor, no la pantalla.
+ * `formCreatedAt`: cuándo se creó el formulario, que es su primera versión; no
+ * cambia al publicar otra ni al volver a usarlo, y por eso sirve para distinguir
+ * a dos formularios con el mismo título.
  */
 export async function listClinicFormTemplates(
   tx: Db,
   orgId: string,
   query: Parameters<typeof listFormTemplates>[2] = {},
-): Promise<Array<FormTemplateRow & { reachesPatients: boolean; offeredUnderYears: number | null } & ProductFormMark>> {
+): Promise<
+  Array<FormTemplateRow & { reachesPatients: boolean; offeredUnderYears: number | null; formCreatedAt: Date } & ProductFormMark>
+> {
   const rows = await listFormTemplates(tx, orgId, query)
   const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
   const marks = rows.length > 0 ? await productFormMarks(tx, orgId) : new Map<string, ProductFormMark>()
   const byAge = rows.length > 0 ? await ageOfferedSpecialties(tx, orgId) : null
+  const keys = [...new Set(rows.map((row) => row.key))]
+  // De todas las versiones de cada formulario, también las que la lista pedida no trae (las archivadas).
+  const firsts = keys.length
+    ? await tx
+        .select({ key: clinicalFormTemplate.key, createdAt: min(clinicalFormTemplate.createdAt) })
+        .from(clinicalFormTemplate)
+        .where(and(eq(clinicalFormTemplate.organizationId, orgId), inArray(clinicalFormTemplate.key, keys)))
+        .groupBy(clinicalFormTemplate.key)
+    : []
+  const createdOf = new Map(firsts.map((first) => [first.key, first.createdAt]))
   return rows.map((row) => ({
     ...row,
     reachesPatients: row.id === reaching?.id,
@@ -147,6 +164,7 @@ export async function listClinicFormTemplates(
       byAge && row.respondent === "staff" && row.specialtyId && byAge.specialtyIds.includes(row.specialtyId)
         ? byAge.underYears
         : null,
+    formCreatedAt: createdOf.get(row.key) ?? row.createdAt,
   }))
 }
 
@@ -174,7 +192,9 @@ export async function getPortalQuestionnaire(
 ): Promise<PortalQuestionnaireView> {
   requireScope(ctx.session, "appointments")
   const respondent = await respondentOf(tx, fromSession(ctx))
-  const template = await currentTemplate(tx, ctx.orgId)
+  // El portal y el enlace usan la misma regla: el cuestionario es de quien decide por el paciente.
+  const decides = await contactDecides(tx, ctx.orgId, ctx.session.patientId, ctx.session.contactId)
+  const template = decides ? await currentTemplate(tx, ctx.orgId) : null
   const response = template ? await latestResponse(tx, fromSession(ctx), template.key) : null
   await logAccess(tx, ctx.orgId, ctx.session.id, "questionnaire.viewed")
   return {
@@ -257,6 +277,9 @@ async function saveQuestionnaire(
   input: { answers: unknown; submit?: boolean; origin?: "portal" | "enlace" },
 ): Promise<string> {
   await respondentOf(tx, who)
+  // Una sola regla para el portal y «Su enlace»: lo responde quien decide por el paciente.
+  if (!(await contactDecides(tx, who.orgId, who.patientId, who.contactId)))
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este cuestionario lo responde el paciente o quien decide por él")
   const template = await currentTemplate(tx, who.orgId)
   if (!template) throw notFound("Cuestionario")
   const schema = assertFormSchema(template.schema)
@@ -276,6 +299,8 @@ async function saveQuestionnaire(
       `Ya enviaste este cuestionario; tu ${productWords(await orgProduct(tx, who.orgId)).clinician.one} lo revisará`,
     )
   const now = new Date()
+  // Por dónde llegó se guarda al enviarlo: la pantalla del equipo lo dice tal cual.
+  const submittedVia = input.submit ? (input.origin ?? "portal") : null
   let id: string
   if (open) {
     const [row] = await tx
@@ -284,6 +309,7 @@ async function saveQuestionnaire(
         answers,
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
         updatedAt: now,
       })
       .where(and(eq(clinicalFormResponse.id, open.id), isNull(clinicalFormResponse.submittedAt)))
@@ -305,6 +331,7 @@ async function saveQuestionnaire(
         source: "portal",
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
       })
       .returning({ id: clinicalFormResponse.id })
     id = row!.id

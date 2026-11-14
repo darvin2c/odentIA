@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { voidedAttentionFormWords } from "../../lib/clinical-forms"
 import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
@@ -450,11 +451,20 @@ export function VoidedEncounterLine({ item }: { item: TimelineItem }) {
         {item.voidedByName ? ` por ${item.voidedByName}` : ""} · Motivo: {item.voidReason ?? "sin registrar"}
       </p>
       {withIt ? <p className="text-muted-foreground">Se anuló con ella: {withIt}</p> : null}
+      {/* Sus formularios, cada uno con lo que pasó: el que quedó sin terminar se descartó al anular
+          (no sale en Documentos), y el finalizado se conserva. Aquí es donde la persona lo ve. */}
+      {born && born.forms.length > 0 ? (
+        <ul className="mt-1 flex flex-col gap-0.5 text-muted-foreground" aria-label="Formularios de esta atención">
+          {born.forms.map((form) => (
+            <li key={form.id}>{voidedAttentionFormWords(form, formatDateTime)}</li>
+          ))}
+        </ul>
+      ) : null}
       {/* Lo firmado, recetado o pedido en ella no desaparece: un consentimiento firmado o una
           receta que salió siguen siendo hechos (revisión de código del 9 nov). */}
       {born ? (
         <div className="mt-1 flex flex-col gap-2 text-muted-foreground">
-          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [] }} />
+          <BornParts born={{ ...born, indicated: [], budgets: [], followUps: [], forms: [] }} />
         </div>
       ) : null}
     </div>

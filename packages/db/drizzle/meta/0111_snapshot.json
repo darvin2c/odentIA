@@ -1,5 +1,5 @@
 {
-  "id": "6296a37c-6df4-4507-bcc2-4b282e29d336",
+  "id": "0d4a79e9-3d6a-49fd-97dd-ad7430a90b6c",
   "prevId": "8d997323-4369-4ffd-ad53-a8c4197f27b3",
   "version": "7",
   "dialect": "postgresql",
@@ -11766,6 +11766,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "submitted_via": {
+          "name": "submitted_via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finalized_by": {
+          "name": "finalized_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "discarded_at": {
           "name": "discarded_at",
           "type": "timestamp with time zone",
@@ -11945,6 +11957,20 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "clinical_form_response_finalized_by_user_id_fk": {
+          "name": "clinical_form_response_finalized_by_user_id_fk",
+          "tableFrom": "clinical_form_response",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "finalized_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "clinical_form_response_discarded_by_user_id_fk": {
           "name": "clinical_form_response_discarded_by_user_id_fk",
           "tableFrom": "clinical_form_response",
@@ -11971,6 +11997,10 @@
         "clinical_form_response_source_check": {
           "name": "clinical_form_response_source_check",
           "value": "\"clinical_form_response\".\"source\" in ('staff','portal')"
+        },
+        "clinical_form_response_submitted_via_check": {
+          "name": "clinical_form_response_submitted_via_check",
+          "value": "\"clinical_form_response\".\"submitted_via\" is null or \"clinical_form_response\".\"submitted_via\" in ('portal','enlace')"
         }
       },
       "isRLSEnabled": false
@@ -12042,13 +12072,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'staff'"
-        },
-        "in_use": {
-          "name": "in_use",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "created_by": {
           "name": "created_by",
@@ -20970,6 +20993,129 @@
         "patient_family_history_diagnosis_pair_check": {
           "name": "patient_family_history_diagnosis_pair_check",
           "value": "(\"patient_family_history\".\"diagnosis_system\" IS NULL) = (\"patient_family_history\".\"diagnosis_code\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.patient_health_declaration": {
+      "name": "patient_health_declaration",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "via": {
+          "name": "via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "respondent": {
+          "name": "respondent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "health": {
+          "name": "health",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patient_health_declaration_org_patient_idx": {
+          "name": "patient_health_declaration_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patient_health_declaration_organization_id_organization_id_fk": {
+          "name": "patient_health_declaration_organization_id_organization_id_fk",
+          "tableFrom": "patient_health_declaration",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "patient_health_declaration_organization_id_patient_id_patient_organization_id_id_fk": {
+          "name": "patient_health_declaration_organization_id_patient_id_patient_organization_id_id_fk",
+          "tableFrom": "patient_health_declaration",
+          "tableTo": "patient",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "patient_health_declaration_via_check": {
+          "name": "patient_health_declaration_via_check",
+          "value": "\"patient_health_declaration\".\"via\" IN ('enlace')"
+        },
+        "patient_health_declaration_respondent_check": {
+          "name": "patient_health_declaration_respondent_check",
+          "value": "\"patient_health_declaration\".\"respondent\" IN ('patient','representative')"
         }
       },
       "isRLSEnabled": false

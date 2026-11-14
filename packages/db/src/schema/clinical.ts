@@ -395,6 +395,61 @@ export const patientRegistration = pgTable(
   ],
 )
 
+/** Por dónde declaró la persona su salud: su registro, «Tus datos y tu salud» de su enlace o un cuestionario. */
+export const HEALTH_DECLARATION_VIAS = ["enlace", "registro", "formulario"] as const
+
+/** Quién lo dijo: la persona, quien habla por ella o, si se lo dijo al equipo, quien lo anotó. */
+export const HEALTH_DECLARATION_RESPONDENTS = ["patient", "representative", "staff"] as const
+
+/**
+ * Cada vez que la persona, o quien habla por ella, declaró algo de su salud:
+ * lo que dijo tal como llegó, quién lo dijo y cuándo. Solo se agrega y se lee.
+ * Antecedentes guarda lo vigente, que el equipo corrige; esta fila es lo que
+ * se declaró («Ver declaración original») y dice de quién y de cuándo es cada
+ * cosa que sigue sin revisar. Sus filas de Antecedentes entran en la misma
+ * transacción: comparten `created_at`, y así se sabe de qué declaración es
+ * cada una. `said_at` es cuándo se dijo, que puede ser antes (un registro que
+ * recepción resolvió después, un cuestionario revisado días más tarde).
+ * Quien lo dijo va escrito (`declarant_name`, `declarant_relation`), no como
+ * vínculo a un contacto: es lo que se sabía ese día y no cambia si después se
+ * corrige o se une una ficha.
+ */
+export const patientHealthDeclaration = pgTable(
+  "patient_health_declaration",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    via: text("via").$type<(typeof HEALTH_DECLARATION_VIAS)[number]>().notNull(),
+    respondent: text("respondent").$type<(typeof HEALTH_DECLARATION_RESPONDENTS)[number]>().notNull(),
+    /** El nombre de quien habla por la persona; nulo si lo dijo ella o no se sabe. */
+    declarantName: text("declarant_name"),
+    /** Su vínculo en palabras («madre», «hermana»); nulo si no se sabe. */
+    declarantRelation: text("declarant_relation"),
+    health: jsonb("health").$type<NonNullable<RegistrationAnswers["health"]>>().notNull(),
+    /** Cuándo lo dijo la persona. */
+    saidAt: timestamp("said_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Cuándo entró a su ficha: el mismo instante de las filas de Antecedentes que trajo. */
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("patient_health_declaration_org_patient_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.createdAt,
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.patientId],
+      foreignColumns: [patient.organizationId, patient.id],
+    }).onDelete("cascade"),
+    check("patient_health_declaration_via_check", sql`${table.via} IN ('enlace','registro','formulario')`),
+    check(
+      "patient_health_declaration_respondent_check",
+      sql`${table.respondent} IN ('patient','representative','staff')`,
+    ),
+  ],
+)
+
 /** Correlativos por organización (patient → HC-000123; futuros comprobantes). */
 export const orgCounter = pgTable(
   "org_counter",

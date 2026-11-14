@@ -782,15 +782,29 @@
     {
       "idx": 111,
       "version": "7",
-      "when": 1794659201093,
-      "tag": "0111_fichas_en_uso",
+      "when": 1794606989369,
+      "tag": "0111_lo_que_dijo_el_paciente",
       "breakpoints": true
     },
     {
       "idx": 112,
       "version": "7",
-      "when": 1794659213685,
-      "tag": "0112_fichas_en_uso_reglas",
+      "when": 1794606999369,
+      "tag": "0112_lo_que_dijo_el_paciente_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1794611105349,
+      "tag": "0113_quien_y_cuando_lo_dijo",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1794611115349,
+      "tag": "0114_quien_y_cuando_lo_dijo_reglas",
       "breakpoints": true
     }
   ]

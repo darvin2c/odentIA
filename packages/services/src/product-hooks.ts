@@ -1,5 +1,7 @@
 import {
   CORE_VITAL_KEYS,
+  checkInterviewPregnancy,
+  declaredPregnancy,
   DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
   type DiagnosisSystemKey,
@@ -15,7 +17,7 @@ import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
 import type { FormSchemaDef } from "./clinical-forms.js"
 import type { DocumentCheckFacts } from "./document-check.js"
-import { validation } from "./errors.js"
+import { invalidField, validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
 import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
 
@@ -249,12 +251,31 @@ export function answeredOf(group: Record<string, unknown> | undefined): Record<s
   )
 }
 
-/** La entrevista común: los antecedentes personales que declaró, con sus mismas claves. */
+/**
+ * El embarazo de una entrevista que se va a guardar, en la forma común con su
+ * fecha (`checkInterviewPregnancy` de `@odentia/clinical`). El error va a su
+ * dato, con el nombre que tiene en el cuerpo (`anamnesis.answers.…`).
+ */
+export function checkedPregnancy(answers: Record<string, unknown>, today: string): Record<string, unknown> {
+  const checked = checkInterviewPregnancy(answers, today)
+  if (!checked.ok) throw invalidField(`anamnesis.answers.${checked.field}`, checked.error)
+  return checked.value
+}
+
+/**
+ * La entrevista común: los antecedentes personales que declaró, con sus mismas
+ * claves, y el embarazo con el día en que se dijo (`embarazoLactancia.embarazo`,
+ * la forma de latidIA): así la ficha dice la semana de hoy y deja de afirmarlo
+ * cuando ya no puede ser cierto.
+ */
 export const COMMON_INTERVIEW: ProductInterview = {
-  check: (answers) => answers,
-  declared: (health) => {
-    const personal = answeredOf(health.personal)
-    return Object.keys(personal).length ? { antecedentesPersonales: personal } : {}
+  check: checkedPregnancy,
+  declared: (health, today) => {
+    const { statement, rest } = declaredPregnancy(answeredOf(health.personal), today)
+    return {
+      ...(Object.keys(rest).length ? { antecedentesPersonales: rest } : {}),
+      ...(statement ? { embarazoLactancia: { embarazo: statement } } : {}),
+    }
   },
 }
 

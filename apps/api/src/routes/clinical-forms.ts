@@ -233,8 +233,9 @@ const addendumInput = z
     text: z
       .string()
       .trim()
-      .min(1, "Escribe la adenda.")
-      .max(5000, "La adenda admite hasta 5000 caracteres."),
+      // Las mismas palabras que la pantalla: lo que el paciente envió se corrige con una «corrección».
+      .min(1, "Escribe la corrección.")
+      .max(5000, "La corrección admite hasta 5000 caracteres."),
   })
   .strict()
 
@@ -810,9 +811,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para finalizar fichas de consulta")
     }
+    // Sin cuerpo, como siempre. Desde la atención viaja cuál es: lo revisado queda ligado a ella.
+    const text = await c.req.text()
+    let body: unknown = {}
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = null
+      }
+    }
+    const parsed = z.object({ encounterId: z.uuid().nullish() }).strict().safeParse(body)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeFormResponse(tx, orgId, userId, formId(c)),
+        finalizeFormResponse(tx, orgId, userId, formId(c), { encounterId: parsed.data.encounterId ?? null }),
       ),
     )
   })

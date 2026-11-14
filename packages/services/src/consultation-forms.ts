@@ -10,7 +10,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
 import {
   assertFormSchema,
-  type FormResponseListed,
+  type ListedFormResponse,
   type FormTemplateRow,
   listFormResponses,
 } from "./clinical-forms.js"
@@ -516,7 +516,7 @@ export async function getEncounterFormOffers(
 }
 
 /** Una ficha de la lista del paciente, con la anterior del mismo tipo (`previousId`), si la hay. */
-export type PatientFormResponse = FormResponseListed & {
+export type PatientFormResponse = ListedFormResponse & {
   previousId: string | null
   /** La de inicio del mismo tipo, si no es la anterior: «Comparar con: Anterior · Inicio». */
   firstId: string | null

@@ -809,7 +809,8 @@ function TemplateBuilder({
                 type="button"
                 size="sm"
                 variant="outline"
-                className={ROW_BUTTON}
+                // El título puede ser largo: el botón parte la línea en vez de salirse del aviso.
+                className={`${ROW_BUTTON} h-auto max-w-full whitespace-normal py-1.5 text-left`}
                 onClick={() => twin.unused && onReuse(twin.unused.last)}
               >
                 Volver a usar «{twin.title}»

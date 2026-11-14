@@ -29,7 +29,8 @@ El catálogo de la voz de diseño UX: las tareas que más se repiten en un día,
 - [ ] El presupuesto va en una línea, con un solo botón.
 - [ ] «Indicado hoy» no se lee como «hecho hoy».
 - [ ] A 390 px las filas del Plan se leen sin desplazamiento lateral.
-**Ya falló:** una pantalla en blanco que no sabía a qué venía el paciente; cajones apilados para cada dato.
+- [ ] «Hoy viene a…» no repite el punto final tras «a. m.» o «p. m.».
+**Ya falló:** una pantalla en blanco que no sabía a qué venía el paciente; cajones apilados para cada dato; «Hoy viene a…» con doble punto tras la hora («… p. m..», 13 nov).
 **Patrones:** `PageNotice` y `NoticeStrip` (`UP/`) para el aviso con su botón; `Field` (`UI/field.tsx`).
 
 ### M-ATE-02 La sesión que sigue («Continuar hoy»)
@@ -407,6 +408,56 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Los papeles del mismo día salen en el mismo orden en Documentos y en la Historia (hoy no siempre).
 **Ya falló:** «Subido el …» y el motivo del retiro se cortaban a 390 px (QA del 12 nov, corregido antes de unir).
 
+## Lo que se le pregunta al paciente
+
+### M-FRM-01 La dueña decide qué se le pregunta al paciente
+**Quién:** la dueña o quien administra; al alta y alguna vez después (supuesto).
+**Dónde:** `R/settings.patient-registration.tsx`, `R/settings.forms.tsx` («Formularios propios», al pie de Consentimientos).
+**Medida (1440, 13 nov 2026):** llegar a «Formularios propios», 3 clics y 1 desplazamiento de ~2 pantallas (el enlace a 1711 px, 408 palabras antes); sola, no se encuentra. Una pregunta Sí/No con teclado, ~17 teclas; 11 preguntas con ratón, ~80 clics. Publicar, 2 clics, sin decir a quién le llega. **A mejorar** (meta: 3 clics desde Configuración, con la vista del paciente al lado).
+- [ ] Se llega desde el menú de Configuración, sin la Ayuda.
+- [ ] Antes de guardar o publicar, dice a quién le llega, desde cuándo y qué reemplaza.
+- [ ] «Así lo ve el paciente» está al lado, también para la mamá de un niño.
+- [ ] Lo que se pregunta llega a la ficha (franja o Antecedentes), no queda como papel.
+- [ ] Se deja de preguntar algo desde la pantalla, con «Deshacer».
+- [ ] Teclado: la pregunta nueva recibe el foco, vacía; la pregunta se lee entera.
+**Ya falló:** «Crear un formulario» al pie de 12 consentimientos; publicar otro cuestionario reemplazó al vigente para todos sin avisar; «Nuevo campo» se pegaba a lo tecleado.
+**Patrones:** el control de tres estados y «Así lo ve el paciente» de Registro de pacientes; «Se pide para» de `CA/settings/consent-templates.tsx`.
+
+### M-FRM-02 El paciente responde antes de su cita, en el celular
+**Quién:** paciente o quien lo cuida; antes de cada cita (supuesto).
+**Dónde:** `CA/public/personal-link-page.tsx`, `link-steps.tsx`, `CA/patient/registration-questionnaire.tsx`.
+**Medida (390, 13 nov 2026):** «Tus datos y tu salud», 16 toques y 5 tecleos en 4 pasos; «Antes de tu cita», otra tarjeta, ~10 toques, 21 teclas con teclado (escala 0–10 de 11 paradas). Salir a mitad pierde todo; tras enviar no queda nada que leer. **A mejorar** (meta: una tarjeta, un recorrido, nada perdido).
+- [ ] Con cita por venir, una sola tarjeta y un solo «Enviar».
+- [ ] Salir a mitad y volver conserva lo escrito, y lo dice.
+- [ ] Enter o «Ir» pasa a la pregunta siguiente; solo «Enviar» envía.
+- [ ] La escala y los Sí/No son una parada de Tab, con flechas.
+- [ ] Después de enviar se lee lo enviado, con a quién avisar si algo está mal.
+- [ ] A quien registra a un niño se le pregunta lo de un niño, con su nombre.
+**Ya falló:** «Tus pendientes» a mitad borraba el cuestionario sin aviso; Enter en una respuesta corta envió todo con dos preguntas vacías.
+**Patrones:** `draftKey` de `registration-questionnaire.tsx`; `UI/radio-group.tsx`.
+
+### M-FRM-03 La doctora lee lo que contó el paciente y lo usa
+**Quién:** odontólogo; con cada paciente que respondió (supuesto).
+**Dónde:** `CA/patient/encounter-context.tsx`, `encounter-visit.tsx`, `health-review-notice.tsx`, `formularios-tab.tsx`.
+**Medida (1440, 13 nov 2026):** «Atender» 1 clic; la caja del cuestionario a 0 clics; «Pasar a Antecedentes» a 29 Tab; tras pulsarlo, la caja desaparece y el motivo se escribe a mano (1 tecleo). **A mejorar** (meta: 2 clics con «Usar como motivo», y lo leído sigue a la vista).
+- [ ] Lo que contó de esta visita está en «Hoy viene a…», con «Usar como motivo».
+- [ ] Revisar no esconde: sigue en la atención, la firmada y la Historia, con quién lo revisó.
+- [ ] El aviso dice lo que pasó a Antecedentes y lo que no.
+- [ ] Lo declarado se lee como texto; una corrección queda aparte con nombre y hora.
+- [ ] Anticoagulante, bifosfonato y embarazo declarados salen en la franja.
+**Ya falló:** «Pasó a Antecedentes como declarado» sin pasar nada, y la caja se iba; la respuesta del paciente se editaba como un borrador.
+**Patrones:** «Usar como motivo» de `encounter-visit.tsx`; la caja «Revisa con … lo que declaró» de `health-review-notice.tsx`; la adenda de `clinical_form_addendum`.
+
+### M-FRM-04 La ficha de especialidad en la atención y en el control
+**Quién:** odontólogo especialista; en cada caso que abre y en cada control (supuesto).
+**Dónde:** `CA/patient/encounter-documents.tsx` («Nuevo › Formulario»), `R/settings.forms.tsx`.
+**Medida (1440, de la voz clínica, 13 nov 2026):** abrir la ficha, 5 clics desde una lista sin especialidad; ver la del control anterior, ~4 clics y 1 salto a Documentos. **A mejorar** (meta: 1 clic y 0 saltos).
+- [ ] La ficha se ofrece sola por el servicio de la cita o de lo indicado.
+- [ ] La última del mismo tipo se ve desde la atención siguiente.
+- [ ] La atención firmada y la copia de la historia la traen con sus respuestas.
+**Ya falló:** «Sin registrar: documentos» en una atención con su ficha; la copia de la historia sin formularios.
+**Patrones:** «Se pide para» y `getEncounterConsentNeeds`.
+
 ## Soporte de odentIA
 
 ### M-SOP-01 Dar acceso a soporte de odentIA desde Ayuda
@@ -460,3 +511,4 @@ En todas las tareas de Agenda, además de lo propio:
 ### Giras nuevas (para «Sus giras»)
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
 - **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
+- **Enter y la tecla «Ir»** en cada formulario del celular: ¿pasa a la pregunta siguiente o envía todo?

@@ -206,6 +206,10 @@ export const clinicalFormResponse = pgTable(
     respondentContactId: uuid("respondent_contact_id"),
     /** El paciente envió sus respuestas (declarado); el equipo las revisa y finaliza. */
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** Por dónde llegó lo que envió el paciente: su enlace o el portal. Nulo en lo del equipo. */
+    submittedVia: text("submitted_via"),
+    /** Quién lo finalizó: en lo que envió el paciente, quien lo revisó. */
+    finalizedBy: text("finalized_by").references(() => user.id),
     discardedAt: timestamp("discarded_at", { withTimezone: true }),
     discardedBy: text("discarded_by").references(() => user.id),
     discardReason: text("discard_reason"),
@@ -220,6 +224,10 @@ export const clinicalFormResponse = pgTable(
       sql`${table.status} in ('borrador','finalizado','descartado')`,
     ),
     check("clinical_form_response_source_check", sql`${table.source} in ('staff','portal')`),
+    check(
+      "clinical_form_response_submitted_via_check",
+      sql`${table.submittedVia} is null or ${table.submittedVia} in ('portal','enlace')`,
+    ),
   ],
 )
 

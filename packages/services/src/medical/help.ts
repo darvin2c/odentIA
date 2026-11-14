@@ -116,7 +116,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer" && form !== "dos caminos") } : {}),
           },
         ]
@@ -551,7 +551,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-receta-avisos",
       q: "¿Por qué la receta me pide el peso o no me deja un medicamento controlado?",
-      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo: se emite igual y queda guardado que viste el aviso.",
+      a: "Un medicamento controlado (un opioide, una benzodiazepina, un barbitúrico o un estimulante) no se emite en la receta común: va en la receta oficial de tu país. A un menor de 12 años la receta le pide el «Peso (kg)» y propone el último registrado. Si tiene un embarazo o una lactancia anotados, lo recuerda y avisa de lo que está contraindicado en el embarazo: se emite igual y queda guardado que viste el aviso. Pasadas las 42 semanas dice «Embarazo por confirmar» y sigue avisando hasta que actualices sus antecedentes.",
       forms: ["no me deja recetar tramadol", "la receta me pide el peso", "aviso de embarazo en la receta"],
       area: "clinica",
       needs: "clinical.write",

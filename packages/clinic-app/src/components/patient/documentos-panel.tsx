@@ -574,7 +574,12 @@ export function DocumentosSection({
     ...(forms.data?.data ?? [])
       .filter((response) => response.status !== "descartado")
       .map((response): Row => {
-        const date = response.finalizedAt ?? response.createdAt
+        const date = response.finalizedAt ?? response.submittedAt ?? response.createdAt
+        // Lo que respondió el paciente no es un borrador del equipo: se lee y se revisa, no se «completa».
+        const declared = response.source === "portal"
+        const sender = response.respondent?.name.trim().split(/\s+/)[0] ?? "el paciente"
+        const via =
+          response.submittedVia === "enlace" ? " desde su enlace" : response.submittedVia === "portal" ? " desde el portal" : ""
         return {
           key: `formulario-${response.id}`,
           kind: "formulario",
@@ -582,18 +587,24 @@ export function DocumentosSection({
           teeth: [],
           retired: false,
           title: formRowTitle(response),
-          // Dice lo de su atención: quedó a medias al firmarla, o es de una que se anuló.
-          detail: `${formatDate(date)} · ${formStateWords(response)}`,
+          // Lo del equipo dice lo de su atención: quedó a medias al firmarla, o es de una que se anuló.
+          // Lo que declaró el paciente no es de la atención: dice quién lo envió, por dónde y si se revisó.
+          detail: declared ? declaredFormDetail(response, sender, via) : `${formatDate(date)} · ${formStateWords(response)}`,
           date,
           status:
             response.status === "finalizado"
-              ? response.encounterStatus === "anulada"
-                ? { label: "De una atención anulada", tone: "outline" }
-                : { label: "Finalizado", tone: "success" }
-              : { label: "Borrador", tone: "warning" },
-          needsAction: response.status === "borrador",
+              ? declared
+                ? { label: "Revisado", tone: "success" }
+                : response.encounterStatus === "anulada"
+                  ? { label: "De una atención anulada", tone: "outline" }
+                  : { label: "Finalizado", tone: "success" }
+              : declared
+                ? { label: response.submittedAt ? "Por revisar" : "Sin enviar", tone: "warning" }
+                : { label: "Borrador", tone: "warning" },
+          // Lo que el paciente aún no envió no pide nada al equipo.
+          needsAction: response.status === "borrador" && (!declared || response.submittedAt !== null),
           action:
-            response.status === "borrador" && canWrite ? { type: "completar" } : { type: "ver" },
+            response.status === "borrador" && canWrite && !declared ? { type: "completar" } : { type: "ver" },
           open: { kind: "formulario", response },
         }
       }),
@@ -997,6 +1008,7 @@ export function DocumentosSection({
 
       <OpenedDocument
         patientId={patientId}
+        sex={patient.data?.data.patient.sex ?? null}
         opened={opened}
         canWrite={canWrite}
         budgets={budgetPapers.budgets}
@@ -1276,6 +1288,7 @@ function FileRow({
 /** Un papel abierto al lado: su PDF con lo que se puede hacer con él; el formulario, su detalle. */
 function OpenedDocument({
   patientId,
+  sex,
   opened,
   canWrite,
   budgets,
@@ -1283,6 +1296,8 @@ function OpenedDocument({
   onChanged,
 }: {
   patientId: string
+  /** El sexo registrado del paciente: lo que él envió dice quién lo dijo. */
+  sex: string | null
   opened: Row["open"] | null
   canWrite: boolean
   budgets: BudgetWithTotals[]
@@ -1395,6 +1410,7 @@ function OpenedDocument({
                 : null
             }
             canWrite={canWrite}
+            sex={sex}
             onChanged={onChanged}
           />
         </DetailDrawer>
@@ -1427,4 +1443,22 @@ function signerWords(
     return name ? `${name}, su representante legal` : "su representante legal"
   }
   return "su representante legal"
+}
+
+/**
+ * La línea de lo que envió el paciente en Documentos: cada fecha dice lo que es
+ * («Lo envió Marta desde su enlace el 13/11/2026 · revisado el 14/11/2026»).
+ * Antes la fecha de revisión iba delante de «Lo envió» (auditor, 14 nov).
+ */
+export function declaredFormDetail(
+  response: Pick<FormResponse, "submittedAt" | "finalizedAt" | "status" | "createdAt">,
+  sender: string,
+  via: string,
+): string {
+  if (!response.submittedAt) return `${formatDate(response.createdAt)} · Lo está respondiendo ${sender}: aún no lo envió`
+  const reviewed =
+    response.status === "finalizado"
+      ? ` · revisado${response.finalizedAt ? ` el ${formatDate(response.finalizedAt)}` : ""}`
+      : ""
+  return `Lo envió ${sender}${via} el ${formatDate(response.submittedAt)}${reviewed}`
 }

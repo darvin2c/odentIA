@@ -23,6 +23,7 @@ import {
   unfinishedAfterSigning,
   fetchConsents,
   fetchFormResponses,
+  teamFormsOfEncounter,
   fetchFormTemplates,
   fetchOrders,
   phoneSignBlockWords,
@@ -178,9 +179,9 @@ export function useEncounterDocuments(
   const ownPrescriptions = (prescriptions.data?.data ?? []).filter(
     (rx) => rx.encounterId === encounterId && rx.status === "emitida",
   )
-  const ownForms = (forms.data?.data ?? []).filter(
-    (form) => form.encounterId === encounterId && form.status !== "descartado",
-  )
+  // Lo que envió el paciente y se revisó en esta atención ya está arriba, entero, en su caja
+  // (`DeclaredQuestionnaireNotice`): aquí van los formularios que llena el equipo, y no se repite.
+  const ownForms = teamFormsOfEncounter(forms.data?.data ?? [], encounterId)
   const ownLeaves = (leaves.data?.data ?? []).filter(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
@@ -878,6 +879,8 @@ export function EncounterDocumentsBlock({
       ) : null}
       <FormDetail
         patientId={patientId}
+        encounterId={encounterId}
+        sex={patient.patient.sex ?? null}
         responseId={openForm}
         // Firmada la atención, su formulario a medias se termina igual desde aquí.
         canWrite={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
@@ -987,6 +990,8 @@ export function UnfinishedFormsBox({
 /** Un formulario de la atención se completa al lado, sin salir. */
 export function FormDetail({
   patientId,
+  encounterId,
+  sex,
   responseId,
   canWrite,
   onClose,
@@ -994,6 +999,8 @@ export function FormDetail({
   dock,
 }: {
   patientId: string
+  encounterId: string
+  sex: string | null
   responseId: string | null
   canWrite: boolean
   onClose: () => void
@@ -1014,7 +1021,7 @@ export function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Ficha"}
-      description="Se guarda sola mientras la llenas."
+      description={response?.source === "portal" ? undefined : "Se guarda sola mientras la llenas."}
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
     >
@@ -1025,6 +1032,8 @@ export function FormDetail({
           previous={previous}
           first={first}
           canWrite={canWrite}
+          sex={sex}
+          encounterId={encounterId}
           onChanged={onChanged}
         />
       ) : null}

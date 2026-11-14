@@ -1,4 +1,4 @@
-import type { ConsentSections } from "@odentia/clinical"
+import type { ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, apiFetch, apiFetchBytes } from "./api"
 
@@ -88,6 +88,8 @@ export interface FormTemplate {
   looked?: boolean
   /** Además de por su especialidad, se ofrece a quien tiene menos de estos años. Viene en la lista. */
   offeredUnderYears?: number | null
+  /** Cuándo se creó el formulario (su primera versión): no cambia al volver a usarlo. Viene en la lista. */
+  formCreatedAt?: string
 }
 
 export interface FormResponse {
@@ -106,6 +108,14 @@ export interface FormResponse {
   templateTitle: string | null
   source: "staff" | "portal"
   submittedAt: string | null
+  /** Por dónde lo envió el paciente; nulo si no quedó guardado (lo de antes) o es del equipo. */
+  submittedVia?: "portal" | "enlace" | null
+  /** Quién lo finalizó: en lo que envió el paciente, quien lo revisó. */
+  finalizedBy?: string | null
+  /** Quién lo envió: la persona o quien habla por ella, con su nombre y su vínculo (lo dice el servidor). */
+  respondent?: (HealthDeclarant & { name: string }) | null
+  /** El equipo cambió las respuestas después del envío, antes de que quedaran protegidas: cuándo. */
+  editedByTeamAt?: string | null
   discardedAt: string | null
   discardReason: string | null
   createdAt: string
@@ -118,6 +128,43 @@ export interface FormResponse {
   /** La de inicio del mismo tipo, si no es la anterior (desde el tercer control). Viene en la lista. */
   firstId?: string | null
 }
+
+/** El paciente lo envió y nadie del equipo lo revisó todavía. */
+export function isDeclaredUnreviewed(response: FormResponse): boolean {
+  return response.source === "portal" && response.status === "borrador" && response.submittedAt !== null
+}
+
+/**
+ * Lo que envió el paciente y va arriba al abrir esta atención: lo que sigue sin
+ * revisar y lo que se revisó aquí, que no desaparece.
+ */
+export function declaredFormsOfEncounter(
+  forms: readonly FormResponse[],
+  encounterId: string,
+  /** Lo que ya estaba a la vista: si otra persona lo revisa o lo descarta, no desaparece, dice quién (QA del 14 nov). */
+  onScreen: ReadonlySet<string> = new Set(),
+): FormResponse[] {
+  return forms.filter(
+    (form) =>
+      form.source === "portal" &&
+      (isDeclaredUnreviewed(form) ||
+        (form.status === "finalizado" && form.encounterId === encounterId) ||
+        onScreen.has(form.id)),
+  )
+}
+
+/**
+ * Los formularios de la lista de documentos de la atención: los que llena el
+ * equipo. Lo que envió el paciente ya está arriba, entero, y no se repite.
+ */
+export function teamFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+  return forms.filter(
+    (form) => form.encounterId === encounterId && form.status !== "descartado" && form.source !== "portal",
+  )
+}
+
+/** Lo que pasó al finalizar: las alergias que de verdad entraron a Antecedentes. */
+export type FinalizedFormResponse = FormResponse & { passedAllergies?: string[] }
 
 export interface FormAddendum {
   id: string
@@ -537,17 +584,20 @@ export function unfinishedAfterSigning<T extends Pick<FormResponse, "status" | "
 }
 
 /**
- * Cuándo se finalizó, con fecha y hora (`at` la escribe), y si fue después de
- * firmar su atención: un formulario terminado después lleva su propia fecha, y se ve.
+ * Cuándo se finalizó, con fecha y hora (`at` la escribe), quién lo hizo si se
+ * sabe (`by`), y si fue después de firmar su atención: un formulario terminado
+ * después lleva su propia fecha, y se ve.
  */
 export function finalizedWords(
   response: Pick<FormResponse, "finalizedAt" | "encounterFinalizedAt">,
   at: (iso: string) => string,
+  by?: string | null,
 ): string | null {
   if (!response.finalizedAt) return null
   const after =
     !!response.encounterFinalizedAt && Date.parse(response.finalizedAt) > Date.parse(response.encounterFinalizedAt)
-  return `finalizado ${at(response.finalizedAt)}${after ? " · después de firmar la atención" : ""}`
+  const done = by ? `lo finalizó ${by} el ${at(response.finalizedAt)}` : `finalizado ${at(response.finalizedAt)}`
+  return `${done}${after ? " · después de firmar la atención" : ""}`
 }
 
 /** El estado de un formulario en una lista, dicho entero: a medias, declarado, finalizado, y lo de su atención. */
@@ -561,6 +611,32 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
     : "Sin finalizar"
 }
 
+/**
+ * Un formulario de una atención anulada, dicho en su línea de la Historia: el
+ * que quedó sin terminar (la anulación lo descartó, con su mismo motivo), el
+ * que se descartó antes (con el motivo de entonces) y el que ya estaba
+ * finalizado, que se conserva. `at` escribe la fecha y la hora.
+ */
+export function voidedAttentionFormWords(
+  form: {
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    discardReason: string | null
+    discardedWithAttention: boolean
+  },
+  at: (iso: string) => string,
+): string {
+  const name = `Formulario: ${form.title}`
+  if (form.state === "finalizado")
+    return `${name} · finalizado${form.finalizedAt ? ` ${at(form.finalizedAt)}` : ""} · se conserva, marcado como de una atención anulada`
+  if (form.state === "descartado")
+    return form.discardedWithAttention
+      ? `${name} · quedó sin terminar y se descartó al anular la atención, con ese motivo`
+      : `${name} · descartado antes de anular${form.discardReason ? ` · Motivo: ${form.discardReason}` : ""}`
+  return `${name} · sin terminar`
+}
+
 export function updateFormResponse(
   id: string,
   body: { answers: Record<string, unknown>; professionalUserId?: string | null; baseAnswers?: Record<string, unknown> },
@@ -568,8 +644,9 @@ export function updateFormResponse(
   return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
 }
 
-export function finalizeFormResponse(id: string) {
-  return post<FormResponse>(`${BASE}/form-responses/${id}/finalize`, {})
+/** `encounterId`: la atención en curso desde la que se revisa; la respuesta queda ligada a ella. */
+export function finalizeFormResponse(id: string, encounterId?: string | null) {
+  return post<FinalizedFormResponse>(`${BASE}/form-responses/${id}/finalize`, encounterId ? { encounterId } : {})
 }
 
 export function discardFormResponse(id: string, reason: string) {

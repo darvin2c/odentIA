@@ -14,6 +14,7 @@ import {
   archiveFormTemplate,
   createFormResponse,
   createFormTemplate,
+  discardFormResponse,
   finalizeFormResponse,
   listFormResponses,
   listFormTemplates,
@@ -566,7 +567,7 @@ it("la Historia y la lista dicen el formulario a medias, cuándo se terminó des
   const formsOf = async (patientId: string) =>
     (await f.run((tx) => getTimeline(tx, ORG, patientId))).data.find((row) => row.type === "encounter")?.born?.forms
   // Firmada con el formulario a medias: la tarjeta de la atención lo dice.
-  expect(await formsOf(f.patient.id)).toEqual([
+  expect(await formsOf(f.patient.id)).toMatchObject([
     { id: draft.id, title: "Evaluación con su propia fecha", state: "a_medias", finalizedAt: null, afterSigning: false, retired: false },
   ])
   let [listed] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: f.patient.id }))
@@ -574,7 +575,7 @@ it("la Historia y la lista dicen el formulario a medias, cuándo se terminó des
   expect(listed?.encounterFinalizedAt?.getTime()).toBe(signed.encounter.finalizedAt?.getTime())
   // Terminado después: su propia fecha y hora, y «después de firmar».
   const done = await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, draft.id))
-  expect(await formsOf(f.patient.id)).toEqual([
+  expect(await formsOf(f.patient.id)).toMatchObject([
     { id: draft.id, title: "Evaluación con su propia fecha", state: "finalizado", finalizedAt: done.finalizedAt, afterSigning: true, retired: false },
   ])
   ;[listed] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: f.patient.id }))
@@ -595,4 +596,67 @@ it("la Historia y la lista dicen el formulario a medias, cuándo se terminó des
   const loose = await g.run((tx) => createFormResponse(tx, ORG, g.actor, { templateId: template.id, patientId: g.patient.id }))
   const rows = await g.run((tx) => listFormResponses(tx, ORG, { patientId: g.patient.id }))
   expect(rows.find((row) => row.id === loose.id)).toMatchObject({ encounterStatus: null, encounterFinalizedAt: null })
+})
+
+it("la atención anulada dice en la Historia qué formularios tenía: el que se descartó al anularla, con el motivo, y el que ya estaba finalizado", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Evaluación de una atención anulada, en la Historia")
+  const start = (answers: Record<string, unknown>) =>
+    f.run((tx) =>
+      createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id, answers }),
+    )
+  const finished = await start({ hallazgos: "Percusión negativa" })
+  await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, finished.id))
+  // Uno que se descartó a mano antes de anular: lleva su propio motivo.
+  const dropped = await start({ hallazgos: "Formulario equivocado" })
+  await f.run((tx) => discardFormResponse(tx, ORG, f.actor, dropped.id, "No era este formulario"))
+  const halfway = await start({ hallazgos: "A medias" })
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Se abrió por error" }))
+
+  const card = (await f.run((tx) => getTimeline(tx, ORG, f.patient.id))).data.find((row) => row.type === "encounter")
+  expect(card).toMatchObject({ status: "anulada" })
+  const byId = new Map((card?.born?.forms ?? []).map((form) => [form.id, form]))
+  expect(byId.size).toBe(3)
+  // El finalizado se conserva y se dice, de una atención anulada.
+  expect(byId.get(finished.id)).toMatchObject({ state: "finalizado", retired: true, discardReason: null, discardedWithAttention: false })
+  // El que quedó sin terminar: descartado al anular, con el motivo de la anulación.
+  expect(byId.get(halfway.id)).toMatchObject({
+    state: "descartado",
+    retired: true,
+    discardedWithAttention: true,
+    discardReason: "Atención anulada: Se abrió por error",
+  })
+  // El descartado antes, con su motivo.
+  expect(byId.get(dropped.id)).toMatchObject({
+    state: "descartado",
+    discardedWithAttention: false,
+    discardReason: "No era este formulario",
+  })
+
+  // En una atención que no se anuló, lo descartado sigue sin ser parte de la Historia.
+  const g = await clinicalFixture()
+  const other = await g.run((tx) =>
+    createFormResponse(tx, ORG, g.actor, { templateId: template.id, patientId: g.patient.id, encounterId: g.encounter.id }),
+  )
+  await g.run((tx) => discardFormResponse(tx, ORG, g.actor, other.id, "Paciente equivocado"))
+  const live = (await g.run((tx) => getTimeline(tx, ORG, g.patient.id))).data.find((row) => row.type === "encounter")
+  expect(live?.born?.forms ?? []).toEqual([])
+})
+
+it("la fecha en que se creó un formulario es la de su primera versión, y no cambia al volver a usarlo", async () => {
+  const f = await clinicalFixture()
+  const first = await inUse(f, "Ficha con fecha estable")
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, first.id))
+  const back = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, first.id))
+  expect(back.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime())
+  const rows = (await f.run((tx) => listClinicFormTemplates(tx, ORG))).filter((row) => row.key === first.key)
+  expect(rows).toHaveLength(2)
+  // Las dos versiones dicen la misma fecha: la de la primera. Es lo que distingue a dos con el mismo título.
+  for (const row of rows) expect(row.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
+  // También en lo que ofrece «Nuevo» › «Formulario», que solo trae la versión en uso.
+  const [offered] = (await f.run((tx) => listClinicFormTemplates(tx, ORG, { status: "publicado" }))).filter(
+    (row) => row.key === first.key,
+  )
+  expect(offered).toMatchObject({ id: back.id, version: 2 })
+  expect(offered?.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
 })

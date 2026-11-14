@@ -31,6 +31,7 @@ export function FormOffersBox({
   patientId,
   encounterId,
   professionalUserId,
+  sex,
   canStart,
   beforeWrite,
   onChanged,
@@ -39,6 +40,8 @@ export function FormOffersBox({
   encounterId: string
   /** Quien atiende: responde por la ficha que se empieza aquí. */
   professionalUserId: string
+  /** El sexo registrado del paciente, para decir quién dijo lo que envió. */
+  sex: string | null
   /** Puede empezar o seguir una ficha en esta atención; si no, solo las ve. */
   canStart: boolean
   beforeWrite: () => Promise<void>
@@ -147,6 +150,8 @@ export function FormOffersBox({
       ) : null}
       <FormDetail
         patientId={patientId}
+        encounterId={encounterId}
+        sex={sex}
         responseId={opened}
         canWrite={canStart}
         onClose={close}
