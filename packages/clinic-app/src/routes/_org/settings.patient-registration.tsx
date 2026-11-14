@@ -306,11 +306,13 @@ function RegistrationSettings() {
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
       {canWrite ? (
         // «Guardar» arriba, a la vista mientras se baja: lo marcado se pregunta desde que se guarda.
-        <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-2xl border bg-card/95 p-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
+        // Debajo de un aviso de arriba (el de soporte), como los paneles (`side-dock`), y compacta a 390 (B12).
+        <div className="sticky top-[var(--notice-strip-h,0px)] z-10 flex flex-row items-center justify-between gap-2 rounded-2xl border bg-card/95 p-2 backdrop-blur sm:p-3">
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Lo que marques «Opcional» u «Obligatorio» se le pregunta desde que guardes. A quien ya respondió
             solo se le pregunta lo que le falta.
           </p>
+          <p className="text-xs text-muted-foreground sm:hidden">Se pregunta desde que guardes.</p>
           <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
             <SubmitButton
               type="button"
@@ -323,6 +325,12 @@ function RegistrationSettings() {
             {submitError ? (
               <p role="alert" className="text-sm text-destructive">
                 {submitError}
+              </p>
+            ) : null}
+            {/* Junto al botón que se pulsó, no al pie de la página (B12). */}
+            {conflict ? (
+              <p role="alert" className="max-w-sm text-sm text-warning">
+                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y vuelve a guardar.
               </p>
             ) : null}
           </div>
@@ -576,14 +584,6 @@ function RegistrationSettings() {
             )}
           </section>
 
-          {conflict ? (
-            <Alert>
-              <AlertDescription>
-                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y
-                vuelve a guardar.
-              </AlertDescription>
-            </Alert>
-          ) : null}
           <section className={CARD} aria-labelledby="registro-falta">
             <h2 id="registro-falta" className="font-heading text-base font-medium">
               ¿Te falta una pregunta?
