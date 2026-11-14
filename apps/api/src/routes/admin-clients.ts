@@ -55,6 +55,7 @@ import {
   decide,
   decideSaasProposal,
   deleteClientFile,
+  filenameForType,
   founderInvitationEmail,
   founderOffer,
   getClient,
@@ -85,6 +86,7 @@ import {
   prepareEmailReply,
   prepareOutreach,
   proposalPdf,
+  REPLY_FILES_MAX,
   recordPresentation,
   registerClientFile,
   reopenClientOpportunity,
@@ -95,7 +97,6 @@ import {
   setOpportunity,
   setPrimaryClientContact,
   settleKairosOutreach,
-  sniffFileContent,
   TIMELINE_FILTERS,
   updateClient,
   updateClientContact,
@@ -108,6 +109,7 @@ import { z } from "zod"
 import { adminContextOf } from "../lib/admin-context.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse } from "./helpers.js"
+import { allowedInboundAttachment } from "./inbound-email.js"
 
 /**
  * El ARM de la administración (`/api/admin/clients`, tras el guard de admin):
@@ -144,6 +146,9 @@ export interface AdminClientsDeps {
 
 /** Un documento subido a mano: como los adjuntos de Soporte. */
 export const CLIENT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+/** Lo que se puede subir a Documentos: lo mismo que entra por correo (`allowedInboundAttachment`). */
+const CLIENT_FILE_TYPES_WORDS =
+  "Se admite PDF, una imagen (JPG, PNG, WebP o GIF), Excel (.xlsx), CSV o Word (.docx), sin macros"
 
 /** Los ids son uuid: así `/tasks`, `/pipeline` o `/inbound` nunca caen en `/:id`. */
 const ID = ":id{[0-9a-fA-F-]+}"
@@ -366,6 +371,10 @@ const replyBody = z.strictObject({
   body: text(5000, "la respuesta"),
   proposalId: optionalId("la propuesta"),
   kairosItemId: optionalId("el borrador de Kairós"),
+  fileIds: z
+    .array(z.uuid("Ese documento no existe"))
+    .max(REPLY_FILES_MAX, `Adjunta como máximo ${REPLY_FILES_MAX} documentos`)
+    .optional(),
 })
 
 const annotatePreviewBody = z.strictObject({ text: text(4000, "qué pasó") })
@@ -706,7 +715,8 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       const body = parse(replyBody, raw)
       const { outreach, mail } = await owner(async (tx) => {
         const row = await prepareEmailReply(tx, actor, c.req.param("emailId"), body)
-        return { outreach: row, mail: await outreachEmail(tx, row.id) }
+        // Los adjuntos se leen dentro de la reserva: si no se pueden leer, no queda nada pendiente.
+        return { outreach: row, mail: await outreachEmail(tx, row.id, readClientFile) }
       })
       return await sendReserved(c, actor, outreach, mail)
     } catch (e) {
@@ -1151,6 +1161,13 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
    * `enviado`, o `incierto` si se cortó (502 `SEND_UNKNOWN`, nunca se reintenta:
    * lo resuelve una persona con «¿Salió?»).
    */
+  /** Los bytes de un documento del cliente, para adjuntarlo a un correo. */
+  const readClientFile = (objectKey: string): Promise<Uint8Array> => {
+    if (!deps.storage.getAttachment)
+      throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudieron leer los adjuntos")
+    return deps.storage.getAttachment(objectKey)
+  }
+
   const sendReserved = async (
     c: Context,
     actor: AdminActor,
@@ -1220,7 +1237,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
         // El correo se arma dentro de la reserva: si no se puede armar, no queda nada pendiente.
         return {
           outreach: row,
-          mail: row.channel === "correo" ? await outreachEmail(tx, row.id) : null,
+          mail: row.channel === "correo" ? await outreachEmail(tx, row.id, readClientFile) : null,
         }
       })
       if (!mail) return c.json({ data: { outreach, url: outreach.whatsappUrl } }, 201)
@@ -1275,7 +1292,13 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
       if (actor.role !== "admin" && adminOnly)
         throw new ServiceError("FORBIDDEN", 403, "Ese documento es solo de Administración")
       const bytes = new Uint8Array(await file.arrayBuffer())
-      const sniffed = sniffFileContent(bytes, file.type)
+      // Lo mismo que se acepta de un correo que llega: por sus bytes, nunca por el tipo que dice.
+      const allowed = allowedInboundAttachment(bytes, file.name, file.type)
+      if (!allowed)
+        throw new ServiceError("VALIDATION", 400, CLIENT_FILE_TYPES_WORDS, {
+          file: CLIENT_FILE_TYPES_WORDS,
+        })
+      const sniffed = { ext: allowed.ext, mimeType: allowed.contentType }
       if (!deps.storage.putAttachmentAt)
         throw new ServiceError(
           "STORAGE_UNAVAILABLE",
@@ -1290,7 +1313,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
           registerClientFile(tx, actor, {
             clientId,
             kind,
-            filename: file.name,
+            filename: filenameForType(file.name, sniffed.mimeType),
             objectKey,
             contentType: sniffed.mimeType,
             sizeBytes: file.size,
