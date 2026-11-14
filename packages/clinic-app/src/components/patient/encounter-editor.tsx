@@ -2399,6 +2399,13 @@ export function EncounterEditor({
                 bookedReason={detail.bookedReason}
                 onUseReason={takeOfferedReason}
                 reasonEmpty={reason.trim() === ""}
+                // Lo que contó antes de venir (entrega 8): sus palabras como motivo, sin teclear y sin pisar nada.
+                visitAnswer={detail.visitAnswer ?? null}
+                patientFirstName={patient.patient.givenNames?.trim().split(/\s+/)[0] ?? null}
+                currentReason={reason}
+                onUseVisitReason={(told) => {
+                  if (!locked && reason.trim() === "") editText("reason", told)
+                }}
                 onUrgency={() => {
                   if (reason.trim() === "") editText("reason", "Urgencia: ")
                   requestAnimationFrame(() => {

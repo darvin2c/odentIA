@@ -1,5 +1,6 @@
 import { label } from "../../lib/glossary"
-import { diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText } from "@odentia/clinical"
+import { diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText, visitAnswerLine } from "@odentia/clinical"
+import { visitSeenWords } from "../../lib/visit-answer-words"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
@@ -226,6 +227,18 @@ export function EncounterDetailView({
             <dt className="text-xs font-medium text-muted-foreground">Motivo de consulta</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "Sin motivo"}</dd>
           </div>
+          {detail.visitAnswer ? (
+            // Después de firmar sigue a la vista lo que contó antes de venir, con quién lo vio (entrega 8).
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">Lo que contó antes de venir</dt>
+              <dd className="text-sm">
+                {visitAnswerLine(detail.visitAnswer)}
+                {visitSeenWords(detail.visitAnswer) ? (
+                  <span className="block text-xs text-muted-foreground">{visitSeenWords(detail.visitAnswer)}</span>
+                ) : null}
+              </dd>
+            </div>
+          ) : null}
           {encounter.illnessDuration ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Tiempo de enfermedad</dt>

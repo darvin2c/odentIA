@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
+import { visitHistoryLine } from "../../lib/visit-answer-words"
 import { productUi } from "../../product/product-ui"
 import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -94,6 +95,12 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
   const indicatedSomething = indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + forms.length > 0
   return (
     <>
+      {!retired && born.told ? (
+        // Lo que contó antes de venir, en la atención de su cita, con quién lo vio (mesa del 13 nov, entrega 8).
+        <Part label="Lo que contó antes de venir">
+          <p className="text-sm">{visitHistoryLine(born.told)}</p>
+        </Part>
+      ) : null}
       {indicatedSomething ? (
         <Part label={retired ? "Ya no vigente" : "Se indicó"}>
           <ul className="flex flex-col gap-1 text-sm">

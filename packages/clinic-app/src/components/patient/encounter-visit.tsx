@@ -6,13 +6,20 @@
  * (motivo, diagnóstico que sigue, el tratamiento en «Realizado hoy»); nada se da
  * por hecho: la sesión cuenta al registrarla y el control se cumple al firmar.
  */
-import { gapWords } from "@odentia/clinical"
+import { gapWords, visitReasonForEncounter } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useState } from "react"
 import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../../lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { type EncounterVisit, treatmentConsentWords, type VisitControl, type VisitTreatment } from "../../lib/patients"
+import {
+  type EncounterVisit,
+  treatmentConsentWords,
+  type VisitAnswerView,
+  type VisitControl,
+  type VisitTreatment,
+} from "../../lib/patients"
+import { visitPainWords, visitToldHeading } from "../../lib/visit-answer-words"
 
 /** «4 may», en la zona de la clínica. */
 function shortDay(iso: string): string {
@@ -93,9 +100,23 @@ export function EncounterVisitStrip({
   onChanged,
   onPendingChange,
   past = false,
+  visitAnswer = null,
+  patientFirstName = null,
+  onUseVisitReason,
+  currentReason = "",
 }: {
+  /** El motivo de consulta escrito: si ya es lo que contó, se dice «Ya es el motivo de hoy». */
+  currentReason?: string
   /** La atención es de otro día (una cita pasada que se registra después): no se dice «hoy». */
   past?: boolean
+  /** Lo que contó antes de venir para la cita de esta atención («Antes de tu cita»). */
+  visitAnswer?: VisitAnswerView | null
+  patientFirstName?: string | null
+  /**
+   * «Usar como motivo» con sus palabras: solo con el motivo vacío, nunca pisa lo escrito (ni lo que
+   * anotó recepción, que sigue a la vista).
+   */
+  onUseVisitReason?: (reason: string) => void
   patientId: string
   encounterId: string
   visit: EncounterVisit | null | undefined
@@ -119,7 +140,9 @@ export function EncounterVisitStrip({
   const controls = visit?.controls ?? []
   // Ya usado como motivo, «Su cita» sigue a la vista, sin botón.
   const usedReason = !offeredReason && bookedReason?.trim() ? bookedReason.trim() : null
-  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason && !usedReason
+  // Sus palabras se ofrecen como motivo mientras no haya otro; usadas o con otro escrito, siguen a la vista.
+  const toldReason = visitAnswer ? visitReasonForEncounter(visitAnswer) : null
+  const nothing = treatments.length === 0 && controls.length === 0 && !offeredReason && !usedReason && !visitAnswer
 
   const run = async (key: string, write: () => Promise<unknown>) => {
     if (busy) return
@@ -199,6 +222,34 @@ export function EncounterVisitStrip({
               >
                 Usar como motivo
               </Button>
+            </li>
+          ) : null}
+          {visitAnswer ? (
+            // «Antes de tu cita» (mesa del 13 nov, entrega 8): lo de esta cita y de ninguna otra.
+            <li className={row}>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-xs text-muted-foreground">{visitToldHeading(visitAnswer, patientFirstName)}:</span>
+                {visitAnswer.reason?.trim() ? <span>«{visitAnswer.reason.trim()}»</span> : null}
+                {visitAnswer.toldPurpose && !visitAnswer.reason ? (
+                  <span className="text-muted-foreground">Vino a: {visitAnswer.toldPurpose}</span>
+                ) : null}
+                {visitPainWords(visitAnswer) ? <span className="font-medium">{visitPainWords(visitAnswer)}</span> : null}
+                {visitAnswer.more?.trim() ? <span className="text-muted-foreground">Además: «{visitAnswer.more.trim()}»</span> : null}
+                {toldReason && !reasonEmpty && currentReason.trim() === toldReason ? (
+                  <span className="text-xs text-muted-foreground">Ya es el motivo de hoy</span>
+                ) : null}
+              </span>
+              {toldReason && reasonEmpty && onUseVisitReason ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={disabled}
+                  aria-label={`Usar como motivo lo que contó: «${toldReason}»`}
+                  onClick={() => onUseVisitReason(toldReason)}
+                >
+                  Usar como motivo
+                </Button>
+              ) : null}
             </li>
           ) : null}
           {treatments.map((item) => {
