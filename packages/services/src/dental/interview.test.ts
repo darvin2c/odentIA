@@ -62,7 +62,9 @@ describe("la entrevista de odentIA", () => {
       dentalInterview.check({ antecedentesOdontologicos: { problemaAnestesia: "quizá" } }, today),
     ).toThrow()
     expect(() => dentalInterview.check({ habitos: { tabaco: "nunca", cigarrillos: "menos_10" } }, today)).toThrow()
-    expect(() => dentalInterview.check({ habitos: { alcohol: "no" } }, today)).toThrow()
+    // El alcohol, también en odentIA (QA del 14 nov, C4): solo sus respuestas de la lista.
+    expect(dentalInterview.check({ habitos: { alcohol: "no" } }, today)).toEqual({ habitos: { alcohol: "no" } })
+    expect(() => dentalInterview.check({ habitos: { alcohol: "mucho" } }, today)).toThrow()
     const ok = { habitos: { tabaco: "fuma", cigarrillos: "menos_10" } }
     expect(dentalInterview.check(ok, today)).toBe(ok)
   })
