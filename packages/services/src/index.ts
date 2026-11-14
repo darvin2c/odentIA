@@ -187,6 +187,7 @@ export * from "./procedure-codings.js"
 export * from "./product-agent.js"
 export * from "./product-domains.js"
 export type { DictationPrepared, ProductDictation } from "./product-hooks.js"
+export { NO_SITE } from "./product-hooks.js"
 export {
   agentTextsFor,
   dictationFor,

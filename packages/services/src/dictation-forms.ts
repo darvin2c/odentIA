@@ -75,15 +75,26 @@ export async function dictationFormQuestions(tx: Db, orgId: string, encounterId:
     .limit(DICTATION_MAX_FORMS)
   // Las elegidas, en el orden en que se empezaron: el número de cada pregunta no salta entre pausas.
   rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  return formQuestionsOf(rows.map((row) => ({ id: row.id, title: row.title, snapshot: row.snapshot, answers: (row.answers ?? {}) as Record<string, unknown> })))
+}
+
+/**
+ * Las preguntas que lee Clío de unas fichas empezadas, numeradas en ese orden.
+ * Es la regla de `dictationFormQuestions` sin la base: la usa también la
+ * medición (`eval:dictado` con fichas), para medir lo mismo que corre.
+ */
+export function formQuestionsOf(
+  forms: ReadonlyArray<{ id: string; title: string | null; snapshot: unknown; answers: Record<string, unknown> }>,
+): DictationFormQuestion[] {
   const questions: DictationFormQuestion[] = []
-  for (const row of rows) {
+  for (const form of forms) {
     let fields: FormFieldDef[]
     try {
-      fields = assertFormSchema(row.snapshot).sections.flatMap((section) => section.fields)
+      fields = assertFormSchema(form.snapshot).sections.flatMap((section) => section.fields)
     } catch {
       continue
     }
-    const answers = (row.answers ?? {}) as Record<string, unknown>
+    const answers = form.answers
     fields.forEach((field, order) => {
       if (questions.length >= DICTATION_MAX_FORM_QUESTIONS) return
       if (!(DICTATION_FORM_TYPES as readonly string[]).includes(field.type)) return
@@ -93,8 +104,8 @@ export async function dictationFormQuestions(tx: Db, orgId: string, encounterId:
       if (field.showIf && !isEmpty(answers[field.showIf.field]) && !conditionMet(field.showIf, answers[field.showIf.field])) return
       questions.push({
         number: questions.length + 1,
-        responseId: row.id,
-        formTitle: row.title ?? "Ficha",
+        responseId: form.id,
+        formTitle: form.title ?? "Ficha",
         fieldId: field.id,
         label: field.label,
         type: field.type as DictationFormType,
@@ -148,7 +159,12 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos" 
       if (value !== undefined) found.push(value)
     }
   }
-  const words = plain(text).replace(/(\d),(\d)/g, "$1.$2").split(/[^a-z0-9.-]+/).filter(Boolean)
+  // El punto queda solo como decimal («6.5»): el que cierra una frase («tres.») no es parte del número.
+  const words = plain(text)
+    .replace(/(\d),(\d)/g, "$1.$2")
+    .split(/[^a-z0-9.-]+/)
+    .map((word) => word.replace(/^[.-]+(?=\D)|\.+$/g, ""))
+    .filter(Boolean)
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] ?? ""
     const negative = word === "menos"
@@ -180,6 +196,11 @@ function readNumber(words: string[], at: number): { value: number; next: number 
   if (word === undefined) return null
   if (/^-?\d+(\.\d+)?$/.test(word)) return { value: Number(word), next: at + 1 }
   if (word === "cien") return { value: 100, next: at + 1 }
+  // «ciento quince»: una talla en centímetros.
+  if (word === "ciento") {
+    const rest = readNumber(words, at + 1)
+    return rest && rest.value < 100 ? { value: 100 + rest.value, next: rest.next } : { value: 100, next: at + 1 }
+  }
   if (word in TEENS) return { value: TEENS[word] ?? 0, next: at + 1 }
   const joined = /^veinti(uno|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)$/.exec(word)
   if (joined?.[1]) return { value: 20 + (UNITS[joined[1]] ?? 0), next: at + 1 }

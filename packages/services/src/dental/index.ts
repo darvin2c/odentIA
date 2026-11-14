@@ -8,6 +8,8 @@
 import "../products.js"
 
 export * from "./dictation.js"
+export { DENTAL_FORMS } from "./forms.js"
+export { dentalProductSite } from "./site.js"
 export * from "./odontogram.js"
 export * from "./periodontal.js"
 export * from "./tooth-history.js"

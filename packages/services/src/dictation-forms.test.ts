@@ -56,6 +56,9 @@ describe("los números que se dijeron", () => {
     expect(saidNumbers("la veintiséis y la 6,5")).toEqual([26, 6.5])
     expect(saidNumbers("seis y medio, menos dos")).toEqual([6.5, -2])
     expect(saidNumbers("clase dos división dos")).toEqual([2, 2])
+    // El punto que cierra la frase no es parte del número.
+    expect(saidNumbers("overbite de tres. Clase 2.")).toEqual([3, 2])
+    expect(saidNumbers("talla de ciento quince")).toEqual([115])
   })
   it("en una opción lee los romanos; en lo dictado, solo los de dos letras", () => {
     expect(saidNumbers("Clase II división 1", { roman: "todos" })).toEqual([2, 1])
