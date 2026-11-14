@@ -15,6 +15,7 @@ import {
   type PatientHealth,
   unaskedHealthGroups,
 } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 import { AllergyFormDrawer } from "./allergies-card"
 import { useOpenWide } from "./wide-section"
 
@@ -148,6 +149,11 @@ export function HealthReviewNotice({
     if (saidConditions.length > 0)
       rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
     else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
+    // El corazón, la anestesia, el tabaco y la lactancia que dijo en esta declaración (QA del 14 nov).
+    const interview = group.interview ?? []
+    if (interview.length > 0)
+      for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? [])
+        if (row.keys.some((key) => interview.includes(key))) rows.push({ label: row.label, value: row.value })
     return { title: declaredMarkWords(group.by, group.at, sex), rows }
   })
   const shownGroups = saidGroups.filter((group) => group.rows.length > 0)

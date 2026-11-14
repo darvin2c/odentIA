@@ -487,4 +487,10 @@ export const dentalHealth: ProductHealthUi = {
     dentalInterviewItems(answers).flatMap((item) =>
       item.alert ? [{ keys: ITEM_KEYS[item.key], label: withDay(item, item.alert) }] : [],
     ),
+  saidRows: (answers) =>
+    dentalInterviewItems(answers).map((item) => {
+      // «Corazón: válvula…: sí» → «Corazón» y lo que dijo.
+      const [label, ...rest] = withDay(item, item.text).split(": ")
+      return { keys: ITEM_KEYS[item.key], label: label ?? item.key, value: rest.join(": ") }
+    }),
 }

@@ -213,3 +213,47 @@ export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefin
   if (parts.length === 0) return null
   return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
 }
+
+const INTERVIEW_ANSWER_WORDS: Record<string, string> = { si: "Sí", no: "No", no_sabe: "No sabe" }
+const DECLARED_TOBACCO_WORDS: Record<string, string> = { nunca: "Nunca fumó", fuma: "Fuma", dejo: "Lo dejó" }
+const DECLARED_CIGARETTE_WORDS: Record<string, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
+
+/**
+ * Lo demás que dijo en una declaración, tal como llegó, en filas: el corazón, el antibiótico, la
+ * anestesia, el tabaco, la lactancia y sus operaciones (QA del 14 nov: «Ver declaración original»
+ * no lo traía). Lo que no respondió no sale.
+ */
+export function declaredInterviewRows(health: Record<string, unknown>): Array<{ label: string; value: string }> {
+  const rec = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const dental = rec(health["dental"])
+  const heart = rec(dental["corazon"])
+  const medical = rec(health["medical"])
+  const personal = rec(health["personal"])
+  const answer = (value: unknown) => (typeof value === "string" ? (INTERVIEW_ANSWER_WORDS[value] ?? value) : null)
+  const rows: Array<{ label: string; value: string | null }> = [
+    { label: "Válvula, problema del corazón de nacimiento o endocarditis", value: answer(heart["riesgoEndocarditis"]) },
+    { label: "Su médico le indicó antibiótico antes del dentista", value: answer(heart["antibioticoPrevio"]) },
+    { label: "Problema con la anestesia o sangrado tras una extracción", value: answer(dental["problemaAnestesia"]) },
+    {
+      label: "Tabaco",
+      value:
+        typeof medical["tabaco"] === "string"
+          ? [DECLARED_TOBACCO_WORDS[medical["tabaco"]] ?? medical["tabaco"], DECLARED_CIGARETTE_WORDS[String(medical["cigarrillos"])]]
+              .filter(Boolean)
+              .join(", ")
+          : null,
+    },
+    { label: "Lactancia", value: typeof medical["lactancia"] === "boolean" ? (medical["lactancia"] ? "Sí" : "No") : null },
+    { label: "Operaciones", value: typeof personal["cirugias"] === "string" && personal["cirugias"].trim() ? personal["cirugias"] : null },
+    {
+      label: "Hospitalizaciones",
+      value: typeof personal["hospitalizaciones"] === "string" && personal["hospitalizaciones"].trim() ? personal["hospitalizaciones"] : null,
+    },
+    {
+      label: "Transfusiones",
+      value: typeof personal["transfusiones"] === "string" && personal["transfusiones"].trim() ? personal["transfusiones"] : null,
+    },
+  ]
+  return rows.filter((row): row is { label: string; value: string } => row.value !== null)
+}

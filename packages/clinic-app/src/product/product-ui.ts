@@ -161,6 +161,11 @@ export interface ProductHealthUi {
    * dijo (`DeclaredInterviewKey`): el corazón, la anestesia, la lactancia. Sin esto, nada.
    */
   alerts?(answers: Record<string, unknown>): Array<{ keys: DeclaredInterviewKey[]; label: string }>
+  /**
+   * Lo suyo de la entrevista en filas, para «Revisa con ella lo que dijo»: cada dato con todas sus
+   * respuestas, también el «No», y la clave de quién lo dijo.
+   */
+  saidRows?(answers: Record<string, unknown>): Array<{ keys: DeclaredInterviewKey[]; label: string; value: string }>
 }
 
 export interface InterviewSectionsProps {

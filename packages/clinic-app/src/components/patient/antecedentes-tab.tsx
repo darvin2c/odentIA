@@ -37,6 +37,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   declaredGroupOf,
+  declaredInterviewRows,
   declaredMarkWords,
   pregnancyGroupOf,
   pregnancyWords,
@@ -1454,6 +1455,12 @@ export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.E
           {pregnancy}
         </p>
       ) : null}
+      {declaredInterviewRows(health).map((row) => (
+        <p key={row.label}>
+          <span className="font-medium">{row.label} · </span>
+          {row.value}
+        </p>
+      ))}
     </>
   )
 }
@@ -1606,7 +1613,7 @@ function RegistrationSnapshotDialog({
               </div>
             </dl>
             <DeclaredHealthSnapshot health={health} />
-            {dental ? (
+            {dental && ["ultimaVisita", "experienciaPrevia", "ansiedadDental"].some((key) => typeof dental[key] === "string") ? (
               <section className="flex flex-col gap-1">
                 <h4 className="text-sm font-medium">Odontológicos</h4>
                 <dl className="grid gap-1">

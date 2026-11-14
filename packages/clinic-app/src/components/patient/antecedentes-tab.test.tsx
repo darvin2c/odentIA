@@ -109,3 +109,25 @@ describe("la revisión de los antecedentes", () => {
     expect(healthReviewedWords("2026-11-14T15:00:00.000Z", null, () => "")).toBe("Antecedentes revisados · 14 nov")
   })
 })
+
+// QA del 14 nov (causa raíz): «Ver declaración original» no traía el corazón, la anestesia, el tabaco,
+// la lactancia ni las operaciones que dijo.
+describe("«Ver declaración original» con todo lo que dijo", () => {
+  it("el corazón, el antibiótico, la anestesia, el tabaco, la lactancia y las operaciones, tal como llegaron", () => {
+    const page = renderToStaticMarkup(
+      <DeclaredHealthSnapshot
+        health={{
+          dental: { corazon: { riesgoEndocarditis: "si", antibioticoPrevio: "no_sabe" }, problemaAnestesia: "no" },
+          medical: { tabaco: "fuma", cigarrillos: "10_o_mas", lactancia: true },
+          personal: { cirugias: "Apendicectomía" },
+        }}
+      />,
+    ).replace(/<[^>]+>/g, "")
+    expect(page).toContain("Válvula, problema del corazón de nacimiento o endocarditis · Sí")
+    expect(page).toContain("Su médico le indicó antibiótico antes del dentista · No sabe")
+    expect(page).toContain("Problema con la anestesia o sangrado tras una extracción · No")
+    expect(page).toContain("Tabaco · Fuma, 10 o más al día")
+    expect(page).toContain("Lactancia · Sí")
+    expect(page).toContain("Operaciones · Apendicectomía")
+  })
+})

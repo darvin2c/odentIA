@@ -321,3 +321,46 @@ describe("«Pregúntale» con representante", () => {
     expect(page).toMatch(/Medicinas\|+[^|]*Losartán/)
   })
 })
+
+// QA del 14 nov (causa raíz): Víctor dijo que tiene una válvula operada y que su médico le indicó
+// antibiótico; «Revisa con él lo que dijo» no lo traía.
+describe("«Revisa con él» trae lo que dijo de su corazón", () => {
+  it("cada dato de la entrevista que dijo en esa declaración, con su respuesta", () => {
+    const base = bareProduct("dental")
+    declareProduct({
+      ...base,
+      health: {
+        ...base.health,
+        saidRows: () => [
+          { keys: ["corazon", "antibiotico"], label: "Corazón", value: "válvula, problema de nacimiento o endocarditis: sí · antibiótico antes del dentista: sí" },
+          { keys: ["tabaco"], label: "Tabaco", value: "nunca fumó" },
+        ],
+      },
+    })
+    try {
+      const victor = {
+        ...health,
+        reviewPending: true,
+        latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" },
+        declared: [
+          {
+            by: { kind: "patient", name: null, relation: null },
+            at: "2026-11-13T19:27:00.000Z",
+            allergies: [],
+            conditions: [],
+            medications: [],
+            pregnancy: false,
+            interview: ["corazon", "antibiotico"],
+            saidNo: { allergies: false, conditions: false, medications: false },
+          },
+        ],
+      } as unknown as PatientHealth
+      const page = render(victor).replace(/<[^>]+>/g, "|")
+      expect(page).toMatch(/Corazón\|+[^|]*válvula, problema de nacimiento o endocarditis: sí/)
+      // El tabaco no lo dijo en esta declaración: no se le atribuye.
+      expect(page).not.toContain("nunca fumó")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
+  })
+})
