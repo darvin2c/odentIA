@@ -414,9 +414,12 @@ export async function patientHealthQuestionsWith(
   // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
   // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
   const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
-  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6).
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
+  // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
+  // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
   const responded = !!sent || health.declarations.some((row) => row.via === "registro")
-  if (responded && sawToday) return { ask: [], onlyNew: false, health, known }
+  const answeredOldList = health.declarations.length > 0 && !sawToday
+  if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
   const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
@@ -659,8 +662,9 @@ export async function registrationNoticeSuggested(tx: Db, orgId: string): Promis
 /**
  * Las preguntas que la lista sumó después de la última vez que alguien de la clínica guardó o vio
  * «Preguntas al paciente» (mesa del 13 nov, decisión 10): ya se preguntan como «Opcional» y a quien
- * la administra se le avisa cuáles son. Una clínica sin configuración guardada es de antes de la
- * lista: también se le avisa.
+ * la administra se le avisa cuáles son. Una clínica sin configuración guardada nunca eligió qué
+ * preguntar: no hay nada que la lista le haya cambiado, y una clínica nueva no recibe el aviso
+ * (lo atrapó el e2e: la campana de una clínica recién creada decía «Hay preguntas nuevas»).
  */
 export async function newRegistrationQuestionsOf(
   tx: Db,
@@ -671,7 +675,8 @@ export async function newRegistrationQuestionsOf(
     .from(patientRegistrationConfig)
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
-  return newRegistrationQuestions(row?.seen ?? 1, await orgProduct(tx, orgId))
+  if (!row) return []
+  return newRegistrationQuestions(row.seen, await orgProduct(tx, orgId))
 }
 
 /** «Entendido»: quien administra ya vio las preguntas nuevas, aunque no cambie nada. */

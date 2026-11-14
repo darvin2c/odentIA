@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { REGISTRATION_QUESTIONS_VERSION } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
@@ -591,6 +592,10 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
 })
 
 it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada aviso llega con el permiso que declara", async () => {
+  // Una clínica que ya vio la lista de preguntas de hoy: la campana no trae «Hay preguntas nuevas».
+  await ownerDb.execute(sql`insert into patient_registration_config (organization_id, fields, questions_version)
+    values ('org_a', '{}'::jsonb, ${REGISTRATION_QUESTIONS_VERSION})
+    on conflict (organization_id) do update set questions_version = excluded.questions_version`)
   const notice = (dedupeKey: string, permission: string, extra: { actorUserId?: string } = {}) =>
     withOrgContext(appDb, "org_a", tx => createWorkspaceNotification(tx, "org_a", {
       userId: colleague, dedupeKey, title: `Aviso ${dedupeKey}`, body: "", href: "/home", permission, ...extra,

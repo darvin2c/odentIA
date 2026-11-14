@@ -1227,7 +1227,8 @@ export function declaredMedications(
       name,
       declaredClass: group,
       ...(notes.length ? { notes: upperFirst(notes.join(" · ")) } : {}),
-      ...(answer.now === false && saidOn ? { endDate: saidOn } : {}),
+      // Terminada el día antes de decirlo: una medicina con fin hoy todavía se lee como vigente hoy.
+      ...(answer.now === false && saidOn ? { endDate: dayBefore(saidOn) } : {}),
     })
   }
   for (const item of declared.medications?.state === "recorded" ? declared.medications.items : []) {
@@ -1240,6 +1241,13 @@ export function declaredMedications(
   if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
+}
+
+/** El día anterior a uno (AAAA-MM-DD), en el calendario, sin zona. */
+function dayBefore(day: string): string {
+  const date = new Date(`${day}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - 1)
+  return date.toISOString().slice(0, 10)
 }
 
 /** La fila de «algún otro medicamento» dicho sin decir cuál. */
