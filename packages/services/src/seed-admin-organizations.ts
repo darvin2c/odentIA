@@ -7,6 +7,7 @@ import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, desc, eq } from "drizzle-orm"
 import { writeAdminAudit } from "./admin-core.js"
 import { ensureClinicConsents } from "./clinical-forms.js"
+import { ensureClinicForms } from "./consultation-forms.js"
 import { initialOrgRegion } from "./organization-profile.js"
 import { addDays as addCivilDays, dayStart, reportDayOf } from "./report-periods.js"
 import { SEED_STAFF_ADMIN_ID } from "./seed-admin-core.js"
@@ -120,6 +121,7 @@ async function seedAssistedSignup(db: Db): Promise<void> {
     })
     await ensureClinicSpecialties(db, ASSISTED_ORG)
     await ensureClinicConsents(db, ASSISTED_ORG, null)
+    await ensureClinicForms(db, ASSISTED_ORG)
   }
 
   // Vence hoy, en Lima: a lo más en 6 horas y antes de medianoche. La hizo hace los 7 días que dura.

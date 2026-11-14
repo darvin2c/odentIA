@@ -12,6 +12,7 @@ import {
   type FormTemplateRow,
   listFormTemplates,
 } from "./clinical-forms.js"
+import { ageOfferedSpecialties, type ProductFormMark, productFormMarks } from "./consultation-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
@@ -123,15 +124,28 @@ export async function previewPatientQuestionnaire(
  * Las plantillas para Configuración, con la que hoy reciben los pacientes
  * marcada (`reachesPatients`): de las publicadas «que responde el paciente» les
  * llega una sola, la de `currentTemplate`. La lista lo dice con esa misma regla.
+ * Y de cada ficha, si vino con el producto y si la clínica ya la miró
+ * (`fromProduct`, `looked`) y si además se ofrece por la edad
+ * (`offeredUnderYears`): lo dice el servidor, no la pantalla.
  */
 export async function listClinicFormTemplates(
   tx: Db,
   orgId: string,
   query: Parameters<typeof listFormTemplates>[2] = {},
-): Promise<Array<FormTemplateRow & { reachesPatients: boolean }>> {
+): Promise<Array<FormTemplateRow & { reachesPatients: boolean; offeredUnderYears: number | null } & ProductFormMark>> {
   const rows = await listFormTemplates(tx, orgId, query)
   const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
-  return rows.map((row) => ({ ...row, reachesPatients: row.id === reaching?.id }))
+  const marks = rows.length > 0 ? await productFormMarks(tx, orgId) : new Map<string, ProductFormMark>()
+  const byAge = rows.length > 0 ? await ageOfferedSpecialties(tx, orgId) : null
+  return rows.map((row) => ({
+    ...row,
+    reachesPatients: row.id === reaching?.id,
+    ...(marks.get(row.key) ?? { fromProduct: false, looked: true }),
+    offeredUnderYears:
+      byAge && row.respondent === "staff" && row.specialtyId && byAge.specialtyIds.includes(row.specialtyId)
+        ? byAge.underYears
+        : null,
+  }))
 }
 
 /** Borrador abierto del portal o, si no hay, el último enviado (solo lectura). */

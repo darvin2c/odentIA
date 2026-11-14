@@ -28,6 +28,7 @@ import {
   getConsentPrint,
   getConsentSheetFrame,
   getEncounterConsentNeeds,
+  getEncounterFormOffers,
   getOrderPrint,
   getOwnProfessionalProfile,
   getProfessionalProfile,
@@ -40,7 +41,7 @@ import {
   listClinicFormTemplates,
   listConsentTemplates,
   listFormAddenda,
-  listFormResponses,
+  listPatientFormResponses,
   listProfessionalProfiles,
   listProfessionalSpecialties,
   listSpecialties,
@@ -49,6 +50,7 @@ import {
   loadDocumentClinic,
   markConsentSentByLink,
   markConsentTemplateReviewed,
+  markFormTemplateLooked,
   parseConsentDraft,
   prepareEncounterConsents,
   previewPatientQuestionnaire,
@@ -723,6 +725,33 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
+  // «La miraste»: alguien de la clínica abrió una ficha que vino con el producto.
+  app.post("/form-templates/:id/looked", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración revisa las fichas de la clínica")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => markFormTemplateLooked(tx, orgId, userId, formId(c))),
+    )
+  })
+
+  // Las fichas que la atención ofrece solas: por la especialidad de la cita, por la edad y, sin
+  // servicio, por la de quien atiende. Ofrecer no es pedir: nada de esto frena la atención.
+  app.get("/form-offers", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    const parsed = consentNeedsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId, encounterId } = parsed.data
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getEncounterFormOffers(tx, orgId, patientId, encounterId)),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "formularios" })
+    return response
+  })
+
   // --- Capturas ---
   app.get("/form-responses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -737,7 +766,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (templateId === null) return notFoundResponse(c, "Plantilla no encontrada")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listFormResponses(tx, orgId, {
+        // Cada ficha con la anterior del mismo tipo, para verla al lado de la de hoy.
+        listPatientFormResponses(tx, orgId, {
           patientId,
           encounterId,
           templateId,

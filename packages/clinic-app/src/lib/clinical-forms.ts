@@ -78,6 +78,11 @@ export interface FormTemplate {
    * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
    */
   reachesPatients?: boolean
+  /** Vino con el producto y, si alguien de la clínica ya la abrió o la cambió. Vienen en la lista de plantillas. */
+  fromProduct?: boolean
+  looked?: boolean
+  /** Además de por su especialidad, se ofrece a quien tiene menos de estos años. Viene en la lista. */
+  offeredUnderYears?: number | null
 }
 
 export interface FormResponse {
@@ -103,6 +108,8 @@ export interface FormResponse {
   /** Lo de su atención, si tiene: firmada («finalizada», y desde cuándo) o anulada. Viene en la lista. */
   encounterStatus?: "borrador" | "finalizada" | "anulada" | null
   encounterFinalizedAt?: string | null
+  /** La anterior del mismo tipo, ya finalizada: se lee al lado de esta. Viene en la lista. */
+  previousId?: string | null
 }
 
 export interface FormAddendum {
