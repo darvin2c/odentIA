@@ -1827,5 +1827,13 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   expect(form.healthQuestions).toEqual(expect.arrayContaining(["dental.biberon", "dental.chupon", "dental.quienCepilla"]))
   expect(form.healthQuestions).not.toContain("medical.tabaco")
   expect(form.healthQuestions).not.toContain("personal.embarazo")
-
+  // Lo de un niño entra a su entrevista; lo de un adulto que llegue igual se descarta.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: {},
+      health: { dental: { biberon: "ya_no", quienCepilla: "adulto" }, medical: { tabaco: "nunca" } },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "ya_no", quienCepilla: "adulto" } })
 })

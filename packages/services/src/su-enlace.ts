@@ -20,6 +20,7 @@ import {
   REGISTRATION_FIELDS,
   type RegistrationConfig,
   type RegistrationFieldKey,
+  registrationFieldApplies,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
@@ -1021,11 +1022,16 @@ async function saveLinkData(
   // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
   const asked = input.health ? await healthQuestionsOf(tx, orgId, link) : []
   const known = asked.length > 0 ? knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)) : null
+  // Ni lo que no le corresponde (a un niño, el embarazo o el tabaco; a uno de 8, el biberón): la misma regla del registro.
+  const asker = known ? await requirePatient(tx, orgId, patientId) : null
+  const who = { sex: asker?.sex ?? null, age: ageInYears(asker?.birthDate, await patientOrganizationToday(tx, orgId)) }
   const said =
     input.health && known
       ? onlyAskedHealth(
           input.health,
-          REGISTRATION_FIELDS.filter((field) => field.group === "health" && !known.has(field.key)).map((field) => field.key),
+          REGISTRATION_FIELDS.filter(
+            (field) => field.group === "health" && !known.has(field.key) && registrationFieldApplies(field.key, who),
+          ).map((field) => field.key),
         )
       : null
   const withHealth = !!said && declaredHealthAnswered(said)
