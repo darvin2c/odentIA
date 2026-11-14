@@ -16,6 +16,8 @@ export interface FormDrawerProps {
   children: React.ReactNode
   onSubmit: (event: React.FormEvent) => void
   isDirty?: boolean
+  /** Lo que dice «¿Salir sin guardar?» si parte ya se guardó aparte (`useCloseGuard`). */
+  unsavedDescription?: string
   isSubmitting?: boolean
   isLoading?: boolean
   error?: string | null
@@ -74,6 +76,7 @@ export function FormDrawer({
   children,
   onSubmit,
   isDirty = false,
+  unsavedDescription,
   isSubmitting = false,
   isLoading = false,
   error,
@@ -86,7 +89,7 @@ export function FormDrawer({
   dock = true,
 }: FormDrawerProps) {
   const isMobile = useIsMobile()
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, unsavedDescription, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
@@ -153,6 +156,7 @@ export function FormDrawer({
           onClose={onClose}
           onSubmit={onSubmit}
           isDirty={isDirty}
+          unsavedDescription={unsavedDescription}
           isSubmitting={isSubmitting}
           isLoading={isLoading}
           error={error}

@@ -12,6 +12,8 @@ export interface FormPanelProps {
   children: React.ReactNode
   onSubmit: (event: React.FormEvent) => void
   isDirty?: boolean
+  /** Lo que dice «¿Salir sin guardar?» si parte ya se guardó aparte (`useCloseGuard`). */
+  unsavedDescription?: string
   isSubmitting?: boolean
   isLoading?: boolean
   error?: string | null
@@ -39,6 +41,7 @@ export interface FormPanelProps {
 export function FormPanel({
   onClose,
   isDirty = false,
+  unsavedDescription,
   isSubmitting = false,
   className,
   title,
@@ -54,7 +57,7 @@ export function FormPanel({
   hideSubmit = false,
   secondaryAction,
 }: FormPanelProps) {
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, unsavedDescription, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
 

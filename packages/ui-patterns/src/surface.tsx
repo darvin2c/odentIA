@@ -183,6 +183,12 @@ function SurfaceError({ error, className }: { error: string; className?: string 
 export interface CloseGuardOptions {
   isSubmitting?: boolean
   isDirty?: boolean
+  /**
+   * Lo que dice la pregunta de salir cuando parte del cambio ya se guardó al
+   * hacerlo (una marca que se guarda al pulsarla): «se pierden los cambios» no
+   * sería cierto. Sin esto, la frase común.
+   */
+  unsavedDescription?: string
   onClose: () => void
 }
 
@@ -210,6 +216,7 @@ export interface CloseGuard {
 export function useCloseGuard({
   isSubmitting = false,
   isDirty = false,
+  unsavedDescription,
   onClose,
 }: CloseGuardOptions): CloseGuard {
   const [asking, setAsking] = React.useState(false)
@@ -226,7 +233,7 @@ export function useCloseGuard({
     <ConfirmDialog
       open={asking}
       title={common.confirm.unsaved.title}
-      description={common.confirm.unsaved.description}
+      description={unsavedDescription ?? common.confirm.unsaved.description}
       cancelLabel={common.confirm.unsaved.keepEditing}
       confirmLabel={common.confirm.unsaved.discard}
       onClose={() => setAsking(false)}
