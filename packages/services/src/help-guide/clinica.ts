@@ -244,6 +244,22 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.read",
       },
       {
+        // QA del 14 nov (auditor H7): la Ayuda mandaba a una caja y a Documentos, que no traen esto.
+        id: "pacientes-salud-corazon-anestesia-que-dijo",
+        q: "¿Dónde veo lo que el paciente respondió del corazón y de la anestesia antes de atenderlo?",
+        a: "Arriba de su ficha y de su atención, en la caja «Lo dijo…, sin revisar», junto a sus alergias, enfermedades y medicinas: del corazón (válvula operada, problema de nacimiento o endocarditis, y si su médico le indicó antibiótico antes del dentista) y de la anestesia o un sangrado tras una extracción sale lo que cambia la cita, un «Sí» o un «No sabe», y la lactancia con el día en que la dijo. En la atención, «Revisa con… lo que dijo» lo lista todo, también el «No». Con su marca, está en su página › Antecedentes › «Corazón, anestesia y tabaco», que también dice si fuma. Lo que respondió tal como llegó, en «Ver declaración original». Al guardar sus antecedentes queda revisado y la marca se va.",
+        forms: [
+          "donde veo lo que respondio del corazon",
+          "donde veo si tiene problemas con la anestesia",
+          "donde veo si tiene una valvula",
+          "donde veo si fuma",
+          "lo que dijo de su corazon antes de atenderlo",
+        ],
+        area: "clinica",
+        needs: "clinical.read",
+        own: true,
+      },
+      {
         id: "pacientes-cuestionario-corregir-lo-que-puso",
         q: "El paciente puso algo mal en lo que respondió, ¿cómo lo corrijo?",
         a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre y la hora, antes o después de «Marcar como revisado». Para que su ficha diga otra cosa, corrígelo también en sus antecedentes. Si llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",

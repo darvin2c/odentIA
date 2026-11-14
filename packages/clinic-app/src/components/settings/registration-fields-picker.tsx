@@ -322,7 +322,7 @@ export function RegistrationFieldsPicker({
       />
       <Group
         title="Su salud"
-        help="Sale arriba de su ficha y de la atención; quien atiende la revisa con él."
+        help="Todo queda en sus Antecedentes; lo que cambia la cita sale arriba de su ficha y de la atención, y quien atiende lo revisa con él."
         items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...HEALTH_MEDICINES]}
         newKeys={newKeys}
         fields={fields}
