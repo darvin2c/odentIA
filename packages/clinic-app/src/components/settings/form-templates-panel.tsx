@@ -1,4 +1,5 @@
 import { productUi } from "../../product/product-ui"
+import { Switch } from "@odentia/ui/components/switch"
 import {
   Badge,
   Button,
@@ -126,7 +127,13 @@ export function FormTemplatesPanel() {
   const specialtyName = (id: string | null) =>
     id ? ((specialtiesQuery.data?.data ?? []).find((item) => item.id === id)?.name ?? null) : null
   // «Miraste 1 de 4»: de las que vinieron con el producto, cuántas abrió ya la clínica.
-  const looked = useMemo(() => lookedCount(listed), [listed])
+  const looked = useMemo(() => lookedCount([...listed, ...unused.map((item) => [item.last])]), [listed, unused])
+  // La que falta mirar va primero, para verla sin desplazar; las demás, en su orden.
+  const ordered = useMemo(() => {
+    const toLook = (versions: FormTemplate[]) =>
+      unlooked(versions.find((version) => version.status === "publicado") ?? versions[0]) ? 0 : 1
+    return [...listed].sort((a, b) => toLook(a) - toLook(b))
+  }, [listed])
   const lookMutation = useMutation({
     mutationFn: (template: FormTemplate) => markFormTemplateLooked(template.id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["form-templates"] }),
@@ -171,8 +178,9 @@ export function FormTemplatesPanel() {
     mutationFn: (current: FormTemplate) => archiveFormTemplate(current.id),
     onSuccess: (_result, current) => {
       setConfirm(null)
-      toast.success(`«${current.title}» ya no se usa. Lo ya llenado sigue en cada paciente.`)
-      follow(current, "leave", `«${current.title}» pasó a «Ya no se usan».`)
+      toast.success(`«${current.title}» quedó sin usar. Lo ya llenado sigue en cada paciente.`)
+      // El interruptor no se mueve de sitio: el foco se queda en él y se dice lo que pasó.
+      setAnnounced(`«${current.title}» quedó sin usar.`)
       invalidate()
     },
     onError: (error) => {
@@ -186,8 +194,14 @@ export function FormTemplatesPanel() {
     mutationFn: (last: FormTemplate) => reuseFormTemplate(last.id),
     onSuccess: (result, last) => {
       setConfirm(null)
-      toast.success(`«${last.title}» está en uso otra vez, como versión ${result.data.version}`)
-      follow(last, "reuse", `«${last.title}» volvió a la lista de fichas en uso.`)
+      toast.success(
+        result.data.id === last.id
+          ? `«${last.title}» está en uso otra vez`
+          : `«${last.title}» está en uso otra vez, como versión ${result.data.version}`,
+      )
+      // Encendida con su interruptor, el foco se queda en él; la que estaba en «Ya no se usan» sube a la lista.
+      if (result.data.id === last.id) setAnnounced(`«${last.title}» está en uso otra vez.`)
+      else follow(last, "reuse", `«${last.title}» volvió a la lista de fichas en uso.`)
       invalidate()
     },
     onError: (error, last) => {
@@ -321,15 +335,17 @@ export function FormTemplatesPanel() {
             />
           ) : listed.length === 0 ? null : (
             <ul className="flex flex-col gap-3">
-              {listed.map((versions) => {
+              {ordered.map((versions) => {
                 const latest = versions[0]
                 if (!latest) return null
                 const draft = versions.find((version) => version.status === "borrador")
                 const current = versions.find((version) => version.status === "publicado")
                 const shown = current ?? latest
-                // Una ficha del equipo en uso, sin borrador, se dice como en la atención: dónde aparece y qué anota.
+                // Una ficha del equipo publicada, sin borrador, se dice como en la atención: dónde aparece y qué anota.
                 const plain = latest.respondent === "staff" && current !== undefined && !draft
                 const toLook = unlooked(shown)
+                // «En uso» o «Sin usar»: el interruptor de la versión publicada.
+                const on = current?.inUse !== false
                 return (
                   <li key={latest.key} className={CARD}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -350,7 +366,9 @@ export function FormTemplatesPanel() {
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {plain ? <Badge>En uso</Badge> : null}
+                        {current && !canAdmin ? (
+                          <Badge variant={on ? "default" : "secondary"}>{on ? "En uso" : "Sin usar"}</Badge>
+                        ) : null}
                         {shown.fromProduct ? <Badge variant="outline">Viene con {productName}</Badge> : null}
                         {shown.fromProduct ? (
                           <Badge variant={toLook ? "secondary" : "outline"}>{toLook ? "Sin mirar" : "La miraste"}</Badge>
@@ -417,18 +435,18 @@ export function FormTemplatesPanel() {
                           </Button>
                         )}
                         {current ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className={ROW_BUTTON}
-                            data-form-key={latest.key}
-                            data-form-button="leave"
-                            aria-label={`Dejar de usar ${current.title}`}
-                            onClick={() => setConfirm({ kind: "leave", current })}
-                          >
-                            Dejar de usar
-                          </Button>
+                          // Como en Consentimientos: apagarla pide confirmar; encenderla vuelve a usar la misma versión.
+                          <div className="flex min-h-11 items-center gap-2 pl-1 text-sm sm:min-h-8">
+                            <Switch
+                              checked={on}
+                              disabled={leaveMutation.isPending || reuseMutation.isPending}
+                              data-form-key={latest.key}
+                              data-form-button={on ? "leave" : "reuse"}
+                              aria-label={`${current.title}: ${on ? "en uso" : "sin usar"}`}
+                              onCheckedChange={(next) => (next ? reuse(current) : setConfirm({ kind: "leave", current }))}
+                            />
+                            <span aria-hidden>{on ? "En uso" : "Sin usar"}</span>
+                          </div>
                         ) : null}
                       </div>
                     ) : null}

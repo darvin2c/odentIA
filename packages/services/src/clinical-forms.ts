@@ -312,6 +312,7 @@ export async function archiveSpecialty(
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.specialtyId, specialtyId),
         eq(clinicalFormTemplate.status, "publicado"),
+        eq(clinicalFormTemplate.inUse, true),
       ),
     )
     .limit(1)
@@ -994,6 +995,8 @@ export async function listFormTemplates(
     q?: string
     /** Primero los de las especialidades de este profesional (desde la atención). */
     forUserId?: string
+    /** Con `status: "publicado"`, también las apagadas («Sin usar»). */
+    includeOff?: boolean
   } = {},
 ): Promise<FormTemplateRow[]> {
   const conditions = [eq(clinicalFormTemplate.organizationId, orgId)]
@@ -1003,6 +1006,8 @@ export async function listFormTemplates(
       throw validation("Estado inválido: borrador|publicado|archivado")
     }
     conditions.push(eq(clinicalFormTemplate.status, query.status))
+    // «Publicada» es la que se puede llenar: una apagada («Sin usar») no se ofrece.
+    if (query.status === "publicado" && !query.includeOff) conditions.push(eq(clinicalFormTemplate.inUse, true))
   }
   const q = (query.q ?? "").trim()
   if (q) conditions.push(foldedWordsMatch([clinicalFormTemplate.title], q))
@@ -1220,10 +1225,12 @@ export async function publishFormTemplate(
         eq(clinicalFormTemplate.status, "publicado"),
       ),
     )
-    .returning({ version: clinicalFormTemplate.version })
+    .returning({ version: clinicalFormTemplate.version, inUse: clinicalFormTemplate.inUse })
+  // La versión nueva sigue como estaba la anterior: en uso, o apagada si se había dejado de usar.
+  const inUse = previous[0]?.inUse ?? true
   const [published] = await tx
     .update(clinicalFormTemplate)
-    .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "publicado", inUse, publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(clinicalFormTemplate.id, current.id))
     .returning()
   if (!published) throw notFound("Ficha")
@@ -1252,10 +1259,13 @@ export async function archiveFormTemplate(
     .for("update")
     .limit(1)
   if (!current) throw notFound("Ficha")
-  if (current.status === "archivado") throw conflict("ARCHIVED", "Esta ficha ya no se usa")
+  if (current.status === "archivado" || (current.status === "publicado" && !current.inUse))
+    throw conflict("ARCHIVED", "Esta ficha ya no se usa")
+  // La que está en uso se apaga («Sin usar»): la misma versión, que se vuelve a encender igual.
+  // Un borrador, en cambio, se archiva.
   const [row] = await tx
     .update(clinicalFormTemplate)
-    .set({ status: "archivado", updatedAt: new Date() })
+    .set(current.status === "publicado" ? { inUse: false, updatedAt: new Date() } : { status: "archivado", updatedAt: new Date() })
     .where(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
@@ -1272,10 +1282,11 @@ export async function archiveFormTemplate(
 }
 
 /**
- * «Volver a usar» un formulario que se dejó de usar. La base no deja salir de
- * «archivado», así que nace la versión siguiente, ya publicada, con el mismo
- * título y las mismas preguntas que la última que estuvo en uso; la archivada
- * y lo llenado con ella no cambian.
+ * «Volver a usar» una ficha que se dejó de usar: enciende la misma versión
+ * (`in_use`), sin crear otra; lo llenado con ella no cambia. Una ficha que se
+ * dejó de usar antes de que existiera el interruptor tiene todas sus versiones
+ * archivadas, y de ahí no se sale: para ella nace la versión siguiente, ya
+ * publicada, con el mismo título y las mismas preguntas que la última que estuvo en uso.
  */
 export async function reuseFormTemplate(
   tx: Db,
@@ -1301,8 +1312,22 @@ export async function reuseFormTemplate(
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)))
     .orderBy(desc(clinicalFormTemplate.version))
-  if (versions.some((row) => row.status === "publicado"))
-    throw conflict("IN_USE", "Esta ficha ya está en uso")
+  const published = versions.find((row) => row.status === "publicado")
+  if (published?.inUse) throw conflict("IN_USE", "Esta ficha ya está en uso")
+  if (published) {
+    const [row] = await tx
+      .update(clinicalFormTemplate)
+      .set({ inUse: true, updatedAt: new Date() })
+      .where(and(eq(clinicalFormTemplate.id, published.id), eq(clinicalFormTemplate.organizationId, orgId)))
+      .returning()
+    if (!row) throw notFound("Ficha")
+    await audit(tx, orgId, actorUserId, "form_template.reuse", "clinical_form_template", row.id, {
+      key: row.key,
+      version: row.version,
+      from: row.version,
+    })
+    return row
+  }
   if (versions.some((row) => row.status === "borrador")) {
     throw conflict("DRAFT_EXISTS", "Esta ficha tiene un borrador: publícalo para volver a usarla, o archívalo")
   }
@@ -1478,12 +1503,12 @@ export async function createFormResponse(
     )
     .limit(1)
   if (!template) throw notFound("Ficha")
-  if (template.status !== "publicado") {
+  if (template.status !== "publicado" || !template.inUse) {
     throw invalidField(
       "templateId",
-      template.status === "archivado"
-        ? "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración"
-        : "Esta ficha aún es un borrador: publícala para empezar a llenarla",
+      template.status === "borrador"
+        ? "Esta ficha aún es un borrador: publícala para empezar a llenarla"
+        : "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración",
     )
   }
   // La pantalla ya no lo ofrece; el servidor tampoco lo acepta.

@@ -73,11 +73,13 @@ async function currentTemplate(tx: Db, orgId: string, exceptKey?: string) {
       and(
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.status, "publicado"),
+        eq(clinicalFormTemplate.inUse, true),
         eq(clinicalFormTemplate.respondent, "portal"),
         exceptKey ? ne(clinicalFormTemplate.key, exceptKey) : undefined,
       ),
     )
-    .orderBy(desc(clinicalFormTemplate.publishedAt))
+    // El último publicado o vuelto a usar: encender uno apagado lo deja como el que les llega.
+    .orderBy(desc(clinicalFormTemplate.updatedAt))
     .limit(1)
   return template ?? null
 }

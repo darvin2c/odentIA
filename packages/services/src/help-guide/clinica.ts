@@ -342,19 +342,19 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "formularios-formulario-dejar-de-usar",
         q: "¿Cómo dejo de usar una ficha?",
-        a: "En Configuración › Fichas de consulta, en la ficha que está en uso, toca «Dejar de usar» y confirma: deja de ofrecerse para llenarlo, y lo ya llenado sigue en cada paciente con sus preguntas. Queda abajo, en «Ya no se usan», con la fecha en que se dejó, y desde ahí se recupera cuando quieras. Si es un cuestionario que responde el paciente, la confirmación dice qué recibirán los pacientes desde ese momento.",
+        a: "En Configuración › Fichas de consulta, cada ficha tiene su interruptor «En uso». Apágalo y confirma: queda «Sin usar», deja de aparecer sola en la atención y en «Nuevo» › «Ficha», y lo ya llenado sigue en cada paciente con sus preguntas. Sigue en la lista, con su interruptor, para volver a usarla cuando quieras. Si es un cuestionario que responde el paciente, la confirmación dice qué recibirán los pacientes desde ese momento.",
         forms: ["quitar un formulario que ya no uso", "que el paciente deje de recibir el cuestionario", "retirar un formulario publicado"],
       },
       {
         id: "formularios-formulario-volver-a-usar",
         q: "¿Cómo vuelvo a usar una ficha que dejé de usar?",
-        a: "En Configuración › Fichas de consulta, abajo, está «Ya no se usan», con cada ficha y la fecha en que se dejó. «Volver a usar» lo pone otra vez en uso con las mismas preguntas, como una versión nueva; lo ya llenado no cambia. Si lo responde el paciente, antes pide confirmar y dice a qué cuestionario reemplaza. Si alguna de sus preguntas ya no se puede publicar como quedó, se abre para corregirla y publicarlo.",
+        a: "En Configuración › Fichas de consulta, enciende su interruptor: pasa de «Sin usar» a «En uso» con la misma versión y las mismas preguntas, sin crear otra; lo ya llenado no cambia. Si lo responde el paciente, antes pide confirmar y dice a qué cuestionario reemplaza. Una ficha que se dejó de usar antes de que existiera el interruptor está abajo, en «Ya no se usan», con «Volver a usar».",
         forms: ["volver a usar un formulario que deje de usar", "recuperar un formulario que ya no se usa", "donde estan los formularios que deje de usar"],
       },
       {
         id: "formularios-formulario-mismo-titulo",
         q: "Hice dos fichas con el mismo nombre, ¿qué pasa?",
-        a: "Son dos fichas distintas: ninguna reemplaza a la otra ni se vuelve su versión. Al escribir un título que ya existe, la pantalla avisa «Ya tienes una ficha con ese título»: ofrece «Cambiar el que ya tengo» si lo que querías era esa, o «Volver a usar» si la habías dejado, y deja guardar igual. En la lista de Fichas de consulta y en «Nuevo» › «Ficha», las que se llaman igual dicen cuántas preguntas tienen y cuándo se crearon, para distinguirlas. Si una sobra, «Dejar de usar».",
+        a: "Son dos fichas distintas: ninguna reemplaza a la otra ni se vuelve su versión. Al escribir un título que ya existe, la pantalla avisa «Ya tienes una ficha con ese título»: ofrece «Cambiar el que ya tengo» si lo que querías era esa, o «Volver a usar» si la habías dejado, y deja guardar igual. En la lista de Fichas de consulta y en «Nuevo» › «Ficha», las que se llaman igual dicen cuántas preguntas tienen y cuándo se crearon, para distinguirlas. Si una sobra, apaga su interruptor «En uso».",
         forms: ["dos formularios con el mismo nombre", "tengo un formulario repetido con el mismo titulo", "cual de los dos formularios iguales es el mio"],
       },
       {

@@ -382,6 +382,7 @@ export async function getEncounterFormOffers(
       and(
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.status, "publicado"),
+        eq(clinicalFormTemplate.inUse, true),
         eq(clinicalFormTemplate.respondent, "staff"),
       ),
     )

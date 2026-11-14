@@ -285,3 +285,11 @@ it("Enter en una pregunta pasa al campo siguiente", () => {
   expect(nextAfter(stops, "quitar")).toBeNull()
   expect(nextAfter(stops, "otro")).toBeNull()
 })
+
+it("una ficha apagada sigue en la lista, con su versión «sin usar», y no pasa a «Ya no se usan»", () => {
+  const off = template({ key: "periodontal", title: "Ficha periodontal", status: "publicado", inUse: false, publishedAt: "2026-11-01T00:00:00Z" })
+  expect(versionStatusWords(off)).toBe("sin usar")
+  const { listed, unused } = templateGroups([off])
+  expect(listed).toHaveLength(1)
+  expect(unused).toHaveLength(0)
+})

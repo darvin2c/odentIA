@@ -62,6 +62,7 @@ const STATUS_WORDS: Record<FormTemplate["status"], string> = {
 
 /** El estado de una versión en su etiqueta: de los cuestionarios del paciente, «vigente» es solo el que les llega. */
 export function versionStatusWords(version: FormTemplate): string {
+  if (version.status === "publicado" && version.inUse === false) return "sin usar"
   return publishedButNotReaching(version) ? "no llega a los pacientes" : STATUS_WORDS[version.status]
 }
 

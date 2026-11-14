@@ -778,6 +778,20 @@
       "when": 1794586456662,
       "tag": "0110_correo_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1794659201093,
+      "tag": "0111_fichas_en_uso",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1794659213685,
+      "tag": "0112_fichas_en_uso_reglas",
+      "breakpoints": true
     }
   ]
 }

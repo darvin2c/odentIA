@@ -78,6 +78,11 @@ export interface FormTemplate {
    * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
    */
   reachesPatients?: boolean
+  /**
+   * «En uso» o «Sin usar»: el interruptor de la ficha. Solo cuenta en la versión publicada;
+   * apagarla no la archiva ni crea otra versión. Viene en la lista de plantillas.
+   */
+  inUse?: boolean
   /** Vino con el producto y, si alguien de la clínica ya la abrió o la cambió. Vienen en la lista de plantillas. */
   fromProduct?: boolean
   looked?: boolean
