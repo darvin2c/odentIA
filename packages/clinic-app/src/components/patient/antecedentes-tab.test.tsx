@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { asaLabel, type PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { buildDrafts, ClinicalGroupCard } from "./antecedentes-tab"
+import { buildDrafts, ClinicalGroupCard, DeclaredHealthSnapshot, hasOriginalDeclaration } from "./antecedentes-tab"
 
 declareProduct(bareProduct("dental"))
 
@@ -61,5 +61,26 @@ describe("«Revisar antecedentes» con un «No» que dijo la persona", () => {
     expect(page).toContain("Dijo que no · 13 nov · sin revisar")
     expect(page).toContain("No se le preguntó")
     expect(page).not.toContain("Niega")
+  })
+})
+
+// QA del 14 nov (H2 y H6 de desarrollo, 5 del auditor).
+describe("«Ver declaración original»", () => {
+  it("muestra el embarazo que dijo al registrarse, con sus semanas", () => {
+    const page = renderToStaticMarkup(
+      <DeclaredHealthSnapshot
+        health={{ allergies: { state: "recorded", items: [{ substance: "Ibuprofeno" }] }, personal: { embarazo: true, semanasEmbarazo: 22 } }}
+      />,
+    ).replace(/<[^>]+>/g, "")
+    expect(page).toContain("Ibuprofeno")
+    expect(page).toContain("Embarazo · Sí · 22 semanas")
+  })
+
+  it("no se ofrece si el equipo la registró sin nada de su salud", () => {
+    expect(hasOriginalDeclaration({ respondent: "staff", answers: {} }, [])).toBe(false)
+    expect(hasOriginalDeclaration({ respondent: "staff", answers: { health: { bloodGroup: "O+" } } }, [])).toBe(true)
+    expect(hasOriginalDeclaration({ respondent: "patient", answers: {} }, [])).toBe(true)
+    expect(hasOriginalDeclaration(null, [{}])).toBe(true)
+    expect(hasOriginalDeclaration(null, [])).toBe(false)
   })
 })

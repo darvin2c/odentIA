@@ -728,7 +728,7 @@ export function AntecedentesTab({
               Ver historial ({versions.length})
             </Button>
           ) : null}
-          {registration || laterDeclarations.length > 0 ? (
+          {hasOriginalDeclaration(registration, laterDeclarations) ? (
             <Button type="button" variant="link" size="sm" onClick={() => setSnapshotOpen(true)}>
               Ver declaración original
             </Button>
@@ -1405,6 +1405,44 @@ function declaredPregnancyText(health: Rec): string | null {
 }
 
 /**
+ * Lo que dijo de su salud en una declaración, tal como llegó: alergias,
+ * enfermedades, medicación y el embarazo (QA del 14 nov, H2 de desarrollo: el
+ * del registro no salía), igual para el registro y para lo que envió después.
+ */
+export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.Element {
+  const pregnancy = declaredPregnancyText(health)
+  return (
+    <>
+      <SnapshotGroup title="Alergias" group={health["allergies"]} nameKey="substance" />
+      <SnapshotGroup title="Enfermedades" group={health["conditions"]} nameKey="name" />
+      <SnapshotGroup title="Medicación" group={health["medications"]} nameKey="name" />
+      {pregnancy ? (
+        <p>
+          <span className="font-medium">Embarazo · </span>
+          {pregnancy}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * Si hay algo que mostrar como «declaración original»: lo que envió después o
+ * un registro que no hizo el equipo sin su salud (H6: con Sofía, registrada por
+ * el equipo sin salud, el diálogo salía vacío).
+ */
+export function hasOriginalDeclaration(
+  registration: Pick<NonNullable<PatientFull["registration"]>, "respondent" | "answers"> | null,
+  later: readonly unknown[],
+): boolean {
+  if (later.length > 0) return true
+  if (!registration) return false
+  if (registration.respondent !== "staff") return true
+  const health = ((registration.answers ?? {}) as Rec)["health"]
+  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
+}
+
+/**
  * La declaración original, solo para leer: lo que la persona (o quien habla
  * por ella) envió después, desde su enlace o en otro registro en línea, tal
  * como llegó y con quién lo dijo, y el registro con que se creó la ficha. Nunca se edita desde aquí: lo vigente se corrige en sus
@@ -1445,7 +1483,6 @@ function RegistrationSnapshotDialog({
         </DialogHeader>
         {later.map((declaration) => {
           const sent = declaration.health as Rec
-          const pregnancy = declaredPregnancyText(sent)
           const blood = sent["bloodGroup"]
           const title = declaration.via === "enlace" ? "Lo que envió desde su enlace" : "Lo que envió en su registro en línea"
           return (
@@ -1457,15 +1494,7 @@ function RegistrationSnapshotDialog({
                   {new Date(declaration.at).toLocaleString(activeOrgLocale(), { dateStyle: "long", timeStyle: "short" })}.
                 </p>
               </div>
-              <SnapshotGroup title="Alergias" group={sent["allergies"]} nameKey="substance" />
-              <SnapshotGroup title="Enfermedades" group={sent["conditions"]} nameKey="name" />
-              <SnapshotGroup title="Medicación" group={sent["medications"]} nameKey="name" />
-              {pregnancy ? (
-                <p>
-                  <span className="font-medium">Embarazo · </span>
-                  {pregnancy}
-                </p>
-              ) : null}
+              <DeclaredHealthSnapshot health={sent} />
               {typeof blood === "string" && blood in BLOOD_GROUP_LABELS ? (
                 <p>
                   <span className="font-medium">Grupo sanguíneo · </span>
@@ -1526,9 +1555,7 @@ function RegistrationSnapshotDialog({
                 </dd>
               </div>
             </dl>
-            <SnapshotGroup title="Alergias" group={health["allergies"]} nameKey="substance" />
-            <SnapshotGroup title="Enfermedades" group={health["conditions"]} nameKey="name" />
-            <SnapshotGroup title="Medicación" group={health["medications"]} nameKey="name" />
+            <DeclaredHealthSnapshot health={health} />
             {dental ? (
               <section className="flex flex-col gap-1">
                 <h4 className="text-sm font-medium">Odontológicos</h4>
