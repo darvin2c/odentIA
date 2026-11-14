@@ -7,11 +7,11 @@ import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import { encounter, patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
-import { consentDocument, consentEvent } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, consentDocument, consentEvent } from "@odentia/db/schema/clinical-forms"
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
@@ -1733,4 +1733,39 @@ it("después de enviar, su enlace dice qué envió y cuándo, y nunca lo que res
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: marta.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
   const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).told).toBeNull()
+})
+
+// Revisión de la entrega 3: lo enviado hace meses salía en un enlace nuevo como «Lo recibimos…
+// Lo lee la Dra. X antes de atenderte». Solo cuenta lo enviado después de su última cita pasada.
+it("«Lo que nos contaste» es de la cita que viene: lo enviado antes de su última cita pasada ya no sale", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-03-04" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  const told = async (token: string) => (await f.run((tx) => getPersonalLinkView(tx, ORG, token))).told?.items.map((item) => item.what) ?? null
+  expect(await told(link.token)).toEqual(["datos", "salud", "cuestionario"])
+
+  // Pasa el tiempo: sus datos y su salud los envió hace una semana, y esa cita fue hace tres días.
+  const days = (n: number) => new Date(Date.now() - n * 86_400_000)
+  await ownerDb
+    .update(auditEvent)
+    .set({ createdAt: days(7) })
+    .where(and(eq(auditEvent.organizationId, ORG), eq(auditEvent.action, "personal_link.data_sent"), eq(auditEvent.entityId, marta.patientId)))
+  await ownerDb.update(appointment).set({ startsAt: days(3), endsAt: new Date(days(3).getTime() + 30 * 60_000) }).where(eq(appointment.id, visit))
+  const next = await upcomingAppointment(f, marta.patientId)
+  const fresh = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: next }, { secretsKey: KEY }),
+  )
+  // El cuestionario lo envió después de esa cita: es de la que viene. Lo de antes ya no se anuncia.
+  expect(await told(fresh.token)).toEqual(["cuestionario"])
+  await ownerDb.update(clinicalFormResponse).set({ submittedAt: days(7) }).where(eq(clinicalFormResponse.patientId, marta.patientId))
+  expect(await told(fresh.token)).toBeNull()
+  // Una cita cancelada no fue una visita: lo enviado para ella sigue siendo de la que viene.
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, visit))
+  expect(await told(fresh.token)).toEqual(["datos", "salud", "cuestionario"])
 })

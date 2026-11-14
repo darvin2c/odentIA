@@ -307,9 +307,29 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
   })
 }
 
+/** Cuándo fue la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
+async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        lte(appointment.startsAt, new Date()),
+        sql`${appointment.status} <> 'cancelada'`,
+      ),
+    )
+    .orderBy(desc(appointment.startsAt))
+    .limit(1)
+  return row?.startsAt ?? null
+}
+
 /**
  * Lo que envió desde su enlace quien lo abre (sus datos, su salud, el cuestionario) y cuándo:
  * de la traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo.
+ * Es lo de la cita que viene: lo enviado antes de su última cita pasada fue para aquella y ya
+ * no se anuncia como recién recibido.
  */
 async function toldOf(
   tx: Db,
@@ -318,6 +338,8 @@ async function toldOf(
   timeZone: string,
 ): Promise<PersonalLinkView["told"]> {
   if (!link.patientId || !link.decides || link.expired) return null
+  const since = await lastVisitAt(tx, orgId, link.patientId)
+  const current = (at: Date) => since === null || at > since
   const sent = await tx
     .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
     .from(auditEvent)
@@ -332,14 +354,16 @@ async function toldOf(
     )
     .orderBy(desc(auditEvent.createdAt))
     .limit(10)
-  const traced = sent.map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
+  const traced = sent
+    .filter((row) => current(row.at))
+    .map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
   const data = traced.find((row) => (row.fields?.length ?? 0) > 0 || row.renamed)
   const health = traced.find((row) => row.health)
   const questionnaire = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
-  if (questionnaire?.own) items.push({ what: "cuestionario", at: questionnaire.at.toISOString() })
+  if (questionnaire?.own && current(questionnaire.at)) items.push({ what: "cuestionario", at: questionnaire.at.toISOString() })
   return items.length > 0 ? { timeZone, items } : null
 }
 

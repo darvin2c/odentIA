@@ -127,19 +127,26 @@ describe("lo que nos contaste", () => {
     expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atenderte.")
   })
 
-  it("quién lo lee: con «Dr.» lleva «el», sin tratamiento va el nombre, y sin cita, quien atiende en su clínica", () => {
+  it("quién lo lee: con «Dr.» lleva «el», sin tratamiento va el nombre, y sin nombre, quien atiende en su clínica", () => {
     const sent = told([{ what: "salud", at: SENT }])
-    const withDoctor = (professionalName: string) => {
+    const withDoctor = (professionalName: string, clinician = "odontólogo") => {
       const base = view({ told: sent })
-      return toldWords({ ...base, appointment: base.appointment && { ...base.appointment, professionalName } }, "odontólogo")?.reader
+      return toldWords({ ...base, appointment: base.appointment && { ...base.appointment, professionalName } }, clinician)?.reader
     }
     expect(withDoctor("Dr. Luis Prado")).toBe("Lo lee el Dr. Luis Prado antes de atenderte.")
     expect(withDoctor("Luis Prado")).toBe("Lo lee Luis Prado antes de atenderte.")
-    expect(toldWords(view({ told: sent, appointment: null }), "médico")?.reader).toBe("Lo lee tu médico antes de atenderte.")
+    expect(withDoctor("", "médico")).toBe("Lo lee tu médico antes de atenderte.")
+    expect(withDoctor("", "optómetra")).toBe("Lo lee tu optómetra antes de atenderte.")
+  })
+
+  // Revisión de la entrega 3: sin una cita por venir no hay «antes de atenderte» que prometer.
+  it("sin cita por venir dice qué envió y cuándo, y no promete quién lo lee antes de atenderla", () => {
+    const sent = told([{ what: "salud", at: SENT }])
+    const none = toldWords(view({ told: sent, appointment: null }), "médico")
+    expect(none?.sent.map(plain)).toEqual(["Enviaste tu salud el viernes, 13 de noviembre, 2:27 p. m."])
+    expect(none?.reader).toBeNull()
     const cancelled = view({ told: sent })
-    expect(toldWords({ ...cancelled, appointment: cancelled.appointment && { ...cancelled.appointment, cancelled: true } }, "optómetra")?.reader).toBe(
-      "Lo lee tu optómetra antes de atenderte.",
-    )
+    expect(toldWords({ ...cancelled, appointment: cancelled.appointment && { ...cancelled.appointment, cancelled: true } }, "optómetra")?.reader).toBeNull()
   })
 
   it("por un hijo, con su nombre", () => {

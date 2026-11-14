@@ -318,10 +318,11 @@ function listed(parts: string[]): string {
 
 /**
  * «Lo que nos contaste»: qué envió desde aquí y cuándo (lo del mismo envío, junto) y quién lo
- * lee. Nunca lo que respondió: el enlace se abre sin código y se puede reenviar. `null`: aún no
- * envió nada.
+ * lee antes de atenderla, solo si el enlace muestra una cita por venir (`reader` nulo: sin cita
+ * no hay «antes de atenderte» que prometer). Nunca lo que respondió: el enlace se abre sin
+ * código y se puede reenviar. `null`: no envió nada para la cita que viene.
  */
-export function toldWords(view: PersonalLinkView, clinician: string): { sent: string[]; reader: string } | null {
+export function toldWords(view: PersonalLinkView, clinician: string): { sent: string[]; reader: string | null } | null {
   const told = view.told
   if (!told || told.items.length === 0) return null
   const name = view.patientFirstName
@@ -335,7 +336,8 @@ export function toldWords(view: PersonalLinkView, clinician: string): { sent: st
     const parts = told.items.filter((item) => item.at === at).map((item, index) => said(item.what, index === 0))
     return withPeriod(`Enviaste ${listed(parts)} el ${whenText({ startsAt: at, timeZone: told.timeZone })}`)
   })
-  const professional = view.appointment && !view.appointment.cancelled ? view.appointment.professionalName?.trim() : ""
+  if (!view.appointment || view.appointment.cancelled) return { sent, reader: null }
+  const professional = view.appointment.professionalName?.trim()
   const who = professional ? withArticle(professional) : `tu ${clinician}`
   return { sent, reader: `Lo lee ${who} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.` }
 }
@@ -1177,7 +1179,7 @@ export function PersonalLinkPage({
                   {line}
                 </p>
               ))}
-              <p className="text-muted-foreground">{told.reader}</p>
+              {told.reader ? <p className="text-muted-foreground">{told.reader}</p> : null}
             </div>
           </section>
         ) : null}
