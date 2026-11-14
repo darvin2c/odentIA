@@ -57,7 +57,7 @@ import {
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
-import { formRowTitle } from "../../lib/consultation-forms"
+import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 
@@ -277,6 +277,12 @@ export function EncounterDocumentsBlock({
     }
   }, [openMenu, disabled, onMenuHandled])
 
+  // Lo que ya se ofrece arriba, en «Fichas para esta atención» (la misma consulta, compartida).
+  const offers = useQuery({
+    queryKey: ["form-offers", patientId, encounterId],
+    queryFn: () => fetchFormOffers(patientId, encounterId),
+    enabled: detail.encounter.status === "borrador",
+  })
   const formTemplates = useQuery({
     queryKey: ["form-templates-published", "mine-first"],
     queryFn: () => fetchFormTemplates({ status: "publicado", forUser: "me" }),
@@ -653,7 +659,7 @@ export function EncounterDocumentsBlock({
           </li>
         ))}
         {/* El que quedó a medias al firmar ya está arriba, con su «Completar»: aquí no se repite. */}
-        {docs.forms
+        {formsBelowOffers(docs.forms, offers.data?.data)
           .filter((form) => !unfinished.some((pending) => pending.id === form.id))
           .map((form) => (
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
@@ -764,6 +770,7 @@ export function EncounterDocumentsBlock({
           defaultProfessionalUserId={detail.encounter.professionalUserId}
           templates={(formTemplates.data?.data ?? []).filter((t) => t.respondent !== "portal")}
           loading={!formTemplates.isSuccess}
+          drafts={docs.forms}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
             setCreating(null)

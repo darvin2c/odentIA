@@ -44,7 +44,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
-import { answerWords } from "../../lib/consultation-forms"
+import { answerWords, draftOf } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -84,6 +84,7 @@ export function NewResponseDrawer({
   encounterId,
   defaultProfessionalUserId,
   loading = false,
+  drafts = [],
   onCreated,
 }: {
   open: boolean
@@ -96,6 +97,8 @@ export function NewResponseDrawer({
   defaultProfessionalUserId?: string
   /** Mientras llegan las fichas en uso: sin ellas todavía no se dice que no hay ninguna. */
   loading?: boolean
+  /** Las fichas a medias de esta atención: elegir una de ellas la abre, en vez de empezar otra igual. */
+  drafts?: ReadonlyArray<Pick<FormResponse, "id" | "templateId" | "templateTitle" | "status" | "source">>
   onCreated: (id: string) => Promise<void>
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
@@ -119,6 +122,14 @@ export function NewResponseDrawer({
     },
     validators: { onSubmit: newResponseSchema },
     onSubmit: async ({ value }) => {
+      // La que ya está a medias se abre: una ficha a medias se ve una sola vez.
+      const chosen = templates.find((template) => template.id === value.templateId)
+      const open = chosen ? draftOf(chosen, drafts) : null
+      if (open) {
+        form.reset()
+        await onCreated(open)
+        return
+      }
       const result = await create.mutateAsync(value)
       form.reset()
       if (result.detached) {
@@ -155,7 +166,10 @@ export function NewResponseDrawer({
               label="Ficha"
               placeholder="Elige la ficha"
               // Dos formularios con el mismo título llevan lo que los distingue: preguntas y fecha.
-              options={templates.map((t) => ({ value: t.id, label: templateOptionLabel(t, templates, whenAt) }))}
+              options={templates.map((t) => ({
+                value: t.id,
+                label: `${templateOptionLabel(t, templates, whenAt)}${draftOf(t, drafts) ? " · a medias: se abre la que empezaste" : ""}`,
+              }))}
             />
           )}
         </form.AppField>

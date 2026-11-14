@@ -7,6 +7,8 @@ import {
   lookedCount,
   offerActionWords,
   offersView,
+  draftOf,
+  formsBelowOffers,
   offerStateWords,
   offerWhyWords,
   unlooked,
@@ -96,4 +98,21 @@ it("en Documentos y en la Historia se llama «Ficha»; lo del paciente, como lo 
   expect(formRowTitle({ source: "portal", templateTitle: "Cuestionario previo a la cita" })).toBe(
     "Lo que respondió el paciente · Cuestionario previo a la cita",
   )
+})
+
+// QA del 14 nov (U5): «Otra ficha…» dejaba empezar otra igual a la que estaba a medias.
+describe("una ficha a medias se ve una sola vez", () => {
+  const draft = { id: "r1", templateId: "t1", templateTitle: "Ficha de odontopediatría", status: "borrador" as const, source: "staff" as const }
+  it("«Otra ficha…» abre la que ya está a medias, también si era de otra versión", () => {
+    expect(draftOf({ id: "t1", title: "Ficha de odontopediatría" }, [draft])).toBe("r1")
+    expect(draftOf({ id: "t2", title: "Ficha de odontopediatría" }, [draft])).toBe("r1")
+    expect(draftOf({ id: "t3", title: "Ficha de ortodoncia" }, [draft])).toBeNull()
+    expect(draftOf({ id: "t1", title: "Ficha de odontopediatría" }, [{ ...draft, status: "finalizado" }])).toBeNull()
+  })
+  it("Documentos no repite la que ya se ofrece arriba a medias; la finalizada sí queda", () => {
+    const forms = [draft, { id: "r2", status: "finalizado" as const }]
+    const offers = [{ today: { responseId: "r1", status: "borrador" as const } }, { today: { responseId: "r2", status: "finalizado" as const } }]
+    expect(formsBelowOffers(forms, offers).map((form) => form.id)).toEqual(["r2"])
+    expect(formsBelowOffers(forms, undefined).map((form) => form.id)).toEqual(["r1", "r2"])
+  })
 })

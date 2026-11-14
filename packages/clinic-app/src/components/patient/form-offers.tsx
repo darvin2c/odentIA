@@ -2,7 +2,7 @@ import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
-import { fetchFormTemplates, startFormResponse } from "../../lib/clinical-forms"
+import { fetchFormResponses, fetchFormTemplates, startFormResponse } from "../../lib/clinical-forms"
 import {
   fetchFormOffers,
   type FormOffer,
@@ -53,6 +53,13 @@ export function FormOffersBox({
     queryFn: () => fetchFormOffers(patientId, encounterId),
     retry: 1,
   })
+  // Las de esta atención: «Otra ficha…» abre la que ya está a medias en vez de empezar otra.
+  const forms = useQuery({
+    queryKey: ["form-responses", patientId],
+    queryFn: () => fetchFormResponses({ patientId }),
+    enabled: choosing,
+  })
+  const drafts = (forms.data?.data ?? []).filter((form) => form.encounterId === encounterId)
   const templates = useQuery({
     queryKey: ["form-templates-published", "mine-first"],
     queryFn: () => fetchFormTemplates({ status: "publicado", forUser: "me" }),
@@ -114,7 +121,8 @@ export function FormOffersBox({
           encounterId={encounterId}
           defaultProfessionalUserId={professionalUserId}
           templates={(templates.data?.data ?? []).filter((template) => template.respondent !== "portal")}
-          loading={!templates.isSuccess}
+          loading={!templates.isSuccess || !forms.isSuccess}
+          drafts={drafts}
           onClose={() => setChoosing(false)}
           onCreated={async (id) => {
             setChoosing(false)

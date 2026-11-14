@@ -69,6 +69,31 @@ export function offersView(
   return canStart ? "solo-otra" : "nada"
 }
 
+/**
+ * La ficha de esa plantilla que ya está a medias en esta atención, si la hay:
+ * «Otra ficha…» y «Nuevo › Ficha» la abren en vez de empezar otra igual. Se
+ * reconoce por la plantilla o por su título (una versión anterior de la misma ficha).
+ */
+export function draftOf(
+  template: Pick<FormTemplate, "id" | "title">,
+  drafts: ReadonlyArray<Pick<FormResponse, "id" | "templateId" | "templateTitle" | "status" | "source">>,
+): string | null {
+  const open = drafts.filter((draft) => draft.status === "borrador" && draft.source !== "portal")
+  return (open.find((draft) => draft.templateId === template.id) ?? open.find((draft) => draft.templateTitle === template.title))?.id ?? null
+}
+
+/**
+ * Las fichas de la atención que se listan en Documentos: la que está a medias y
+ * ya se ofrece arriba («A medias · Seguir con la de hoy») no se repite.
+ */
+export function formsBelowOffers<T extends Pick<FormResponse, "id" | "status">>(
+  forms: readonly T[],
+  offers: ReadonlyArray<Pick<FormOffer, "today">> | undefined,
+): T[] {
+  const above = new Set((offers ?? []).flatMap((offer) => (offer.today?.status === "borrador" ? [offer.today.responseId] : [])))
+  return forms.filter((form) => !(form.status === "borrador" && above.has(form.id)))
+}
+
 /** La ficha en uso (o la última versión) de cada una que vino con el producto y sigue en la lista. */
 function productForms(listed: readonly FormTemplate[][]): FormTemplate[] {
   return listed.flatMap((versions) => {
