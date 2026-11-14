@@ -462,8 +462,11 @@ function StaffResponseDetail({
     for (const item of proposals) {
       const fieldId = String(item.payload["fieldId"])
       const value = saved[fieldId]
-      // Con el mismo valor es la que se acaba de confirmar: esa no se toca.
-      if (isEmptyAnswer(value) || JSON.stringify(value) === JSON.stringify(item.payload["value"] ?? null) || discardSent.current.has(item.id)) continue
+      // Con el mismo valor es la que se acaba de confirmar; con el que corrige, la pregunta sigue
+      // diciendo lo que Clío vio («Ya dice…»): esas no se tocan.
+      const same = (other: unknown) => JSON.stringify(value) === JSON.stringify(other ?? null)
+      const correcting = item.payload["replaces"] !== undefined && same(item.payload["replaces"])
+      if (isEmptyAnswer(value) || same(item.payload["value"]) || correcting || discardSent.current.has(item.id)) continue
       discardSent.current.add(item.id)
       clio.discard(item)
       if (item.status === "lista" && !typedHere.current.has(fieldId)) {
@@ -472,8 +475,11 @@ function StaffResponseDetail({
       }
     }
   }, [response.answers, proposals.length])
+  // El segundo toque llega antes de que el botón se vea ocupado: la ref lo frena en el acto.
+  const confirmingRef = useRef(false)
   const accept = async (items: DictationSuggestion[]) => {
-    if (!clio || confirming) return
+    if (!clio || confirmingRef.current) return
+    confirmingRef.current = true
     setConfirming(true)
     // Lo que se confirma ahora es de Clío: su marca se ve aunque antes se haya tocado la pregunta.
     for (const item of items) typedHere.current.delete(String(item.payload["fieldId"]))
@@ -487,6 +493,7 @@ function StaffResponseDetail({
       if (isStale(error)) setStale(true)
       toast.error(submitErrorMessage(error))
     } finally {
+      confirmingRef.current = false
       setConfirming(false)
     }
   }
@@ -891,7 +898,14 @@ function StaffResponseDetail({
                             className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${proposal.status === "lista" ? "bg-agent-soft" : "bg-muted"}`}
                           >
                             <span className="min-w-0 [overflow-wrap:anywhere]">
-                              {proposal.status === "lista" ? (
+                              {proposal.status === "lista" && proposal.payload["replaces"] !== undefined ? (
+                                <>
+                                  {/* Corrige lo ya escrito: dice lo que hay y lo que dijo; «Confirmar» la cambia. */}
+                                  <strong>{CLINICAL_NAME}:</strong> {proposedWords(proposal)} · ya dice «
+                                  {proposedWords({ ...proposal, payload: { ...proposal.payload, value: proposal.payload["replaces"] } })}»
+                                  {proposal.sourceText ? `; dijiste «${proposal.sourceText}»` : ""}. «Confirmar» la cambia.
+                                </>
+                              ) : proposal.status === "lista" ? (
                                 <>
                                   <strong>{CLINICAL_NAME}:</strong> {proposedWords(proposal)}
                                   {proposal.sourceText ? ` · dijiste «${proposal.sourceText}»` : ""}

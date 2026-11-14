@@ -383,8 +383,14 @@ export function prepareFormAnswer(
   if (!proposed || question?.answered === undefined) return proposed
   const value = proposed.payload["value"]
   if (value === null || value === undefined || sameAnswer(value, question.answered)) return null
+  // Lo que cambia una respuesta ya escrita («corrijo, es división uno»): «Confirmar» la cambia, y
+  // solo si la pregunta sigue diciendo lo que decía (`replaces`); si no, gana lo escrito.
   const now = formAnswerWords({ value: question.answered, unit: question.unit })
-  return { payload: proposed.payload, status: "por_revisar", note: `Ya dice «${now}». Si cambió, cámbiala tú en la ficha.` }
+  return {
+    payload: { ...proposed.payload, replaces: question.answered },
+    status: proposed.status,
+    note: proposed.status === "lista" ? `Ya dice «${now}».` : proposed.note,
+  }
 }
 
 /**
@@ -615,7 +621,9 @@ export async function answerFormFromDictation(tx: Db, orgId: string, actorUserId
   if (!field) return { written: false, note: "Esa pregunta ya no está en la ficha." }
   const answers = (current.answers ?? {}) as Record<string, unknown>
   const words = (value: unknown, unit?: string | null) => formAnswerWords({ value, unit })
-  if (!isEmpty(answers[fieldId])) {
+  // Una corrección de lo ya escrito lo cambia solo si sigue diciendo lo que Clío vio.
+  const replacing = payload["replaces"] !== undefined && sameAnswer(answers[fieldId], payload["replaces"])
+  if (!isEmpty(answers[fieldId]) && !replacing) {
     return { written: false, note: `Clío proponía «${words(payload["value"], field.unit)}»; quedó «${words(answers[fieldId], field.unit)}», que ya estaba escrito.` }
   }
   if (field.showIf && !conditionMet(field.showIf, answers[field.showIf.field])) {

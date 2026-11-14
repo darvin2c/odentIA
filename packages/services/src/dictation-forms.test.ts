@@ -476,18 +476,29 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(pending.find((item) => item.id === id)).toMatchObject({ payload: { value: 7 }, sourceText: "no, el overjet es de siete" })
   })
 
-  it("sobre una ya respondida, lo que la cambia queda por revisar con lo que dice; lo mismo no se propone", async () => {
-    const { save, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
+  it("sobre una ya respondida, lo que la cambia dice lo que ya dice y «Confirmar» la cambia; lo mismo no se propone", async () => {
+    const { save, fx, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
     const same = await save([{ payload: { question: 1, answer: "Clase II división 2" }, sourceText: "clase molar derecha clase dos división dos" }])
     expect(same.suggestions).toEqual([])
     const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
     expect(changed.suggestions).toHaveLength(1)
     expect(changed.suggestions[0]).toMatchObject({
-      status: "por_revisar",
-      payload: { value: "Clase II división 1" },
-      note: "Ya dice «Clase II división 2». Si cambió, cámbiala tú en la ficha.",
+      status: "lista",
+      payload: { value: "Clase II división 1", replaces: "Clase II división 2" },
+      note: "Ya dice «Clase II división 2».",
     })
     expect(await answersNow()).toEqual({ clase_molar_derecha: "Clase II división 2" })
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, changed.suggestions[0]!.id, { expectedValue: "Clase II división 1" }))
+    expect(await answersNow()).toMatchObject({ clase_molar_derecha: "Clase II división 1" })
+  })
+
+  it("la corrección de lo escrito no pisa lo que alguien cambió después", async () => {
+    const { save, fx, form, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
+    const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
+    await ownerDb.update(clinicalFormResponse).set({ answers: { clase_molar_derecha: "Clase III" } }).where(eq(clinicalFormResponse.id, form.id))
+    const result = await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, changed.suggestions[0]!.id))
+    expect(result.status).toBe("descartada")
+    expect(await answersNow()).toEqual({ clase_molar_derecha: "Clase III" })
   })
 
   it("lo que entra al firmar queda dicho en la ficha: «confirmó al firmar»", async () => {

@@ -609,10 +609,11 @@ export function useDictationSession({
       } finally {
         for (const item of done) onApplied(item)
         if (notes.length) toast(notes.join(" "))
+        // Ocupado hasta que la lista ya no trae lo confirmado: un segundo toque no llega al servidor.
+        await refresh()
       }
       return done
     },
-    onSettled: () => void refresh(),
   })
 
   /** «Emitir receta» de la receta dictada: una receta con todos sus medicamentos. */
