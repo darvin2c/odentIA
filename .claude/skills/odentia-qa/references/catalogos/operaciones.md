@@ -249,7 +249,7 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] La pantalla promete el canal por el que de verdad saldrá, y dice «no tiene por dónde» solo si es cierto.
 - [ ] Fuera de las 24 horas de WhatsApp sale con la plantilla aprobada, y lo que se escribió junto al envío no se pierde.
 - [ ] «Se ve en su portal» lo decide el servidor, con la misma regla que arma su lista.
-- [ ] Ningún papel cambia un carácter por «?». La letra de los PDF no tiene «−», «≥», «≤», «≈», «→», «←», «∆» ni «✓»: `printable` (`S/document-kit.ts`, `STAND_INS`) escribe su equivalente, salvo en «✓». Un carácter nuevo en el texto de un papel se prueba ahí.
+- [ ] Ningún papel cambia un carácter por «?»; un emoji se quita (la copia de la historia imprimió «??» en lugar de los emojis del cuestionario, QA de la entrega 2, 14 nov). La letra de los PDF no tiene «−», «≥», «≤», «≈», «→», «←», «∆» ni «✓»: `printable` (`S/document-kit.ts`, `STAND_INS`) escribe su equivalente, salvo en «✓». Un carácter nuevo en el texto de un papel se prueba ahí.
 - [ ] Un signo y su importe no se separan al final de una línea: el signo va pegado («‒S/ 410.00»).
 
 **Ya falló:** el signo menos salía «?» en la receta de lentes («?2,00»), en el descuento del presupuesto y en el saldo a favor del ticket, y en la primera versión del arreglo el «–» del descuento podía quedar solo al final de la línea; un documento se mandó como enlace en vez del PDF; enviar la orden dijo «no tiene WhatsApp ni correo» a quien tenía los dos; el resultado de una orden desapareció del portal y la ficha decía que se veía; «se ve en su portal» se calculaba en la pantalla con otra regla; el cajón prometió que el mensaje escrito «queda en la conversación» y con la plantilla se perdía.
@@ -383,6 +383,8 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] El segundo envío dice que ya se envió, no que el enlace venció.
 - [ ] Lo que la pantalla esconde (tipo de respuesta, plantilla del paciente en la ficha) también lo rechaza el servidor.
 - [ ] Los formularios finalizados están en la Historia y en la copia de la historia (PDF y FHIR `QuestionnaireResponse`).
+- [ ] Lo finalizado en una atención anulada sale en la copia marcado como no vigente: en el PDF, con su marca, y en FHIR, con `entered-in-error`, igual que en la Historia y en Documentos.
+- [ ] La copia dice lo que la persona envió y aún no se revisó, o lo trae marcado «sin revisar», con la misma regla que la declaración de salud.
 - [ ] Una fecha imposible y un tipo que no es el de la pregunta se rechazan en el servidor.
 - [ ] El autoguardado deja el formulario «sin cambios»: salir no avisa de una pérdida que no hay.
 - [ ] Una marca que sale en la franja (anticoagulante, huesos, embarazo) sale de la respuesta a su pregunta, con su código, no de reconocer el nombre escrito; y lleva la fecha en que se dijo.

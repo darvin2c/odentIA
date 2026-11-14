@@ -38,6 +38,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
+import { addedWords, formRecordAt, formRecordAtSql, loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -706,6 +707,8 @@ export interface TimelineItemBase {
   /** Quién firmó la atención y cuándo. */
   signerName?: string | null
   signedAt?: Date | null
+  /** Un formulario: quién lo llenó, dicho en palabras («Lo llenó Ana Torres»). */
+  byText?: string | null
   /** Hecho de una atención que sigue en curso (sin firmar): la historia lo dice. */
   openEncounter?: boolean
   voidedByName?: string | null
@@ -734,7 +737,8 @@ export interface EncounterBorn {
    * anuló y lo finalizado en ella va con lo que ya no vale. De una atención
    * anulada vienen además los descartados, con su motivo: es el único lugar donde
    * la persona ve qué pasó con lo que había empezado (`discardedWithAttention`:
-   * lo descartó la propia anulación).
+   * lo descartó la propia anulación). `summary`: lo respondido en una línea, en
+   * lo finalizado; se anotó, no se indicó.
    */
   forms: Array<{
     id: string
@@ -745,6 +749,9 @@ export interface EncounterBorn {
     retired: boolean
     discardReason: string | null
     discardedWithAttention: boolean
+    summary: string
+    /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
+    fromPerson: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
@@ -778,7 +785,7 @@ async function loadBornForEncounters(
     }
     return born
   }
-  const [items, consents, recipes, orders, forms, controls] = await Promise.all([
+  const [items, consents, recipes, orders, forms, records, controls] = await Promise.all([
     tx
       .select()
       .from(treatmentPlanItem)
@@ -817,6 +824,7 @@ async function loadBornForEncounters(
         encounterId: clinicalFormResponse.encounterId,
         templateTitle: clinicalFormResponse.templateTitle,
         status: clinicalFormResponse.status,
+        source: clinicalFormResponse.source,
         finalizedAt: clinicalFormResponse.finalizedAt,
         discardedAt: clinicalFormResponse.discardedAt,
         discardReason: clinicalFormResponse.discardReason,
@@ -842,6 +850,8 @@ async function loadBornForEncounters(
         ),
       )
       .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
+    // Lo respondido en una línea, como lo dice la copia: solo lo finalizado lo tiene.
+    loadFormRecords(tx, orgId, patientId, { encounterIds }),
     tx
       .select()
       .from(clinicalFollowUp)
@@ -969,6 +979,9 @@ async function loadBornForEncounters(
       state: row.status === "completado" ? "con resultado" : row.status === "cancelado" ? "cancelada" : "sin resultado",
     })
   }
+  // La línea dice también que se le agregó algo después: lo plegado no se lee como si nadie lo
+  // hubiera corregido (QA de la entrega 2).
+  const summaries = new Map(records.map((form) => [form.id, [form.summary, addedWords(form)].filter(Boolean).join(" · ")]))
   for (const row of forms) {
     if (!row.encounterId) continue
     const finalized = row.status === "finalizado"
@@ -985,6 +998,8 @@ async function loadBornForEncounters(
       // La anulación lo descartó en su misma transacción: el mismo instante.
       discardedWithAttention:
         discarded && !!row.discardedAt && !!row.attentionVoidedAt && row.discardedAt.getTime() === row.attentionVoidedAt.getTime(),
+      summary: summaries.get(row.id) ?? "",
+      fromPerson: row.source === "portal",
     })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
@@ -1079,7 +1094,9 @@ export async function getTimeline(
     )
   if (types.includes("form") && tooth == null)
     branches.push(
-      sql`select id, 'form'::text as kind, finalized_at as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
+      // Lo que respondió la persona, a la hora en que lo envió; lo del equipo, a la que se finalizó: la
+      // misma expresión con que ordena la copia (`formRecordAtSql`).
+      sql`select id, 'form'::text as kind, ${formRecordAtSql} as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
     )
   if (types.includes("note") && tooth == null)
     branches.push(
@@ -1565,36 +1582,27 @@ export async function getTimeline(
         encounterId: row.encounterId,
       })
     }
-  const formIds = ids("form")
-  if (formIds.length)
-    for (const { row, reviewer } of await tx
-      .select({ row: clinicalFormResponse, reviewer: user.name })
-      .from(clinicalFormResponse)
-      .leftJoin(user, eq(user.id, clinicalFormResponse.finalizedBy))
-      .where(and(eq(clinicalFormResponse.organizationId, orgId), inArray(clinicalFormResponse.id, formIds)))) {
-      hydrated.set(row.id, {
-        id: row.id,
-        refId: row.id,
-        type: "form",
-        createdAt: row.finalizedAt ?? row.createdAt,
-        // Lo del equipo es una ficha de consulta; lo del paciente se dice como lo que es.
-        title:
-          row.source === "portal"
-            ? `Lo que respondió el paciente: ${row.templateTitle ?? "Cuestionario"}`
-            : `Se completó la ficha de consulta: ${row.templateTitle ?? "Ficha de consulta"}`,
-        // Lo que envió el paciente: quién lo revisó, si quedó guardado; nunca se afirma sin saberlo.
-        detail:
-          row.source === "portal"
-            ? reviewer
-              ? `Lo respondió la persona y lo revisó ${reviewer}`
-              : "Lo respondió la persona y el equipo lo revisó"
-            : null,
-        status: row.status,
-        toothNumbers: [],
-        authorId: row.authorUserId,
-        encounterId: row.encounterId,
-      })
-    }
+  // La ficha finalizada es su título con lo respondido en una línea; «Ver» la abre con todo.
+  // Lo del equipo es una ficha de consulta; lo del paciente se dice como lo que es.
+  for (const form of await loadFormRecords(tx, orgId, patientId, { ids: ids("form") })) {
+    hydrated.set(form.id, {
+      id: form.id,
+      refId: form.id,
+      type: "form",
+      // Lo que respondió la persona va el día en que lo envió, no el de su revisión (auditor, QA de
+      // la entrega 2); lo dice `byText`. Es la misma hora con la que se ordena (`getTimeline`).
+      createdAt: formRecordAt(form) ?? new Date(0),
+      title:
+        form.source === "portal"
+          ? `Lo que respondió el paciente: ${form.title}`
+          : `Se completó la ficha de consulta: ${form.title}`,
+      detail: [form.summary, addedWords(form)].filter(Boolean).join(" · ") || null,
+      byText: form.whoWords,
+      status: "finalizado",
+      toothNumbers: [],
+      encounterId: form.encounterId,
+    })
+  }
   // Lo de una atención que sigue en curso sale suelto (el borrador no es todavía un
   // hecho de la historia) y lo dice, para no leerlo como cerrado (segunda mesa del 9 nov).
   const drafts = new Set(

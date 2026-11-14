@@ -395,9 +395,12 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 - [ ] Una atención en curso no queda suelta ni se confunde con una firmada.
 - [ ] El PDF, el odontograma impreso y la hoja del seguro dicen lo mismo que la pantalla.
 - [ ] La copia de la historia y la exportación FHIR traen todo (ADR 0080).
+- [ ] La copia marca como anulado lo que viene de una atención anulada, también sus fichas, y el FHIR lo dice en el recurso (`entered-in-error`), no solo en el `Encounter`.
+- [ ] Una medicina suspendida sale en la copia con hasta cuándo la tomó, no como vigente.
+- [ ] La copia dice el tipo de diagnóstico (presuntivo o definitivo) y quién firmó cada atención, con su título, colegiatura y hora, como la pantalla.
 - [ ] La tarjeta plegada dice la sesión y el estado (sesión 2 de 2 · tratamiento terminado; pulpitis resuelta). Lo quitado figura igual plegado y abierto, y una receta cuenta como indicación registrada.
 
-**Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar».
+**Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar»; la copia daba por vigentes la ficha de una atención anulada y una medicina suspendida (QA de la entrega 2, 14 nov).
 **Fuentes:** NTS 139-MINSA; HL7 FHIR R4; ADR 0080, 0115 y 0133.
 
 ## P-ODO-18 Controles y seguimiento

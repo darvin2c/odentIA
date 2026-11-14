@@ -1,5 +1,5 @@
 -- Preguntas al paciente (mesa del 13 nov, entrega 6): lo que TS no declara. La columna
--- `questions_version` de `patient_registration_config` la generó 0118; la tabla ya tiene su RLS y
+-- `questions_version` de `patient_registration_config` la generó 0119; la tabla ya tiene su RLS y
 -- su GRANT, que valen para la columna nueva. Las clínicas que ya existían quedan en la versión 1:
 -- así su administración recibe el aviso de que hay preguntas nuevas.
 

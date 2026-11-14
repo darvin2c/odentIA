@@ -1,5 +1,5 @@
 {
-  "id": "c1e6178e-1035-48cd-8f45-e4e8d50c4686",
+  "id": "0acf2afb-0a4a-4443-aa78-cbafc6e4a0cc",
   "prevId": "7cad998a-9b70-41b2-86a3-0a2a0a19a7d9",
   "version": "7",
   "dialect": "postgresql",
@@ -11594,6 +11594,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -11670,7 +11676,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "clinical_form_addendum_reason_check": {
+          "name": "clinical_form_addendum_reason_check",
+          "value": "\"clinical_form_addendum\".\"reason\" IS NULL OR char_length(\"clinical_form_addendum\".\"reason\") BETWEEN 1 AND 2000"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.clinical_form_response": {
@@ -36188,13 +36199,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "questions_version": {
-          "name": "questions_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
         },
         "created_at": {
           "name": "created_at",

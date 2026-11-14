@@ -1,4 +1,4 @@
-import { Badge, Button, cn, toast } from "@odentia/ui"
+import { Badge, Button, cn, FieldGroup, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   submitErrorMessage,
@@ -136,16 +136,22 @@ const discardSchema = z.object({
 
 const correctionSchema = z.object({
   text: z.string().trim().min(1, "Escribe la corrección.").max(5000, "La corrección admite hasta 5000 caracteres."),
+  // Por qué se corrige: la norma de historia clínica lo pide, pero vacío no traba (decisión del 14 nov).
+  reason: z.string().trim().max(2000, "El motivo admite hasta 2000 caracteres."),
 })
 
 /**
- * Si la corrección no deja nada sin guardar: cerrada (guardada o cancelada) o
- * abierta sin texto. Se guarda con su botón, sin `submit` del panel, así que el
- * panel lateral se entera por aquí (`useDraftSaved`): con el texto a medias,
- * salir pregunta; ya guardada o cancelada, no.
+ * Lo que se pierde al salir sin guardar, con su nombre: la corrección, el motivo o
+ * los dos (verificador, QA de la entrega 2: decía «la corrección» con solo el motivo
+ * escrito). null si no hay nada escrito.
  */
-export function correctionSaved(correcting: boolean, text: string): boolean {
-  return !correcting || text.trim() === ""
+export function correctionLostWords(text: string, reason: string): string | null {
+  const hasText = text.trim() !== ""
+  const hasReason = reason.trim() !== ""
+  if (hasText && hasReason) return "Se pierden la corrección y el motivo que escribiste y no guardaste."
+  if (hasText) return "Se pierde la corrección que escribiste y no guardaste."
+  if (hasReason) return "Se pierde el motivo que escribiste y no guardaste."
+  return null
 }
 
 export function DeclaredResponse({
@@ -221,12 +227,14 @@ export function DeclaredResponse({
       reviewedRef.current?.focus()
     }
   }, [response.status])
-  const addCorrection = useMutation({ mutationFn: (text: string) => addFormAddendum(response.id, text) })
+  const addCorrection = useMutation({
+    mutationFn: (value: { text: string; reason: string }) => addFormAddendum(response.id, value.text, value.reason),
+  })
   const correctionForm = useAppForm({
-    defaultValues: { text: "" },
+    defaultValues: { text: "", reason: "" },
     validators: { onSubmit: correctionSchema },
     onSubmit: async ({ value }) => {
-      await addCorrection.mutateAsync(value.text.trim())
+      await addCorrection.mutateAsync({ text: value.text.trim(), reason: value.reason.trim() })
       correctionForm.reset()
       setCorrecting(false)
       focusNext.current = { correctionsBefore: corrections.data?.data.length ?? 0 }
@@ -236,8 +244,10 @@ export function DeclaredResponse({
   })
   // Una corrección a medias se pierde al salir: su panel o cajón lo pregunta (×, Escape, el menú y
   // «Atrás»), con lo que de verdad se pierde. Guardada, cancelada o vacía, ya no hay nada que perder.
-  const correctionText = useStore(correctionForm.store, (state) => state.values.text)
-  const correctionPending = !correctionSaved(correcting, correctionText)
+  const lost = useStore(correctionForm.store, (state) =>
+    correctionLostWords(state.values.text, state.values.reason),
+  )
+  const correctionPending = correcting && lost !== null
   const draftSaved = useDraftSaved({
     onDiscard: () => {
       correctionForm.reset()
@@ -246,14 +256,14 @@ export function DeclaredResponse({
   })
   const toldPending = useRef(false)
   useEffect(() => {
-    if (correctionPending) {
+    if (correctionPending && lost) {
       toldPending.current = true
-      draftSaved(false, "Se pierde la corrección que escribiste y no guardaste. Lo que respondió no cambia.")
+      draftSaved(false, `${lost} Lo que respondió no cambia.`)
     } else if (toldPending.current) {
       toldPending.current = false
       draftSaved(true)
     }
-  }, [correctionPending, draftSaved])
+  }, [correctionPending, lost, draftSaved])
   // Al abrirla se escribe sin otro clic: el foco va al texto de la corrección.
   useEffect(() => {
     if (correcting) correctionRef.current?.querySelector("textarea")?.focus()
@@ -380,6 +390,9 @@ export function DeclaredResponse({
                 Corrección · {item.createdBy ? memberName(item.createdBy) : "Equipo"} · {dayAndTime(item.createdAt)}
               </p>
               <p className="whitespace-pre-wrap">{item.text}</p>
+              {item.reason ? (
+                <p className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground">Motivo: {item.reason}</p>
+              ) : null}
             </div>
           ))}
         </section>
@@ -392,9 +405,20 @@ export function DeclaredResponse({
       ) : null}
       {correcting ? (
         <div ref={correctionRef} className="flex flex-col gap-2 rounded-md border p-3">
-          <correctionForm.AppField name="text">
-            {(field) => <field.TextareaField label="Tu corrección" rows={3} maxLength={5000} />}
-          </correctionForm.AppField>
+          <FieldGroup className="gap-3">
+            <correctionForm.AppField name="text">
+              {(field) => <field.TextareaField label="Tu corrección" rows={3} maxLength={5000} />}
+            </correctionForm.AppField>
+            <correctionForm.AppField name="reason">
+              {(field) => (
+                <field.TextField
+                  label="Motivo (opcional)"
+                  description="Por qué se corrige, por ejemplo «lo confirmó en consulta». Queda junto a la corrección."
+                  maxLength={2000}
+                />
+              )}
+            </correctionForm.AppField>
+          </FieldGroup>
           <p className="text-xs text-muted-foreground">
             Lo que {author} escribió no cambia. Para que su ficha diga otra cosa, corrígelo también en sus
             antecedentes.

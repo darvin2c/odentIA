@@ -9,8 +9,41 @@ import {
   CIGARETTE_BANDS,
   type CigaretteBand,
   INTERVIEW_ANSWERS,
+  type InterviewEntry,
   TOBACCO_ANSWERS,
 } from "@odentia/clinical"
+
+/** Las opciones de la pantalla, con su nombre. */
+const EXPERIENCE_WORDS: Record<string, string> = { positiva: "Positiva", regular: "Regular", traumatica: "Traumática" }
+const ANXIETY_WORDS: Record<string, string> = { ninguna: "Ninguna", leve: "Leve", moderada: "Moderada", alta: "Alta" }
+
+/**
+ * «Odontológicos y hábitos» en palabras, en el orden de la pantalla, para la
+ * copia de la historia. Lo que no se respondió no sale.
+ */
+export function dentalInterviewEntries(answers: unknown): InterviewEntry[] {
+  const all = answers && typeof answers === "object" && !Array.isArray(answers) ? (answers as Record<string, unknown>) : {}
+  const group = all.antecedentesOdontologicos
+  if (!group || typeof group !== "object" || Array.isArray(group)) return []
+  const given = group as Record<string, unknown>
+  const out: InterviewEntry[] = []
+  const add = (key: string, label: string, value: string | null | undefined) => {
+    if (value) out.push({ key: `antecedentesOdontologicos.${key}`, label, value })
+  }
+  const yesNo = (value: unknown) => (typeof value === "boolean" ? (value ? "Sí" : "No") : null)
+  add("ultimaVisita", "Última visita", typeof given.ultimaVisita === "string" ? given.ultimaVisita.trim() : null)
+  add("cepilladosAlDia", "Cepillados al día", typeof given.cepilladosAlDia === "number" ? String(given.cepilladosAlDia) : null)
+  add("experienciaPrevia", "Experiencia previa", EXPERIENCE_WORDS[String(given.experienciaPrevia)])
+  add("ansiedadDental", "Ansiedad dental", ANXIETY_WORDS[String(given.ansiedadDental)])
+  add("hiloDental", "Hilo dental", yesNo(given.hiloDental))
+  add("bruxismo", "Bruxismo", yesNo(given.bruxismo))
+  add(
+    "habitos",
+    "Hábitos",
+    Array.isArray(given.habitos) ? given.habitos.filter((item) => typeof item === "string" && item.trim()).join(", ") : null,
+  )
+  return out
+}
 
 /** Cuántos hábitos se registran como mucho. */
 export const DENTAL_HABITS_MAX = 10

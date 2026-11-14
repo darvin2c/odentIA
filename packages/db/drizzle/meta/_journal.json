@@ -831,15 +831,22 @@
     {
       "idx": 118,
       "version": "7",
-      "when": 1794671420343,
-      "tag": "0118_preguntas_al_paciente",
+      "when": 1794677152498,
+      "tag": "0118_motivo_de_la_correccion",
       "breakpoints": true
     },
     {
       "idx": 119,
       "version": "7",
-      "when": 1794671427882,
-      "tag": "0119_preguntas_al_paciente_reglas",
+      "when": 1794683267187,
+      "tag": "0119_preguntas_al_paciente",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1794683271292,
+      "tag": "0120_preguntas_al_paciente_reglas",
       "breakpoints": true
     }
   ]

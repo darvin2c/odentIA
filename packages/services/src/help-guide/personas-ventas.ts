@@ -119,8 +119,15 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
       {
         id: "pacientes-pedidos-sobre-sus-datos",
         q: "Un paciente pide una copia de su historia o que corrijamos sus datos, ¿cómo lo registro?",
-        a: "En su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», «Registrar un pedido»: qué pide (una copia, corregir un dato, no recibir mensajes o borrar sus datos), quién lo pide, por dónde llegó y cuándo. Al abrirlo, primero «Comprobé que es ella»; después envías la copia por WhatsApp o por correo, o haces lo que pidió, y «Marcar respondida»; «Denegar…» pide el porqué. Cada pedido se responde en 10 días. Lo atienden recepción y Administración; «Descargar historia» solo lo ve quien lee la historia clínica.",
-        forms: ["el paciente pide copia de su historia clinica", "donde registro que pidio corregir sus datos", "cuanto tiempo tengo para responder un pedido de datos"],
+        a: "En su página › Datos › Privacidad y pedidos, en «Pedidos sobre sus datos», «Registrar un pedido»: qué pide (una copia, corregir un dato, no recibir mensajes o borrar sus datos), quién lo pide, por dónde llegó y cuándo. Al abrirlo, primero «Comprobé que es ella»; después envías la copia por WhatsApp o por correo, o haces lo que pidió, y «Marcar respondida»; «Denegar…» pide el porqué. Cada pedido se responde en 10 días. Lo atienden recepción y Administración; «Descargar historia» solo lo ve Administración: quien atiende o está en recepción le pide la copia a Administración, y recepción la envía sin abrirla.",
+        forms: [
+          "el paciente pide copia de su historia clinica",
+          "donde registro que pidio corregir sus datos",
+          "cuanto tiempo tengo para responder un pedido de datos",
+          "que le doy al paciente si me pide su historia",
+          "el paciente quiere su historia clinica",
+          "como le entrego la copia de su historia",
+        ],
         area: "ficha",
         needs: "patients.write",
       },
