@@ -144,6 +144,19 @@ const PRODUCT_FIELDS: Record<
   },
   optical: { health: [], personal: [], own: null, child: null },
 }
+/**
+ * «Antes de cada cita» (mesa del 13 nov, entrega 8): lo de esa visita, en los tres productos. Nunca
+ * es obligatorio: lo que no responda no frena nada.
+ */
+const VISIT: PickerItem[] = [
+  {
+    keys: ["visit.reason"],
+    label: "A qué viene, con sus palabras",
+    hint: "En una sesión o un control no se le pregunta: se le dice a qué viene.",
+  },
+  { keys: ["visit.pain"], label: "Si le duele ahora y cuánto (0 a 10)" },
+  { keys: ["visit.more"], label: "Algo más que quiera contarnos" },
+]
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
   { keys: ["educationLevel"], label: "Nivel educativo" },
@@ -388,6 +401,17 @@ export function RegistrationFieldsPicker({
           errors={errors}
         />
       ) : null}
+      <Group
+        title="Antes de cada cita"
+        help="Se le pide en su enlace o su portal antes de cada cita y llega a «Hoy viene a…» de esa atención. Nunca es obligatorio."
+        items={VISIT}
+        newKeys={newKeys}
+        fields={fields}
+        options={TWO}
+        onMode={onMode}
+        disabled={disabled}
+        errors={errors}
+      />
       <Group
         title="Preguntas para conocerlo"
         help="Nunca son obligatorias: no hacen falta para atenderlo."

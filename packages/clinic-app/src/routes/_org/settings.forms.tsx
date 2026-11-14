@@ -256,7 +256,8 @@ function FormTemplatesPanel() {
                             Versión {version.version} · {TEMPLATE_STATUS_LABELS[version.status]}
                           </Badge>
                         ))}
-                        {latest.respondent === "portal" ? <Badge variant="outline">Lo responde el paciente</Badge> : null}
+                        {/* El cuestionario del paciente de antes: lo respondido se conserva; ya no se publica. */}
+                        {latest.respondent === "portal" ? <Badge variant="outline">Lo respondía el paciente · ya no se usa</Badge> : null}
                       </div>
                     </div>
                     {canAdmin ? (
@@ -451,7 +452,8 @@ function useTemplateForm(initial: FormTemplate | null, onSubmit: (value: Templat
     title: initial?.title ?? "",
     description: initial?.description ?? "",
     specialtyId: initial?.specialtyId ?? "",
-    respondent: initial?.respondent ?? "staff",
+    // Un borrador de los de antes que respondía el paciente pasa al equipo al guardarlo: ya no se publica para el paciente.
+    respondent: "staff",
     sections: initial ? structuredClone(initial.schema.sections) : [{ id: "general", title: "General", fields: [] }],
   }))
   return useAppForm({
@@ -565,23 +567,16 @@ function TemplateBuilder({
             />
           )}
         </form.AppField>
-        <form.AppField name="respondent">
-          {(field) => (
-            <field.SelectField
-              label="Quién lo responde"
-              options={[
-                { value: "staff", label: "El equipo, desde la ficha" },
-                { value: "portal", label: "El paciente, desde el portal (cuestionario previo)" },
-              ]}
-              description={
-                respondent === "portal"
-                  ? "Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo finaliza. Al finalizarlo, las respuestas marcadas como alergias pasan a sus antecedentes sin confirmar y la receta avisa."
-                  : undefined
-              }
-              disabled={!canAdmin}
-            />
-          )}
-        </form.AppField>
+        {/* Lo llena el equipo: lo que se le pregunta al paciente, también antes de cada cita, está en un
+            solo lugar (mesa del 13 nov, decisión 1). */}
+        <p className="text-sm text-muted-foreground">
+          Lo llena el equipo en la ficha o en la atención. Lo que se le pregunta al paciente, también antes de cada
+          cita, está en{" "}
+          <Link to="/settings/patient-registration" className="underline underline-offset-4">
+            Preguntas al paciente
+          </Link>
+          .
+        </p>
         <form.Field name="sections" mode="array">
           {(sectionsField) => {
             // `mode="array"` solo vuelve a pintar al cambiar el largo: lo demás se lee de `sections`.
