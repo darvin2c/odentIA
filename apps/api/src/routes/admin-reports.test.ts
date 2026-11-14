@@ -76,7 +76,7 @@ afterAll(async () => {
 
 describe("reportes", () => {
   it("Soporte no ve ningún reporte", async () => {
-    for (const path of ["/funnel", "/revenue", "/forecast", "/weekly"]) {
+    for (const path of ["/funnel", "/alta", "/revenue", "/forecast", "/weekly"]) {
       const res = await call(path, "support")
       expect(res.status, path).toBe(403)
       expect(await read(res)).toMatchObject({ error: { code: "FORBIDDEN" } })
@@ -89,6 +89,14 @@ describe("reportes", () => {
       months: 3,
       clients: { value: 0, words: expect.any(String), howCalculated: expect.any(String) },
       conversion: { words: "Sin casos" },
+    })
+    const alta = await read(await call("/alta?months=3", "admin"))
+    expect(alta.data).toMatchObject({
+      months: 3,
+      entered: { value: 0, howCalculated: expect.any(String) },
+      paid: { words: "Sin casos" },
+      stalls: [],
+      stalledMost: null,
     })
     const revenue = await read(await call("/revenue", "admin"))
     expect(revenue.data).toMatchObject({
@@ -106,6 +114,7 @@ describe("reportes", () => {
       error: { code: "VALIDATION", fields: { months: expect.any(String) } },
     })
     expect((await call("/revenue?months=0", "admin")).status).toBe(400)
+    expect((await call("/alta?months=0", "admin")).status).toBe(400)
   })
 
   it("la semana: nada hasta que Kairós la escribe; después, la última con las cifras que citó", async () => {

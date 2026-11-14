@@ -1,17 +1,23 @@
 import { AGREEMENT_VERSION } from "@odentia/auth/legal"
+import type { Db } from "@odentia/db"
 import { saasClient, saasClientFile, saasInboundEmail } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import {
+  cargaDeleteAfter,
+  clearDueCargaNow,
   clientFileDeleteAfter,
   clientFileKey,
   clientFileUrl,
   deleteClientFile,
   dueClientFileDeletions,
+  isLikelyCarga,
+  likelyCargaSql,
   listClientFiles,
+  markClientFileCarga,
   purgeDueClientFiles,
   registerClientFile,
   type StoredInboundAttachment,
@@ -188,33 +194,100 @@ describe("listar, descargar y borrar", () => {
   })
 })
 
+/** Un correo a soporte@ con un adjunto ya registrado como documento del cliente (`correo`, sin marcar). */
+async function emailWithAttachment(
+  messageId: string,
+  receivedAt: Date,
+  filename = "pacientes.xlsx",
+  client: string = clientId,
+) {
+  const objectKey = clientFileKey(client, "xlsx")
+  const [email] = await ownerDb
+    .insert(saasInboundEmail)
+    .values({
+      clientId: client,
+      mailbox: "soporte",
+      product: "dental",
+      messageId,
+      fromAddress: "clinica@files.test",
+      toAddress: "soporte@odentia32.com",
+      textBody: "Rosa Díaz, DNI 12345678, 999 888 777",
+      notice: "Un adjunto no entró: lista.zip",
+      receivedAt,
+      attachments: [],
+    })
+    .returning({ id: saasInboundEmail.id })
+  if (!email) throw new Error("sin correo")
+  const file = await registerClientFile(ownerDb, null, {
+    clientId: client,
+    kind: "correo",
+    filename,
+    objectKey,
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    sizeBytes: 5,
+    deleteAfter: null,
+    source: "correo",
+    receivedAt,
+    inboundEmailId: email.id,
+  })
+  const attachments: StoredInboundAttachment[] = [
+    {
+      filename,
+      contentType: file.contentType,
+      size: 5,
+      fileId: file.id,
+      objectKey,
+    },
+  ]
+  await ownerDb
+    .update(saasInboundEmail)
+    .set({ attachments })
+    .where(eq(saasInboundEmail.id, email.id))
+  return { emailId: email.id, fileId: file.id, objectKey }
+}
+
+async function emailRow(id: string) {
+  const [row] = await ownerDb.select().from(saasInboundEmail).where(eq(saasInboundEmail.id, id))
+  return row
+}
+
+async function fileRow(id: string) {
+  const [row] = await ownerDb.select().from(saasClientFile).where(eq(saasClientFile.id, id))
+  return row
+}
+
 describe("borrado a los 30 días", () => {
-  it("borra lo vencido y los adjuntos de un correo sin cliente; lo que falla vuelve a salir", async () => {
+  it("solo se borra la carga vencida; un adjunto con fecha o un correo sin cliente se guardan; lo que falla vuelve a salir", async () => {
     const now = new Date()
     const old = new Date(now.getTime() - 31 * DAY)
-    const expiredKey = clientFileKey(clientId, "pdf")
-    const failingKey = clientFileKey(clientId, "pdf")
-    const keepKey = clientFileKey(clientId, "pdf")
-    // Dos llegaron hace 31 días; el otro, hoy (lo de la clínica nunca pasa de 30 días desde que llega).
-    for (const [key, deleteAfter, at] of [
-      [expiredKey, limaDate(old), old],
-      [failingKey, limaDate(old), old],
-      [keepKey, null, now],
-    ] as const)
-      await registerClientFile(
+    const register = (
+      kind: "archivo_clinica" | "correo",
+      key: string,
+      deleteAfter: string | null,
+    ) =>
+      registerClientFile(
         ownerDb,
         admin,
         {
           clientId,
-          kind: "correo",
+          kind,
           filename: "adjunto.pdf",
           objectKey: key,
           contentType: "application/pdf",
           sizeBytes: 5,
           deleteAfter,
+          receivedAt: old,
         },
-        at,
+        now,
       )
+    const expiredKey = clientFileKey(clientId, "pdf")
+    const failingKey = clientFileKey(clientId, "pdf")
+    const legacyKey = clientFileKey(clientId, "pdf")
+    // La carga que llegó hace 31 días ya pasó su día; el adjunto con fecha lo registró el código anterior.
+    const expired = await register("archivo_clinica", expiredKey, null)
+    await register("archivo_clinica", failingKey, null)
+    await register("correo", legacyKey, limaDate(old))
+    expect(expired.deleteAfter).toBe(cargaDeleteAfter(old, now))
     const orphanAttachments: StoredInboundAttachment[] = [
       {
         filename: "datos.xlsx",
@@ -224,123 +297,257 @@ describe("borrado a los 30 días", () => {
         objectKey: "inbound/huerfano.csv",
       },
     ]
-    const [orphan] = await ownerDb
-      .insert(saasInboundEmail)
-      .values({
-        mailbox: "soporte",
-        product: "dental",
-        messageId: "<huerfano@files.test>",
-        fromAddress: "nadie@files.test",
-        toAddress: "soporte@odentia32.com",
-        receivedAt: old,
-        attachments: orphanAttachments,
-      })
-      .returning({ id: saasInboundEmail.id })
-    if (!orphan) throw new Error("sin correo")
+    await ownerDb.insert(saasInboundEmail).values({
+      mailbox: "soporte",
+      product: "dental",
+      messageId: "<huerfano@files.test>",
+      fromAddress: "nadie@files.test",
+      toAddress: "soporte@odentia32.com",
+      receivedAt: old,
+      attachments: orphanAttachments,
+    })
 
     const due = await dueClientFileDeletions(ownerDb, now)
-    expect(due.map((item) => item.objectKey).sort()).toEqual(
-      [expiredKey, failingKey, "inbound/huerfano.csv"].sort(),
-    )
+    expect(due.map((item) => item.objectKey).sort()).toEqual([expiredKey, failingKey].sort())
 
     const storage = fakeStorage(failingKey)
-    expect(await purgeDueClientFiles(ownerDb, storage, now)).toEqual({ deleted: 2, failed: 1 })
-    expect(storage.deleted.sort()).toEqual([expiredKey, "inbound/huerfano.csv"].sort())
+    expect(await purgeDueClientFiles(ownerDb, storage, now)).toMatchObject({
+      deleted: 1,
+      failed: 1,
+    })
+    expect(storage.deleted).toEqual([expiredKey])
     const rows = await ownerDb
       .select({ key: saasClientFile.objectKey, deletedAt: saasClientFile.deletedAt })
       .from(saasClientFile)
       .where(eq(saasClientFile.clientId, clientId))
     expect(rows.find((row) => row.key === expiredKey)?.deletedAt).not.toBeNull()
     expect(rows.find((row) => row.key === failingKey)?.deletedAt).toBeNull()
-    expect(rows.find((row) => row.key === keepKey)?.deletedAt).toBeNull()
-    const [email] = await ownerDb
-      .select({ attachments: saasInboundEmail.attachments })
-      .from(saasInboundEmail)
-      .where(eq(saasInboundEmail.id, orphan.id))
-    expect(email?.attachments).toEqual([
-      { filename: "datos.xlsx", contentType: "text/csv", size: 3, fileId: null },
-    ])
+    expect(rows.find((row) => row.key === legacyKey)?.deletedAt).toBeNull()
+    // La auditoría dice qué archivos y de qué clientes («Se borraron sin cargar»).
+    const [audit] = await ownerDb
+      .select({ metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(eq(adminAudit.action, "kairos.client_files_expired"))
+    expect(audit?.metadata).toEqual({ count: 1, fileIds: [expired.id], clientIds: [clientId] })
 
     // Lo que no se pudo borrar sale en la próxima pasada; lo demás ya no.
     expect((await dueClientFileDeletions(ownerDb, now)).map((item) => item.objectKey)).toEqual([
       failingKey,
     ])
+    await purgeDueClientFiles(ownerDb, fakeStorage(), now)
+    expect(await dueClientFileDeletions(ownerDb, now)).toEqual([])
+  })
+
+  it("el plazo de la carga se topa a los 30 días de llegar, aunque pidan más", async () => {
+    const now = new Date()
+    const receivedAt = new Date(now.getTime() - 10 * DAY)
+    const file = await registerClientFile(
+      ownerDb,
+      admin,
+      {
+        clientId,
+        kind: "archivo_clinica",
+        filename: "agenda.csv",
+        objectKey: clientFileKey(clientId, "csv"),
+        contentType: "text/csv",
+        sizeBytes: 5,
+        deleteAfter: "2099-01-01",
+        receivedAt,
+      },
+      now,
+    )
+    expect(file.deleteAfter).toBe(cargaDeleteAfter(receivedAt, now))
+    expect(file.receivedAt).toEqual(receivedAt)
+    expect(file.cargaAt).toEqual(now)
+    // Lo que dice llegar en el futuro cuenta desde ahora.
+    expect(cargaDeleteAfter(new Date(now.getTime() + 5 * DAY), now)).toBe(
+      clientFileDeleteAfter(now),
+    )
   })
 })
 
 describe("el texto del correo", () => {
-  it("solo el de la carga (soporte@ con adjuntos) se borra a los 30 días, con o sin cliente; lo demás se queda", async () => {
+  it("solo el del correo con un adjunto marcado como la carga se borra a los 30 días; lo demás se queda", async () => {
     const now = new Date()
     const old = new Date(now.getTime() - 31 * DAY)
-    const sent = [{ filename: "pacientes.xlsx", contentType: "text/csv", size: 3, fileId: null }]
-    const insert = async (
-      messageId: string,
-      receivedAt: Date,
-      client: string | null,
-      mailbox: "soporte" | "hola" = "soporte",
-      attachments: typeof sent = sent,
-    ) => {
-      const [row] = await ownerDb
-        .insert(saasInboundEmail)
-        .values({
-          clientId: client,
-          mailbox,
-          product: "dental",
-          messageId,
-          fromAddress: "clinica@files.test",
-          toAddress: `${mailbox}@odentia32.com`,
-          textBody: "Rosa Díaz, DNI 12345678, 999 888 777",
-          receivedAt,
-          attachments,
-        })
-        .returning({ id: saasInboundEmail.id })
-      return row?.id ?? ""
-    }
-    const oldWithClient = await insert("<texto-viejo@files.test>", old, clientId)
-    const oldOrphan = await insert("<texto-viejo-solo@files.test>", old, null)
-    const fresh = await insert("<texto-nuevo@files.test>", now, clientId)
-    const oldHola = await insert("<texto-viejo-hola@files.test>", old, clientId, "hola")
-    const oldSupportNoFiles = await insert("<texto-viejo-sin@files.test>", old, null, "soporte", [])
-    await purgeDueClientFiles(ownerDb, fakeStorage(), now)
-    const text = async (id: string) =>
-      (
-        await ownerDb
-          .select({ text: saasInboundEmail.textBody })
-          .from(saasInboundEmail)
-          .where(eq(saasInboundEmail.id, id))
-      )[0]?.text
-    expect(await text(oldWithClient)).toBeNull()
-    expect(await text(oldOrphan)).toBeNull()
-    expect(await text(fresh)).toContain("Rosa")
-    expect(await text(oldHola)).toContain("Rosa")
-    expect(await text(oldSupportNoFiles)).toContain("Rosa")
-  })
-
-  it("los adjuntos de un correo sin cliente que no es de la carga no se borran", async () => {
-    const now = new Date()
-    const kept: StoredInboundAttachment[] = [
-      {
-        filename: "contrato.pdf",
-        contentType: "application/pdf",
-        size: 3,
-        fileId: null,
-        objectKey: "inbound/contrato-hola.pdf",
-      },
-    ]
-    const [row] = await ownerDb
+    const marked = await emailWithAttachment("<texto-carga@files.test>", old)
+    const freshMarked = await emailWithAttachment(
+      "<texto-carga-nuevo@files.test>",
+      new Date(now.getTime() - 2 * DAY),
+    )
+    const unmarked = await emailWithAttachment("<texto-sin-marcar@files.test>", old)
+    // Se marcan en la base (sin `markClientFileCarga`, que lo borraría al marcarlo).
+    for (const id of [marked.fileId, freshMarked.fileId])
+      await ownerDb
+        .update(saasClientFile)
+        .set({ kind: "archivo_clinica", cargaAt: now, deleteAfter: limaDate(now) })
+        .where(eq(saasClientFile.id, id))
+    const [orphan] = await ownerDb
       .insert(saasInboundEmail)
       .values({
-        mailbox: "hola",
+        mailbox: "soporte",
         product: "dental",
-        messageId: "<hola-huerfano@files.test>",
-        fromAddress: "nadie@files.test",
-        toAddress: "hola@odentia32.com",
-        receivedAt: new Date(now.getTime() - 40 * DAY),
-        attachments: kept,
+        messageId: "<texto-viejo-solo@files.test>",
+        fromAddress: "clinica@files.test",
+        toAddress: "soporte@odentia32.com",
+        textBody: "Rosa Díaz, DNI 12345678",
+        receivedAt: old,
+        attachments: [
+          { filename: "pacientes.xlsx", contentType: "text/csv", size: 3, fileId: null },
+        ],
       })
       .returning({ id: saasInboundEmail.id })
-    expect(row).toBeDefined()
-    const due = await dueClientFileDeletions(ownerDb, now, 1000)
-    expect(due.map((item) => item.objectKey)).not.toContain("inbound/contrato-hola.pdf")
+    const result = await purgeDueClientFiles(ownerDb, fakeStorage(), now)
+    expect(result.textsCleared).toBe(1)
+    expect(await emailRow(marked.emailId)).toMatchObject({ textBody: null, notice: null })
+    expect((await emailRow(freshMarked.emailId))?.textBody).toContain("Rosa")
+    expect((await emailRow(unmarked.emailId))?.textBody).toContain("Rosa")
+    expect((await emailRow(orphan?.id ?? ""))?.textBody).toContain("Rosa")
+    // El objeto borrado ya no está en el correo; el adjunto sigue nombrado.
+    expect((await emailRow(marked.emailId))?.attachments).toEqual([
+      {
+        filename: "pacientes.xlsx",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size: 5,
+        fileId: marked.fileId,
+      },
+    ])
+  })
+})
+
+describe("es la carga de datos", () => {
+  it("a los 5 días de llegar: pasa a la carga, se borra a los 30 días y queda anotado quién", async () => {
+    const now = new Date()
+    const receivedAt = new Date(now.getTime() - 5 * DAY)
+    const { fileId, objectKey } = await emailWithAttachment("<carga-5@files.test>", receivedAt)
+    const before = (await listClientFiles(ownerDb, admin, clientId, now)).items.find(
+      (item) => item.id === fileId,
+    )
+    // La pantalla dice el día con la cuenta del servidor, antes de marcarlo.
+    expect(before).toMatchObject({
+      kind: "correo",
+      deleteAfter: null,
+      cargaDeleteAfter: cargaDeleteAfter(receivedAt, now),
+      cargaDueNow: false,
+    })
+    const out = await markClientFileCarga(ownerDb, admin, fileId, now)
+    expect(out).toMatchObject({ dueNow: false, objectKey })
+    expect(out.file).toMatchObject({
+      kind: "archivo_clinica",
+      adminOnly: true,
+      deleteAfter: cargaDeleteAfter(receivedAt, now),
+      cargaDeleteAfter: null,
+    })
+    expect(out.file.cargaAt).toEqual(now)
+    const audits = await ownerDb
+      .select({ actor: adminAudit.actorUserId, metadata: adminAudit.metadata })
+      .from(adminAudit)
+      .where(
+        and(eq(adminAudit.action, "client_file.marked_carga"), eq(adminAudit.entityId, fileId)),
+      )
+    expect(audits).toEqual([
+      {
+        actor: admin.userId,
+        metadata: expect.objectContaining({ clientId, deletedNow: false }),
+      },
+    ])
+    // Dos veces es lo mismo, sin otra auditoría.
+    expect(await markClientFileCarga(ownerDb, admin, fileId, now)).toMatchObject({
+      dueNow: false,
+      file: { kind: "archivo_clinica" },
+    })
+    expect(
+      await ownerDb
+        .select({ id: adminAudit.id })
+        .from(adminAudit)
+        .where(
+          and(eq(adminAudit.action, "client_file.marked_carga"), eq(adminAudit.entityId, fileId)),
+        ),
+    ).toHaveLength(1)
+  })
+
+  it("Soporte no marca, una carta no es la carga y lo ya borrado no existe", async () => {
+    const { fileId } = await emailWithAttachment("<carga-roles@files.test>", new Date())
+    await expect(markClientFileCarga(ownerDb, support, fileId)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+    const letter = await registerClientFile(ownerDb, admin, {
+      clientId,
+      kind: "carta",
+      filename: "carta.pdf",
+      objectKey: clientFileKey(clientId, "pdf"),
+      contentType: "application/pdf",
+      sizeBytes: 5,
+    })
+    await expect(markClientFileCarga(ownerDb, admin, letter.id)).rejects.toMatchObject({
+      code: "VALIDATION",
+      fields: { fileId: expect.any(String) },
+    })
+    await deleteClientFile(ownerDb, admin, fileId)
+    await expect(markClientFileCarga(ownerDb, admin, fileId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+  })
+
+  it("a los 31 días se borra al marcarlo: el texto en la misma transacción y el objeto después; si falla, la pasada siguiente", async () => {
+    const now = new Date()
+    const old = new Date(now.getTime() - 31 * DAY)
+    const { emailId, fileId, objectKey } = await emailWithAttachment("<carga-31@files.test>", old)
+    const before = (await listClientFiles(ownerDb, admin, clientId, now)).items.find(
+      (item) => item.id === fileId,
+    )
+    expect(before?.cargaDueNow).toBe(true)
+    const out = await ownerDb.transaction((tx) => markClientFileCarga(tx as Db, admin, fileId, now))
+    expect(out.dueNow).toBe(true)
+    expect(await emailRow(emailId)).toMatchObject({ textBody: null, notice: null })
+    expect((await fileRow(fileId))?.deletedAt).toBeNull()
+    // El almacenamiento falla al borrar ahora: queda vencido y lo toma la limpieza.
+    await expect(
+      clearDueCargaNow(ownerDb, fakeStorage(objectKey), fileId, objectKey, now),
+    ).rejects.toThrow()
+    expect((await fileRow(fileId))?.deletedAt).toBeNull()
+    expect((await dueClientFileDeletions(ownerDb, now)).map((item) => item.fileId)).toContain(
+      fileId,
+    )
+    const storage = fakeStorage()
+    await purgeDueClientFiles(ownerDb, storage, now)
+    expect(storage.deleted).toContain(objectKey)
+    expect((await fileRow(fileId))?.deletedAt).not.toBeNull()
+  })
+
+  it("borrar ahora lo marcado vencido: objeto, registro y clave del correo", async () => {
+    const now = new Date()
+    const old = new Date(now.getTime() - 40 * DAY)
+    const { emailId, fileId, objectKey } = await emailWithAttachment("<carga-40@files.test>", old)
+    const out = await markClientFileCarga(ownerDb, admin, fileId, now)
+    const storage = fakeStorage()
+    await clearDueCargaNow(ownerDb, storage, fileId, out.objectKey, now)
+    expect(storage.deleted).toEqual([objectKey])
+    expect((await fileRow(fileId))?.deletedAt).not.toBeNull()
+    expect((await emailRow(emailId))?.attachments).toEqual([
+      expect.not.objectContaining({ objectKey: expect.anything() }),
+    ])
+  })
+})
+
+describe("lo que puede ser la carga", () => {
+  it("Excel, CSV o Word, por su tipo o su nombre; en TS y en SQL igual", async () => {
+    expect(isLikelyCarga({ contentType: "text/csv", filename: "x" })).toBe(true)
+    expect(
+      isLikelyCarga({ contentType: "application/octet-stream", filename: "Pacientes.XLSX" }),
+    ).toBe(true)
+    expect(isLikelyCarga({ contentType: "application/pdf", filename: "contrato.pdf" })).toBe(false)
+    expect(isLikelyCarga({ contentType: "image/png", filename: "captura.png" })).toBe(false)
+    const rows = (await ownerDb.execute(
+      sql`select f.filename, f.content_type, ${likelyCargaSql("f")} as likely
+      from admin.saas_client_file f where f.client_id = ${clientId}`,
+    )) as unknown as Array<{ filename: string; content_type: string; likely: boolean }>
+    expect(rows.some((row) => row.likely)).toBe(true)
+    expect(rows.some((row) => !row.likely)).toBe(true)
+    for (const row of rows)
+      expect(row.likely, row.filename).toBe(
+        isLikelyCarga({ filename: row.filename, contentType: row.content_type }),
+      )
+    expect(() => likelyCargaSql("f; drop")).toThrow()
   })
 })

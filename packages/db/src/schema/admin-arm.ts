@@ -9,6 +9,7 @@ import {
   index,
   integer,
   jsonb,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -120,6 +121,7 @@ export const KAIROS_ITEM_KINDS = [
   "presentacion_hecha",
   "correo_sin_cliente",
   "responder_correo",
+  "posible_carga",
 ] as const
 export type KairosItemKind = (typeof KAIROS_ITEM_KINDS)[number]
 export const KAIROS_ITEM_STATUSES = [
@@ -142,6 +144,41 @@ export const SAAS_CLIENT_FILE_KINDS = [
 export type SaasClientFileKind = (typeof SAAS_CLIENT_FILE_KINDS)[number]
 export const SAAS_CLIENT_FILE_SOURCES = ["persona", "kairos", "correo"] as const
 export type SaasClientFileSource = (typeof SAAS_CLIENT_FILE_SOURCES)[number]
+/**
+ * Los pasos del alta que guardan su primera vez (`saas_client_milestone`): copia literal de
+ * `ONBOARDING_STEP_KEYS` de los servicios (una prueba de los servicios exige que sean iguales;
+ * la base no importa los servicios).
+ */
+export const SAAS_MILESTONE_STEPS = [
+  "entro",
+  "contrato",
+  "carta",
+  "archivos",
+  "configuracion",
+  "pacientes",
+  "informe",
+  "equipo",
+  "whatsapp",
+  "primer_uso",
+  "primer_pago",
+] as const
+export type SaasMilestoneStep = (typeof SAAS_MILESTONE_STEPS)[number]
+/** Los pasos que una persona puede marcar «No aplica», con su motivo. */
+export const SAAS_MILESTONE_NA_STEPS = ["equipo", "whatsapp", "pacientes"] as const
+export type SaasMilestoneNaStep = (typeof SAAS_MILESTONE_NA_STEPS)[number]
+/**
+ * Lo único que hace retroceder un paso alcanzado: el primer pago revertido (sin ningún pago
+ * confirmado) y los datos recibidos que se borraron sin cargar.
+ */
+export const SAAS_MILESTONE_LOST_REASONS = ["pago_revertido", "borrados_sin_cargar"] as const
+export type SaasMilestoneLostReason = (typeof SAAS_MILESTONE_LOST_REASONS)[number]
+/**
+ * De dónde salió la primera vez: `hecho`, de un hecho de la clínica (lo vio la pasada o el
+ * relleno de la migración); `respaldo`, un correo con adjuntos a soporte@ de una clínica que
+ * ya tuvo una carga (solo «Datos recibidos»).
+ */
+export const SAAS_MILESTONE_SOURCES = ["hecho", "respaldo"] as const
+export type SaasMilestoneSource = (typeof SAAS_MILESTONE_SOURCES)[number]
 /**
  * A dónde llegó un correo: un buzón fijo de cada dominio (soporte@, contacto@, hola@,
  * fundadores@) o la dirección de una persona del equipo (`persona`, con su `staff_user_id`).
@@ -317,7 +354,9 @@ export const saasClientContact = adminSchema.table(
 /**
  * Lo que hay que hacer con un cliente, para un día de Lima (`due_on`) y, si
  * hay hora, `due_at`. Kairós pone tareas (`by_kairos`) con una clave por regla
- * y día (`kairos_key`) para no repetirlas.
+ * y día (`kairos_key`) para no repetirlas. `admin_only`: lo que solo hace
+ * Administración (cobro, carga, informe, Zoho): Soporte no la ve. Una de cobro
+ * tampoco la ve aunque la columna diga que no (el código anterior no la escribía).
  */
 export const saasTask = adminSchema.table(
   "saas_task",
@@ -338,6 +377,7 @@ export const saasTask = adminSchema.table(
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     byKairos: boolean("by_kairos").notNull().default(false),
     kairosKey: text("kairos_key"),
+    adminOnly: boolean("admin_only").notNull().default(false),
     doneAt: timestamp("done_at", { withTimezone: true }),
     doneBy: text("done_by").references(() => user.id),
     doneNote: text("done_note"),
@@ -595,8 +635,13 @@ export const saasOutreach = adminSchema.table(
 
 /**
  * Los archivos de un cliente en el bucket privado (`clients/<clientId>/…`):
- * carta, propuesta, presentación, lo que mandó la clínica. Lo de la clínica y lo que llega por correo se borra a los 30 días
- * (`delete_after`). Soporte no ve lo `admin_only`.
+ * carta, propuesta, presentación, lo que mandó la clínica. Solo `archivo_clinica`
+ * (la carga de datos) se borra, a los 30 días de llegar (`received_at`; el día de
+ * Lima va en `delete_after`). Lo que llega por correo (`correo`, con su
+ * `inbound_email_id`) se guarda hasta que Administración marca que es la carga
+ * (`carga_at`): entonces pasa a `archivo_clinica` sin volver a subirse. La marca
+ * no se deshace y su plazo no se alarga (`saas_client_file_carga_guard`). Soporte
+ * no ve lo `admin_only`.
  */
 export const saasClientFile = adminSchema.table(
   "saas_client_file",
@@ -615,12 +660,21 @@ export const saasClientFile = adminSchema.table(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     source: text("source"),
+    /** Cuándo llegó: la hora del correo si vino por correo; si no, cuándo se subió. */
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    /** El correo por el que llegó (`saas_inbound_email` se declara después: va con flecha). */
+    inboundEmailId: uuid("inbound_email_id").references((): AnyPgColumn => saasInboundEmail.id, {
+      onDelete: "set null",
+    }),
+    /** Cuándo se marcó como la carga de datos; desde ahí cuentan los días para cargarla. */
+    cargaAt: timestamp("carga_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [
     uniqueIndex("saas_client_file_object_uidx").on(table.objectKey),
     index("saas_client_file_client_idx").on(table.clientId, table.createdAt),
     index("saas_client_file_delete_idx").on(table.deleteAfter),
+    index("saas_client_file_email_idx").on(table.inboundEmailId),
     check("saas_client_file_kind_check", oneOf(table.kind, SAAS_CLIENT_FILE_KINDS)),
     check(
       "saas_client_file_source_check",
@@ -629,6 +683,69 @@ export const saasClientFile = adminSchema.table(
     check(
       "saas_client_file_text_check",
       sql`length(trim(${table.filename})) BETWEEN 1 AND 255 AND ${table.sizeBytes} >= 0`,
+    ),
+    // La carga siempre tiene su día de borrado y la marca es solo de la carga. Sin la
+    // equivalencia «archivo_clinica ⇔ carga_at»: mientras se despliega, el código anterior
+    // registra cargas sin marca.
+    check(
+      "saas_client_file_carga_check",
+      sql`(${table.kind} <> 'archivo_clinica' OR ${table.deleteAfter} IS NOT NULL) AND (${table.cargaAt} IS NULL OR ${table.kind} = 'archivo_clinica')`,
+    ),
+  ],
+)
+
+/**
+ * La primera vez que un cliente alcanzó cada paso del alta (ficha › Alta). La escribe la
+ * pasada de Kairós desde los hechos y no retrocede aunque el hecho cambie después (se borran
+ * las sesiones, cambia la versión del contrato, llega otra invitación), salvo el primer pago
+ * revertido y los datos recibidos que se borraron sin cargar: `lost_at` y `lost_reason`, con
+ * `reached_at` nulo; si se vuelve a alcanzar, toma la fecha nueva y se limpia lo perdido.
+ * «No aplica» (`na_*`, con su motivo) lo marca una persona, solo en equipo, WhatsApp y
+ * pacientes. Lo protege `saas_client_milestone_guard`. Como el resto del ARM, sin `GRANT`.
+ */
+export const saasClientMilestone = adminSchema.table(
+  "saas_client_milestone",
+  {
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => saasClient.id, { onDelete: "cascade" }),
+    step: text("step").notNull(),
+    reachedAt: timestamp("reached_at", { withTimezone: true }),
+    source: text("source"),
+    lostAt: timestamp("lost_at", { withTimezone: true }),
+    lostReason: text("lost_reason"),
+    naReason: text("na_reason"),
+    naBy: text("na_by").references(() => user.id, { onDelete: "set null" }),
+    naAt: timestamp("na_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ name: "saas_client_milestone_pkey", columns: [table.clientId, table.step] }),
+    check("saas_client_milestone_step_check", oneOf(table.step, SAAS_MILESTONE_STEPS)),
+    check(
+      "saas_client_milestone_source_check",
+      sql`(${table.source} IS NULL OR ${oneOf(table.source, SAAS_MILESTONE_SOURCES)})
+        AND (${table.reachedAt} IS NULL OR ${table.source} IS NOT NULL)
+        AND (${table.source} IS DISTINCT FROM 'respaldo' OR ${table.step} = 'archivos')`,
+    ),
+    check(
+      "saas_client_milestone_na_check",
+      sql`(${table.naReason} IS NULL AND ${table.naAt} IS NULL AND ${table.naBy} IS NULL)
+        OR (${table.naReason} IS NOT NULL AND ${table.naAt} IS NOT NULL
+          AND length(trim(${table.naReason})) BETWEEN 1 AND 500
+          AND ${oneOf(table.step, SAAS_MILESTONE_NA_STEPS)})`,
+    ),
+    check(
+      "saas_client_milestone_lost_check",
+      sql`(${table.lostAt} IS NULL AND ${table.lostReason} IS NULL)
+        OR (${table.lostAt} IS NOT NULL AND ${table.reachedAt} IS NULL
+          AND ((${table.lostReason} = 'pago_revertido' AND ${table.step} = 'primer_pago')
+            OR (${table.lostReason} = 'borrados_sin_cargar' AND ${table.step} = 'archivos')))`,
+    ),
+    check(
+      "saas_client_milestone_nonempty_check",
+      sql`${table.reachedAt} IS NOT NULL OR ${table.lostAt} IS NOT NULL OR ${table.naAt} IS NOT NULL`,
     ),
   ],
 )

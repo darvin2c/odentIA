@@ -18,6 +18,7 @@ import {
   LOST_REASON_WORDS,
   purgeDueClientFiles,
   type Storage,
+  taskHiddenFromSupportSql,
   writeAdminAudit,
   writeKairosWeekly,
 } from "@odentia/services"
@@ -28,7 +29,8 @@ import { sql } from "drizzle-orm"
  * minutos corre las reglas sin modelo (`kairosRulesPass`), pide al modelo los
  * borradores que esperan (hasta 20: mensajes, guiones y la respuesta de cada
  * correo nuevo a hola@, contacto@, fundadores@ o a una persona del equipo) y
- * borra los archivos de las clínicas que vencieron. Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
+ * borra la carga de datos (lo que Administración marcó así) a los 30 días de
+ * llegar, con el texto de su correo. Una vez al día, desde las 07:00 de Lima, renueva «Lo que hay que
  * saber» de hasta 30 clientes con algo nuevo y, si la semana aún no lo tiene,
  * escribe el resumen de la semana de Reportes. Nunca envía nada a una
  * clínica: lo que prepara queda en espera del sí de una persona. La hora la
@@ -48,6 +50,8 @@ export interface KairosTickDeps {
   ownerDb: Db
   writer: KairosWriter
   storage: Pick<Storage, "deleteAttachment">
+  /** «Conectar con Facebook» está configurado (`metaSignupConfigured`): sin él, WhatsApp espera a Meta. */
+  metaSignupAvailable?: boolean
   /** La hora de la base; las pruebas la fijan. */
   now?: Date
 }
@@ -72,6 +76,8 @@ export interface KairosTickResult {
   weekly: string | null
   filesDeleted: number
   filesFailed: number
+  /** De cuántos correos de la carga se borró el texto. */
+  textsCleared: number
   /** Lo que falló, en palabras para el registro; nunca corta las demás partes. */
   errors: string[]
 }
@@ -252,11 +258,11 @@ export async function clientSummaryFacts(
       `actividad:${entry.id}`,
     )
   }
-  // Las tareas de cobro no las ve Soporte.
+  // Las tareas solo de Administración (y las de cobro) no las ve Soporte.
   const tasks = await ownerDb.execute<{ id: string; title: string; due_on: string }>(
-    sql`select id, title, due_on::text as due_on from saas_task
-      where client_id = ${client.id}::uuid and status = 'abierta' and kind <> 'cobro'
-      order by due_on limit 3`,
+    sql`select t.id, t.title, t.due_on::text as due_on from saas_task t
+      where t.client_id = ${client.id}::uuid and t.status = 'abierta' and not ${taskHiddenFromSupportSql("t")}
+      order by t.due_on limit 3`,
   )
   for (const task of tasks)
     add(`Tarea abierta: ${task.title}, para el ${summaryDay(task.due_on)}`, `tarea:${task.id}`)
@@ -368,10 +374,13 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     weekly: null,
     filesDeleted: 0,
     filesFailed: 0,
+    textsCleared: 0,
     errors: [],
   }
   try {
-    result.pass = await deps.ownerDb.transaction((tx) => kairosRulesPass(tx, now))
+    result.pass = await deps.ownerDb.transaction((tx) =>
+      kairosRulesPass(tx, now, { metaSignupAvailable: deps.metaSignupAvailable === true }),
+    )
   } catch (error) {
     result.errors.push(`reglas: ${message(error)}`)
   }
@@ -415,6 +424,7 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     const purged = await purgeDueClientFiles(deps.ownerDb, deps.storage, now)
     result.filesDeleted = purged.deleted
     result.filesFailed = purged.failed
+    result.textsCleared = purged.textsCleared
   } catch (error) {
     result.errors.push(`archivos: ${message(error)}`)
   }

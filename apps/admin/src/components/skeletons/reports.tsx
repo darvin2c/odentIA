@@ -7,7 +7,7 @@ import { ControlSkeleton, KpiSkeleton, PageLoading, TextBase, TextSm } from "./p
 
 export const REPORTS_TITLE = "Reportes"
 export const REPORTS_SUBTITLE =
-  "Embudo, ingresos y previsión. Las cifras las pone el cálculo; Kairós solo las cuenta."
+  "Embudo, alta, ingresos y previsión. Las cifras las pone el cálculo; Kairós solo las cuenta."
 
 /** Las pestañas, sin interacción mientras llega. */
 export function ReportsTabsSkeleton() {
@@ -18,6 +18,7 @@ export function ReportsTabsSkeleton() {
       className="flex w-fit max-w-full gap-1 overflow-hidden rounded-3xl bg-muted p-1"
     >
       <span className={`${tab} bg-background shadow-xs`}>Embudo</span>
+      <span className={`${tab} text-muted-foreground`}>Alta</span>
       <span className={`${tab} text-muted-foreground`}>Ingresos</span>
       <span className={`${tab} text-muted-foreground`}>Previsión</span>
     </div>
@@ -56,6 +57,7 @@ export function ReportsBodySkeleton({ kpis }: { kpis: string[] }) {
 }
 
 export const FUNNEL_KPIS = ["Clínicas", "Entraron", "Siguen abiertas", "Perdidas"]
+export const ALTA_KPIS = ["Entraron", "Pagaron", "Días hasta el primer pago", "Donde más se quedan"]
 
 export function ReportsPageSkeleton() {
   return (

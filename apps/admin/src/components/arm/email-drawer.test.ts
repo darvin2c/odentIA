@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
+import { cargaConfirmWords, cargaMarkedWords } from "./client-files-tab"
 import {
   answeredWords,
+  attachmentTypeWords,
   canAttachProposal,
+  emailFileState,
   inboundEmailSchema,
   replyHint,
   replyToWords,
@@ -186,5 +189,56 @@ describe("adjuntar una propuesta al responder", () => {
       to: "soporte@odentia32.com",
     })
     expect(canAttachProposal(toSupport, true, false)).toBe(false)
+  })
+})
+
+describe("los adjuntos del correo y la carga de datos", () => {
+  const file = {
+    fileId: "f1",
+    filename: "pacientes.xlsx",
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    size: 120,
+    kind: "correo" as const,
+    deleteAfter: null,
+    deleted: false,
+    cargaDeleteAfter: "2026-12-12",
+    cargaDueNow: false,
+  }
+
+  it("cada adjunto con uno de tres estados; de un servidor viejo, sin lista", () => {
+    const read = inboundEmailSchema.parse({ ...email, files: [file] })
+    const [only] = read.files
+    if (!only) throw new Error("sin adjunto")
+    expect(attachmentTypeWords(only.contentType)).toBe("Excel")
+    expect(emailFileState(only)).toEqual({ words: "Adjunto de un correo", canMark: true })
+    const carga = { ...only, kind: "archivo_clinica" as const, deleteAfter: "2026-12-12" }
+    expect(emailFileState(carga).canMark).toBe(false)
+    expect(emailFileState(carga).words).toMatch(/^Lo que mandó la clínica · se borra el /)
+    expect(emailFileState({ ...carga, deleted: true })).toEqual({
+      words: "Se borró",
+      canMark: false,
+    })
+    expect(inboundEmailSchema.parse(email).files).toEqual([])
+  })
+
+  it("el diálogo dice el día del servidor, o que se borra al marcarlo", () => {
+    expect(cargaConfirmWords(file)).toMatch(
+      /^pacientes\.xlsx pasa a «Lo que mandó la clínica» y se borra el .+, a los 30 días de llegar/,
+    )
+    expect(cargaConfirmWords({ ...file, cargaDueNow: true })).toContain("se borra al marcarlo")
+    expect(
+      cargaMarkedWords("pacientes.xlsx", {
+        file: { id: "f1", deleteAfter: null },
+        dueNow: true,
+        deletedNow: true,
+      }),
+    ).toBe("pacientes.xlsx se borró: llegó hace más de 30 días")
+    expect(
+      cargaMarkedWords("pacientes.xlsx", {
+        file: { id: "f1", deleteAfter: null },
+        dueNow: true,
+        deletedNow: false,
+      }),
+    ).toContain("se borra en los próximos minutos")
   })
 })

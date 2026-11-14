@@ -1,8 +1,10 @@
 /**
  * Semilla manual del ARM de la administración (ADR 0185): clientes en cada
  * etapa, sus personas, tareas, propuestas, envíos, correos que llegan, un
- * documento, lo que cargó la skill (con un informe que no se sabe si salió) y
- * lo que prepara Kairós, para recorrer Hoy, Clientes, Embudo, Kairós y
+ * documento, lo que cargó la skill (con un informe que no se sabe si salió),
+ * el alta de cada clínica (ADR 0187: una posible carga por correo, la carga
+ * con errores, una carga por borrarse y un «No aplica») y lo que prepara
+ * Kairós, para recorrer Hoy, Clientes, Embudo (Venta y Alta), Kairós y
  * Reportes en local.
  *
  * Solo manual (seed-dev la llama al final, cuando ya existen las cuentas de la
@@ -12,8 +14,10 @@
  * cambios directos mueven fechas (para que la historia tenga días distintos),
  * anotan la carga de la configuración como la deja la skill en el servidor
  * (sin correr la carga entera), marcan la propuesta «por aprobar» (hoy solo Administración arma
- * propuestas, así que no se llega a ese estado por la operación) y escriben
- * «Lo que hay que saber» como lo guarda el worker de Kairós.
+ * propuestas, así que no se llega a ese estado por la operación), escriben
+ * «Lo que hay que saber» como lo guarda el worker de Kairós y arman la cuenta
+ * de «Demo Datos» (su propietaria, su contrato y el primer paso de su alta
+ * como lo dejó el relleno al desplegar).
  *
  * Idempotente: cada cliente se reconoce por el correo de su persona y su
  * historia se siembra una sola vez; al volver a correrla solo se mueven las
@@ -22,6 +26,7 @@
  * «(ficticio)»; correos `@example.test`. No envía correos ni mensajes: lo que
  * figura «enviado» es parte del ejemplo.
  */
+import { AGREEMENT_VERSION } from "@odentia/auth/legal"
 import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -30,17 +35,25 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasClientMilestone,
+  saasInboundEmail,
   saasOpportunity,
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
-import { organization, user } from "@odentia/db/schema/auth"
-import { saasFollowUp, saasPlan } from "@odentia/db/schema/saas-billing"
+import { member, organization, user } from "@odentia/db/schema/auth"
+import { saasFollowUp, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, like, ne, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
-import { clientFileKey, registerClientFile } from "./admin-client-files.js"
+import {
+  clientFileKey,
+  inboundAttachmentKey,
+  markClientFileCarga,
+  registerClientFile,
+} from "./admin-client-files.js"
 import {
   addClientContact,
   createClient,
@@ -63,6 +76,7 @@ import {
   type KairosWeeklyWriter,
   writeKairosWeekly,
 } from "./admin-kairos-drafts.js"
+import { markStepNotApplicable, readMilestones } from "./admin-onboarding.js"
 import {
   addActivity,
   completeClientTask,
@@ -89,6 +103,7 @@ import { limaDate } from "./peru-business-days.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID } from "./seed-admin-core.js"
+import { ensureFinishedSignupOrg } from "./seed-saas-billing.js"
 import type { Storage } from "./storage.js"
 
 const DAY = 86_400_000
@@ -324,6 +339,12 @@ const GOAL_WORDS: Record<string, string> = {
   pedir_archivos:
     "para cargar tus datos nos faltan los archivos que pedimos en la carta de bienvenida.",
   recordar_equipo: "parte de tu equipo aún no aceptó su invitación. ¿Les reenvío el enlace?",
+  recordar_propietaria:
+    "tu invitación para entrar a tu cuenta sigue esperando. Si el correo no te llegó, dime y te la reenvío.",
+  pedir_archivos_otra_vez:
+    "los archivos para cargar tus datos se borraron sin cargarse, como prometemos a los 30 días. ¿Nos los vuelves a enviar?",
+  alta_sin_avanzar:
+    "queda un paso de tu lado para terminar de poner en marcha tu cuenta. ¿Te ayudo?",
 }
 
 /**
@@ -389,6 +410,7 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
+    markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
   }
 }
 
@@ -1120,6 +1142,7 @@ export async function seedAdminArm(
 
   /* --- Documentos y lo que cargó la skill --- */
   await seedOnboardingFiles(tx, clock, storage, { prueba, deuda })
+  if (await seedAlta(tx, clock, storage, { prueba, cobrada })) clients += 1
 
   /* --- Kairós: su pasada, sus borradores, lo que ya se decidió, sus resúmenes y la semana --- */
   const pass = await kairosRulesPass(tx, now)
@@ -1308,7 +1331,8 @@ async function seedAccountPeople(
  * servidor: la configuración cargada por Ada hace 3 días y el informe N.º 1,
  * que se intentó ayer y no se sabe si salió (con su PDF y su correo
  * guardados, para «Revisé en Zoho: salió» o «No salió: reenviar»). Kairós
- * pone la tarea urgente de revisarlo en Hoy.
+ * pone la tarea urgente de revisarlo en Hoy. La configuración trae 3 que no
+ * entraron: Kairós pide «Revisar los 3 que no entraron» a Ada, que la cargó.
  */
 async function seedOnboardingFiles(
   tx: Db,
@@ -1367,12 +1391,32 @@ async function seedClinicLoad(
     await writeAdminAudit(tx, ADA, {
       action: "org.setup_import",
       organizationId: orgId,
-      metadata: { planSha256: "0".repeat(64), nueva: 20, cambia: 2, igual: 7, invitations: 0 },
+      metadata: {
+        planSha256: "0".repeat(64),
+        nueva: 20,
+        cambia: 2,
+        igual: 7,
+        error: 3,
+        invitations: 0,
+      },
     })
     await tx
       .update(adminAudit)
       .set({ createdAt: clock.ago(3) })
       .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, "org.setup_import")))
+  } else {
+    // Una base sembrada antes de que la carga dijera sus errores: los recibe una vez.
+    await tx
+      .update(adminAudit)
+      .set({
+        metadata: sql`coalesce(${adminAudit.metadata}, '{}'::jsonb) || '{"error": 3}'::jsonb`,
+      })
+      .where(
+        and(
+          eq(adminAudit.id, loaded.id),
+          sql`not (coalesce(${adminAudit.metadata}, '{}'::jsonb) ? 'error')`,
+        ),
+      )
   }
   if ((await listProgressReports(tx, orgId)).some((report) => report.number === 1)) return
   const [client] = await tx
@@ -1408,6 +1452,232 @@ async function seedClinicLoad(
     .update(adminAudit)
     .set({ createdAt: clock.ago(1) })
     .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.entityId, "informe-1")))
+}
+
+/* ---------- El alta (ADR 0187) ---------- */
+
+/** La cuenta ficticia que espera su carga de datos, y su propietaria. */
+const DATOS_ORG = "seed-alta-datos"
+const DATOS_OWNER = "seed-alta-datos-duena"
+const DATOS_OWNER_EMAIL = "duena.datos@example.test"
+
+/** Un CSV de pacientes ficticio: lo justo para que el adjunto se abra. */
+function fictitiousCsv(clinic: string): Uint8Array {
+  return new TextEncoder().encode(
+    `nombre,telefono,clinica\nPaciente Uno (ficticio),+51900000001,${clinic}\nPaciente Dos (ficticia),+51900000002,${clinic}\n`,
+  )
+}
+
+/**
+ * Un correo a soporte@ con un CSV, registrado como lo deja la ruta firmada (sin
+ * verificar el remitente) y ligado a su cliente por Ada. Devuelve el id del
+ * adjunto en Documentos; null si el correo ya estaba.
+ */
+async function supportEmailWithCsv(
+  tx: Db,
+  clock: Clock,
+  put: NonNullable<Storage["putAttachmentAt"]>,
+  email: {
+    messageId: string
+    clientId: string
+    from: string
+    fromName: string
+    subject: string
+    text: string
+    filename: string
+    clinic: string
+    receivedAt: Date
+  },
+): Promise<string | null> {
+  const [known] = await tx
+    .select({ id: saasInboundEmail.id })
+    .from(saasInboundEmail)
+    .where(eq(saasInboundEmail.messageId, email.messageId))
+    .limit(1)
+  if (known) return null
+  const bytes = fictitiousCsv(email.clinic)
+  const fileKey = inboundAttachmentKey("csv")
+  await put(fileKey, bytes, "text/csv")
+  const received = await ingestInboundEmail(
+    tx,
+    {
+      mailbox: "soporte",
+      product: "dental",
+      messageId: email.messageId,
+      from: email.from,
+      fromName: email.fromName,
+      to: `soporte@${productMailDomain("dental")}`,
+      subject: email.subject,
+      text: email.text,
+      receivedAt: email.receivedAt,
+      attachments: [
+        { filename: email.filename, contentType: "text/csv", size: bytes.byteLength, fileKey },
+      ],
+    },
+    clock.now,
+  )
+  if (received.duplicate) return null
+  const assigned = await assignInboundEmail(tx, ADA, received.id, email.clientId, clock.now)
+  return assigned.fileIds[0] ?? null
+}
+
+/**
+ * El alta en la demo (ADR 0187), una sola vez cada cosa:
+ * - Demo Prueba: Inés manda a soporte@, hace 3 días, un CSV que puede ser la
+ *   carga; Kairós deja «¿Es la carga de datos?» primero en Hoy de Ada. Su
+ *   propietaria sigue sin aceptar la invitación (`seed-admin-organizations`):
+ *   está en Bienvenida.
+ * - Demo Datos (ficticia), una cuenta nueva: su propietaria entró hace 27 días,
+ *   aceptó el contrato y recibió la carta; hace 26 días mandó sus datos y Ada
+ *   los marcó como la carga, sin cargarlos. Se borran en 4 días: la urgente
+ *   «Cargar los datos de…: se borran en 4 días» y la tarjeta trabada en «Sus
+ *   datos». Su primer paso guardado es de cuando entró, como lo deja el relleno
+ *   al desplegar (si no, la cuenta recién se vigilaría hoy y no estaría trabada).
+ * - Demo Cobrada: «No aplica: Trabaja sola» en Equipo, puesto por Ada.
+ * Los demás pasos los guarda la pasada de Kairós desde los hechos. Devuelve si
+ * creó la cuenta de Demo Datos. Sin `putAttachmentAt` no hay adjuntos: solo el
+ * «No aplica».
+ */
+async function seedAlta(
+  tx: Db,
+  clock: Clock,
+  storage: Pick<Storage, "putAttachmentAt">,
+  ids: { prueba: string; cobrada: string },
+): Promise<boolean> {
+  const cobradaSteps = await readMilestones(tx, ids.cobrada)
+  if (!cobradaSteps.get("equipo")?.naReason)
+    await markStepNotApplicable(tx, ADA, ids.cobrada, "equipo", "Trabaja sola", clock.ago(2))
+
+  const put = storage.putAttachmentAt?.bind(storage)
+  if (!put) return false
+  await supportEmailWithCsv(tx, clock, put, {
+    messageId: "<seed-alta-prueba-carga@example.test>",
+    clientId: ids.prueba,
+    from: "ines.prueba@example.test",
+    fromName: "Inés Vargas (ficticia)",
+    subject: "Les mando mis pacientes",
+    text: "Hola, adjunto la lista de pacientes que tenemos en Excel. (ejemplo ficticio)",
+    filename: "pacientes-ficticios.csv",
+    clinic: "Demo Prueba",
+    receivedAt: clock.ago(3, 2),
+  })
+
+  const [exists] = await tx
+    .select({ id: organization.id })
+    .from(organization)
+    .where(eq(organization.id, DATOS_ORG))
+    .limit(1)
+  const entered = clock.ago(27)
+  if (!exists) {
+    await ensureFinishedSignupOrg(tx, {
+      id: DATOS_ORG,
+      name: "Demo Datos (ficticia)",
+      slug: "saas-demo-datos",
+      branches: ["Sede Principal"],
+    })
+    await tx.update(organization).set({ createdAt: entered }).where(eq(organization.id, DATOS_ORG))
+    // La prueba la abrió el disparador al crear la cuenta: empieza cuando entró, con su duración.
+    const [trial] = await tx
+      .select({ startedAt: saasSubscription.trialStartedAt, endsAt: saasSubscription.trialEndsAt })
+      .from(saasSubscription)
+      .where(eq(saasSubscription.organizationId, DATOS_ORG))
+      .limit(1)
+    if (trial?.startedAt && trial.endsAt) {
+      const ends = new Date(entered.getTime() + trial.endsAt.getTime() - trial.startedAt.getTime())
+      await tx
+        .update(saasSubscription)
+        .set({
+          trialStartedAt: entered,
+          trialEndsAt: ends,
+          currentPeriodStart: entered,
+          currentPeriodEnd: ends,
+        })
+        .where(eq(saasSubscription.organizationId, DATOS_ORG))
+    }
+  }
+  await tx
+    .insert(user)
+    .values({ id: DATOS_OWNER, name: "Teresa Paredes (ficticia)", email: DATOS_OWNER_EMAIL })
+    .onConflictDoNothing({ target: user.id })
+  await tx
+    .insert(member)
+    .values({
+      id: `${DATOS_ORG}-teresa`,
+      organizationId: DATOS_ORG,
+      userId: DATOS_OWNER,
+      role: "owner",
+      createdAt: entered,
+    })
+    .onConflictDoNothing()
+  await tx
+    .insert(processingAgreementAcceptance)
+    .values({
+      organizationId: DATOS_ORG,
+      version: AGREEMENT_VERSION,
+      acceptedBy: DATOS_OWNER,
+      acceptedAt: entered,
+    })
+    .onConflictDoNothing()
+  const clientId = await linkClientToOrganization(tx, ADA, {
+    organizationId: DATOS_ORG,
+    origin: "web",
+    now: entered,
+  })
+  if (!clientId) throw new Error("Demo Datos no puede ser una demo para presentar")
+  await tx
+    .insert(saasClientMilestone)
+    .values({
+      clientId,
+      step: "entro",
+      reachedAt: entered,
+      source: "hecho",
+      createdAt: entered,
+      updatedAt: entered,
+    })
+    .onConflictDoNothing()
+
+  const [letter] = await tx
+    .select({ id: saasClientFile.id })
+    .from(saasClientFile)
+    .where(and(eq(saasClientFile.clientId, clientId), eq(saasClientFile.kind, "carta")))
+    .limit(1)
+  if (!letter) {
+    const bytes = await onePagePdf("Carta de bienvenida (ficticia) - Demo Datos")
+    const objectKey = clientFileKey(clientId, "pdf")
+    await put(objectKey, bytes, "application/pdf")
+    const file = await registerClientFile(
+      tx,
+      ADA,
+      {
+        clientId,
+        kind: "carta",
+        filename: "carta-de-bienvenida-demo-datos.pdf",
+        objectKey,
+        contentType: "application/pdf",
+        sizeBytes: bytes.byteLength,
+        adminOnly: false,
+      },
+      clock.now,
+    )
+    await tx
+      .update(saasClientFile)
+      .set({ createdAt: entered })
+      .where(eq(saasClientFile.id, file.id))
+  }
+  const fileId = await supportEmailWithCsv(tx, clock, put, {
+    messageId: "<seed-alta-datos-carga@example.test>",
+    clientId,
+    from: DATOS_OWNER_EMAIL,
+    fromName: "Teresa Paredes (ficticia)",
+    subject: "Nuestros datos para la carga",
+    text: "Adjunto los pacientes y la agenda, como dice la carta. (ejemplo ficticio)",
+    filename: "pacientes-demo-datos.csv",
+    clinic: "Demo Datos",
+    receivedAt: clock.ago(26),
+  })
+  // Ada lo marcó como la carga al día siguiente: los 30 días cuentan desde que llegó.
+  if (fileId) await markClientFileCarga(tx, ADA, fileId, clock.ago(25))
+  return !exists
 }
 
 /**

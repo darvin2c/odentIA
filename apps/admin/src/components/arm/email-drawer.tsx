@@ -1,6 +1,8 @@
 /**
  * Un correo que llegó (`GET /api/admin/clients/inbound/:emailId`): lo que dice,
- * cuántos adjuntos trae (se leen en Documentos; aquí nunca se abren) y lo que
+ * cuántos adjuntos trae (se leen en Documentos; aquí nunca se abren) y, para
+ * Administración, cada uno con su estado y «Es la carga de datos» (el mismo
+ * diálogo de Documentos, `useMarkCarga`); y lo que
  * ya se le respondió, con «Responder» cuando quien mira puede (Soporte, solo
  * lo de soporte@: lo demás ni lo ve). Responder es el mismo envío de
  * «Escribir»: «Para» el remitente, «Desde» quien firma (lo dice el servidor),
@@ -32,6 +34,7 @@ import { api } from "../../lib/api"
 import { useIsAdmin } from "../../lib/session"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import { deleteOnWords, useMarkCarga } from "./client-files-tab"
 import { FORMAT_HINT, FormatTools, FormattedText } from "./formatted-body"
 import { invalidateArm } from "./hoy-links"
 import { ReplyFiles } from "./reply-files"
@@ -75,8 +78,55 @@ export const inboundEmailSchema = z.object({
   replySignature: z.string().nullable().default(null),
   replySubject: z.string().default(""),
   replies: z.array(replySchema),
+  /** Sus adjuntos uno por uno, solo para Administración (Soporte recibe la lista vacía). */
+  files: z
+    .array(
+      z.object({
+        fileId: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        kind: z.enum(["correo", "archivo_clinica"]),
+        deleteAfter: z.string().nullable(),
+        deleted: z.boolean(),
+        cargaDeleteAfter: z.string().nullable().default(null),
+        cargaDueNow: z.boolean().default(false),
+      }),
+    )
+    .default([]),
 })
 export type InboundEmail = z.infer<typeof inboundEmailSchema>
+export type InboundEmailFile = InboundEmail["files"][number]
+
+/** El tipo de un adjunto en palabras («Excel», «PDF»…). */
+export function attachmentTypeWords(contentType: string): string {
+  const type = contentType.trim().toLowerCase()
+  if (type === "application/pdf") return "PDF"
+  if (type.startsWith("image/")) return "Imagen"
+  if (type === "text/csv") return "CSV"
+  if (type.includes("spreadsheetml")) return "Excel"
+  if (type.includes("wordprocessingml")) return "Word"
+  return "Archivo"
+}
+
+/**
+ * Uno de los tres estados de un adjunto: sin marcar («Adjunto de un correo»,
+ * que se puede marcar), la carga (con el día en que se borra) o ya borrado.
+ */
+export function emailFileState(file: InboundEmailFile): {
+  words: string
+  canMark: boolean
+} {
+  if (file.deleted) return { words: "Se borró", canMark: false }
+  if (file.kind === "archivo_clinica")
+    return {
+      words: file.deleteAfter
+        ? `Lo que mandó la clínica · ${deleteOnWords(file.deleteAfter)}`
+        : "Lo que mandó la clínica",
+      canMark: false,
+    }
+  return { words: "Adjunto de un correo", canMark: true }
+}
 
 /** La clave del correo; toda respuesta o «¿Salió?» la refresca. */
 export const inboundEmailKey = (emailId: string) => ["admin", "correo", emailId] as const
@@ -272,8 +322,11 @@ function EmailSurface({
   )
 }
 
-/** Lo que dice el correo, sus adjuntos contados y lo que ya se le respondió. */
+/** Lo que dice el correo, sus adjuntos y lo que ya se le respondió. */
 function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: () => void }) {
+  const isAdmin = useIsAdmin()
+  const carga = useMarkCarga(email.clientId, onResolved)
+  const listed = isAdmin && email.files.length > 0
   return (
     <div className="flex flex-col gap-5">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
@@ -299,15 +352,56 @@ function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: 
             El texto de este correo se borró a los 30 días de llegar.
           </p>
         )}
-        {email.attachments > 0 ? (
+        {listed ? (
+          <ul aria-label="Adjuntos" className="flex flex-col gap-2">
+            {email.files.map((file) => {
+              const state = emailFileState(file)
+              return (
+                <li
+                  key={file.fileId}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border p-3 text-sm"
+                >
+                  <Paperclip aria-hidden className="size-4 text-muted-foreground" />
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="font-medium [overflow-wrap:anywhere]">{file.filename}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {attachmentTypeWords(file.contentType)} · {state.words}
+                    </p>
+                  </div>
+                  {state.canMark ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        carga.ask({
+                          fileId: file.fileId,
+                          filename: file.filename,
+                          cargaDeleteAfter: file.cargaDeleteAfter,
+                          cargaDueNow: file.cargaDueNow,
+                        })
+                      }
+                    >
+                      Es la carga de datos
+                    </Button>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        ) : email.attachments > 0 ? (
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Paperclip aria-hidden className="size-4" />
             {email.attachments === 1 ? "1 adjunto" : `${email.attachments} adjuntos`}
             {email.clientId
               ? ": están en Documentos de su ficha."
               : ": se guardan al ligarlo a un cliente."}
+            {isAdmin && !email.clientId
+              ? " Para marcar la carga, primero dile de qué cliente es."
+              : ""}
           </p>
         ) : null}
+        {carga.dialog}
         {email.notice ? (
           <PageNotice tone="aviso" label="Adjuntos que no entraron">
             {email.notice}

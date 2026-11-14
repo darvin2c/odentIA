@@ -1239,6 +1239,29 @@ export async function getConnectionSetup(
   }
 }
 
+/**
+ * Las variables sin las que «Conectar con Facebook» de WhatsApp no existe. Una sola lista para la
+ * API, que arma el botón (`metaSignupFromEnv`), y para el worker, que solo necesita saber si está
+ * (el paso de WhatsApp del alta dice «Espera a Meta» sin ellas).
+ */
+export const META_SIGNUP_ENV = [
+  "META_APP_ID",
+  "META_APP_SECRET",
+  "META_LOGIN_CONFIG_ID",
+  "META_WEBHOOK_VERIFY_TOKEN",
+] as const
+export type MetaSignupEnv = Record<(typeof META_SIGNUP_ENV)[number], string>
+
+/** Las variables de «Conectar con Facebook» que faltan (vacías o solo espacios). */
+export function metaSignupMissing(env: Partial<Record<keyof MetaSignupEnv, string | undefined>>): string[] {
+  return META_SIGNUP_ENV.filter((name) => !env[name]?.trim())
+}
+
+/** «Conectar con Facebook» está configurado: están las cuatro variables. */
+export function metaSignupConfigured(env: Partial<Record<keyof MetaSignupEnv, string | undefined>>): boolean {
+  return metaSignupMissing(env).length === 0
+}
+
 /** Anota que el proveedor verificó la dirección de avisos (el reto de Meta). */
 export async function markWebhookVerified(tx: Db, orgId: string, id: string): Promise<void> {
   await tx

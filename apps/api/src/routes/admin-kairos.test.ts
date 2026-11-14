@@ -8,6 +8,7 @@ import {
   kairosWeekly,
   saasClient,
   saasClientContact,
+  saasClientFile,
   saasOpportunity,
   saasOutreach,
 } from "@odentia/db/schema/admin-arm"
@@ -368,6 +369,49 @@ describe("lo que espera un sí", () => {
     const res = await post(`/items/${ids.admin}/decide`, ADMIN, { action: "descartar" })
     expect(res.status).toBe(200)
     expect((await read(res)).data).toMatchObject({ status: "descartada", outreach: null })
+  })
+
+  it("una posible carga de datos: Soporte no la decide (no la ve); el sí de Administración la marca con la operación de Documentos", async () => {
+    const { clientId } = await client("carga", { email: "carga@kairos-ruta.test" })
+    const [file] = await ownerDb
+      .insert(saasClientFile)
+      .values({
+        clientId,
+        kind: "correo",
+        filename: "pacientes.xlsx",
+        objectKey: `clients/${clientId}/kr-pacientes.xlsx`,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        sizeBytes: 10,
+        receivedAt: new Date(Date.now() - 3 * 24 * HOUR),
+      })
+      .returning({ id: saasClientFile.id })
+    const [item] = await ownerDb
+      .insert(kairosItem)
+      .values({
+        clientId,
+        kind: "posible_carga",
+        title: "¿Es la carga de datos? pacientes.xlsx",
+        reason: "Llegó por correo",
+        payload: { fileId: file?.id },
+        expectedState: { file: { kind: "correo", deleted: false } },
+        idempotencyKey: "prueba:posible-carga",
+        expiresAt: new Date(Date.now() + 48 * HOUR),
+        adminOnly: true,
+      })
+      .returning({ id: kairosItem.id })
+    const hidden = await post(`/items/${item?.id}/decide`, SUPPORT, { action: "aprobar" })
+    expect(hidden.status).toBe(404)
+    const res = await post(`/items/${item?.id}/decide`, ADMIN, { action: "aprobar" })
+    expect(res.status).toBe(200)
+    expect((await read(res)).data).toMatchObject({
+      status: "ejecutada",
+      result: { fileId: file?.id, dueNow: false },
+    })
+    const [marked] = await ownerDb
+      .select({ kind: saasClientFile.kind })
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, file?.id as string))
+    expect(marked?.kind).toBe("archivo_clinica")
   })
 
   it("descartar no envía nada y pasa a lo ya decidido", async () => {

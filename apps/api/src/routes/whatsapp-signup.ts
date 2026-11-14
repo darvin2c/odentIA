@@ -3,6 +3,9 @@ import { withOrgContext } from "@odentia/db"
 import {
   assertSingleWhatsApp,
   closeWhatsAppSignup,
+  META_SIGNUP_ENV,
+  type MetaSignupEnv,
+  metaSignupMissing,
   openWhatsAppSignup,
   pendingSignupWork,
   redeemWhatsAppSignup,
@@ -28,24 +31,12 @@ export interface MetaSignupConfig extends MetaPlatformApp {
  * variables. Con alguna de menos no hay botón y nada más cambia; se dice cuáles
  * faltan para que una instalación a medias no pase por «apagado a propósito».
  */
-export function metaSignupFromEnv(env: {
-  META_APP_ID: string
-  META_APP_SECRET: string
-  META_LOGIN_CONFIG_ID: string
-  META_WEBHOOK_VERIFY_TOKEN: string
-  META_GRAPH_VERSION: string
-}): MetaSignupConfig | undefined {
-  const required = {
-    META_APP_ID: env.META_APP_ID,
-    META_APP_SECRET: env.META_APP_SECRET,
-    META_LOGIN_CONFIG_ID: env.META_LOGIN_CONFIG_ID,
-    META_WEBHOOK_VERIFY_TOKEN: env.META_WEBHOOK_VERIFY_TOKEN,
-  }
-  const missing = Object.entries(required)
-    .filter(([, value]) => !value.trim())
-    .map(([name]) => name)
+export function metaSignupFromEnv(
+  env: MetaSignupEnv & { META_GRAPH_VERSION: string },
+): MetaSignupConfig | undefined {
+  const missing = metaSignupMissing(env)
   if (missing.length > 0) {
-    if (missing.length < Object.keys(required).length) {
+    if (missing.length < META_SIGNUP_ENV.length) {
       console.warn(
         `«Conectar con Facebook» de WhatsApp queda apagado: faltan ${missing.join(", ")}. La conexión a mano sigue igual.`,
       )
