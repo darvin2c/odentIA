@@ -89,6 +89,18 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).toContain("¿Quién le cepilla los dientes?")
   })
 
+  it("sin representante, el paso de quien lo cuida le habla a ella, con el nombre del niño", () => {
+    declareProduct(bareProduct("dental"))
+    const fill = { missing: new Set<string>(["birthDate"]), health: true, hasRepresentative: false, firstName: "Thiago", respondentFirstName: "Carla" }
+    const child = page({ fill: { ...fill, age: 6 } }).replace(/<[^>]+>/g, "|")
+    expect(child).toContain("Thiago es menor de edad: déjanos tus datos, que respondes por Thiago.")
+    expect(child).not.toContain("Eres menor de edad")
+    expect(child).not.toContain("Tu madre, padre o tutor")
+    // Un adolescente que abre su propio enlace sigue leyéndolo para él (de 12 a 17, fuera de esta entrega).
+    const teen = page({ fill: { ...fill, age: 15, respondentFirstName: null } })
+    expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
+  })
+
   it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(8)

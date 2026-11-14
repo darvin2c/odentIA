@@ -1315,10 +1315,14 @@ export function RegistrationQuestionnaire({
           grouped
           required
           disabled={fill ? !(repInFill && minor) : !forOther}
-          title={fill ? "Tu madre, padre o tutor" : "Ahora tus datos"}
+          // En «Su enlace» de un niño lo llena quien lo cuida: se le habla a ella, con el nombre del niño. Quién
+          // queda como representante no cambia: lo registra la clínica con su documento.
+          title={fill ? (child ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
           description={
             fill
-              ? "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
+              ? child
+                ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
+                : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
               : `Quedas como quien habla por ${name} con la clínica.`
           }
           check={() =>
