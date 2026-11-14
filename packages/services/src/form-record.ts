@@ -52,6 +52,8 @@ export interface FormRecord {
   encounterId: string | null
   /** Lo llenó el equipo o lo respondió la persona (o quien la representa) y el equipo lo revisó. */
   source: "staff" | "portal"
+  /** Por dónde llegó lo que envió la persona: su enlace o el portal. null en lo del equipo o si no quedó guardado. */
+  via: "enlace" | "portal" | null
   /** Quién lo llenó: quien lo empezó en la clínica, o la persona que lo respondió. */
   filledBy: string | null
   /** Quien lo respondió es el propio paciente; null si lo llenó el equipo o no se sabe quién. */
@@ -63,17 +65,27 @@ export interface FormRecord {
   /** Cuándo lo envió la persona, si lo respondió ella. */
   submittedAt: Date | null
   finalizedAt: Date
-  /** Quién lo finalizó; null mientras la respuesta no lo guarde (ver `loadFormRecords`). */
+  /** Quién lo finalizó: en lo que envió la persona, quien lo revisó. null si no quedó guardado (lo de antes). */
   finalizedBy: string | null
-  /** «Lo llenó Ana Torres», «Lo respondió Marta Ríos (paciente)»: quién lo llenó, dicho igual en todas partes. */
-  filledWords: string
+  /**
+   * Quién lo llenó y, si fue otra persona, quién lo cerró, sin fechas: «Lo llenó Ana
+   * Torres», «Lo respondió Marta Ríos (paciente) · lo revisó Ana Torres». Es la frase
+   * de la Historia, que ya dice el día.
+   */
+  whoWords: string
   /**
    * Quién lo llenó y cuándo se finalizó, en una frase con las fechas de la clínica:
    * la misma en la copia, en la atención firmada y en el texto de FHIR.
    */
   byWords: string
   sections: FormRecordSection[]
+  /**
+   * Lo que el equipo agregó sin cambiar las respuestas, en orden. En lo que envió la
+   * persona puede ser anterior a la revisión: lo que escribió no se edita ni antes.
+   */
   addenda: Array<{ id: string; text: string; authorName: string | null; createdAt: Date }>
+  /** Cómo se llaman: «Correcciones» en lo que envió la persona, «Adendas» en lo del equipo. */
+  addendaTitle: "Adendas" | "Correcciones"
   /** Lo respondido en una línea, para verlo sin abrirlo. */
   summary: string
 }
@@ -152,7 +164,7 @@ function answerOf(
   }
 }
 
-type FormHead = Omit<FormRecord, "filledWords" | "byWords" | "summary" | "sections" | "addenda">
+type FormHead = Omit<FormRecord, "whoWords" | "byWords" | "summary" | "sections" | "addenda" | "addendaTitle">
 
 /**
  * Quién lo llenó: alguien del equipo, o la persona que lo respondió, que puede ser
@@ -166,16 +178,35 @@ function filledWordsOf(form: FormHead): string {
   return `Lo respondió ${form.filledBy ?? "la persona"}${role}`
 }
 
-/** «Lo llenó Ana Torres · finalizado el 13 de noviembre de 2026, 15:02». */
+/**
+ * Quién lo cerró: lo que envió la persona lo revisa el equipo; lo del equipo se
+ * finaliza. Sin quién (lo de antes de guardarlo) no se afirma un nombre.
+ */
+function closedWordsOf(form: FormHead): string {
+  if (form.source === "portal") return form.finalizedBy ? `lo revisó ${form.finalizedBy}` : "el equipo lo revisó"
+  return form.finalizedBy ? `lo finalizó ${form.finalizedBy}` : "finalizado"
+}
+
+/** Quién lo llenó y quién lo cerró, sin fechas. En lo del equipo, quien lo finalizó solo si fue otra persona. */
+function whoWordsOf(form: FormHead): string {
+  const sameHand = form.source !== "portal" && (!form.finalizedBy || form.finalizedBy === form.filledBy)
+  return sameHand ? filledWordsOf(form) : `${filledWordsOf(form)} · ${closedWordsOf(form)}`
+}
+
+/**
+ * «Lo llenó Ana Torres · lo finalizó Ana Torres el 13 de noviembre de 2026, 15:02»,
+ * «Lo respondió Marta Ríos (paciente) desde su enlace el … · lo revisó Ana Torres el …».
+ */
 function byWordsOf(form: FormHead, zone: Zone): string {
-  const finalized = `el ${dayTimeWords(form.finalizedAt, zone)}${form.finalizedBy ? ` por ${form.finalizedBy}` : ""}`
+  const closed = `${closedWordsOf(form)} el ${dayTimeWords(form.finalizedAt, zone)}`
   if (form.source === "portal") {
+    const via = form.via === "enlace" ? " desde su enlace" : form.via === "portal" ? " desde el portal" : ""
     const sent = form.submittedAt ? ` el ${dayTimeWords(form.submittedAt, zone)}` : ""
-    return `${filledWordsOf(form)}${sent} · el equipo lo revisó y lo finalizó ${finalized}`
+    return `${filledWordsOf(form)}${via}${sent} · ${closed}`
   }
   const charge =
     form.professionalName && form.professionalName !== form.filledBy ? ` · a cargo de ${form.professionalName}` : ""
-  return `${filledWordsOf(form)}${charge} · finalizado ${finalized}`
+  return `${filledWordsOf(form)}${charge} · ${closed}`
 }
 
 /** Lo que cabe en una línea de la Historia. */
@@ -219,16 +250,19 @@ export async function loadFormRecords(
   if (scope.encounterIds?.length === 0 || scope.ids?.length === 0) return []
   const author = alias(user, "form_author")
   const professional = alias(user, "form_professional")
+  const finalizer = alias(user, "form_finalizer")
   const rows = await tx
     .select({
       row: clinicalFormResponse,
       authorName: author.name,
       professionalName: professional.name,
+      finalizerName: finalizer.name,
       respondentName: contact.displayName,
     })
     .from(clinicalFormResponse)
     .leftJoin(author, eq(author.id, clinicalFormResponse.authorUserId))
     .leftJoin(professional, eq(professional.id, clinicalFormResponse.professionalUserId))
+    .leftJoin(finalizer, eq(finalizer.id, clinicalFormResponse.finalizedBy))
     .leftJoin(
       contact,
       and(eq(contact.id, clinicalFormResponse.respondentContactId), eq(contact.organizationId, orgId)),
@@ -290,7 +324,7 @@ export async function loadFormRecords(
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
-  return rows.map(({ row, authorName, professionalName, respondentName }) => {
+  return rows.map(({ row, authorName, professionalName, finalizerName, respondentName }) => {
     const answers = (row.answers ?? {}) as Record<string, unknown>
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({
@@ -309,12 +343,15 @@ export async function loadFormRecords(
       }))
       .filter((section) => section.items.length > 0)
     const fromPerson = row.source === "portal"
+    const via: FormRecord["via"] =
+      fromPerson && (row.submittedVia === "enlace" || row.submittedVia === "portal") ? row.submittedVia : null
     const head = {
       id: row.id,
       title: row.templateTitle ?? "Formulario clínico",
       version: row.templateVersion,
       encounterId: row.encounterId,
       source: fromPerson ? ("portal" as const) : ("staff" as const),
+      via,
       filledBy: fromPerson ? respondentName : authorName,
       filledByPatient: fromPerson && row.respondentContactId ? row.respondentContactId === self?.personId : null,
       respondentContactId: fromPerson ? row.respondentContactId : null,
@@ -322,19 +359,17 @@ export async function loadFormRecords(
       submittedAt: row.submittedAt,
       // Un finalizado siempre tiene su hora; la de creación solo cubre una fila antigua sin ella.
       finalizedAt: row.finalizedAt ?? row.createdAt,
-      // Quién lo finalizó: la respuesta todavía no lo guarda (solo consta en la auditoría).
-      // Cuando tenga su columna se lee aquí, con otro `leftJoin` a `user` como `authorName`;
-      // la copia, la atención firmada y la Historia ya lo dicen cuando viene.
-      finalizedBy: null,
+      finalizedBy: finalizerName,
     }
     return {
       ...head,
-      filledWords: filledWordsOf(head),
+      whoWords: whoWordsOf(head),
       byWords: byWordsOf(head, zone),
       sections,
       addenda: addenda
         .filter((addendum) => addendum.responseId === row.id)
         .map(({ id, text, authorName: addendumAuthor, createdAt }) => ({ id, text, authorName: addendumAuthor, createdAt })),
+      addendaTitle: fromPerson ? ("Correcciones" as const) : ("Adendas" as const),
       summary: summaryOf(sections),
     }
   })

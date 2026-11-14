@@ -131,6 +131,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     source: "portal",
     respondentContactId: f.patient.personId,
     submittedAt: new Date(),
+    submittedVia: "enlace",
   }
   await ownerDb.insert(clinicalFormResponse).values({ ...declaredRow, answers: { motivo: "Respuesta que nadie revisó" } })
   // El que sí se revisó y se finalizó entra, dicho como respondido por ella.
@@ -176,7 +177,14 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   // El formulario, con cada pregunta que se hizo y su respuesta en palabras.
   expect(record.forms.map((form) => form.title)).toEqual(["Evaluación de endodoncia", "Cuestionario previo"])
   const [form, fromPerson] = record.forms
-  expect(form).toMatchObject({ version: 1, encounterId: f.encounter.id, source: "staff", filledBy: "Clínico" })
+  expect(form).toMatchObject({
+    version: 1,
+    encounterId: f.encounter.id,
+    source: "staff",
+    filledBy: "Clínico",
+    finalizedBy: "Clínico",
+    addendaTitle: "Adendas",
+  })
   expect(form!.sections.flatMap((section) => section.items).map((item) => [item.label, item.words])).toEqual([
     ["¿Presenta dolor?", "Sí"],
     ["Intensidad del dolor", "8 de 10"],
@@ -187,7 +195,17 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     ["Sangrado al sondaje", null],
   ])
   expect(form!.addenda).toMatchObject([{ text: "La prueba al frío se repitió a los 10 minutos.", authorName: "Clínico" }])
-  expect(fromPerson).toMatchObject({ source: "portal", filledBy: "Paciente de prueba", filledByPatient: true })
+  expect(fromPerson).toMatchObject({
+    source: "portal",
+    via: "enlace",
+    filledBy: "Paciente de prueba",
+    filledByPatient: true,
+    finalizedBy: "Clínico",
+  })
+  // Quién lo envió, por dónde y cuándo; y quién lo revisó, que es quien lo finalizó.
+  expect(fromPerson!.byWords).toMatch(
+    /^Lo respondió Paciente de prueba \(paciente\) desde su enlace el .+ · lo revisó Clínico el /,
+  )
 
   // La entrevista, como la cuenta odentIA, con lo que ella declaró dicho como suyo. El embarazo se
   // guarda con el día en que lo dijo: la copia dice la semana a su fecha y la que dijo ese día.
@@ -205,13 +223,13 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   for (const said of [
     "Formularios (2)",
     "Evaluación de endodoncia · versión 1",
-    "Lo llenó Clínico",
+    "Lo llenó Clínico · lo finalizó Clínico el",
     "Pruebas de vitalidad",
     "Frío +, Percusión +",
     "Pieza 46",
     "Sin respuesta",
     "La prueba al frío se repitió a los 10 minutos.",
-    "Lo respondió Paciente de prueba (paciente)",
+    "Lo respondió Paciente de prueba (paciente) desde su enlace el",
     "Me duele la muela de abajo",
     "Entrevista de salud",
     pregnancy,
@@ -512,25 +530,45 @@ it("lo que respondió quien habla por el paciente lo dice así, y en FHIR apunta
       answers: { motivo: "Se le mueve un diente de leche" },
     })
     .returning()
+  // Lo que envió no se cambia: lo que el equipo precisa queda aparte, también antes de revisarlo.
+  await run((tx) => addFormAddendum(tx, "org_a", f.actor, sent!.id, "Dice que es el diente de arriba, no el de abajo."))
   await run((tx) => finalizeFormResponse(tx, "org_a", f.actor, sent!.id))
 
   const record = await run((tx) => loadPatientRecord(tx, "org_a", child.id))
-  expect(record.forms[0]).toMatchObject({ source: "portal", filledBy: "Marta Tutora", filledByPatient: false })
+  expect(record.forms[0]).toMatchObject({
+    source: "portal",
+    filledBy: "Marta Tutora",
+    filledByPatient: false,
+    // Sin el canal guardado (lo de antes), no se dice por dónde llegó.
+    via: null,
+    addendaTitle: "Correcciones",
+  })
+  const [correction] = record.forms[0]!.addenda
+  expect(correction).toMatchObject({ text: "Dice que es el diente de arriba, no el de abajo.", authorName: "Clínico" })
+  expect(correction!.createdAt.getTime()).toBeLessThan(record.forms[0]!.finalizedAt.getTime())
+  expect(record.forms[0]!.byWords).not.toContain("desde")
+  const text = await printedText(record)
+  expect(text).toContain("Correcciones")
+  expect(text).not.toContain("Adendas")
   expect(record.forms[0]!.byWords).toMatch(/^Lo respondió Marta Tutora \(en nombre del paciente\) el /)
 
   // La misma frase en la Historia: una sola regla para decir quién lo llenó.
   const timeline = await run((tx) => getTimeline(tx, "org_a", child.id, {}))
-  expect(timeline.data.find((item) => item.type === "form")?.byText).toBe("Lo respondió Marta Tutora (en nombre del paciente)")
+  expect(timeline.data.find((item) => item.type === "form")?.byText).toBe(
+    "Lo respondió Marta Tutora (en nombre del paciente) · lo revisó Clínico",
+  )
 
   const resources = resourcesOf(record)
   // FHIR R4: un id tiene hasta 64 caracteres, de letras, números, guion y punto.
   expect(resources.filter((resource) => !/^[A-Za-z0-9.-]{1,64}$/.test(resource.id)).map((resource) => resource.id)).toEqual([])
   const related = resources.find((resource) => resource.resourceType === "RelatedPerson")
   expect(related).toMatchObject({ id: mother.id, patient: { reference: `Patient/${child.id}` }, name: [{ text: "Marta Tutora" }] })
-  expect(resources.find((resource) => resource.id === sent!.id)).toMatchObject({
+  const answered = resources.find((resource) => resource.id === sent!.id)
+  expect(answered).toMatchObject({
     resourceType: "QuestionnaireResponse",
     source: { reference: `RelatedPerson/${mother.id}`, display: "Marta Tutora" },
   })
+  expect((answered!.text as { div: string }).div).toContain("Corrección: Dice que es el diente de arriba, no el de abajo.")
 })
 
 it("un embarazo guardado antes, sin fecha, sale con el día en que se anotó y la semana a la fecha de la copia", async () => {

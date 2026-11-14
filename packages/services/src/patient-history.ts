@@ -1517,7 +1517,7 @@ export async function getTimeline(
       createdAt: form.finalizedAt,
       title: form.title,
       detail: form.summary || null,
-      byText: form.filledWords,
+      byText: form.whoWords,
       status: "finalizado",
       toothNumbers: [],
       encounterId: form.encounterId,

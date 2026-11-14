@@ -170,6 +170,7 @@ export async function seedClinicalForms(
         authorUserId: ownerUserId,
         status: "finalizado",
         finalizedAt: signed.finalizedAt ?? signed.startedAt,
+        finalizedBy: ownerUserId,
         answers: {
           dolor: true,
           intensidad: 7,

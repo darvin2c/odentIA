@@ -683,6 +683,8 @@ export interface FormRecord {
   version: number
   /** Quién lo llenó y cuándo se finalizó, en una frase. */
   byWords: string
+  /** «Correcciones» en lo que envió el paciente, «Adendas» en lo del equipo. */
+  addendaTitle: string
   sections: Array<{
     id: string
     title: string

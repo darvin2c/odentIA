@@ -753,9 +753,10 @@ export async function renderPatientRecordPdf(
         190,
       )
     }
-    // Lo corregido después de finalizar no cambia las respuestas: va aparte, con quién y cuándo.
+    // Lo que el equipo agregó no cambia las respuestas: va aparte, con quién y cuándo. En lo que envió
+    // la persona se llama «Correcciones» y puede ser anterior a la revisión.
     if (form.addenda.length) {
-      kit.subheading("Adendas")
+      kit.subheading(form.addendaTitle)
       kit.bullets(form.addenda.map((addendum) => addendumWords(addendum, zone)))
     }
   }
@@ -1269,7 +1270,10 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         })),
         notes: [
           form.byWords,
-          ...form.addenda.map((addendum) => `Adenda: ${addendumWords(addendum, record.clinic)}`),
+          ...form.addenda.map(
+            (addendum) =>
+              `${form.addendaTitle === "Correcciones" ? "Corrección" : "Adenda"}: ${addendumWords(addendum, record.clinic)}`,
+          ),
         ],
       }),
     )

@@ -48,7 +48,7 @@ export function FormRecordView({ form }: { form: FormRecord }) {
       ))}
       {form.addenda.length > 0 ? (
         <div className="flex flex-col gap-2 border-t pt-3">
-          <h6 className="text-sm font-medium">Adendas</h6>
+          <h6 className="text-sm font-medium">{form.addendaTitle}</h6>
           <ul className="flex flex-col gap-2">
             {form.addenda.map((addendum) => (
               <li key={addendum.id} className="text-sm">

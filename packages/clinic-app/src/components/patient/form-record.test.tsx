@@ -7,7 +7,8 @@ const form: FormRecord = {
   id: "f1",
   title: "Evaluación de endodoncia",
   version: 2,
-  byWords: "Lo llenó Dra. Ana Torres · finalizado el 13 de noviembre de 2026, 15:02",
+  byWords: "Lo llenó Dra. Ana Torres · lo finalizó Dra. Ana Torres el 13 de noviembre de 2026, 15:02",
+  addendaTitle: "Adendas",
   sections: [
     {
       id: "examen",
@@ -28,7 +29,7 @@ describe("un formulario finalizado dentro de su atención", () => {
     for (const said of [
       "Evaluación de endodoncia",
       "versión 2",
-      "Lo llenó Dra. Ana Torres · finalizado el 13 de noviembre de 2026, 15:02",
+      "Lo llenó Dra. Ana Torres · lo finalizó Dra. Ana Torres el 13 de noviembre de 2026, 15:02",
       "Pruebas de vitalidad",
       "Frío +, Percusión +",
       "Adendas",
@@ -45,5 +46,11 @@ describe("un formulario finalizado dentro de su atención", () => {
 
   it("sin adendas no anuncia ninguna", () => {
     expect(renderToStaticMarkup(<FormRecordView form={{ ...form, addenda: [] }} />)).not.toContain("Adendas")
+  })
+
+  it("lo que el equipo precisó sobre lo que envió el paciente se llama «Correcciones»", () => {
+    const page = renderToStaticMarkup(<FormRecordView form={{ ...form, addendaTitle: "Correcciones" }} />)
+    expect(page).toContain("Correcciones")
+    expect(page).not.toContain("Adendas")
   })
 })
