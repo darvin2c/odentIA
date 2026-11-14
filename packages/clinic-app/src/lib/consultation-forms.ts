@@ -49,6 +49,11 @@ export function offerActionWords(offer: Pick<FormOffer, "today">): "Empezar la d
   return offer.today.status === "borrador" ? "Seguir con la de hoy" : "Ver la de hoy"
 }
 
+/** El nombre del botón de una ficha ofrecida: qué hace, de cuál es y por qué aparece. */
+export function offerButtonName(offer: Pick<FormOffer, "title" | "today" | "why" | "specialtyName" | "underYears">): string {
+  return `${offerActionWords(offer)}: ${offer.title}. ${offerWhyWords(offer)}`
+}
+
 /** El estado de una ficha ofrecida: «Sin empezar», «A medias», «Finalizada». Nunca «pendiente»: no se pide. */
 export function offerStateWords(offer: Pick<FormOffer, "today">): string | null {
   if (!offer.today) return null

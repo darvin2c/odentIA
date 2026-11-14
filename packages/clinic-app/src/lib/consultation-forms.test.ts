@@ -7,6 +7,7 @@ import {
   lookedCount,
   lookFirst,
   offerActionWords,
+  offerButtonName,
   offersView,
   draftOf,
   formsBelowOffers,
@@ -138,4 +139,11 @@ it("«Miraste N de 4» no cambia de total con una apagada, y la que falta mirar 
   const old = [template({ key: "d", fromProduct: true, looked: true, status: "archivado" })]
   expect(lookedCount([mine, off, toLook, seen, old])).toEqual({ looked: 3, total: 4 })
   expect(lookFirst([mine, off, toLook, seen]).map((versions) => versions[0]?.key)).toEqual(["b", "propia", "a", "c"])
+})
+
+// QA del 14 nov (UX, teclado): el lector anunciaba «Empezar la de hoy: Ficha…» sin el porqué.
+it("el botón de una ficha ofrecida dice qué hace, de cuál es y por qué aparece", () => {
+  expect(
+    offerButtonName({ title: "Ficha de odontopediatría", today: null, why: "edad", specialtyName: "Odontopediatría", underYears: 12 }),
+  ).toBe("Empezar la de hoy: Ficha de odontopediatría. Por su edad: menor de 12 años")
 })

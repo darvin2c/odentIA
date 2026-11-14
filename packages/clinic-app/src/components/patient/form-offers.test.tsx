@@ -16,3 +16,20 @@ describe("«Fichas para esta atención» en la atención", () => {
     expect(source("./encounter-documents.tsx")).not.toContain("<FormOffersBox")
   })
 })
+
+// QA del 14 nov (UX U2): la respuesta anterior no se oía con el lector de pantalla, y decía «al lado».
+describe("la anterior, debajo de cada pregunta", () => {
+  it("queda unida a su pregunta y dice «debajo», no «al lado»", () => {
+    const detail = source("./formularios-tab.tsx")
+    expect(detail).toContain("describedBy={previous && before ? beforeId : undefined}")
+    expect(detail).toContain("<span id={beforeId}>")
+    expect(detail).not.toMatch(/Al lado, la anterior/)
+    expect(source("./form-fields.tsx")).toContain("[control.describedBy, describedBy]")
+    expect(source("./form-offers.tsx")).not.toContain("se ve al lado")
+  })
+  it("al cerrar la ficha, el foco vuelve a su fila", () => {
+    const offers = source("./form-offers.tsx")
+    expect(offers).toContain("data-offer={offer.templateId}")
+    expect(offers).toContain("onClose={close}")
+  })
+})

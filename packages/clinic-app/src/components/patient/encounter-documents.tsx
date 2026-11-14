@@ -673,11 +673,24 @@ export function EncounterDocumentsBlock({
                   : FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
-                ? "Completar"
-                : "Ver"}
-            </Button>
+            {(() => {
+              const action =
+                form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
+                  ? "Completar"
+                  : "Ver"
+              return (
+                // Con dos fichas, cada botón dice de cuál es.
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${action} ${formRowTitle(form)}`}
+                  onClick={() => setOpenForm(form.id)}
+                >
+                  {action}
+                </Button>
+              )
+            })()}
           </li>
         ))}
         {docs.files.map((file) => (
@@ -1001,7 +1014,7 @@ export function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Ficha"}
-      description="Se guarda solo mientras lo completas."
+      description="Se guarda sola mientras la llenas."
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
     >

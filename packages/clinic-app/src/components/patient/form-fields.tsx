@@ -205,10 +205,13 @@ export function AnswerAppField({
   field,
   disabled = false,
   attachments,
+  describedBy,
 }: {
   field: FormFieldDef
   disabled?: boolean
   attachments?: AttachmentOption[]
+  /** Otro texto que describe la pregunta (la respuesta anterior): se oye con ella. */
+  describedBy?: string
 }): React.JSX.Element | null {
   const formField = useFieldContext<unknown>()
   const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!field.help })
@@ -234,7 +237,7 @@ export function AnswerAppField({
           invalid={control.invalid}
           onBlur={control.onBlur}
           aria-labelledby={labelId}
-          aria-describedby={control.describedBy}
+          aria-describedby={[control.describedBy, describedBy].filter(Boolean).join(" ") || undefined}
         />
       )}
     </AnswerFrame>

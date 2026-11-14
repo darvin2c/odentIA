@@ -1,12 +1,13 @@
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { fetchFormResponses, fetchFormTemplates, startFormResponse } from "../../lib/clinical-forms"
 import {
   fetchFormOffers,
   type FormOffer,
   offerActionWords,
+  offerButtonName,
   offerStateWords,
   offersView,
   offerWhyWords,
@@ -23,7 +24,7 @@ const dayOf = (iso: string) =>
  * Las fichas que la atención ofrece solas (ADR 0117): por la especialidad de la
  * cita, por la edad o, sin servicio, por la de quien atiende. Va arriba, debajo
  * de «Hoy viene a…» (dibujo 18), con por qué aparece cada una y un solo botón;
- * «Otra ficha…» abre las demás. La ficha se abre al lado sin salir de la
+ * «Otra ficha…» abre las demás. La ficha se abre en el panel sin salir de la
  * atención. Ofrecer no es pedir: nada de esto se exige para firmar ni para cobrar.
  */
 export function FormOffersBox({
@@ -47,6 +48,9 @@ export function FormOffersBox({
   const titleId = useId()
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState<string | null>(null)
+  // De qué fila se abrió: al cerrar, el foco vuelve a su botón («Seguir con la de hoy»).
+  const [from, setFrom] = useState<string | null>(null)
+  const sectionRef = useRef<HTMLElement>(null)
   const [choosing, setChoosing] = useState(false)
   const offers = useQuery({
     queryKey: ["form-offers", patientId, encounterId],
@@ -86,8 +90,9 @@ export function FormOffersBox({
         answers: {},
       })
     },
-    onSuccess: async (result) => {
+    onSuccess: async (result, offer) => {
       await refresh()
+      setFrom(offer.templateId)
       setOpened(result.data.id)
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
@@ -98,8 +103,17 @@ export function FormOffersBox({
   if (view === "nada") return null
 
   const act = (offer: FormOffer) => {
+    setFrom(offer.templateId)
     if (offer.today) setOpened(offer.today.responseId)
     else start.mutate(offer)
+  }
+  const close = () => {
+    setOpened(null)
+    // El botón de origen cambió de nombre («Empezar» pasó a «Seguir»), pero es la misma fila.
+    const target = from
+    requestAnimationFrame(() =>
+      sectionRef.current?.querySelector<HTMLElement>(`[data-offer="${target}"]`)?.focus(),
+    )
   }
   const other = (
     <Button
@@ -135,7 +149,7 @@ export function FormOffersBox({
         patientId={patientId}
         responseId={opened}
         canWrite={canStart}
-        onClose={() => setOpened(null)}
+        onClose={close}
         onChanged={refresh}
       />
     </>
@@ -154,7 +168,7 @@ export function FormOffersBox({
   }
 
   return (
-    <section aria-labelledby={titleId} className="flex flex-col gap-2 rounded-lg border p-3">
+    <section ref={sectionRef} aria-labelledby={titleId} className="flex flex-col gap-2 rounded-lg border p-3">
       <h3 id={titleId} className="text-sm font-medium">
         Fichas para esta atención
       </h3>
@@ -173,7 +187,7 @@ export function FormOffersBox({
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {offerWhyWords(offer)}
-                  {offer.previous ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}, se ve al lado` : ""}
+                  {offer.previous ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}, se ve debajo de cada pregunta` : ""}
                 </span>
               </div>
               {allowed ? (
@@ -183,8 +197,9 @@ export function FormOffersBox({
                   variant={offer.today ? "outline" : "default"}
                   className="min-h-11 sm:min-h-8"
                   disabled={start.isPending}
-                  // Con varias ofrecidas, cada botón dice de cuál es.
-                  aria-label={`${action}: ${offer.title}`}
+                  // Con varias ofrecidas, cada botón dice de cuál es y por qué aparece.
+                  aria-label={offerButtonName(offer)}
+                  data-offer={offer.templateId}
                   onClick={() => act(offer)}
                 >
                   {action}

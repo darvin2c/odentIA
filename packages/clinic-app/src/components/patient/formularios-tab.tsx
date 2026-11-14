@@ -261,7 +261,7 @@ export function ResponseDetail({
   onChanged,
 }: {
   response: FormResponse
-  /** La anterior del mismo tipo, ya finalizada: su respuesta va bajo cada pregunta, al lado de la de hoy. */
+  /** La anterior del mismo tipo, ya finalizada: su respuesta va debajo de cada pregunta de la de hoy. */
   previous?: FormResponse | null
   /** La de inicio, si no es la anterior: «Comparar con: Anterior · Inicio». */
   first?: FormResponse | null
@@ -529,9 +529,9 @@ export function ResponseDetail({
       ) : null}
       {previous ? (
         <p className="rounded-md bg-muted p-3 text-sm">
-          Al lado, la anterior: {when(previous.finalizedAt)}
-          {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : ""}. Lo que respondió va bajo
-          cada pregunta.
+          Debajo de cada pregunta, {against === "inicio" && first ? "lo de la de inicio" : "lo de la anterior"}:{" "}
+          {when(previous.finalizedAt)}
+          {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
         </p>
       ) : null}
       {schema.sections.map((section) => (
@@ -548,12 +548,19 @@ export function ResponseDetail({
                     const earlier = previous?.answers?.[field.id]
                     // «Usar»: copia la respuesta anterior a la de hoy con un clic (la pieza, la clase…); nada se copia solo.
                     const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
+                    const beforeId = `${ids}-antes-${field.id}`
                     return (
                       <div className="flex flex-col gap-1">
-                        <AnswerAppField field={field} disabled={!editable} attachments={attachments} />
+                        <AnswerAppField
+                          field={field}
+                          disabled={!editable}
+                          attachments={attachments}
+                          // La respuesta anterior se oye al llegar a la pregunta, no solo se ve.
+                          describedBy={previous && before ? beforeId : undefined}
+                        />
                         {previous && before ? (
                           <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                            <span>
+                            <span id={beforeId}>
                               {when(previous.finalizedAt)}: {answerWords(before, earlier)}
                             </span>
                             {reusable !== undefined ? (
