@@ -2196,7 +2196,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Preguntas al paciente",
     parent: SETTINGS,
     purpose:
-      "El único lugar donde la clínica decide qué se le pregunta al paciente: sus datos y su salud (alergias, enfermedades, sus medicinas, el corazón y la anestesia, la lactancia, si fuma), al registrarse y en su enlace, y el aviso de privacidad que acepta. Lo marcado se pregunta desde que guardas, y a quien ya respondió solo se le pregunta lo que le falta. Aquí están también el enlace público y el código QR del registro, y el interruptor «Que se registren solos», que lo apaga o lo enciende. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
+      "El único lugar donde la clínica decide qué se le pregunta al paciente: sus datos y su salud (alergias, enfermedades, sus medicinas y lo que cambia lo que se hace en la cita), al registrarse y en su enlace, y el aviso de privacidad que acepta. Lo marcado se pregunta desde que guardas, y a quien ya respondió solo se le pregunta lo que le falta. Aquí están también el enlace público y el código QR del registro, y el interruptor «Que se registren solos», que lo apaga o lo enciende. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para la atención».",
     terms: [
       "registro de pacientes",
       "preguntas al paciente",
