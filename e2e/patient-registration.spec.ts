@@ -114,8 +114,12 @@ async function fillSalud(page: Page) {
   await page.getByLabel(/^¿A qué\?/).fill("Penicilina")
   await page.getByRole("group", { name: /alguna de estas enfermedades/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
   await chooseOption(page.getByRole("combobox", { name: "Grupo sanguíneo" }), { label: "O+" })
+  // «Siguiente», no `advanceTo`: este paso tiene «Saltar», que borraría lo respondido.
+  const atHealth = await page.getByText(/^Paso \d+ de \d+$/).textContent()
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await expect(page.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(atHealth ?? "")
   const medications = page.getByRole("group", { name: /medicamento todos los días/ }).first()
-  await advanceTo(page, medications)
+  await expect(medications).toBeVisible()
   await medications.getByRole("button", { name: "No", exact: true }).click()
   const before = await page.getByText(/^Paso \d+ de \d+$/).textContent()
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
