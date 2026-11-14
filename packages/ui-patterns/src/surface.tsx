@@ -1,7 +1,7 @@
 import { Button, cn, ScrollArea, Skeleton } from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
-import { ConfirmDialog } from "./confirm-dialog.js"
+import { UnsavedDialog } from "./confirm-dialog.js"
 
 /**
  * Chrome compartido por las dos familias de superficies laterales: el
@@ -183,12 +183,16 @@ function SurfaceError({ error, className }: { error: string; className?: string 
 export interface CloseGuardOptions {
   isSubmitting?: boolean
   isDirty?: boolean
+  /** Qué se pierde, si el contenido lo dijo (`useDraftSaved`); gana sobre `unsavedDescription`. */
+  lost?: string | null
   /**
    * Lo que dice la pregunta de salir cuando parte del cambio ya se guardó al
    * hacerlo (una marca que se guarda al pulsarla): «se pierden los cambios» no
-   * sería cierto. Sin esto, la frase común.
+   * sería cierto. Sin esto ni `lost`, la frase común.
    */
   unsavedDescription?: string
+  /** Se llama con «Descartar y salir», antes de cerrar: lo pendiente ya no se guarda. */
+  onDiscard?: () => void
   onClose: () => void
 }
 
@@ -216,7 +220,9 @@ export interface CloseGuard {
 export function useCloseGuard({
   isSubmitting = false,
   isDirty = false,
+  lost = null,
   unsavedDescription,
+  onDiscard,
   onClose,
 }: CloseGuardOptions): CloseGuard {
   const [asking, setAsking] = React.useState(false)
@@ -230,15 +236,14 @@ export function useCloseGuard({
   }, [isSubmitting, isDirty, onClose])
 
   const confirmDialog = (
-    <ConfirmDialog
+    <UnsavedDialog
       open={asking}
-      title={common.confirm.unsaved.title}
-      description={unsavedDescription ?? common.confirm.unsaved.description}
-      cancelLabel={common.confirm.unsaved.keepEditing}
-      confirmLabel={common.confirm.unsaved.discard}
-      onClose={() => setAsking(false)}
-      onConfirm={() => {
+      // Un solo diálogo: lo que el contenido dijo que se pierde, o la frase propia de la superficie.
+      lost={lost || unsavedDescription}
+      onStay={() => setAsking(false)}
+      onDiscard={() => {
         setAsking(false)
+        onDiscard?.()
         onClose()
       }}
     />

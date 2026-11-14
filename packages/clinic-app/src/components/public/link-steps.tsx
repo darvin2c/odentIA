@@ -1,5 +1,7 @@
 import { Button, Checkbox } from "@odentia/ui"
 import {
+  advanceOnEnter,
+  EmptyState,
   ErrorState,
   FormChoiceField,
   LoadingState,
@@ -10,7 +12,8 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { ReactElement } from "react"
+import { CircleCheck } from "lucide-react"
+import { type ReactElement, useEffect } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, type LinkConsent, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
@@ -163,7 +166,8 @@ export function LinkConsentStep({
   }
   return (
     // La hoja es la del papel que recibe: se lee entera en la página, sin otra barra que la de siempre.
-    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+    // Enter en el documento pasa a la firma: solo «Firmar» firma (antes la marcaba en rojo sin haber llegado).
+    <form className="flex flex-col gap-4" onSubmit={submit} onKeyDown={advanceOnEnter} noValidate>
       <ConsentSheet
         className="-mx-2 sm:mx-0"
         clinic={consent.clinic}
@@ -214,6 +218,9 @@ export function LinkConsentStep({
                     description="Lo comparamos con el de tu ficha; no lo mostramos."
                     inputClassName="min-h-11"
                     autoComplete="off"
+                    // El DNI son solo números: el teléfono abre su teclado, como en «Tus datos».
+                    inputMode={docLabel === "DNI" ? "numeric" : undefined}
+                    enterKeyHint="next"
                     maxLength={20}
                   />
                 )}
@@ -255,13 +262,49 @@ export function LinkConsentStep({
   )
 }
 
-/** «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la página (`onSent`). */
-export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; token: string; onSent: () => void }) {
+/** El servidor dice que el cuestionario ya está enviado (`ALREADY_SUBMITTED`): «Ya lo enviaste: …». */
+function alreadySent(error: unknown): { title: string; description: string } | null {
+  if (!(error instanceof ApiError) || error.shape.code !== "ALREADY_SUBMITTED") return null
+  const [title = "Ya lo enviaste", ...rest] = (error.shape.message ?? "").split(": ")
+  const description = rest.join(": ")
+  return { title: title || "Ya lo enviaste", description: description.charAt(0).toUpperCase() + description.slice(1) }
+}
+
+/**
+ * El cuestionario no se pudo abrir. Si es porque ya está enviado (lo envió en otra pestaña o en
+ * otro teléfono), se dice eso, como al enviar, y no hay nada que reintentar; si falló de verdad,
+ * el motivo y «Reintentar».
+ */
+export function QuestionnaireUnavailable({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const sent = alreadySent(error)
+  if (sent) return <EmptyState icon={CircleCheck} title={sent.title} description={sent.description} />
+  return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(error, "Vuelve a intentarlo.")} onRetry={onRetry} />
+}
+
+/**
+ * «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la
+ * página (`onSent`); si ya estaba enviado (otra pestaña, otro teléfono), el servidor lo dice
+ * (al abrirlo o junto al botón) y la página se pone al día (`onAlreadySent`).
+ */
+export function LinkQuestionnaireStep({
+  slug,
+  token,
+  onSent,
+  onAlreadySent,
+}: {
+  slug: string
+  token: string
+  onSent: () => void
+  onAlreadySent?: () => void
+}) {
   const query = useQuery({ queryKey: ["link-questionnaire", slug, token], queryFn: () => fetchLinkQuestionnaire(slug, token), retry: false })
   const send = useMutation({
     retry: false,
     mutationFn: (answers: Record<string, unknown>) => submitLinkQuestionnaire(slug, token, answers),
     onSuccess: () => onSent(),
+    onError: (error) => {
+      if (error instanceof ApiError && error.shape.code === "ALREADY_SUBMITTED") onAlreadySent?.()
+    },
   })
   const schema = query.data?.data.schema ?? null
   const form = useAppForm({
@@ -282,11 +325,18 @@ export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; t
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const answers = useStore(form.store, (state) => state.values.answers)
+  // Ya estaba enviado al abrirlo: la página se pone al día y deja de ofrecerlo.
+  const sentElsewhere = query.isError && alreadySent(query.error) !== null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: avisa una vez, cuando el servidor lo dice.
+  useEffect(() => {
+    if (sentElsewhere) onAlreadySent?.()
+  }, [sentElsewhere])
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
-  if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
+  if (query.isError) return <QuestionnaireUnavailable error={query.error} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data
   return (
-    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+    // Enter (o «Ir» en el teléfono) pasa a la pregunta siguiente: solo «Enviar respuestas» envía.
+    <form className="flex flex-col gap-4" onSubmit={submit} onKeyDown={advanceOnEnter} noValidate>
       <h2 className="text-lg font-semibold">{questionnaire.title}</h2>
       {questionnaire.schema.sections.map((section) => (
         <fieldset key={section.id} className="m-0 flex flex-col gap-4 rounded-2xl border bg-card p-4">
@@ -295,7 +345,7 @@ export function LinkQuestionnaireStep({ slug, token, onSent }: { slug: string; t
             .filter((field) => isFieldVisible(field, answers))
             .map((field) => (
               <form.AppField key={field.id} name={`answers.${field.id}`}>
-                {() => <AnswerAppField field={field} />}
+                {() => <AnswerAppField field={field} enterKeyHint="next" />}
               </form.AppField>
             ))}
         </fieldset>

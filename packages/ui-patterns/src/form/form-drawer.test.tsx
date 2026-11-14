@@ -118,7 +118,7 @@ describe("FormDrawer", () => {
     expect(spinner).not.toBeNull()
   })
 
-  it("con cambios, Cancelar pregunta; «Continuar editando» no cierra y devuelve el foco", async () => {
+  it("con cambios, Cancelar pregunta; «Seguir aquí» no cierra y devuelve el foco", async () => {
     const onClose = vi.fn()
     const nativeConfirm = vi.spyOn(window, "confirm")
     renderDrawer({ isDirty: true, onClose })
