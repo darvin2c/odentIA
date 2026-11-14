@@ -22,6 +22,7 @@ import {
   diagnosisCatalog,
   encounter,
   encounterDiagnosis,
+  encounterDictationSuggestion,
   encounterProcedure,
   imagingStudy,
   patient,
@@ -1963,6 +1964,12 @@ export type ListedFormResponse = FormResponseRow & {
   editedByTeamAt: Date | null
   encounterStatus: string | null
   encounterFinalizedAt: Date | null
+  /**
+   * Las respuestas que propuso Clío al dictar y aceptó una persona, mientras
+   * sigan siendo esas (si alguien las cambia a mano, ya son suyas): por pregunta,
+   * quién la aceptó y cuándo.
+   */
+  clioAccepted: Record<string, { by: string | null; at: Date }>
 }
 
 export async function listFormResponses(
@@ -2037,8 +2044,34 @@ export async function listFormResponses(
       null,
     )
   }
+  // Lo que aceptó una persona de lo que propuso Clío (entrega 11): la sugerencia confirmada guarda quién y cuándo.
+  const staff = rows.filter((row) => row.response.source === "staff" && row.response.encounterId)
+  const accepted = staff.length
+    ? await tx
+        .select({ payload: encounterDictationSuggestion.payload, by: encounterDictationSuggestion.decidedBy, at: encounterDictationSuggestion.decidedAt })
+        .from(encounterDictationSuggestion)
+        .where(
+          and(
+            eq(encounterDictationSuggestion.organizationId, orgId),
+            eq(encounterDictationSuggestion.patientId, query.patientId),
+            eq(encounterDictationSuggestion.kind, "ficha"),
+            eq(encounterDictationSuggestion.status, "confirmada"),
+          ),
+        )
+    : []
+  const clioAccepted = (response: FormResponseRow): Record<string, { by: string | null; at: Date }> => {
+    const answers = (response.answers ?? {}) as Record<string, unknown>
+    const marks: Record<string, { by: string | null; at: Date }> = {}
+    for (const item of accepted) {
+      const fieldId = item.payload["fieldId"]
+      if (item.payload["responseId"] !== response.id || typeof fieldId !== "string" || !item.at) continue
+      if (JSON.stringify(answers[fieldId] ?? null) === JSON.stringify(item.payload["value"] ?? null)) marks[fieldId] = { by: item.by, at: item.at }
+    }
+    return marks
+  }
   return rows.map((row) => ({
     ...row.response,
+    clioAccepted: clioAccepted(row.response),
     respondent:
       row.name === null
         ? null

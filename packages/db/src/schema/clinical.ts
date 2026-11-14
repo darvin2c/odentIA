@@ -2275,7 +2275,8 @@ export const clinicalFollowUpItem = pgTable(
  * se dice, lo que se hizo hoy, la próxima cita, el presupuesto a pedido,
  * issue 109, y el material que se usó, ADR 0106), el odontograma de odentIA y
  * los signos vitales, el examen por sistemas y el descanso médico de latidIA
- * (issue 229, entrega 10).
+ * (issue 229, entrega 10), y la respuesta de una ficha de consulta empezada
+ * (entrega 11 de la mesa de formularios).
  */
 export const DICTATION_KINDS = [
   "nota",
@@ -2292,6 +2293,7 @@ export const DICTATION_KINDS = [
   "cita",
   "presupuesto",
   "material",
+  "ficha",
 ] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
@@ -2338,7 +2340,7 @@ export const encounterDictationSuggestion = pgTable(
     ),
     check(
       "encounter_dictation_suggestion_kind_check",
-      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')`,
+      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha')`,
     ),
     check(
       "encounter_dictation_suggestion_status_check",
