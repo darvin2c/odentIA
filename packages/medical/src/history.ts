@@ -14,7 +14,7 @@
  *
  * Las demás claves de la entrevista son comunes y no se tocan aquí.
  */
-import { pregnancyToday } from "@odentia/clinical"
+import { type InterviewEntry, pregnancyToday } from "@odentia/clinical"
 
 export const MEDICAL_INTERVIEW_GROUPS = [
   "embarazoLactancia",
@@ -291,9 +291,18 @@ export function pregnancyLines(history: MedicalHistory, today: string): string[]
   return lines
 }
 
-/** Los antecedentes médicos en líneas, para la ficha y la copia de la historia. */
-export function medicalHistoryLines(history: MedicalHistory, today: string): string[] {
-  const lines = pregnancyLines(history, today)
+/**
+ * Los antecedentes médicos dato por dato, con su ruta en la entrevista, para la
+ * copia de la historia (el PDF y el archivo para otro sistema).
+ */
+export function medicalHistoryEntries(history: MedicalHistory, today: string): InterviewEntry[] {
+  const out: InterviewEntry[] = []
+  // `pregnancyLines` da primero el embarazo y después la lactancia, cada uno solo si se dijo.
+  const said = pregnancyLines(history, today)
+  if (history.embarazoLactancia?.embarazo)
+    out.push({ key: "embarazoLactancia.embarazo", label: "Embarazo", value: said[0] as string })
+  if (history.embarazoLactancia?.lactancia)
+    out.push({ key: "embarazoLactancia.lactancia", label: "Lactancia", value: said.at(-1) as string })
   const gyneco = history.ginecoObstetricos
   if (gyneco) {
     const parts = [
@@ -303,7 +312,7 @@ export function medicalHistoryLines(history: MedicalHistory, today: string): str
       gyneco.cesareas === undefined ? "" : `${gyneco.cesareas} cesárea(s)`,
       gyneco.metodo ? `método: ${CONTRACEPTION_METHODS[gyneco.metodo].toLowerCase()}` : "",
     ].filter(Boolean)
-    if (parts.length) lines.push(`Gineco-obstétricos: ${parts.join(" · ")}`)
+    if (parts.length) out.push({ key: "ginecoObstetricos", label: "Gineco-obstétricos", value: parts.join(" · ") })
   }
   const habits = history.habitos
   if (habits) {
@@ -316,11 +325,20 @@ export function medicalHistoryLines(history: MedicalHistory, today: string): str
         ? `actividad física: ${ACTIVITY[habits.actividadFisica].toLowerCase()}`
         : "",
     ].filter(Boolean)
-    if (parts.length) lines.push(`Hábitos: ${parts.join(" · ")}`)
+    if (parts.length) out.push({ key: "habitos", label: "Hábitos", value: parts.join(" · ") })
   }
   if (history.vacunas?.length)
-    lines.push(
-      `Vacunas: ${history.vacunas.map((v) => (v.fecha ? `${v.vacuna} (${dayWords(v.fecha)})` : v.vacuna)).join(", ")}`,
-    )
-  return lines
+    out.push({
+      key: "vacunas",
+      label: "Vacunas",
+      value: history.vacunas.map((v) => (v.fecha ? `${v.vacuna} (${dayWords(v.fecha)})` : v.vacuna)).join(", "),
+    })
+  return out
+}
+
+/** Los antecedentes médicos en líneas, para la ficha: el embarazo y la lactancia se leen solos; lo demás, con su nombre. */
+export function medicalHistoryLines(history: MedicalHistory, today: string): string[] {
+  return medicalHistoryEntries(history, today).map((entry) =>
+    entry.key.startsWith("embarazoLactancia.") ? entry.value : `${entry.label}: ${entry.value}`,
+  )
 }

@@ -262,10 +262,31 @@ const STAND_INS: Record<string, string> = {
 }
 
 /**
+ * Lo que de un emoji no es texto: el dibujo, su tono de piel, el selector que lo
+ * pide en color, la unión entre dibujos y el marco de una tecla («1️⃣»). Quitado
+ * eso, lo que queda (el «1» de la tecla) se escribe como texto.
+ */
+const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0e\ufe0f\u20e3]/gu
+
+/** Donde había un emoji: se marca para ordenar después los espacios que deja. */
+const GAP = "\u0000"
+/** Un espacio que dejó un emoji quitado: se borra antes de un signo o al borde de una línea. */
+const SOFT = "\u0001"
+/** Espacios y emojis seguidos; el espacio que dejan antes de un signo o al final, y al empezar una línea. */
+const GAP_RUN = new RegExp(`[ ${GAP}]*${GAP}[ ${GAP}]*`, "g")
+const SOFT_BEFORE_SIGN = new RegExp(`${SOFT}(?=[.,;:!?)\\]}»”\\n]|$)`, "g")
+const SOFT_AT_LINE_START = new RegExp(`(^|\\n)${SOFT}`, "g")
+
+/**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con
- * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`) o, si no
- * lo tiene, como `?`, sin error. Los blancos heredados pasan a espacios y los
- * caracteres de control se quitan.
+ * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`). Un emoji
+ * no se dibuja: se quita, sin dejar un `?` que cambie lo que dijo la persona (QA de
+ * la copia de la historia, 14 nov: «muela de atrás ??»). Una letra con un acento que
+ * la letra no tiene sale sin el acento. Solo lo que no tiene ninguna de esas salidas
+ * (otra escritura) queda como `?`, sin error. Los blancos heredados pasan a espacios
+ * y los caracteres de control se quitan. Quitado el emoji, no queda un espacio suelto
+ * («muela de atrás . Año») y lo que era solo emojis dice «(emoji)», no un blanco
+ * (revisor y verificador, QA de la entrega 2).
  */
 export function printable(value: string, face: Face = "sans"): string {
   const { font } = fontData(face)
@@ -284,9 +305,27 @@ export function printable(value: string, face: Face = "sans"): string {
       continue
     }
     const standIn = STAND_INS[segment]
-    out += standIn && covered(standIn) ? standIn : "?"
+    if (standIn && covered(standIn)) {
+      out += standIn
+      continue
+    }
+    const text = segment.replace(EMOJI_PARTS, "")
+    if (text !== segment) {
+      out += text && covered(text) ? text : GAP
+      continue
+    }
+    const bare = segment.normalize("NFD").replace(/\p{M}/gu, "")
+    out += bare && covered(bare) ? bare : "?"
   }
-  return out
+  if (!out.includes(GAP)) return out
+  const tidy = out
+    // Los espacios y emojis seguidos valen un espacio, si había alguno («Hola 👍 Ñandú»), o nada («a👍b»).
+    .replace(GAP_RUN, (run) => (run.includes(" ") ? SOFT : ""))
+    // Ese espacio sobra antes de un signo y al borde de una línea.
+    .replace(SOFT_BEFORE_SIGN, "")
+    .replace(SOFT_AT_LINE_START, "$1")
+    .replaceAll(SOFT, " ")
+  return tidy.trim() === "" && clean.trim() !== "" ? "(emoji)" : tidy
 }
 
 // --- Color ---------------------------------------------------------------------

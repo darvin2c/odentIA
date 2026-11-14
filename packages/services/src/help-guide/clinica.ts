@@ -262,7 +262,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-cuestionario-corregir-lo-que-puso",
         q: "El paciente puso algo mal en lo que respondió, ¿cómo lo corrijo?",
-        a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre y la hora, antes o después de «Marcar como revisado». Para que su ficha diga otra cosa, corrígelo también en sus antecedentes. Si llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",
+        a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto, si quieres el «Motivo (opcional)» (por qué se corrige, por ejemplo «lo confirmó en consulta»), y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre, la hora y su motivo, antes o después de «Marcar como revisado», y así sale en la copia de la historia. Para que su ficha diga otra cosa, corrígelo también en sus antecedentes. Si llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",
         forms: [
           "el paciente puso algo mal como lo corrijo",
           "el paciente puso algo mal",
@@ -274,6 +274,8 @@ export const CLINICA: readonly HelpMore[] = [
           "agregar una correccion al cuestionario",
           "el paciente envio el cuestionario dos veces",
           "como descarto un cuestionario que envio el paciente",
+          "tengo que poner el motivo de la correccion",
+          "donde pongo por que corrijo lo que dijo el paciente",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -303,6 +305,23 @@ export const CLINICA: readonly HelpMore[] = [
         ],
         area: "clinica",
         needs: "clinical.write",
+      },
+      {
+        id: "pacientes-copia-historia-trae-formularios",
+        q: "¿La copia de la historia trae las fichas y lo que respondió el paciente?",
+        a: "Sí. En «Fichas de consulta» va cada ficha finalizada y en «Lo que respondió el paciente», cada cuestionario que envió: con su título y su versión, cada pregunta con su respuesta, sus adendas o correcciones con su motivo, quién lo llenó y quién lo finalizó o lo revisó. Lo que envió y nadie revisó también sale, marcado «sin revisar». Lo de una atención anulada sale marcado «es de una atención anulada», con su motivo. Trae además sus alergias y antecedentes con quién los revisó y cuándo, la medicina que ya no toma con hasta cuándo la tomó, la «Entrevista de salud» con el embarazo si se registró, y lo que declaró de su salud tal como llegó; lo que dijo y nadie revisó va marcado «sin revisar», con quién lo dijo y cuándo. Todo va en el PDF y en el archivo para otro sistema. Una ficha del equipo a medias no sale: ábrela en Documentos y «Finalizar…». La copia la baja Administración, en su página › Datos › Privacidad y pedidos, con «Descargar historia»; si atiendes o estás en recepción, pídesela a Administración. En la Historia, cada ficha finalizada va con lo respondido en una línea y «Ver», y la atención firmada la muestra con sus respuestas.",
+        forms: [
+          "el formulario sale en la copia de la historia",
+          "la historia que descargo incluye los formularios",
+          "la copia de la historia trae los formularios",
+          "la copia de la historia lleva la entrevista de salud",
+          "en la copia se ve lo que el paciente dijo y nadie reviso",
+          "la copia marca lo que no se reviso",
+          "la copia trae lo de una atencion anulada",
+          "como descargo yo la copia de la historia",
+        ],
+        area: "clinica",
+        needs: "clinical.read",
       },
       {
         id: "pacientes-documentos-buscar-retirar",

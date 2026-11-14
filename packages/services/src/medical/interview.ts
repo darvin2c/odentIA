@@ -1,7 +1,7 @@
-import { declaredPregnancy } from "@odentia/clinical"
-import { parseMedicalHistory } from "@odentia/medical"
+import { declaredPregnancy, PREGNANCY_ENTRY_KEY } from "@odentia/clinical"
+import { medicalHistoryEntries, parseMedicalHistory, readMedicalHistory } from "@odentia/medical"
 import { invalidField, validation } from "../errors.js"
-import { answeredOf, type ProductInterview } from "../product-hooks.js"
+import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
 
 /**
  * La entrevista de latidIA (issue 229, decisión 13): lo común más embarazo y
@@ -33,4 +33,11 @@ export const medicalInterview: ProductInterview = {
       ...(Object.keys(habits).length ? { habitos: habits } : {}),
     }
   },
+  record: (answers, today, reading) => [
+    ...COMMON_INTERVIEW.record(answers, today, reading),
+    // El embarazo ya lo dijo lo común, con la misma regla: aquí va lo demás (lactancia, hábitos, vacunas).
+    ...medicalHistoryEntries(readMedicalHistory(answers, today), today).filter(
+      (entry) => entry.key !== PREGNANCY_ENTRY_KEY,
+    ),
+  ],
 }

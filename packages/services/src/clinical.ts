@@ -1,5 +1,6 @@
 import {
   ALLERGY_SEVERITIES,
+  isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
   type BloodGroup,
@@ -570,10 +571,16 @@ function validateMedicationRow(
     notes,
   }
 }
+/**
+ * La salud de la persona como la lee la ficha. `allDeclarations`: todas sus
+ * declaraciones, sin el tope de la pantalla; la copia de la historia las entrega
+ * todas (revisor, QA de la entrega 2).
+ */
 export async function getPatientHealth(
   tx: Db,
   orgId: string,
   patientId: string,
+  opts: { allDeclarations?: boolean } = {},
 ): Promise<PatientHealth> {
   await requirePatient(tx, orgId, patientId)
   const [header] = await tx
@@ -662,7 +669,7 @@ export async function getPatientHealth(
   }
   const authorship = await healthAuthorshipOf(tx, orgId, patientId)
   const reviewPending = healthReviewPending(health, authorship)
-  const declarations = await healthDeclarationsOf(tx, orgId, patientId)
+  const declarations = await healthDeclarationsOf(tx, orgId, patientId, opts.allDeclarations ? null : 50)
   const today = await clinicToday(tx, orgId)
   // Lo guardado antes sin fecha toma la del día en que se anotó ese «sí»: sale de las versiones de la
   // entrevista, al leer, sin reescribir ninguna.
@@ -708,14 +715,22 @@ export function hasMeaningfulHealth(health: Partial<NonNullable<RegistrationAnsw
   )
 }
 
-/** Las declaraciones de salud de la persona que dicen algo, de la más nueva a la más antigua. */
-async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): Promise<HealthDeclaration[]> {
-  const rows = await tx
+/**
+ * Las declaraciones de salud de la persona que dicen algo, de la más nueva a la más
+ * antigua. `limit`: las últimas que se leen (la pantalla); null, todas (la copia).
+ */
+async function healthDeclarationsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  limit: number | null = 50,
+): Promise<HealthDeclaration[]> {
+  const query = tx
     .select()
     .from(patientHealthDeclaration)
     .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
     .orderBy(desc(patientHealthDeclaration.createdAt))
-    .limit(50)
+  const rows = limit === null ? await query : await query.limit(limit)
   return rows.filter((row) => hasMeaningfulHealth(row.health as Parameters<typeof hasMeaningfulHealth>[0])).map((row) => ({
     at: row.saidAt,
     enteredAt: row.createdAt,
@@ -1406,7 +1421,7 @@ export async function addDeclaredHealth(
         .from(patientMedication)
         .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
     )
-      .filter((row) => !row.endDate || row.endDate >= today)
+      .filter((row) => isCurrentMedication(row, today))
       .map((row) => normalizeDrugText(row.name)),
   )
   const medications = declared.medications?.state === "recorded" ? declared.medications.items : []

@@ -32,6 +32,7 @@ import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/pat
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
 import { EncounterHistoryCard, VoidedEncounterLine } from "./encounter-history-card"
+import { FormViewButton } from "./form-record"
 import { NewEncounterButton } from "./new-encounter-button"
 import { useOpenWide, type WideTarget } from "./wide-section"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -74,7 +75,6 @@ const DOCUMENT_FILTER_OF: Partial<Record<TimelineItem["type"], DocumentFilter>> 
   prescription: "recetas",
   consent: "consentimientos",
   order: "ordenes",
-  form: "formularios",
 }
 
 /**
@@ -424,18 +424,20 @@ function JourneyCard({
 }
 
 /**
- * Un papel como hecho de la historia: «Firmó: …», «Se pidió…»,
- * «Se completó el formulario…» o la receta emitida. El papel en sí se abre en
- * Documentos.
+ * Un papel como hecho de la historia: «Firmó: …», «Se pidió…» o la receta
+ * emitida; el papel en sí se abre en Documentos. Un formulario finalizado va con
+ * lo respondido en una línea y se abre aquí mismo, con «Ver».
  */
 /** Los tipos que se dicen en femenino («Receta anulada», «Orden anulada»). */
 const FEMININE_TYPES = new Set(["prescription", "order", "note", "anamnesis", "encounter"])
 
 function FactCard({
+  patientId,
   item,
   timezone,
   locale,
 }: {
+  patientId: string
   item: TimelineItem
   timezone: string
   locale: string | undefined
@@ -463,8 +465,12 @@ function FactCard({
         />
         <p className={cn("text-sm font-medium", voided && "text-muted-foreground")}>{item.title}</p>
         {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
+        {item.byText ? <p className="text-xs text-muted-foreground">{item.byText}</p> : null}
       </div>
-      {filter ? (
+      {item.type === "form" ? (
+        // El formulario se lee aquí mismo: «Ver» lo abre con sus respuestas, sin pasar por Documentos.
+        <FormViewButton patientId={patientId} formId={item.refId} title={item.title} />
+      ) : filter ? (
         <Button type="button" variant="outline" size="sm" onClick={() => openWide?.({ id: "documentos", documentFilter: filter })}>
           Ver en Documentos
         </Button>
@@ -536,11 +542,11 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
 
   const renderItem = (item: TimelineItem) =>
     item.type === "encounter" && item.status === "anulada" ? (
-      <VoidedEncounterLine key={item.id} item={item} />
+      <VoidedEncounterLine key={item.id} patientId={patientId} item={item} />
     ) : item.type === "encounter" ? (
       <EncounterHistoryCard key={item.id} patientId={patientId} item={item} />
     ) : item.type === "prescription" || item.type === "consent" || item.type === "order" || item.type === "form" ? (
-      <FactCard key={item.id} item={item} timezone={timezone} locale={locale} />
+      <FactCard key={item.id} patientId={patientId} item={item} timezone={timezone} locale={locale} />
     ) : item.type === "note" ? (
       <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
     ) : item.type === "odontogram" ? (

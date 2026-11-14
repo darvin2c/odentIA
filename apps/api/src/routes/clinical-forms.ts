@@ -1,5 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  ADDENDUM_REASON_MAX,
   addFormAddendum,
   advanceClinicalOrder,
   archiveConsentTemplate,
@@ -236,6 +237,12 @@ const addendumInput = z
       // Las mismas palabras que la pantalla: lo que el paciente envió se corrige con una «corrección».
       .min(1, "Escribe la corrección.")
       .max(5000, "La corrección admite hasta 5000 caracteres."),
+    /** Por qué se corrige: opcional, vacío no traba (decisión del 14 nov). */
+    reason: z
+      .string()
+      .trim()
+      .max(ADDENDUM_REASON_MAX, `El motivo admite hasta ${ADDENDUM_REASON_MAX} caracteres.`)
+      .nullish(),
   })
   .strict()
 
@@ -877,7 +884,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        addFormAddendum(tx, orgId, userId, formId(c), parsed.data.text),
+        addFormAddendum(tx, orgId, userId, formId(c), parsed.data.text, parsed.data.reason),
       ),
     )
   })

@@ -3,6 +3,7 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
+  isCurrentMedication,
   type HealthDeclarant,
   type MissingPersonDatum,
   type PregnancyToday,
@@ -330,10 +331,8 @@ export function unaskedHealthGroups(health: PatientHealth, today: string): Array
   return groups
 }
 
-/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta. */
-export function isCurrentMedication(row: Pick<Medication, "endDate">, today: string): boolean {
-  return !row.endDate || row.endDate >= today
-}
+/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta (la regla común). */
+export { isCurrentMedication }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
   unknown: "No se le preguntó",
@@ -673,6 +672,30 @@ export function splitPlans<T extends TreatmentPlanWithStatus>(plans: readonly T[
   }
 }
 
+/**
+ * Un formulario finalizado, para leerlo: cada pregunta que se hizo con su respuesta
+ * en palabras, y sus adendas. Lo dice el servidor, igual que en la copia de la historia.
+ */
+export interface FormRecord {
+  id: string
+  title: string
+  version: number
+  /** Quién lo llenó y cuándo se finalizó, en una frase. */
+  byWords: string
+  /** «Correcciones» en lo que envió el paciente, «Adendas» en lo del equipo. */
+  addendaTitle: string
+  /** Lo llenó el equipo o lo respondió la persona. */
+  source?: "staff" | "portal"
+  sections: Array<{
+    id: string
+    title: string
+    /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
+    items: Array<{ id: string; label: string; words: string | null }>
+  }>
+  /** `reason`: por qué se corrigió, si quien corrigió lo dijo. */
+  addenda: Array<{ id: string; text: string; reason?: string | null; authorName: string | null; createdAt: string }>
+}
+
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
 export interface EncounterDetail {
   encounter: Encounter
@@ -696,6 +719,8 @@ export interface EncounterDetail {
    */
   odontogramEntries?: SiteFinding[]
   documents: PatientDocument[]
+  /** Los formularios finalizados en la atención, con sus respuestas: algo que se anotó en ella. */
+  forms?: FormRecord[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
   /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
@@ -810,6 +835,8 @@ export interface TimelineItem {
   /** Quién firmó la atención y cuándo. */
   signerName?: string | null
   signedAt?: string | null
+  /** Un formulario: quién lo llenó, dicho por el servidor («Lo llenó Ana Torres»). */
+  byText?: string | null
   /** Hecho de una atención que sigue en curso, sin firmar. */
   openEncounter?: boolean
   voidedByName?: string | null
@@ -830,7 +857,7 @@ export interface EncounterBorn {
   /**
    * Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una
    * atención anulada, que trae también los descartados con su motivo (`discardedWithAttention`: lo
-   * descartó la propia anulación).
+   * descartó la propia anulación). `summary`: lo respondido en una línea, si lo hay.
    */
   forms: Array<{
     id: string
@@ -841,6 +868,9 @@ export interface EncounterBorn {
     retired: boolean
     discardReason: string | null
     discardedWithAttention: boolean
+    summary: string
+    /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
+    fromPerson?: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
