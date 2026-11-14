@@ -45,11 +45,16 @@ export async function ensureClinicForms(tx: Db, orgId: string): Promise<FormTemp
   const { suggestions } = (await productHooks(tx, orgId)).forms
   if (suggestions.length === 0) return []
   const existing = await tx
-    .selectDistinct({ key: clinicalFormTemplate.key })
+    .selectDistinct({ key: clinicalFormTemplate.key, title: clinicalFormTemplate.title })
     .from(clinicalFormTemplate)
     .where(eq(clinicalFormTemplate.organizationId, orgId))
   const known = new Set(existing.map((row) => row.key))
-  const missing = suggestions.filter((suggestion) => !known.has(suggestion.key))
+  // Una que se llama igual, aunque su clave sea otra (una ficha antigua de la clínica o de la demo,
+  // «evaluacion-endodoncia»), tampoco se duplica: la lista mostraría dos con el mismo nombre.
+  const titles = new Set(existing.map((row) => sameTitle(row.title)))
+  const missing = suggestions.filter(
+    (suggestion) => !known.has(suggestion.key) && !titles.has(sameTitle(suggestion.title)),
+  )
   if (missing.length === 0) return []
   const specialtyOf = await librarySpecialtyIds(
     tx,
@@ -87,6 +92,16 @@ export async function ensureClinicForms(tx: Db, orgId: string): Promise<FormTemp
     created.push(row)
   }
   return created
+}
+
+/** El título como se compara: sin mayúsculas, tildes ni espacios de más. */
+function sameTitle(title: string): string {
+  return title
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 /**

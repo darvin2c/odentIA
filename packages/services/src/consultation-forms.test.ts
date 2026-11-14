@@ -179,6 +179,21 @@ it("la ficha que la clínica dejó de usar o ya tenía con ese título no se vue
   expect(after.some((row) => row.key === "ficha-de-odontopediatria")).toBe(false)
 })
 
+it("una ficha que se llama igual que una del producto, con otra clave, tampoco se duplica (la demo ya sembrada)", async () => {
+  const c = await clinic({ forms: false })
+  const schema = { sections: [{ id: "general", title: "General", fields: [{ id: "nota", label: "Nota", type: "texto" }] }] }
+  // La «Evaluación de endodoncia» de antes, con su clave antigua.
+  const old = await c.run(async (tx) => {
+    const draft = await createFormTemplate(tx, c.orgId, c.actor, { key: "evaluacion-endodoncia", title: "Evaluación de endodoncia", schema })
+    return publishFormTemplate(tx, c.orgId, c.actor, draft.id)
+  })
+  expect(old.key).toBe("evaluacion-endodoncia")
+  const created = await c.run((tx) => ensureClinicForms(tx, c.orgId))
+  expect(created.map((row) => row.key).sort()).toEqual(PRODUCT_KEYS.filter((key) => key !== "evaluacion-de-endodoncia"))
+  const titles = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).map((row) => row.title)
+  expect(titles.filter((title) => title === "Evaluación de endodoncia")).toHaveLength(1)
+})
+
 it("una ficha del producto dice «sin mirar» hasta que alguien de la clínica la abre o la cambia", async () => {
   const c = await clinic()
   const marks = async () =>
