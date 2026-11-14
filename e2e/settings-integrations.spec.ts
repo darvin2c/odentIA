@@ -4,7 +4,7 @@ import { call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
-/** Los dieciséis apartados de quien es dueña: el nombre de la lista es el título de su página. */
+/** Los apartados de quien es dueña: el nombre de la lista es el título de su página. */
 const SECTIONS: Array<[string, string]> = [
   ["Datos de la clínica", "/settings"],
   ["Sedes", "/settings/branches"],
@@ -13,6 +13,8 @@ const SECTIONS: Array<[string, string]> = [
   ["Protección de datos", "/settings/data-protection"],
   ["Especialidades", "/settings/specialties"],
   ["Consentimientos", "/settings/forms"],
+  // Las fichas del equipo, con su lugar en Atención (ADR 0117).
+  ["Fichas de consulta", "/settings/consultation-forms"],
   ["Registro de pacientes", "/settings/patient-registration"],
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],
@@ -111,6 +113,10 @@ test("configuración: lista por grupos, cada apartado con su nombre y direccione
     // Lo que se abre desde Integraciones la deja marcada en la lista.
     await expect(nav.getByRole("link", { name: "Integraciones", exact: true })).toHaveAttribute("aria-current", "page")
   }
+  // La pestaña antigua de los formularios del equipo lleva a «Fichas de consulta».
+  await gotoHydrated(page, tenant(org.slug, "/settings/forms?tab=formularios"))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/consultation-forms"))
+  await expect(title).toHaveText("Fichas de consulta")
 
   // El servidor vuelve a la dirección antigua de Correo tras autorizar un buzón: el aviso se dice en Integraciones.
   await gotoHydrated(page, tenant(org.slug, "/settings/mail?ok=1&buzon=gmail"))

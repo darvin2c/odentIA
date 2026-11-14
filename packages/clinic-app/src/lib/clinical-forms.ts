@@ -78,6 +78,16 @@ export interface FormTemplate {
    * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
    */
   reachesPatients?: boolean
+  /**
+   * «En uso» o «Sin usar»: el interruptor de la ficha. Solo cuenta en la versión publicada;
+   * apagarla no la archiva ni crea otra versión. Viene en la lista de plantillas.
+   */
+  inUse?: boolean
+  /** Vino con el producto y, si alguien de la clínica ya la abrió o la cambió. Vienen en la lista de plantillas. */
+  fromProduct?: boolean
+  looked?: boolean
+  /** Además de por su especialidad, se ofrece a quien tiene menos de estos años. Viene en la lista. */
+  offeredUnderYears?: number | null
   /** Cuándo se creó el formulario (su primera versión): no cambia al volver a usarlo. Viene en la lista. */
   formCreatedAt?: string
 }
@@ -113,6 +123,10 @@ export interface FormResponse {
   /** Lo de su atención, si tiene: firmada («finalizada», y desde cuándo) o anulada. Viene en la lista. */
   encounterStatus?: "borrador" | "finalizada" | "anulada" | null
   encounterFinalizedAt?: string | null
+  /** La anterior del mismo tipo, ya finalizada: se lee al lado de esta. Viene en la lista. */
+  previousId?: string | null
+  /** La de inicio del mismo tipo, si no es la anterior (desde el tercer control). Viene en la lista. */
+  firstId?: string | null
 }
 
 /** El paciente lo envió y nadie del equipo lo revisó todavía. */

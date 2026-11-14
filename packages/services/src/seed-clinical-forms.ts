@@ -34,6 +34,7 @@ import {
   updateSpecialty,
   type FormSchemaDef,
 } from "./clinical-forms.js"
+import { ensureClinicForms, markFormTemplateLooked } from "./consultation-forms.js"
 
 /**
  * Semilla del dominio formularios clínicos/consentimientos/órdenes.
@@ -69,46 +70,14 @@ export async function seedClinicalForms(
   // Quien crea la clínica atiende la cirugía; la endodoncia la adscribe seed-dev.
   await setProfessionalSpecialties(tx, orgId, ownerUserId, ownerUserId, [cirugia.id])
 
-  const evaluacionSchema: FormSchemaDef = {
-    sections: [
-      {
-        id: "sintomas",
-        title: "Síntomas",
-        fields: [
-          { id: "dolor", label: "¿Presenta dolor?", type: "booleano", required: true },
-          {
-            id: "intensidad",
-            label: "Intensidad del dolor (0–10)",
-            type: "numero",
-            min: 0,
-            max: 10,
-          },
-          {
-            id: "zona",
-            label: "Zona del dolor",
-            type: "opcion_unica",
-            options: ["Localizado", "Irradiado", "Generalizado"],
-          },
-        ],
-      },
-      {
-        id: "examen",
-        title: "Examen",
-        fields: [
-          { id: "hallazgos", label: "Hallazgos", type: "texto_largo", required: true },
-          { id: "fecha_evaluacion", label: "Fecha de evaluación", type: "fecha", required: true },
-        ],
-      },
-    ],
-  }
-
-  const template = await upsertFormTemplate(tx, orgId, ownerUserId, {
-    key: "evaluacion-endodoncia",
-    title: "Evaluación de endodoncia",
-    description: "Ficha de evaluación previa al tratamiento de conducto.",
-    specialtyId: endodoncia.id,
-    schema: evaluacionSchema,
-  })
+  // Las fichas de consulta que vienen con el producto (ADR 0117), como en toda clínica nueva. La de
+  // endodoncia ya la abrió alguien: la lista dice «Miraste 1 de 4».
+  await ensureClinicForms(tx, orgId)
+  const template = (await listFormTemplates(tx, orgId, { status: "publicado" })).find(
+    (t) => t.key === "evaluacion-de-endodoncia",
+  )
+  if (!template) throw new Error("Falta la ficha de endodoncia del producto en la semilla")
+  await markFormTemplateLooked(tx, orgId, ownerUserId, template.id)
 
   // Plantillas por procedimiento (secciones fijas). En la demo se publican
   // para poder usarlas; en una organización real quedan en borrador hasta
@@ -149,11 +118,14 @@ export async function seedClinicalForms(
     await updateFormResponseDraft(tx, orgId, ownerUserId, response.id, {
       professionalUserId: ownerUserId,
       answers: {
-        dolor: true,
-        intensidad: 7,
-        zona: "Localizado",
-        hallazgos: "Dolor provocado al frío en pieza 36, percusión positiva leve.",
-        fecha_evaluacion: new Date().toISOString().slice(0, 10),
+        pieza: 36,
+        dolor: "Provocado",
+        frio: "Aumentada, persiste",
+        percusion: "Positiva",
+        palpacion: "Negativa",
+        diagnostico_pulpar: "Pulpitis irreversible sintomática",
+        diagnostico_apical: "Periodontitis apical sintomática",
+        observaciones: "Dolor provocado al frío en la pieza 36, que persiste al retirar el estímulo.",
       },
     })
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)

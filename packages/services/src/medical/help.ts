@@ -157,8 +157,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
               ["Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos", "Antecedentes, Signos vitales, Historia y Documentos"],
               [" En el celular, la lista de hallazgos va justo debajo del odontograma.", ""],
               [
-                "(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
-                "(presupuestos, recetas, descansos médicos, órdenes, consentimientos, formularios, imágenes y otros archivos)",
+                "(presupuestos, recetas, órdenes, consentimientos, fichas, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
+                "(presupuestos, recetas, descansos médicos, órdenes, consentimientos, fichas, imágenes y otros archivos)",
               ],
             ),
           },
@@ -171,8 +171,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             ...faq,
             a: faq.a
               .replace(
-                "receta, consentimiento, orden, formulario o imagen",
-                "receta, descanso médico, consentimiento, orden, formulario o imagen",
+                "receta, consentimiento, orden, ficha o imagen",
+                "receta, descanso médico, consentimiento, orden, ficha o imagen",
               )
               .replace(
                 "(pieza, diagnóstico, procedimiento y quien atiende)",

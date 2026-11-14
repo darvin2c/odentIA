@@ -62,8 +62,8 @@ describe("detalles de «Tus datos y tu salud» y del formulario", () => {
   })
 
   it("un formulario finalizado ya no dice que se guarda solo", () => {
-    expect(formDetailDescription({ status: "borrador" }, true)).toBe("Se guarda solo mientras lo completas.")
-    expect(formDetailDescription({ status: "finalizado" }, true)).not.toMatch(/se guarda solo/i)
+    expect(formDetailDescription({ status: "borrador" }, true)).toBe("Se guarda sola mientras la llenas.")
+    expect(formDetailDescription({ status: "finalizado" }, true)).not.toMatch(/se guarda sola/i)
     expect(formDetailDescription({ status: "borrador" }, false)).toBeUndefined()
     // Lo que respondió el paciente no lo escribe el equipo: ni «se guarda solo» ni «agrega una adenda».
     expect(formDetailDescription({ status: "borrador", source: "portal" }, true)).toBeUndefined()

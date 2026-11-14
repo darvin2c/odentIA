@@ -479,6 +479,18 @@ export function FormTemplatesPageSkeleton() {
   )
 }
 
+export function ConsultationFormsPageSkeleton() {
+  return (
+    <SettingsPage
+      title="Fichas de consulta"
+      subtitle="Tus hojas para anotar en consulta, además del examen. Cada una aparece sola en la atención cuando la cita es de su especialidad."
+      message="Cargando las fichas de consulta…"
+    >
+      <TemplatesSkeleton />
+    </SettingsPage>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Integraciones
 // ---------------------------------------------------------------------------
@@ -1132,6 +1144,7 @@ const PAGE_BY_PATH: Record<string, () => ReactNode> = {
   "/settings/data-protection": DataProtectionPageSkeleton,
   "/settings/specialties": SpecialtiesPageSkeleton,
   "/settings/forms": FormTemplatesPageSkeleton,
+  "/settings/consultation-forms": ConsultationFormsPageSkeleton,
   "/settings/patient-registration": PatientRegistrationPageSkeleton,
   "/settings/patient-access": PatientPortalPageSkeleton,
   "/settings/payment-methods": PaymentMethodsPageSkeleton,

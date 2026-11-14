@@ -204,7 +204,8 @@ const COMMON_DOCUMENT_FILTERS = [
   { id: "recetas", label: "Recetas" },
   { id: "ordenes", label: "Órdenes" },
   { id: "consentimientos", label: "Consentimientos" },
-  { id: "formularios", label: "Formularios" },
+  // La ficha que llenó el equipo y, dentro, lo que respondió el paciente (ADR 0117): un solo nombre.
+  { id: "formularios", label: "Fichas" },
   { id: "imagenes", label: "Imágenes" },
   // Un informe suelto, una carta: lo subido que no es imagen ni consentimiento.
   { id: "otros", label: "Otros archivos" },

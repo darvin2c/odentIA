@@ -140,6 +140,7 @@ import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, UnfinishedFormsBox, useEncounterDocuments } from "./encounter-documents"
+import { FormOffersBox } from "./form-offers"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -1597,7 +1598,7 @@ export function EncounterEditor({
     {
       key: "documentos",
       title: "Documentos",
-      description: "Receta, consentimiento, orden, formulario, imagen o archivo de esta atención.",
+      description: "Receta, consentimiento, orden, ficha, imagen o archivo de esta atención.",
       summary:
         [
           docs.total === 0 ? "Sin documentos" : counted(docs.total, "documento", "documentos"),
@@ -1681,7 +1682,7 @@ export function EncounterEditor({
   const showTranscript = () => setTranscriptOpen(true)
   const contextSurface = {
     title: "Antecedentes y última atención",
-    description: "Solo lectura: se editan en Antecedentes de su ficha.",
+    description: "Solo lectura: se editan en Antecedentes, en su página.",
     onClose: () => setContextOpen(false),
     children: <EncounterContextBody patientId={patientId} encounterId={encounterId} patient={patient} />,
   }
@@ -2420,6 +2421,19 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
               />
             </div>
+          ) : null}
+
+          {/* Las fichas que aparecen solas, a la vista debajo de «Hoy viene a…» (dibujo 18). Ninguna se exige. */}
+          {detail.encounter.status === "borrador" ? (
+            <FormOffersBox
+              patientId={patientId}
+              encounterId={encounterId}
+              professionalUserId={detail.encounter.professionalUserId}
+              sex={patient.patient.sex ?? null}
+              canStart={canWrite && attending && !locked}
+              beforeWrite={flush}
+              onChanged={handleChildChanged}
+            />
           ) : null}
 
           {block(

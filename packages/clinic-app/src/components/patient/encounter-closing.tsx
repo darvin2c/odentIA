@@ -1103,11 +1103,11 @@ export function openFormsWords(forms: ReadonlyArray<{ title: string }>): { title
   const names = listWords(forms.map((form) => `«${form.title}»`))
   return forms.length === 1
     ? {
-        title: "Queda un formulario a medias",
+        title: "Queda una ficha a medias",
         detail: `${names}. Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.`,
       }
     : {
-        title: `Quedan ${forms.length} formularios a medias`,
+        title: `Quedan ${forms.length} fichas a medias`,
         detail: `${names}. Puedes firmar igual: se terminan después, aquí mismo en la atención, y llevan su propia fecha y hora.`,
       }
 }

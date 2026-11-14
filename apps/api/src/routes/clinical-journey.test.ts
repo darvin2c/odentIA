@@ -1388,7 +1388,8 @@ it("formularios: dejar de usar y volver a usar desde Configuración; la lista di
   const reused = await post(app, `/clinical-forms/form-templates/${second}/reuse`)
   expect(reused.status).toBe(201)
   const back = (await json<{ data: Row }>(reused)).data
-  expect(back).toMatchObject({ version: 2, status: "publicado" })
+  // Con el interruptor «En uso», volver a usarlo enciende la misma versión: no nace otra.
+  expect(back).toMatchObject({ id: second, version: 1, status: "publicado", inUse: true })
   rows = await list()
   expect(rows.find((row) => row.id === back.id)?.reachesPatients).toBe(true)
   // Ya en uso, no hay a qué volver.

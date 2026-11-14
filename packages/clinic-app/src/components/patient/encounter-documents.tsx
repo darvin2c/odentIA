@@ -58,6 +58,7 @@ import {
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
+import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 
@@ -76,7 +77,7 @@ const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
   { kind: "receta", label: "Receta" },
   { kind: "consentimiento", label: "Consentimiento" },
   { kind: "orden", label: "Orden" },
-  { kind: "formulario", label: "Formulario" },
+  { kind: "formulario", label: "Ficha" },
   { kind: "archivo", label: "Imagen o archivo" },
 ]
 
@@ -277,6 +278,12 @@ export function EncounterDocumentsBlock({
     }
   }, [openMenu, disabled, onMenuHandled])
 
+  // Lo que ya se ofrece arriba, en «Fichas para esta atención» (la misma consulta, compartida).
+  const offers = useQuery({
+    queryKey: ["form-offers", patientId, encounterId],
+    queryFn: () => fetchFormOffers(patientId, encounterId),
+    enabled: detail.encounter.status === "borrador",
+  })
   const formTemplates = useQuery({
     queryKey: ["form-templates-published", "mine-first"],
     queryFn: () => fetchFormTemplates({ status: "publicado", forUser: "me" }),
@@ -292,6 +299,7 @@ export function EncounterDocumentsBlock({
         ["prescriptions", patientId],
         ["medical-leaves", patientId],
         ["form-responses", patientId],
+        ["form-offers", patientId, encounterId],
         ["encounter-closing", patientId, encounterId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     )
@@ -360,12 +368,12 @@ export function EncounterDocumentsBlock({
                 search={{ tab: "documentos" }}
                 className="font-medium text-primary underline-offset-4 hover:underline"
               >
-                Documentos de la ficha
+                los Documentos de {firstName(patient)}
               </Link>
               .
             </>
           ) : (
-            "Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención."
+            "Receta, consentimiento, orden, ficha o imagen, llenos con lo de esta atención."
           )}
         </p>
         {canWrite && !signed ? (
@@ -394,6 +402,7 @@ export function EncounterDocumentsBlock({
         canComplete={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
         onOpen={setOpenForm}
       />
+
 
       {docs.toPrepare.length > 0 ? (
         <section
@@ -651,13 +660,13 @@ export function EncounterDocumentsBlock({
           </li>
         ))}
         {/* El que quedó a medias al firmar ya está arriba, con su «Completar»: aquí no se repite. */}
-        {docs.forms
+        {formsBelowOffers(docs.forms, offers.data?.data)
           .filter((form) => !unfinished.some((pending) => pending.id === form.id))
           .map((form) => (
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">
-                Formulario · {form.templateTitle ?? "Formulario"}
+                {formRowTitle(form)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {signed && form.status === "borrador"
@@ -665,11 +674,24 @@ export function EncounterDocumentsBlock({
                   : FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
-                ? "Completar"
-                : "Ver"}
-            </Button>
+            {(() => {
+              const action =
+                form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
+                  ? "Completar"
+                  : "Ver"
+              return (
+                // Con dos fichas, cada botón dice de cuál es.
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${action} ${formRowTitle(form)}`}
+                  onClick={() => setOpenForm(form.id)}
+                >
+                  {action}
+                </Button>
+              )
+            })()}
           </li>
         ))}
         {docs.files.map((file) => (
@@ -761,6 +783,8 @@ export function EncounterDocumentsBlock({
           encounterId={encounterId}
           defaultProfessionalUserId={detail.encounter.professionalUserId}
           templates={(formTemplates.data?.data ?? []).filter((t) => t.respondent !== "portal")}
+          loading={!formTemplates.isSuccess}
+          drafts={docs.forms}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
             setCreating(null)
@@ -922,8 +946,8 @@ export function formDetailDescription(
   canWrite: boolean,
 ): string | undefined {
   if (response?.source === "portal") return undefined
-  if (response?.status === "borrador" && canWrite) return "Se guarda solo mientras lo completas."
-  if (response?.status === "finalizado") return "Finalizado: ya no se cambia. Para corregir algo, agrega una adenda."
+  if (response?.status === "borrador" && canWrite) return "Se guarda sola mientras la llenas."
+  if (response?.status === "finalizado") return "Finalizada: ya no se cambia. Para corregir algo, agrega una adenda."
   return undefined
 }
 
@@ -945,20 +969,20 @@ export function UnfinishedFormsBox({
   if (forms.length === 0) return null
   return (
     <section
-      aria-label="Formularios a medias"
+      aria-label="Fichas a medias"
       className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3"
     >
       <div className="flex min-w-0 flex-col">
         <span className="text-sm font-medium">
-          {forms.length === 1 ? "Falta terminar un formulario" : `Falta terminar ${forms.length} formularios`}
+          {forms.length === 1 ? "Falta terminar una ficha" : `Falta terminar ${forms.length} fichas`}
         </span>
         <span className="text-xs text-muted-foreground">
-          Quedó a medias al firmar la atención. Al terminarlo lleva su propia fecha y hora.
+          Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora.
         </span>
       </div>
       <ul className="flex flex-col gap-2">
         {forms.map((form) => {
-          const title = form.templateTitle ?? "Formulario"
+          const title = form.templateTitle ?? "Ficha"
           return (
             <li key={form.id} className="flex flex-wrap items-center justify-between gap-2">
               <span className="min-w-0 break-words text-sm">{title}</span>
@@ -1006,10 +1030,13 @@ export function FormDetail({
     enabled: responseId !== null,
   })
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
+  // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
+  const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
+  const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null
   return (
     <DetailDrawer
       open={responseId !== null && response !== null}
-      title={response?.templateTitle ?? "Formulario"}
+      title={response?.templateTitle ?? "Ficha"}
       description={formDetailDescription(response, canWrite)}
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
@@ -1018,6 +1045,8 @@ export function FormDetail({
         <ResponseDetail
           key={response.id}
           response={response}
+          previous={previous}
+          first={first}
           canWrite={canWrite}
           sex={sex}
           encounterId={encounterId}
