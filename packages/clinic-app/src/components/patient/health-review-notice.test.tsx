@@ -188,6 +188,46 @@ describe("«Pregúntale» con representante", () => {
     expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
 
+  it("C3 · la odontóloga lee sin clics lo que dijo la mamá de Thiago, con la marca de quien lo dijo", () => {
+    const thiago = {
+      ...health,
+      allergyReviewDue: false,
+      reviewPending: true,
+      reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
+      conditions: [{ id: "c1", name: "Asma", status: "activa" }],
+      medications: [{ id: "m1", name: "salbutamol inhalador cuando tiene crisis", atcCode: null, endDate: null }],
+      declared: [
+        {
+          by: { kind: "representative", name: "Carla Ramos", relation: "madre" },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: [],
+          conditions: ["c1"],
+          medications: ["m1"],
+          pregnancy: false,
+          interview: [
+            { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
+            { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+            { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
+          ],
+          saidNo: { allergies: true, conditions: false, medications: false },
+        },
+      ],
+    } as unknown as PatientHealth
+    const carla = { ...guardian, displayName: "Carla Ramos", relationshipDetail: "Madre", kinship: "MTH" }
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Thiago Quispe" health={thiago} sex="M" askTo={askWhom([carla])} />
+      </QueryClientProvider>,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toContain("Revisa con su madre (Carla Ramos) lo que dijo de la salud de Thiago")
+    expect(page).toContain("Lo dijo su madre, Carla, el 13 nov, sin revisar")
+    expect(page).toMatch(/Enfermedades\|+[^|]*Asma/)
+    expect(page).toMatch(/Alergias\|+Su madre dijo que no/i)
+    expect(page).toMatch(/De pequeño\|+[^|]*ya no toma biberón · se chupa el dedo/)
+    expect(page).toMatch(/Dulces o jugos entre comidas\|+[^|]*4 o más veces al día/)
+    expect(page).toMatch(/Dientes\|+[^|]*se cepilla sin ayuda/)
+  })
+
   it("Marta: el anticoagulante y la medicina para los huesos van cada uno en su fila", () => {
     const marta = {
       ...health,

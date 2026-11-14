@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import {
+  ageInYears,
   CONSENT_DECLARATION,
   clinicalProfileFor,
   CONSENT_SIGNATURE_NOTES,
@@ -791,6 +792,13 @@ export interface PersonalLinkDataForm {
   healthQuestions: RegistrationFieldKey[]
   /** Su primer nombre, para saludarla; nulo si no se sabe. */
   firstName: string | null
+  /** Sus años cumplidos hoy, si se saben: a quien cuida a un menor de 12 se le pregunta lo de un niño. */
+  age: number | null
+  /**
+   * El primer nombre de quien abre el enlace cuando no es la persona (su madre, su tutor): a quien
+   * cuida a un niño se le habla a él («Lo respondes tú, Carla»). Nulo si el enlace es de la persona.
+   */
+  respondentFirstName: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va al final, antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }
 }
@@ -806,16 +814,21 @@ export async function getPersonalLinkDataForm(
   const healthQuestions = await healthQuestionsOf(tx, orgId, link)
   const health = healthQuestions.length > 0
   if ((!missing && !health) || !link.patientId) throw linkExpired()
+  const person = await requirePatient(tx, orgId, link.patientId)
+  const today = await patientOrganizationToday(tx, orgId)
+  const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
   return {
     missing: missing ?? [],
     countryCode: await findOrgCountry(tx, orgId),
-    today: await patientOrganizationToday(tx, orgId),
+    today,
+    age: ageInYears(person.birthDate, today),
+    respondentFirstName: self ? null : await linkContactFirstName(tx, orgId, link.row.contactId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
     // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).
     registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
     healthQuestions,
-    firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
+    firstName: firstName(person) || null,
     pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
   }
 }

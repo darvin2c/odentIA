@@ -228,6 +228,11 @@ export interface DeclaredHealthGroup {
   conditions: string[]
   medications: string[]
   pregnancy: boolean
+  /**
+   * Lo del producto que dijo, ya en palabras (odentIA: «de pequeño» de un niño). Opcional: un
+   * servidor anterior no lo manda.
+   */
+  interview?: Array<{ label: string; value: string }>
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }

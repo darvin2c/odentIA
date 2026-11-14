@@ -144,6 +144,8 @@ export function HealthReviewNotice({
     if (saidConditions.length > 0)
       rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
     else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
+    // Lo del producto, como lo dice el servidor (odentIA: lo de pequeño que contó quien cuida a un niño).
+    for (const row of group.interview ?? []) rows.push(row)
     return { title: declaredMarkWords(group.by, group.at, sex), rows }
   })
   const pregnancyPending = (health.declared ?? []).some((group) => group.pregnancy)
@@ -153,7 +155,8 @@ export function HealthReviewNotice({
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const asked = active.length > 0 || health.reviewStatus.allergies === "none"
   // Con representante (un niño), se le pregunta a él, como lo dice la ficha; si no, a la persona.
-  const first = askTo ?? patientName.trim().split(/\s+/)[0] ?? patientName
+  const patientFirst = patientName.trim().split(/\s+/)[0] ?? patientName
+  const first = askTo ?? patientFirst
   const topics = [
     allergiesDue ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
@@ -162,7 +165,7 @@ export function HealthReviewNotice({
   const title =
     !allergiesDue && unasked.length === 0
       ? pending
-        ? `Revisa con ${first} lo que dijo de su salud`
+        ? `Revisa con ${first} lo que dijo de ${askTo ? `la salud de ${patientFirst}` : "su salud"}`
         : `Pregúntale a ${first} si sigue embarazada`
       : unasked.length === 0
       ? asked

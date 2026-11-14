@@ -317,6 +317,11 @@ export interface DeclaredHealthGroup {
   medications: string[]
   /** El embarazo de la entrevista lo dijo en esta declaración y sigue sin revisar. */
   pregnancy: boolean
+  /**
+   * Lo del producto que dijo en esta declaración y sigue sin revisar, en palabras
+   * (`ProductInterview.declaredLines`; odentIA: «de pequeño» de un niño).
+   */
+  interview: Array<{ label: string; value: string }>
   /** Su «No» a un grupo: lo dijo quien declaró, no lo preguntó ni lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
@@ -705,10 +710,12 @@ export async function getPatientHealth(
     legacySaidOn = legacyPregnancySaidOn(days)
   }
   const pregnancy = pregnancyToday(latest?.answers, today, { legacySaidOn })
+  const { interview } = await productHooks(tx, orgId)
+  const interviewLines = (said: DeclaredPatientHealthInput) => interview.declaredLines?.(said) ?? []
   return {
     ...health,
     reviewPending,
-    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy }),
+    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy, interviewLines }),
     pregnancy,
     declarations,
     medicineClasses: medicineClassAnswers({
@@ -765,6 +772,8 @@ function declaredGroupsOf(input: {
   declarations: HealthDeclaration[]
   latest: AnamnesisRow | null
   pregnancy: PregnancyToday | null
+  /** Lo del producto que dijo, en palabras (`ProductInterview.declaredLines`). */
+  interviewLines: (health: DeclaredPatientHealthInput) => Array<{ label: string; value: string }>
 }): DeclaredHealthGroup[] {
   const { health, reviewPending, authorship, declarations, latest } = input
   const groups = new Map<string, DeclaredHealthGroup>()
@@ -780,6 +789,7 @@ function declaredGroupsOf(input: {
         conditions: [],
         medications: [],
         pregnancy: false,
+        interview: [],
         saidNo: { allergies: false, conditions: false, medications: false },
       }
       groups.set(key, group)
@@ -805,6 +815,10 @@ function declaredGroupsOf(input: {
       const said = declarations.find((row) => typeof row.health.personal?.embarazo === "boolean")
       groupOf(said, latest.createdAt).pregnancy = true
     }
+    // Lo del producto (odentIA: «de pequeño»), de la última declaración que lo dijo, mientras nadie del
+    // equipo haya guardado la entrevista después.
+    const said = declarations.find((row) => input.interviewLines(row.health).length > 0)
+    if (said && sinceStaff(said.enteredAt)) groupOf(said, said.enteredAt).interview = input.interviewLines(said.health)
   }
   // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
   const saidNo = {

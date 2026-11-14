@@ -241,6 +241,11 @@ export interface ProductInterview {
   check(answers: Record<string, unknown>, today: string): Record<string, unknown>
   /** Lo que la persona declaró en su registro, ya con las claves de la entrevista. */
   declared(health: DeclaredHealth, today: string): Record<string, unknown>
+  /**
+   * Lo suyo que dijo una declaración, en palabras, para «Revisa con … lo que
+   * dijo» de la atención (odentIA: «de pequeño» de un niño). Sin él, nada.
+   */
+  declaredLines?(health: DeclaredHealth): Array<{ label: string; value: string }>
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
