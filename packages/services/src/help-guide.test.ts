@@ -110,6 +110,26 @@ describe("la solo lectura por falta de pago", () => {
   })
 })
 
+// QA del 14 nov: contado como lo vive la doctora, la Ayuda no llegaba a la recomendada.
+describe("la opción recomendada del presupuesto", () => {
+  const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null
+  const answer = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((faq) => faq.id === "ofrecer-dos-opciones")
+
+  it.each([
+    "opción recomendada",
+    "cambiar la recomendada",
+    "le sale marcada otra opción",
+    "ya lo envié y la recomendada está mal",
+  ])("«%s» la encuentra", (question) => {
+    expect(firstFaq(question)).toBe("ofrecer-dos-opciones")
+  })
+
+  it("lo entregado se cambia con una revisión, no anulándolo", () => {
+    expect(answer?.a).toContain("«Crear revisión»")
+    expect(answer?.a).toMatch(/no con «Anular presupuesto»/)
+  })
+})
+
 describe("saludar y agradecer", () => {
   it("se responden sin buscar", () => {
     expect(helpSmallTalk("Hola")).toContain("soy Ariadna")
