@@ -56,7 +56,6 @@ import {
   PrescriptionPaper,
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
-import { FormOffersBox } from "./form-offers"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { formRowTitle } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
@@ -397,19 +396,6 @@ export function EncounterDocumentsBlock({
         onOpen={setOpenForm}
       />
 
-      {/* Las fichas que aparecen solas: por la cita, por la edad o por quien atiende. Ninguna se exige. */}
-      {signed ? null : (
-        <FormOffersBox
-          patientId={patientId}
-          encounterId={encounterId}
-          professionalUserId={detail.encounter.professionalUserId}
-          canStart={canWrite && !disabled}
-          beforeWrite={beforeWrite}
-          onStarted={refresh}
-          onOpen={setOpenForm}
-          onOther={() => startNew("formulario")}
-        />
-      )}
 
       {docs.toPrepare.length > 0 ? (
         <section

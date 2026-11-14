@@ -138,6 +138,7 @@ import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, UnfinishedFormsBox, useEncounterDocuments } from "./encounter-documents"
+import { FormOffersBox } from "./form-offers"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -2404,6 +2405,18 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
               />
             </div>
+          ) : null}
+
+          {/* Las fichas que aparecen solas, a la vista debajo de «Hoy viene a…» (dibujo 18). Ninguna se exige. */}
+          {detail.encounter.status === "borrador" ? (
+            <FormOffersBox
+              patientId={patientId}
+              encounterId={encounterId}
+              professionalUserId={detail.encounter.professionalUserId}
+              canStart={canWrite && attending && !locked}
+              beforeWrite={flush}
+              onChanged={handleChildChanged}
+            />
           ) : null}
 
           {block(

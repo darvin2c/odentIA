@@ -1,8 +1,8 @@
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { useId } from "react"
-import { startFormResponse } from "../../lib/clinical-forms"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useId, useState } from "react"
+import { fetchFormTemplates, startFormResponse } from "../../lib/clinical-forms"
 import {
   fetchFormOffers,
   type FormOffer,
@@ -12,6 +12,8 @@ import {
   offerWhyWords,
 } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { FormDetail } from "./encounter-documents"
+import { NewResponseDrawer } from "./formularios-tab"
 
 /** «12 oct», en la zona de la clínica. */
 const dayOf = (iso: string) =>
@@ -19,9 +21,10 @@ const dayOf = (iso: string) =>
 
 /**
  * Las fichas que la atención ofrece solas (ADR 0117): por la especialidad de la
- * cita, por la edad o, sin servicio, por la de quien atiende. Cada una con por
- * qué aparece y un solo botón; «Otra ficha…» abre las demás. Ofrecer no es
- * pedir: nada de esto se exige para firmar ni para cobrar.
+ * cita, por la edad o, sin servicio, por la de quien atiende. Va arriba, debajo
+ * de «Hoy viene a…» (dibujo 18), con por qué aparece cada una y un solo botón;
+ * «Otra ficha…» abre las demás. La ficha se abre al lado sin salir de la
+ * atención. Ofrecer no es pedir: nada de esto se exige para firmar ni para cobrar.
  */
 export function FormOffersBox({
   patientId,
@@ -29,9 +32,7 @@ export function FormOffersBox({
   professionalUserId,
   canStart,
   beforeWrite,
-  onStarted,
-  onOpen,
-  onOther,
+  onChanged,
 }: {
   patientId: string
   encounterId: string
@@ -40,16 +41,33 @@ export function FormOffersBox({
   /** Puede empezar o seguir una ficha en esta atención; si no, solo las ve. */
   canStart: boolean
   beforeWrite: () => Promise<void>
-  onStarted: () => Promise<void>
-  onOpen: (responseId: string) => void
-  onOther: () => void
+  /** Lo que la atención vuelve a leer al empezar o cambiar una ficha (su cierre, sus documentos). */
+  onChanged: () => Promise<void>
 }): React.JSX.Element | null {
   const titleId = useId()
+  const queryClient = useQueryClient()
+  const [opened, setOpened] = useState<string | null>(null)
+  const [choosing, setChoosing] = useState(false)
   const offers = useQuery({
     queryKey: ["form-offers", patientId, encounterId],
     queryFn: () => fetchFormOffers(patientId, encounterId),
     retry: 1,
   })
+  const templates = useQuery({
+    queryKey: ["form-templates-published", "mine-first"],
+    queryFn: () => fetchFormTemplates({ status: "publicado", forUser: "me" }),
+    enabled: choosing,
+  })
+  const refresh = async () => {
+    await Promise.all(
+      [
+        ["form-offers", patientId, encounterId],
+        ["form-responses", patientId],
+        ["encounter-closing", patientId, encounterId],
+      ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    )
+    await onChanged()
+  }
   const start = useMutation({
     mutationFn: async (offer: FormOffer) => {
       await beforeWrite()
@@ -62,8 +80,8 @@ export function FormOffersBox({
       })
     },
     onSuccess: async (result) => {
-      await onStarted()
-      onOpen(result.data.id)
+      await refresh()
+      setOpened(result.data.id)
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
@@ -71,20 +89,60 @@ export function FormOffersBox({
   // Si no se pudo leer, igual se ofrece elegir una: «Otra ficha…» está siempre.
   const view = offersView(offers.data?.data ?? (offers.isError ? [] : undefined), canStart)
   if (view === "nada") return null
-  if (view === "solo-otra") {
-    return (
-      <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-        Ninguna ficha aparece sola en esta atención.
-        <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={onOther}>
-          Otra ficha…
-        </Button>
-      </p>
-    )
-  }
 
   const act = (offer: FormOffer) => {
-    if (offer.today) onOpen(offer.today.responseId)
+    if (offer.today) setOpened(offer.today.responseId)
     else start.mutate(offer)
+  }
+  const other = (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className="min-h-11 w-fit sm:min-h-8"
+      onClick={() => setChoosing(true)}
+    >
+      Otra ficha…
+    </Button>
+  )
+  const drawers = (
+    <>
+      {choosing ? (
+        <NewResponseDrawer
+          open
+          patientId={patientId}
+          encounterId={encounterId}
+          defaultProfessionalUserId={professionalUserId}
+          templates={(templates.data?.data ?? []).filter((template) => template.respondent !== "portal")}
+          loading={!templates.isSuccess}
+          onClose={() => setChoosing(false)}
+          onCreated={async (id) => {
+            setChoosing(false)
+            await refresh()
+            setOpened(id)
+          }}
+        />
+      ) : null}
+      <FormDetail
+        patientId={patientId}
+        responseId={opened}
+        canWrite={canStart}
+        onClose={() => setOpened(null)}
+        onChanged={refresh}
+      />
+    </>
+  )
+
+  if (view === "solo-otra") {
+    return (
+      <>
+        <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+          Ninguna ficha aparece sola en esta atención.
+          {other}
+        </p>
+        {drawers}
+      </>
+    )
   }
 
   return (
@@ -128,11 +186,8 @@ export function FormOffersBox({
           )
         })}
       </ul>
-      {canStart ? (
-        <Button type="button" size="sm" variant="ghost" className="min-h-11 w-fit sm:min-h-8" onClick={onOther}>
-          Otra ficha…
-        </Button>
-      ) : null}
+      {canStart ? other : null}
+      {drawers}
     </section>
   )
 }
