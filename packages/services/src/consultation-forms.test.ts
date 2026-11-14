@@ -349,7 +349,7 @@ it("en el control, la ficha de hoy trae la anterior del mismo tipo, aunque la pl
       templateId: (await template()).id,
       patientId: c.patient.id,
       encounterId: first.id,
-      answers: { clase_molar: "Clase II división 1", overjet: 6, overbite: 4 },
+      answers: { clase_molar_derecha: "Clase II división 1", overjet: 6, overbite: 4 },
     }),
   )
   // En su propia atención, la de hoy no es «la anterior» de sí misma.
@@ -407,7 +407,7 @@ it("la ficha finalizada en una atención que después se anuló no se pone al la
       templateId: template.id,
       patientId: c.patient.id,
       encounterId: first.id,
-      answers: { clase_molar: "Clase I" },
+      answers: { clase_molar_derecha: "Clase I" },
     }),
   )
   await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, initial.id))
@@ -467,7 +467,7 @@ it("desde el tercer control, la de hoy trae también la de inicio para comparar"
   for (const answer of ["Clase II división 1", "Clase II división 1", "Clase I"]) {
     const visit = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
     const row = await c.run((tx) =>
-      createFormResponse(tx, c.orgId, c.actor, { templateId: template.id, patientId: c.patient.id, encounterId: visit.id, answers: { clase_molar: answer } }),
+      createFormResponse(tx, c.orgId, c.actor, { templateId: template.id, patientId: c.patient.id, encounterId: visit.id, answers: { clase_molar_derecha: answer } }),
     )
     await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, row.id))
     finished.push(row.id)

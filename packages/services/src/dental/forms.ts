@@ -37,7 +37,8 @@ const APICAL_DIAGNOSES = [
 const ENDODONTICS: SuggestedFormTemplate = {
   key: "evaluacion-de-endodoncia",
   title: "Evaluación de endodoncia",
-  description: "Pieza, pruebas de frío, calor, percusión y palpación, diagnóstico pulpar y apical.",
+  description:
+    "Pieza, dolor (0–10), tumefacción, fístula, movilidad y sondaje, pruebas de frío, calor, percusión y palpación, radiografía, diagnóstico pulpar y apical.",
   kind: "endodoncia",
   schema: {
     sections: [
@@ -47,6 +48,23 @@ const ENDODONTICS: SuggestedFormTemplate = {
         fields: [
           { id: "pieza", label: "Pieza", type: "pieza", required: true },
           { id: "dolor", label: "Dolor", type: "opcion_unica", options: ["Sin dolor", "Provocado", "Espontáneo"] },
+          { id: "dolor_intensidad", label: "Intensidad del dolor", type: "escala", min: 0, max: 10, help: "0, sin dolor; 10, el peor dolor." },
+        ],
+      },
+      {
+        // Lo que separa el absceso agudo del crónico y la lesión endoperiodontal (AAE).
+        id: "examen",
+        title: "Examen de la pieza",
+        fields: [
+          { id: "tumefaccion", label: "Tumefacción", type: "opcion_unica", options: ["No tiene", "Intraoral", "Extraoral"] },
+          { id: "fistula", label: "Fístula (tracto sinusal)", type: "booleano" },
+          {
+            id: "movilidad",
+            label: "Movilidad",
+            type: "opcion_unica",
+            options: ["Grado 0 (fisiológica)", "Grado 1", "Grado 2", "Grado 3"],
+          },
+          { id: "sondaje", label: "Sondaje periodontal más profundo", type: "numero", unit: "mm", min: 0, max: 15 },
         ],
       },
       {
@@ -57,6 +75,25 @@ const ENDODONTICS: SuggestedFormTemplate = {
           { id: "calor", label: "Prueba de calor", type: "opcion_unica", options: PULP_TEST },
           { id: "percusion", label: "Percusión", type: "opcion_unica", options: ["Negativa", "Positiva"] },
           { id: "palpacion", label: "Palpación", type: "opcion_unica", options: ["Negativa", "Positiva"] },
+        ],
+      },
+      {
+        id: "radiografia",
+        title: "Radiografía",
+        fields: [
+          {
+            id: "hallazgo_radiografico",
+            label: "Hallazgo radiográfico periapical",
+            type: "opcion_multiple",
+            options: [
+              "Ninguno",
+              "Ensanchamiento del ligamento periodontal",
+              "Radiolucidez periapical",
+              "Conductos calcificados",
+              "Reabsorción",
+              "Tratamiento de conducto previo",
+            ],
+          },
         ],
       },
       {
@@ -72,10 +109,19 @@ const ENDODONTICS: SuggestedFormTemplate = {
   },
 }
 
+/** La clase de Angle, molar o canina, de un lado. */
+const ANGLE = ["Clase I", "Clase II división 1", "Clase II división 2", "Clase III"]
+/** La clase canina de un lado: sin divisiones. */
+const CANINE = ["Clase I", "Clase II", "Clase III"]
+/** La línea media de una arcada respecto a la facial. */
+const MIDLINE = ["Centrada", "Desviada a la derecha", "Desviada a la izquierda"]
+
+/** Por lado y por arcada: con un solo campo no se anota una clase II subdivisión. */
 const ORTHODONTICS: SuggestedFormTemplate = {
   key: "ficha-de-ortodoncia",
   title: "Ficha de ortodoncia",
-  description: "Clase de Angle, overjet y overbite en mm, línea media, mordidas cruzadas, hábitos.",
+  description:
+    "Clase molar y canina de cada lado, overjet y overbite en mm, línea media de cada arcada, mordidas cruzadas, hábitos.",
   kind: "ortodoncia",
   schema: {
     sections: [
@@ -83,21 +129,16 @@ const ORTHODONTICS: SuggestedFormTemplate = {
         id: "oclusion",
         title: "Oclusión",
         fields: [
-          {
-            id: "clase_molar",
-            label: "Clase molar (Angle)",
-            type: "opcion_unica",
-            options: ["Clase I", "Clase II división 1", "Clase II división 2", "Clase III"],
-          },
+          { id: "clase_molar_derecha", label: "Clase molar derecha (Angle)", type: "opcion_unica", options: ANGLE },
+          { id: "clase_molar_izquierda", label: "Clase molar izquierda (Angle)", type: "opcion_unica", options: ANGLE },
+          { id: "clase_canina_derecha", label: "Clase canina derecha", type: "opcion_unica", options: CANINE },
+          { id: "clase_canina_izquierda", label: "Clase canina izquierda", type: "opcion_unica", options: CANINE },
           { id: "overjet", label: "Overjet", type: "numero", unit: "mm", min: -10, max: 20 },
           { id: "overbite", label: "Overbite", type: "numero", unit: "mm", min: -10, max: 15 },
-          {
-            id: "linea_media",
-            label: "Línea media",
-            type: "opcion_unica",
-            options: ["Centrada", "Desviada a la derecha", "Desviada a la izquierda"],
-          },
-          { id: "linea_media_mm", label: "Desviación de la línea media", type: "numero", unit: "mm", min: 0, max: 15 },
+          { id: "linea_media_superior", label: "Línea media superior", type: "opcion_unica", options: MIDLINE },
+          { id: "linea_media_superior_mm", label: "Desviación de la línea media superior", type: "numero", unit: "mm", min: 0, max: 15 },
+          { id: "linea_media_inferior", label: "Línea media inferior", type: "opcion_unica", options: MIDLINE },
+          { id: "linea_media_inferior_mm", label: "Desviación de la línea media inferior", type: "numero", unit: "mm", min: 0, max: 15 },
           {
             id: "mordida_cruzada",
             label: "Mordida cruzada",

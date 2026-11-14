@@ -62,3 +62,23 @@ it("cada pregunta de casillas tiene su «No tiene» o «Ninguno»: sin marcar no
         expect(field.help ?? "", `${form.key}:${field.id}`).not.toMatch(/sin marcar/i)
       }
 })
+
+// QA del 14 nov (voz clínica): lo que la consulta anota y la ficha no tenía dónde.
+it("ortodoncia anota la clase molar y canina de cada lado y la línea media de cada arcada; endodoncia, lo que separa los diagnósticos", () => {
+  const ids = (key: string) =>
+    DENTAL_FORMS.suggestions.find((form) => form.key === key)?.schema.sections.flatMap((section) => section.fields.map((field) => field.id)) ?? []
+  expect(ids("ficha-de-ortodoncia")).toEqual(
+    expect.arrayContaining([
+      "clase_molar_derecha",
+      "clase_molar_izquierda",
+      "clase_canina_derecha",
+      "clase_canina_izquierda",
+      "linea_media_superior",
+      "linea_media_inferior",
+    ]),
+  )
+  expect(ids("ficha-de-ortodoncia")).not.toContain("clase_molar")
+  expect(ids("evaluacion-de-endodoncia")).toEqual(
+    expect.arrayContaining(["dolor_intensidad", "tumefaccion", "fistula", "movilidad", "sondaje", "hallazgo_radiografico"]),
+  )
+})
