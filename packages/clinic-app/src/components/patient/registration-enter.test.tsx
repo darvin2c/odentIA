@@ -62,8 +62,15 @@ const answer = (name: RegExp, text: string) => {
   fireEvent.click(button)
 }
 
+/** Si una opción quedó elegida en el grupo: Enter nunca contesta por la persona. */
+const answered = (name: RegExp) =>
+  [...question(name).querySelectorAll("button")].filter(
+    (b) => b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true" || b.dataset.state === "on",
+  )
+
 // QA de la entrega 3 (14 nov): en «Tus datos y tu salud», Enter en «¿A qué?» de la alergia saltaba
-// a la pantalla siguiente y dejaba sin ver «¿Tienes alguna enfermedad?» y la medicación.
+// a la pantalla siguiente y dejaba sin ver «¿Tienes alguna enfermedad?» y la medicación. Desde la
+// entrega 6, después de «¿A qué?» viene «¿Qué te pasó?», y después las enfermedades de la lista.
 it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambiar de pantalla", async () => {
   healthOnly()
   await screen.findAllByRole("group", { name: /alergia a algún medicamento o material/ })
@@ -71,7 +78,9 @@ it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambia
   const what = await screen.findByLabelText(/¿A qué\?/)
   fireEvent.change(what, { target: { value: "penicilina" } })
   enter(what)
-  expect(question(/alguna enfermedad/).contains(document.activeElement)).toBe(true)
+  expect(document.activeElement).toBe(screen.getByLabelText("¿Qué te pasó?"))
+  enter(document.activeElement as Element)
+  expect(question(/alguna de estas enfermedades/).contains(document.activeElement)).toBe(true)
   expect(screen.getByLabelText(/¿A qué\?/)).toBeTruthy()
 })
 
@@ -89,28 +98,37 @@ it("Enter repetido después de «¿A qué?» recorre las preguntas sin contestar
   const what = await screen.findByLabelText(/¿A qué\?/)
   fireEvent.change(what, { target: { value: "penicilina" } })
   enterLikeBrowser(what)
-  for (let i = 0; i < 4; i++) enterLikeBrowser(document.activeElement as Element)
-  for (const name of [/alguna enfermedad/, /algún medicamento todos los días/]) {
-    const pressed = [...question(name).querySelectorAll("button")].filter((b) => b.getAttribute("aria-pressed") === "true")
-    expect(pressed, String(name)).toEqual([])
+  // «¿Qué te pasó?», las enfermedades, el corazón, el antibiótico y la anestesia: hasta el grupo sanguíneo.
+  for (let i = 0; i < 6; i++) enterLikeBrowser(document.activeElement as Element)
+  expect((document.activeElement as HTMLElement | null)?.dataset.slot).toBe("select-trigger")
+  for (const name of [/alguna de estas enfermedades/, /válvula del corazón/, /antibiótico antes de ir al dentista/, /problema con la anestesia/]) {
+    expect(answered(name), String(name)).toEqual([])
   }
 })
 
-// …y en la última pantalla, Enter en la última respuesta escrita lo enviaba todo.
+// …y en la última pantalla, Enter en la última respuesta escrita lo enviaba todo. Desde la entrega 6,
+// lo que toma va en su propio paso, «Tus medicinas», que termina en «¿Tomas algún otro medicamento…?».
 it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", async () => {
   const onSubmit = healthOnly()
   await screen.findAllByRole("group", { name: /alergia a algún medicamento o material/ })
   answer(/algún medicamento o material/, "No")
-  answer(/alguna enfermedad/, "No")
-  answer(/algún medicamento todos los días/, "Sí")
-  const which = (await screen.findAllByLabelText(/¿Cuál\? Si son varios/))[0] as HTMLInputElement
+  answer(/alguna de estas enfermedades/, "No")
+  answer(/válvula del corazón/, "No")
+  answer(/problema con la anestesia/, "No")
+  fireEvent.click(screen.getByRole("button", { name: "Siguiente" }))
+  await screen.findAllByRole("group", { name: /coágulos/ }, { timeout: 5000 })
+  answer(/coágulos/, "No")
+  answer(/medicinas para los huesos/, "No")
+  answer(/algún otro medicamento todos los días/, "Sí")
+  const which = (await screen.findAllByLabelText(/¿Cuál\? Si son varios/)).at(-1) as HTMLInputElement
   fireEvent.change(which, { target: { value: "Losartán" } })
   enter(which)
   await new Promise((resolve) => setTimeout(resolve, 50))
   expect(onSubmit).not.toHaveBeenCalled()
-  // El foco pasa a la pregunta siguiente (el grupo sanguíneo), nunca a «Anterior» ni a «Saltar».
-  expect((document.activeElement as HTMLElement | null)?.dataset.slot).toBe("select-trigger")
+  // El foco pasa al botón de seguir, sin pulsarlo, y nunca a «Anterior» ni a «Saltar».
+  expect((document.activeElement as HTMLElement | null)?.dataset.slot).toBe("questionnaire-next")
   const stops = [...document.querySelectorAll<HTMLElement>("[data-slot=questionnaire-previous], [data-slot=questionnaire-skip]")]
   expect(stops.length).toBeGreaterThan(0)
   for (const stop of stops) expect(stop.hasAttribute("data-enter-skip")).toBe(true)
-})
+  // Recorre dos pasos del cuestionario: con todo el paquete corriendo a la vez pasa de los 5 s.
+}, 20_000)
