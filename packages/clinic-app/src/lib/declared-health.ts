@@ -6,11 +6,20 @@
  * declaración; `FormResponse.respondent`): aquí solo se escribe. Nunca se
  * deduce quién fue por quién figura hoy como su representante.
  */
-import { type HealthDeclarant, KINSHIP_LABELS, type PregnancyToday } from "@odentia/clinical"
+import {
+  type HealthDeclarant,
+  KINSHIP_LABELS,
+  type PregnancyToday,
+  saidNoWords,
+  saidWhenWords,
+  whoWords,
+} from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
 
 export type { HealthDeclarant }
+// Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
+export { saidNoWords, whoWords }
 
 /** Quien decide por la persona cuando tiene representante: el preferido primero. */
 function guardianOf(contacts: readonly PatientContactLink[]): { kin: string; name: string } | null {
@@ -38,25 +47,6 @@ export function askWhom(contacts: readonly PatientContactLink[]): string | null 
 
 type Sex = string | null | undefined
 
-/** «ella», «él» o, sin sexo registrado, nada: no se supone ninguno. */
-const pronoun = (sex: Sex): string => (sex === "F" ? "ella" : sex === "M" ? "él" : "")
-
-/**
- * Quién lo dijo, en palabras: «ella», «él», «su madre, Carla» o «el equipo».
- * Cadena vacía si lo dijo la persona y no se sabe su sexo, o si no consta
- * quién fue (lo anterior a guardarlo): la frase se arma sin sujeto.
- */
-export function whoWords(by: HealthDeclarant, sex: Sex): string {
-  if (by.kind === "patient") return pronoun(sex)
-  if (by.kind === "staff") return "el equipo"
-  if (by.kind === "unknown") return ""
-  const first = by.name?.trim().split(/\s+/)[0] ?? ""
-  if (by.relation && first) return `su ${by.relation}, ${first}`
-  if (by.relation) return `su ${by.relation}`
-  if (first) return first
-  return sex === "F" ? "quien habla por ella" : sex === "M" ? "quien habla por él" : "quien habla en su nombre"
-}
-
 /**
  * «13 nov», y de otro año «13 nov 2025». Un día de calendario (`2026-11-13`) se
  * dice tal cual; un instante, en la zona de la clínica.
@@ -83,14 +73,7 @@ export function shortDay(value: string, now: Date = new Date()): string {
  * no dice quién fue: «Declarado el 13 nov…».
  */
 export function declaredMarkWords(by: HealthDeclarant, at: string | null | undefined, sex: Sex): string {
-  const day = at ? shortDay(at) : ""
-  const when = day ? ` el ${day}` : ""
-  if (by.kind === "staff") return `Lo anotó el equipo${when}, sin revisar`
-  if (by.kind === "unknown") return `Declarado${when}, sin revisar`
-  const who = whoWords(by, sex)
-  // Con quien habla por ella, su nombre va entre comas: «Lo dijo su madre, Carla, el 13 nov, sin revisar».
-  const subject = who ? ` ${who}${who.includes(",") && day ? "," : ""}` : ""
-  return `Lo dijo${subject}${when}, sin revisar`
+  return `${saidWhenWords(by, at ? shortDay(at) : "", sex)}, sin revisar`
 }
 
 /** «lo dijo ella», para una fila: «lo dijo ella · por revisar». */
@@ -99,19 +82,6 @@ export function saidByWords(by: HealthDeclarant, sex: Sex): string {
   if (by.kind === "unknown") return "declarado"
   const who = whoWords(by, sex)
   return who ? `lo dijo ${who}` : "lo dijo"
-}
-
-/**
- * El «No» que marcó quien declaró: «Dijo que no», «Su madre dijo que no». No es
- * el «niega» que anota un profesional cuando se lo pregunta.
- */
-export function saidNoWords(by: HealthDeclarant, sex: Sex): string {
-  if (by.kind === "staff") return "El equipo anotó que no"
-  if (by.kind === "representative") {
-    const who = by.relation ? `su ${by.relation}` : whoWords(by, sex)
-    return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que no`
-  }
-  return "Dijo que no"
 }
 
 type Topic = "allergies" | "conditions" | "medications"
