@@ -1700,6 +1700,25 @@ it("el segundo envío del cuestionario dice «Ya lo enviaste», no que el enlace
   await expect(f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, hers.token, { motivo: "x" }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
 })
 
+// QA de la entrega 3 (14 nov): abrir un mensaje viejo con «abre=cuestionario» decía «Ya lo enviaste»
+// por las respuestas de una cita que ya pasó.
+it("lo enviado para una cita que ya pasó no es «Ya lo enviaste»: ese enlace ya no sirve para el cuestionario", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  await expect(f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, link.token))).rejects.toMatchObject({ code: "ALREADY_SUBMITTED" })
+  // Pasa el tiempo: lo envió hace una semana para la cita de hace tres días.
+  const days = (n: number) => new Date(Date.now() - n * 86_400_000)
+  await ownerDb.update(clinicalFormResponse).set({ submittedAt: days(7) }).where(eq(clinicalFormResponse.patientId, marta.patientId))
+  await ownerDb.update(appointment).set({ startsAt: days(3), endsAt: new Date(days(3).getTime() + 30 * 60_000) }).where(eq(appointment.id, visit))
+  const next = await upcomingAppointment(f, marta.patientId)
+  const fresh = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: next }, { secretsKey: KEY }),
+  )
+  const opened = f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, fresh.token))
+  await expect(opened).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+})
+
 // Mesa de formularios del 13 nov (C8): después de enviar, «Tus pendientes» no decía nada de lo enviado.
 it("después de enviar, su enlace dice qué envió y cuándo, y nunca lo que respondió", async () => {
   const f = await clinicalFixture()

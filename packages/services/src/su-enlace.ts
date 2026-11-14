@@ -1566,13 +1566,17 @@ export async function signPersonalLinkConsent(
 // ---------------------------------------------------------- cuestionario ---
 
 /**
- * Por qué no hay cuestionario por responder: si ya está enviado, se dice eso («Ya lo enviaste»);
- * el enlace sigue sirviendo. Lo demás (no decide, sin cita, vencido) es «ya no sirve».
+ * Por qué no hay cuestionario por responder: si ya está enviado para la cita que viene, se dice
+ * eso («Ya lo enviaste»); el enlace sigue sirviendo. Lo enviado antes de su última cita pasada fue
+ * para aquella (la misma regla que «Lo que nos contaste»): de esta no hay nada que decir. Lo demás
+ * (no decide, sin cita, vencido) es «ya no sirve».
  */
 async function questionnaireClosed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<ServiceError> {
   if (!link.patientId || !link.decides || link.expired) return linkExpired()
   const sent = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
   if (!sent) return linkExpired()
+  const since = await lastVisitAt(tx, orgId, link.patientId)
+  if (since !== null && sent.at <= since) return linkExpired()
   const { clinician } = productWords(await orgProduct(tx, orgId))
   return new ServiceError(
     "ALREADY_SUBMITTED",
