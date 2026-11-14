@@ -49,6 +49,8 @@ const COMPOSED = new Set([
   "Corona · sesión 1 de 2: mar 10 nov, 9:00 · la sesión 2 se reserva en esa cita",
   "sí, ahí estaré",
   "y en agosto",
+  // Su paso y su total salen de lo que dejó escrito en su celular (`draftResumeWords`).
+  "Vas en el paso 3 de 6",
 ])
 
 /** Lo que una guía cita entre comillas y no aparece en ninguna pantalla ni servicio. */

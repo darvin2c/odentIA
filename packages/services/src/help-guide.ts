@@ -1105,6 +1105,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         ],
       },
       {
+        // Mesa de formularios del 13 nov, entrega 9.
+        id: "paciente-se-le-borro-lo-que-escribio",
+        q: "La paciente dice que se le borró lo que escribió, ¿qué pasó?",
+        a: "Lo que escribe en su registro, en su enlace o en «Antes de tu cita» se guarda en su propio celular, no en la clínica, hasta que lo envía o por un día, lo que pase primero. Si vuelve en ese mismo celular y en ese mismo navegador dentro del día, ve «Vas en el paso 3 de 6» y «Seguir donde ibas». Empieza en blanco si lo abre desde otro celular, desde otro navegador o en una ventana privada, si pasó más de un día, si borró los datos del navegador o si tocó «Empezar de nuevo». Hasta que lo envía, la clínica no recibe nada y nadie del equipo puede recuperarlo: que lo vuelva a responder desde su enlace, o que lo cuente en la cita. Lo que ya envió no se pierde: llegó a la clínica.",
+        forms: [
+          "la paciente dice que se le borro lo que escribio",
+          "se le borro lo que estaba llenando",
+          "el paciente perdio lo que respondio",
+          "se perdieron sus respuestas antes de enviar",
+          "puedo recuperar lo que escribio el paciente",
+        ],
+      },
+      {
         id: "doy-acceso-portal",
         q: "¿Cómo le doy acceso al portal?",
         a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
