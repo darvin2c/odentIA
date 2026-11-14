@@ -517,7 +517,15 @@ const withDay = (item: DentalInterviewItem, text: string): string => {
  * resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato: lo
  * del equipo queda sin ella (QA del 14 nov, causa raíz).
  */
-function DentalHistorySummary({ answers, marks }: { answers: Rec; marks?: Partial<Record<DeclaredInterviewKey, string>> }) {
+function DentalHistorySummary({
+  answers,
+  marks,
+  productMark,
+}: {
+  answers: Rec
+  marks?: Partial<Record<DeclaredInterviewKey, string>>
+  productMark?: string
+}) {
   const items = dentalInterviewItems(answers)
   const raw = answers.antecedentesOdontologicos
   const childhood = childhoodLines(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
@@ -542,7 +550,11 @@ function DentalHistorySummary({ answers, marks }: { answers: Rec; marks?: Partia
       ) : null}
       {childhood.length > 0 ? (
         <section aria-label="De pequeño" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-          <h3 className="font-heading text-sm font-medium">De pequeño</h3>
+          <div className="flex flex-col gap-0.5">
+            <h3 className="font-heading text-sm font-medium">De pequeño</h3>
+            {/* Lo contó quien cuida al niño y nadie lo revisó: lleva su marca, como lo de arriba. */}
+            {productMark ? <p className="text-xs text-warning">{productMark}</p> : null}
+          </div>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
             {childhood.map((row) => (
               <div key={row.label} className="contents">

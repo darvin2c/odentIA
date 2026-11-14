@@ -777,6 +777,11 @@ export function AntecedentesTab({
             (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
           ),
         )}
+        // Lo del producto (odentIA: «de pequeño» de un niño), con la marca de quien lo contó.
+        productMark={(() => {
+          const said = (health.declared ?? []).find((group) => (group.productLines ?? []).length > 0)
+          return said ? declaredMarkWords(said.by, said.at, sex) : undefined
+        })()}
       />
 
       <FormDrawer
