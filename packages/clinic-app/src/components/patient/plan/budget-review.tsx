@@ -11,7 +11,7 @@ import {
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
@@ -21,6 +21,7 @@ import {
   type BudgetPresentationBody,
   type BudgetWithTotals,
   budgetNumberLabel,
+  budgetOptionApi,
   fetchBudgetDetail,
   fetchBudgetPresentation,
   PLAN_QUERY_KEYS,
@@ -241,18 +242,50 @@ export function BudgetReviewDrawer({
   )
 }
 
+type PresentedOption = Pick<BudgetPresentation["options"][number], "label" | "isRecommended">
+
+/** «Opción A · recomendada»: la misma marca del Plan, donde se escribe la propuesta. */
+export function optionHeading(option: PresentedOption): string {
+  return `${option.label}${option.isRecommended ? " · recomendada" : ""}`
+}
+
+/**
+ * La línea de «Antes de enviar» con varias opciones: cuál verá marcada el paciente
+ * en su enlace, su portal y su PDF. Solo informa y no lee «Lo que le proponemos»:
+ * es texto libre, y adivinar de ahí la recomendada sería inventarla. `names`, por
+ * etiqueta, es lo que se está escribiendo y aún no se guardó.
+ */
+export function recommendedNotice(
+  options: ReadonlyArray<PresentedOption & Pick<BudgetPresentation["options"][number], "name">>,
+  names: Readonly<Record<string, string>> = {},
+): string | null {
+  if (options.length < 2) return null
+  const recommended = options.find((option) => option.isRecommended)
+  if (!recommended) return null
+  const name = (names[recommended.label] ?? recommended.name ?? "").trim()
+  return `El paciente verá marcada como recomendada la ${inSentence(recommended.label)}${name ? ` (${name})` : ""}: revisa que coincida con lo que le propones.`
+}
+
+/** «Opción A» dentro de una frase: «la opción A». */
+function inSentence(label: string): string {
+  return `${label.charAt(0).toLowerCase()}${label.slice(1)}`
+}
+
 /**
  * Las opciones para quien no las escribe: lo que tienen, como texto; lo vacío no
- * aparece. En el borrador dice quién las escribe, para que no parezca un olvido.
+ * aparece, salvo la recomendada, que se dice siempre. En el borrador dice quién
+ * las escribe, para que no parezca un olvido.
  */
-function OptionsText({
+export function OptionsText({
   options,
   draft,
 }: {
   options: BudgetPresentation["options"]
   draft: boolean
 }): React.JSX.Element | null {
-  const filled = options.filter((option) => option.name || option.pros || option.cons)
+  const filled = options.filter(
+    (option) => option.name || option.pros || option.cons || option.isRecommended,
+  )
   if (filled.length === 0 && !draft) return null
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -263,7 +296,7 @@ function OptionsText({
           className="flex flex-col gap-1.5 rounded-lg border p-3"
         >
           <h3 className="font-medium">
-            {option.label}
+            {optionHeading(option)}
             {option.name ? ` · ${option.name}` : ""}
           </h3>
           {option.pros || option.cons ? (
@@ -424,8 +457,46 @@ function ReviewForm({
   const findingsValue = useStore(form.store, (state) => state.values.findings)
   const dated = useStore(form.store, (state) => state.values.validUntil)
   const lineValues = useStore(form.store, (state) => state.values.lines)
+  const optionValues = useStore(form.store, (state) => state.values.options)
   const several = data.options.length > 1
-  const busy = surface.isSubmitting
+
+  // La recomendada se cambia aquí mismo, con la operación del Plan. Se lleva aparte
+  // del formulario: volver a leer lo que explica reiniciaría lo que se está escribiendo.
+  const [recommendedId, setRecommendedId] = useState<string | null>(
+    () => data.options.find((option) => option.isRecommended)?.id ?? null,
+  )
+  const [recommendError, setRecommendError] = useState<string | null>(null)
+  const recommend = useMutation({
+    mutationFn: (optionId: string) => budgetOptionApi(patientId, budgetId, optionId, "recommend"),
+    onSuccess: async (_result, optionId) => {
+      setRecommendError(null)
+      setRecommendedId(optionId)
+      setPdfRevision((revision) => revision + 1)
+      // Lo que explica queda viejo, sin volver a leerlo ahora (lo escrito sigue).
+      void queryClient.invalidateQueries({
+        queryKey: ["budget-presentation", patientId, budgetId],
+        refetchType: "none",
+      })
+      await Promise.all(
+        PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
+    },
+    onError: (err) => setRecommendError(submitErrorMessage(err)),
+  })
+  const options = data.options.map((option) => ({
+    ...option,
+    isRecommended: option.id === recommendedId,
+  }))
+  const recommendedLine = recommendedNotice(
+    options,
+    Object.fromEntries(
+      options.map((option) => [
+        option.label,
+        optionValues.find((row) => row.id === option.id)?.name ?? option.name ?? "",
+      ]),
+    ),
+  )
+  const busy = surface.isSubmitting || recommend.isPending
 
   const ownOf = (lineId: string): GuideDraft | null =>
     lineValues.find((row) => row.id === lineId)?.own ?? null
@@ -457,7 +528,9 @@ function ReviewForm({
         hideSubmit={!(sendable || editable)}
         cancelLabel={sendable || editable ? undefined : "Cerrar"}
         submitLabel={sendable ? (preview.data?.data.label ?? "Enviar") : "Guardar"}
-        submitDisabled={sendable ? preview.isPending || blocked != null : false}
+        submitDisabled={
+          recommend.isPending || (sendable ? preview.isPending || blocked != null : false)
+        }
         secondaryAction={{
           label: "Ver el PDF",
           disabled: busy,
@@ -616,11 +689,28 @@ function ReviewForm({
             </ul>
           </FieldSet>
 
-          {several && !editable ? <OptionsText options={data.options} draft={draft} /> : null}
+          {several && !editable ? <OptionsText options={options} draft={draft} /> : null}
+          {several && editable && recommendError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {recommendError}
+            </p>
+          ) : null}
           {several && editable
-            ? data.options.map((option, index) => (
+            ? options.map((option, index) => (
                 <FieldSet key={option.id}>
-                  <FieldLegend>{option.label}</FieldLegend>
+                  <FieldLegend>{optionHeading(option)}</FieldLegend>
+                  {option.isRecommended ? null : (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto self-start p-0"
+                      aria-label={`Marcar la ${inSentence(option.label)} como recomendada`}
+                      disabled={busy}
+                      onClick={() => recommend.mutate(option.id)}
+                    >
+                      Marcar como recomendada
+                    </Button>
+                  )}
                   <FieldGroup>
                     <form.AppField name={`options[${index}].name`}>
                       {(field) => <field.TextField label="Nombre" maxLength={120} />}
@@ -665,6 +755,7 @@ function ReviewForm({
                 {dated && missing.length === 0 ? (
                   <li>Todo tiene su explicación y su fecha.</li>
                 ) : null}
+                {recommendedLine ? <li>{recommendedLine}</li> : null}
                 {blocked ? <li>{blocked}</li> : null}
               </ul>
               <p className="text-muted-foreground">
