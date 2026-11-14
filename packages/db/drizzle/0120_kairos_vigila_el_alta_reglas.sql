@@ -1,5 +1,5 @@
 -- Kairós vigila el alta (14 nov): lo que TS no declara. La tabla `saas_client_milestone` y las
--- columnas nuevas de `saas_client_file` y `saas_task` las generó 0118 desde el esquema; viven en
+-- columnas nuevas de `saas_client_file` y `saas_task` las generó 0119 desde el esquema; viven en
 -- `admin` y no reciben ningún GRANT al rol de la aplicación (ADR 0063 y 0064). No llevan RLS: no
 -- tienen `organization_id`.
 
@@ -65,7 +65,7 @@ CREATE TRIGGER saas_client_file_carga_guard BEFORE UPDATE ON admin.saas_client_f
 --   contrato       la primera aceptación del contrato de encargo, de cualquier versión.
 --   carta          la primera carta guardada, aunque ya se haya borrado.
 --   archivos       lo primero que llegó como la carga (`archivo_clinica`, por `received_at`, que
---                  llenó 0118). Un correo a soporte@ no cuenta aquí: si la clínica ya tuvo una
+--                  llenó 0119). Un correo a soporte@ no cuenta aquí: si la clínica ya tuvo una
 --                  carga, lo pone la pasada como `respaldo`.
 --   configuracion  la primera configuración cargada (`org.setup_import`).
 --   pacientes      la primera persona o tanda de la carga de pacientes (`clinic_import_row`,

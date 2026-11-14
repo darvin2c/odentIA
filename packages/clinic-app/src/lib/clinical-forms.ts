@@ -170,6 +170,8 @@ export interface FormAddendum {
   id: string
   responseId: string
   text: string
+  /** Por qué se corrigió, si quien corrigió lo dijo; null si no. */
+  reason?: string | null
   createdBy: string | null
   createdAt: string
 }
@@ -658,8 +660,10 @@ export function fetchFormAddenda(responseId: string) {
   return apiFetch<{ data: FormAddendum[] }>(`${BASE}/form-responses/${responseId}/addenda`)
 }
 
-export function addFormAddendum(responseId: string, text: string) {
-  return post<FormAddendum>(`${BASE}/form-responses/${responseId}/addenda`, { text })
+/** `reason`: por qué se corrige, opcional; vacío no se envía. */
+export function addFormAddendum(responseId: string, text: string, reason?: string) {
+  const why = reason?.trim()
+  return post<FormAddendum>(`${BASE}/form-responses/${responseId}/addenda`, why ? { text, reason: why } : { text })
 }
 
 // --- Consentimientos ---

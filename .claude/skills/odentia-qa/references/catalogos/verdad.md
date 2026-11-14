@@ -246,6 +246,17 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** la paciente puso dolor 8; un clic del equipo lo dejó en 6 y la atención mostró «¿Cuánto te duele? 6 · desde su enlace» (mesa del 13 nov).
 **Caso:** el 13 de marzo la paciente responde dolor 8 y «alérgica a la penicilina» en texto libre. El 14 el odontólogo pulsa «Pasar a Antecedentes»: la atención, Documentos y la Historia dicen 8, y el aviso no afirma haber pasado una alergia que no pasó.
 
+## V-DAT-07 La copia de la historia dice cuándo se dijo, cuándo se revisó y quién corrigió
+**Aparece en:** el PDF y el FHIR de «Descargar historia» (`S/patient-record.ts`, `S/form-record.ts`), la Historia (`S/patient-history.ts`), Antecedentes y la franja.
+**A mano:** por cada dato declarado, tres momentos: dicho (`submitted_at` o `said_at`), revisado (quién y cuándo) y corregido (quién, cuándo, qué y por qué). El PDF y el FHIR de la misma copia dan las mismas horas.
+- [ ] `QuestionnaireResponse.authored` es la hora en que la persona respondió, no la de la revisión, y coincide con el PDF y con la Historia.
+- [ ] La copia dice quién revisó los antecedentes y cuándo, como la ficha.
+- [ ] Un «dijo que no» sigue en la copia después de revisar.
+- [ ] Una medicina suspendida dice hasta cuándo la tomó en el PDF, como en el FHIR.
+
+**Ya falló:** el FHIR fechaba el cuestionario a la hora de su revisión; tras «Revisar antecedentes», el «no» de la paciente a enfermedades desaparecía de la copia (QA de la entrega 2, 14 nov).
+**Caso:** se registra el 13 con «enfermedades: no» y un cuestionario a las 09:32; el 14 a las 09:35 se revisa. Las dos copias dicen respondió 13/09:32, revisó 14/09:35, y «Enfermedades: no se le preguntó en la clínica; dijo que no el 13…».
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.

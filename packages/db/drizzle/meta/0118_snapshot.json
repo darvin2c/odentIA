@@ -1,5 +1,5 @@
 {
-  "id": "c9a2b844-8cda-48f4-8881-bdadc7aa7fa2",
+  "id": "0acf2afb-0a4a-4443-aa78-cbafc6e4a0cc",
   "prevId": "7cad998a-9b70-41b2-86a3-0a2a0a19a7d9",
   "version": "7",
   "dialect": "postgresql",
@@ -320,7 +320,7 @@
       "checkConstraints": {
         "kairos_item_kind_check": {
           "name": "kairos_item_kind_check",
-          "value": "\"admin\".\"kairos_item\".\"kind\" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente','responder_correo','posible_carga')"
+          "value": "\"admin\".\"kairos_item\".\"kind\" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente','responder_correo')"
         },
         "kairos_item_status_check": {
           "name": "kairos_item_status_check",
@@ -970,25 +970,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "inbound_email_id": {
-          "name": "inbound_email_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "carga_at": {
-          "name": "carga_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1048,21 +1029,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "saas_client_file_email_idx": {
-          "name": "saas_client_file_email_idx",
-          "columns": [
-            {
-              "expression": "inbound_email_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -1093,20 +1059,6 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "saas_client_file_inbound_email_id_saas_inbound_email_id_fk": {
-          "name": "saas_client_file_inbound_email_id_saas_inbound_email_id_fk",
-          "tableFrom": "saas_client_file",
-          "tableTo": "saas_inbound_email",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "inbound_email_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1124,149 +1076,6 @@
         "saas_client_file_text_check": {
           "name": "saas_client_file_text_check",
           "value": "length(trim(\"admin\".\"saas_client_file\".\"filename\")) BETWEEN 1 AND 255 AND \"admin\".\"saas_client_file\".\"size_bytes\" >= 0"
-        },
-        "saas_client_file_carga_check": {
-          "name": "saas_client_file_carga_check",
-          "value": "(\"admin\".\"saas_client_file\".\"kind\" <> 'archivo_clinica' OR \"admin\".\"saas_client_file\".\"delete_after\" IS NOT NULL) AND (\"admin\".\"saas_client_file\".\"carga_at\" IS NULL OR \"admin\".\"saas_client_file\".\"kind\" = 'archivo_clinica')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.saas_client_milestone": {
-      "name": "saas_client_milestone",
-      "schema": "admin",
-      "columns": {
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "step": {
-          "name": "step",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reached_at": {
-          "name": "reached_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lost_at": {
-          "name": "lost_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lost_reason": {
-          "name": "lost_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "na_reason": {
-          "name": "na_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "na_by": {
-          "name": "na_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "na_at": {
-          "name": "na_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "saas_client_milestone_client_id_saas_client_id_fk": {
-          "name": "saas_client_milestone_client_id_saas_client_id_fk",
-          "tableFrom": "saas_client_milestone",
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "saas_client_milestone_na_by_user_id_fk": {
-          "name": "saas_client_milestone_na_by_user_id_fk",
-          "tableFrom": "saas_client_milestone",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "na_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "saas_client_milestone_pkey": {
-          "name": "saas_client_milestone_pkey",
-          "columns": [
-            "client_id",
-            "step"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_client_milestone_step_check": {
-          "name": "saas_client_milestone_step_check",
-          "value": "\"admin\".\"saas_client_milestone\".\"step\" IN ('entro','contrato','carta','archivos','configuracion','pacientes','informe','equipo','whatsapp','primer_uso','primer_pago')"
-        },
-        "saas_client_milestone_source_check": {
-          "name": "saas_client_milestone_source_check",
-          "value": "(\"admin\".\"saas_client_milestone\".\"source\" IS NULL OR \"admin\".\"saas_client_milestone\".\"source\" IN ('hecho','respaldo'))\n        AND (\"admin\".\"saas_client_milestone\".\"reached_at\" IS NULL OR \"admin\".\"saas_client_milestone\".\"source\" IS NOT NULL)\n        AND (\"admin\".\"saas_client_milestone\".\"source\" IS DISTINCT FROM 'respaldo' OR \"admin\".\"saas_client_milestone\".\"step\" = 'archivos')"
-        },
-        "saas_client_milestone_na_check": {
-          "name": "saas_client_milestone_na_check",
-          "value": "(\"admin\".\"saas_client_milestone\".\"na_reason\" IS NULL AND \"admin\".\"saas_client_milestone\".\"na_at\" IS NULL AND \"admin\".\"saas_client_milestone\".\"na_by\" IS NULL)\n        OR (\"admin\".\"saas_client_milestone\".\"na_reason\" IS NOT NULL AND \"admin\".\"saas_client_milestone\".\"na_at\" IS NOT NULL\n          AND length(trim(\"admin\".\"saas_client_milestone\".\"na_reason\")) BETWEEN 1 AND 500\n          AND \"admin\".\"saas_client_milestone\".\"step\" IN ('equipo','whatsapp','pacientes'))"
-        },
-        "saas_client_milestone_lost_check": {
-          "name": "saas_client_milestone_lost_check",
-          "value": "(\"admin\".\"saas_client_milestone\".\"lost_at\" IS NULL AND \"admin\".\"saas_client_milestone\".\"lost_reason\" IS NULL)\n        OR (\"admin\".\"saas_client_milestone\".\"lost_at\" IS NOT NULL AND \"admin\".\"saas_client_milestone\".\"reached_at\" IS NULL\n          AND ((\"admin\".\"saas_client_milestone\".\"lost_reason\" = 'pago_revertido' AND \"admin\".\"saas_client_milestone\".\"step\" = 'primer_pago')\n            OR (\"admin\".\"saas_client_milestone\".\"lost_reason\" = 'borrados_sin_cargar' AND \"admin\".\"saas_client_milestone\".\"step\" = 'archivos')))"
-        },
-        "saas_client_milestone_nonempty_check": {
-          "name": "saas_client_milestone_nonempty_check",
-          "value": "\"admin\".\"saas_client_milestone\".\"reached_at\" IS NOT NULL OR \"admin\".\"saas_client_milestone\".\"lost_at\" IS NOT NULL OR \"admin\".\"saas_client_milestone\".\"na_at\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -2489,13 +2298,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "admin_only": {
-          "name": "admin_only",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "done_at": {
           "name": "done_at",
           "type": "timestamp with time zone",
@@ -2906,33 +2708,6 @@
               "expression": "actor_user_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "admin_audit_org_action_idx": {
-          "name": "admin_audit_org_action_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "action",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
               "nulls": "last"
             }
           ],
@@ -11819,6 +11594,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -11895,7 +11676,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "clinical_form_addendum_reason_check": {
+          "name": "clinical_form_addendum_reason_check",
+          "value": "\"clinical_form_addendum\".\"reason\" IS NULL OR char_length(\"clinical_form_addendum\".\"reason\") BETWEEN 1 AND 2000"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.clinical_form_response": {
