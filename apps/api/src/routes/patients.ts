@@ -1530,10 +1530,11 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     }
   })
   app.get("/:id/encounters/:encounterId", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getEncounterDetail(tx, orgId, c.req.param("id"), c.req.param("encounterId")),
+        // Quien atiende y abre su borrador queda como quien vio lo que contó el paciente antes de venir.
+        getEncounterDetail(tx, orgId, c.req.param("id"), c.req.param("encounterId"), userId),
       ),
     )
   })

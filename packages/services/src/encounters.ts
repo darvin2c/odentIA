@@ -91,6 +91,7 @@ import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diag
 import { assertAttending } from "./encounter-attending.js"
 import { removableFromEncounter } from "./encounter-plan-remove.js"
 import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
+import { encounterVisitAnswer, type VisitAnswerView } from "./visit-answers.js"
 import {
   checkEncounterVoidBudgets,
   type EncounterVoidPreview,
@@ -314,6 +315,12 @@ export interface EncounterDetailBase {
    * cita. Nulo en una atención firmada o anulada.
    */
   visit: EncounterVisit | null
+  /**
+   * Lo que contó antes de venir para la cita de esta atención («Antes de tu cita»): solo de esa
+   * cita, en el borrador y después de firmar, con quién lo vio al atender. Nulo sin cita o si no
+   * contó nada. No traba nada: sin él, la atención se firma igual.
+   */
+  visitAnswer: VisitAnswerView | null
   /**
    * Tratamientos que esta atención deja por ejecutar: los vinculados y los
    * indicados aquí, sin repetir, que siguen abiertos y la persona no dejó fuera
@@ -1105,6 +1112,8 @@ export async function getEncounterDetail(
   orgId: string,
   patientId: string,
   encounterId: string,
+  /** Quien la abre: si es quien atiende el borrador, el sistema anota que vio lo que contó el paciente. */
+  viewerUserId: string | null = null,
 ): Promise<EncounterDetail> {
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
   const site = await siteOf(tx, orgId)
@@ -1233,6 +1242,7 @@ export async function getEncounterDetail(
     pendingTreatments,
     bookedReason,
     visit: await encounterVisitOf(tx, orgId, row),
+    visitAnswer: await encounterVisitAnswer(tx, orgId, row, viewerUserId),
   }
 }
 

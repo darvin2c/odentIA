@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { encounter, patientAnamnesis } from "@odentia/db/schema/clinical"
@@ -31,7 +32,6 @@ import { ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
 import { createPatient, patientPersonId, setPatientContact } from "./patients.js"
-import { submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { submitPersonalLinkData } from "./su-enlace.js"
@@ -65,26 +65,61 @@ async function person(f: Fixture, given: string, surname: string) {
   return { patientId: created.id, personId }
 }
 
-/** Deja en uso un cuestionario del paciente; el anterior deja de ser el que le llega. */
-async function questionnaire(f: Fixture, title: string, fields: Array<Record<string, unknown>>): Promise<void> {
+/**
+ * Un cuestionario del paciente como los de antes de la entrega 8, que ya no se crean ni se publican
+ * (mesa de formularios del 13 nov, decisión 1): lo que se respondió con ellos se conserva, y lo
+ * enviado sin revisar sigue por revisar. Se escribe directo, como quedó en la base.
+ */
+async function questionnaire(_f: Fixture, title: string, fields: Array<Record<string, unknown>>): Promise<void> {
   await ownerDb.execute(
     sql`update clinical_form_template set status = 'archivado' where organization_id = ${ORG} and status = 'publicado' and respondent = 'portal'`,
   )
-  await f.run(async (tx) => {
-    const draft = await createFormTemplate(tx, ORG, f.actor, {
-      title,
-      respondent: "portal",
-      schema: { sections: [{ id: "antes", title: "Antes de tu cita", fields }] },
-    })
-    await publishFormTemplate(tx, ORG, f.actor, draft.id)
+  await ownerDb.insert(clinicalFormTemplate).values({
+    organizationId: ORG,
+    key: `antes-${randomUUID().slice(0, 8)}`,
+    title,
+    version: 1,
+    status: "publicado",
+    respondent: "portal",
+    schema: { sections: [{ id: "antes", title: "Antes de tu cita", fields }] },
+    publishedAt: new Date(),
   })
 }
 
-/** La persona envía el cuestionario desde su enlace y devuelve la respuesta guardada. */
+/** Lo que la persona envió desde su enlace con ese cuestionario, como quedó guardado. */
 async function sent(f: Fixture, who: { patientId: string; personId: string }, answers: Record<string, unknown>) {
-  await f.run((tx) =>
-    submitQuestionnaireFromLink(tx, { orgId: ORG, patientId: who.patientId, contactId: who.personId }, answers),
-  )
+  const [template] = await ownerDb
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.organizationId, ORG), eq(clinicalFormTemplate.status, "publicado"), eq(clinicalFormTemplate.respondent, "portal")))
+    .orderBy(desc(clinicalFormTemplate.publishedAt))
+    .limit(1)
+  const [inserted] = await ownerDb
+    .insert(clinicalFormResponse)
+    .values({
+      organizationId: ORG,
+      templateId: template!.id,
+      templateVersion: template!.version,
+      templateTitle: template!.title,
+      templateSnapshot: template!.schema as Record<string, unknown>,
+      patientId: who.patientId,
+      status: "borrador",
+      answers,
+      source: "portal",
+      respondentContactId: who.personId,
+      submittedAt: new Date(),
+      submittedVia: "enlace",
+    })
+    .returning({ id: clinicalFormResponse.id })
+  // Su traza, como la dejaba el envío.
+  await ownerDb.insert(auditEvent).values({
+    organizationId: ORG,
+    actorUserId: `contact:${who.personId}`,
+    action: "form_response.portal_submitted",
+    entity: "clinical_form_response",
+    entityId: inserted!.id,
+    metadata: { patientId: who.patientId, contactId: who.personId, via: "enlace" },
+  })
   const [row] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: who.patientId }))
   if (!row) throw new Error("Sin respuesta")
   return row

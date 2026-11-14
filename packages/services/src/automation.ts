@@ -2045,10 +2045,11 @@ export async function pendingBeforeAppointment(
   orgId: string,
   patientId: string,
   contactId: string,
-  options: { health?: boolean } = {},
+  options: { health?: boolean; appointmentId?: string | null } = {},
 ): Promise<{ data: boolean; total: number }> {
-  // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella.
-  const todo = await patientTodo(tx, orgId, { patientId, contactId, withAppointment: true })
+  // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella. «Tu
+  // visita» es de la cita del aviso: con sus datos, una sola cosa («Antes de tu cita»).
+  const todo = await patientTodo(tx, orgId, { patientId, contactId, appointmentId: options.appointmentId ?? null })
   return remoteTodoCount(todo, options)
 }
 
@@ -2091,6 +2092,7 @@ async function pendingNoticesFor(
   if (!(await contactDecides(tx, orgId, row.patientId, contactId))) return []
   const pending = await pendingBeforeAppointment(tx, orgId, row.patientId, contactId, {
     health: key === APPOINTMENT_DATA_NOTICE_KEY,
+    appointmentId: job.appointmentId,
   })
   // Un aviso por cita: solo el recordatorio los cuenta (los envíos del equipo salen al momento).
   const many = key === REMINDER_DATA_KEY && pending.total > (pending.data ? 1 : 0)

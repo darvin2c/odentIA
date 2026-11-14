@@ -21,6 +21,8 @@ import {
   type RegistrationConfig,
   type RegistrationFieldKey,
   registrationFieldApplies,
+  type VisitAnswerInput,
+  type VisitQuestions,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
@@ -118,7 +120,7 @@ import {
   portalBudgetContext,
   toPortalBudget,
 } from "./portal.js"
-import { pendingQuestionnaire, questionnaireSent, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
+import { saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
@@ -127,8 +129,9 @@ import { waitingItemIds } from "./to-schedule.js"
 
 /**
  * Lo que tiene pendiente cada persona en «Su enlace» (decisión 8; ADR 0037):
- * su cita, sus datos por completar, el presupuesto que se le envió, el
- * consentimiento por firmar y el cuestionario. Cada cosa sale de su propia
+ * su cita, «Antes de tu cita» (sus datos por completar y «Tu visita», en una
+ * sola tarjeta), el presupuesto que se le envió y el consentimiento por
+ * firmar. Cada cosa sale de su propia
  * regla y deja de servir cuando ya no hace falta; aquí no se guarda nada
  * aparte. Nunca se muestra lo guardado: de sus datos solo qué falta.
  */
@@ -241,14 +244,18 @@ export interface PersonalLinkView {
   budgets: PortalBudgetView[]
   /** Consentimientos que la clínica le envió a firmar. */
   consents: PersonalLinkConsent[]
-  /** «Antes de tu cita», si hay uno por responder. */
-  questionnaire: { title: string } | null
+  /**
+   * «Tu visita» de la cita de este enlace, si se le pregunta y aún no la respondió: va con sus
+   * datos en una sola tarjeta, «Antes de tu cita». `purpose`: a qué viene, si la cita ya lo dice
+   * («sesión 2 de endodoncia»); entonces solo se le pregunta si le duele.
+   */
+  visit: { purpose: string | null; questions: VisitQuestions } | null
   /**
    * «Lo que nos contaste»: qué envió desde su enlace quien lo abre y cuándo (`timeZone`: la
    * zona de la clínica), para que sepa que llegó. Nunca lo que respondió ni ningún dato de su
    * salud: el enlace se abre sin código y se puede reenviar.
    */
-  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "cuestionario"; at: string }> } | null
+  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "visita"; at: string }> } | null
   /**
    * M3: lo que aceptó de su presupuesto y aún no tiene cita, «Lo que aceptaste, por
    * agendar»; se agenda con `planItemIds` al reservar. Solo a quien decide por el paciente.
@@ -318,8 +325,13 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
     patientId: link.patientId,
     contactId: link.row.contactId,
     dataSubmitted: link.row.dataSubmittedAt !== null,
-    withAppointment: link.appointment !== null && link.appointment.status !== "cancelada",
+    appointmentId: linkAppointmentId(link),
   })
+}
+
+/** La cita que muestra el enlace, si sigue en pie: «Tu visita» es de ella. */
+function linkAppointmentId(link: ResolvedPersonalLink): string | null {
+  return link.appointment && link.appointment.status !== "cancelada" ? link.appointment.id : null
 }
 
 /** Cuándo fue la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
@@ -341,10 +353,10 @@ async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Da
 }
 
 /**
- * Lo que envió desde su enlace quien lo abre (sus datos, su salud, el cuestionario) y cuándo:
- * de la traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo.
- * Es lo de la cita que viene: lo enviado antes de su última cita pasada fue para aquella y ya
- * no se anuncia como recién recibido.
+ * Lo que envió desde su enlace quien lo abre (sus datos, su salud, su visita) y cuándo: de la
+ * traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo. Es lo de
+ * la cita que viene: lo enviado antes de su última cita pasada fue para aquella y ya no se anuncia
+ * como recién recibido. «Tu visita» guarda su cita: cuenta solo la de la cita de este enlace.
  */
 async function toldOf(
   tx: Db,
@@ -374,11 +386,11 @@ async function toldOf(
     .map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
   const data = traced.find((row) => (row.fields?.length ?? 0) > 0 || row.renamed)
   const health = traced.find((row) => row.health)
-  const questionnaire = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
+  const visit = await visitSentOf(tx, orgId, linkAppointmentId(link), link.row.contactId)
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
-  if (questionnaire?.own && current(questionnaire.at)) items.push({ what: "cuestionario", at: questionnaire.at.toISOString() })
+  if (visit?.own) items.push({ what: "visita", at: visit.at.toISOString() })
   return items.length > 0 ? { timeZone, items } : null
 }
 
@@ -556,24 +568,6 @@ async function messagesOf(
   }
 }
 
-/** El cuestionario sale antes de una cita: con una por venir y mientras no lo haya enviado. */
-async function questionnaireOf(
-  tx: Db,
-  orgId: string,
-  link: ResolvedPersonalLink,
-): Promise<{ title: string } | null> {
-  if (
-    !link.patientId ||
-    !link.decides ||
-    link.expired ||
-    !link.appointment ||
-    link.appointment.status === "cancelada"
-  )
-    return null
-  const pending = await pendingQuestionnaire(tx, orgId, link.patientId)
-  return pending ? { title: pending.title } : null
-}
-
 export async function getPersonalLinkView(
   tx: Db,
   orgId: string,
@@ -600,7 +594,7 @@ export async function getPersonalLinkView(
     pending: null,
     budgets: [],
     consents: [],
-    questionnaire: null,
+    visit: null,
     told: null,
     toSchedule: [],
     another: null,
@@ -618,7 +612,7 @@ export async function getPersonalLinkView(
   const health = todo?.health ?? false
   const budgets = todo ? await budgetViews(tx, orgId, todo.budgets) : []
   const consents = todo ? await consentViews(tx, orgId, link, todo.consents, todo.signBlock) : []
-  const questionnaire = todo?.questionnaire ?? null
+  const visit = todo?.visit ? { purpose: todo.visit.purpose, questions: todo.visit.questions } : null
   const messages = await messagesOf(tx, orgId, link)
   // M3: lo aceptado y sin cita, a quien decide por el paciente.
   const toSchedule = todo?.toSchedule ?? []
@@ -636,7 +630,7 @@ export async function getPersonalLinkView(
     !health &&
     budgets.length === 0 &&
     consents.length === 0 &&
-    !questionnaire &&
+    !visit &&
     toSchedule.length === 0 &&
     !messages
   if (nothing) return { ...empty, closed: await closedOf(tx, orgId, link) }
@@ -663,7 +657,7 @@ export async function getPersonalLinkView(
     ...(await youOf(tx, orgId, link)),
     budgets,
     consents,
-    questionnaire,
+    visit,
     told: await toldOf(tx, orgId, link, region.timezone),
     toSchedule,
     another,
@@ -802,9 +796,23 @@ export interface PersonalLinkDataForm {
   respondentFirstName: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va al final, antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }
+  /**
+   * «Tu visita», el último paso de «Antes de tu cita», si se le pregunta para la cita de este
+   * enlace. Va en el mismo envío que sus datos.
+   */
+  visit: { purpose: string | null; questions: VisitQuestions } | null
 }
 
-/** Lo que pide «Tus datos»: solo lo que falta, con el país de la clínica para los documentos. */
+/** «Tu visita» de la cita de este enlace, solo a quien decide por el paciente y mientras no la respondió. */
+async function linkVisitOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
+  if (!link.patientId || !link.decides || link.expired) return null
+  return visitAskOf(tx, orgId, { patientId: link.patientId, appointmentId: linkAppointmentId(link) })
+}
+
+/**
+ * Lo que pide «Antes de tu cita» (o «Tus datos», sin cita): solo lo que falta, con el país de la
+ * clínica para los documentos, y al final «Tu visita».
+ */
 export async function getPersonalLinkDataForm(
   tx: Db,
   orgId: string,
@@ -814,7 +822,8 @@ export async function getPersonalLinkDataForm(
   const missing = await missingOf(tx, orgId, link)
   const healthQuestions = await healthQuestionsOf(tx, orgId, link)
   const health = healthQuestions.length > 0
-  if ((!missing && !health) || !link.patientId) throw linkExpired()
+  const visit = await linkVisitOf(tx, orgId, link)
+  if ((!missing && !health && !visit) || !link.patientId) throw linkExpired()
   const person = await requirePatient(tx, orgId, link.patientId)
   const today = await patientOrganizationToday(tx, orgId)
   const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
@@ -830,7 +839,12 @@ export async function getPersonalLinkDataForm(
     asksHealth: health,
     healthQuestions,
     firstName: firstName(person) || null,
-    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
+    // Solo «Tu visita» no pide datos: sin el aviso ni las novedades, que son de «Tus datos».
+    pending:
+      missing || health
+        ? await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true })
+        : { privacy: false, promotions: false },
+    visit: visit ? { purpose: visit.purpose, questions: visit.questions } : null,
   }
 }
 
@@ -882,6 +896,8 @@ export interface PersonalLinkDataInput {
   name?: { givenNames: string; familyName: string; docNumber?: string } | null
   /** Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas. */
   acceptsReminders?: true
+  /** «Tu visita», el último paso de «Antes de tu cita»: todo opcional. */
+  visit?: VisitAnswerInput | null
 }
 
 /** De quién es ya ese documento, si es de otra persona. */
@@ -957,38 +973,63 @@ export async function submitPersonalLinkData(
   const link = await requireLiveLink(tx, orgId, token, true)
   const missing = await missingOf(tx, orgId, link)
   const health = await healthPendingOf(tx, orgId, link)
+  const visit = await linkVisitOf(tx, orgId, link)
   const patientId = link.patientId
-  if ((!missing && !health) || !patientId) {
+  const withData = Boolean(missing || health)
+  if ((!withData && !visit) || !patientId) {
     if (patientId && !link.decides) requireLinkDecider(link)
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
-  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, {
-    // Si solo quedaba su salud, que es opcional, enviarla en blanco también es responder.
-    requireSomething: Boolean(missing),
-    toldWhatsApp: input.acceptsReminders === true && !!input.data.phone?.trim(),
-  })
-  // «Tus datos» se envían una sola vez: después dice «Recibido».
-  await tx
-    .update(appointmentBookingLink)
-    .set({ dataSubmittedAt: new Date() })
-    .where(
-      and(
-        eq(appointmentBookingLink.organizationId, orgId),
-        eq(appointmentBookingLink.id, link.row.id),
-      ),
+  if (withData) {
+    await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, {
+      // Si solo quedaba su salud, que es opcional, enviarla en blanco también es responder.
+      requireSomething: Boolean(missing),
+      toldWhatsApp: input.acceptsReminders === true && !!input.data.phone?.trim(),
+    })
+    // «Tus datos» se envían una sola vez: después dice «Recibido».
+    await tx
+      .update(appointmentBookingLink)
+      .set({ dataSubmittedAt: new Date() })
+      .where(
+        and(
+          eq(appointmentBookingLink.organizationId, orgId),
+          eq(appointmentBookingLink.id, link.row.id),
+        ),
+      )
+  }
+  // «Tu visita» va en el mismo envío: un solo «Enviar» para toda la tarjeta. Todo es opcional, y
+  // aunque no cuente nada queda respondida para esa cita.
+  if (visit) {
+    await saveVisitAnswer(
+      tx,
+      orgId,
+      { patientId, contactId: link.row.contactId },
+      visit.appointmentId,
+      input.visit ?? {},
+      "enlace",
     )
+  }
   await thankInChat(
     tx,
     orgId,
     link,
-    {
-      note: "Completó sus datos desde su enlace.",
-      message: "Gracias, ya recibimos los datos.",
-      key: `enlace-datos:${link.row.id}`,
-      reason: "La persona completó sus datos desde su enlace",
-      kind: "datos",
-      title: "recibió sus datos",
-    },
+    withData
+      ? {
+          note: visit ? "Completó desde su enlace sus datos y lo de su visita." : "Completó sus datos desde su enlace.",
+          message: "Gracias, ya recibimos los datos.",
+          key: `enlace-datos:${link.row.id}`,
+          reason: "La persona completó sus datos desde su enlace",
+          kind: "datos",
+          title: "recibió sus datos",
+        }
+      : {
+          note: "Contó desde su enlace lo de su visita.",
+          message: "Gracias, ya recibimos lo que nos contaste para tu cita.",
+          key: `enlace-visita:${link.row.id}:${visit?.appointmentId ?? ""}`,
+          reason: "La persona contó desde su enlace lo de su visita",
+          kind: "enlace",
+          title: "recibió lo de su visita",
+        },
     deps,
   )
   return { received: true }
@@ -1635,64 +1676,6 @@ export async function signPersonalLinkConsent(
     deps,
   )
   return { signed: true }
-}
-
-// ---------------------------------------------------------- cuestionario ---
-
-/**
- * Por qué no hay cuestionario por responder: si ya está enviado, se dice eso («Ya lo enviaste»);
- * el enlace sigue sirviendo. Lo demás (no decide, sin cita, vencido) es «ya no sirve».
- */
-async function questionnaireClosed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<ServiceError> {
-  if (!link.patientId || !link.decides || link.expired) return linkExpired()
-  const sent = await questionnaireSent(tx, { orgId, patientId: link.patientId, contactId: link.row.contactId })
-  if (!sent) return linkExpired()
-  const { clinician } = productWords(await orgProduct(tx, orgId))
-  return new ServiceError(
-    "ALREADY_SUBMITTED",
-    409,
-    `${sent.own ? "Ya lo enviaste" : "Ya está enviado"}: la clínica tiene las respuestas de la primera vez. Si quieres cambiar algo, díselo a tu ${clinician.one} en la cita.`,
-  )
-}
-
-export async function getPersonalLinkQuestionnaire(tx: Db, orgId: string, token: string) {
-  const link = await requireLiveLink(tx, orgId, token)
-  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw await questionnaireClosed(tx, orgId, link)
-  const pending = await pendingQuestionnaire(tx, orgId, link.patientId)
-  if (!pending) throw linkExpired()
-  return pending
-}
-
-export async function submitPersonalLinkQuestionnaire(
-  tx: Db,
-  orgId: string,
-  token: string,
-  answers: unknown,
-  deps: { secretsKey?: Buffer } = {},
-): Promise<{ submitted: true }> {
-  const link = await requireLiveLink(tx, orgId, token, true)
-  if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw await questionnaireClosed(tx, orgId, link)
-  const submitted = await submitQuestionnaireFromLink(
-    tx,
-    { orgId, patientId: link.patientId, contactId: link.row.contactId },
-    answers,
-  )
-  const { clinician } = productWords(await orgProduct(tx, orgId))
-  await thankInChat(
-    tx,
-    orgId,
-    link,
-    {
-      note: "Envió su cuestionario desde su enlace.",
-      message: `Gracias, ya recibimos el cuestionario. El ${clinician.one} lo revisará antes de la cita.`,
-      key: `enlace-cuestionario:${link.row.id}:${link.appointment?.id ?? ""}`,
-      reason: "La persona envió su cuestionario desde su enlace",
-      kind: "enlace",
-      title: "recibió su cuestionario",
-    },
-    deps,
-  )
-  return submitted
 }
 
 // ------------------------------------------------- enviarle su enlace ---

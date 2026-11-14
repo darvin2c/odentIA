@@ -3,7 +3,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
-import { createRoom, patientPersonId, secretsKeyFromEnv, setProfessionalSchedule, submitQuestionnaireFromLink } from "@odentia/services"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { createRoom, patientPersonId, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
 import { createHash } from "node:crypto"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
@@ -1290,35 +1291,44 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
 })
 
 it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Marcar como revisado» dice qué pasó y en qué atención", async () => {
-  const draft = await post(app, "/clinical-forms/form-templates", {
-    title: "Antes de tu cita por la API",
-    respondent: "portal",
-    schema: {
-      sections: [
-        {
-          id: "antes",
-          title: "Antes de tu cita",
-          fields: [
-            { id: "motivo", label: "¿Por qué vienes?", type: "texto_largo", required: true },
-            { id: "alergias", label: "¿A qué eres alérgica?", type: "texto_largo", definition: "AllergyIntolerance.code" },
-          ],
-        },
-      ],
-    },
-  })
-  expect(draft.status).toBe(201)
-  const published = await post(app, `/clinical-forms/form-templates/${(await json<{ data: { id: string } }>(draft)).data.id}/publish`)
-  expect(published.ok).toBe(true)
+  // Un cuestionario del paciente ya no se crea ni se publica (entrega 8): la API lo rechaza.
+  const schema = {
+    sections: [
+      {
+        id: "antes",
+        title: "Antes de tu cita",
+        fields: [
+          { id: "motivo", label: "¿Por qué vienes?", type: "texto_largo", required: true },
+          { id: "alergias", label: "¿A qué eres alérgica?", type: "texto_largo", definition: "AllergyIntolerance.code" },
+        ],
+      },
+    ],
+  }
+  const refused = await post(app, "/clinical-forms/form-templates", { title: "Antes de tu cita por la API", respondent: "portal", schema })
+  expect(refused.status).toBe(409)
   const patientId = await createPatient()
   const encounterId = await createEncounter(patientId, "Dolor")
-  // La persona lo envía desde su enlace.
+  // Lo que la persona envió desde su enlace con uno de los de antes sigue por revisar: se escribe como quedó.
   await withOrgContext(appDb, "org_a", async (tx) => {
     const personId = await patientPersonId(tx, "org_a", patientId)
-    await submitQuestionnaireFromLink(
-      tx,
-      { orgId: "org_a", patientId, contactId: personId! },
-      { motivo: "Me duele la muela", alergias: "Penicilina: ronchas" },
-    )
+    const [template] = await tx
+      .insert(clinicalFormTemplate)
+      .values({ organizationId: "org_a", key: "antes-api", title: "Antes de tu cita por la API", status: "archivado", respondent: "portal", schema, publishedAt: new Date() })
+      .returning()
+    await tx.insert(clinicalFormResponse).values({
+      organizationId: "org_a",
+      templateId: template!.id,
+      templateVersion: 1,
+      templateTitle: template!.title,
+      templateSnapshot: schema,
+      patientId,
+      status: "borrador",
+      answers: { motivo: "Me duele la muela", alergias: "Penicilina: ronchas" },
+      source: "portal",
+      respondentContactId: personId!,
+      submittedAt: new Date(),
+      submittedVia: "enlace",
+    })
   })
   type Listed = { id: string; source: string; submittedVia: string | null; finalizedBy: string | null; encounterId: string | null; respondent: { kind: string; name: string } | null; editedByTeamAt: string | null }
   const list = await json<{ data: Listed[] }>(await app.request(`/clinical-forms/form-responses?patientId=${patientId}`))

@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto"
+import { visitReasonForEncounter } from "@odentia/clinical"
 import { member, user } from "@odentia/db/schema/auth"
 import { appointment } from "@odentia/db/schema/agenda"
-import { encounter, patientCharge } from "@odentia/db/schema/clinical"
-import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import { encounter, patient, patientCharge } from "@odentia/db/schema/clinical"
+import { appointmentVisitAnswer, clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { crmTask } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
@@ -19,6 +20,7 @@ import { createMedicalLeave } from "./medical-leaves.js"
 import {
   addEncounterProcedure,
   createEncounter,
+  discardEmptyEncounter,
   finalizeEncounter,
   getEncounterClosing,
   getEncounterDetail,
@@ -33,6 +35,7 @@ import { getPatientSummary } from "./patient-history.js"
 import { listPlanItems } from "./plan.js"
 import { getProfessionalProfile, setProfessionalProfile } from "./professional-profiles.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { patientVisitAnswers } from "./visit-answers.js"
 
 setupTestDb()
 
@@ -709,4 +712,82 @@ it("dos pestañas: guardar un texto que otra pestaña cambió avisa en vez de pi
   await expect(
     f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Escrito en B", base: { evolution: "Escrito en A" } })),
   ).resolves.toMatchObject({ evolution: "Escrito en B" })
+})
+
+/** Lo que la persona contó antes de esa cita, como lo guarda su enlace. */
+async function toldBefore(f: Awaited<ReturnType<typeof withAgenda>>, appointmentId: string, said: { reason?: string; pain?: string; painLevel?: number }) {
+  const [person] = await ownerDb.select({ personId: patient.personId }).from(patient).where(eq(patient.id, f.patient.id))
+  await ownerDb.insert(appointmentVisitAnswer).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    appointmentId,
+    reason: said.reason ?? null,
+    pain: said.pain ?? null,
+    painLevel: said.painLevel ?? null,
+    respondentContactId: person!.personId,
+    submittedVia: "enlace",
+  })
+}
+
+// Mesa de formularios del 13 nov, entrega 8 (C2 y C6).
+it("«Hoy viene a…» trae lo que contó para esa cita, el sistema anota quién lo vio al atender y sigue después de firmar", async () => {
+  const f = await withAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const visit = await f.book(14)
+  const later = await f.book(16)
+  await toldBefore(f, visit.id, { reason: "Me duele la muela de abajo", pain: "si", painLevel: 8 })
+  // Lo que contó para otra cita no es de hoy (C6).
+  await toldBefore(f, later.id, { reason: "Una limpieza" })
+  const opened = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id }))
+  // Otra persona del equipo que mira la atención no queda como quien lo vio.
+  const other = randomUUID()
+  await ownerDb.insert(user).values({ id: other, name: "Recepción", email: `${other}@example.test` })
+  const peek = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id, other))
+  expect(peek.visitAnswer).toMatchObject({ reason: "Me duele la muela de abajo", pain: "si", painLevel: 8, seen: null, by: { kind: "patient" } })
+  // Quien atiende la abre: queda anotado, una vez y sin botón.
+  const attended = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id, f.actor))
+  expect(attended.visitAnswer?.seen).toMatchObject({ by: "Clínico" })
+  const again = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id, f.actor))
+  expect(again.visitAnswer?.seen?.at).toEqual(attended.visitAnswer?.seen?.at)
+  // «Usar como motivo» no pisa lo que se escribió al reservar: el motivo de la cita sigue ofreciéndose.
+  expect(attended.bookedReason).not.toBe("Me duele la muela de abajo")
+  // «Usar como motivo»: sus palabras pasan al motivo de consulta, sin teclear.
+  await f.run((tx) =>
+    updateEncounterDraft(tx, ...f.args, opened.id, { reason: visitReasonForEncounter(attended.visitAnswer!) }),
+  )
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id))).encounter.reason).toBe("Me duele la muela de abajo")
+  await f.ready(opened.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, opened.id))
+  const signed = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id, f.actor))
+  expect(signed.visitAnswer).toMatchObject({ reason: "Me duele la muela de abajo", seen: { by: "Clínico" }, seenEncounterId: opened.id })
+  // La Historia y la copia lo tienen, cada uno con su cita y su atención.
+  const all = await f.run((tx) => patientVisitAnswers(tx, "org_a", f.patient.id))
+  expect(all.map((item) => [item.reason, item.encounterId])).toEqual(
+    expect.arrayContaining([
+      ["Me duele la muela de abajo", opened.id],
+      ["Una limpieza", null],
+    ]),
+  )
+  // Quién lo vio no cambia después, ni para el dueño de la base.
+  await expect(
+    ownerDb.update(appointmentVisitAnswer).set({ seenBy: other }).where(eq(appointmentVisitAnswer.appointmentId, visit.id)),
+  ).rejects.toThrow()
+})
+
+it("sin lo que contó antes de venir la atención se abre y se firma igual; un borrador vacío se descarta aunque se haya visto", async () => {
+  const f = await withAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const visit = await f.book(15)
+  const plain = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id, reason: "Control" }))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, plain.id, f.actor))).visitAnswer).toBeNull()
+  await f.ready(plain.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, plain.id))
+  // Otra cita, con lo que contó: se abre, se ve y se descarta vacía; quién lo vio y cuándo se quedan.
+  const next = await f.book(17)
+  await toldBefore(f, next.id, { pain: "no" })
+  const draft = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: next.id }))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, draft.id, f.actor))).visitAnswer?.seen).toBeTruthy()
+  await f.run((tx) => discardEmptyEncounter(tx, ...f.args, draft.id))
+  const [kept] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, next.id))
+  expect(kept).toMatchObject({ seenBy: f.actor, seenEncounterId: null, pain: "no" })
 })

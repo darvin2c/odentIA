@@ -968,14 +968,28 @@ export interface CreateFormTemplateInput {
   description?: string | null
   specialtyId?: string | null
   schema: unknown
-  /** «portal»: cuestionario que responde el paciente antes de su cita. */
+  /** Solo «staff»: el cuestionario que respondía el paciente se dejó de usar (ver `retiredPatientForm`). */
   respondent?: "staff" | "portal"
 }
 
-function assertRespondent(raw: unknown): "staff" | "portal" {
-  if (raw === undefined || raw === null) return "staff"
-  if (raw !== "staff" && raw !== "portal") throw validation("Destinatario inválido: staff|portal")
-  return raw
+/**
+ * Lo que se le pregunta al paciente está en un solo lugar, «Preguntas al paciente», con «Antes de
+ * cada cita» (mesa de formularios del 13 nov, decisión 1): las fichas son del equipo. Un formulario
+ * que responde el paciente ya no se crea, no se publica ni se vuelve a usar; lo que se respondió
+ * con los de antes se conserva y lo enviado sin revisar sigue por revisar.
+ */
+function retiredPatientForm(): ServiceError {
+  return new ServiceError(
+    "PATIENT_FORMS_RETIRED",
+    409,
+    "Lo que se le pregunta al paciente está en Configuración › Preguntas al paciente, también lo de antes de cada cita. Las fichas las llena el equipo.",
+  )
+}
+
+function assertRespondent(raw: unknown): "staff" {
+  if (raw === undefined || raw === null || raw === "staff") return "staff"
+  if (raw === "portal") throw retiredPatientForm()
+  throw validation("Destinatario inválido: staff")
 }
 
 /** El paciente no adjunta archivos clínicos desde el portal: cada pregunta de archivo, en su tipo. */
@@ -1132,6 +1146,7 @@ export async function updateFormTemplate(
     }
   }
   const schema = patch.schema !== undefined ? assertFormSchema(patch.schema) : current.schema
+  // Un borrador de los de antes que respondía el paciente se puede pasar al equipo, nunca al revés.
   const respondent =
     patch.respondent !== undefined ? assertRespondent(patch.respondent) : (current.respondent as "staff" | "portal")
   assertPortalSchema(respondent, schema as FormSchemaDef)
@@ -1188,6 +1203,7 @@ export async function publishFormTemplate(
     .limit(1)
   if (!current) throw notFound("Plantilla")
   if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
+  if (current.respondent === "portal") throw retiredPatientForm()
   assertFormSchema(current.schema)
   if (current.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, current.specialtyId)

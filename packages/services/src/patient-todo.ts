@@ -7,7 +7,7 @@ import { schedulableItemsOf } from "./booking-links.js"
 import { type BudgetWithTotals, listBudgets } from "./budgets.js"
 import { type RemoteSignBlock, remoteSignBlock } from "./clinical-forms.js"
 import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
-import { pendingQuestionnaire } from "./portal-questionnaire.js"
+import { type VisitAsk, visitAskOf } from "./visit-answers.js"
 
 /**
  * Lo que tiene por hacer quien decide por el paciente (entrega 2, «Un enlace por cosa»): una
@@ -27,8 +27,11 @@ export interface PatientTodo {
    * se leen ahí y se firman en la cita, y no son algo que pueda hacer antes.
    */
   signBlock: RemoteSignBlock | null
-  /** El cuestionario antes de su cita, solo con una cita a la vista. */
-  questionnaire: { title: string } | null
+  /**
+   * «Tu visita» antes de la cita a la vista (a qué viene, si le duele), si la clínica lo pregunta y
+   * aún no lo respondió. Va en la misma tarjeta que sus datos: «Antes de tu cita».
+   */
+  visit: VisitAsk | null
   /** Los presupuestos que esperan su respuesta, el último enviado primero. */
   budgets: BudgetWithTotals[]
   /** «Lo que aceptaste, por agendar». */
@@ -106,8 +109,8 @@ export async function patientTodo(
     contactId: string
     /** Ya envió «Tus datos» desde este enlace: no se le vuelven a pedir. */
     dataSubmitted?: boolean
-    /** Hay una cita por venir a la vista: solo entonces el cuestionario. */
-    withAppointment: boolean
+    /** La cita por venir a la vista (la del enlace o la del recordatorio): solo con ella, «Tu visita». */
+    appointmentId: string | null
   },
 ): Promise<PatientTodo> {
   const { patientId } = input
@@ -117,9 +120,7 @@ export async function patientTodo(
     health: !input.dataSubmitted && (await patientHealthToAsk(tx, orgId, patientId)),
     consents,
     signBlock: consents.length > 0 ? await remoteSignBlock(tx, orgId, patientId, input.contactId) : null,
-    questionnaire: input.withAppointment
-      ? await pendingQuestionnaire(tx, orgId, patientId).then((found) => (found ? { title: found.title } : null))
-      : null,
+    visit: await visitAskOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
     budgets: await budgetsToAnswer(tx, orgId, patientId),
     toSchedule: await schedulableItemsOf(tx, orgId, patientId),
   }
@@ -131,25 +132,25 @@ export function hasTodo(todo: PatientTodo): boolean {
     todo.missing.length > 0 ||
     todo.health ||
     todo.consents.length > 0 ||
-    todo.questionnaire !== null ||
+    todo.visit !== null ||
     todo.budgets.length > 0 ||
     todo.toSchedule.length > 0
   )
 }
 
 /**
- * Cuántas cosas puede hacer desde su teléfono, una por tarjeta de la página: sus datos, cada
- * consentimiento que firma a distancia, el cuestionario, cada presupuesto y lo aceptado por
- * agendar. Un consentimiento que solo se firma en la cita no cuenta. La salud, opcional,
- * cuenta como sus datos solo si `health`.
+ * Cuántas cosas puede hacer desde su teléfono, una por tarjeta de la página: «Antes de tu cita»
+ * (sus datos y su visita, una sola tarjeta), cada consentimiento que firma a distancia, cada
+ * presupuesto y lo aceptado por agendar. Un consentimiento que solo se firma en la cita no cuenta.
+ * La salud, opcional, cuenta como sus datos solo si `health`; «Tu visita» cuenta cuando se le
+ * pregunta: es lo que se le pide antes de cada cita (entrega 8), y con sus datos es una sola cosa.
  */
 export function remoteTodoCount(todo: PatientTodo, options: { health?: boolean } = {}): { data: boolean; total: number } {
   const data = todo.missing.length > 0 || (options.health === true && todo.health)
   const consents = todo.signBlock ? 0 : todo.consents.length
   const total =
-    (data ? 1 : 0) +
+    (data || todo.visit ? 1 : 0) +
     consents +
-    (todo.questionnaire ? 1 : 0) +
     todo.budgets.length +
     (todo.toSchedule.length > 0 ? 1 : 0)
   return { data, total }

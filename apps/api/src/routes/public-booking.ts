@@ -1,5 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
-import { registrationAnswersSchema } from "@odentia/clinical"
+import { registrationAnswersSchema, visitAnswerSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import {
@@ -14,7 +14,6 @@ import {
   getBranchDirections,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
-  getPersonalLinkQuestionnaire,
   getPersonalLinkView,
   issueFields,
   listBookingLinkProfessionals,
@@ -27,7 +26,6 @@ import {
   setPersonalLinkMessages,
   signPersonalLinkConsent,
   submitPersonalLinkData,
-  submitPersonalLinkQuestionnaire,
   suggestAddresses,
 } from "@odentia/services"
 import { eq } from "drizzle-orm"
@@ -88,6 +86,8 @@ const dataBody = z.strictObject({
   acceptsPromotions: z.boolean().optional(),
   // Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas.
   acceptsReminders: z.literal(true).optional(),
+  // «Tu visita», el último paso de «Antes de tu cita»: a qué viene y si le duele, todo opcional.
+  visit: visitAnswerSchema.nullish(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),
@@ -140,7 +140,6 @@ const signBody = z.strictObject({
   comprehensionConfirmed: z.boolean(),
   signatureData: z.unknown(),
 })
-const questionnaireBody = z.strictObject({ token, answers: z.record(z.string(), z.unknown()) })
 // «Tus mensajes»: un interruptor o «ningún mensaje» (ADR 0040).
 const messagesBody = z.strictObject({
   token,
@@ -395,19 +394,6 @@ export function createPublicBookingRoute(deps: {
         signPersonalLinkConsent(tx, orgId, linkToken, params.data.consentId, input, evidence, { secretsKey: deps.secretsKey }),
       ),
     )
-  })
-
-  // Antes de tu cita: el cuestionario se envía una vez, completo.
-  app.get("/:slug/questionnaire", async (c) => {
-    const query = z.strictObject({ token }).safeParse(c.req.query())
-    if (!query.success) return unavailable(c)
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => getPersonalLinkQuestionnaire(tx, orgId, query.data.token)))
-  })
-
-  app.post("/:slug/questionnaire", async (c) => {
-    const body = questionnaireBody.safeParse(await bodyOf(c))
-    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus respuestas"), 400)
-    return answer(c, 201, () => inOrg(c, (tx, orgId) => submitPersonalLinkQuestionnaire(tx, orgId, body.data.token, body.data.answers, { secretsKey: deps.secretsKey })))
   })
 
   // «Tus mensajes»: los tres interruptores de quien recibe sus mensajes.

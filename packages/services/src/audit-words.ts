@@ -98,6 +98,9 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   passkey: "portal",
   session: "portal",
   questionnaire: "portal",
+  // «Antes de tu cita» (entrega 8): lo que cuenta de su visita, desde su enlace o su portal.
+  visit: "portal",
+  visit_answer: "portal",
   account: "portal",
   appointments: "portal",
   budgets: "portal",
@@ -512,6 +515,9 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "questionnaire.viewed": say("Abrió un cuestionario en el portal", "paciente"),
   "questionnaire.saved": say("Guardó un cuestionario sin enviarlo, en el portal", "paciente"),
   "questionnaire.submitted": say("Envió un cuestionario desde el portal", "paciente"),
+  "visit.viewed": say("Abrió «Antes de tu cita» en el portal", "paciente"),
+  "visit.sent": say("Envió «Antes de tu cita» desde el portal", "paciente"),
+  "visit_answer.sent": say("Contó antes de su cita a qué viene y si le duele", "paciente"),
   // Su enlace (ADR 0037): lo que la persona hizo en su página personal.
   "personal_link.sent": say("Le envió su enlace"),
   "personal_link.shown": say("Le mostró su enlace en la clínica"),
@@ -616,6 +622,8 @@ const AUTHOR_OF_SUBJECT: Record<string, AuditAuthor> = {
   passkey: "paciente",
   session: "paciente",
   questionnaire: "paciente",
+  visit: "paciente",
+  visit_answer: "paciente",
 }
 
 function subjectOf(action: string): string {

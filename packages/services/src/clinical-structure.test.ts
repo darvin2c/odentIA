@@ -1,4 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
+import { clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -663,14 +664,25 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
-  const template = await run(async (tx) => {
-    const draft = await createFormTemplate(tx, "org_a", ACTOR, {
-      title: "Antes de tu cita",
-      respondent: "portal",
-      schema: { sections: [{ id: "salud", title: "Salud", fields }] },
-    })
-    return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
-  })
+  // Un cuestionario del paciente ya no se crea (entrega 8): este es uno de los de antes, como quedó.
+  await expect(
+    run((tx) => createFormTemplate(tx, "org_a", ACTOR, { title: "Antes de tu cita", respondent: "portal", schema: { sections: [{ id: "salud", title: "Salud", fields }] } })),
+  ).rejects.toMatchObject({ code: "PATIENT_FORMS_RETIRED" })
+  const [template] = await run((tx) =>
+    tx
+      .insert(clinicalFormTemplate)
+      .values({
+        organizationId: "org_a",
+        key: "antes-de-tu-cita-de-antes",
+        title: "Antes de tu cita",
+        status: "publicado",
+        respondent: "portal",
+        schema: { sections: [{ id: "salud", title: "Salud", fields }] },
+        publishedAt: new Date(),
+      })
+      .returning(),
+  )
+  if (!template) throw new Error("Sin plantilla")
   const response = await run((tx) =>
     createFormResponse(tx, "org_a", ACTOR, {
       templateId: template.id,

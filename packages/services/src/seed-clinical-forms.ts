@@ -1,10 +1,10 @@
 import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
-import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { and, eq, ilike, sql } from "drizzle-orm"
+import { and, desc, eq, ilike, sql } from "drizzle-orm"
 import {
   addFormAddendum,
   advanceClinicalOrder,
@@ -158,14 +158,14 @@ export async function seedClinicalForms(
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)
   }
 
-  // Cuestionario previo que el paciente responde desde el portal; Rosa ya lo
-  // envió y queda «declarado» para que la profesional lo revise.
-  const previo = await upsertFormTemplate(tx, orgId, ownerUserId, {
+  // El «Cuestionario previo a la cita» de antes, que respondía el paciente: se dejó de usar (lo de
+  // antes de cada cita está en «Preguntas al paciente», entrega 8), pero lo que Rosa envió con él
+  // sigue «declarado» para que la profesional lo revise. Queda como quedó en una clínica que lo
+  // usaba: retirado, con lo respondido intacto.
+  const previo = await retiredPatientQuestionnaire(tx, orgId, ownerUserId, {
     key: "cuestionario-previo",
     title: "Cuestionario previo a la cita",
     description: "Lo completa el paciente o su representante antes de la cita.",
-    specialtyId: null,
-    respondent: "portal",
     schema: {
       sections: [
         {
@@ -378,6 +378,38 @@ async function upsertSpecialty(
   return createSpecialty(tx, orgId, actorUserId, input)
 }
 
+/** El cuestionario del paciente de antes, ya retirado: se escribe como quedó, porque hoy no se crea. */
+async function retiredPatientQuestionnaire(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { key: string; title: string; description: string; schema: FormSchemaDef },
+) {
+  const [found] = await tx
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, input.key)))
+    .orderBy(desc(clinicalFormTemplate.version))
+    .limit(1)
+  if (found) return found
+  const [row] = await tx
+    .insert(clinicalFormTemplate)
+    .values({
+      organizationId: orgId,
+      key: input.key,
+      title: input.title,
+      description: input.description,
+      version: 1,
+      status: "archivado",
+      respondent: "portal",
+      schema: input.schema as unknown as Record<string, unknown>,
+      createdBy: actorUserId,
+      publishedAt: new Date(),
+    })
+    .returning()
+  return row!
+}
+
 async function upsertFormTemplate(
   tx: Db,
   orgId: string,
@@ -388,7 +420,6 @@ async function upsertFormTemplate(
     description: string
     specialtyId: string | null
     schema: FormSchemaDef
-    respondent?: "staff" | "portal"
   },
 ) {
   const published = (await listFormTemplates(tx, orgId, { status: "publicado" })).find(
