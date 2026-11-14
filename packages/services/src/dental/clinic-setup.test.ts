@@ -137,6 +137,29 @@ describe("carga de la configuración de una clínica", () => {
     expect(await ownerDb.select().from(invitation).where(eq(invitation.organizationId, ORG))).toHaveLength(1)
   })
 
+  // Mesa de formularios del 13 nov, entrega 8: lo que responde el paciente va en «Preguntas al paciente».
+  it("la hoja que la clínica le daba al paciente no se carga como formulario; una del equipo, sí", async () => {
+    const withForms = clinicSetupPlanSchema.parse({
+      ...raw,
+      forms: [
+        { title: "Antes de tu cita", respondent: "portal", schema: { sections: [{ id: "a", title: "A", fields: [{ id: "motivo", label: "Motivo", type: "texto_largo" }] }] } },
+        { title: "Evaluación de ortodoncia de la clínica", schema: { sections: [{ id: "a", title: "A", fields: [{ id: "perfil", label: "Perfil", type: "texto" }] }] } },
+      ],
+    })
+    let result: Awaited<ReturnType<typeof runClinicSetup>> | null = null
+    try {
+      await withOrgContext(ownerDb, ORG, async (tx: Db) => {
+        throw new ClinicSetupRehearsal(await runClinicSetup(tx, ORG, admin, withForms, {}, "ensayo"))
+      })
+    } catch (error) {
+      if (!(error instanceof ClinicSetupRehearsal)) throw error
+      result = error.result
+    }
+    const forms = result?.items.filter((item) => item.area === "Formatos propios") ?? []
+    expect(forms.find((item) => item.label.includes("Antes de tu cita"))).toMatchObject({ status: "error", detail: expect.stringContaining("Preguntas al paciente") })
+    expect(forms.find((item) => item.label.includes("Evaluación de ortodoncia"))?.status).toBe("nueva")
+  })
+
   it("lo de la propietaria se carga cuando ya es parte de la clínica", async () => {
     const id = `t-dra-${randomUUID()}`
     await ownerDb.insert(user).values({ id, name: "Dra. Prueba", email: "dra.prueba@example.com" })
