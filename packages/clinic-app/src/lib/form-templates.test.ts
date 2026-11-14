@@ -255,6 +255,17 @@ it("dos formularios con el mismo título se distinguen por cuántas preguntas ti
   // En el desplegable de «Nuevo» › «Formulario», el detalle va junto al título.
   expect(templateOptionLabel(a, all, when)).toBe("Ficha de ortodoncia inicial A · 4 preguntas · creado el 2026-11-13 21:43")
   expect(templateOptionLabel(other, all, when)).toBe("Evaluación de endodoncia")
+  // Al volver a usarlo nace otra versión, con otra fecha: lo que se dice es cuándo se creó el
+  // formulario (su primera versión, lo dice el servidor), para que esa línea no cambie.
+  const aBack = template({
+    key: "orto",
+    title: "Ficha de ortodoncia inicial A",
+    version: 2,
+    schema: fields(4),
+    createdAt: "2026-11-13T23:06:00.000Z",
+    formCreatedAt: "2026-11-13T21:43:00.000Z",
+  })
+  expect(twinDetail(aBack, [aBack, b, other], when)).toBe("4 preguntas · creado el 2026-11-13 21:43")
 })
 
 it("un clic a la vez: el segundo clic de un doble clic no se envía", () => {

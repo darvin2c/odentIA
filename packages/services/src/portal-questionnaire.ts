@@ -4,7 +4,7 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, isNull, ne } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, min, ne } from "drizzle-orm"
 import {
   assertAnswers,
   assertFormSchema,
@@ -123,15 +123,32 @@ export async function previewPatientQuestionnaire(
  * Las plantillas para Configuración, con la que hoy reciben los pacientes
  * marcada (`reachesPatients`): de las publicadas «que responde el paciente» les
  * llega una sola, la de `currentTemplate`. La lista lo dice con esa misma regla.
+ * `formCreatedAt`: cuándo se creó el formulario, que es su primera versión; no
+ * cambia al publicar otra ni al volver a usarlo, y por eso sirve para distinguir
+ * a dos formularios con el mismo título.
  */
 export async function listClinicFormTemplates(
   tx: Db,
   orgId: string,
   query: Parameters<typeof listFormTemplates>[2] = {},
-): Promise<Array<FormTemplateRow & { reachesPatients: boolean }>> {
+): Promise<Array<FormTemplateRow & { reachesPatients: boolean; formCreatedAt: Date }>> {
   const rows = await listFormTemplates(tx, orgId, query)
   const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
-  return rows.map((row) => ({ ...row, reachesPatients: row.id === reaching?.id }))
+  const keys = [...new Set(rows.map((row) => row.key))]
+  // De todas las versiones de cada formulario, también las que la lista pedida no trae (las archivadas).
+  const firsts = keys.length
+    ? await tx
+        .select({ key: clinicalFormTemplate.key, createdAt: min(clinicalFormTemplate.createdAt) })
+        .from(clinicalFormTemplate)
+        .where(and(eq(clinicalFormTemplate.organizationId, orgId), inArray(clinicalFormTemplate.key, keys)))
+        .groupBy(clinicalFormTemplate.key)
+    : []
+  const createdOf = new Map(firsts.map((first) => [first.key, first.createdAt]))
+  return rows.map((row) => ({
+    ...row,
+    reachesPatients: row.id === reaching?.id,
+    formCreatedAt: createdOf.get(row.key) ?? row.createdAt,
+  }))
 }
 
 /** Borrador abierto del portal o, si no hay, el último enviado (solo lectura). */
