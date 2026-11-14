@@ -167,11 +167,13 @@ function confirmWords(via: PersonalLinkView["confirmVia"]): string {
   return ""
 }
 
-/** Lo que se dice de su salud, de quien se atiende: de ella misma o, con su nombre, de su hijo. */
+/**
+ * Lo que se dice de su salud, de quien se atiende: de ella misma o, con su nombre, de su hijo. No
+ * nombra alergias ni medicinas: el enlace pregunta solo lo que falta, dato por dato (entrega 6), y
+ * a quien el equipo ya le anotó la alergia no se le dice que se la van a preguntar.
+ */
 function healthAsk(patientFirstName: string | null | undefined): string {
-  return patientFirstName
-    ? `si ${patientFirstName} tiene alergias, alguna enfermedad o toma medicamentos`
-    : "si tienes alergias, alguna enfermedad o tomas medicamentos"
+  return patientFirstName ? `unas preguntas de la salud de ${patientFirstName}` : "unas preguntas de tu salud"
 }
 
 /** Una cosa por hacer: su tarjeta en la lista y su botón en «lo que sigue». */
@@ -248,7 +250,7 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
       abre: "datos",
       title: name ? `La salud de ${name}` : "Tu salud",
       badge: "Opcional",
-      text: `${capital(healthAsk(name))}, cuéntanoslo antes de venir.`,
+      text: `${capital(healthAsk(name))}, para saberlo antes de que ${name ? "venga" : "vengas"}.`,
       action: "Responder",
       next: name ? `Contarnos de la salud de ${name}` : "Contarnos de tu salud",
       at: cita,
