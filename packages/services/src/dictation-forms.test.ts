@@ -587,6 +587,17 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     )
     const note = saved.suggestions.find((item) => item.kind === "nota")
     expect(note?.payload["evolution"]).toBe("Paciente refiere dolor al masticar.")
+    // La frase de la ficha que abarca otra oración: esa otra sigue en la nota.
+    const wide = await fx.run((tx) =>
+      saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        drafts: [
+          { kind: "ficha", payload: { question: 3, answer: "2" }, sourceText: "No, el overbite es de dos. Se cementan brackets en la arcada superior." },
+          { kind: "nota", payload: { evolution: "No, el overbite es de dos. Se cementan brackets en la arcada superior." }, sourceText: "brackets" },
+        ],
+        formQuestions,
+      }),
+    )
+    expect(wide.suggestions.find((item) => item.kind === "nota")?.payload["evolution"]).toBe("Se cementan brackets en la arcada superior.")
   })
 
   it("la ficha abierta en pantalla se lee siempre, además de las dos últimas tocadas", async () => {

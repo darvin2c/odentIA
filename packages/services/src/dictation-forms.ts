@@ -496,10 +496,19 @@ export function withoutFormNotes<T extends { kind: string; payload: Record<strin
   transcript?: string,
 ): T[] {
   if (!questions.length) return [...drafts]
+  // De la frase de una ficha, las oraciones que nombran su pregunta: si la frase abarca otra cosa
+  // («… Se cementan brackets»), eso sigue siendo de la consulta.
   const phrases = drafts
     .filter((draft) => draft.kind === "ficha" && draft.sourceText?.trim())
     .filter((draft) => prepareFormAnswer(draft, questions, site, transcript) !== null || formAnswerDropReason(draft, questions) !== null)
-    .map((draft) => draft.sourceText ?? "")
+    .flatMap((draft) => {
+      const said = draft.sourceText ?? ""
+      const parts = said.split(/(?<=[.;!?\n])\s+/).filter((part) => part.trim())
+      const question = questions.find((item) => item.number === draft.payload["question"])
+      if (parts.length <= 1 || !question) return [said]
+      const label = labelStems(question.label)
+      return parts.filter((part) => stemsOf(part).some((stem) => label.includes(stem)))
+    })
   return drafts.flatMap((draft) => {
     if (draft.kind !== "nota") return [draft]
     const payload = Object.fromEntries(

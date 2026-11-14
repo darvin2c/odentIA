@@ -91,7 +91,7 @@
       "id": "orto-8-ya-respondida",
       "texto": "Overjet de seis, overbite de cuatro.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "overjet": 5 } }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 4 } }
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.overjet": 6 } }
     },
     {
       "id": "orto-9-nada-de-la-ficha",
@@ -404,7 +404,7 @@
       "id": "orto-20-corrige-respondida",
       "texto": "Corrijo: la clase molar derecha es clase dos división uno.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "clase_molar_derecha": "Clase II división 2" } }],
-      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha"] }
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1" } }
     },
     {
       "id": "orto-21-c15b",
