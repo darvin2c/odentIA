@@ -18,7 +18,15 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { type DictationFormQuestion, formQuestionsOf, prepareFormAnswer, productHooksFor, withFormTwins } from "@odentia/services"
+import {
+  type DictationFormQuestion,
+  formQuestionsOf,
+  prepareFormAnswer,
+  productHooksFor,
+  withDiagnosisFormAnswers,
+  withFormTwins,
+  withoutFormNotes,
+} from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
@@ -29,7 +37,8 @@ interface FormCase {
   producto?: "odentia" | "latidia"
   texto: string
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
-  espera: { fichas?: Record<string, unknown>; revisar?: string[] }
+  /** `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones). */
+  espera: { fichas?: Record<string, unknown>; revisar?: string[]; nota?: string[]; noEnNota?: string[] }
 }
 
 function arg(name: string, fallback: string): string {
@@ -76,7 +85,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "")
-const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
 const now = new Date()
 const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo || item.id === solo))
 
@@ -122,7 +131,16 @@ for (const dictation of cases) {
     console.log(`✗ ${dictation.id}: el modelo no respondió con la herramienta`)
     continue
   }
-  const answers = read.drafts.filter((draft) => draft.kind === "ficha")
+  // Como el servidor: el diagnóstico que también pregunta una ficha va a los dos lugares, y la nota
+  // pierde lo que fue para la ficha y las frases que solo corrigen.
+  const all = withDiagnosisFormAnswers(read.drafts, questions)
+  const derived = new Set(all.slice(read.drafts.length))
+  const answers = all.filter((draft) => draft.kind === "ficha")
+  const noteText = withoutFormNotes(all, questions, product.site, dictation.texto)
+    .filter((draft) => draft.kind === "nota")
+    .flatMap((draft) => Object.values(draft.payload).filter((value): value is string => typeof value === "string"))
+    .join(" ")
+    .toLowerCase()
   totals.leidas += answers.length
   const notes: string[] = []
   const listed = new Map<string, unknown>()
@@ -130,6 +148,7 @@ for (const dictation of cases) {
   // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
   // la misma pregunta en una pausa vale la última.
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
+  for (const draft of derived) twins.add(draft)
   const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
   const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
@@ -167,6 +186,18 @@ for (const dictation of cases) {
     totals.revisarEsperadas += 1
     if (!listed.has(key)) totals.revisarBien += 1
   }
+  for (const want of dictation.espera.nota ?? []) {
+    totals.notaEsperada += 1
+    if (noteText.includes(want.toLowerCase())) totals.notaBien += 1
+    else notes.push(`la nota perdió «${want}»`)
+  }
+  for (const unwanted of dictation.espera.noEnNota ?? []) {
+    totals.notaSobraEsperada += 1
+    if (noteText.includes(unwanted.toLowerCase())) {
+      totals.notaSobra += 1
+      notes.push(`la nota repite «${unwanted}»`)
+    }
+  }
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   const shown = [...listed].map(([key, value]) => `${key.split(".").at(-1)}=${JSON.stringify(value)}`).join(", ")
   console.log(`${notes.some((note) => note.startsWith("INVENTÓ")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
@@ -180,4 +211,5 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
+console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
 console.log(`Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`)

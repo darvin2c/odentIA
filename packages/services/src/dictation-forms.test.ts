@@ -6,7 +6,16 @@ import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { listFormResponses } from "./clinical-forms.js"
-import { type DictationFormQuestion, dictationFormQuestions, formQuestionsOf, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
+import {
+  type DictationFormQuestion,
+  dictationFormQuestions,
+  formAnswerDropReason,
+  formQuestionsOf,
+  prepareFormAnswer,
+  saidNumbers,
+  withDiagnosisFormAnswers,
+  withoutFormPhrases,
+} from "./dictation-forms.js"
 import {
   confirmDictationSuggestion,
   discardDictationSuggestion,
@@ -186,6 +195,12 @@ describe("lo que el servidor dejaba pasar (QA del 14 nov)", () => {
     expect(ask("fistula", "Sí", "no hay fístula")).toMatchObject({ status: "por_revisar" })
     expect(ask("fistula", "Sí", "sin embargo hay fístula")).toMatchObject({ status: "lista", payload: { value: true } })
   })
+  it("lo que no nombra la pregunta no se avisa como si fuera de la ficha", () => {
+    const draft = { payload: { question: forms.find((item) => item.fieldId === "clase_molar_derecha")?.number, answer: "Clase II división 1" }, sourceText: "el diagnóstico es maloclusión clase dos división uno" }
+    expect(prepareFormAnswer(draft, forms, FDI)).toBeNull()
+    expect(formAnswerDropReason(draft, forms)).toBeNull()
+  })
+
   it("«al menos dos» no es menos dos, y la pieza se dice dígito a dígito", () => {
     expect(saidNumbers("al menos dos")).toEqual([2])
     expect(saidNumbers("por lo menos dos")).toEqual([2])
@@ -290,6 +305,42 @@ describe("lo que la medición del 14 nov mostró que se perdía", () => {
     expect(say("vacunas", "Sí", "vacunas completas")?.payload["value"]).toBe(true)
     expect(say("desviacion_inferior", "2", "la inferior desviada a la izquierda dos milímetros")?.payload["value"]).toBe(2)
     expect(say("desviacion_inferior", "2", "desviada unos dos milímetros a la izquierda, la inferior")).toMatchObject({ status: "por_revisar", payload: { value: null } })
+  })
+
+  it("el texto de la consulta pierde lo que fue para la ficha y las frases que solo corrigen", () => {
+    const evolution = "Overjet de seis, perdón, de cuatro milímetros. Paciente refiere dolor al masticar. No, el overjet es de cuatro. Corrijo: overbite de dos."
+    expect(withoutFormPhrases(evolution, ["Overjet de seis, perdón, de cuatro milímetros", "overbite de dos"])).toBe("Paciente refiere dolor al masticar.")
+    expect(withoutFormPhrases("No es alérgico. Control en un mes.", [])).toBe("No es alérgico. Control en un mes.")
+    // La oración que además dice otra cosa se queda: la evolución no pierde lo suyo.
+    expect(withoutFormPhrases("Dolor espontáneo desde hace tres días en la cuarenta y seis.", ["dolor espontáneo"])).toBe("Dolor espontáneo desde hace tres días en la cuarenta y seis.")
+  })
+
+  it("un diagnóstico dicho que también pregunta una ficha se propone en ella", () => {
+    const endo = formQuestionsOf([
+      {
+        id: "endo",
+        title: "Evaluación de endodoncia",
+        snapshot: {
+          sections: [
+            {
+              id: "d",
+              title: "Diagnóstico",
+              fields: [
+                { id: "pulpar", label: "Diagnóstico pulpar", type: "opcion_unica", options: ["Pulpitis irreversible sintomática", "Pulpitis irreversible asintomática"] },
+                { id: "apical", label: "Diagnóstico apical", type: "opcion_unica", options: ["Periodontitis apical sintomática", "Periodontitis apical asintomática"] },
+              ],
+            },
+          ],
+        },
+        answers: {},
+      },
+    ])
+    const said = "pulpitis irreversible sintomática con periodontitis apical sintomática"
+    const dictated: Array<{ kind: string; payload: Record<string, unknown>; sourceText: string }> = [{ kind: "diagnostico", payload: { diagnosisCode: "K04.0" }, sourceText: said }]
+    const all = withDiagnosisFormAnswers(dictated, endo)
+    expect(all.filter((draft) => draft.kind === "ficha").map((draft) => draft.payload["answer"])).toEqual(["Pulpitis irreversible sintomática", "Periodontitis apical sintomática"])
+    const ready = all.filter((draft) => draft.kind === "ficha").map((draft) => prepareFormAnswer(draft, endo, FDI)?.payload["value"])
+    expect(ready).toEqual(["Pulpitis irreversible sintomática", "Periodontitis apical sintomática"])
   })
 
   it("«la derecha en clase dos» no elige canina ni molar", () => {
@@ -520,6 +571,22 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis centímetros" }])
     expect(saved.suggestions).toEqual([])
     expect(saved.droppedForms).toEqual([{ said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha." }])
+  })
+
+  it("con la ficha empezada, la nota no repite lo que fue para la ficha", async () => {
+    const { fx, questions } = await startedForm()
+    const formQuestions = await questions()
+    const saved = await fx.run((tx) =>
+      saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        drafts: [
+          { kind: "ficha", payload: { question: 2, answer: "4" }, sourceText: "Overjet de seis, perdón, de cuatro milímetros" },
+          { kind: "nota", payload: { evolution: "Overjet de seis, perdón, de cuatro milímetros. Paciente refiere dolor al masticar. No, el overjet es de cuatro." }, sourceText: "dolor al masticar" },
+        ],
+        formQuestions,
+      }),
+    )
+    const note = saved.suggestions.find((item) => item.kind === "nota")
+    expect(note?.payload["evolution"]).toBe("Paciente refiere dolor al masticar.")
   })
 
   it("la ficha abierta en pantalla se lee siempre, además de las dos últimas tocadas", async () => {

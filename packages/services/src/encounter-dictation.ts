@@ -61,7 +61,9 @@ import {
   formAnswerDropReason,
   formAnswerWords,
   prepareFormAnswer,
+  withDiagnosisFormAnswers,
   withFormTwins,
+  withoutFormNotes,
 } from "./dictation-forms.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
@@ -1577,13 +1579,20 @@ export async function saveDictationSegment(
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   const droppedForms: Array<{ said: string; why: string }> = []
-  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada.
-  const { drafts, twins } = withFormTwins(segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS), scope.formQuestions)
+  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada, y lo
+  // que fue para una ficha no se repite en el texto de la consulta.
+  // Un diagnóstico dicho que también pregunta una ficha va a los dos lugares.
+  const dictated = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
+  const fromDiagnoses = withDiagnosisFormAnswers(dictated, scope.formQuestions).slice(dictated.length)
+  const { drafts, twins } = withFormTwins(withoutFormNotes([...dictated, ...fromDiagnoses], scope.formQuestions, scope.site, scope.transcript), scope.formQuestions)
+  for (const draft of fromDiagnoses) twins.add(draft)
   for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) preparedDrafts.push({ draft, prepared })
-    else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim())
-      droppedForms.push({ said: draft.sourceText.trim(), why: formAnswerDropReason(draft, scope.formQuestions) })
+    else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim()) {
+      const why = formAnswerDropReason(draft, scope.formQuestions)
+      if (why) droppedForms.push({ said: draft.sourceText.trim(), why })
+    }
   }
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
   // Las alergias, antes que las recetas: la que se acaba de dictar ya avisa en este mismo tramo.

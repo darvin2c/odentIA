@@ -397,10 +397,18 @@ export function prepareFormAnswer(
  * Por qué lo dicho para una ficha no quedó como propuesta, para «No pude usar
  * esto»: la frase no se pierde en silencio (QA del 14 nov, D21).
  */
-export function formAnswerDropReason(draft: { payload: Record<string, unknown>; sourceText?: string | undefined }, questions: readonly DictationFormQuestion[]): string {
+export function formAnswerDropReason(
+  draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
+  questions: readonly DictationFormQuestion[],
+): string | null {
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
   const said = draft.sourceText ?? ""
+  // La frase que no nombra la pregunta no era de la ficha («el diagnóstico es maloclusión clase dos»
+  // no nombra «Clase molar derecha»): no se avisa como si lo fuera. Con un rótulo de varias palabras,
+  // al menos dos dichas.
+  const named = labelStems(question.label).filter((stem) => stemsOf(said).includes(stem)).length
+  if (named === 0 || (labelStems(question.label).length > 1 && named < 2)) return null
   const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
   if (question.unit && unit?.test(plain(said))) return `«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`
   if (!talksAbout(question, new Set(stemsOf(said)))) return `No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`
@@ -441,6 +449,103 @@ export function withFormTwins<T extends { kind: string; payload: Record<string, 
     return [draft, ...more]
   })
   return { drafts: all, twins }
+}
+
+/** Una frase que solo corrige lo anterior («No, el overjet es de cuatro», «Perdón, de cuatro», «Corrijo: …»). */
+const CORRECTION = /^(no,\s|perd[oó]n\b|corrijo\b|mejor dicho\b|me equivoqu)/
+
+/** Las palabras que dicen algo de una frase: sin las cortas ni las de relleno. */
+const meaningful = (text: string) =>
+  plain(text)
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3 && !FILLER.has(word))
+
+/**
+ * El texto de la consulta sin lo que fue para una ficha (verificación del 14
+ * nov): se quita la oración que es la frase de la ficha, o casi solo eso, y la
+ * que solo corrige («perdón…», «no, es…», «corrijo…»). La oración que además
+ * dice otra cosa («dolor espontáneo desde hace tres días») se queda entera: la
+ * evolución no pierde lo que sí es suyo.
+ */
+export function withoutFormPhrases(text: string, formPhrases: readonly string[]): string {
+  const phrases = formPhrases.map((phrase) => plain(phrase).replace(/[.;,]+$/, "").trim()).filter((phrase) => phrase.length >= 4)
+  const sentences = text.split(/(?<=[.;!?\n])\s+/)
+  const kept = sentences.filter((sentence) => {
+    const said = plain(sentence).replace(/[.;,]+$/, "").trim()
+    if (!said) return false
+    if (CORRECTION.test(said)) return false
+    const hits = phrases.filter((phrase) => said.includes(phrase) || phrase.includes(said))
+    if (!hits.length) return true
+    const used = new Set(hits.flatMap(meaningful))
+    return meaningful(said).filter((word) => !used.has(word)).length >= 2
+  })
+  return kept.join(" ").trim()
+}
+
+/**
+ * Lo dicho de una pausa con el texto de la consulta limpio de lo que fue para
+ * una ficha: lo que quedó como propuesta o va a «No pude usar esto» con su
+ * motivo. Lo que la ficha no tomó ni avisa se queda en la consulta, para no
+ * perderlo. Una nota que queda vacía no se propone. Solo con fichas empezadas:
+ * sin ellas, lo de siempre. Lo usan el servidor y la medición.
+ */
+export function withoutFormNotes<T extends { kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>(
+  drafts: readonly T[],
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  transcript?: string,
+): T[] {
+  if (!questions.length) return [...drafts]
+  const phrases = drafts
+    .filter((draft) => draft.kind === "ficha" && draft.sourceText?.trim())
+    .filter((draft) => prepareFormAnswer(draft, questions, site, transcript) !== null || formAnswerDropReason(draft, questions) !== null)
+    .map((draft) => draft.sourceText ?? "")
+  return drafts.flatMap((draft) => {
+    if (draft.kind !== "nota") return [draft]
+    const payload = Object.fromEntries(
+      Object.entries(draft.payload).map(([key, value]) => [key, typeof value === "string" ? withoutFormPhrases(value, phrases) : value]),
+    )
+    const empty = Object.values(payload).every((value) => typeof value !== "string" || value === "")
+    if (empty) return []
+    return [{ ...draft, payload: Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== "")) }]
+  })
+}
+
+/** Una respuesta de ficha que nace de otra cosa dicha (un diagnóstico), no del modelo. */
+export interface DerivedFormDraft {
+  kind: "ficha"
+  payload: Record<string, unknown>
+  sourceText: string
+}
+
+/**
+ * Un diagnóstico dicho que también pregunta una ficha empezada se propone en
+ * los dos lugares, como el ceod (verificación del 14 nov): «pulpitis
+ * irreversible sintomática» va a Diagnóstico y a «Diagnóstico pulpar». Solo una
+ * opción de dos o más palabras, todas dichas, y la única de su pregunta; la
+ * pregunta vacía que el modelo no respondió. Se comprueba como las demás.
+ */
+export function withDiagnosisFormAnswers<T extends { kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>(
+  drafts: readonly T[],
+  questions: readonly DictationFormQuestion[],
+): Array<T | DerivedFormDraft> {
+  const extra: DerivedFormDraft[] = []
+  const answered = new Set(drafts.filter((draft) => draft.kind === "ficha").map((draft) => draft.payload["question"]))
+  for (const draft of drafts) {
+    if (draft.kind !== "diagnostico" || !draft.sourceText?.trim()) continue
+    const spoken = new Set(stemsOf(draft.sourceText))
+    for (const question of questions) {
+      if (question.type !== "opcion_unica" || question.answered !== undefined || answered.has(question.number)) continue
+      const hits = (question.options ?? []).filter((option) => {
+        const stems = stemsOf(option)
+        return stems.length >= 2 && stems.every((stem) => spoken.has(stem))
+      })
+      if (hits.length !== 1) continue
+      answered.add(question.number)
+      extra.push({ kind: "ficha", payload: { question: question.number, answer: hits[0] }, sourceText: draft.sourceText.trim() })
+    }
+  }
+  return [...drafts, ...extra]
 }
 
 /** La misma respuesta, sin mirar el orden de varias opciones. */

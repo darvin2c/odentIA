@@ -274,10 +274,10 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
   return [
     "Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.",
     "- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).",
-    "- Una opción: una de la lista, tal cual está escrita. Si lo dicho no alcanza para elegir una sola (falta el lado, la división o el grado), no la respondas.",
-    "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad que la de la pregunta, no la respondas.",
+    "- Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.",
+    "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.",
     "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
-    "- Lo que respondes en una ficha no lo repitas en el texto de la consulta.",
+    "- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta.",
     ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
   ].join("\n")
 }

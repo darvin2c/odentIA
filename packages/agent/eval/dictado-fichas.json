@@ -447,6 +447,36 @@
       "texto": "ceod: tres cariados, uno con extracción indicada y dos obturados.",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }, { "ficha": "ficha-odontoestomatologica" }],
       "espera": { "fichas": { "ficha-de-odontopediatria.ceod_c": 3, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-odontoestomatologica.ceod_c": 3, "ficha-odontoestomatologica.ceod_e": 1, "ficha-odontoestomatologica.ceod_o": 2 } }
+    },
+    {
+      "id": "nota-1-ficha-y-evolucion",
+      "texto": "Overjet de seis, perdón, de cuatro milímetros. Paciente refiere dolor al masticar desde hace una semana.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4 }, "nota": ["dolor al masticar"], "noEnNota": ["overjet"] }
+    },
+    {
+      "id": "nota-2-otra-unidad",
+      "texto": "Overjet de seis centímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {}, "noEnNota": ["centímetros"] }
+    },
+    {
+      "id": "nota-3-correccion",
+      "texto": "Overbite de tres. No, el overbite es de dos. Se cementan brackets en la arcada superior.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2 }, "nota": ["brackets"], "noEnNota": ["no, el overbite"] }
+    },
+    {
+      "id": "nota-4-relato-se-queda",
+      "texto": "Dolor espontáneo desde hace tres días en la cuarenta y seis. Percusión positiva.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.dolor": "Espontáneo", "evaluacion-de-endodoncia.percusion": "Positiva" }, "nota": ["tres días"] }
+    },
+    {
+      "id": "endo-16-diagnostico-a-la-ficha",
+      "texto": "Pieza cuarenta y seis. Diagnóstico: pulpitis irreversible sintomática con periodontitis apical sintomática.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática", "evaluacion-de-endodoncia.diagnostico_apical": "Periodontitis apical sintomática" } }
     }
   ]
 }
