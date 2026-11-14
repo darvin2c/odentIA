@@ -200,7 +200,10 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     "Cuestionario previo",
     "Cuestionario previo",
   ])
-  const [form, sentOnly, fromPerson] = record.forms
+  // Los dos cuestionarios se enviaron en el mismo instante: se buscan por su id, no por su lugar.
+  const form = record.forms[0]
+  const sentOnly = record.forms.find((row) => row.id === unreviewed!.id)
+  const fromPerson = record.forms.find((row) => row.id === reviewed!.id)
   expect(sentOnly).toMatchObject({ id: unreviewed!.id, source: "portal", finalizedAt: null, finalizedBy: null })
   // Quién lo respondió, con las palabras de la ficha: sin su sexo registrado, «el paciente».
   expect(sentOnly!.byWords).toMatch(/^Lo respondió el paciente desde su enlace el .+ · sin revisar$/)
