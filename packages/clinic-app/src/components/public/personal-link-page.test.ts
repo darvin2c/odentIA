@@ -3,7 +3,7 @@ import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-l
 import { setOrgLocale } from "../../lib/locale"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
-import { toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
+import { beforeVisitCard, pendingItems, toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
 
 declareProduct(bareProduct("dental"))
 
@@ -45,7 +45,7 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
       { id: "c1", title: "Exodoncia", procedureRef: "Pieza 38", appointment: { startsAt: THURSDAY, timeZone: "America/Lima" }, signable: true, why: null },
       { id: "c2", title: "Implante", procedureRef: null, appointment: { startsAt: LATER, timeZone: "America/Lima" }, signable: true, why: null },
     ],
-    questionnaire: null,
+    visit: null,
     told: null,
     toSchedule: [],
     another: null,
@@ -83,6 +83,42 @@ describe("al terminar algo", () => {
   })
 })
 
+// Mesa de formularios del 13 nov, entrega 8 (C2): antes había dos tarjetas y dos envíos.
+describe("antes de su cita, una sola tarjeta", () => {
+  const questions = { reason: true, pain: true, more: true }
+  it("junta sus datos, su salud y su visita, y dice quién lo lee", () => {
+    const items = pendingItems(
+      view({ consents: [], data: { missing: [{ key: "birthDate", label: "Fecha de nacimiento" }], health: true }, visit: { purpose: null, questions } }),
+      "odontólogo",
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      abre: "datos",
+      title: "Antes de tu cita",
+      text: "Tus datos, tu salud, tus medicinas y a qué vienes.",
+      detail: "Lo lee la Dra. Díaz antes de atenderte.",
+      action: "Empezar",
+    })
+  })
+
+  it("en una sesión le dice a qué viene; solo su visita es opcional", () => {
+    const card = beforeVisitCard(
+      view({ data: null, visit: { purpose: "sesión 2 de endodoncia", questions: { reason: false, pain: true, more: false } } }),
+      "odontólogo",
+    )
+    expect(card).toMatchObject({ badge: "Opcional", text: "Vienes a: sesión 2 de endodoncia. Cuéntanos si te duele algo." })
+  })
+
+  it("sin cita por venir, sus datos siguen siendo «Tus datos»", () => {
+    const items = pendingItems(view({ consents: [], appointment: null, visit: null }), "odontólogo")
+    expect(items[0]).toMatchObject({ title: "Tus datos", action: "Completar" })
+  })
+
+  it("los enlaces que abrían el cuestionario de antes siguen abriendo", () => {
+    expect(validatePersonalLinkSearch({ token: "t", abre: "cuestionario" })).toMatchObject({ abre: "cuestionario" })
+  })
+})
+
 describe("la dirección", () => {
   it("abre solo lo que conoce, y el id es de una cosa", () => {
     expect(validatePersonalLinkSearch({ token: "t", abre: "firma", id: "6f0c1e8a-6c4c-4f43-9a5d-0d6f3f1d2b3c" })).toMatchObject({ abre: "firma", id: "6f0c1e8a-6c4c-4f43-9a5d-0d6f3f1d2b3c" })
@@ -117,12 +153,12 @@ describe("lo que nos contaste", () => {
 
   it("dice qué envió y cuándo, junto lo del mismo envío, y quién lo lee", () => {
     const words = toldWords(
-      view({ told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: LATER_SENT }]) }),
+      view({ told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "visita", at: LATER_SENT }]) }),
       "odontólogo",
     )
     expect(words?.sent.map(plain)).toEqual([
       "Enviaste tus datos y tu salud el viernes, 13 de noviembre, 2:27 p. m.",
-      "Enviaste tus respuestas de «Antes de tu cita» el viernes, 13 de noviembre, 2:31 p. m.",
+      "Enviaste lo de tu visita el viernes, 13 de noviembre, 2:31 p. m.",
     ])
     expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atenderte.")
   })
@@ -151,11 +187,11 @@ describe("lo que nos contaste", () => {
 
   it("por un hijo, con su nombre", () => {
     const words = toldWords(
-      view({ patientFirstName: "Mateo", told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: SENT }]) }),
+      view({ patientFirstName: "Mateo", told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "visita", at: SENT }]) }),
       "odontólogo",
     )
     expect(words?.sent.map(plain)).toEqual([
-      "Enviaste los datos de Mateo, su salud y tus respuestas de «Antes de la cita de Mateo» el viernes, 13 de noviembre, 2:27 p. m.",
+      "Enviaste los datos de Mateo, su salud y lo de la visita de Mateo el viernes, 13 de noviembre, 2:27 p. m.",
     ])
     expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atender a Mateo.")
   })
@@ -163,11 +199,11 @@ describe("lo que nos contaste", () => {
 
 describe("mientras dura la entrega", () => {
   it("la vista de la API anterior, sin los campos nuevos, no rompe la página ni ofrece «Reservar otra»", () => {
-    const { toSchedule, another, confirmVia, remindersVia, closed, told, ...old } = view({
+    const { toSchedule, another, confirmVia, remindersVia, closed, told, visit, ...old } = view({
       consents: [{ id: "c1", title: "Exodoncia" } as PersonalLinkView["consents"][number]],
     })
     const ready = withLinkViewDefaults(old as PersonalLinkView)
-    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null, told: null })
+    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null, told: null, visit: null })
     // Antes se firmaba siempre desde el teléfono.
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()

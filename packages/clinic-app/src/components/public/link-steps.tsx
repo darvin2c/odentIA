@@ -16,11 +16,10 @@ import { CircleCheck } from "lucide-react"
 import { type ReactElement, useEffect } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
-import { fetchLinkConsent, fetchLinkQuestionnaire, type LinkConsent, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
+import { fetchLinkConsent, type LinkConsent, signLinkConsent } from "../../lib/booking-link"
 import { appWords } from "../../lib/product-words"
 import { ConsentSheet } from "../patient/consent-sheet"
 import { FirmaPad } from "../patient/firma-pad"
-import { AnswerAppField, isFieldVisible, missingRequired } from "../patient/form-fields"
 import { longDay, timeLabel } from "./week-slots"
 
 function problemOf(error: unknown, fallback: string): string {
@@ -253,106 +252,6 @@ export function LinkConsentStep({
       ) : null}
       <SubmitButton type="submit" className="min-h-11 w-full" pending={pending}>
         Firmar
-      </SubmitButton>
-    </form>
-  )
-}
-
-/** El servidor dice que el cuestionario ya está enviado (`ALREADY_SUBMITTED`): «Ya lo enviaste: …». */
-function alreadySent(error: unknown): { title: string; description: string } | null {
-  if (!(error instanceof ApiError) || error.shape.code !== "ALREADY_SUBMITTED") return null
-  const [title = "Ya lo enviaste", ...rest] = (error.shape.message ?? "").split(": ")
-  const description = rest.join(": ")
-  return { title: title || "Ya lo enviaste", description: description.charAt(0).toUpperCase() + description.slice(1) }
-}
-
-/**
- * El cuestionario no se pudo abrir. Si es porque ya está enviado (lo envió en otra pestaña o en
- * otro teléfono), se dice eso, como al enviar, y no hay nada que reintentar; si falló de verdad,
- * el motivo y «Reintentar».
- */
-export function QuestionnaireUnavailable({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  const sent = alreadySent(error)
-  if (sent) return <EmptyState icon={CircleCheck} title={sent.title} description={sent.description} />
-  return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(error, "Vuelve a intentarlo.")} onRetry={onRetry} />
-}
-
-/**
- * «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la
- * página (`onSent`); si ya estaba enviado (otra pestaña, otro teléfono), el servidor lo dice
- * (al abrirlo o junto al botón) y la página se pone al día (`onAlreadySent`).
- */
-export function LinkQuestionnaireStep({
-  slug,
-  token,
-  onSent,
-  onAlreadySent,
-}: {
-  slug: string
-  token: string
-  onSent: () => void
-  onAlreadySent?: () => void
-}) {
-  const query = useQuery({ queryKey: ["link-questionnaire", slug, token], queryFn: () => fetchLinkQuestionnaire(slug, token), retry: false })
-  const send = useMutation({
-    retry: false,
-    mutationFn: (answers: Record<string, unknown>) => submitLinkQuestionnaire(slug, token, answers),
-    onSuccess: () => onSent(),
-    onError: (error) => {
-      if (error instanceof ApiError && error.shape.code === "ALREADY_SUBMITTED") onAlreadySent?.()
-    },
-  })
-  const schema = query.data?.data.schema ?? null
-  const form = useAppForm({
-    defaultValues: { answers: {} as Record<string, unknown> },
-    validators: {
-      // Lo obligatorio que falta se dice en su pregunta.
-      onSubmit: ({ value }) => {
-        const missing = schema ? missingRequired(schema, value.answers) : []
-        if (missing.length === 0) return undefined
-        return { fields: Object.fromEntries(missing.map((field) => [`answers.${field.id}`, "Responde esta pregunta."])) }
-      },
-    },
-    onSubmit: async ({ value }) => {
-      await send.mutateAsync(value.answers)
-    },
-  })
-  const submit = useFormSubmit(form)
-  const error = useFormSubmitError(form)
-  const pending = useStore(form.store, (state) => state.isSubmitting)
-  const answers = useStore(form.store, (state) => state.values.answers)
-  // Ya estaba enviado al abrirlo: la página se pone al día y deja de ofrecerlo.
-  const sentElsewhere = query.isError && alreadySent(query.error) !== null
-  // biome-ignore lint/correctness/useExhaustiveDependencies: avisa una vez, cuando el servidor lo dice.
-  useEffect(() => {
-    if (sentElsewhere) onAlreadySent?.()
-  }, [sentElsewhere])
-  if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
-  if (query.isError) return <QuestionnaireUnavailable error={query.error} onRetry={() => void query.refetch()} />
-  const questionnaire = query.data.data
-  return (
-    // Enter (o «Ir» en el teléfono) pasa a la pregunta siguiente: solo «Enviar respuestas» envía.
-    <form className="flex flex-col gap-4" onSubmit={submit} onKeyDown={advanceOnEnter} noValidate>
-      <h2 className="text-lg font-semibold">{questionnaire.title}</h2>
-      {questionnaire.schema.sections.map((section) => (
-        <fieldset key={section.id} className="m-0 flex flex-col gap-4 rounded-2xl border bg-card p-4">
-          <legend className="px-1 text-sm font-semibold">{section.title}</legend>
-          {section.fields
-            .filter((field) => isFieldVisible(field, answers))
-            .map((field) => (
-              <form.AppField key={field.id} name={`answers.${field.id}`}>
-                {() => <AnswerAppField field={field} enterKeyHint="next" />}
-              </form.AppField>
-            ))}
-        </fieldset>
-      ))}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <SubmitButton type="submit" className="min-h-11 w-full" pending={pending}>
-        Enviar respuestas
       </SubmitButton>
     </form>
   )

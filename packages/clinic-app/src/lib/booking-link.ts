@@ -1,4 +1,10 @@
-import type { RegistrationAnswers, RegistrationConfig, RegistrationFieldKey } from "@odentia/clinical"
+import type {
+  RegistrationAnswers,
+  RegistrationConfig,
+  RegistrationFieldKey,
+  VisitAnswerInput,
+  VisitQuestions,
+} from "@odentia/clinical"
 import type { ConsentLetterhead } from "./clinical-forms"
 import { ApiError, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
@@ -73,9 +79,13 @@ export interface PersonalLinkView {
   pending: { privacy: boolean; promotions: boolean; promotionsOffer: boolean } | null
   budgets: PortalBudget[]
   consents: PersonalLinkConsent[]
-  questionnaire: { title: string } | null
+  /**
+   * «Tu visita» de la cita del enlace, si se le pregunta y aún no la respondió: va con sus datos en
+   * la tarjeta «Antes de tu cita». `purpose`: a qué viene, si la cita lo dice (una sesión, un control).
+   */
+  visit: { purpose: string | null; questions: VisitQuestions } | null
   /** «Lo que nos contaste»: qué envió quien abre y cuándo (en la zona de la clínica). Nunca lo que respondió. */
-  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "cuestionario"; at: string }> } | null
+  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "visita"; at: string }> } | null
   /** Lo que aceptó de su presupuesto y aún no tiene cita: «Lo que aceptaste, por agendar». */
   toSchedule: Array<{ planItemId: string; title: string }>
   /** «Reservar otra» en «Tu cita»: las citas por venir y el tope; nulo si no le corresponde. */
@@ -182,6 +192,7 @@ export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
       why: consent.why ?? null,
     })),
     told: view.told ?? null,
+    visit: view.visit ?? null,
     toSchedule: view.toSchedule ?? [],
     another: view.another ?? null,
     confirmVia: view.confirmVia ?? null,
@@ -371,6 +382,8 @@ export interface PersonalDataForm {
   respondentFirstName?: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }
+  /** «Tu visita», el último paso de «Antes de tu cita»; nulo sin cita o ya respondida. */
+  visit?: { purpose: string | null; questions: VisitQuestions } | null
 }
 
 export function fetchPersonalDataForm(slug: string, token: string): Promise<{ data: PersonalDataForm }> {
@@ -392,9 +405,11 @@ export interface PersonalDataInput {
   acceptsPromotions?: boolean
   /** Se le dijo que le escribiremos por WhatsApp al celular que dejó. */
   acceptsReminders?: boolean
+  /** «Tu visita», en el mismo envío. */
+  visit?: VisitAnswerInput | null
 }
 
-/** «Tus datos»: solo lo que falta, una sola vez. */
+/** «Antes de tu cita» (o «Tus datos», sin cita): solo lo que falta y su visita, una sola vez. */
 export function submitPersonalData(slug: string, token: string, input: PersonalDataInput): Promise<{ data: { received: true } }> {
   return post(`${base(slug)}/data`, { token, ...input })
 }
@@ -462,19 +477,4 @@ export function signLinkConsent(
   input: { docNumber: string; comprehensionConfirmed: boolean; signatureData: { strokes: number[][][] } },
 ): Promise<{ data: { signed: true } }> {
   return post(`${base(slug)}/consents/${encodeURIComponent(consentId)}/sign`, { token, ...input })
-}
-
-export interface LinkQuestionnaire {
-  id: string
-  title: string
-  version: number
-  schema: import("./clinical-forms").FormSchemaDef
-}
-
-export function fetchLinkQuestionnaire(slug: string, token: string): Promise<{ data: LinkQuestionnaire }> {
-  return publicFetch(`${base(slug)}/questionnaire?token=${encodeURIComponent(token)}`)
-}
-
-export function submitLinkQuestionnaire(slug: string, token: string, answers: Record<string, unknown>): Promise<{ data: { submitted: true } }> {
-  return post(`${base(slug)}/questionnaire`, { token, answers })
 }

@@ -3,6 +3,8 @@ import {
   formatMoneyAmount,
   moneyTotalsText,
   type PatientGuide,
+  type VisitAnswerInput,
+  type VisitQuestions,
 } from "@odentia/clinical"
 import type {
   AuthenticationResponseJSON,
@@ -12,7 +14,6 @@ import type {
 } from "@simplewebauthn/browser"
 import { ApiError, apiFetch, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
-import type { FormSchemaDef } from "./clinical-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /**
@@ -423,28 +424,24 @@ export async function fetchPortalAccount(sessionToken: string): Promise<PortalAc
   return res.data
 }
 
-export interface PortalQuestionnaire {
-  template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
-  response: {
-    id: string
-    answers: Record<string, unknown>
-    submittedAt: string | null
-    status: string
-  } | null
+/**
+ * «Antes de tu cita» en el portal (mesa del 13 nov, entrega 8): lo de su visita para su próxima
+ * cita, con la misma regla de su enlace. De lo enviado, solo cuándo.
+ */
+export interface PortalVisit {
+  visit: { appointmentId: string; startsAt: string; purpose: string | null; questions: VisitQuestions } | null
+  sent: { at: string; own: boolean } | null
   respondent: { name: string; relationship: string }
 }
 
-export async function fetchPortalQuestionnaire(sessionToken: string): Promise<PortalQuestionnaire> {
-  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire")
+export async function fetchPortalVisit(sessionToken: string): Promise<PortalVisit> {
+  const res = await portalFetch<{ data: PortalVisit }>(sessionToken, "/visit")
   return res.data
 }
 
-export async function savePortalQuestionnaireApi(
-  sessionToken: string,
-  input: { answers: Record<string, unknown>; submit?: boolean },
-): Promise<PortalQuestionnaire> {
-  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire", {
-    method: "PUT",
+export async function sendPortalVisitApi(sessionToken: string, input: VisitAnswerInput): Promise<PortalVisit> {
+  const res = await portalFetch<{ data: PortalVisit }>(sessionToken, "/visit", {
+    method: "POST",
     body: JSON.stringify(input),
   })
   return res.data

@@ -1,4 +1,19 @@
-import { Badge, Button, Field, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Field,
+  FieldError,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from "@odentia/ui"
 import {
   EmptyState,
   ErrorState,
@@ -19,7 +34,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Fingerprint } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { AnswerAppField, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
+import { ChoiceButtons } from "../../components/choice-buttons"
 import { AppointmentBlock } from "../../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
 import {
@@ -51,7 +66,7 @@ import {
   fetchPortalPaperFileUrl,
   fetchPortalPaperPdf,
   fetchPortalPapers,
-  fetchPortalQuestionnaire,
+  fetchPortalVisit,
   fetchPortalRescheduleSlots,
   fetchPortalSession,
   fetchPublicPortalPolicyApi,
@@ -64,13 +79,12 @@ import {
   markPortalBudgetSeenApi,
   type PortalAppointment,
   type PortalBudget,
-  type PortalQuestionnaire,
   portalErrorMessage,
   rememberPortalSessionApi,
   requestPasskeyAuthOptionsApi,
   requestPasskeyRegistrationOptionsApi,
   reschedulePortalAppointmentApi,
-  savePortalQuestionnaireApi,
+  sendPortalVisitApi,
   selectPortalGrantApi,
   verifyPasskeyAuthApi,
   verifyPasskeyRegistrationApi,
@@ -82,7 +96,7 @@ import { PortalAccountSkeleton, PortalAppointmentSkeleton, PortalBudgetsSkeleton
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.
  * Una sola página: su próxima cita (el mismo bloque de «Su enlace»), «Antes
- * de tu cita» solo si hay un cuestionario, «Por decidir», sus documentos y su
+ * de tu cita» (lo de su visita, si se le pregunta), «Por decidir», sus documentos y su
  * cuenta, según lo que la clínica le dio. La primera vez entra con el enlace
  * de recepción y el código de 6 dígitos, y guardar su acceso en el teléfono es
  * el paso principal; después entra con su huella o su cara. Si el teléfono no
@@ -576,7 +590,7 @@ function PortalDashboard({
         ) : null}
         <GrantSwitcher sessionToken={sessionToken} currentPatientId={info.session.patientId} onSessionToken={onSessionToken} />
         {scope.appointments ? <NextAppointment sessionToken={sessionToken} /> : null}
-        {scope.appointments ? <QuestionnaireBlock sessionToken={sessionToken} /> : null}
+        {scope.appointments ? <VisitBlock sessionToken={sessionToken} /> : null}
         {scope.budgets ? <BudgetsBlock sessionToken={sessionToken} /> : null}
         {scope.papers ? <DocumentsBlock sessionToken={sessionToken} /> : null}
         {/* Sus pedidos van con «Tu cuenta» (ADR 0172), donde la clínica trabaja con pedidos. */}
@@ -861,160 +875,132 @@ function GrantSwitcher({ sessionToken, currentPatientId, onSessionToken }: { ses
 }
 
 /**
- * «Antes de tu cita»: solo aparece si hay un cuestionario por responder. Por
- * pasos (una sección por paso); se guarda el avance al cambiar de paso.
+ * «Antes de tu cita» (mesa del 13 nov, entrega 8): lo de su visita para su próxima cita, con la
+ * misma regla de su enlace: lo responde quien decide por el paciente, una vez por cita y todo
+ * opcional. En una sesión o un control se le dice a qué viene y solo se le pregunta si le duele.
+ * De lo enviado solo se dice cuándo llegó, nunca qué respondió.
  */
-function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
+function VisitBlock({ sessionToken }: { sessionToken: string }) {
+  const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ["portal-questionnaire", sessionToken],
-    queryFn: () => fetchPortalQuestionnaire(sessionToken),
+    queryKey: ["portal-visit", sessionToken],
+    queryFn: () => fetchPortalVisit(sessionToken),
   })
+  const [reason, setReason] = useState("")
+  const [pain, setPain] = useState<"si" | "no" | null>(null)
+  const [painLevel, setPainLevel] = useState<string | null>(null)
+  const [more, setMore] = useState("")
   const [sentNow, setSentNow] = useState(false)
+  const send = useMutation({
+    mutationFn: () =>
+      sendPortalVisitApi(sessionToken, {
+        ...(reason.trim() ? { reason: reason.trim() } : {}),
+        ...(pain ? { pain } : {}),
+        ...(pain === "si" && painLevel !== null ? { painLevel: Number(painLevel) } : {}),
+        ...(more.trim() ? { more: more.trim() } : {}),
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["portal-visit", sessionToken], data)
+      setSentNow(true)
+    },
+  })
   if (query.isPending) return null
   if (query.isError) return <ErrorState message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
-  const { template, response, respondent } = query.data
-  if (!template) return null
-  if (response?.submittedAt) {
+  const { visit, respondent } = query.data
+  const clinician = appWords().clinician.one
+  if (!visit) {
     if (!sentNow) return null
     return (
       <p role="status" className="rounded-2xl bg-success-soft p-4 text-sm">
-        Gracias, recibimos tus respuestas. Tu {appWords().clinician.one} las revisa contigo en la cita.
+        Listo, lo recibimos. Lo lee tu {clinician} antes de atenderte.
       </p>
     )
   }
-  return (
-    <QuestionnaireForm
-      // Las respuestas iniciales se toman una vez por respuesta: guardar el avance no reinicia lo escrito.
-      key={`${template.id}:${response?.id ?? "nueva"}`}
-      sessionToken={sessionToken}
-      template={template}
-      initialAnswers={response?.answers ?? {}}
-      respondent={respondent}
-      onSent={() => setSentNow(true)}
-    />
-  )
-}
-
-/** Lo que hace el paso al enviarse: volver, seguir (con lo obligatorio del paso) o enviar todo. */
-type QuestionnaireIntent = { kind: "back" | "next"; to: number } | { kind: "send" }
-
-function QuestionnaireForm({
-  sessionToken,
-  template,
-  initialAnswers,
-  respondent,
-  onSent,
-}: {
-  sessionToken: string
-  template: NonNullable<PortalQuestionnaire["template"]>
-  initialAnswers: Record<string, unknown>
-  respondent: PortalQuestionnaire["respondent"]
-  onSent: () => void
-}) {
-  const queryClient = useQueryClient()
-  const [step, setStep] = useState(0)
-  const intent = useRef<QuestionnaireIntent>({ kind: "send" })
-  const sections = template.schema.sections
-  const index = Math.min(step, sections.length - 1)
-  const section = sections[index]!
-  const last = step >= sections.length - 1
-  const save = useMutation({
-    mutationFn: (input: { answers: Record<string, unknown>; submit: boolean }) => savePortalQuestionnaireApi(sessionToken, input),
-  })
-  const form = useAppForm({
-    defaultValues: { answers: initialAnswers },
-    validators: {
-      // Lo obligatorio que falta se dice en su pregunta: del paso al seguir, de todo al enviar.
-      onSubmit: ({ value }) => {
-        const now = intent.current
-        if (now.kind === "back") return undefined
-        const scope = now.kind === "send" ? template.schema : { sections: sections.slice(now.to - 1, now.to) }
-        const missing = missingRequired(scope, value.answers)
-        if (missing.length === 0) return undefined
-        return { fields: Object.fromEntries(missing.map((field) => [`answers.${field.id}`, "Responde esta pregunta."])) }
-      },
-    },
-    onSubmit: async ({ value, formApi }) => {
-      const now = intent.current
-      // Volver o seguir sin cambios no guarda nada; con cambios, el avance se guarda antes de pasar.
-      if (now.kind === "send" || formApi.state.isDirty) {
-        const data = await save.mutateAsync({ answers: value.answers, submit: now.kind === "send" })
-        queryClient.setQueryData(["portal-questionnaire", sessionToken], data)
-        formApi.reset(value)
-      }
-      if (now.kind === "send") {
-        onSent()
-        return
-      }
-      setStep(now.to)
-      window.scrollTo({ top: 0 })
-    },
-  })
-  const error = useFormSubmitError(form)
-  const pending = useStore(form.store, (state) => state.isSubmitting)
-  const answers = useStore(form.store, (state) => state.values.answers)
-  const run = async (next: QuestionnaireIntent) => {
-    intent.current = next
-    if (await submitForm(form, { formMessage: portalFormMessage })) return
-    // Lo que hay que corregir puede estar en otro paso (lo dice el servidor): se va a ese paso.
-    const meta = form.state.fieldMeta as Record<string, { errors?: unknown[] } | undefined>
-    const wrong = sections.findIndex((item) => item.fields.some((field) => (meta[`answers.${field.id}`]?.errors?.length ?? 0) > 0))
-    if (wrong >= 0 && wrong !== index) {
-      setStep(wrong)
-      focusFirstInvalid(null)
-    }
-  }
+  const { questions } = visit
   return (
     <form
-      aria-labelledby="questionnaire-title"
+      aria-labelledby="portal-visit-title"
       className="flex flex-col gap-4 rounded-2xl border bg-card p-4"
       noValidate
       onSubmit={(event) => {
         event.preventDefault()
-        void run(last ? { kind: "send" } : { kind: "next", to: step + 1 })
+        if (!send.isPending) send.mutate()
       }}
     >
       <div>
-        <h2 id="questionnaire-title" className="text-lg font-semibold">
-          Antes de tu cita · {template.title}
+        <h2 id="portal-visit-title" className="text-lg font-semibold">
+          Antes de tu cita
         </h2>
+        <p className="text-sm text-muted-foreground">
+          Para tu cita del {formatPortalDate(visit.startsAt)}. Lo lee tu {clinician} antes de empezar. Todo es opcional.
+        </p>
         <p className="text-sm text-muted-foreground">
           Respondes por: {respondent.name}
           {respondent.relationship === "self" ? " (tú)" : ""}
         </p>
-        <p className="mt-1 text-sm font-medium" aria-live="polite">
-          Paso {index + 1} de {sections.length} · {section.title}
-        </p>
       </div>
-      {/* Todos los pasos quedan montados (solo se ve el actual) para que cada error llegue a su pregunta. */}
-      {sections.map((item, position) => (
-        <div key={item.title + String(position)} hidden={position !== index} className="flex flex-col gap-4">
-          {item.fields
-            .filter((field) => isFieldVisible(field, answers))
-            .map((field) => (
-              <form.AppField key={field.id} name={`answers.${field.id}`}>
-                {() => <AnswerAppField field={field} />}
-              </form.AppField>
-            ))}
-        </div>
-      ))}
-      <p className="text-xs text-muted-foreground">
-        Tu {appWords().clinician.one} revisará estas respuestas contigo en la cita. Guardamos tu avance; puedes
-        continuar más tarde desde el mismo enlace.
-      </p>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
+      {visit.purpose ? (
+        <p className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
+          <span className="text-muted-foreground">Vienes a: </span>
+          <span className="font-medium">{visit.purpose}</span>
         </p>
       ) : null}
-      <div className="flex justify-between gap-2">
-        <Button type="button" variant="outline" disabled={step === 0 || pending} onClick={() => void run({ kind: "back", to: step - 1 })}>
-          Atrás
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {last ? (pending ? "Enviando…" : "Enviar respuestas") : "Continuar"}
-        </Button>
-      </div>
+      {questions.reason ? (
+        <Field>
+          <FieldLabel htmlFor="portal-visit-reason">
+            ¿A qué vienes? Cuéntalo con tus palabras: qué te molesta o qué te gustaría cambiar.
+          </FieldLabel>
+          <Textarea id="portal-visit-reason" rows={3} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} />
+        </Field>
+      ) : null}
+      {questions.pain ? (
+        <FieldSet>
+          <FieldLegend id="portal-visit-pain" variant="label">
+            ¿Te duele ahora?
+          </FieldLegend>
+          <ChoiceButtons
+            aria-labelledby="portal-visit-pain"
+            value={pain}
+            options={[
+              { value: "no", label: "No" },
+              { value: "si", label: "Sí" },
+            ]}
+            onChange={(value) => {
+              setPain(value)
+              if (value !== "si") setPainLevel(null)
+            }}
+            columns={2}
+          />
+        </FieldSet>
+      ) : null}
+      {questions.pain && pain === "si" ? (
+        <FieldSet>
+          <FieldLegend id="portal-visit-level" variant="label">
+            ¿Cuánto? 0 es sin dolor, 10 el peor.
+          </FieldLegend>
+          <ChoiceButtons
+            aria-labelledby="portal-visit-level"
+            value={painLevel}
+            options={Array.from({ length: 11 }, (_, level) => ({ value: String(level), label: String(level) }))}
+            onChange={setPainLevel}
+            onClear={() => setPainLevel(null)}
+          />
+        </FieldSet>
+      ) : null}
+      {questions.more ? (
+        <Field>
+          <FieldLabel htmlFor="portal-visit-more">¿Algo más que quieras contarnos?</FieldLabel>
+          <Input id="portal-visit-more" maxLength={2000} value={more} onChange={(event) => setMore(event.target.value)} />
+        </Field>
+      ) : null}
+      {send.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {portalErrorMessage(send.error)}
+        </p>
+      ) : null}
+      <SubmitButton type="submit" className="min-h-11 self-start" pending={send.isPending}>
+        Enviar
+      </SubmitButton>
     </form>
   )
 }

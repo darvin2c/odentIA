@@ -35,6 +35,8 @@ import {
   type SWEETS_ANSWERS,
   validateDemographics,
   validateRegistrationAnswers,
+  type VisitAnswerInput,
+  type VisitQuestions,
 } from "@odentia/clinical"
 import {
   Button,
@@ -67,6 +69,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "@odentia/ui"
 import {
   BirthDateInput,
@@ -198,6 +201,11 @@ interface Draft {
   referralSource: string
   messages: "" | "si" | "no"
   privacy: boolean
+  /** «Tu visita», antes de su cita: a qué viene, si le duele y cuánto, algo más. Todo opcional. */
+  visitReason: string
+  visitPain: YesNo
+  visitPainLevel: string
+  visitMore: string
 }
 
 const EMPTY: Draft = {
@@ -277,7 +285,13 @@ const EMPTY: Draft = {
   referralSource: "",
   messages: "",
   privacy: false,
+  visitReason: "",
+  visitPain: "",
+  visitPainLevel: "",
+  visitMore: "",
 }
+/** La escala del dolor, de 0 (sin dolor) a 10 (el peor): un grupo que se recorre con flechas. */
+const PAIN_LEVELS = Array.from({ length: 11 }, (_, level) => ({ value: String(level), label: String(level) }))
 
 const DECLARED: ReadonlyArray<{ value: Exclude<Declared, "">; label: string }> = [
   { value: "none", label: "No" },
@@ -444,6 +458,10 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.medical", "habits"],
   ["acceptsMessages", "send", "messages"],
   ["privacyAccepted", "send", "privacy"],
+  ["visit.reason", "visit", "visitReason"],
+  ["visit.painLevel", "visit", "visitPainLevel"],
+  ["visit.pain", "visit", "visitPain"],
+  ["visit.more", "visit", "visitMore"],
 ]
 
 /**
@@ -453,7 +471,7 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
  */
 function whereOf(key: string): (typeof WHERE)[number] | undefined {
   const bare = key.replace(/^answers\./, "")
-  const path = /^(demographics|representative|health|respondent|privacyAccepted|acceptsMessages)\b/.test(bare)
+  const path = /^(demographics|representative|health|respondent|privacyAccepted|acceptsMessages|visit)\b/.test(bare)
     ? bare
     : `demographics.${bare}`
   return WHERE.find(([prefix]) => path.startsWith(prefix))
@@ -562,6 +580,11 @@ export interface RegistrationFill {
   promotions?: boolean
   /** El nombre de la clínica, para decir a quién llegan sus datos. */
   clinicName?: string
+  /**
+   * «Tu visita», el último paso de «Antes de tu cita» (entrega 8): lo que se le pregunta de esa cita.
+   * `purpose`: a qué viene, si la cita lo dice; `reader`: quien lo lee («el Dr. Luis Prado»).
+   */
+  visit?: { purpose: string | null; questions: VisitQuestions; reader: string } | null
 }
 
 const HEALTH_KEYS = new Set<string>(
@@ -627,9 +650,10 @@ export function RegistrationQuestionnaire({
   /**
    * Recibe las respuestas ya validadas. Si lanza, lo que el servidor señala por
    * dato (`fields`, el `ApiError` tal cual) va a su campo y su pantalla; el
-   * resto se dice en la última pantalla.
+   * resto se dice en la última pantalla. En «Su enlace» con «Tu visita», lo de
+   * su visita llega aparte (`visit`), en el mismo envío.
    */
-  onSubmit: (answers: RegistrationAnswers) => Promise<void>
+  onSubmit: (answers: RegistrationAnswers, extra: { visit: VisitAnswerInput | null }) => Promise<void>
 }) {
   const profile = clinicalProfileFor(countryCode)
   const phoneCountry = normalizeCountry(countryCode)
@@ -641,7 +665,8 @@ export function RegistrationQuestionnaire({
     if (wants("phone") || wants("email") || wants("address")) return "contact"
     if (wants("emergencyContactName")) return "emergency"
     if (wants("insuranceType")) return "insurance"
-    if (!fill.health) return "send"
+    // Sin nada de sus datos ni de su salud, «Antes de tu cita» es solo «Tu visita».
+    if (!fill.health) return fill.visit ? "visit" : "send"
     // La primera pantalla de su salud con algo que preguntarle.
     const first = fill.healthKeys
       ? REGISTRATION_FIELDS.find((field) => field.group === "health" && fill.healthKeys?.has(field.key))
@@ -656,7 +681,7 @@ export function RegistrationQuestionnaire({
     { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
-      await onSubmit(buildAnswers())
+      await onSubmit(buildAnswers(), { visit: buildVisit() })
       // Enviado: lo escrito se borra de la pestaña ya, antes de que la pantalla cambie.
       sentRef.current = true
       if (draftKey) clearQuestionnaireDraft(draftKey)
@@ -724,7 +749,9 @@ export function RegistrationQuestionnaire({
   const fillHasContent =
     !!fill &&
     (fill.health ||
+      !!fill.visit ||
       [...PERSON_KEYS, "docType", "phone", "email", "address", "emergencyContactName", "insuranceType"].some((key) => fillWants(fill, key)))
+  const visitAsks = fill?.visit?.questions ?? null
   const finishEarly = !!fill && !sendInFill && fillHasContent
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
@@ -1001,6 +1028,19 @@ export function RegistrationQuestionnaire({
     // ficha en la que guardarlo.
     if (forOther ? !fill && !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
+  }
+
+  /** «Tu visita» como la guarda el servidor: solo lo que se le preguntó y respondió; cuánto, solo con dolor. */
+  function buildVisit(): VisitAnswerInput | null {
+    if (!visitAsks) return null
+    const d = draft
+    const level = d.visitPain === "si" && d.visitPainLevel !== "" ? Number(d.visitPainLevel) : undefined
+    return {
+      ...(visitAsks.reason && d.visitReason.trim() ? { reason: d.visitReason.trim() } : {}),
+      ...(visitAsks.pain && d.visitPain ? { pain: d.visitPain } : {}),
+      ...(level !== undefined ? { painLevel: level } : {}),
+      ...(visitAsks.more && d.visitMore.trim() ? { more: d.visitMore.trim() } : {}),
+    }
   }
 
   /**
@@ -2659,6 +2699,96 @@ export function RegistrationQuestionnaire({
           ) : null}
         </Question>
 
+        {fill && visitAsks ? (
+          // «Tu visita», el último paso de «Antes de tu cita» (mesa del 13 nov, entrega 8): todo
+          // opcional; en una sesión o un control se le dice a qué viene y solo se le pregunta si le duele.
+          <Question
+            name="visit"
+            grouped
+            saysOptional
+            title={child ? `La visita de ${name}` : "Tu visita"}
+            description={`Lo lee ${fill.visit?.reader ?? "quien te atiende"} antes de empezar. Todo es opcional.`}
+            onSkip={() => set({ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "" })}
+          >
+            {fill.visit?.purpose ? (
+              <p className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
+                <span className="text-muted-foreground">{child ? "Viene a: " : "Vienes a: "}</span>
+                <span className="font-medium">{fill.visit.purpose}</span>
+              </p>
+            ) : null}
+            {visitAsks.reason ? (
+              <Labeled
+                name="visitReason"
+                label={you(
+                  "¿A qué vienes? Cuéntalo con tus palabras: qué te molesta o qué te gustaría cambiar.",
+                  `¿A qué viene ${name}? Cuéntalo con tus palabras: qué le molesta o qué le gustaría cambiar.`,
+                )}
+                optional
+              >
+                {(control) => (
+                  <Textarea
+                    {...control.props}
+                    rows={3}
+                    maxLength={2000}
+                    enterKeyHint="next"
+                    value={draft.visitReason}
+                    onChange={(event) => set({ visitReason: event.target.value })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.pain ? (
+              <Labeled name="visitPain" group label={you("¿Te duele ahora?", `¿A ${name} le duele ahora?`)} optional>
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.visitPain || null}
+                    options={YES_NO}
+                    // Sin dolor, no hay cuánto.
+                    onChange={(value) => set({ visitPain: value, ...(value === "si" ? {} : { visitPainLevel: "" }) })}
+                    columns={2}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.pain && draft.visitPain === "si" ? (
+              <Labeled name="visitPainLevel" group label="¿Cuánto? 0 es sin dolor, 10 el peor." optional>
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.visitPainLevel || null}
+                    options={PAIN_LEVELS}
+                    onChange={(value) => set({ visitPainLevel: value })}
+                    // Tocar otra vez el número lo desmarca: no hace falta decir cuánto.
+                    onClear={() => set({ visitPainLevel: "" })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.more ? (
+              <Labeled name="visitMore" label="¿Algo más que quieras contarnos?" optional>
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    autoComplete="off"
+                    maxLength={2000}
+                    value={draft.visitMore}
+                    onChange={(event) => set({ visitMore: event.target.value })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+          </Question>
+        ) : null}
+
         {fill ? (
           <Question
             name="send"
@@ -2669,8 +2799,9 @@ export function RegistrationQuestionnaire({
             description={`Tus respuestas llegan a ${fill.clinicName ?? "quien te atiende"} al tocar «Enviar». Lo que ya tenemos no cambia.`}
             submit={sending ? "Enviando…" : submitLabel}
             sending={sending}
+            // Novedades y promociones se pregunta y se puede dejar sin responder, como en el registro (mesa
+            // del 13 nov, decisión 7): solo el aviso de privacidad, si falta, se pide para enviar.
             check={() =>
-              needs(!!fill.promotions && !draft.messages, "messages", "Elige una opción.") ??
               needs(!!fill.privacy && !draft.privacy, "privacy", "Para enviar necesitamos que aceptes el aviso de privacidad.")
             }
           >
@@ -2678,6 +2809,7 @@ export function RegistrationQuestionnaire({
               <Labeled
                 name="messages"
                 group
+                optional
                 label={`¿Quieres recibir novedades y promociones de ${fill.clinicName ?? "quien te atiende"} por WhatsApp?`}
                 hint={`Descuentos y campañas${fill.clinicName ? ` de ${fill.clinicName}` : ""}. Puedes darte de baja cuando quieras.`}
               >

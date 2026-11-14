@@ -44,7 +44,7 @@ import { appWords } from "../../lib/product-words"
 import { AppointmentBlock } from "./appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "./budget-responder"
 import { type BookingPick, ChooseAppointment, type ChooseMode } from "./choose-appointment"
-import { LinkConsentStep, LinkQuestionnaireStep } from "./link-steps"
+import { LinkConsentStep } from "./link-steps"
 import { PersonalDataForm } from "./personal-data-form"
 import { capital, longDay, timeLabel } from "./week-slots"
 
@@ -59,7 +59,10 @@ import { capital, longDay, timeLabel } from "./week-slots"
  * propias de quién decide ni de qué se firma.
  */
 
-/** Lo que abre cada mensaje (`?abre=`), y el cuestionario, que se abre desde la lista. */
+/**
+ * Lo que abre cada mensaje (`?abre=`). `cuestionario` es el de antes: los enlaces ya enviados que
+ * lo nombran abren «Antes de tu cita» (`datos`).
+ */
 export const PERSONAL_LINK_OPENS = [
   "firma",
   "presupuesto",
@@ -221,12 +224,64 @@ export function whatFollows(view: PersonalLinkView, done: { key: string; at: str
   }
 }
 
-export function pendingItems(view: PersonalLinkView): PendingItem[] {
+/**
+ * Quien lee lo que envía antes de atenderla: «el Dr. Luis Prado», o «tu odontólogo» si la cita
+ * no dice con quién es.
+ */
+function readerOf(view: PersonalLinkView, clinician: string): string {
+  const professional = view.appointment?.professionalName?.trim()
+  return professional ? withArticle(professional) : `tu ${clinician}`
+}
+
+/**
+ * «Antes de tu cita» (mesa del 13 nov, entrega 8): con una cita por venir, sus datos, su salud y
+ * su visita van en una sola tarjeta y un solo recorrido. Lo que lleva, en palabras: «Tus datos, tu
+ * salud, tus medicinas y a qué vienes». Nulo si no hay cita o no le queda nada de eso.
+ */
+export function beforeVisitCard(view: PersonalLinkView, clinician: string): PendingItem | null {
+  const appointment = view.appointment && !view.appointment.cancelled ? view.appointment : null
+  if (!appointment || (!view.data && !view.visit)) return null
+  const name = view.patientFirstName
+  const missing = view.data?.missing.length ?? 0
+  const parts = [
+    missing > 0 ? (name ? `los datos de ${name}` : "tus datos") : null,
+    view.data?.health ? (name ? "su salud, sus medicinas" : "tu salud, tus medicinas") : null,
+    view.visit
+      ? view.visit.questions.reason
+        ? name
+          ? `a qué viene ${name}`
+          : "a qué vienes"
+        : name
+          ? "si le duele algo"
+          : "si te duele algo"
+      : null,
+  ].filter((part): part is string => !!part)
+  // Solo si le duele (una sesión, un control): se le pide que lo cuente.
+  const what = parts.length === 1 && view.visit && !view.visit.questions.reason ? `Cuéntanos ${parts[0]}` : capital(listed(parts))
+  const purpose = view.visit?.purpose ? `${name ? `${name} viene a` : "Vienes a"}: ${view.visit.purpose}. ` : ""
+  return {
+    key: "datos",
+    abre: "datos",
+    title: name ? `Antes de la cita de ${name}` : "Antes de tu cita",
+    // Lo de su visita es opcional; sus datos, si faltan, no.
+    badge: missing > 0 ? "Por completar" : "Opcional",
+    text: `${purpose}${what}.`,
+    detail: `Lo lee ${readerOf(view, clinician)} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.`,
+    action: "Empezar",
+    next: name ? `Antes de la cita de ${name}: empezar` : "Antes de tu cita: empezar",
+    at: appointment.startsAt,
+  }
+}
+
+export function pendingItems(view: PersonalLinkView, clinician = "odontólogo"): PendingItem[] {
   const name = view.patientFirstName
   const cita = view.appointment && !view.appointment.cancelled ? view.appointment.startsAt : null
   const items: PendingItem[] = []
   const missing = view.data?.missing ?? []
-  if (missing.length > 0) {
+  const before = beforeVisitCard(view, clinician)
+  if (before) {
+    items.push(before)
+  } else if (missing.length > 0) {
     items.push({
       key: "datos",
       abre: "datos",
@@ -277,18 +332,6 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
       at: consent.appointment?.startsAt ?? cita,
     })
   }
-  if (view.questionnaire) {
-    items.push({
-      key: "cuestionario",
-      abre: "cuestionario",
-      title: name ? `Antes de la cita de ${name}` : "Antes de tu cita",
-      badge: "Por responder",
-      text: view.questionnaire.title,
-      action: "Responder",
-      next: `Responder: ${view.questionnaire.title}`,
-      at: cita,
-    })
-  }
   for (const budget of view.budgets) {
     items.push({
       key: `presupuesto:${budget.id}`,
@@ -329,7 +372,7 @@ export function toldWords(view: PersonalLinkView, clinician: string): { sent: st
   const said = (what: NonNullable<PersonalLinkView["told"]>["items"][number]["what"], first: boolean): string => {
     if (what === "datos") return name ? `los datos de ${name}` : "tus datos"
     if (what === "salud") return name ? (first ? `la salud de ${name}` : "su salud") : "tu salud"
-    return `tus respuestas de «${name ? `Antes de la cita de ${name}` : "Antes de tu cita"}»`
+    return name ? `lo de la visita de ${name}` : "lo de tu visita"
   }
   const moments = [...new Set(told.items.map((item) => item.at))]
   const sent = moments.map((at) => {
@@ -524,7 +567,8 @@ export function PersonalLinkPage({
   const [legacyMessages] = useState(
     () => typeof window !== "undefined" && window.location.hash === "#mensajes",
   )
-  const abre = search.abre ?? (legacyMessages ? "mensajes" : undefined)
+  // Los enlaces que abrían el cuestionario de antes (`abre=cuestionario`) abren ahora «Antes de tu cita».
+  const abre = search.abre === "cuestionario" ? "datos" : (search.abre ?? (legacyMessages ? "mensajes" : undefined))
   const [arrived] = useState(() => (token ? (landed.get(token) ?? null) : null))
   const [news, setNews] = useState<News | null>(arrived?.news ?? null)
   // La cita recién reservada o cambiada, mientras la vista se actualiza.
@@ -705,7 +749,8 @@ export function PersonalLinkPage({
   }
 
   const activeAppointment = appointment && !appointment.cancelled ? appointment : null
-  const items = pendingItems(view)
+  const clinician = appWords().clinician.one
+  const items = pendingItems(view, clinician)
   const name = view.patientFirstName
 
   if (flow) {
@@ -804,7 +849,6 @@ export function PersonalLinkPage({
       onAction={items.length > 0 ? toList : undefined}
     />
   )
-  const clinician = appWords().clinician.one
 
   if (abre === "mensajes") {
     if (!view.messages) {
@@ -888,20 +932,32 @@ export function PersonalLinkPage({
     const missing = view.data?.missing ?? []
     const healthOnly = missing.length === 0 && !!view.data?.health
     const withHealth = !!view.data?.health && !healthOnly
-    const title = name
-      ? healthOnly
-        ? `La salud de ${name}`
-        : `Los datos de ${name}${withHealth ? " y su salud" : ""}`
-      : healthOnly
-        ? "Tu salud"
-        : withHealth
-          ? "Tus datos y tu salud"
-          : "Tus datos"
-    if (!view.data)
+    // Con una cita por venir es «Antes de tu cita»: sus datos, su salud y su visita, un solo recorrido.
+    const before = beforeVisitCard(view, clinician)
+    const title = before
+      ? before.title
+      : name
+        ? healthOnly
+          ? `La salud de ${name}`
+          : `Los datos de ${name}${withHealth ? " y su salud" : ""}`
+        : healthOnly
+          ? "Tu salud"
+          : withHealth
+            ? "Tus datos y tu salud"
+            : "Tus datos"
+    if (!view.data && !view.visit) {
+      // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
+      const sentAt = view.told?.items.at(-1)?.at
       return one(
-        title,
-        empty("Tus datos ya están en la clínica", "No te falta nada por completar."),
+        activeAppointment ? (name ? `Antes de la cita de ${name}` : "Antes de tu cita") : title,
+        sentAt && view.told
+          ? empty(
+              "Ya lo enviaste",
+              `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
+            )
+          : empty("Ya está en la clínica", "No te falta nada por completar."),
       )
+    }
     return one(
       title,
       <>
@@ -915,6 +971,7 @@ export function PersonalLinkPage({
           slug={slug}
           token={token}
           clinicName={view.clinicName}
+          reader={activeAppointment ? readerOf(view, clinician) : null}
           onSent={(words) => {
             refresh()
             setDone({
@@ -926,41 +983,6 @@ export function PersonalLinkPage({
           }}
         />
       </>,
-    )
-  }
-
-  if (abre === "cuestionario") {
-    const title = name ? `Antes de la cita de ${name}` : "Antes de tu cita"
-    if (!view.questionnaire) {
-      // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
-      const sentAt = view.told?.items.find((item) => item.what === "cuestionario")?.at
-      return one(
-        title,
-        sentAt && view.told
-          ? empty(
-              "Ya lo enviaste",
-              `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
-            )
-          : empty("No tienes preguntas por responder", "Si ya respondiste, la clínica tiene tus respuestas."),
-      )
-    }
-    return one(
-      title,
-      <LinkQuestionnaireStep
-        slug={slug}
-        token={token}
-        onAlreadySent={refresh}
-        onSent={() => {
-          refresh()
-          setDone({
-            key: "cuestionario",
-            screen: title,
-            title: "Gracias, recibimos tus respuestas",
-            text: `Tu ${clinician} las revisa contigo en la cita.`,
-            at: activeAppointment?.startsAt ?? null,
-          })
-        }}
-      />,
     )
   }
 

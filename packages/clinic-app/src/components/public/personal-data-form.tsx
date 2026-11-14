@@ -1,4 +1,4 @@
-import { declaredHealthAnswered, isChildAge, type RegistrationAnswers } from "@odentia/clinical"
+import { declaredHealthAnswered, isChildAge, type RegistrationAnswers, type VisitAnswerInput } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
@@ -33,8 +33,8 @@ const DATA_KEYS = [
 ] as const
 
 
-/** Las respuestas del cuestionario, como las guarda «Tus datos», con lo que aún no aceptó o respondió. */
-function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pending"]): PersonalDataInput {
+/** Las respuestas del cuestionario, como las guarda «Tus datos», con lo que aún no aceptó o respondió y su visita. */
+function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pending"], visit: VisitAnswerInput | null): PersonalDataInput {
   const demographics = answers.demographics as Record<string, unknown>
   const data: Partial<Record<string, string>> = {}
   for (const key of DATA_KEYS) {
@@ -57,29 +57,63 @@ function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pe
     ...(pending.privacy ? { privacyAccepted: answers.privacyAccepted } : {}),
     ...(pending.promotions && answers.acceptsMessages !== undefined ? { acceptsPromotions: answers.acceptsMessages } : {}),
     ...(answers.acceptsReminders && data.phone ? { acceptsReminders: true } : {}),
+    // «Tu visita» va siempre que se le preguntó: aunque no cuente nada, queda respondida para esa cita.
+    ...(visit ? { visit } : {}),
   }
 }
 
-/** Si hay algo que enviar: un dato, su salud o lo que acepta. Solo su salud y nada respondido no se envía. */
+/** Si hay algo que enviar: un dato, su salud, lo que acepta o su visita. Solo su salud y nada respondido no se envía. */
 function sendsSomething(input: PersonalDataInput): boolean {
-  return Object.keys(input.data).length > 0 || !!input.health || input.privacyAccepted !== undefined || input.acceptsPromotions !== undefined
+  return (
+    Object.keys(input.data).length > 0 ||
+    !!input.health ||
+    input.privacyAccepted !== undefined ||
+    input.acceptsPromotions !== undefined ||
+    !!input.visit
+  )
+}
+
+/** «a», «a y b», «a, b y c». */
+function listed(parts: string[]): string {
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : (parts[0] ?? "")
 }
 
 /**
  * Lo que dice la página al terminar. Del enlace de un niño (menor de 12) se le
  * habla a quien lo cuida, con el nombre del niño: «Listo, Carla», «ya tiene lo
- * que nos contaste de la salud de Thiago» (mesa del 13 nov, entrega 7).
+ * que nos contaste de la salud de Thiago» (mesa del 13 nov, entrega 7). Con «Tu
+ * visita» (entrega 8) dice todo lo que llegó en ese envío y quién lo lee antes de
+ * atenderla: «Listo, Marta. Dental Smile ya tiene tus datos, tu salud y a qué
+ * vienes. Lo lee el Dr. Luis Prado antes de atenderte.»
  */
 export function personalDataSentWords(
   form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">,
   clinicName: string,
   outcome: "nada" | "con-salud" | "sin-salud" | "ya-enviado",
+  visit?: { reader: string | null; askedReason: boolean } | null,
 ): { title: string; text: string } {
   const child = isChildAge(form.age) && !!form.firstName
   const greeted = child ? form.respondentFirstName : form.firstName
   const listo = greeted ? `Listo, ${greeted}` : "Listo"
   const health = child ? `la salud de ${form.firstName}` : "tu salud"
   const data = child ? `los datos de ${form.firstName}` : "tus datos"
+  if (visit && outcome !== "ya-enviado") {
+    const parts = [
+      form.missing.length > 0 ? data : null,
+      outcome === "con-salud" ? health : null,
+      visit.askedReason
+        ? child
+          ? `a qué viene ${form.firstName}`
+          : "a qué vienes"
+        : child
+          ? `lo de la visita de ${form.firstName}`
+          : "lo de tu visita",
+    ].filter((part): part is string => !!part)
+    const reads = visit.reader
+      ? ` Lo lee ${visit.reader} ${child ? `antes de atender a ${form.firstName}` : "antes de atenderte"}.`
+      : ""
+    return { title: listo, text: `${clinicName} ya tiene ${listed(parts)}.${reads}` }
+  }
   if (outcome === "nada")
     return { title: "Gracias", text: `No nos contaste nada de ${health}. Si quieres, cuéntanoslo antes de venir o en la cita.` }
   if (outcome === "ya-enviado") return { title: listo, text: `${clinicName} ya tiene ${data}.` }
@@ -94,22 +128,26 @@ export function personalDataSentWords(
 }
 
 /**
- * «Tus datos» de «Su enlace»: el mismo cuestionario por temas del registro,
- * solo con lo que falta y, si nadie la registró aún, su salud (opcional; sin
- * nada que falte, la pantalla es solo «Tu salud»). Al final, si aún no lo
- * aceptó o respondió, el aviso de privacidad y las novedades. Nunca muestra lo
- * guardado. Las reglas (qué se acepta, el documento repetido, el menor sin
- * representante) son del servidor.
+ * «Antes de tu cita» de «Su enlace» (mesa del 13 nov, entrega 8): un solo
+ * recorrido y un solo envío con lo que falta de sus datos, su salud si nadie la
+ * registró (opcional) y, con una cita por venir, «Tu visita» al final (a qué
+ * viene y si le duele, opcional). Sin cita es «Tus datos», como antes. Al final,
+ * si aún no lo aceptó o respondió, el aviso de privacidad y las novedades. Nunca
+ * muestra lo guardado. Las reglas (qué se acepta, el documento repetido, el
+ * menor sin representante, una respuesta por cita) son del servidor.
  */
 export function PersonalDataForm({
   slug,
   token,
   clinicName,
+  reader,
   onSent,
 }: {
   slug: string
   token: string
   clinicName: string
+  /** Quien lo lee antes de atenderla: «el Dr. Luis Prado»; nulo si la cita no lo dice. */
+  reader?: string | null
   /** Lo envió (o no había nada que enviar): la página dice «Listo» con estas palabras y lo que sigue. */
   onSent: (words: { title: string; text: string }) => void
 }) {
@@ -127,11 +165,13 @@ export function PersonalDataForm({
   if (formQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando…" />
   if (formQuery.isError) {
     if (formQuery.error instanceof ApiError && formQuery.error.shape.code === "BOOKING_LINK_EXPIRED") {
-      return <ErrorState title="Tus datos ya están en la clínica" message="Este paso ya no está pendiente." />
+      return <ErrorState title="Ya está en la clínica" message="Esto ya no está pendiente." />
     }
-    return <ErrorState title="No pudimos abrir tus datos" message="Vuelve a intentarlo en un momento." onRetry={() => void formQuery.refetch()} />
+    return <ErrorState title="No pudimos abrirlo" message="Vuelve a intentarlo en un momento." onRetry={() => void formQuery.refetch()} />
   }
   const form = formQuery.data.data
+  const visit = form.visit ?? null
+  const visitWords = visit ? { reader: reader ?? null, askedReason: visit.questions.reason } : null
   return (
     <div className="rounded-3xl border bg-card p-5 sm:p-6">
       <RegistrationQuestionnaire
@@ -150,12 +190,13 @@ export function PersonalDataForm({
           privacy: form.pending.privacy,
           promotions: form.pending.promotions,
           clinicName,
+          visit: visit ? { ...visit, reader: reader ?? "quien te atiende" } : null,
         }}
         submitLabel="Enviar"
         shortcuts={false}
         addressSource={addressSource}
-        onSubmit={async (answers) => {
-          const input = toInput(answers, form.pending)
+        onSubmit={async (answers, extra) => {
+          const input = toInput(answers, form.pending, extra.visit)
           if (!sendsSomething(input)) {
             // Queda dicho que ya respondió, para no volver a pedírselo; si falla, no pasa nada.
             if (form.missing.length === 0) void submitPersonalData(slug, token, input).catch(() => undefined)
@@ -166,9 +207,9 @@ export function PersonalDataForm({
           const withHealth = form.asksHealth && !!input.health
           try {
             await send.mutateAsync(input)
-            onSent(personalDataSentWords(form, clinicName, withHealth ? "con-salud" : "sin-salud"))
+            onSent(personalDataSentWords(form, clinicName, withHealth ? "con-salud" : "sin-salud", visitWords))
           } catch (error) {
-            if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") {
+            if (error instanceof ApiError && (error.shape.code === "DATA_ALREADY_SENT" || error.shape.code === "ALREADY_SUBMITTED")) {
               onSent(personalDataSentWords(form, clinicName, "ya-enviado"))
               return
             }
@@ -176,8 +217,8 @@ export function PersonalDataForm({
             if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
             throw new Error(
               error instanceof ApiError
-                ? (error.shape.message ?? "No pudimos guardar tus datos.")
-                : "No pudimos guardar tus datos. Revisa tu conexión y vuelve a intentarlo.",
+                ? (error.shape.message ?? "No pudimos guardar lo que enviaste.")
+                : "No pudimos guardar lo que enviaste. Revisa tu conexión y vuelve a intentarlo.",
             )
           }
         }}
