@@ -67,6 +67,7 @@ import { Route as SettingsDotavailabilityRouteImport } from './../../../packages
 import { Route as SettingsDotbranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.branches'
 import { Route as SettingsDotchannelsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.channels'
 import { Route as SettingsDotcommissionsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.commissions'
+import { Route as SettingsDotconsultationFormsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.consultation-forms'
 import { Route as SettingsDotdataProtectionRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.data-protection'
 import { Route as SettingsDotformsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.forms'
 import { Route as SettingsDotmailRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.mail'
@@ -415,6 +416,11 @@ const SettingsDotcommissionsRoute = SettingsDotcommissionsRouteImport.update({
   path: '/commissions',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsDotconsultationFormsRoute = SettingsDotconsultationFormsRouteImport.update({
+  id: '/consultation-forms',
+  path: '/consultation-forms',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsDotdataProtectionRoute =
   SettingsDotdataProtectionRouteImport.update({
     id: '/data-protection',
@@ -589,6 +595,7 @@ export interface FileRoutesByFullPath {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/commissions': typeof SettingsDotcommissionsRoute
+  '/settings/consultation-forms': typeof SettingsDotconsultationFormsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
@@ -667,6 +674,7 @@ export interface FileRoutesByTo {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/commissions': typeof SettingsDotcommissionsRoute
+  '/settings/consultation-forms': typeof SettingsDotconsultationFormsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
@@ -749,6 +757,7 @@ export interface FileRoutesById {
   '/_org/settings/branches': typeof SettingsDotbranchesRoute
   '/_org/settings/channels': typeof SettingsDotchannelsRoute
   '/_org/settings/commissions': typeof SettingsDotcommissionsRoute
+  '/_org/settings/consultation-forms': typeof SettingsDotconsultationFormsRoute
   '/_org/settings/data-protection': typeof SettingsDotdataProtectionRoute
   '/_org/settings/forms': typeof SettingsDotformsRoute
   '/_org/settings/mail': typeof SettingsDotmailRoute
@@ -831,6 +840,7 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/commissions'
+    | '/settings/consultation-forms'
     | '/settings/data-protection'
     | '/settings/forms'
     | '/settings/mail'
@@ -909,6 +919,7 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/commissions'
+    | '/settings/consultation-forms'
     | '/settings/data-protection'
     | '/settings/forms'
     | '/settings/mail'
@@ -990,6 +1001,7 @@ export interface FileRouteTypes {
     | '/_org/settings/branches'
     | '/_org/settings/channels'
     | '/_org/settings/commissions'
+    | '/_org/settings/consultation-forms'
     | '/_org/settings/data-protection'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
@@ -1446,6 +1458,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDotcommissionsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_org/settings/consultation-forms': {
+      id: '/_org/settings/consultation-forms'
+      path: '/consultation-forms'
+      fullPath: '/settings/consultation-forms'
+      preLoaderRoute: typeof SettingsDotconsultationFormsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_org/settings/data-protection': {
       id: '/_org/settings/data-protection'
       path: '/data-protection'
@@ -1619,6 +1638,7 @@ interface SettingsRouteChildren {
   SettingsDotbranchesRoute: typeof SettingsDotbranchesRoute
   SettingsDotchannelsRoute: typeof SettingsDotchannelsRoute
   SettingsDotcommissionsRoute: typeof SettingsDotcommissionsRoute
+  SettingsDotconsultationFormsRoute: typeof SettingsDotconsultationFormsRoute
   SettingsDotdataProtectionRoute: typeof SettingsDotdataProtectionRoute
   SettingsDotformsRoute: typeof SettingsDotformsRoute
   SettingsDotmailRoute: typeof SettingsDotmailRoute
@@ -1644,6 +1664,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDotbranchesRoute: SettingsDotbranchesRoute,
   SettingsDotchannelsRoute: SettingsDotchannelsRoute,
   SettingsDotcommissionsRoute: SettingsDotcommissionsRoute,
+  SettingsDotconsultationFormsRoute: SettingsDotconsultationFormsRoute,
   SettingsDotdataProtectionRoute: SettingsDotdataProtectionRoute,
   SettingsDotformsRoute: SettingsDotformsRoute,
   SettingsDotmailRoute: SettingsDotmailRoute,

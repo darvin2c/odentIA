@@ -71,10 +71,10 @@ test("consentimientos: nacen activos; se leen, se cambian sobre la hoja, se ve e
   await implant.getByRole("switch").click()
   await expect(implant.getByText("Activo", { exact: true })).toBeVisible()
 
-  // Los formularios propios quedan a un enlace, no como pestaña.
-  await expect(page.getByRole("tab", { name: "Formularios clínicos" })).toHaveCount(0)
-  await page.getByRole("link", { name: "Crear un formulario" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Formularios propios" })).toBeVisible()
+  // Las fichas del equipo tienen su lugar en el menú: el pie de Consentimientos ya no lleva a ellas.
+  await expect(page.getByRole("link", { name: "Crear un formulario" })).toHaveCount(0)
+  await page.getByRole("link", { name: "Fichas de consulta" }).first().click()
+  await expect(page.getByRole("heading", { level: 1, name: "Fichas de consulta" })).toBeVisible()
 
   // En el teléfono se edita igual, sin que la hoja se salga de la pantalla.
   await page.setViewportSize({ width: 390, height: 844 })
