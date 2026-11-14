@@ -75,6 +75,27 @@ it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambia
   expect(screen.getByLabelText(/¿A qué\?/)).toBeTruthy()
 })
 
+/** Enter como lo hace el navegador: si nadie lo detuvo, un botón con el foco se pulsa. */
+function enterLikeBrowser(target: Element) {
+  if (fireEvent.keyDown(target, { key: "Enter" }) && target instanceof HTMLButtonElement) fireEvent.click(target)
+}
+
+// Verificación de la entrega 3 (14 nov): tras «¿A qué?», el primer Enter llevaba el foco al «No» de la
+// enfermedad sin marcarlo, pero el segundo lo marcaba: «niega enfermedades» sin que lo dijera.
+it("Enter repetido después de «¿A qué?» recorre las preguntas sin contestar ninguna", async () => {
+  healthOnly()
+  await screen.findAllByRole("group", { name: /alergia a algún medicamento o material/ })
+  answer(/algún medicamento o material/, "Sí")
+  const what = await screen.findByLabelText(/¿A qué\?/)
+  fireEvent.change(what, { target: { value: "penicilina" } })
+  enterLikeBrowser(what)
+  for (let i = 0; i < 4; i++) enterLikeBrowser(document.activeElement as Element)
+  for (const name of [/alguna enfermedad/, /algún medicamento todos los días/]) {
+    const pressed = [...question(name).querySelectorAll("button")].filter((b) => b.getAttribute("aria-pressed") === "true")
+    expect(pressed, String(name)).toEqual([])
+  }
+})
+
 // …y en la última pantalla, Enter en la última respuesta escrita lo enviaba todo.
 it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", async () => {
   const onSubmit = healthOnly()
