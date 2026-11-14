@@ -564,7 +564,7 @@ function RegistrationSettings() {
             </h2>
             <p className="text-sm text-muted-foreground">
               Lo que tu clínica pregunta y no está aquí, pregúntalo en la consulta y anótalo en una{" "}
-              <Link to="/settings/forms" className="underline underline-offset-4">
+              <Link to="/settings/consultation-forms" className="underline underline-offset-4">
                 ficha de consulta
               </Link>
               . Si crees que toda clínica debería preguntarlo, cuéntanoslo desde Ayuda.
