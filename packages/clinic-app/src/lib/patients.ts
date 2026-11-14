@@ -235,7 +235,7 @@ export interface DeclaredHealthGroup {
 }
 
 /** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
-export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "lactancia"
+export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {

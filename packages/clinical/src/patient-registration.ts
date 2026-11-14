@@ -132,8 +132,8 @@ export const REGISTRATION_FIELDS = [
   { key: "conditions", label: "Enfermedades", step: "salud", group: "health" },
   { key: "dental.corazon", label: "Corazón", step: "salud", group: "health", products: ["dental"] },
   { key: "dental.problemaAnestesia", label: "Problemas con la anestesia", step: "salud", group: "health", products: ["dental"] },
-  { key: "anticoagulants", label: "Anticoagulantes", step: "medicinas", group: "health" },
-  { key: "boneMedicines", label: "Medicinas para los huesos", step: "medicinas", group: "health" },
+  { key: "anticoagulants", label: "Anticoagulantes", step: "medicinas", group: "health", products: ["dental", "medical"] },
+  { key: "boneMedicines", label: "Medicinas para los huesos", step: "medicinas", group: "health", products: ["dental", "medical"] },
   { key: "medications", label: "Otros medicamentos", step: "medicinas", group: "health" },
   { key: "personal.embarazo", label: "Embarazo", step: "personales", group: "health" },
   { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
@@ -141,7 +141,7 @@ export const REGISTRATION_FIELDS = [
   { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
   { key: "medical.lactancia", label: "Lactancia", step: "personales", group: "health", products: ["medical", "dental"] },
   { key: "medical.tabaco", label: "Si fuma y cuánto", step: "habitos", group: "health", products: ["medical", "dental"] },
-  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", products: ["medical"] },
+  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", products: ["dental", "medical"] },
   { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", products: ["dental"] },
@@ -168,6 +168,7 @@ const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Rec
   boneMedicines: 2,
   "medical.lactancia": { dental: 2 },
   "medical.tabaco": { dental: 2 },
+  "medical.alcohol": { dental: 2 },
 }
 
 const fieldProducts = (field: (typeof REGISTRATION_FIELDS)[number]): readonly ClinicalProduct[] | null =>
@@ -228,7 +229,7 @@ const optionalDefaults: Record<string, true> = {
   docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true,
   allergies: true, conditions: true, medications: true,
   anticoagulants: true, boneMedicines: true, "dental.corazon": true, "dental.problemaAnestesia": true,
-  "medical.lactancia": true, "medical.tabaco": true,
+  "medical.lactancia": true, "medical.tabaco": true, "medical.alcohol": true,
 }
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
   version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
@@ -309,7 +310,8 @@ export const CIGARETTE_BAND_LABELS: Record<CigaretteBand, string> = { menos_10: 
  * cabeza o cuello» cambian una extracción (historia de salud de la ADA).
  */
 export const DECLARED_CONDITION_OPTIONS = [
-  "Diabetes", "Presión alta", "Asma", "Epilepsia", "Hepatitis", "Problemas de sangrado", "Radioterapia en cabeza o cuello",
+  "Diabetes", "Presión alta", "Problema del corazón (infarto, angina, arritmia, marcapasos)", "Asma", "Epilepsia", "Hepatitis",
+  "Problemas de sangrado", "Radioterapia en cabeza o cuello",
 ] as const
 export const registrationContactInputSchema = z.strictObject({
   contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(),
@@ -584,6 +586,8 @@ export function declaredLactationAndTobacco(
       tabaco: medical.tabaco,
       ...(medical.tabaco === "fuma" && medical.cigarrillos ? { cigarrillos: medical.cigarrillos } : {}),
     }
+  // El alcohol, con la misma clave en los dos productos (QA del 14 nov, C4: también en odentIA).
+  if (medical?.alcohol) out.habitos = { ...(out.habitos ?? {}), alcohol: medical.alcohol }
   return out
 }
 

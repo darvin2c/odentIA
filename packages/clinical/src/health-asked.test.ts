@@ -111,7 +111,7 @@ describe("«No se le preguntó» no es «dijo que no»", () => {
       group: "anticoagulants",
     })
     expect(medicationAlertWords({ name: "alendronato", atcCode: "M05B" })).toEqual({
-      label: "Huesos: alendronato",
+      label: "Medicina para los huesos: alendronato",
       group: "boneMedicines",
     })
     expect(medicationAlertWords({ name: "Anticoagulante (no dijo cuál)", atcCode: "B01A" }).label).toBe(
@@ -191,4 +191,10 @@ describe("a quién le corresponde cada pregunta", () => {
     expect(registrationFieldApplies("medical.lactancia", { sex: "M", age: 30 })).toBe(false)
     expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 30 })).toBe(true)
   })
+})
+
+// QA del 14 nov (C1): la aspirina y el clopidogrel son antiagregantes; la marca lo dice.
+it("«Antiagregante» para el grupo B01AC y «Anticoagulante» para el resto", () => {
+  expect(medicationAlertWords({ name: "clopidogrel", dose: "75 mg", atcCode: "B01AC04" }).label).toBe("Antiagregante: clopidogrel 75 mg")
+  expect(medicationAlertWords({ name: "apixabán", dose: null, atcCode: "B01AF02" }).label).toBe("Anticoagulante: apixabán")
 })

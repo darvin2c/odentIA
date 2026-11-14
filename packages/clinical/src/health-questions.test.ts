@@ -40,11 +40,12 @@ describe("los datos de salud nuevos", () => {
       "dental.problemaAnestesia",
       "medical.lactancia",
       "medical.tabaco",
+      // QA del 14 nov (C4): el alcohol, también en «Opcional».
+      "medical.alcohol",
     ] as const)
       expect(DEFAULT_REGISTRATION_CONFIG.fields[key]).toBe("optional")
-    // Lo que ya era opcional o no se pedía sigue igual.
+    // Lo que ya era opcional sigue igual.
     expect(DEFAULT_REGISTRATION_CONFIG.fields.medications).toBe("optional")
-    expect(DEFAULT_REGISTRATION_CONFIG.fields["medical.alcohol"]).toBe("hidden")
   })
 
   it("a quien administra una clínica que ya existía se le dicen las preguntas nuevas de su producto", () => {
@@ -55,14 +56,16 @@ describe("los datos de salud nuevos", () => {
       "boneMedicines",
       "medical.lactancia",
       "medical.tabaco",
+      "medical.alcohol",
     ])
-    // latidIA ya preguntaba la lactancia y el tabaco: para ella son nuevas solo las dos medicinas.
+    // latidIA ya preguntaba la lactancia, el tabaco y el alcohol: para ella son nuevas solo las dos
+    // medicinas. vistIA no las pregunta (C5).
     expect(newRegistrationQuestions(1, "medical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
-    expect(newRegistrationQuestions(1, "optical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
+    expect(newRegistrationQuestions(1, "optical").map((item) => item.key)).toEqual([])
     expect(newRegistrationQuestions(REGISTRATION_QUESTIONS_VERSION, "dental")).toEqual([])
   })
 
-  it("lo dental queda en odentIA; la lactancia y el tabaco, en odentIA y latidIA; nada de eso en vistIA", () => {
+  it("lo dental queda en odentIA; las medicinas, la lactancia, el tabaco y el alcohol, en odentIA y latidIA; nada de eso en vistIA", () => {
     const fields = Object.fromEntries(
       Object.keys(config.fields).map((key) => [
         key,
@@ -88,9 +91,10 @@ describe("los datos de salud nuevos", () => {
       "boneMedicines",
       "medical.lactancia",
       "medical.tabaco",
+      "medical.alcohol",
     ])
     expect(asked("medical")).toEqual(["anticoagulants", "boneMedicines", "medical.lactancia", "medical.tabaco", "medical.alcohol"])
-    expect(asked("optical")).toEqual(["anticoagulants", "boneMedicines"])
+    expect(asked("optical")).toEqual([])
   })
 
   it("«Tus medicinas»: Sí con cuál, No o No sé; «cuál» solo con el Sí", () => {

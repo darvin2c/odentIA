@@ -49,7 +49,7 @@ const HEALTH_FIRST: PickerItem[] = [
   {
     keys: ["conditions"],
     label: "Enfermedades",
-    hint: "Se marcan de una lista: diabetes, presión alta, asma, epilepsia, hepatitis, problemas de sangrado, radioterapia en cabeza o cuello… y «Otra».",
+    hint: "Se marcan de una lista: diabetes, presión alta, problema del corazón, asma, epilepsia, hepatitis, problemas de sangrado, radioterapia en cabeza o cuello… y «Otra».",
   },
 ]
 const HEALTH_MEDICINES: PickerItem[] = [
@@ -86,7 +86,7 @@ const DENTAL: PickerItem[] = [
   {
     keys: ["dental.habitos"],
     label: "Hábitos",
-    hint: "Fumar, morderse las uñas, respirar por la boca…",
+    hint: "Morderse las uñas, respirar por la boca, morder lápices…",
   },
 ]
 /**
@@ -97,9 +97,11 @@ const LACTATION: PickerItem = { keys: ["medical.lactancia"], label: "Lactancia",
 const TOBACCO: PickerItem = {
   keys: ["medical.tabaco"],
   label: "Fuma y cuántos cigarrillos al día",
-  hint: "No fumo · Fumo (menos de 10 o 10 o más) · Lo dejé.",
+  // Las mismas palabras que ve el paciente (B14).
+  hint: "Nunca fumé · Fumo (menos de 10 o 10 o más) · Lo dejé.",
 }
-const MEDICAL_HABITS: PickerItem[] = [TOBACCO, { keys: ["medical.alcohol"], label: "Si toma alcohol" }]
+const ALCOHOL: PickerItem = { keys: ["medical.alcohol"], label: "Si toma alcohol" }
+const MEDICAL_HABITS: PickerItem[] = [TOBACCO, ALCOHOL]
 /**
  * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
  * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA). vistIA
@@ -115,7 +117,8 @@ const PRODUCT_FIELDS: Record<
 > = {
   dental: {
     health: DENTAL_HEALTH,
-    personal: [LACTATION, TOBACCO],
+    // El alcohol, también en odentIA (QA del 14 nov, C4).
+    personal: [LACTATION, TOBACCO, ALCOHOL],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
   },
   medical: {
@@ -323,7 +326,8 @@ export function RegistrationFieldsPicker({
       <Group
         title="Su salud"
         help="Todo queda en sus Antecedentes; lo que cambia la cita sale arriba de su ficha y de la atención, y quien atiende lo revisa con él."
-        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...HEALTH_MEDICINES]}
+        // vistIA no pregunta por las dos medicinas (QA del 14 nov, C5).
+        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...(product === "optical" ? [] : HEALTH_MEDICINES)]}
         newKeys={newKeys}
         fields={fields}
         options={THREE}

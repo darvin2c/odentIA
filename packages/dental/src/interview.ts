@@ -62,22 +62,27 @@ export function dentalHabitsErrors(answers: Record<string, unknown>): Record<str
   const group = answers.habitos
   if (group === undefined) return {}
   if (!group || typeof group !== "object" || Array.isArray(group)) return { habitos: "Hábitos: revisa lo escrito." }
-  const { tabaco, cigarrillos, ...rest } = group as Record<string, unknown>
+  const { tabaco, cigarrillos, alcohol, ...rest } = group as Record<string, unknown>
   const errors: Record<string, string> = {}
   if (tabaco !== undefined && !(TOBACCO_ANSWERS as readonly unknown[]).includes(tabaco))
     errors["habitos.tabaco"] = "Tabaco: elige una opción."
   if (cigarrillos !== undefined && (tabaco !== "fuma" || !(CIGARETTE_BANDS as readonly unknown[]).includes(cigarrillos)))
     errors["habitos.cigarrillos"] = "Cuántos al día se dice solo de quien fuma."
-  if (Object.keys(rest).length) errors.habitos = "Hábitos: solo el tabaco y cuánto fuma."
+  if (alcohol !== undefined && !(ALCOHOL_ANSWERS as readonly unknown[]).includes(alcohol))
+    errors["habitos.alcohol"] = "Alcohol: elige una opción."
+  if (Object.keys(rest).length) errors.habitos = "Hábitos: solo el tabaco, cuánto fuma y el alcohol."
   return errors
 }
 
 const ANSWER_WORDS: Record<string, string> = { si: "sí", no: "no", no_sabe: "no sabe" }
 const TOBACCO_WORDS: Record<string, string> = { nunca: "nunca fumó", fuma: "fuma", dejo: "lo dejó" }
+/** Lo que se responde del alcohol, como en latidIA. */
+export const ALCOHOL_ANSWERS = ["no", "ocasional", "frecuente"] as const
+const ALCOHOL_WORDS: Record<string, string> = { no: "no toma", ocasional: "de vez en cuando", frecuente: "con frecuencia" }
 
 /** Un dato de lo que odentIA suma a la entrevista, con la clave de quién lo dijo (`DECLARED_INTERVIEW`). */
 export interface DentalInterviewItem {
-  key: "corazon" | "anestesia" | "tabaco" | "lactancia"
+  key: "corazon" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
   text: string
   /**
    * Lo que va arriba de la ficha y de la atención: el corazón, el antibiótico y la anestesia solo
@@ -129,6 +134,8 @@ export function dentalInterviewItems(answers: Record<string, unknown>): DentalIn
     const band = typeof habits.cigarrillos === "string" ? CIGARETTE_BAND_LABELS[habits.cigarrillos as CigaretteBand] : ""
     items.push({ key: "tabaco", text: `Tabaco: ${TOBACCO_WORDS[habits.tabaco] ?? habits.tabaco}${band ? `, ${band}` : ""}`, alert: null })
   }
+  if (typeof habits.alcohol === "string")
+    items.push({ key: "alcohol", text: `Alcohol: ${ALCOHOL_WORDS[habits.alcohol] ?? habits.alcohol}`, alert: null })
   const lactation = rec(rec(answers.embarazoLactancia).lactancia)
   if (lactation.estado === "si" || lactation.estado === "no") {
     const saidOn = typeof lactation.fecha === "string" ? lactation.fecha : undefined

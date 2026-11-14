@@ -282,6 +282,7 @@ const CIGARETTE_ITEMS: Record<string, string> = {
   ...Object.fromEntries(CIGARETTE_BANDS.map((band) => [band, CIGARETTE_BAND_LABELS[band]])),
 }
 const LACTATION_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No" }
+const ALCOHOL_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", no: "No toma", ocasional: "De vez en cuando", frecuente: "Con frecuencia" }
 
 /** Una lista corta con «Sin indicar» primero; elegirlo quita el dato. */
 function Pick({
@@ -351,7 +352,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          Corazón, anestesia y tabaco <ChevronDown aria-hidden className="size-4" />
+          Corazón, anestesia, tabaco y alcohol <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -407,6 +408,15 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
               error={subFieldError(errors, "habitos.cigarrillos", fid("od-cigarrillos"))}
             />
           ) : null}
+          <Pick
+            id={fid("od-alcohol")}
+            label="Alcohol"
+            items={ALCOHOL_ITEMS}
+            value={strOf(habits["alcohol"])}
+            onChange={(v) => update("habitos", "alcohol", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "habitos.alcohol", fid("od-alcohol"))}
+          />
           {sex === "M" ? null : (
             <Pick
               id={fid("od-lactancia")}
@@ -436,6 +446,7 @@ const ITEM_KEYS: Record<DentalInterviewItem["key"], DeclaredInterviewKey[]> = {
   corazon: ["corazon", "antibiotico"],
   anestesia: ["anestesia"],
   tabaco: ["tabaco"],
+  alcohol: ["alcohol"],
   lactancia: ["lactancia"],
 }
 

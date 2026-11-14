@@ -323,8 +323,8 @@ const BRUSHING = [
   { value: "3", label: "3 o más" },
 ] as const
 /** Los hábitos que más pesan en la boca, en palabras del paciente. */
+// Sin «Fumar»: el tabaco tiene su propia pregunta, con cuántos al día (QA del 14 nov, B14).
 const HABITS = [
-  "Fumar",
   "Morderse las uñas",
   "Morder lápices u objetos",
   "Respirar por la boca",

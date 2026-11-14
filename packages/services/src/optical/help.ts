@@ -562,6 +562,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // vistIA no pregunta por anticoagulantes ni por medicinas para los huesos (QA del 14 nov, C5).
+  "preguntar-anticoagulantes": () => [],
   // Sin dictado no hay sugerencias que corregir ni página de Clío donde probarlo.
   "pacientes-dictado-corregir-pausar": () => [],
   "agente-clio-probar-dictado": () => [],

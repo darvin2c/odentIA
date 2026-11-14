@@ -174,7 +174,7 @@ export function medicineClassAnswers(
 
 /**
  * La marca de una medicina en la franja: «Anticoagulante: warfarina 5 mg» o
- * «Huesos: alendronato» si su código es de una de las dos clases; si no,
+ * «Medicina para los huesos: alendronato» si su código es de una de las dos clases; si no,
  * «Toma …». Lo dicho sin nombre («Anticoagulante (no dijo cuál)») se lee tal cual.
  */
 export function medicationAlertWords(row: { name: string; dose?: string | null; atcCode?: string | null }): {
@@ -185,7 +185,10 @@ export function medicationAlertWords(row: { name: string; dose?: string | null; 
   const group = medicationClassOf(row.atcCode)
   if (!group) return { label: `Toma ${what}`, group: null }
   const { label, unnamed } = MEDICATION_CLASSES[group]
-  return { label: row.name === unnamed ? unnamed : `${label}: ${what}`, group }
+  // La aspirina y el clopidogrel (B01AC) son antiagregantes, no anticoagulantes: se manejan distinto
+  // antes de una extracción (SDCEP 2022). La pregunta es una sola; la marca dice cuál es.
+  const named = group === "anticoagulants" && row.atcCode?.startsWith("B01AC") ? "Antiagregante" : label
+  return { label: row.name === unnamed ? unnamed : `${named}: ${what}`, group }
 }
 
 /** Lo que va junto con un dato: las semanas, con el embarazo; cuántos al día, con el tabaco. */

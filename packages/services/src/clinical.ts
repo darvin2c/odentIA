@@ -347,6 +347,7 @@ export const DECLARED_INTERVIEW = {
   antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
   anestesia: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
   tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
+  alcohol: { said: ["medical", "alcohol"], kept: ["habitos", "alcohol"] },
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW

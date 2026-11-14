@@ -261,12 +261,12 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     const [box] = boxes(markup)
     expect(box?.label).toBe("Lo dijo ella el 13 nov, sin revisar")
     expect(box?.inside).toContain("Anticoagulante: warfarina 5 mg")
-    expect(box?.inside).toContain("Huesos: alendronato")
+    expect(box?.inside).toContain("Medicina para los huesos: alendronato")
     expect(box?.inside).not.toContain("Losartán")
     const page = markup.replace(/<[^>]+>/g, "|")
     expect(page.indexOf("Anticoagulante: warfarina 5 mg")).toBeGreaterThan(-1)
-    expect(page.indexOf("Huesos: alendronato")).toBeGreaterThan(page.indexOf("Anticoagulante: warfarina 5 mg"))
-    expect(page.indexOf("Toma Losartán")).toBeGreaterThan(page.indexOf("Huesos: alendronato"))
+    expect(page.indexOf("Medicina para los huesos: alendronato")).toBeGreaterThan(page.indexOf("Anticoagulante: warfarina 5 mg"))
+    expect(page.indexOf("Toma Losartán")).toBeGreaterThan(page.indexOf("Medicina para los huesos: alendronato"))
   })
 
   it("en la atención, «No se le preguntó» no es «dijo que no»; la ficha no lo repite", () => {
@@ -280,7 +280,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
       <PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} medicineClasses />,
     )
     expect(encounter).toContain("Anticoagulante: no se le preguntó")
-    expect(encounter).toContain("Huesos: dijo que no")
+    expect(encounter).toContain("Medicina para los huesos: dijo que no")
     const chart = text(<PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} />)
     expect(chart).not.toContain("no se le preguntó")
   })
