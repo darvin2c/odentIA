@@ -4,8 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
-import { clearDeviceDraft } from "../../lib/device-draft"
 import { fetchPersonalDataForm, type PersonalDataForm as PersonalDataFormView, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
+import { clearDeviceDraft } from "../../lib/device-draft"
 import { RegistrationQuestionnaire } from "../patient/registration-questionnaire"
 
 /** Lo que «Tus datos» puede completar (las mismas claves que acepta el servidor). */

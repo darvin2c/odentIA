@@ -678,7 +678,8 @@ export function PersonalLinkPage({
       ? personalLinkDraftKey(slug, token, draftAppointment && !draftAppointment.cancelled ? draftAppointment.startsAt : null)
       : undefined
   const [draftOnDevice, setDraftOnDevice] = useState<DraftOnDevice | null>(null)
-  // Se mira al hidratar y cada vez que vuelve a la lista (pudo escribir en el recorrido).
+  // Se mira al hidratar y cada vez que cambia de pantalla (pudo escribir en el recorrido).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `screenKey` es el momento de volver a mirar, no un dato.
   useEffect(() => {
     if (!hydrated || !draftKey) return
     sweepDeviceDrafts()
