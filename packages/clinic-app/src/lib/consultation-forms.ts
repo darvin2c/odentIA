@@ -144,6 +144,26 @@ export function answerWords(field: Pick<FormFieldDef, "type" | "unit">, value: u
 }
 
 /**
+ * Lo que «Usar» copia de la anterior a la de hoy: la misma respuesta, si la
+ * pregunta de hoy la admite (mismo tipo y, en las de opciones, opciones que
+ * siguen). Una firma o un archivo no se copian; nada se copia solo.
+ */
+export function reusableAnswer(
+  field: Pick<FormFieldDef, "type" | "options">,
+  before: Pick<FormFieldDef, "type">,
+  value: unknown,
+): unknown {
+  if (value === null || value === undefined || value === "") return undefined
+  if (field.type !== before.type || field.type === "firma" || field.type === "adjunto") return undefined
+  if (field.type === "opcion_unica") return field.options?.includes(String(value)) ? value : undefined
+  if (field.type === "opcion_multiple") {
+    const kept = Array.isArray(value) ? value.filter((option) => field.options?.includes(String(option))) : []
+    return kept.length > 0 ? kept : undefined
+  }
+  return value
+}
+
+/**
  * Cómo se llama en una lista lo que hay en `clinical_form_response`: la ficha
  * que llenó el equipo es «Ficha»; el cuestionario antiguo que respondió el
  * paciente queda en el mismo filtro, dicho como lo que es.

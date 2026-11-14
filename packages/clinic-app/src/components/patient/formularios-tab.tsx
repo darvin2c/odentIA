@@ -44,7 +44,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
-import { answerWords, draftOf } from "../../lib/consultation-forms"
+import { answerWords, draftOf, reusableAnswer } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -520,16 +520,35 @@ export function ResponseDetail({
               const before = previous ? previousField(previous, field.id) : null
               return (
                 <form.AppField key={field.id} name={`answers.${field.id}`}>
-                  {() => (
-                    <div className="flex flex-col gap-1">
-                      <AnswerAppField field={field} disabled={!editable} attachments={attachments} />
-                      {previous && before ? (
-                        <p className="text-xs text-muted-foreground">
-                          {when(previous.finalizedAt)}: {answerWords(before, previous.answers?.[field.id])}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
+                  {(answerField) => {
+                    const earlier = previous?.answers?.[field.id]
+                    // «Usar»: copia la respuesta anterior a la de hoy con un clic (la pieza, la clase…); nada se copia solo.
+                    const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <AnswerAppField field={field} disabled={!editable} attachments={attachments} />
+                        {previous && before ? (
+                          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                            <span>
+                              {when(previous.finalizedAt)}: {answerWords(before, earlier)}
+                            </span>
+                            {reusable !== undefined ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="link"
+                                className="h-auto min-h-8 p-0 text-xs"
+                                aria-label={`Usar la respuesta anterior en «${field.label}»: ${answerWords(before, earlier)}`}
+                                onClick={() => answerField.handleChange(reusable)}
+                              >
+                                Usar
+                              </Button>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  }}
                 </form.AppField>
               )
             })}

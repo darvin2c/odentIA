@@ -9,6 +9,7 @@ import {
   offersView,
   draftOf,
   formsBelowOffers,
+  reusableAnswer,
   offerStateWords,
   offerWhyWords,
   unlooked,
@@ -115,4 +116,14 @@ describe("una ficha a medias se ve una sola vez", () => {
     expect(formsBelowOffers(forms, offers).map((form) => form.id)).toEqual(["r2"])
     expect(formsBelowOffers(forms, undefined).map((form) => form.id)).toEqual(["r1", "r2"])
   })
+})
+
+// QA del 14 nov (clínica H1): en la sesión 2 o el control se reescribía todo, incluida la pieza.
+it("«Usar» copia la respuesta anterior si la pregunta de hoy la admite, y nunca una firma", () => {
+  expect(reusableAnswer({ type: "pieza" }, { type: "pieza" }, 36)).toBe(36)
+  expect(reusableAnswer({ type: "opcion_unica", options: ["Clase I", "Clase III"] }, { type: "opcion_unica" }, "Clase II")).toBeUndefined()
+  expect(reusableAnswer({ type: "opcion_multiple", options: ["No tiene", "Anterior"] }, { type: "opcion_multiple" }, ["Anterior", "Lateral"])).toEqual(["Anterior"])
+  expect(reusableAnswer({ type: "numero" }, { type: "texto" }, "5")).toBeUndefined()
+  expect(reusableAnswer({ type: "firma" }, { type: "firma" }, { strokes: [] })).toBeUndefined()
+  expect(reusableAnswer({ type: "texto" }, { type: "texto" }, "")).toBeUndefined()
 })
