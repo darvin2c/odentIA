@@ -108,7 +108,7 @@ it("publicar un cuestionario del paciente dice a quién le llega y a cuál reemp
   const ficha = template({ key: "ficha", title: "Ficha", status: "borrador", publishedAt: null })
   expect(touchesPatients(ficha, [previo, ficha])).toBe(false)
   expect(publishWords(ficha, [previo, ficha], null)).toBe(
-    "Quedará disponible para responder en la ficha. Una versión publicada ya no se edita: para cambiarla se prepara la siguiente.",
+    "Quedará en uso: se llena en la atención y en «Nuevo» › «Ficha». Una versión publicada ya no se edita: para cambiarla se prepara la siguiente.",
   )
   // Sin el dato del servidor (no se pudo consultar) no nombra a ninguno.
   expect(publishWords(nuevo, [previo, nuevo], null)).not.toContain("en lugar de")

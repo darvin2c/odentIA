@@ -128,7 +128,7 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
       : "los pacientes dejan de recibirlo y no recibirán ningún cuestionario antes de su cita."
     return `${base} Como ahora lo llena el equipo, ${instead} ${KEEPS}`
   }
-  return `Quedará disponible para responder en la ficha. ${FROZEN}`
+  return `Quedará en uso: se llena en la atención y en «Nuevo» › «Ficha». ${FROZEN}`
 }
 
 /** Lo que pasa al apagar una ficha en uso: lo que deja de pasar, lo que se queda y cómo volver. */
