@@ -1,5 +1,5 @@
 {
-  "id": "f2741d0f-9db4-41f7-8ef8-1ffa21cd7556",
+  "id": "0acf2afb-0a4a-4443-aa78-cbafc6e4a0cc",
   "prevId": "7cad998a-9b70-41b2-86a3-0a2a0a19a7d9",
   "version": "7",
   "dialect": "postgresql",
@@ -11676,7 +11676,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "clinical_form_addendum_reason_check": {
+          "name": "clinical_form_addendum_reason_check",
+          "value": "\"clinical_form_addendum\".\"reason\" IS NULL OR char_length(\"clinical_form_addendum\".\"reason\") BETWEEN 1 AND 2000"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.clinical_form_response": {

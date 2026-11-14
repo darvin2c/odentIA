@@ -1,1 +1,2 @@
-ALTER TABLE "clinical_form_addendum" ADD COLUMN "reason" text;
+ALTER TABLE "clinical_form_addendum" ADD COLUMN "reason" text;--> statement-breakpoint
+ALTER TABLE "clinical_form_addendum" ADD CONSTRAINT "clinical_form_addendum_reason_check" CHECK ("clinical_form_addendum"."reason" IS NULL OR char_length("clinical_form_addendum"."reason") BETWEEN 1 AND 2000);
