@@ -112,6 +112,13 @@ export function lookedCount(listed: readonly FormTemplate[][]): { looked: number
   return { looked: forms.filter((form) => form.looked !== false).length, total: forms.length }
 }
 
+/** La lista de Fichas de consulta con las que faltan mirar primero; las demás, en su orden. */
+export function lookFirst(listed: readonly FormTemplate[][]): FormTemplate[][] {
+  const toLook = (versions: FormTemplate[]) =>
+    unlooked(versions.find((version) => version.status === "publicado") ?? versions[0]) ? 0 : 1
+  return [...listed].sort((a, b) => toLook(a) - toLook(b))
+}
+
 /** Vino con el producto y nadie de la clínica la abrió todavía. */
 export function unlooked(template: Pick<FormTemplate, "fromProduct" | "looked"> | undefined): boolean {
   return template?.fromProduct === true && template.looked === false

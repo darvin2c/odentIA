@@ -178,7 +178,8 @@ export async function productFormMarks(tx: Db, orgId: string): Promise<Map<strin
       and(
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, TEMPLATE_ENTITY),
-        eq(auditEvent.action, LOOK_ACTION),
+        // Abrirla o apagarla es haberla decidido; volver a encenderla no cambia la marca.
+        inArray(auditEvent.action, [LOOK_ACTION, "form_template.leave"]),
         inArray(auditEvent.entityId, ids),
       ),
     )

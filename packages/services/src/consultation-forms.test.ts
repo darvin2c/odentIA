@@ -14,6 +14,7 @@ import { expect, it } from "vitest"
 import {
   archiveFormTemplate,
   archiveSpecialty,
+  reuseFormTemplate,
   createFormResponse,
   createFormTemplate,
   finalizeFormResponse,
@@ -478,4 +479,23 @@ it("desde el tercer control, la de hoy trae también la de inicio para comparar"
   expect(byId.get(finished[1]!)).toMatchObject({ previousId: finished[0], firstId: null })
   // La tercera: la anterior y, aparte, la de inicio.
   expect(byId.get(finished[2]!)).toMatchObject({ previousId: finished[1], firstId: finished[0] })
+})
+
+// QA del 14 nov (desarrollo H8): «Miraste N de 4» cambiaba de total y «Volver a usar» la marcaba.
+it("apagar una ficha del producto cuenta como decidida, y encenderla otra vez no cambia la marca", async () => {
+  const c = await clinic()
+  const marks = async () =>
+    new Map(
+      (await c.run((tx) => listClinicFormTemplates(tx, c.orgId)))
+        .filter((row) => row.status === "publicado")
+        .map((row) => [row.key, row]),
+    )
+  const pediatric = (await marks()).get("ficha-de-odontopediatria")!
+  expect(pediatric).toMatchObject({ fromProduct: true, looked: false })
+  await c.run((tx) => archiveFormTemplate(tx, c.orgId, c.actor, pediatric.id))
+  expect((await marks()).get("ficha-de-odontopediatria")).toMatchObject({ fromProduct: true, looked: true, inUse: false })
+  await c.run((tx) => reuseFormTemplate(tx, c.orgId, c.actor, pediatric.id))
+  expect((await marks()).get("ficha-de-odontopediatria")).toMatchObject({ fromProduct: true, looked: true, inUse: true })
+  // Las cuatro siguen siendo del producto, en uso o no: el total no cambia.
+  expect([...(await marks()).values()].filter((row) => row.fromProduct)).toHaveLength(4)
 })

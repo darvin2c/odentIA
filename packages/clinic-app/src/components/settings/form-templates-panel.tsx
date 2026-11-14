@@ -75,7 +75,7 @@ import {
   versionStatusWords,
 } from "../../lib/form-templates"
 import { TemplatesSkeleton } from "../skeletons/settings"
-import { appearsWords, lookedCount, markFormTemplateLooked, unlooked } from "../../lib/consultation-forms"
+import { appearsWords, lookedCount, lookFirst, markFormTemplateLooked, unlooked } from "../../lib/consultation-forms"
 import { appWords } from "../../lib/product-words"
 
 const FIELD_TYPES = Object.keys(FIELD_TYPE_LABELS) as FormFieldType[]
@@ -130,11 +130,7 @@ export function FormTemplatesPanel() {
   // «Miraste 1 de 4»: de las que vinieron con el producto, cuántas abrió ya la clínica.
   const looked = useMemo(() => lookedCount([...listed, ...unused.map((item) => [item.last])]), [listed, unused])
   // La que falta mirar va primero, para verla sin desplazar; las demás, en su orden.
-  const ordered = useMemo(() => {
-    const toLook = (versions: FormTemplate[]) =>
-      unlooked(versions.find((version) => version.status === "publicado") ?? versions[0]) ? 0 : 1
-    return [...listed].sort((a, b) => toLook(a) - toLook(b))
-  }, [listed])
+  const ordered = useMemo(() => lookFirst(listed), [listed])
   const lookMutation = useMutation({
     mutationFn: (template: FormTemplate) => markFormTemplateLooked(template.id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["form-templates"] }),

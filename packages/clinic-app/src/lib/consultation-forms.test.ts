@@ -5,6 +5,7 @@ import {
   appearsWords,
   formRowTitle,
   lookedCount,
+  lookFirst,
   offerActionWords,
   offersView,
   draftOf,
@@ -126,4 +127,15 @@ it("«Usar» copia la respuesta anterior si la pregunta de hoy la admite, y nunc
   expect(reusableAnswer({ type: "numero" }, { type: "texto" }, "5")).toBeUndefined()
   expect(reusableAnswer({ type: "firma" }, { type: "firma" }, { strokes: [] })).toBeUndefined()
   expect(reusableAnswer({ type: "texto" }, { type: "texto" }, "")).toBeUndefined()
+})
+
+// QA del 14 nov (desarrollo H8, UX U7): el total cambiaba al dejar de usar una, y la que faltaba quedaba al final.
+it("«Miraste N de 4» no cambia de total con una apagada, y la que falta mirar va primero", () => {
+  const mine = [template({ key: "propia", fromProduct: false, looked: true })]
+  const off = [template({ key: "a", fromProduct: true, looked: true, inUse: false })]
+  const toLook = [template({ key: "b", fromProduct: true, looked: false })]
+  const seen = [template({ key: "c", fromProduct: true, looked: true })]
+  const old = [template({ key: "d", fromProduct: true, looked: true, status: "archivado" })]
+  expect(lookedCount([mine, off, toLook, seen, old])).toEqual({ looked: 3, total: 4 })
+  expect(lookFirst([mine, off, toLook, seen]).map((versions) => versions[0]?.key)).toEqual(["b", "propia", "a", "c"])
 })
