@@ -423,5 +423,5 @@ it("«Hay preguntas nuevas» llega a la campana de quien administra y se va con 
   const seen = await ownerDb.execute(
     sql`select metadata from audit_event where organization_id = ${orgId} and action = 'patient-registration.questions_seen'`,
   )
-  expect(seen.rows ?? seen).toHaveLength(1)
+  expect(seen).toHaveLength(1)
 })
