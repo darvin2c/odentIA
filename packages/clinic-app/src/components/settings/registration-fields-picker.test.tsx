@@ -42,6 +42,14 @@ describe("«Preguntas al paciente»: el único lugar donde la clínica decide qu
     expect(page).toContain("Anticoagulantes o aspirina diaria")
   })
 
+  it("odentIA suma «Si se atiende un niño», con biberón y chupón hasta los 6 años; latidIA y vistIA no", () => {
+    const page = text("dental")
+    expect(page).toContain("Si se atiende un niño")
+    for (const label of ["Biberón o pecho para dormir", "Chupón o se chupa el dedo", "Dulces o jugos entre comidas", "Pasta de dientes con flúor", "Quién le cepilla los dientes"])
+      expect(page).toContain(label)
+    expect(text("medical")).not.toContain("Si se atiende un niño")
+  })
+
   it("las preguntas que nadie de la clínica vio aún dicen «Nueva»", () => {
     const page = text("dental", new Set(["anticoagulants"]) as Set<never>)
     expect(page).toContain("Anticoagulantes o aspirina diaria|Nueva")

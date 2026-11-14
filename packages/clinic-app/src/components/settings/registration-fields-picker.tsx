@@ -97,9 +97,20 @@ const LACTATION: PickerItem = { keys: ["medical.lactancia"], label: "Lactancia",
 const TOBACCO: PickerItem = {
   keys: ["medical.tabaco"],
   label: "Fuma y cuántos cigarrillos al día",
-  hint: "No fumo · Fumo (menos de 10 o 10 o más) · Lo dejé.",
+  hint: "No fumo · Fumo (menos de 10 o 10 o más) · Lo dejé. No se pregunta a menores de 12.",
 }
-const MEDICAL_HABITS: PickerItem[] = [TOBACCO, { keys: ["medical.alcohol"], label: "Si toma alcohol" }]
+const MEDICAL_HABITS: PickerItem[] = [
+  TOBACCO,
+  { keys: ["medical.alcohol"], label: "Si toma alcohol", hint: "No se pregunta a menores de 12." },
+]
+/** Lo de un niño, para quien lo cuida (odentIA): lo que decide el riesgo de caries. */
+const CHILD: PickerItem[] = [
+  { keys: ["dental.biberon"], label: "Biberón o pecho para dormir", hint: "Hasta los 6 años" },
+  { keys: ["dental.chupon"], label: "Chupón o se chupa el dedo", hint: "Hasta los 6 años" },
+  { keys: ["dental.dulcesEntreComidas"], label: "Dulces o jugos entre comidas", hint: "Casi nunca · 1 a 3 · 4 o más al día" },
+  { keys: ["dental.pastaConFluor"], label: "Pasta de dientes con flúor" },
+  { keys: ["dental.quienCepilla"], label: "Quién le cepilla los dientes" },
+]
 /**
  * Lo de cada producto en el registro: lo que suma a «Otros antecedentes» y su
  * grupo propio («Su historia dental» en odentIA; los hábitos en latidIA). vistIA
@@ -111,19 +122,27 @@ const PRODUCT_FIELDS: Record<
     health: PickerItem[]
     personal: PickerItem[]
     own: { title: string; help: string; items: PickerItem[] } | null
+    /** Lo que se le pregunta a quien cuida a un menor de 12; null si el producto no pregunta nada propio. */
+    child: { title: string; help: string; items: PickerItem[] } | null
   }
 > = {
   dental: {
     health: DENTAL_HEALTH,
     personal: [LACTATION, TOBACCO],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
+    child: {
+      title: "Si se atiende un niño",
+      help: "A menores de 12 años: lo responde quien lo cuida, con su nombre. Nunca son obligatorias.",
+      items: CHILD,
+    },
   },
   medical: {
     health: [],
     personal: [LACTATION],
     own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
+    child: null,
   },
-  optical: { health: [], personal: [], own: null },
+  optical: { health: [], personal: [], own: null, child: null },
 }
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -264,6 +283,7 @@ export function RegistrationFieldsPicker({
   // Lo de cada producto: «Su historia dental» en odentIA; la lactancia y los hábitos en latidIA.
   const product = productUi().product
   const own = PRODUCT_FIELDS[product].own
+  const child = PRODUCT_FIELDS[product].child
   return (
     <div className="flex flex-col gap-7">
       <dl className="grid gap-2 rounded-2xl bg-muted/60 p-4 text-sm sm:grid-cols-3">
@@ -347,6 +367,19 @@ export function RegistrationFieldsPicker({
           title={own.title}
           help={own.help}
           items={own.items}
+          newKeys={newKeys}
+          fields={fields}
+          options={TWO}
+          onMode={onMode}
+          disabled={disabled}
+          errors={errors}
+        />
+      ) : null}
+      {child ? (
+        <Group
+          title={child.title}
+          help={child.help}
+          items={child.items}
           newKeys={newKeys}
           fields={fields}
           options={TWO}

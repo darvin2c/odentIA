@@ -117,6 +117,8 @@ export function PersonalDataForm({
           healthKeys: new Set(form.healthQuestions ?? []),
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
+          age: form.age ?? null,
+          respondentFirstName: form.respondentFirstName ?? null,
           privacy: form.pending.privacy,
           promotions: form.pending.promotions,
           clinicName,

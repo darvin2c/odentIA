@@ -119,7 +119,7 @@ async function fillSalud(page: Page) {
 
 /** «Antes de enviar»: acepta el aviso y envía. */
 function privacyBox(page: Page) {
-  return page.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })
+  return page.getByRole("checkbox", { name: /Autorizo el tratamiento de (mis datos|los datos de)/ })
 }
 
 async function acceptAndSubmit(page: Page) {
@@ -432,7 +432,7 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
     expect(publicPosts).toBe(1)
     await expect(anon.getByText(/rev\. 2/)).toBeVisible()
     await expect(
-      anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }),
+      anon.getByRole("checkbox", { name: /Autorizo el tratamiento de (mis datos|los datos de)/ }),
     ).toBeChecked()
     // La declaración de salud se conserva al retroceder.
     const allergies = anon.getByRole("group", { name: /alérgic/ }).first()

@@ -1,9 +1,12 @@
 import {
+  type BOTTLE_ANSWERS,
+  type BRUSHER_ANSWERS,
   CIGARETTE_BAND_LABELS,
   CIGARETTE_BANDS,
   type CigaretteBand,
   clinicalProfileFor,
   composeDisplayName,
+  DECLARED_CHILD_CONDITION_OPTIONS,
   DECLARED_CONDITION_OPTIONS,
   DOC_TYPE_LABELS,
   EDUCATION_LEVEL_LABELS,
@@ -12,20 +15,24 @@ import {
   identityDocumentError,
   INSURANCE_TYPE_LABELS,
   type InsuranceType,
+  isChildAge,
   isMinor,
   isRealDate,
   KINSHIP,
   KINSHIP_LABELS,
   MARITAL_STATUS_LABELS,
+  type PACIFIER_ANSWERS,
   REFERRAL_KIND_LABELS,
   REFERRAL_KINDS,
   type RegistrationAnswers,
   type RegistrationConfig,
   REGISTRATION_FIELDS,
   type RegistrationFieldKey,
+  registrationFieldApplies,
   registrationFieldAsked,
   registrationHealthSection,
   SEX_LABELS,
+  type SWEETS_ANSWERS,
   validateDemographics,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
@@ -101,6 +108,10 @@ type Declared = "" | "none" | "recorded" | "unknown"
 type Relation = "" | "guardian" | "family" | "other"
 type YesNo = "" | "si" | "no"
 type YesNoUnknown = "" | "si" | "no" | "nose"
+type BottleAnswer = (typeof BOTTLE_ANSWERS)[number]
+type PacifierAnswer = (typeof PACIFIER_ANSWERS)[number]
+type SweetsAnswer = (typeof SWEETS_ANSWERS)[number]
+type BrusherAnswer = (typeof BRUSHER_ANSWERS)[number]
 
 interface Draft {
   respondent: Respondent
@@ -166,6 +177,12 @@ interface Draft {
   floss: YesNo
   bruxism: YesNoUnknown
   habits: string[]
+  /** «De pequeño» de un menor de 12, lo que cuenta quien lo cuida (odentIA). */
+  bottle: "" | BottleAnswer
+  pacifier: "" | PacifierAnswer
+  sweets: "" | SweetsAnswer
+  fluoride: YesNoUnknown
+  brusher: "" | BrusherAnswer
   /** latidIA (issue 229): lactancia, tabaco y alcohol. */
   breastfeeding: YesNo
   tobacco: "" | "nunca" | "fuma" | "dejo"
@@ -243,6 +260,11 @@ const EMPTY: Draft = {
   floss: "",
   bruxism: "",
   habits: [],
+  bottle: "",
+  pacifier: "",
+  sweets: "",
+  fluoride: "",
+  brusher: "",
   breastfeeding: "",
   tobacco: "",
   cigarettes: "",
@@ -291,6 +313,35 @@ const CIGARETTE_OPTIONS = CIGARETTE_BANDS.map((value) => ({
   label: CIGARETTE_BAND_LABELS[value].replace(/^./, (letter) => letter.toLocaleUpperCase("es")),
 }))
 const CONDITION_OPTIONS = DECLARED_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
+/** Las de un niño, para quien lo cuida: sin «presión alta» ni radioterapia. */
+const CHILD_CONDITION_OPTIONS = DECLARED_CHILD_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
+/** «De pequeño», con las palabras del dibujo de la mesa (entrega 7). */
+const BOTTLE_OPTIONS: ReadonlyArray<{ value: BottleAnswer; label: string }> = [
+  { value: "no", label: "No" },
+  { value: "si", label: "Sí" },
+  { value: "ya_no", label: "Ya no" },
+]
+const PACIFIER_OPTIONS: ReadonlyArray<{ value: PacifierAnswer; label: string }> = [
+  { value: "no", label: "No" },
+  { value: "chupon", label: "Chupón" },
+  { value: "dedo", label: "Dedo" },
+]
+const SWEETS_OPTIONS: ReadonlyArray<{ value: SweetsAnswer; label: string }> = [
+  { value: "casi_nunca", label: "Casi nunca" },
+  { value: "1_a_3", label: "1 a 3" },
+  { value: "4_o_mas", label: "4 o más" },
+]
+const FLUORIDE_OPTIONS: ReadonlyArray<{ value: Exclude<YesNoUnknown, "">; label: string }> = [
+  { value: "si", label: "Sí" },
+  { value: "no", label: "No" },
+  { value: "nose", label: "No sé" },
+]
+/** «Él solo» o «Ella sola» según su sexo; sin él, «Sin ayuda». */
+const brusherOptions = (sex: string): ReadonlyArray<{ value: BrusherAnswer; label: string }> => [
+  { value: "solo", label: sex === "F" ? "Ella sola" : sex === "M" ? "Él solo" : "Sin ayuda" },
+  { value: "adulto", label: "Un adulto" },
+  { value: "ambos", label: "Los dos" },
+]
 /** Sí, No o No sé de la entrevista, como lo guarda la ficha. */
 const INTERVIEW_OF: Record<Exclude<YesNoUnknown, "">, "si" | "no" | "no_sabe"> = { si: "si", no: "no", nose: "no_sabe" }
 const ALCOHOL_OPTIONS: ReadonlyArray<{ value: Exclude<Draft["alcohol"], "">; label: string }> = [
@@ -380,6 +431,11 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.dental.hiloDental", "dental", "floss"],
   ["health.dental.bruxismo", "dental", "bruxism"],
   ["health.dental.habitos", "dental", "habits"],
+  ["health.dental.biberon", "childhood", "bottle"],
+  ["health.dental.chupon", "childhood", "pacifier"],
+  ["health.dental.dulcesEntreComidas", "childhood", "sweets"],
+  ["health.dental.pastaConFluor", "childhood", "fluoride"],
+  ["health.dental.quienCepilla", "childhood", "brusher"],
   ["health.dental", "dental"],
   ["health.medical.lactancia", "history", "breastfeeding"],
   ["health.medical.tabaco", "habits", "tobacco"],
@@ -496,6 +552,10 @@ export interface RegistrationFill {
   hasRepresentative: boolean
   /** Su nombre, para saludarla. */
   firstName?: string | null
+  /** Sus años cumplidos: de un menor de 12 se le pregunta lo de un niño a quien lo cuida. */
+  age?: number | null
+  /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
+  respondentFirstName?: string | null
   /** Aún no aceptó el aviso de privacidad (registrada por teléfono, por ejemplo): se pide al final. */
   privacy?: boolean
   /** Nunca respondió lo de novedades y promociones: se pregunta al final. */
@@ -513,6 +573,7 @@ const HEALTH_ITEM_OF_STEP: Record<string, string> = {
   medicinas: "medicines",
   personales: "history",
   odontologicos: "dental",
+  ninez: "childhood",
   habitos: "habits",
 }
 /** El sexo en lo que llena la persona. */
@@ -638,13 +699,21 @@ export function RegistrationQuestionnaire({
   const wants = (key: string) => !fill || fillWants(fill, key)
   // Lo de un producto (`dental.*`, `medical.*`) solo en las clínicas de ese producto.
   const product = productUi().product
+  // Sus años: los de la fecha que se escribe o, en «Su enlace», los de su ficha.
+  const ageNow = fill && !isRealDate(draft.birthDate) ? (fill.age ?? null) : ageOn(draft.birthDate, today)
+  // Un niño (menor de 12): su salud se le pregunta a quien lo cuida, con ejemplos de niño (mesa del 13 nov, entrega 7).
+  const child = isChildAge(ageNow)
+  // A quién se le pregunta cada dato de salud: la misma regla del servidor (`registrationFieldApplies`).
+  const applies = (key: RegistrationFieldKey) =>
+    !HEALTH_KEYS.has(key) || registrationFieldApplies(key, { sex: draft.sex || null, age: ageNow })
   const asked = (key: RegistrationFieldKey) =>
     !fill
-      ? registrationFieldAsked(config, key, countryCode, product)
+      ? registrationFieldAsked(config, key, countryCode, product) && applies(key)
       : HEALTH_KEYS.has(key) || registrationHealthSection(key) !== null
         ? fill.health &&
           (!fill.healthKeys || fill.healthKeys.has(key)) &&
-          registrationFieldAsked(config, key, countryCode, product)
+          registrationFieldAsked(config, key, countryCode, product) &&
+          applies(key)
         : fillWants(fill, key)
   const required = (key: RegistrationFieldKey) => config.fields[key] === "required"
   // Menor sin representante legal: en «Su enlace» deja los datos de su madre, padre o tutor.
@@ -660,17 +729,21 @@ export function RegistrationQuestionnaire({
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
-  const age = ageOn(draft.birthDate, today)
   const docTypes = profile.documentTypes.map(({ code }) => ({
     value: code,
     label: DOC_TYPE_LABELS[code],
   }))
   const repDocType = (docTypes[0]?.value ?? "DNI") as IdentityDocType
   const countries = countryChoices(profile.country)
-  // «¿Cuándo nació Mateo?»: con su nombre en cuanto se sabe.
-  const first = draft.givenNames.trim().split(/\s+/)[0] ?? ""
+  // «¿Cuándo nació Mateo?»: con su nombre en cuanto se sabe (en «Su enlace», el de su ficha).
+  const first = draft.givenNames.trim().split(/\s+/)[0] || (fill?.firstName?.trim().split(/\s+/)[0] ?? "")
   const name = first || "la persona"
-  const you = (self: string, other: string) => (forOther ? other : self)
+  // A quien cuida a un niño se le habla a él, también en «Su enlace»: «¿Thiago tiene…?».
+  const aboutOther = forOther || (!!fill && child)
+  const you = (self: string, other: string) => (aboutOther ? other : self)
+  // Quien responde por el niño: «Lo respondes tú, Carla».
+  const caregiver = fill ? (fill.respondentFirstName?.trim() ?? "") : (draft.repName.trim().split(/\s+/)[0] ?? "")
+  const answeredBy = child ? (caregiver ? `Lo respondes tú, ${caregiver}.` : "Lo respondes tú, que lo cuidas.") : ""
   // Con el correo en el registro, basta el celular o el correo.
   const phoneRequired = !forOther && !asked("email") && wants("phone")
 
@@ -710,10 +783,17 @@ export function RegistrationQuestionnaire({
   const medicineKeys = ["anticoagulants", "boneMedicines", "medications"] as const
   const medicinesAsked = medicineKeys.some(asked)
   const medicinesRequired = medicineKeys.some((key) => asked(key) && required(key))
-  const pregnancyAsked =
-    asked("personal.embarazo") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
-  const breastfeedingAsked =
-    asked("medical.lactancia") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
+  // A mujeres de 12 a 55 años, y nunca a un niño: lo dice `applies`.
+  const pregnancyAsked = asked("personal.embarazo")
+  const breastfeedingAsked = asked("medical.lactancia")
+  // «Thiago de pequeño»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
+  const childhoodKeys = [
+    "dental.biberon",
+    "dental.chupon",
+    "dental.dulcesEntreComidas",
+    "dental.pastaConFluor",
+    "dental.quienCepilla",
+  ] as const
   const historyAsked =
     pregnancyAsked ||
     breastfeedingAsked ||
@@ -900,6 +980,12 @@ export function RegistrationQuestionnaire({
         ...(d.heartAntibiotic ? { antibioticoPrevio: INTERVIEW_OF[d.heartAntibiotic] } : {}),
       }
     if (asked("dental.problemaAnestesia") && d.anesthesia) dental.problemaAnestesia = INTERVIEW_OF[d.anesthesia]
+    // «De pequeño», con las claves de la entrevista de odentIA.
+    if (asked("dental.biberon") && d.bottle) dental.biberon = d.bottle
+    if (asked("dental.chupon") && d.pacifier) dental.chupon = d.pacifier
+    if (asked("dental.dulcesEntreComidas") && d.sweets) dental.dulcesEntreComidas = d.sweets
+    if (asked("dental.pastaConFluor") && d.fluoride) dental.pastaConFluor = INTERVIEW_OF[d.fluoride]
+    if (asked("dental.quienCepilla") && d.brusher) dental.quienCepilla = d.brusher
     if (Object.keys(dental).length) health.dental = dental
     type Medical = NonNullable<Health["medical"]>
     const medical: Medical = {}
@@ -1713,11 +1799,15 @@ export function RegistrationQuestionnaire({
           disabled={!healthAsked}
           title={you("Tu salud", `La salud de ${name}`)}
           description={
-            fill
-              ? healthRequired
-                ? "Ayuda a quien te atiende; lo revisa contigo en la cita."
-                : "Es opcional. Ayuda a quien te atiende; lo revisa contigo en la cita."
-              : "Así quien te atiende lo sabe antes de empezar."
+            child
+              ? fill
+                ? `${answeredBy} ${healthRequired ? "" : "Es opcional; "}${healthRequired ? "Lo" : "lo"} revisan contigo en la cita.`
+                : `${answeredBy} Así quien atiende a ${name} lo sabe antes de empezar.`
+              : fill
+                ? healthRequired
+                  ? "Ayuda a quien te atiende; lo revisa contigo en la cita."
+                  : "Es opcional. Ayuda a quien te atiende; lo revisa contigo en la cita."
+                : "Así quien te atiende lo sabe antes de empezar."
           }
           saysOptional={!!fill}
           onSkip={() =>
@@ -1798,7 +1888,12 @@ export function RegistrationQuestionnaire({
                 "¿Tienes alguna de estas enfermedades?",
                 `¿${first || "La persona"} tiene alguna de estas enfermedades?`,
               )}
-              hint="Diabetes, presión alta, problemas de sangrado, radioterapia en cabeza o cuello…"
+              // A quien cuida a un niño, con ejemplos de niño: nunca «diabetes, presión alta».
+              hint={
+                child
+                  ? "Por ejemplo, asma, convulsiones o problemas de sangrado."
+                  : "Diabetes, presión alta, problemas de sangrado, radioterapia en cabeza o cuello…"
+              }
               detailLabel="Otra: ¿cuál? Si son varias, sepáralas con comas."
               state={draft.conditions}
               text={draft.conditionsText}
@@ -1808,7 +1903,7 @@ export function RegistrationQuestionnaire({
                 <MultiChoiceButtons
                   label="Enfermedades"
                   value={draft.conditionsPicked}
-                  options={CONDITION_OPTIONS}
+                  options={child ? CHILD_CONDITION_OPTIONS : CONDITION_OPTIONS}
                   onChange={(value) => set({ conditionsPicked: value })}
                   columns={2}
                 />
@@ -2130,6 +2225,106 @@ export function RegistrationQuestionnaire({
               onAnswer={(value) => set({ transfusion: value })}
               onText={(value) => set({ transfusionText: value })}
             />
+          ) : null}
+        </Question>
+
+        <Question
+          name="childhood"
+          grouped
+          disabled={!childhoodKeys.some(asked)}
+          title={first ? `${first} de pequeño` : "De pequeño"}
+          description={`${answeredBy} Ayuda a cuidar sus dientes.`}
+          onSkip={() => set({ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" })}
+        >
+          {asked("dental.biberon") ? (
+            <Labeled name="bottle" group label={first ? `¿${first} toma biberón o pecho para dormir?` : "¿Toma biberón o pecho para dormir?"} optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.bottle || null}
+                  options={BOTTLE_OPTIONS}
+                  onChange={(value) => set({ bottle: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {asked("dental.chupon") ? (
+            <Labeled name="pacifier" group label="¿Usa chupón o se chupa el dedo?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.pacifier || null}
+                  options={PACIFIER_OPTIONS}
+                  onChange={(value) => set({ pacifier: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {asked("dental.dulcesEntreComidas") ? (
+            <Labeled
+              name="sweets"
+              group
+              label="¿Cuántas veces al día come dulces o toma jugos entre comidas?"
+              optional
+            >
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.sweets || null}
+                  options={SWEETS_OPTIONS}
+                  onChange={(value) => set({ sweets: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {asked("dental.pastaConFluor") ? (
+            <Labeled name="fluoride" group label="¿Su pasta de dientes tiene flúor?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.fluoride || null}
+                  options={FLUORIDE_OPTIONS}
+                  onChange={(value) => set({ fluoride: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {asked("dental.quienCepilla") ? (
+            <Labeled name="brusher" group label="¿Quién le cepilla los dientes?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.brusher || null}
+                  options={brusherOptions(draft.sex)}
+                  onChange={(value) => set({ brusher: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
           ) : null}
         </Question>
 
@@ -2532,7 +2727,11 @@ export function RegistrationQuestionnaire({
               checked={draft.privacy}
               onChange={(event) => set({ privacy: event.target.checked })}
             >
-              Autorizo el tratamiento de mis datos personales para el registro en la clínica.
+              {/* Quien registra a otra persona da los datos de los dos: la casilla los nombra. Las palabras
+                  legales del permiso son las de siempre (pendiente legal de la mesa del 13 nov). */}
+              {forOther
+                ? `Autorizo el tratamiento de los datos de ${first || "la persona"} y los míos para el registro en la clínica.`
+                : "Autorizo el tratamiento de mis datos personales para el registro en la clínica."}
             </QuestionnaireChoice>
           </QuestionnaireChoices>
           <FieldMessage name="privacy" />
