@@ -1983,7 +1983,7 @@ export type ListedFormResponse = FormResponseRow & {
    * sigan siendo esas (si alguien las cambia a mano, ya son suyas): por pregunta,
    * quién la aceptó y cuándo.
    */
-  clioAccepted: Record<string, { by: string | null; at: Date }>
+  clioAccepted: Record<string, { by: string | null; at: Date; atSign?: true }>
 }
 
 export async function listFormResponses(
@@ -2073,13 +2073,16 @@ export async function listFormResponses(
           ),
         )
     : []
-  const clioAccepted = (response: FormResponseRow): Record<string, { by: string | null; at: Date }> => {
+  const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] => {
     const answers = (response.answers ?? {}) as Record<string, unknown>
-    const marks: Record<string, { by: string | null; at: Date }> = {}
+    const marks: ListedFormResponse["clioAccepted"] = {}
     for (const item of accepted) {
       const fieldId = item.payload["fieldId"]
       if (item.payload["responseId"] !== response.id || typeof fieldId !== "string" || !item.at) continue
-      if (JSON.stringify(answers[fieldId] ?? null) === JSON.stringify(item.payload["value"] ?? null)) marks[fieldId] = { by: item.by, at: item.at }
+      // Entró con la firma de la atención: así lo dice la ficha.
+      const atSign = (item.payload["_meta"] as { atSign?: boolean } | undefined)?.atSign === true
+      if (JSON.stringify(answers[fieldId] ?? null) === JSON.stringify(item.payload["value"] ?? null))
+        marks[fieldId] = { by: item.by, at: item.at, ...(atSign ? { atSign: true as const } : {}) }
     }
     return marks
   }

@@ -379,6 +379,14 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(await answersNow()).toEqual({ clase_molar_derecha: "Clase II división 2" })
   })
 
+  it("lo que entra al firmar queda dicho en la ficha: «confirmó al firmar»", async () => {
+    const { save, fx, form } = await startedForm()
+    const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, saved.suggestions[0]!.id, { expectedValue: 6, atSign: true }))
+    const listed = await fx.run((tx) => listFormResponses(tx, ORG, { patientId: fx.patient.id }))
+    expect(listed.find((row) => row.id === form.id)?.clioAccepted["overjet"]).toMatchObject({ by: fx.actor, atSign: true })
+  })
+
   it("anular la atención descarta lo que Clío proponía", async () => {
     const { save, fx } = await startedForm()
     await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])

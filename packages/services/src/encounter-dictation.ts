@@ -162,6 +162,8 @@ interface SuggestionMeta {
    * `entityId` propio porque no lo creó el dictado.
    */
   onFile?: string | undefined
+  /** Una respuesta de ficha que entró con la firma: la ficha dice «confirmó al firmar». */
+  atSign?: true | undefined
 }
 const META = "_meta"
 
@@ -2122,8 +2124,11 @@ export async function confirmDictationSuggestion(
   patientId: string,
   encounterId: string,
   id: string,
-  /** Lo que veía quien confirma: una pausa pudo cambiar la propuesta con el mismo id mientras tanto. */
-  options: { expectedValue?: unknown } = {},
+  /**
+   * `expectedValue`: lo que veía quien confirma (una pausa pudo cambiar la propuesta con el
+   * mismo id mientras tanto). `atSign`: se confirma al firmar la atención.
+   */
+  options: { expectedValue?: unknown; atSign?: boolean } = {},
 ): Promise<DictationSuggestion> {
   const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
@@ -2248,6 +2253,7 @@ export async function confirmDictationSuggestion(
       status: "confirmada",
       entityId,
       ...(onFile ? { payload: withMeta(parts.data, { ...parts.meta, onFile: onFile.id }), note: onFile.note } : {}),
+      ...(row.kind === "ficha" && options.atSign ? { payload: withMeta(parts.data, { ...parts.meta, atSign: true }) } : {}),
       decidedBy: actorUserId,
       decidedAt: new Date(),
       updatedAt: new Date(),

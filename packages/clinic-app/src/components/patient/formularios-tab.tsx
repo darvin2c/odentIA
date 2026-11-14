@@ -916,7 +916,7 @@ function StaffResponseDetail({
                         ) : null}
                         {marked ? (
                           <p className="text-xs text-muted-foreground">
-                            {CLINICAL_NAME} · confirmó {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
+                            {CLINICAL_NAME} · {mark.atSign ? "confirmó al firmar" : "confirmó"} {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
                           </p>
                         ) : null}
                         {previous && before ? (

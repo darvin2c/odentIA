@@ -66,12 +66,17 @@ const CONTEXT_CHARS = 600
  */
 export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha"
 /** Lo que se confirma al firmar si está marcado: también las respuestas de ficha. */
-const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && item.status === "lista")
+export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && item.status === "lista")
 /** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
 const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
-/** Confirmar una respuesta de ficha manda lo que se veía: si una pausa la cambió, el servidor avisa. */
-const confirmBody = (item: DictationSuggestion): RequestInit =>
-  item.kind === "ficha" ? { method: "POST", body: JSON.stringify({ expectedValue: item.payload["value"] ?? null }) } : { method: "POST" }
+/**
+ * Confirmar una respuesta de ficha manda lo que se veía (si una pausa la cambió, el servidor
+ * avisa) y si entra al firmar: la ficha dice «confirmó al firmar».
+ */
+const confirmBody = (item: DictationSuggestion, atSign = false): RequestInit =>
+  item.kind === "ficha"
+    ? { method: "POST", body: JSON.stringify({ expectedValue: item.payload["value"] ?? null, ...(atSign ? { atSign: true } : {}) }) }
+    : { method: "POST" }
 
 /** Espera antes del único reintento automático de un tramo que no se pudo ordenar. */
 const RETRY_MS = 3000
@@ -541,7 +546,7 @@ export function useDictationSession({
         // Las de una ficha, en su orden: la pregunta de la que depende otra entra primero.
         for (const item of inFormOrder(suggestions.filter((candidate) => ids.includes(candidate.id) && confirmableAtSign(candidate)))) {
           current = item
-          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item))
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item, true))
           // La pregunta de la ficha que alguien respondió a mano: queda la suya y no frena la firma.
           if (response?.data?.status === "descartada") {
             if (response.data.note) toast(response.data.note)

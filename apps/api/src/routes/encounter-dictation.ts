@@ -48,7 +48,10 @@ const dictateInput = z
 // Lo que el odontólogo puede corregir de una sugerencia; el servicio vuelve a validarla contra su operación.
 /** Al confirmar una respuesta de ficha: el valor que se veía. */
 const confirmInput = z
-  .object({ expectedValue: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(200)).max(40), z.null()]).optional() })
+  .object({
+    expectedValue: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(200)).max(40), z.null()]).optional(),
+    atSign: z.boolean().optional(),
+  })
   .strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
 

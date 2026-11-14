@@ -131,7 +131,7 @@ export interface FormResponse {
    * Lo que propuso Clío al dictar y aceptó una persona, mientras siga siendo eso
    * (si alguien lo cambia a mano, ya es suyo): por pregunta, quién y cuándo.
    */
-  clioAccepted?: Record<string, { by: string | null; at: string }>
+  clioAccepted?: Record<string, { by: string | null; at: string; atSign?: boolean }>
 }
 
 /** El paciente lo envió y nadie del equipo lo revisó todavía. */

@@ -1120,12 +1120,17 @@ export function openFormsWords(forms: ReadonlyArray<{ title: string }>): { title
 export function OpenFormsLine({
   forms,
   onComplete,
+  finishing,
+  onFinishToggle,
   disabled = false,
   id,
 }: {
   forms: ReadonlyArray<{ id: string; title: string }>
   /** «Completar ahora»: cierra el cierre y abre ese formulario. */
   onComplete?: (formId: string) => void
+  /** Las que se finalizan con la firma, como quedaron («Finalizarla al firmar»). */
+  finishing?: readonly string[]
+  onFinishToggle?: (formId: string, finish: boolean) => void
   disabled?: boolean
   id?: string
 }): React.JSX.Element | null {
@@ -1156,6 +1161,19 @@ export function OpenFormsLine({
               {forms.length === 1 ? "Completar ahora" : `Completar «${form.title}»`}
             </Button>
           ))}
+        </span>
+      ) : null}
+      {onFinishToggle ? (
+        <span className="flex basis-full flex-col gap-1">
+          {forms.map((form) => {
+            const checked = finishing?.includes(form.id) ?? false
+            return (
+              <label key={form.id} className="flex items-center gap-2 text-sm">
+                <Checkbox checked={checked} disabled={disabled} onCheckedChange={(value) => onFinishToggle(form.id, value === true)} />
+                {forms.length === 1 ? "Finalizarla al firmar, como está" : `Finalizar «${form.title}» al firmar, como está`}
+              </label>
+            )
+          })}
         </span>
       ) : null}
     </div>
@@ -1195,6 +1213,9 @@ export function EncounterClosingDialog({
   healthGaps = [],
   onCompleteHealth,
   onCompleteForm,
+  finishingForms,
+  onFinishFormToggle,
+  dictated = null,
 }: {
   open: boolean
   form: ClosingForm
@@ -1256,6 +1277,11 @@ export function EncounterClosingDialog({
   onCompleteHealth?: () => void
   /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
   onCompleteForm?: (formId: string) => void
+  /** Las fichas a medias que se finalizan con la firma («Finalizarla al firmar»). */
+  finishingForms?: readonly string[]
+  onFinishFormToggle?: (formId: string, finish: boolean) => void
+  /** Lo dictado sin confirmar, marcado para entrar con la firma: el mismo cierre, sin otro diálogo. */
+  dictated?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
   // Quien no ve la caja no recibe lo que debe en «Atención finalizada»: no se le promete (QA antes de entregar).
@@ -1346,10 +1372,12 @@ export function EncounterClosingDialog({
                 onComplete={onCompleteHealth}
                 disabled={busy}
               />
+              {dictated}
               <OpenFormsLine
                 id={`${ids}-forms`}
                 forms={closing?.openForms ?? []}
                 onComplete={onCompleteForm}
+                {...(onFinishFormToggle ? { finishing: finishingForms ?? [], onFinishToggle: onFinishFormToggle } : {})}
                 disabled={busy}
               />
               {consents.map((need) => {
