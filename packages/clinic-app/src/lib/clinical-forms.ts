@@ -114,11 +114,18 @@ export function isDeclaredUnreviewed(response: FormResponse): boolean {
  * Lo que envió el paciente y va arriba al abrir esta atención: lo que sigue sin
  * revisar y lo que se revisó aquí, que no desaparece.
  */
-export function declaredFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+export function declaredFormsOfEncounter(
+  forms: readonly FormResponse[],
+  encounterId: string,
+  /** Lo que ya estaba a la vista: si otra persona lo revisa o lo descarta, no desaparece, dice quién (QA del 14 nov). */
+  onScreen: ReadonlySet<string> = new Set(),
+): FormResponse[] {
   return forms.filter(
     (form) =>
       form.source === "portal" &&
-      (isDeclaredUnreviewed(form) || (form.status === "finalizado" && form.encounterId === encounterId)),
+      (isDeclaredUnreviewed(form) ||
+        (form.status === "finalizado" && form.encounterId === encounterId) ||
+        onScreen.has(form.id)),
   )
 }
 

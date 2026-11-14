@@ -120,6 +120,9 @@ describe("lo que envió el paciente, para leer", () => {
     const all = [sent, reviewedHere, reviewedElsewhere, teamForm]
     // Arriba: lo que sigue sin revisar y lo que se revisó en esta atención.
     expect(declaredFormsOfEncounter(all, "e1").map((form) => form.id)).toEqual(["r1", "r2"])
+    // Lo que ya estaba a la vista y otra persona revisó sin ligarlo a esta atención no desaparece
+    // de golpe: sigue ahí para decir quién lo revisó (QA del 14 nov, H1 de desarrollo).
+    expect(declaredFormsOfEncounter(all, "e1", new Set(["r3"])).map((form) => form.id)).toEqual(["r1", "r2", "r3"])
     // En la lista de documentos de la atención, solo lo que llena el equipo.
     expect(teamFormsOfEncounter(all, "e1").map((form) => form.id)).toEqual(["r4"])
   })
