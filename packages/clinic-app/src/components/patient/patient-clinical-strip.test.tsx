@@ -285,3 +285,44 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(chart).not.toContain("no se le preguntó")
   })
 })
+
+// QA del 14 nov (causa raíz): el corazón y la anestesia que dijo el paciente iban a la entrevista sin
+// quién lo dijo y no salían arriba. Ahora salen, dentro de la caja de quien lo dijo, si nadie lo revisó.
+describe("lo que dijo de su corazón y de la anestesia", () => {
+  const base = bareProduct("dental")
+  const withAlerts = {
+    ...base,
+    health: {
+      ...base.health,
+      alerts: () => [
+        { keys: ["corazon" as const, "antibiotico" as const], label: "Corazón: válvula, de nacimiento o endocarditis" },
+        { keys: ["anestesia" as const], label: "Tuvo problemas con la anestesia o sangró tras una extracción" },
+      ],
+    },
+  }
+  const plain: Detail = { activeAllergies: [], activeConditions: [], currentMedications: [], allergyReview: "none" }
+  const answers = { latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" } }
+
+  it("lo dicho y sin revisar va en su caja; lo que ya revisó el equipo va afuera", () => {
+    declareProduct(withAlerts)
+    try {
+      const said = renderToStaticMarkup(
+        <PatientClinicalStrip
+          detail={plain}
+          sex="M"
+          health={health([group({ interview: ["corazon"] })], answers as Partial<PatientHealth>)}
+        />,
+      )
+      const page = said.replace(/<[^>]+>/g, "|")
+      expect(page).toContain("Lo dijo él el 13 nov, sin revisar")
+      expect(page.indexOf("Corazón: válvula")).toBeGreaterThan(page.indexOf("Lo dijo él el 13 nov"))
+      // La anestesia no la dijo en esta declaración: la anotó el equipo y va fuera de la caja.
+      expect(page).toContain("Tuvo problemas con la anestesia")
+      const reviewed = text(<PatientClinicalStrip detail={plain} sex="M" health={health([], answers as Partial<PatientHealth>)} />)
+      expect(reviewed).toContain("Corazón: válvula")
+      expect(reviewed).not.toContain("Lo dijo él")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
+  })
+})

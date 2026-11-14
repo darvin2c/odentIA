@@ -768,7 +768,15 @@ export function AntecedentesTab({
           sex={sex}
         />
       )}
-      <productHealth.Summary answers={(health.latestAnamnesis?.answers ?? {}) as Rec} />
+      <productHealth.Summary
+        answers={(health.latestAnamnesis?.answers ?? {}) as Rec}
+        // Lo que dijo la persona y nadie revisó, con su marca dato por dato (QA del 14 nov, causa raíz).
+        marks={Object.fromEntries(
+          (health.declared ?? []).flatMap((group) =>
+            (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
+          ),
+        )}
+      />
 
       <FormDrawer
         {...surface}

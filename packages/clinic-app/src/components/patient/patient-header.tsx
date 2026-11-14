@@ -58,6 +58,7 @@ import {
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import { personHeaderRules } from "../../lib/screen-rules"
+import { productUi } from "../../product/product-ui"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { useOpenRecordPanel } from "../person/record-panel"
@@ -211,6 +212,16 @@ export function PatientClinicalStrip({
           group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
       ),
     })),
+    // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
+    // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
+    ...(health?.latestAnamnesis
+      ? (productUi().health.alerts?.((health.latestAnamnesis.answers ?? {}) as Record<string, unknown>) ?? []).map((alert) => ({
+          id: `entrevista-${alert.keys[0]}`,
+          label: alert.label,
+          tone: "warning" as const,
+          group: groupIndex((group) => alert.keys.some((key) => group.interview?.includes(key))),
+        }))
+      : []),
   ]
   // Lo grave primero, sea de quien sea (QA del 14 nov, H1): las alergias severas que confirmó el
   // equipo; después cada declaración sin revisar, con su severa delante; después lo demás.

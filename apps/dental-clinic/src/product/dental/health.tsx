@@ -8,9 +8,12 @@ import {
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
+  type DentalInterviewItem,
   dentalInterviewErrors,
-  dentalInterviewLines,
+  dentalInterviewItems,
 } from "@odentia/dental"
+import { shortDay } from "@odentia/clinic-app/lib/declared-health"
+import type { DeclaredInterviewKey } from "@odentia/clinic-app/lib/patients"
 import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS } from "@odentia/clinical"
 import { regionToday } from "@odentia/ui-patterns"
 import {
@@ -428,17 +431,41 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
   )
 }
 
-/** Lo guardado del corazón, la anestesia, el tabaco y la lactancia, debajo del resumen de antecedentes. */
-function DentalHistorySummary({ answers }: { answers: Rec }) {
-  const lines = dentalInterviewLines(answers)
-  if (lines.length === 0) return null
+/** Quién dijo cada dato: el del corazón lo dicen dos preguntas (la válvula y el antibiótico). */
+const ITEM_KEYS: Record<DentalInterviewItem["key"], DeclaredInterviewKey[]> = {
+  corazon: ["corazon", "antibiotico"],
+  anestesia: ["anestesia"],
+  tabaco: ["tabaco"],
+  lactancia: ["lactancia"],
+}
+
+/** La lactancia con el día en que se dijo, como el embarazo. */
+const withDay = (item: DentalInterviewItem, text: string): string => {
+  const day = item.saidOn ? shortDay(item.saidOn) : ""
+  return day ? `${text} (lo dijo el ${day})` : text
+}
+
+/**
+ * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, debajo del resumen de
+ * antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato: lo del equipo
+ * queda sin ella (QA del 14 nov, causa raíz).
+ */
+function DentalHistorySummary({ answers, marks }: { answers: Rec; marks?: Partial<Record<DeclaredInterviewKey, string>> }) {
+  const items = dentalInterviewItems(answers)
+  if (items.length === 0) return null
   return (
     <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
       <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
       <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {lines.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
+        {items.map((item) => {
+          const mark = ITEM_KEYS[item.key].map((key) => marks?.[key]).find(Boolean)
+          return (
+            <li key={item.key}>
+              {withDay(item, item.text)}
+              {mark ? <span className="text-warning"> · {mark}</span> : null}
+            </li>
+          )
+        })}
       </ul>
     </section>
   )
@@ -456,4 +483,8 @@ export const dentalHealth: ProductHealthUi = {
   ),
   validate: (answers) => ({ ...dentalInterviewErrors(answers), ...dentalHabitsErrors(answers) }),
   Summary: (props) => <DentalHistorySummary {...props} />,
+  alerts: (answers) =>
+    dentalInterviewItems(answers).flatMap((item) =>
+      item.alert ? [{ keys: ITEM_KEYS[item.key], label: withDay(item, item.alert) }] : [],
+    ),
 }

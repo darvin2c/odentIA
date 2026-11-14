@@ -17,7 +17,7 @@ import type {
 } from "../components/patient/dictation-session"
 import type { ClosingCheck } from "../lib/encounters"
 import type { PatientAreaId } from "../lib/patient-areas"
-import type { EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
+import type { DeclaredInterviewKey, EncounterDetail, PatientFull, SiteFinding, TimelineItem } from "../lib/patients"
 import type { ServiceToothAnatomy, ToothAnatomySibling } from "../lib/services"
 
 /**
@@ -151,8 +151,16 @@ export interface ProductHealthUi {
    * de la clínica (YYYY-MM-DD).
    */
   validate(answers: Record<string, unknown>, today: string): SubFieldErrors
-  /** Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. */
-  Summary(props: { answers: Record<string, unknown> }): ReactNode
+  /**
+   * Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. `marks`: la marca de lo
+   * que dijo la persona y sigue sin revisar, por dato («Lo dijo ella el 14 nov, sin revisar»).
+   */
+  Summary(props: { answers: Record<string, unknown>; marks?: Partial<Record<DeclaredInterviewKey, string>> }): ReactNode
+  /**
+   * Lo suyo de la entrevista que va arriba de la ficha y de la atención, con la clave de quién lo
+   * dijo (`DeclaredInterviewKey`): el corazón, la anestesia, la lactancia. Sin esto, nada.
+   */
+  alerts?(answers: Record<string, unknown>): Array<{ keys: DeclaredInterviewKey[]; label: string }>
 }
 
 export interface InterviewSectionsProps {

@@ -228,9 +228,14 @@ export interface DeclaredHealthGroup {
   conditions: string[]
   medications: string[]
   pregnancy: boolean
+  /** Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (el corazón, la anestesia…). */
+  interview?: DeclaredInterviewKey[]
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
+
+/** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
+export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "lactancia"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {

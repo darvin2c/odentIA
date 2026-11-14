@@ -26,6 +26,7 @@ import {
   declaredAllergiesByPatient,
   getPatientHealth,
   markHealthDenied,
+  recordHealthDeclaration,
   savePatientHealth,
 } from "./clinical.js"
 import { ServiceError } from "./errors.js"
@@ -819,4 +820,43 @@ it("si dice que dejó de fumar, el «cuántos al día» de antes se quita y lo d
   const answers = health.latestAnamnesis?.answers as Record<string, Record<string, unknown>>
   expect(answers["habitos"]).toEqual({ tabaco: "dejo" })
   expect(answers["antecedentesOdontologicos"]).toMatchObject({ problemaAnestesia: "si" })
+})
+
+// QA del 14 nov (causa raíz): el corazón, la anestesia, el tabaco y la lactancia que dijo iban a la
+// entrevista sin quién lo dijo. Ahora llevan su declaración, como el embarazo, hasta que el equipo revisa.
+it("lo que dijo del corazón, la anestesia y la lactancia queda como dicho por ella hasta que el equipo revisa", async () => {
+  const f = await clinicalFixture()
+  const berta = await person(f, "Berta", "Válvula")
+  const declared = {
+    dental: { corazon: { riesgoEndocarditis: "si" as const, antibioticoPrevio: "si" as const }, problemaAnestesia: "no_sabe" as const },
+    medical: { lactancia: true },
+  }
+  await f.run(async (tx) => {
+    await addDeclaredHealth(tx, ORG, null, berta.patientId, declared, {
+      entity: "registration_hold",
+      entityId: berta.patientId,
+      at: new Date(),
+    })
+    await recordHealthDeclaration(tx, ORG, berta.patientId, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  const said = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(said.declared).toHaveLength(1)
+  expect(said.declared[0]?.by).toMatchObject({ kind: "patient" })
+  expect([...(said.declared[0]?.interview ?? [])].sort()).toEqual(["anestesia", "antibiotico", "corazon", "lactancia"])
+  // El equipo lo revisa y guarda: ya no es «lo dijo ella, sin revisar».
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, berta.patientId, {
+      expectedRevision: said.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: said.latestAnamnesis!.version, answers: said.latestAnamnesis!.answers as Record<string, unknown> },
+    }),
+  )
+  const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(reviewed.declared.flatMap((group) => group.interview)).toEqual([])
 })

@@ -317,8 +317,37 @@ export interface DeclaredHealthGroup {
   medications: string[]
   /** El embarazo de la entrevista lo dijo en esta declaración y sigue sin revisar. */
   pregnancy: boolean
+  /**
+   * Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (`DECLARED_INTERVIEW`):
+   * el corazón, el antibiótico, la anestesia, el tabaco y la lactancia, como el embarazo.
+   */
+  interview: DeclaredInterviewKey[]
   /** Su «No» a un grupo: lo dijo quien declaró, no lo preguntó ni lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
+}
+
+/**
+ * Lo de la entrevista que puede decir la persona (entrega 6, QA del 14 nov, causa raíz): dónde lo
+ * dice su declaración y dónde queda en la entrevista. Con eso cada dato sabe quién lo dijo y cuándo,
+ * como las alergias y las medicinas, y no se lee como anotado por el equipo.
+ */
+export const DECLARED_INTERVIEW = {
+  corazon: { said: ["dental", "corazon", "riesgoEndocarditis"], kept: ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"] },
+  antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
+  anestesia: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
+  tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
+  lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
+} as const
+export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
+
+/** Lo que hay en `value` siguiendo `path`, o undefined. */
+function atPath(value: unknown, path: readonly string[]): unknown {
+  let at = value
+  for (const step of path) {
+    if (!at || typeof at !== "object" || Array.isArray(at)) return undefined
+    at = (at as Record<string, unknown>)[step]
+  }
+  return at
 }
 
 /** Una declaración de salud como llegó: no cambia aunque el equipo corrija lo vigente. */
@@ -793,6 +822,7 @@ function declaredGroupsOf(input: {
         conditions: [],
         medications: [],
         pregnancy: false,
+        interview: [],
         saidNo: { allergies: false, conditions: false, medications: false },
       }
       groups.set(key, group)
@@ -817,6 +847,14 @@ function declaredGroupsOf(input: {
       // El embarazo vigente lo dijo la última declaración que lo respondió.
       const said = declarations.find((row) => typeof row.health.personal?.embarazo === "boolean")
       groupOf(said, latest.createdAt).pregnancy = true
+    }
+    if (latest && sinceStaff(latest.createdAt)) {
+      // Cada dato de la entrevista que está y que dijo una declaración: de la última que lo respondió.
+      for (const [key, where] of Object.entries(DECLARED_INTERVIEW) as Array<[DeclaredInterviewKey, (typeof DECLARED_INTERVIEW)[DeclaredInterviewKey]]>) {
+        if (atPath(latest.answers, where.kept) === undefined) continue
+        const said = declarations.find((row) => atPath(row.health, where.said) !== undefined)
+        if (said) groupOf(said, latest.createdAt).interview.push(key)
+      }
     }
   }
   // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
