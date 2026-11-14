@@ -2823,6 +2823,8 @@ export function RegistrationQuestionnaire({
             {fill.privacy ? (
               <PrivacyAccept
                 clinicName={fill.clinicName ?? null}
+                // Quien responde por otra persona (la mamá de Thiago) acepta por los dos, como en el registro.
+                forName={caregiver ? first || null : null}
                 notice={config.privacyNotice}
                 checked={draft.privacy}
                 onChange={(privacy) => set({ privacy })}
@@ -3341,11 +3343,14 @@ function Carry() {
  */
 function PrivacyAccept({
   clinicName,
+  forName,
   notice,
   checked,
   onChange,
 }: {
   clinicName: string | null
+  /** De quién más son los datos, si responde por otra persona: «para los datos de Thiago y los míos». */
+  forName?: string | null
   notice: string
   checked: boolean
   onChange: (accepted: boolean) => void
@@ -3368,7 +3373,7 @@ function PrivacyAccept({
             />
             <div className="flex min-w-0 flex-col items-start">
               <label htmlFor={control.id} className="flex min-h-11 cursor-pointer items-center text-sm">
-                {clinicName ? `Acepto el aviso de privacidad de ${clinicName}.` : "Acepto el aviso de privacidad."}
+                {`Acepto el aviso de privacidad${clinicName ? ` de ${clinicName}` : ""}${forName ? ` para los datos de ${forName} y los míos` : ""}.`}
               </label>
               {notice.trim() ? (
                 <Button
