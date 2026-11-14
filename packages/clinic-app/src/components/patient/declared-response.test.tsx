@@ -9,7 +9,7 @@ import {
   teamFormsOfEncounter,
 } from "../../lib/clinical-forms"
 import { ApiError } from "../../lib/api"
-import { alreadySettled, DeclaredResponse, declaredAnswerText, reviewedLine, reviewedWords, sentWords } from "./declared-response"
+import { alreadySettled, correctionLostWords, DeclaredResponse, declaredAnswerText, reviewedLine, reviewedWords, sentWords } from "./declared-response"
 import { ResponseDetail } from "./formularios-tab"
 
 // Las fechas en el formato de la clínica, no en el de la máquina que corre la prueba (el CI está en inglés).
@@ -81,6 +81,14 @@ describe("lo que envió el paciente, para leer", () => {
     // Ya no se «completa» ni se «pasa a Antecedentes».
     expect(page).not.toContain("Pasar a Antecedentes")
     expect(page).not.toContain("Finalizar")
+  })
+
+  // La corrección se guarda con su botón, sin el `submit` del panel: el panel lateral sabe por
+  // `useDraftSaved` si quedó algo a medias, y solo entonces pregunta al salir.
+  it("la corrección a medias avisa al salir del panel; guardada, cancelada o sin texto, no", () => {
+    expect(correctionLostWords("La alergia es a la amoxicilina", "")).toBe("Se pierde la corrección que escribiste y no guardaste.")
+    expect(correctionLostWords("", "")).toBeNull()
+    expect(correctionLostWords("   ", "  ")).toBeNull()
   })
 
   it("dice quién lo envió y por dónde, solo con lo que quedó guardado", () => {

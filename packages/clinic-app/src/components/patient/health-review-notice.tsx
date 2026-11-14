@@ -1,3 +1,4 @@
+import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -14,6 +15,7 @@ import {
   type PatientHealth,
   unaskedHealthGroups,
 } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 import { AllergyFormDrawer } from "./allergies-card"
 import { useOpenWide } from "./wide-section"
 
@@ -100,6 +102,7 @@ export function HealthReviewNotice({
   const today = clinicToday()
   const pregnancy = health.pregnancy ?? null
   // Una lista por declaración: cada cosa con quien la dijo y su día, sin juntar lo de dos fechas.
+  const lastGroup = (health.declared ?? []).at(-1)
   const saidGroups = (health.declared ?? []).map((group) => {
     const no = saidNoWords(group.by, sex).toLocaleLowerCase("es")
     const rows: Array<{ label: string; value: string }> = []
@@ -130,13 +133,38 @@ export function HealthReviewNotice({
     const saidMedications = health.medications.filter(
       (row) => group.medications.includes(row.id) && isCurrentMedication(row, today),
     )
-    if (saidMedications.length > 0)
-      rows.push({ label: "Medicinas", value: saidMedications.map((row) => row.name).join(", ") })
-    else if (group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
+    // Lo que tiene marca (anticoagulante, huesos) va en su propia fila, como arriba de la ficha.
+    for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
+      const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
+      const label = key === "anticoagulants" ? "Anticoagulante" : "Medicina para los huesos"
+      if (inClass.length > 0)
+        rows.push({
+          label,
+          // «Anticoagulante · Anticoagulante (no dijo cuál)» se leía dos veces (B9): sin nombre, «no dijo cuál».
+          value: inClass
+            .map((row) => (row.name === MEDICATION_CLASSES[key].unnamed ? "no dijo cuál" : [row.name, row.dose].filter(Boolean).join(" ")))
+            .join(", "),
+        })
+      else if (group === lastGroup) {
+        // Su «No» o su «No sé» a la clase también se revisa con ella (B9), en su última declaración.
+        const known = health.medicineClasses?.[key]
+        if (known?.said && known.answer === "unknown") rows.push({ label, value: "no sabe" })
+        else if (known?.said && known.answer === "no") rows.push({ label, value: no })
+      }
+    }
+    const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
+    if (otherMedications.length > 0)
+      rows.push({ label: "Medicinas", value: otherMedications.map((row) => row.name).join(", ") })
+    else if (saidMedications.length === 0 && group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
     const saidConditions = health.conditions.filter((row) => group.conditions.includes(row.id) && row.status === "activa")
     if (saidConditions.length > 0)
       rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
     else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
+    // El corazón, la anestesia, el tabaco y la lactancia que dijo en esta declaración (QA del 14 nov).
+    const interview = group.interview ?? []
+    if (interview.length > 0)
+      for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? [])
+        if (row.keys.some((key) => interview.includes(key))) rows.push({ label: row.label, value: row.value })
     return { title: declaredMarkWords(group.by, group.at, sex), rows }
   })
   const shownGroups = saidGroups.filter((group) => group.rows.length > 0)

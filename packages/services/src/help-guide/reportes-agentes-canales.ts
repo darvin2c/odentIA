@@ -75,7 +75,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "reportes-de-donde-vienen",
         q: "¿De dónde vienen mis pacientes?",
-        a: "En Reportes › Pacientes. «Por dónde nos buscaron» cuenta el canal de la primera conversación y cuántos de ellos vinieron; «Recepción» es llamada o en persona. «Cómo nos conocieron» es lo que respondieron los pacientes nuevos al registrarse; si muchos quedan sin respuesta, «Revisar el registro» lleva a Configuración › Registro de pacientes.",
+        a: "En Reportes › Pacientes. «Por dónde nos buscaron» cuenta el canal de la primera conversación y cuántos de ellos vinieron; «Recepción» es llamada o en persona. «Cómo nos conocieron» es lo que respondieron los pacientes nuevos al registrarse; si muchos quedan sin respuesta, «Revisar el registro» lleva a Configuración › Preguntas al paciente.",
         forms: ["por que canal llegan los pacientes", "como nos conocieron los pacientes"],
       },
       {
@@ -245,7 +245,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "administrador-casi-no-escribe",
         q: "¿Por qué una línea prendida casi no escribe?",
-        a: "Porque la mayoría no aceptó recibir esos mensajes: la página de Argos avisa «Prendida, pero casi no escribe» con cuántas personas fueron en 30 días. «Ver a quiénes no pudo escribir» las lista; si tu registro de pacientes no lo pregunta, «Preguntarlo en el registro» lleva a activarlo. «Sin WhatsApp conectado: solo puede escribir por correo» avisa que a quien no tenga correo no le llega nada.",
+        a: "Porque la mayoría no aceptó recibir esos mensajes: la página de Argos avisa «Prendida, pero casi no escribe» con cuántas personas fueron en 30 días. «Ver a quiénes no pudo escribir» las lista; si «Preguntas al paciente» no lo pregunta, «Preguntarlo en el registro» lleva a activarlo. «Sin WhatsApp conectado: solo puede escribir por correo» avisa que a quien no tenga correo no le llega nada.",
         forms: ["la linea esta prendida pero no escribe a nadie", "argos no le escribe a casi nadie"],
       },
     ],

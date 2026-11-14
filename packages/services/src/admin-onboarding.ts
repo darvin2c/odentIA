@@ -264,7 +264,7 @@ function asDate(value: unknown): Date | null {
 
 /**
  * Lo que dice el hecho de un paso: hecho (`at`, la primera vez que se ve en los datos, la misma
- * que lee el relleno de 0120) o lo que falta. `lost` hace que falte aunque esté guardado.
+ * que lee el relleno de 0122) o lo que falta. `lost` hace que falte aunque esté guardado.
  */
 interface Fact {
   at: Date | null

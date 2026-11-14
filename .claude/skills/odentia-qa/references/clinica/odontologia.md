@@ -121,6 +121,22 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 **Huecos conocidos:** nada cruza un anticoagulante o un bifosfonato con exodoncia, cirugía o implante; no hay aviso de profilaxis antibiótica; la ASA no se sugiere; el látex no avisa en los materiales.
 **Fuentes:** clasificación ASA (American Society of Anesthesiologists); profilaxis de endocarditis de la AHA (declaración de 2021); osteonecrosis por medicamentos de la AAOMS (posición de 2022); ADR 0035, 0072 y 0163.
 
+**Sumado por la QA de la entrega 6 (14 nov 2026):**
+- [ ] Lo que dice del corazón (válvula operada, cardiopatía de nacimiento, endocarditis, antibiótico indicado antes del dentista) y el sangrado largo tras una extracción se ven en la franja y en «Revisa con … lo que dijo» al abrir la atención, como «lo dijo él», no solo en Antecedentes.
+- [ ] Lo que la persona dijo de corazón, anestesia, tabaco y lactancia lleva «lo dijo él · sin revisar» en Antecedentes y sale en «Ver declaración original».
+- [ ] La marca distingue antiagregante (B01AC) de anticoagulante; con un antagonista de la vitamina K se ve antes de extraer que falta el INR de las últimas 24 horas.
+- [ ] La medicina para los huesos dice por qué (osteoporosis o cáncer), cómo (pastillas o inyección) y desde cuándo; la que tomó y ya no toma sigue contando, sin quedar vigente.
+- [ ] Una alergia que la persona cuenta como grave (le costó respirar, fue a emergencia) se ve como grave antes de que la confirme el profesional; cada alergia lleva su propia reacción.
+- [ ] Una dosis con coma decimal («2,5 mg») no parte el medicamento en dos.
+- [ ] «No sé» se dice «no sabe» en alergias, enfermedades, medicinas y corazón; nunca «no se le preguntó».
+- [ ] El embarazo y la lactancia se ven en «Emitir receta».
+
+Fuentes que se suman: AHA 2021, prevención de la endocarditis (Wilson y otros, *Circulation* 2021;143:e963-e978); SDCEP, *Management of Dental Patients Taking Anticoagulants or Antiplatelet Drugs*, 2.ª ed. (verificar el año); AAOMS 2022, osteonecrosis por medicamentos; FDA 2020, AINE desde las 20 semanas; FDA 2017, codeína y tramadol en la lactancia; AAP/EFP 2018, grado de la periodontitis según el tabaco (menos de 10 o 10 o más al día).
+
+Huecos conocidos: los antiangiogénicos (bevacizumab, sunitinib) también dan osteonecrosis y no se preguntan (AAOMS 2022).
+
+Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxia a penicilina; va a una exodoncia); **Ernesto** (warfarina por fibrilación y sangrado previo tras una extracción; exodoncia de la 46); **Gloria** (ácido zoledrónico endovenoso por metástasis óseas; va a una extracción); **Lucía** (gestante de 24 semanas, lactante y fumadora de menos de 10 al día; se le receta un analgésico).
+
 ## P-ODO-03 Abrir la atención: «Hoy viene a…», motivo y relato
 
 **Dónde:** «Atender» (`CA/new-encounter-button.tsx`), la atención (`CA/encounter-editor.tsx`) y «Hoy viene a…» (`CA/encounter-visit.tsx`, `S/encounter-visit.ts`).

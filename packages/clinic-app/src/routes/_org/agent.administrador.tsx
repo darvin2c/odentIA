@@ -236,8 +236,8 @@ function MissingNotices({
             <p>
               No aceptaron recibir {PURPOSE_WORDS[gap.purpose].what}.{" "}
               {gap.asks
-                ? "Tu registro de pacientes ya lo pregunta: a quienes se registraron antes, pídeselo y márcalo en su ficha, en «Mensajes de la clínica»."
-                : `Tu registro de pacientes no pregunta por ${PURPOSE_WORDS[gap.purpose].field}: actívalo y cada paciente nuevo podrá aceptarlo al registrarse.`}
+                ? "«Preguntas al paciente» ya lo pregunta: a quienes se registraron antes, pídeselo y márcalo en su ficha, en «Mensajes de la clínica»."
+                : `«Preguntas al paciente» no pregunta por ${PURPOSE_WORDS[gap.purpose].field}: actívalo y cada paciente nuevo podrá aceptarlo al registrarse.`}
             </p>
           </div>
           {gap.asks ? (

@@ -1,4 +1,12 @@
-import { documentText, formatMoney } from "@odentia/clinical"
+import {
+  documentText,
+  formatMoney,
+  MEDICATION_CLASSES,
+  type MedicationClass,
+  type MedicineClassAnswer,
+  medicationAlertWords,
+  medicationClassOf,
+} from "@odentia/clinical"
 import {
   Badge,
   Breadcrumb,
@@ -51,6 +59,7 @@ import {
 } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import { personHeaderRules } from "../../lib/screen-rules"
+import { productUi } from "../../product/product-ui"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { useOpenRecordPanel } from "../person/record-panel"
@@ -92,13 +101,23 @@ export function clinicalAlerts(
     tone: "warning" as const,
   }))
   // Lo que toma, con su nombre: un anticoagulante cambia la anestesia y la hemostasia
-  // (mesa del 9 nov). Antes solo se contaba («2 medicamentos vigentes»).
-  const medications = detail.currentMedications.map((m) => ({
-    id: m.id,
-    label: `Toma ${[m.name, m.dose].filter(Boolean).join(" ")}`,
-    tone: "secondary" as const,
-  }))
-  return [...severe, ...other, ...conditions, ...medications]
+  // (mesa del 9 nov). Un anticoagulante o una medicina para los huesos (grupos ATC B01A y M05B)
+  // llevan su marca, «Anticoagulante: warfarina 5 mg», y van antes que lo demás (mesa del 13 nov).
+  const medications = detail.currentMedications.map((m) => {
+    const words = medicationAlertWords(m)
+    return { id: m.id, label: words.label, tone: words.group ? ("warning" as const) : ("secondary" as const) }
+  })
+  const marked = medications.filter((m) => m.tone === "warning")
+  return [...severe, ...marked, ...other, ...conditions, ...medications.filter((m) => m.tone !== "warning")]
+}
+
+/** «No se le preguntó» no es «dijo que no»: lo que se sabe de cada clase, en la atención. */
+const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, (said: boolean) => string> = {
+  unasked: () => "no se le preguntó",
+  saidYes: () => "dijo que toma, falta anotar cuál",
+  took: () => "la tomó antes, hoy no",
+  no: (said) => (said ? "dijo que no" : "no toma"),
+  unknown: () => "no sabe",
 }
 
 /** Lo declarado que llega a quien solo ve las alergias, como grupos de la franja. */
@@ -137,6 +156,7 @@ export function PatientClinicalStrip({
   medicationReview,
   health,
   sex,
+  medicineClasses = false,
 }: {
   detail: Pick<
     PatientFull,
@@ -154,6 +174,11 @@ export function PatientClinicalStrip({
   health?: PatientHealth | null
   /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
   sex?: string | null
+  /**
+   * La atención dice también lo que no se sabe de anticoagulantes y medicinas para los huesos: «No
+   * se le preguntó», «dijo que no» o «no sabe» (mesa del 13 nov). La ficha muestra solo la marca.
+   */
+  medicineClasses?: boolean
 }) {
   const stripId = useId()
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
@@ -167,6 +192,25 @@ export function PatientClinicalStrip({
   const pregnancy = health?.pregnancy ?? null
   // El «No» que marcó la persona (o quien habla por ella) no es «Niega alergias»: nadie se lo preguntó.
   const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
+  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
+  // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
+  const classWords = health?.medicineClasses
+    ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+          const known = health.medicineClasses?.[key]
+          if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
+          // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
+          const unclassed =
+            known.answer === "unknown" && detail.currentMedications.some((row) => !medicationClassOf(row.atcCode))
+          return [
+            {
+              key,
+              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}${unclassed ? " · revisa sus medicinas" : ""}`,
+              warn: known.answer !== "no",
+              said: known.said,
+            },
+          ]
+        })
+      : []
   const alerts = [
     ...(pregnancy
       ? [
@@ -189,6 +233,25 @@ export function PatientClinicalStrip({
           group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
       ),
     })),
+    // Su «No sé» o su «No» a una clase de medicina, dentro de la caja de su última declaración (B9).
+    ...classWords
+      .filter((word) => word.said && groups.length > 0)
+      .map((word) => ({
+        id: `clase-${word.key}`,
+        label: word.label,
+        tone: word.warn ? ("warning" as const) : ("secondary" as const),
+        group: groups.length - 1,
+      })),
+    // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
+    // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
+    ...(health?.latestAnamnesis
+      ? (productUi().health.alerts?.((health.latestAnamnesis.answers ?? {}) as Record<string, unknown>) ?? []).map((alert) => ({
+          id: `entrevista-${alert.keys[0]}`,
+          label: alert.label,
+          tone: "warning" as const,
+          group: groupIndex((group) => alert.keys.some((key) => group.interview?.includes(key))),
+        }))
+      : []),
   ]
   // Lo grave primero, sea de quien sea (QA del 14 nov, H1): las alergias severas que confirmó el
   // equipo; después cada declaración sin revisar, con su severa delante; después lo demás.
@@ -218,7 +281,7 @@ export function PatientClinicalStrip({
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
-  if (alerts.length === 0 && !allergyWord && !medicationWord) return null
+  if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
     <Badge
@@ -301,6 +364,19 @@ export function PatientClinicalStrip({
             </Badge>
           </li>
         ) : null}
+        {classWords.filter((word) => !(word.said && groups.length > 0)).map((word) => (
+          <li key={word.key} className="flex min-w-0 max-w-full">
+            <Badge
+              variant="outline"
+              className={cn(
+                "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
+                word.warn && "border-warning/30 bg-warning-soft text-warning",
+              )}
+            >
+              {word.label}
+            </Badge>
+          </li>
+        ))}
         {hidden > 0 ? <li className="flex min-w-0 max-w-full">{more}</li> : null}
       </ul>
     </section>

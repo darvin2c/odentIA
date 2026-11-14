@@ -44,6 +44,9 @@ import {
   isCurrentMedication,
   isImageDocumentCategory,
   KINSHIP_LABELS,
+  MEDICATION_CLASSES,
+  type MedicationClass,
+  type MedicineClassAnswer,
   PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
   saidNoWords,
@@ -74,7 +77,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { type DeclaredHealthGroup, getPatientHealth, type HealthDeclaration } from "./clinical.js"
+import { type DeclaredHealthGroup, type DeclaredInterviewKey, getPatientHealth, type HealthDeclaration } from "./clinical.js"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { loadDocumentClinic } from "./document-clinic.js"
@@ -218,6 +221,12 @@ export interface PatientRecord {
   declarations: RecordDeclaration[]
   /** null si no hay nada que contar: nunca se guardó una entrevista, o la vigente quedó sin datos. */
   interview: RecordInterview | null
+  /**
+   * Lo que se sabe de las dos medicinas que se preguntan aparte (anticoagulante y huesos) cuando no
+   * hay una de esa clase vigente: «dijo que no», «no sabe», «no se le preguntó» o «la tomó antes»
+   * (QA de la entrega 6). Lo que toma ya está en sus medicinas.
+   */
+  medicineClasses: Array<{ group: MedicationClass; answer: MedicineClassAnswer["answer"]; said: boolean }>
   familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
   encounters: Array<{
     row: typeof encounter.$inferSelect
@@ -304,6 +313,32 @@ function declarationEntries(
   return [...out, ...interviewEntries.filter((entry) => entry.key !== PREGNANCY_ENTRY_KEY)]
 }
 
+/** Lo que se sabe de cada clase de medicina, en la copia (lo mismo que dice la atención). */
+const MEDICINE_CLASS_WORDS: Record<MedicineClassAnswer["answer"], string> = {
+  yes: "toma una",
+  saidYes: "dijo que toma una; falta anotar cuál",
+  took: "la tomó antes, hoy no",
+  no: "no toma",
+  unknown: "no sabe",
+  unasked: "no se le preguntó",
+}
+/** El estado de FHIR R4 de cada respuesta de una clase (`MedicationStatement.status`). */
+const MEDICINE_CLASS_FHIR: Partial<Record<MedicineClassAnswer["answer"], string>> = {
+  saidYes: "active",
+  took: "completed",
+  no: "not-taken",
+  unknown: "unknown",
+}
+
+/** De qué pregunta de la persona es cada dato de la entrevista (`DECLARED_INTERVIEW`). */
+const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
+  "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
+  "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
+  "habitos.tabaco": ["tabaco"],
+  "habitos.alcohol": ["alcohol"],
+  "embarazoLactancia.lactancia": ["lactancia"],
+}
+
 /** La entrevista vigente y, de cada dato, desde qué versión consta igual. */
 function interviewOf(
   versions: Array<{ version: number; answers: unknown; createdAt: Date; createdBy: string | null; authorName: string | null }>,
@@ -356,7 +391,12 @@ function interviewOf(
         since: from && from !== latest ? saidOf(from) : null,
         ...(entry.key === PREGNANCY_ENTRY_KEY && unreviewedPregnancy
           ? { unreviewed: { by: unreviewedPregnancy.by, at: unreviewedPregnancy.at, repeatsVersion } }
-          : {}),
+          : (() => {
+              // El corazón, la anestesia, el tabaco y la lactancia que dijo y nadie revisó (QA de la entrega 6).
+              const keys = ENTRY_DECLARED_KEYS[entry.key]
+              const group = keys ? health.declared.find((item) => keys.some((key) => item.interview.includes(key))) : undefined
+              return group ? { unreviewed: { by: group.by, at: group.at } } : {}
+            })()),
       }
     }),
   }
@@ -586,6 +626,10 @@ export async function loadPatientRecord(
         }
       })
       .reverse(),
+    medicineClasses: (Object.keys(health.medicineClasses) as MedicationClass[]).flatMap((group) => {
+      const known = health.medicineClasses[group]
+      return known.answer === "yes" ? [] : [{ group, answer: known.answer, said: known.said }]
+    }),
     interview: interviewOf(
       interviewVersions,
       (answers, current, shownDay) => hooks.interview.record(answers, today, current ? { legacySaidOn, shownDay } : {}),
@@ -981,6 +1025,14 @@ export async function renderPatientRecordPdf(
         const mark = markOf("medications", m.id)
         return `${ended ? "Ya no lo toma" : "Medicamento"}: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${until}${m.notes ? ` · ${m.notes}` : ""}${mark ? ` · ${mark}` : ""}`
       }),
+    )
+
+  // «Tus medicinas»: lo que se sabe de las dos que se preguntan aparte, también el «No» y el «No sé».
+  if (record.medicineClasses.length)
+    kit.bullets(
+      record.medicineClasses.map(
+        (item) => `${MEDICATION_CLASSES[item.group].label}: ${MEDICINE_CLASS_WORDS[item.answer]}${item.said ? " · lo dijo la persona" : ""}`,
+      ),
     )
 
   section("Entrevista de salud")
@@ -1464,6 +1516,24 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       ...(m.dose || m.frequency
         ? { dosage: [{ text: [m.dose, m.frequency].filter(Boolean).join(" · ") }] }
         : {}),
+    })
+  }
+  // «Tus medicinas»: el «No», el «No sé» y lo que dijo sin nombre de las dos clases, con su grupo ATC
+  // (B01A, M05B) y quién lo dijo; lo que nadie preguntó no se inventa (QA de la entrega 6).
+  for (const item of record.medicineClasses) {
+    const status = MEDICINE_CLASS_FHIR[item.answer]
+    if (!status) continue
+    resources.push({
+      resourceType: "MedicationStatement",
+      id: `clase-${item.group}`,
+      subject: patientRef,
+      status,
+      medicationCodeableConcept: {
+        coding: [{ system: "http://www.whocc.no/atc", code: MEDICATION_CLASSES[item.group].atc }],
+        text: MEDICATION_CLASSES[item.group].label,
+      },
+      ...(item.said ? { informationSource: patientRef } : {}),
+      note: [{ text: MEDICINE_CLASS_WORDS[item.answer] }],
     })
   }
   // Quién revisó los antecedentes y las alergias: en R4, una `Provenance` con quien verificó

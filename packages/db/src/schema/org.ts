@@ -149,6 +149,9 @@ export const patientRegistrationConfig = pgTable("patient_registration_config", 
   askMessages: boolean("ask_messages").notNull().default(true),
   // El aviso que armó odentIA al nacer la clínica, aún sin revisar (ADR 0141); nulo: es de la clínica.
   noticeSuggestedAt: timestamp("notice_suggested_at", { withTimezone: true }),
+  // La versión de la lista de preguntas que alguien de la clínica ya vio (`REGISTRATION_QUESTIONS_VERSION`
+  // de `@odentia/clinical`): con una menor, «Hay preguntas nuevas». Las clínicas de antes quedan en 1.
+  questionsVersion: integer("questions_version").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })

@@ -15,7 +15,7 @@ const SECTIONS: Array<[string, string]> = [
   ["Consentimientos", "/settings/forms"],
   // Las fichas del equipo, con su lugar en Atención (ADR 0117).
   ["Fichas de consulta", "/settings/consultation-forms"],
-  ["Registro de pacientes", "/settings/patient-registration"],
+  ["Preguntas al paciente", "/settings/patient-registration"],
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],
   ["Comisiones por profesional", "/settings/commissions"],
