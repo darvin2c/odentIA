@@ -178,7 +178,7 @@ export function sameTitleTemplate(
   title: string,
   templates: FormTemplate[],
   ownKey?: string,
-): { title: string; unused: UnusedTemplate | null } | null {
+): { title: string; unused: UnusedTemplate | null; existing: FormTemplate | null } | null {
   const wanted = foldTitle(title)
   if (!wanted) return null
   const { listed, unused } = templateGroups(templates.filter((template) => template.key !== ownKey))
@@ -187,9 +187,27 @@ export function sameTitleTemplate(
     versions.some((version) => version.status !== "archivado" && foldTitle(version.title) === wanted),
   )
   const live = inList?.find((version) => version.status !== "archivado" && foldTitle(version.title) === wanted)
-  if (live) return { title: live.title, unused: null }
+  // `existing`: lo que se abre para cambiar ese en vez de crear otro; su borrador si ya tiene uno.
+  if (live && inList)
+    return { title: live.title, unused: null, existing: inList.find((version) => version.status === "borrador") ?? live }
   const left = unused.find((item) => foldTitle(item.last.title) === wanted)
-  return left ? { title: left.last.title, unused: left } : null
+  return left ? { title: left.last.title, unused: left, existing: null } : null
+}
+
+/**
+ * Qué botón de la fila recibe el foco después de un cambio que la muda de
+ * sitio. Se dejó de usar: está en «Ya no se usan», con «Volver a usar»
+ * (`reuse`). Volvió a usarse o se publicó: está en la lista, con «Dejar de
+ * usar» (`leave`). Sin esto el foco se pierde, porque el botón que se tocó ya no está.
+ */
+export function rowButtonAfter(change: "publish" | "leave" | "reuse"): "leave" | "reuse" {
+  return change === "leave" ? "reuse" : "leave"
+}
+
+/** El que sigue a `current` en una lista de paradas, o null si es el último o no está. */
+export function nextAfter<T>(stops: readonly T[], current: T): T | null {
+  const index = stops.indexOf(current)
+  return index >= 0 ? (stops[index + 1] ?? null) : null
 }
 
 /** «4 preguntas»: cuántas tiene un formulario, entre todas sus secciones. */

@@ -31,7 +31,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft, Plus, X } from "lucide-react"
-import { type ReactNode, useId, useMemo, useRef, useState } from "react"
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ConsentSheetPage, ConsentTemplatesList } from "../../components/settings/consent-templates"
 import { SettingsLoadError } from "../../components/settings/load-error"
@@ -61,10 +61,12 @@ import {
   leaveWords,
   NEW_FIELD_PLACEHOLDER,
   newField,
+  nextAfter,
   oneAtATime,
   publishedButNotReaching,
   publishWords,
   reuseWords,
+  rowButtonAfter,
   sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
@@ -174,12 +176,39 @@ function FormTemplatesPanel() {
 
   // Un envío a la vez: el segundo clic de un doble clic llega antes de que el botón se apague.
   const sending = useRef(oneAtATime()).current
+  // Dejar de usar, volver a usar y publicar mudan la fila de sitio y el botón que se tocó desaparece:
+  // el foco sigue al formulario a su lugar nuevo, y se dice dónde quedó para quien no ve la pantalla.
+  const listRef = useRef<HTMLDivElement>(null)
+  const [moved, setMoved] = useState<{ key: string; button: "leave" | "reuse"; readAt: number } | null>(null)
+  const [announced, setAnnounced] = useState("")
+  const follow = (template: FormTemplate, change: "publish" | "leave" | "reuse", said: string) => {
+    setMoved({ key: template.key, button: rowButtonAfter(change), readAt: listQuery.dataUpdatedAt })
+    setAnnounced(said)
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se vuelve a mirar cuando la lista se vuelve a dibujar.
+  useEffect(() => {
+    if (!moved) return
+    const row = `[data-form-key="${moved.key}"]`
+    const target = listRef.current?.querySelector<HTMLElement>(`${row}[data-form-button="${moved.button}"]`)
+    if (target) {
+      target.focus()
+      setMoved(null)
+      return
+    }
+    // La lista ya se volvió a leer y ese botón no está (quedó con un borrador, por ejemplo):
+    // el foco va a lo que haya de ese formulario, y no se lo vuelve a buscar.
+    if (listQuery.dataUpdatedAt !== moved.readAt) {
+      listRef.current?.querySelector<HTMLElement>(row)?.focus()
+      setMoved(null)
+    }
+  }, [moved, templates, listQuery.dataUpdatedAt])
   const leaveMutation = useMutation({
     onSettled: sending.done,
     mutationFn: (current: FormTemplate) => archiveFormTemplate(current.id),
     onSuccess: (_result, current) => {
       setConfirm(null)
       toast.success(`«${current.title}» ya no se usa. Lo ya llenado sigue en cada paciente.`)
+      follow(current, "leave", `«${current.title}» pasó a «Ya no se usan».`)
       invalidate()
     },
     onError: (error) => {
@@ -194,6 +223,7 @@ function FormTemplatesPanel() {
     onSuccess: (result, last) => {
       setConfirm(null)
       toast.success(`«${last.title}» está en uso otra vez, como versión ${result.data.version}`)
+      follow(last, "reuse", `«${last.title}» volvió a la lista de formularios en uso.`)
       invalidate()
     },
     onError: (error, last) => {
@@ -217,6 +247,7 @@ function FormTemplatesPanel() {
     onSuccess: (_result, draft) => {
       setConfirm(null)
       toast.success(`Versión ${draft.version} de «${draft.title}» publicada`)
+      follow(draft, "publish", `«${draft.title}» quedó en uso, en su versión ${draft.version}.`)
       void invalidate()
     },
     onError: (error) => {
@@ -281,7 +312,11 @@ function FormTemplatesPanel() {
   const CHECKING = "Comprobando qué cuestionario reciben hoy los pacientes…"
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={listRef} className="flex flex-col gap-4">
+      {/* Dónde quedó el formulario tras el cambio: lo dice el lector de pantalla, no ocupa sitio. */}
+      <p role="status" className="sr-only">
+        {announced}
+      </p>
       {canAdmin && !empty ? (
         <PanelActions>
           <Button type="button" className="min-h-11" onClick={() => openBuilder(null)}>
@@ -345,18 +380,48 @@ function FormTemplatesPanel() {
                       <div className="flex flex-wrap gap-2">
                         {draft ? (
                           <>
-                            <Button type="button" size="sm" variant="outline" className={ROW_BUTTON} onClick={() => openBuilder(draft)}>
+                            {/* Cada botón dice de qué formulario es: con seis tarjetas, seis nombres distintos. */}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className={ROW_BUTTON}
+                              data-form-key={latest.key}
+                              aria-label={`Editar borrador de ${draft.title}`}
+                              onClick={() => openBuilder(draft)}
+                            >
                               Editar borrador
                             </Button>
-                            <Button type="button" size="sm" className={ROW_BUTTON} onClick={() => setConfirm({ kind: "publish", draft })}>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className={ROW_BUTTON}
+                              aria-label={`Publicar versión ${draft.version} de ${draft.title}`}
+                              onClick={() => setConfirm({ kind: "publish", draft })}
+                            >
                               Publicar versión {draft.version}
                             </Button>
-                            <Button type="button" size="sm" variant="ghost" className={ROW_BUTTON} onClick={() => setConfirm({ kind: "archive", draft })}>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className={ROW_BUTTON}
+                              aria-label={`Archivar el borrador de ${draft.title}`}
+                              onClick={() => setConfirm({ kind: "archive", draft })}
+                            >
                               Archivar el borrador
                             </Button>
                           </>
                         ) : (
-                          <Button type="button" size="sm" variant="outline" className={ROW_BUTTON} onClick={() => openBuilder({ ...latest })}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className={ROW_BUTTON}
+                            data-form-key={latest.key}
+                            aria-label={`Nueva versión desde la ${latest.version} de ${latest.title}`}
+                            onClick={() => openBuilder({ ...latest })}
+                          >
                             Nueva versión desde la {latest.version}
                           </Button>
                         )}
@@ -366,6 +431,9 @@ function FormTemplatesPanel() {
                             size="sm"
                             variant="ghost"
                             className={ROW_BUTTON}
+                            data-form-key={latest.key}
+                            data-form-button="leave"
+                            aria-label={`Dejar de usar ${current.title}`}
                             onClick={() => setConfirm({ kind: "leave", current })}
                           >
                             Dejar de usar
@@ -406,6 +474,9 @@ function FormTemplatesPanel() {
                         variant="outline"
                         className={ROW_BUTTON}
                         disabled={reuseMutation.isPending}
+                        data-form-key={last.key}
+                        data-form-button="reuse"
+                        aria-label={`Volver a usar ${last.title}`}
                         onClick={() => reuse(last)}
                       >
                         Volver a usar
@@ -428,6 +499,8 @@ function FormTemplatesPanel() {
             builder.close()
             reuse(last)
           }}
+          // «Cambiar el que ya tengo»: su borrador o la versión nueva; lo escrito aquí se pregunta antes de dejarlo.
+          onOpenExisting={(existing) => openBuilder(existing.status === "borrador" ? existing : { ...existing })}
           onDirtyChange={builder.setDirty}
           onClose={builder.close}
           onDone={() => {
@@ -606,6 +679,7 @@ function TemplateBuilder({
   initial,
   templates,
   onReuse,
+  onOpenExisting,
   onDirtyChange,
   onClose,
   onDone,
@@ -615,6 +689,8 @@ function TemplateBuilder({
   templates: FormTemplate[]
   /** «Volver a usar» el que ya existía con ese título, en vez de crear otro. */
   onReuse: (last: FormTemplate) => void
+  /** «Cambiar el que ya tengo»: abre el que está en uso con ese título, en vez de crear otro. */
+  onOpenExisting: (existing: FormTemplate) => void
   onDirtyChange: (dirty: boolean) => void
   onClose: () => void
   onDone: () => void
@@ -708,8 +784,20 @@ function TemplateBuilder({
               <span className="font-medium">Ya tienes un formulario con ese título</span>
               {twin.unused
                 ? ", en «Ya no se usan». Si es el mismo, vuelve a usarlo en vez de crear otro."
-                : ". Puedes guardarlo igual: al llenar uno, en «Nuevo» › «Formulario» se verán dos con el mismo nombre."}
+                : ". Si lo que quieres es cambiar ese, ábrelo. También puedes guardar este: al llenar uno, en «Nuevo» › «Formulario» se verán dos con el mismo nombre."}
             </p>
+            {twin.existing && canAdmin ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={ROW_BUTTON}
+                aria-label={`Cambiar el que ya tengo: ${twin.title}`}
+                onClick={() => twin.existing && onOpenExisting(twin.existing)}
+              >
+                Cambiar el que ya tengo
+              </Button>
+            ) : null}
             {twin.unused && canAdmin ? (
               <Button
                 type="button"
@@ -773,6 +861,8 @@ function TemplateBuilder({
                       // biome-ignore lint/suspicious/noArrayIndexKey: las secciones son un arreglo del formulario sin id propio: TanStack Form las nombra por su posición
                       key={si}
                       className="rounded-xl border p-3"
+                      // Enter en una pregunta no guarda ni cierra el panel: pasa al campo siguiente.
+                      onKeyDown={enterMovesOn}
                     >
                       <div className="flex items-start gap-2">
                         <form.AppField name={`sections[${si}].title`}>
@@ -873,6 +963,26 @@ function TemplateBuilder({
       </div>
     </FormDrawer>
   )
+}
+
+/**
+ * Enter en un campo de una línea de las preguntas pasa al campo siguiente. Sin
+ * esto guardaba el borrador y cerraba el panel (es un formulario), justo cuando
+ * la pregunta nueva nace con el cursor y lo natural es escribir y dar Enter.
+ * Guardar es con su botón. Lo que ya usa Enter para lo suyo («Nueva opción») sigue igual.
+ */
+function enterMovesOn(event: ReactKeyboardEvent<HTMLElement>) {
+  if (event.key !== "Enter" || event.defaultPrevented || event.nativeEvent.isComposing) return
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) || target.type === "checkbox") return
+  event.preventDefault()
+  const scope: ParentNode = target.closest("form") ?? document
+  const stops = Array.from(
+    scope.querySelectorAll<HTMLElement>(
+      'input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((stop) => stop.tabIndex >= 0)
+  nextAfter(stops, target)?.focus()
 }
 
 /** Lo que ocupa una casilla en la fila de una pregunta (la misma altura táctil que antes). */

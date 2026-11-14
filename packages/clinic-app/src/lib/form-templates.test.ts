@@ -4,9 +4,11 @@ import {
   currentLine,
   leaveWords,
   newField,
+  nextAfter,
   oneAtATime,
   publishWords,
   reuseWords,
+  rowButtonAfter,
   sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
@@ -182,11 +184,20 @@ it("un título que ya tiene otro formulario se avisa, también si está en «Ya 
   expect(sameTitleTemplate("Otra ficha", all)).toBeNull()
   expect(sameTitleTemplate("", all)).toBeNull()
   // Sin tildes, mayúsculas ni espacios de más: es el mismo título.
-  expect(sameTitleTemplate("  evaluacion de   ENDODONCIA ", all)).toEqual({ title: "Evaluación de endodoncia", unused: null })
+  // El que está en uso se ofrece para abrirlo y cambiarlo, en vez de crear otro.
+  expect(sameTitleTemplate("  evaluacion de   ENDODONCIA ", all)).toEqual({
+    title: "Evaluación de endodoncia",
+    unused: null,
+    existing: endodoncia,
+  })
+  // Si ese ya tiene un borrador preparado, lo que se abre es el borrador.
+  const draft = template({ key: "endodoncia", title: "Evaluación de endodoncia", version: 2, status: "borrador", publishedAt: null })
+  expect(sameTitleTemplate("Evaluación de endodoncia", [...all, draft])?.existing).toBe(draft)
   // El que se dejó de usar se ofrece para volver a usarlo.
   expect(sameTitleTemplate("Ficha periodontal", all)).toEqual({
     title: "Ficha periodontal",
     unused: { last: periodontal, leftAt: periodontal.updatedAt },
+    existing: null,
   })
   // La plantilla que se está editando no es su propio doble.
   expect(sameTitleTemplate("Evaluación de endodoncia", all, "endodoncia")).toBeNull()
@@ -257,4 +268,20 @@ it("un clic a la vez: el segundo clic de un doble clic no se envía", () => {
   guard.done()
   expect(guard.run(() => sent.push(3))).toBe(true)
   expect(sent).toEqual([1, 3])
+})
+
+it("tras dejar de usar o volver a usar, el foco sigue al formulario a su lugar nuevo", () => {
+  // Se dejó de usar: su fila está ahora en «Ya no se usan», y ahí el botón es «Volver a usar».
+  expect(rowButtonAfter("leave")).toBe("reuse")
+  // Volvió a la lista (o se publicó): en su tarjeta, «Dejar de usar».
+  expect(rowButtonAfter("reuse")).toBe("leave")
+  expect(rowButtonAfter("publish")).toBe("leave")
+})
+
+it("Enter en una pregunta pasa al campo siguiente", () => {
+  const stops = ["pregunta", "tipo", "obligatorio", "quitar"]
+  expect(nextAfter(stops, "pregunta")).toBe("tipo")
+  // En el último no hay a dónde ir: se queda donde está, y tampoco guarda.
+  expect(nextAfter(stops, "quitar")).toBeNull()
+  expect(nextAfter(stops, "otro")).toBeNull()
 })
