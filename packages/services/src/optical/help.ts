@@ -115,8 +115,8 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         ["Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos", "Antecedentes, Recetas de lentes, Historia y Documentos"],
         [" En el celular, la lista de hallazgos va justo debajo del odontograma.", ""],
         [
-          "(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
-          "(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes y otros archivos)",
+          "(presupuestos, recetas, órdenes, consentimientos, fichas, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
+          "(presupuestos, recetas, órdenes, consentimientos, fichas, imágenes y otros archivos)",
         ],
       )} La receta de lentes (la medida) está en «Recetas de lentes»; la de gotas u otro medicamento, en Documentos.`,
       forms: [...(faq.forms ?? []), "donde estan las recetas de lentes", "no encuentro la medida que le di"],

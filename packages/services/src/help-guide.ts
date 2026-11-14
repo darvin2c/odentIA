@@ -728,7 +728,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quedaron-atenciones-recetas-u-ordenes",
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
-        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas); «Nuevo» abre directo el formulario.",
+        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (presupuestos, recetas, órdenes, consentimientos, fichas, imágenes, otros archivos y, en clínicas de Perú, odontogramas); «Nuevo» abre directo el formulario.",
         area: "clinica",
       },
       {
@@ -781,7 +781,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "receta-consentimiento-orden-atencion",
         q: "¿Dónde hago la receta, el consentimiento o la orden de la atención?",
-        a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, formulario o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
+        a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, ficha o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
         area: "clinica",
       },
       {
@@ -2154,18 +2154,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Consentimientos",
     parent: SETTINGS,
     purpose:
-      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno. También se crean formularios propios, para preguntas que solo tu clínica hace.",
-    terms: [
-      "consentimiento informado",
-      "anamnesis",
-      "cuestionario",
-      "plantillas",
-      "firma del paciente",
-      "documentos para firmar",
-      "ficha propia",
-      "mis preguntas",
-      "formulario propio",
-    ],
+      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno.",
+    terms: ["consentimiento informado", "firma del paciente", "documentos para firmar", "hoja para firmar"],
     writePermission: "settings.write",
     faqs: [
       {
@@ -2187,6 +2177,49 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "alergias-paciente-escribe-cuestionario-llegan-ficha",
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",
         a: "Sí, si en la pregunta marcas «Son alergias: pasan a sus antecedentes». Cuando el profesional finaliza el cuestionario, cada alergia entra a Antecedentes como declarada, sin confirmar, y la receta avisa al escribir un medicamento que choca. No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
+      },
+    ],
+  },
+  {
+    // Las fichas del equipo, con su lugar en el menú (ADR 0117). Las preguntas que venían de
+    // «Formularios propios» conservan su id con el prefijo `formularios-`.
+    id: "fichas",
+    path: "/settings/consultation-forms",
+    title: "Fichas de consulta",
+    parent: SETTINGS,
+    purpose:
+      "Tus hojas para anotar en consulta, además del examen. Cada ficha aparece sola en la atención cuando la cita es de su especialidad; si la cita no tiene servicio, por la especialidad de quien atiende, y «Otra ficha…» ofrece las demás. Las que vienen con el producto ya se usan y dicen «Sin mirar» hasta que alguien las abre; todas se pueden cambiar, y lo ya anotado conserva sus preguntas.",
+    terms: [
+      "fichas",
+      "formularios",
+      "formulario propio",
+      "ficha propia",
+      "mis preguntas",
+      "hoja de consulta",
+      "plantillas",
+      "cuestionario",
+      "anamnesis",
+    ],
+    writePermission: "settings.write",
+    faqs: [
+      {
+        id: "fichas-por-que-aparece",
+        q: "¿Por qué me aparece esta ficha?",
+        a: "La atención ofrece sola, en «Fichas para esta atención», las fichas de la especialidad del servicio de la cita. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece. Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        forms: [
+          "por que me sale esta ficha en la atencion",
+          "de donde sale la ficha que aparece sola",
+          "no quiero que aparezca esta ficha",
+          "por que no aparece mi ficha en la atencion",
+        ],
+      },
+      {
+        id: "fichas-sin-mirar",
+        q: "¿Qué quiere decir «Viene con» y «Sin mirar»?",
+        a: "Que la ficha vino con odentIA y nadie de tu clínica la abrió todavía. Ya se puede usar tal como está. Arriba dice cuántas miraste de las que vinieron. «Ver y ajustar» la abre: desde ese momento dice «La miraste», y si cambias algo y lo publicas, lo ya anotado conserva sus preguntas.",
+        forms: ["que significa sin mirar", "fichas que vienen con el sistema", "tengo que revisar las fichas"],
+        // latidIA y vistIA no traen fichas: no la heredan.
+        own: true,
       },
     ],
   },

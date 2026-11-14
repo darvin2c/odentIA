@@ -86,7 +86,7 @@ describe("la guía de latidIA", () => {
   it("los filtros de Documentos son los de la pantalla, con los descansos médicos", () => {
     const answer = answerOf("quedaron-atenciones-recetas-u-ordenes")
     expect(answer).toContain("Antecedentes, Signos vitales, Historia y Documentos")
-    expect(answer).toContain("(presupuestos, recetas, descansos médicos, órdenes, consentimientos, formularios, imágenes y otros archivos)")
+    expect(answer).toContain("(presupuestos, recetas, descansos médicos, órdenes, consentimientos, fichas, imágenes y otros archivos)")
   })
 
   it("el descanso está donde latidIA lo emite y la base no lo nombra", () => {
