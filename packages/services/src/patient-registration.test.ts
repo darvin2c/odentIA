@@ -1889,3 +1889,44 @@ it("«Hay preguntas nuevas»: a una clínica que ya existía se le avisa, y guar
   await publish(orgId)
   expect(await news()).toEqual([])
 })
+
+it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la atención lo lee con quién lo dijo", async () => {
+  await seedActor()
+  await publish("org_a")
+  const child = {
+    biberon: "ya_no",
+    chupon: "dedo",
+    dulcesEntreComidas: "4_o_mas",
+    pastaConFluor: "si",
+    quienCepilla: "solo",
+  } as const
+  const answers: RegistrationAnswers = {
+    demographics: { displayName: "Thiago Quispe", givenNames: "Thiago", familyName: "Quispe", birthDate: MINOR_BIRTH, sex: "M" },
+    respondent: "representative",
+    representative: {
+      displayName: "Carla Ramos",
+      relationship: "guardian",
+      relationshipDetail: "Madre",
+      phone: "+51987650355",
+      docType: "DNI",
+      docNumber: "45678955",
+    },
+    health: { ...emptyClinical(), conditions: { state: "recorded", items: [{ name: "Asma" }] }, dental: child },
+    privacyAccepted: true,
+  }
+  // Al niño no se le pregunta si fuma: el servidor no lo acepta.
+  await expect(
+    registerOnline({ ...answers, health: { ...answers.health, medical: { tabaco: "nunca" } } }),
+  ).rejects.toThrow()
+  const result = await registerOnline(answers)
+  const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", result.patient!.id))
+  expect(health.latestAnamnesis?.answers).toMatchObject({ antecedentesOdontologicos: child })
+  expect(health.reviewPending).toBe(true)
+  const said = health.declared.find((group) => group.interview.length > 0)
+  expect(said?.by).toMatchObject({ kind: "representative", name: "Carla Ramos" })
+  expect(said?.interview).toEqual([
+    { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
+    { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+    { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
+  ])
+})
