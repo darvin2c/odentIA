@@ -255,18 +255,24 @@ const addendumSchema = z.object({
 
 export function ResponseDetail({
   response,
-  previous = null,
+  previous: latest = null,
+  first = null,
   canWrite,
   onChanged,
 }: {
   response: FormResponse
   /** La anterior del mismo tipo, ya finalizada: su respuesta va bajo cada pregunta, al lado de la de hoy. */
   previous?: FormResponse | null
+  /** La de inicio, si no es la anterior: «Comparar con: Anterior · Inicio». */
+  first?: FormResponse | null
   canWrite: boolean
   onChanged: () => Promise<void>
 }) {
   const ids = useId()
   const queryClient = useQueryClient()
+  // Con qué se compara: la anterior, o la de inicio en un tratamiento largo.
+  const [against, setAgainst] = useState<"anterior" | "inicio">("anterior")
+  const previous = against === "inicio" && first ? first : latest
   const memberName = useMemberName()
   const schema = response.templateSnapshot
   const editable = response.status === "borrador" && canWrite
@@ -502,6 +508,24 @@ export function ResponseDetail({
         <p className="rounded-md bg-muted p-3 text-sm">
           Descartado {when(response.discardedAt)} · {response.discardReason}
         </p>
+      ) : null}
+      {first && latest ? (
+        <div role="group" aria-label="Comparar con" className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Comparar con:</span>
+          {(["anterior", "inicio"] as const).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={against === option ? "default" : "outline"}
+              className="min-h-11 sm:min-h-8"
+              aria-pressed={against === option}
+              onClick={() => setAgainst(option)}
+            >
+              {option === "anterior" ? `Anterior · ${when(latest.finalizedAt)}` : `Inicio · ${when(first.finalizedAt)}`}
+            </Button>
+          ))}
+        </div>
       ) : null}
       {previous ? (
         <p className="rounded-md bg-muted p-3 text-sm">

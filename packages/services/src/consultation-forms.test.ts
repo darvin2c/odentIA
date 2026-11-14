@@ -456,3 +456,26 @@ it("un solo nombre: desactivar una especialidad nombra la ficha de consulta que 
   const { data } = await c.run((tx) => getTimeline(tx, c.orgId, c.patient.id, { types: ["form"] }))
   expect(data.find((row) => row.refId === loose.id)?.title).toBe("Se completó la ficha de consulta: Ficha de ortodoncia")
 })
+
+// QA del 14 nov (clínica H4): desde el tercer control dejaba de verse la ficha de inicio.
+it("desde el tercer control, la de hoy trae también la de inicio para comparar", async () => {
+  const c = await clinic()
+  const template = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find(
+    (row) => row.key === "ficha-de-ortodoncia",
+  )!
+  const finished: string[] = []
+  for (const answer of ["Clase II división 1", "Clase II división 1", "Clase I"]) {
+    const visit = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+    const row = await c.run((tx) =>
+      createFormResponse(tx, c.orgId, c.actor, { templateId: template.id, patientId: c.patient.id, encounterId: visit.id, answers: { clase_molar: answer } }),
+    )
+    await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, row.id))
+    finished.push(row.id)
+  }
+  const listed = await c.run((tx) => listPatientFormResponses(tx, c.orgId, { patientId: c.patient.id }))
+  const byId = new Map(listed.map((row) => [row.id, row]))
+  // La segunda: su anterior es la de inicio, sin repetirla.
+  expect(byId.get(finished[1]!)).toMatchObject({ previousId: finished[0], firstId: null })
+  // La tercera: la anterior y, aparte, la de inicio.
+  expect(byId.get(finished[2]!)).toMatchObject({ previousId: finished[1], firstId: finished[0] })
+})

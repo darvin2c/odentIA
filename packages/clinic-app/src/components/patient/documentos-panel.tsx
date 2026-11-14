@@ -1389,6 +1389,11 @@ function OpenedDocument({
                 ? ((forms.data?.data ?? []).find((row) => row.id === opened.response.previousId) ?? null)
                 : null
             }
+            first={
+              opened.response.firstId
+                ? ((forms.data?.data ?? []).find((row) => row.id === opened.response.firstId) ?? null)
+                : null
+            }
             canWrite={canWrite}
             onChanged={onChanged}
           />

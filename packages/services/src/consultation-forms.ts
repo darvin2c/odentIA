@@ -328,15 +328,34 @@ function previousOf(
   finals: readonly FinalizedForm[],
   form: { id: string | null; key: string; encounterId: string | null; before: Date | null },
 ): FinalizedForm | null {
-  return (
-    finals.find(
-      (item) =>
-        item.key === form.key &&
-        item.id !== form.id &&
-        !(item.encounterId !== null && item.encounterId === form.encounterId) &&
-        (form.before === null || item.finalizedAt < form.before),
-    ) ?? null
+  return earlierOf(finals, form)[0] ?? null
+}
+
+/** Las finalizadas del mismo tipo antes que esta, de la más reciente a la primera. */
+function earlierOf(
+  finals: readonly FinalizedForm[],
+  form: { id: string | null; key: string; encounterId: string | null; before: Date | null },
+): FinalizedForm[] {
+  return finals.filter(
+    (item) =>
+      item.key === form.key &&
+      item.id !== form.id &&
+      !(item.encounterId !== null && item.encounterId === form.encounterId) &&
+      (form.before === null || item.finalizedAt < form.before),
   )
+}
+
+/**
+ * La de inicio: la primera ficha finalizada del mismo tipo. En un tratamiento
+ * largo (desde el tercer control de ortodoncia) se compara también con ella;
+ * null si es la misma que la anterior.
+ */
+function firstOf(
+  finals: readonly FinalizedForm[],
+  form: { id: string | null; key: string; encounterId: string | null; before: Date | null },
+): FinalizedForm | null {
+  const earlier = earlierOf(finals, form)
+  return earlier.length > 1 ? (earlier[earlier.length - 1] ?? null) : null
 }
 
 /**
@@ -486,7 +505,11 @@ export async function getEncounterFormOffers(
 }
 
 /** Una ficha de la lista del paciente, con la anterior del mismo tipo (`previousId`), si la hay. */
-export type PatientFormResponse = FormResponseListed & { previousId: string | null }
+export type PatientFormResponse = FormResponseListed & {
+  previousId: string | null
+  /** La de inicio del mismo tipo, si no es la anterior: «Comparar con: Anterior · Inicio». */
+  firstId: string | null
+}
 
 /**
  * Las fichas de un paciente con la anterior del mismo tipo de cada una: la
@@ -500,9 +523,9 @@ export async function listPatientFormResponses(
 ): Promise<PatientFormResponse[]> {
   const rows = await listFormResponses(tx, orgId, query)
   const staff = rows.filter((row) => row.source === "staff")
-  if (staff.length === 0) return rows.map((row) => ({ ...row, previousId: null }))
+  if (staff.length === 0) return rows.map((row) => ({ ...row, previousId: null, firstId: null }))
   const finals = await finalizedForms(tx, orgId, query.patientId)
-  if (finals.length === 0) return rows.map((row) => ({ ...row, previousId: null }))
+  if (finals.length === 0) return rows.map((row) => ({ ...row, previousId: null, firstId: null }))
   const keys = await tx
     .select({ id: clinicalFormTemplate.id, key: clinicalFormTemplate.key })
     .from(clinicalFormTemplate)
@@ -515,8 +538,8 @@ export async function listPatientFormResponses(
   const keyOf = new Map(keys.map((row) => [row.id, row.key]))
   return rows.map((row) => {
     const key = row.source === "staff" ? keyOf.get(row.templateId) : undefined
-    if (!key) return { ...row, previousId: null }
-    const previous = previousOf(finals, { id: row.id, key, encounterId: row.encounterId, before: row.finalizedAt })
-    return { ...row, previousId: previous?.id ?? null }
+    if (!key) return { ...row, previousId: null, firstId: null }
+    const form = { id: row.id, key, encounterId: row.encounterId, before: row.finalizedAt }
+    return { ...row, previousId: previousOf(finals, form)?.id ?? null, firstId: firstOf(finals, form)?.id ?? null }
   })
 }

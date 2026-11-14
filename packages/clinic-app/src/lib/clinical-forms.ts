@@ -115,6 +115,8 @@ export interface FormResponse {
   encounterFinalizedAt?: string | null
   /** La anterior del mismo tipo, ya finalizada: se lee al lado de esta. Viene en la lista. */
   previousId?: string | null
+  /** La de inicio del mismo tipo, si no es la anterior (desde el tercer control). Viene en la lista. */
+  firstId?: string | null
 }
 
 export interface FormAddendum {

@@ -996,6 +996,7 @@ export function FormDetail({
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
   // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
   const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
+  const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null
   return (
     <DetailDrawer
       open={responseId !== null && response !== null}
@@ -1009,6 +1010,7 @@ export function FormDetail({
           key={response.id}
           response={response}
           previous={previous}
+          first={first}
           canWrite={canWrite}
           onChanged={onChanged}
         />
