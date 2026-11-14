@@ -159,6 +159,12 @@ for (const dictation of cases) {
   }
   for (const [key, value] of listed) {
     if (key in expected && same(expected[key], value)) continue
+    // Varias opciones, solo parte de lo esperado: se perdió una, no se inventó nada (ya cuenta como perdida).
+    const want = expected[key]
+    if (Array.isArray(want) && Array.isArray(value) && value.length > 0 && value.every((item) => want.includes(item))) {
+      notes.push(`a medias ${key} = ${JSON.stringify(value)}`)
+      continue
+    }
     totals.inventadas += 1
     notes.push(`INVENTÓ ${key} = ${JSON.stringify(value)}`)
   }

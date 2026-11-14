@@ -254,6 +254,38 @@ describe("lo que la medición del 14 nov mostró que se perdía", () => {
     expect(say("riesgo", "Alto", "riesgo de caries alto")).toBeNull()
   })
 
+  it("la opción dicha distingue hermanas sin opciones en común; un sí o no se dice con su complemento", () => {
+    const more = formQuestionsOf([
+      {
+        id: "h",
+        title: "Ficha",
+        snapshot: {
+          sections: [
+            {
+              id: "h",
+              title: "Diagnóstico",
+              fields: [
+                { id: "pulpar", label: "Diagnóstico pulpar", type: "opcion_unica", options: ["Pulpa normal", "Pulpitis irreversible sintomática"] },
+                { id: "apical", label: "Diagnóstico apical", type: "opcion_unica", options: ["Tejidos apicales normales", "Periodontitis apical sintomática"] },
+                { id: "vacunas", label: "Vacunas al día", type: "booleano" },
+                { id: "linea_inferior", label: "Línea media inferior", type: "opcion_unica", options: ["Centrada", "Desviada a la izquierda"] },
+                { id: "desviacion_inferior", label: "Desviación de la línea media inferior", type: "numero", unit: "mm" },
+                { id: "desviacion_superior", label: "Desviación de la línea media superior", type: "numero", unit: "mm" },
+              ],
+            },
+          ],
+        },
+        answers: {},
+      },
+    ])
+    const say = (fieldId: string, answer: string, said: string) =>
+      prepareFormAnswer({ payload: { question: more.find((item) => item.fieldId === fieldId)?.number, answer }, sourceText: said }, more, FDI)
+    expect(say("pulpar", "Pulpitis irreversible sintomática", "pulpitis irreversible sintomática")?.payload["value"]).toBe("Pulpitis irreversible sintomática")
+    expect(say("vacunas", "Sí", "vacunas completas")?.payload["value"]).toBe(true)
+    expect(say("desviacion_inferior", "2", "la inferior desviada a la izquierda dos milímetros")?.payload["value"]).toBe(2)
+    expect(say("desviacion_inferior", "2", "desviada unos dos milímetros a la izquierda, la inferior")).toMatchObject({ status: "por_revisar", payload: { value: null } })
+  })
+
   it("«la derecha en clase dos» no elige canina ni molar", () => {
     expect(ask("clase_canina_derecha", "Clase II", "la derecha en clase dos")).toBeNull()
     expect(ask("clase_canina_derecha", "Clase II", "canina derecha clase dos")?.payload["value"]).toBe("Clase II")
@@ -475,16 +507,17 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
 
   it("la ficha abierta en pantalla se lee siempre, además de las dos últimas tocadas", async () => {
     const { fx, form, questions } = await startedForm()
-    const more = async (title: string, updatedAt: Date) =>
+    // Después de la primera por su hora, no por el reloj de la base.
+    const more = async (title: string, after: number) =>
       (
         await ownerDb
           .insert(clinicalFormResponse)
-          .values({ ...form, id: undefined, templateTitle: title, answers: {}, createdAt: updatedAt, updatedAt })
+          .values({ ...form, id: undefined, templateTitle: title, answers: {}, createdAt: new Date(form.createdAt.getTime() + after), updatedAt: new Date(Date.now() + after) })
           .returning()
       )[0]!
     await ownerDb.update(clinicalFormResponse).set({ updatedAt: new Date(Date.now() - 60_000) }).where(eq(clinicalFormResponse.id, form.id))
-    await more("Segunda", new Date())
-    await more("Tercera", new Date())
+    await more("Segunda", 1000)
+    await more("Tercera", 2000)
     const titles = (list: DictationFormQuestion[]) => [...new Set(list.map((item) => item.formTitle))]
     expect(titles(await questions())).toEqual(["Segunda", "Tercera"])
     const open = await fx.run((tx) => dictationFormQuestions(tx, ORG, fx.encounter.id, { open: [form.id] }))
@@ -493,7 +526,9 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
 
   it("un dato que preguntan dos fichas empezadas se propone en las dos", async () => {
     const { form, save } = await startedForm()
-    await ownerDb.insert(clinicalFormResponse).values({ ...form, id: undefined, templateTitle: "Control de ortodoncia", answers: {}, createdAt: new Date() })
+    await ownerDb
+      .insert(clinicalFormResponse)
+      .values({ ...form, id: undefined, templateTitle: "Control de ortodoncia", answers: {}, createdAt: new Date(form.createdAt.getTime() + 1000) })
     const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis milímetros" }])
     expect(saved.suggestions.map((item) => [item.payload["formTitle"], item.payload["value"]])).toEqual([
       ["Ficha de ortodoncia", 6],

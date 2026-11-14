@@ -273,7 +273,7 @@ const denies = (said: string) => NEGATION.test(plain(said).replace(/\bsin embarg
 const isNegativeOption = (option: string) => /^(no|sin|ningun[oa]?|nada|negativ[oa]|ausente)\b/.test(plain(option))
 
 /** Palabras que no distinguen una pregunta ni una opción. */
-const FILLER = new Set(["del", "las", "los", "con", "por", "para", "que", "una", "uno", "angle", "mas"])
+const FILLER = new Set(["del", "las", "los", "con", "por", "para", "que", "una", "uno", "angle", "mas", "unos", "unas", "casi", "cerca", "alrededor", "aproximadamente", "aprox"])
 /** Las raíces de las palabras de un texto (sus 5 primeras letras): «molares» y «molar», «desviada» y «desviación». */
 const stemsOf = (text: string) => [
   ...new Set(
@@ -297,7 +297,11 @@ function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean
   const own = labelStems(question.label)
   // Las hermanas del mismo tipo: «Clase canina derecha» y «Clase molar derecha» se distinguen por
   // «canina», aunque sus opciones no sean las mismas («la derecha en clase dos» no elige ninguna).
-  const twins = (question.siblings ?? []).filter((item) => item.type === question.type)
+  // Si no comparten ninguna opción, la opción dicha ya dice cuál es («pulpitis irreversible» es
+  // el diagnóstico pulpar, no el apical).
+  const shares = (item: { options: string[] | null }) =>
+    !question.options || !item.options || question.options.some((option) => item.options?.includes(option))
+  const twins = (question.siblings ?? []).filter((item) => item.type === question.type && shares(item))
   for (const twin of twins) {
     const theirs = labelStems(twin.label)
     const shared = own.filter((stem) => theirs.includes(stem))
@@ -314,9 +318,13 @@ function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean
  * «intensidad ocho», «higiene regular» o «sondaje de cuatro» sí hablan de ella.
  */
 function namesAnother(question: DictationFormQuestion, text: string): boolean {
+  // Un sí o no se dice con su complemento («vacunas completas»): ahí no se mira.
+  if (question.type === "booleano") return false
   const [head, ...rest] = labelStems(question.label)
   if (!head || rest.length === 0) return false
-  const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf)])
+  // Lo que es de la ficha no nombra otra cosa: «desviada a la izquierda» es de la línea media.
+  const ficha = (question.siblings ?? []).flatMap((item) => [...labelStems(item.label), ...(item.options ?? []).flatMap(stemsOf)])
+  const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf), ...ficha])
   const words = plain(text)
     .split(/[^a-z0-9]+/)
     .filter((word) => (word.length >= 3 && !FILLER.has(word)) || /^[0-9]+$/.test(word))
@@ -336,6 +344,9 @@ const OTHER_UNITS: Record<string, RegExp> = {
   kg: /\b(gramos?|libras?)\b/,
   g: /\b(kilos?|kilogramos?|kg)\b/,
 }
+
+/** Un número dicho como aproximado: no se propone como exacto. */
+const APPROXIMATE = /\b(al menos|por lo menos|mas de|menos de|unos|unas|aproximadamente|aprox|alrededor de|cerca de|casi)\b/
 
 const TRUE_WORDS = new Set(["si", "true", "verdadero"])
 const FALSE_WORDS = new Set(["no", "false", "falso"])
@@ -532,6 +543,8 @@ function checkFormAnswer(
       if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : heard, [number])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
+      // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
+      if (question.type !== "pieza" && APPROXIMATE.test(plain(said))) return review(null, `Dijiste «${shortSaid(said)}»: es aproximado. Escríbelo tú.`)
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)
         return ready(number)
