@@ -770,7 +770,7 @@ it("revisar sus alergias con ella confirma lo que dijo (FHIR verificationStatus)
 it("un registro con todo sin responder no es una declaración, aunque lo haya copiado la migración", async () => {
   const f = await clinicalFixture()
   const thiago = await person(f, "Thiago", "Huanca")
-  const unanswered = {
+  const unanswered: (typeof patientHealthDeclaration.$inferInsert)["health"] = {
     allergies: { state: "unanswered", items: [] },
     conditions: { state: "unanswered", items: [] },
     medications: { state: "unanswered", items: [] },

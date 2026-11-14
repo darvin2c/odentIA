@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { setOrgLocale } from "../../lib/locale"
 import {
   declaredFormsOfEncounter,
   type FormResponse,
@@ -10,6 +11,14 @@ import {
 import { ApiError } from "../../lib/api"
 import { alreadySettled, DeclaredResponse, declaredAnswerText, reviewedLine, reviewedWords, sentWords } from "./declared-response"
 import { ResponseDetail } from "./formularios-tab"
+
+// Las fechas en el formato de la clínica, no en el de la máquina que corre la prueba (el CI está en inglés).
+beforeAll(() => {
+  setOrgLocale("es-PE", "America/Lima")
+})
+afterAll(() => {
+  setOrgLocale(undefined, undefined)
+})
 
 vi.mock("../../lib/crm", () => ({
   usePermission: () => true,

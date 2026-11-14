@@ -1,5 +1,6 @@
 import type { HealthDeclarant } from "@odentia/clinical"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { setOrgLocale } from "./locale"
 import {
   askWhom,
   declaredGroupOf,
@@ -15,6 +16,14 @@ import {
   whoWords,
 } from "./declared-health"
 import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
+
+// Las fechas en el formato de la clínica, no en el de la máquina que corre la prueba (el CI está en inglés).
+beforeAll(() => {
+  setOrgLocale("es-PE", "America/Lima")
+})
+afterAll(() => {
+  setOrgLocale(undefined, undefined)
+})
 
 const herself: HealthDeclarant = { kind: "patient", name: null, relation: null }
 const mother: HealthDeclarant = { kind: "representative", name: "Carla Paz Soto", relation: "madre" }
