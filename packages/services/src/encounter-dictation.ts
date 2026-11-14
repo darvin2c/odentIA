@@ -277,6 +277,8 @@ interface DictationScope {
    * la pausa. Vacía fuera de un tramo: una respuesta de ficha solo nace ahí.
    */
   formQuestions: readonly DictationFormQuestion[]
+  /** Lo dictado en la pausa: la oración de una respuesta de ficha dice de qué pregunta habla. */
+  transcript?: string
 }
 
 async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
@@ -541,7 +543,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   const own = dictation.kinds.includes(draft.kind)
   if (!own && !COMMON_KINDS.includes(draft.kind)) return null
   // La respuesta de una ficha se comprueba contra su pregunta y contra lo que de verdad se dijo.
-  if (draft.kind === "ficha") return prepareFormAnswer(draft, scope.formQuestions, scope.site)
+  if (draft.kind === "ficha") return prepareFormAnswer(draft, scope.formQuestions, scope.site, scope.transcript)
   const parsed = operationAgentSchema(DICTATION_OPERATION[draft.kind]).safeParse(draft.payload)
   if (!parsed.success) {
     return { payload: draft.payload, status: "por_revisar", note: "No pude ubicar todos los datos de esto. Revísalo antes de confirmar." }
@@ -1375,6 +1377,8 @@ export interface DictationSegment {
   removals?: Array<{ suggestionId: string; said: string }>
   /** Identidad del tramo: el mismo tramo no se guarda dos veces. */
   segmentId?: string | undefined
+  /** Lo dictado en el tramo: la oración de una respuesta de ficha dice de qué pregunta habla. */
+  transcript?: string | undefined
   /**
    * Las preguntas de ficha que vio Clío en esta pausa, con su número
    * (`dictationFormQuestions`). Sin ellas se leen otra vez.
@@ -1450,7 +1454,7 @@ export async function saveDictationSegment(
     const { answered: _seen, ...rest } = question
     return [now.answered === undefined ? rest : { ...rest, answered: now.answered }]
   })
-  const scope: DictationScope = { ...(await dictationScope(tx, orgId)), formQuestions }
+  const scope: DictationScope = { ...(await dictationScope(tx, orgId)), formQuestions, ...(segment.transcript ? { transcript: segment.transcript } : {}) }
   const pendingRow = async (id: string) => {
     const [row] = await tx
       .select()

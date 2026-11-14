@@ -188,6 +188,48 @@ describe("lo que el servidor dejaba pasar (QA del 14 nov)", () => {
   })
 })
 
+describe("lo que la medición del 14 nov mostró que se perdía", () => {
+  const EVAL = {
+    sections: [
+      {
+        id: "e",
+        title: "Dolor",
+        fields: [
+          { id: "dolor", label: "Dolor", type: "opcion_unica", options: ["Sin dolor", "Provocado", "Espontáneo"] },
+          { id: "dolor_intensidad", label: "Intensidad del dolor", type: "escala", min: 0, max: 10 },
+          { id: "cpod_c", label: "CPOD · C, cariados", type: "numero" },
+          { id: "ceod_c", label: "ceod · c, cariados", type: "numero" },
+          { id: "clase_molar_derecha", label: "Clase molar derecha (Angle)", type: "opcion_unica", options: ANGLE },
+          { id: "clase_canina_derecha", label: "Clase canina derecha", type: "opcion_unica", options: ["Clase I", "Clase II", "Clase III"] },
+        ],
+      },
+    ],
+  }
+  const forms = formQuestionsOf([{ id: "f", title: "Ficha", snapshot: EVAL, answers: {} }])
+  const ask = (fieldId: string, answer: string, said: string, transcript?: string) =>
+    prepareFormAnswer({ payload: { question: forms.find((item) => item.fieldId === fieldId)?.number, answer }, sourceText: said }, forms, FDI, transcript)
+
+  it("«dolor espontáneo» no empata con «Sin dolor» si no se negó nada", () => {
+    expect(ask("dolor", "Espontáneo", "dolor espontáneo")?.payload["value"]).toBe("Espontáneo")
+    expect(ask("dolor", "Sin dolor", "sin dolor")?.payload["value"]).toBe("Sin dolor")
+  })
+
+  it("«intensidad ocho de diez» basta para «Intensidad del dolor»", () => {
+    expect(ask("dolor_intensidad", "8", "intensidad ocho de diez")?.payload["value"]).toBe(8)
+  })
+
+  it("la oración dice de qué índice es la frase, sin mezclar otra oración", () => {
+    expect(ask("cpod_c", "5", "cinco cariados", "CPOD: cinco cariados, dos perdidos.")?.payload["value"]).toBe(5)
+    expect(ask("cpod_c", "5", "cinco cariados")).toBeNull()
+    expect(ask("ceod_c", "5", "cinco cariados", "CPOD de diez. Ahora, cinco cariados.")).toBeNull()
+  })
+
+  it("«la derecha en clase dos» no elige canina ni molar", () => {
+    expect(ask("clase_canina_derecha", "Clase II", "la derecha en clase dos")).toBeNull()
+    expect(ask("clase_canina_derecha", "Clase II", "canina derecha clase dos")?.payload["value"]).toBe("Clase II")
+  })
+})
+
 setupTestDb()
 const ORG = "org_a"
 

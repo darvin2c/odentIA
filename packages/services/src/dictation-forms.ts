@@ -295,17 +295,18 @@ const labelStems = (label: string) => stemsOf(label.replace(/\([^)]*\)/g, " "))
  */
 function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean {
   const own = labelStems(question.label)
-  // Solo las hermanas del mismo tipo y con las mismas opciones: a las demás ya las distingue el valor.
-  const twins = (question.siblings ?? []).filter(
-    (item) => item.type === question.type && JSON.stringify(item.options ?? null) === JSON.stringify(question.options ?? null),
-  )
+  // Las hermanas del mismo tipo: «Clase canina derecha» y «Clase molar derecha» se distinguen por
+  // «canina», aunque sus opciones no sean las mismas («la derecha en clase dos» no elige ninguna).
+  const twins = (question.siblings ?? []).filter((item) => item.type === question.type)
   for (const twin of twins) {
     const theirs = labelStems(twin.label)
     const shared = own.filter((stem) => theirs.includes(stem))
     const diff = own.filter((stem) => !theirs.includes(stem))
     if (shared.length >= 1 && diff.length >= 1 && diff.length <= 2 && !diff.some((stem) => said.has(stem))) return false
   }
-  const [head, ...rest] = own
+  // La primera palabra sola no basta: «mordida abierta» no es «Mordida cruzada». Lo que va después de
+  // «de» es su complemento: «intensidad» basta para «Intensidad del dolor».
+  const [head, ...rest] = labelStems(question.label.split(/\s(?:de|del)\s/i)[0] ?? question.label)
   if (head && rest.length && said.has(head) && !rest.some((stem) => said.has(stem))) return false
   return true
 }
@@ -344,8 +345,10 @@ export function prepareFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
+  /** Lo dictado en la pausa: la oración de la frase dice de qué pregunta habla («CPOD: cinco cariados»). */
+  transcript?: string,
 ): PreparedFormAnswer | null {
-  const proposed = checkFormAnswer(draft, questions, site)
+  const proposed = checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!proposed || question?.answered === undefined) return proposed
   const value = proposed.payload["value"]
@@ -391,10 +394,22 @@ function sameAnswer(a: unknown, b: unknown): boolean {
   return norm(a) === norm(b)
 }
 
+/**
+ * La oración de lo dictado que contiene la frase: «cinco cariados» en «CPOD:
+ * cinco cariados, dos perdidos…» es del CPOD. Solo la oración, no la pausa
+ * entera: «Clase canina derecha clase uno. Molar izquierda clase dos.» no se mezcla.
+ */
+function sentenceOf(transcript: string | undefined, said: string | undefined): string {
+  if (!transcript || !said?.trim()) return ""
+  const target = plain(said)
+  return transcript.split(/(?<=[.;!?\n])\s+/).find((sentence) => plain(sentence).includes(target)) ?? ""
+}
+
 function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
+  sentence = "",
 ): PreparedFormAnswer | null {
   const said = (draft.sourceText ?? "").trim()
   // Sin frase comprobada no se guarda: es lo que la persona ve para decidir.
@@ -417,9 +432,10 @@ function checkFormAnswer(
   const heard = saidNumbers(said, { roman: "largos" })
   const heardForOptions = saidNumbers(said, { roman: "largos", articles: false })
   const spoken = new Set(stemsOf(said))
-  // La frase tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
-  if (!talksAbout(question, spoken)) return null
-  const labelSaid = labelStems(question.label).some((stem) => spoken.has(stem))
+  // La frase (o su oración) tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
+  const context = new Set([...spoken, ...stemsOf(sentence)])
+  if (!talksAbout(question, context)) return null
+  const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
   const option = (text: string) => (question.options ?? []).find((item) => plain(item) === plain(text)) ?? null
@@ -453,8 +469,10 @@ function checkFormAnswer(
     if (single) {
       const mine = score(value)
       if (!mine) return null
-      const best = Math.max(...options.map(score))
-      const tied = options.filter((item) => score(item) === best)
+      // «Sin dolor» no compite con «dolor espontáneo» si no se negó nada.
+      const rivals = options.filter((item) => !isNegativeOption(item) || denies(said))
+      const best = Math.max(...rivals.map(score))
+      const tied = rivals.filter((item) => score(item) === best)
       if (mine < best) return null
       return tied.length === 1 ? { ok: true } : { ok: false, note: elige(tied) }
     }

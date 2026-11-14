@@ -162,6 +162,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
               return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
             }),
             segmentId,
+            transcript,
             formQuestions: ready.forms,
           }),
         )
