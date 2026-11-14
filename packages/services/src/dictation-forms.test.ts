@@ -9,6 +9,7 @@ import { listFormResponses } from "./clinical-forms.js"
 import { type DictationFormQuestion, dictationFormQuestions, formQuestionsOf, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
 import { confirmDictationSuggestion, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
 import { voidEncounter } from "./encounters.js"
+import { loadFormRecords } from "./form-record.js"
 import type { ProductSite } from "./product-hooks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -385,6 +386,12 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, saved.suggestions[0]!.id, { expectedValue: 6, atSign: true }))
     const listed = await fx.run((tx) => listFormResponses(tx, ORG, { patientId: fx.patient.id }))
     expect(listed.find((row) => row.id === form.id)?.clioAccepted["overjet"]).toMatchObject({ by: fx.actor, atSign: true })
+    // La Historia y la copia lo dicen en su pregunta, mientras siga siendo eso (finalizada, es registro).
+    await ownerDb.update(clinicalFormResponse).set({ status: "finalizado", finalizedAt: new Date() }).where(eq(clinicalFormResponse.id, form.id))
+    const [record] = await fx.run((tx) => loadFormRecords(tx, ORG, fx.patient.id, { ids: [form.id] }))
+    const overjet = record?.sections.flatMap((section) => section.items).find((item) => item.id === "overjet")
+    expect(overjet?.clio).toMatch(/^Clío · confirmó al firmar .+ el /)
+    expect(record?.sections.flatMap((section) => section.items).find((item) => item.id === "overbite")?.clio).toBeNull()
   })
 
   it("lo dicho para la ficha que no queda como propuesta vuelve con su motivo", async () => {
