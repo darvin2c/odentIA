@@ -172,8 +172,14 @@ const FAMILY_RELATIONSHIP_OPTIONS = Object.entries(FAMILY_KINSHIP_LABELS)
 /** Embarazo con su nombre; sin `items`, Base UI mostraría la clave («sin-responder»). */
 const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responder", si: "Sí", no: "No" }
 
-/** Lo guardado, como lo edita el formulario. */
-function buildDrafts(health: PatientHealth): HealthFormValues {
+/**
+ * Lo guardado, como lo edita el formulario. El «No» que marcó la persona (o
+ * quien habla por ella) y nadie revisó no llega elegido como «Niega»: queda
+ * sin marcar hasta que el profesional se lo pregunte (QA del 14 nov, H4a).
+ */
+export function buildDrafts(health: PatientHealth): HealthFormValues {
+  const asked = (topic: "conditions" | "medications"): HealthReviewState =>
+    saidNoGroupOf(health.declared, topic) && health.reviewStatus[topic] === "none" ? "unknown" : health.reviewStatus[topic]
   const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
   const weeks = pregnancyRecordOf(interview)?.semanas
   return {
@@ -215,8 +221,8 @@ function buildDrafts(health: PatientHealth): HealthFormValues {
       persisted: true,
     })),
     reviewStatus: {
-      conditions: health.reviewStatus.conditions,
-      medications: health.reviewStatus.medications,
+      conditions: asked("conditions"),
+      medications: asked("medications"),
     },
     bloodGroup: health.bloodGroup ?? "",
     interview,
@@ -669,6 +675,13 @@ export function AntecedentesTab({
       declaration.via === "enlace" || (declaration.via === "registro" && declaration.enteredAt !== registration?.createdAt),
   )
   const pendingReview = isHealthReviewPending(health)
+  // «Dijo que no · 13 nov», junto al grupo donde se decide: es de quien declaró, no del equipo.
+  const saidNoOf = (topic: "conditions" | "medications"): string | undefined => {
+    const group = saidNoGroupOf(health.declared, topic)
+    if (!group) return undefined
+    const day = group.at ? shortDay(group.at) : ""
+    return `${saidNoWords(group.by, sex)}${day ? ` · ${day}` : ""} · sin revisar`
+  }
   const submitLabel = pendingReview && !isDirty ? "Revisar y guardar" : "Guardar antecedentes"
   const readOnly = !canWrite || isSubmitting
   // Nunca se preguntó: el vacío lo dice y lleva a registrarlo (ADR 0035).
@@ -818,6 +831,7 @@ export function AntecedentesTab({
           <ClinicalGroupCard
             title="Condiciones"
             review={reviewStatus.conditions}
+            saidNo={saidNoOf("conditions")}
             reviewField={<ReviewStateField form={form} id={fid("rev-con")} group="conditions" readOnly={readOnly} />}
           >
             <ConditionRows form={form} idPrefix={uid} readOnly={readOnly} />
@@ -827,7 +841,9 @@ export function AntecedentesTab({
                   <p className="text-sm text-muted-foreground">
                     {reviewStatus.conditions === "none"
                       ? "Ausencia confirmada en este grupo."
-                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                      : saidNoOf("conditions")
+                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                        : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
               }
@@ -837,6 +853,7 @@ export function AntecedentesTab({
           <ClinicalGroupCard
             title="Medicación vigente"
             review={reviewStatus.medications}
+            saidNo={saidNoOf("medications")}
             reviewField={<ReviewStateField form={form} id={fid("rev-med")} group="medications" readOnly={readOnly} />}
           >
             <MedicationRows form={form} idPrefix={uid} readOnly={readOnly} />
@@ -846,7 +863,9 @@ export function AntecedentesTab({
                   <p className="text-sm text-muted-foreground">
                     {reviewStatus.medications === "none"
                       ? "Ausencia confirmada en este grupo."
-                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                      : saidNoOf("medications")
+                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                        : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
               }
@@ -1273,14 +1292,17 @@ function AntecedentesSummary({
   )
 }
 
-function ClinicalGroupCard({
+export function ClinicalGroupCard({
   title,
   review,
+  saidNo,
   reviewField,
   children,
 }: {
   title: string
   review: HealthReviewState
+  /** El «No» de quien declaró, con su día: se muestra al lado, sin elegir «Niega» por el profesional. */
+  saidNo?: string
   reviewField: ReactNode
   children: ReactNode
 }): React.JSX.Element {
@@ -1292,13 +1314,20 @@ function ClinicalGroupCard({
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="font-heading text-base font-medium">{title}</div>
-          <Badge
-            variant={
-              review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-            }
-          >
-            {HEALTH_REVIEW_LABELS[review]}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            {saidNo ? (
+              <Badge variant="outline" className="h-auto max-w-full border-dashed py-px text-left whitespace-normal">
+                {saidNo}
+              </Badge>
+            ) : null}
+            <Badge
+              variant={
+                review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
+              }
+            >
+              {HEALTH_REVIEW_LABELS[review]}
+            </Badge>
+          </div>
         </div>
       </div>
       <div className="flex flex-col gap-3">
