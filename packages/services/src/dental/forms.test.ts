@@ -53,3 +53,12 @@ it("la ficha de odontopediatría no pide el peso (está en los signos vitales) y
   expect(labels.some((label) => label.includes("peso"))).toBe(false)
   expect(DENTAL_FORMS.byAge).toEqual({ underYears: 12, kind: "odontopediatria" })
 })
+
+it("cada pregunta de casillas tiene su «No tiene» o «Ninguno»: sin marcar no es una respuesta", () => {
+  for (const form of DENTAL_FORMS.suggestions)
+    for (const section of form.schema.sections)
+      for (const field of section.fields.filter((item) => item.type === "opcion_multiple")) {
+        expect(field.options?.some((option) => /^(no tiene|ninguno|ninguna)$/i.test(option)), `${form.key}:${field.id}`).toBe(true)
+        expect(field.help ?? "", `${form.key}:${field.id}`).not.toMatch(/sin marcar/i)
+      }
+})

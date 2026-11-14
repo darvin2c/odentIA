@@ -205,6 +205,22 @@ export function rowButtonAfter(change: "publish" | "leave" | "reuse"): "leave" |
   return change === "leave" ? "reuse" : "leave"
 }
 
+/** Una opción que dice «no tiene»: con ella, una pregunta de casillas obligatoria se puede responder. */
+const NONE_OPTION = /^(no|no tiene|ninguno|ninguna|nada)$/i
+
+/**
+ * Una pregunta de casillas obligatoria sin opción «No tiene»: dejarla sin marcar
+ * ya no vale como respuesta y la ficha no se puede finalizar si el paciente no
+ * tiene nada. El editor lo avisa al marcar «Obligatorio», sin impedirlo.
+ */
+export function requiredWithoutNone(field: Pick<FormFieldDef, "type" | "required" | "options">): boolean {
+  return (
+    field.type === "opcion_multiple" &&
+    field.required === true &&
+    !(field.options ?? []).some((option) => NONE_OPTION.test(option.trim()))
+  )
+}
+
 /** El que sigue a `current` en una lista de paradas, o null si es el último o no está. */
 export function nextAfter<T>(stops: readonly T[], current: T): T | null {
   const index = stops.indexOf(current)

@@ -64,6 +64,7 @@ import {
   publishedButNotReaching,
   publishWords,
   reuseWords,
+  requiredWithoutNone,
   rowButtonAfter,
   sameTitleTemplate,
   settleFieldKeys,
@@ -1078,6 +1079,13 @@ function FieldEditor({
         <form.AppField name={`sections[${si}].fields[${fi}].required`}>
           {(requiredField) => <requiredField.CheckboxField label="Obligatorio" disabled={disabled} className={CHECK_FIELD} />}
         </form.AppField>
+        {requiredWithoutNone(field) ? (
+          // Avisa sin impedir: sin «No tiene», quien no tiene nada no podría finalizar la ficha.
+          <p role="status" className="w-full rounded-md bg-warning-soft p-2 text-sm">
+            Obligatoria, «sin marcar» ya no vale como respuesta: agrega la opción «No tiene» (o «Ninguno») para que se
+            pueda responder cuando no hay nada.
+          </p>
+        ) : null}
         {declaresHealth && textAnswer ? (
           <form.AppField name={`sections[${si}].fields[${fi}].definition`}>
             {(definitionField) => (

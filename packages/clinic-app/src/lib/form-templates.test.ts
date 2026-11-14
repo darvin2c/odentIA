@@ -8,6 +8,7 @@ import {
   oneAtATime,
   publishWords,
   reuseWords,
+  requiredWithoutNone,
   rowButtonAfter,
   sameTitleTemplate,
   settleFieldKeys,
@@ -292,4 +293,12 @@ it("una ficha apagada sigue en la lista, con su versión «sin usar», y no pasa
   const { listed, unused } = templateGroups([off])
   expect(listed).toHaveLength(1)
   expect(unused).toHaveLength(0)
+})
+
+// QA del 14 nov (H2 del novato): una casilla obligatoria sin «No tiene» trababa la ficha en consulta.
+it("avisa al hacer obligatoria una pregunta de casillas que no tiene cómo decir «no tiene»", () => {
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: true, options: ["Anterior", "Posterior"] })).toBe(true)
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: true, options: ["No tiene", "Anterior"] })).toBe(false)
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: false, options: ["Anterior"] })).toBe(false)
+  expect(requiredWithoutNone({ type: "opcion_unica", required: true, options: ["Sí", "No"] })).toBe(false)
 })
