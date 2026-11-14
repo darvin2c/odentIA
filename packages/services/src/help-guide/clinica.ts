@@ -68,7 +68,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-atencion-antecedentes-al-lado",
         q: "¿Cómo veo sus antecedentes y su última atención sin salir de la atención?",
-        a: "Arriba de la atención, «Antecedentes y última atención» abre al lado su embarazo si lo hay, sus alergias, enfermedades, medicación y su última atención. Es de solo lectura: se cambia en Antecedentes de su ficha. Lo que respondió antes de venir no está ahí: sale arriba de la atención, en su propia caja.",
+        a: "Arriba de la atención, «Antecedentes y última atención» abre al lado su embarazo si lo hay, sus alergias, enfermedades, medicación y su última atención. Es de solo lectura: se cambia en Antecedentes de su ficha. Lo que contó antes de venir no está ahí: sale en «Hoy viene a…», arriba de la atención.",
         forms: ["que le hice la ultima vez sin salir de la atencion", "ver antecedentes dentro de la atencion"],
         area: "clinica",
         needs: "clinical.read",
@@ -205,7 +205,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo un formulario de la clínica en su ficha?",
-        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. Al terminar, «Finalizar…»; queda con quién lo finalizó. Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo. Lo que respondió el paciente antes de venir no se llena aquí: está en Documentos como «Por revisar».",
+        a: "En «Nuevo» › «Formulario», eliges cuál y «Empezar»: se guarda solo mientras lo completas, y un borrador se retoma con «Completar» en Documentos. Al terminar, «Finalizar…»; queda con quién lo finalizó. Finalizado ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo. Lo que contó el paciente antes de venir no se llena aquí: está en «Hoy viene a…» de su atención.",
         forms: ["como finalizo un formulario", "descartar un formulario en borrador", "retomar un formulario en borrador"],
         area: "clinica",
         needs: "clinical.write",
@@ -213,7 +213,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-cuestionario-respondio-antes-de-venir",
         q: "¿Dónde veo lo que respondió antes de venir?",
-        a: "Al abrir su atención sale arriba, en una caja con sus respuestas, quién lo envió, por dónde y cuándo. También está en su página › Clínica › Documentos, como «Por revisar», con «Ver». Es para leer: lo que escribió no se cambia. «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta. Revisado en la atención, sigue a la vista ahí; revisado desde Documentos, queda en Documentos y en la Historia. Lo que dijo de su salud (alergias, enfermedades, medicinas) está arriba de su ficha y en «Revisa con… lo que dijo de su salud».",
+        a: "Lo que contó de esa visita (a qué viene, si le duele y cuánto) sale en «Hoy viene a…», arriba de la atención de su cita, con quién lo envió y cuándo, y «Usar como motivo» pone sus palabras en el motivo sin teclear. Es solo de esa cita: lo de otra visita no sale. El sistema anota que lo viste al abrir la atención, y después de firmar sigue ahí y en la Historia. Lo que dijo de su salud (alergias, enfermedades, medicinas) está arriba de su ficha y en «Revisa con… lo que dijo de su salud». Si respondió un cuestionario de los de antes, está en su página › Clínica › Documentos, como «Por revisar», con «Ver». Es para leer: lo que escribió no se cambia. «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta. Revisado en la atención, sigue a la vista ahí; revisado desde Documentos, queda en Documentos y en la Historia.",
         forms: [
           "donde veo el cuestionario que respondio antes de venir",
           "lo que respondio antes de venir",
@@ -349,7 +349,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "formularios-formulario-propio-crear-publicar",
         q: "¿Cómo hago un formulario propio o un cuestionario para antes de la cita?",
-        a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios»; ahí, «Nueva plantilla»: pones el título, eliges en «Quién lo responde» si lo llena el equipo desde la ficha o el paciente desde el portal, y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». No se usa hasta que tocas «Publicar». Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas.",
+        a: "Un formulario propio lo llena el equipo: en Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios»; ahí, «Nueva plantilla»: pones el título y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». No se usa hasta que tocas «Publicar». Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas. Lo que se le pregunta al paciente antes de su cita no es un formulario: está en Configuración › Preguntas al paciente, en «Antes de cada cita» (a qué viene, si le duele y algo más), y le llega en su enlace con lo que falta de sus datos.",
         forms: ["como publico un formulario", "cuestionario para que el paciente llene antes de venir", "pregunta que sale solo si responde que si", "nueva plantilla de formulario"],
       },
     ],
