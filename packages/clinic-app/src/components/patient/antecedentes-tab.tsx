@@ -1177,7 +1177,7 @@ export function AntecedentesTab({
  * revisión. Sin formularios. Las alergias tienen su propia tarjeta arriba
  * (`AllergiesCard`).
  */
-function AntecedentesSummary({
+export function AntecedentesSummary({
   saved,
   pendingReview,
   groups,
@@ -1214,7 +1214,15 @@ function AntecedentesSummary({
         return group ? [saidByWords(group.by, sex)] : []
       })),
     ]
-    return who.length > 0 ? `${capital(who.join(" y "))} · sin revisar` : undefined
+    // Con algo que anotó el equipo en la misma tarjeta, la marca va en cada fila, no sobre todo (B7).
+    const allSaid = ids.length > 0 && ids.every((id) => declaredGroupOf(groups, topic, id))
+    return who.length > 0 && allSaid ? `${capital(who.join(" y "))} · sin revisar` : undefined
+  }
+  /** El nombre de cada fila, con «lo dijo ella, sin revisar» si la dijo y en la tarjeta hay también lo del equipo. */
+  const rowWords = (topic: "conditions" | "medications", id: string | undefined, text: string, ids: string[]): string => {
+    if (!id || saidWord(topic, ids)) return text
+    const group = declaredGroupOf(groups, topic, id)
+    return group ? `${text} (${saidByWords(group.by, sex)}, sin revisar)` : text
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancyText = pregnancy ? pregnancyWords(pregnancy) : null
@@ -1227,7 +1235,9 @@ function AntecedentesSummary({
         asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
         activeCon.length > 0
-          ? activeCon.map((row) => row.name).join(", ")
+          ? activeCon
+              .map((row) => rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))))
+              .join(", ")
           : conditions.length > 0
             ? "Ninguna activa"
             : "Sin registros",
@@ -1239,7 +1249,14 @@ function AntecedentesSummary({
       detail:
         activeMed.length > 0
           ? activeMed
-              .map((row) => [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "))
+              .map((row) =>
+                rowWords(
+                  "medications",
+                  row.id,
+                  [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "),
+                  activeMed.flatMap((item) => (item.id ? [item.id] : [])),
+                ),
+              )
               .join(", ")
           : medications.length > 0
             ? "Ninguna vigente"
