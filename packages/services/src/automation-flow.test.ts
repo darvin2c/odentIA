@@ -50,6 +50,7 @@ import {
   UNSUBSCRIBE_WORDS,
   unsubscribeByToken,
 } from "./automation.js"
+import { saveVisitAnswer } from "./visit-answers.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { saveMessageText, sendLinkReceivedNotice } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
@@ -442,6 +443,25 @@ describe("por dónde le llega a cada persona", () => {
     const [job] = await jobsOf(c)
     // No le dice «2 cosas por hacer»: el consentimiento lo lee en su enlace y lo firma en la cita.
     expect(await messageOf(job!.sentMessageId)).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_datos_v1" })
+  })
+
+  // Mesa de formularios del 13 nov, entrega 8: lo de su visita cuenta, y con sus datos es una sola cosa.
+  it("«Antes de tu cita» cuenta lo de su visita de esa cita: sus datos y su visita son una cosa, y respondida ya no cuenta", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
+    const p = await person(c, "Marta Ríos", { consent: ["recordatorio"] })
+    // Una cita de verdad por venir: lo de la visita se pregunta para una cita que aún no llega.
+    const visit = await appointmentFor(c, p.patientId, new Date(Date.now() + 2 * 24 * HOUR))
+    const count = () => run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId, { appointmentId: visit }))
+    // Le falta su fecha de nacimiento y se le pregunta a qué viene: una sola tarjeta.
+    expect(await count()).toEqual({ data: true, total: 1 })
+    await ownerDb
+      .update(contact)
+      .set({ givenNames: "Marta", familyName: "Ríos", birthDate: "1960-03-12", phone: "+51987000937" })
+      .where(eq(contact.id, p.contactId))
+    // Solo su visita: también es algo por hacer, y el recordatorio la cuenta.
+    expect(await count()).toEqual({ data: false, total: 1 })
+    await run(c, (tx) => saveVisitAnswer(tx, c.orgId, { patientId: p.patientId, contactId: p.contactId }, visit, { pain: "no" }, "enlace"))
+    expect(await count()).toEqual({ data: false, total: 0 })
   })
 
   it("«Antes de tu cita» sin aprobar: sale el de sus datos y, si no, el de siempre", async () => {
