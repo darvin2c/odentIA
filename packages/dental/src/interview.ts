@@ -5,10 +5,14 @@
  */
 
 import {
+  BOTTLE_ANSWERS,
+  BRUSHER_ANSWERS,
   CIGARETTE_BAND_LABELS,
   CIGARETTE_BANDS,
   type CigaretteBand,
   INTERVIEW_ANSWERS,
+  PACIFIER_ANSWERS,
+  SWEETS_ANSWERS,
   TOBACCO_ANSWERS,
 } from "@odentia/clinical"
 
@@ -51,7 +55,54 @@ export function dentalInterviewErrors(answers: Record<string, unknown>): Record<
   }
   if (!isAnswer(problemaAnestesia))
     errors["antecedentesOdontologicos.problemaAnestesia"] = "Problemas con la anestesia: elige Sí, No o No sabe."
+  // «De pequeño»: cada respuesta, una de su lista.
+  const childhood = group as Record<string, unknown>
+  for (const [key, allowed, label] of CHILDHOOD_CHOICES) {
+    const value = childhood[key]
+    if (value !== undefined && !(allowed as readonly unknown[]).includes(value))
+      errors[`antecedentesOdontologicos.${key}`] = `${label}: elige una opción.`
+  }
   return errors
+}
+
+/** Lo de un niño que cuenta quien lo cuida, con sus respuestas posibles y su nombre. */
+const CHILDHOOD_CHOICES = [
+  ["biberon", BOTTLE_ANSWERS, "Biberón o pecho para dormir"],
+  ["chupon", PACIFIER_ANSWERS, "Chupón o dedo"],
+  ["dulcesEntreComidas", SWEETS_ANSWERS, "Dulces o jugos entre comidas"],
+  ["pastaConFluor", INTERVIEW_ANSWERS, "Pasta con flúor"],
+  ["quienCepilla", BRUSHER_ANSWERS, "Quién le cepilla"],
+] as const
+
+/** Cada respuesta de «de pequeño», como se lee en la atención y en Antecedentes. */
+export const CHILDHOOD_WORDS = {
+  biberon: { no: "no toma biberón", si: "toma biberón o pecho para dormir", ya_no: "ya no toma biberón" },
+  chupon: { no: "no usa chupón ni se chupa el dedo", chupon: "usa chupón", dedo: "se chupa el dedo" },
+  dulcesEntreComidas: { casi_nunca: "casi nunca", "1_a_3": "1 a 3 veces al día", "4_o_mas": "4 o más veces al día" },
+  pastaConFluor: { si: "pasta con flúor", no: "pasta sin flúor", no_sabe: "no sabe si su pasta tiene flúor" },
+  quienCepilla: { solo: "se cepilla sin ayuda", adulto: "lo cepilla un adulto", ambos: "se cepilla con ayuda de un adulto" },
+} as const satisfies Record<(typeof CHILDHOOD_CHOICES)[number][0], Record<string, string>>
+
+/**
+ * «De pequeño», en palabras y en tres filas, para «Revisa con … lo que dijo» de
+ * la atención y el resumen de Antecedentes: «De pequeño» (biberón y chupón),
+ * «Dulces o jugos entre comidas» y «Dientes» (flúor y quién le cepilla). Lo que
+ * no se respondió no sale.
+ */
+export function childhoodLines(dental: Record<string, unknown> | null | undefined): Array<{ label: string; value: string }> {
+  const said = (key: keyof typeof CHILDHOOD_WORDS): string => {
+    const value = dental?.[key]
+    const words: Record<string, string> = CHILDHOOD_WORDS[key]
+    return typeof value === "string" ? (words[value] ?? "") : ""
+  }
+  const rows: Array<{ label: string; value: string }> = []
+  const small = [said("biberon"), said("chupon")].filter(Boolean)
+  if (small.length) rows.push({ label: "De pequeño", value: small.join(" · ") })
+  const sweets = said("dulcesEntreComidas")
+  if (sweets) rows.push({ label: "Dulces o jugos entre comidas", value: sweets })
+  const teeth = [said("pastaConFluor"), said("quienCepilla")].filter(Boolean)
+  if (teeth.length) rows.push({ label: "Dientes", value: teeth.join(" · ") })
+  return rows
 }
 
 /**

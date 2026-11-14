@@ -167,6 +167,8 @@ export interface InterviewSectionsProps {
   idPrefix: string
   /** El sexo de la ficha: lo gineco-obstétrico no se le pregunta a un hombre. */
   sex: string | null
+  /** Sus años cumplidos hoy, si se saben: lo de un niño solo se le pregunta a quien lo cuida (menores de 12). */
+  age?: number | null
   /**
    * El error de cada dato, junto a él: la clave es «grupo.clave» de la
    * entrevista («habitos.tabaco», «antecedentesOdontologicos.ultimaVisita»;

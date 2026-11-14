@@ -1,4 +1,4 @@
-import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
+import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -1092,6 +1092,7 @@ export function AntecedentesTab({
                     disabled={readOnly}
                     idPrefix={uid}
                     sex={patientQuery.data?.data.patient.sex ?? null}
+                    age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
                     errors={interviewErrors}
                   />
                 )}

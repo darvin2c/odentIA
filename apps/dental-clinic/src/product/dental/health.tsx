@@ -5,13 +5,15 @@ import {
   subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
 import {
+  CHILDHOOD_WORDS,
+  childhoodLines,
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
   dentalInterviewErrors,
   dentalInterviewLines,
 } from "@odentia/dental"
-import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS } from "@odentia/clinical"
+import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS, EARLY_CHILDHOOD_MAX_AGE, isChildAge } from "@odentia/clinical"
 import { regionToday } from "@odentia/ui-patterns"
 import {
   Checkbox,
@@ -328,7 +330,9 @@ function Pick({
  * atender), la anestesia, si fuma y cuánto, y la lactancia, con la forma de latidIA
  * (`habitos`, `embarazoLactancia.lactancia` con el día en que se dijo).
  */
-function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }: InterviewSectionsProps) {
+function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, errors }: InterviewSectionsProps) {
+  // A un niño no se le pregunta si fuma ni la lactancia; lo ya anotado sí se ve.
+  const child = isChildAge(age)
   const [open, setOpen] = useState(true)
   const fid = (name: string): string => `${idPrefix}-${name}`
   const group = (key: string): Rec => {
@@ -380,6 +384,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
             disabled={disabled}
             error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia", fid("od-anestesia"))}
           />
+          {child && strOf(habits["tabaco"]) === "" ? null : (
           <Pick
             id={fid("od-tabaco")}
             label="Tabaco"
@@ -393,6 +398,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
             disabled={disabled}
             error={subFieldError(errors, "habitos.tabaco", fid("od-tabaco"))}
           />
+          )}
           {habits["tabaco"] === "fuma" ? (
             <Pick
               id={fid("od-cigarrillos")}
@@ -404,7 +410,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
               error={subFieldError(errors, "habitos.cigarrillos", fid("od-cigarrillos"))}
             />
           ) : null}
-          {sex === "M" ? null : (
+          {sex === "M" || (child && strOf(lactation["estado"]) === "") ? null : (
             <Pick
               id={fid("od-lactancia")}
               label="Lactancia"
@@ -428,19 +434,95 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
   )
 }
 
-/** Lo guardado del corazón, la anestesia, el tabaco y la lactancia, debajo del resumen de antecedentes. */
+/** Una respuesta de «de pequeño» por lista, con «Sin indicar» primero. */
+const childItems = (words: Record<string, string>): Record<string, string> => ({
+  "sin-indicar": "Sin indicar",
+  ...Object.fromEntries(Object.entries(words).map(([key, text]) => [key, text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))])),
+})
+const CHILD_FIELDS = [
+  { key: "biberon", label: "Biberón o pecho para dormir", early: true },
+  { key: "chupon", label: "Chupón o dedo", early: true },
+  { key: "dulcesEntreComidas", label: "Dulces o jugos entre comidas", early: false },
+  { key: "pastaConFluor", label: "Pasta de dientes con flúor", early: false },
+  { key: "quienCepilla", label: "Quién le cepilla los dientes", early: false },
+] as const
+
+/**
+ * «De pequeño» (mesa del 13 nov, entrega 7): lo que cuenta quien cuida a un menor
+ * de 12, con las claves de `antecedentesOdontologicos`. Sale para un niño, o si ya
+ * hay algo anotado; biberón y chupón, hasta los 6 años.
+ */
+function ChildhoodSections({ answers, update, disabled, idPrefix, age, errors }: InterviewSectionsProps) {
+  const [open, setOpen] = useState(true)
+  const raw = answers.antecedentesOdontologicos
+  const odontologicos: Rec = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : {}
+  const child = isChildAge(age)
+  const shown = CHILD_FIELDS.filter(
+    (field) =>
+      strOf(odontologicos[field.key]) !== "" ||
+      (child && (!field.early || (age as number) <= EARLY_CHILDHOOD_MAX_AGE)),
+  )
+  if (shown.length === 0) return null
+  const fid = (name: string): string => `${idPrefix}-od-${name}`
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="text-sm font-medium">
+        <span className="flex items-center gap-1">
+          De pequeño <ChevronDown aria-hidden className="size-4" />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid gap-4 pt-2 sm:grid-cols-2">
+          {shown.map((field) => (
+            <Pick
+              key={field.key}
+              id={fid(field.key)}
+              label={field.label}
+              items={childItems(CHILDHOOD_WORDS[field.key])}
+              value={strOf(odontologicos[field.key])}
+              onChange={(v) => update("antecedentesOdontologicos", field.key, v)}
+              disabled={disabled}
+              error={subFieldError(errors, `antecedentesOdontologicos.${field.key}`, fid(field.key))}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de pequeño, debajo del resumen de antecedentes. */
 function DentalHistorySummary({ answers }: { answers: Rec }) {
   const lines = dentalInterviewLines(answers)
-  if (lines.length === 0) return null
+  const raw = answers.antecedentesOdontologicos
+  const childhood = childhoodLines(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
+  if (lines.length === 0 && childhood.length === 0) return null
   return (
-    <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-      <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
-      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-        {lines.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-    </section>
+    <>
+      {lines.length > 0 ? (
+        <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
+          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+            {lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {childhood.length > 0 ? (
+        <section aria-label="De pequeño" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">De pequeño</h3>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+            {childhood.map((row) => (
+              <div key={row.label} className="contents">
+                <dt className="text-muted-foreground">{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+    </>
   )
 }
 
@@ -451,6 +533,7 @@ export const dentalHealth: ProductHealthUi = {
   InterviewSections: (props) => (
     <>
       <DentalRiskSections {...props} />
+      <ChildhoodSections {...props} />
       <DentalInterviewSections {...props} />
     </>
   ),
