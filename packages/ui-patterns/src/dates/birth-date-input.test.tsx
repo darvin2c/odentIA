@@ -109,6 +109,16 @@ describe("BirthDateInput", () => {
     expect(await written("3 4 1990", "paste")).toBe("03/04/1990")
   })
 
+  // En el teclado numérico del celular a veces no hay barra, pero sí coma, punto o espacio.
+  it("tecleada con comas o con espacios también se entiende", async () => {
+    expect(await written("3,4,1990")).toBe("03/04/1990")
+    expect(await written("3 4 1990")).toBe("03/04/1990")
+    expect(await written("3, 4, 1990")).toBe("03/04/1990")
+    expect(await written("3,4,1990", "paste")).toBe("03/04/1990")
+    // Y sin ningún separador, los ocho números de siempre.
+    expect(await written("03041990")).toBe("03/04/1990")
+  })
+
   it("un separador de más o antes de tiempo no rompe lo escrito", async () => {
     // Con el día ya completo, la barra es la que el campo iba a poner.
     expect(await written("30/07/1995")).toBe("30/07/1995")

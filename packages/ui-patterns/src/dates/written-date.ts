@@ -89,10 +89,11 @@ export function writtenDateMask(format: WrittenDateFormat): Array<RegExp | strin
 
 /**
  * Lo que la gente teclea entre el día, el mes y el año al escribir una fecha
- * como la dice. El espacio no: los teclados del teléfono lo convierten en
- * «. » al repetirlo y la máscara ya lo descarta.
+ * como la dice: barra, guion, punto, coma o espacio (lo que tenga a mano el
+ * teclado numérico del teléfono). Donde ese teclado no trae ninguno, como el
+ * del iPhone, la fecha se escribe con sus ocho números seguidos («03041990»).
  */
-export const TYPED_DATE_SEPARATOR = /[/.-]/
+export const TYPED_DATE_SEPARATOR = /[/.,\-\s]/
 
 /**
  * Al teclear un separador: si la parte en curso (día o mes) lleva un solo
@@ -113,7 +114,7 @@ export function padWrittenPart(written: string, format: WrittenDateFormat = writ
  * orden de la clínica, con sus ceros y su separador. `null` si no son tres partes.
  */
 export function padWrittenDate(text: string, format: WrittenDateFormat = writtenDateFormat()): string | null {
-  const parts = text.trim().split(/[/.\-\s]+/)
+  const parts = text.trim().split(/[/.,\-\s]+/)
   if (parts.length !== 3 || !parts.every((part) => /^\d{1,4}$/.test(part))) return null
   return parts
     .map((part, index) => (format.order[index] !== "year" && part.length === 1 ? `0${part}` : part))

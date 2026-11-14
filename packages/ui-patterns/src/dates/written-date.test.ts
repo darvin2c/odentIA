@@ -52,6 +52,8 @@ describe("fecha escrita", () => {
     expect(padWrittenDate("3-4-1990", pe)).toBe("03/04/1990")
     expect(padWrittenDate("4/3/1990", writtenDateFormat("en-US"))).toBe("04/03/1990")
     expect(padWrittenDate("1990 4 3", se)).toBe("1990-04-03")
+    expect(padWrittenDate("3,4,1990", pe)).toBe("03/04/1990")
+    expect(padWrittenDate("3, 4, 1990", pe)).toBe("03/04/1990")
     // Lo que no son tres partes de números se deja como está.
     expect(padWrittenDate("3/4", pe)).toBeNull()
     expect(padWrittenDate("30071995", pe)).toBeNull()
