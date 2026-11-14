@@ -1066,16 +1066,19 @@ export function healthGapWords(gaps: readonly HealthGap[]): string {
 export function AnesthesiaHealthLine({
   anesthetics,
   gaps,
+  risks = [],
   onComplete,
   disabled = false,
 }: {
   anesthetics: readonly string[]
   gaps: readonly HealthGap[]
+  /** Lo que dijo del corazón y de la anestesia que cambia una anestesia (QA del 14 nov, causa raíz). */
+  risks?: readonly string[]
   /** «Completar en Antecedentes»: los abre encima de la atención. */
   onComplete?: () => void
   disabled?: boolean
 }): React.JSX.Element | null {
-  if (anesthetics.length === 0 || gaps.length === 0) return null
+  if (anesthetics.length === 0 || (gaps.length === 0 && risks.length === 0)) return null
   const asked = healthGapWords(gaps)
   const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
     .filter(Boolean)
@@ -1083,9 +1086,10 @@ export function AnesthesiaHealthLine({
   return (
     <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">Anestesia con su salud por completar</span>
+        <span className="font-medium">{missing ? "Anestesia con su salud por completar" : "Anestesia: revisa lo que dijo"}</span>
         <span className="text-xs text-muted-foreground">
-          Se usa {listWords(anesthetics)}. Falta {missing}. Puedes firmar igual: queda anotado lo que faltaba.
+          Se usa {listWords(anesthetics)}.{risks.length > 0 ? ` Dijo que ${listWords([...risks])}.` : ""}
+          {missing ? ` Falta ${missing}.` : ""} Puedes firmar igual{missing ? ": queda anotado lo que faltaba" : ""}.
         </span>
       </div>
       {onComplete ? (
@@ -1343,6 +1347,7 @@ export function EncounterClosingDialog({
               <AnesthesiaHealthLine
                 anesthetics={closing?.health?.anesthetics ?? []}
                 gaps={healthGaps}
+                risks={closing?.health?.risks ?? []}
                 onComplete={onCompleteHealth}
                 disabled={busy}
               />

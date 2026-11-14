@@ -5,6 +5,8 @@ import {
   healthReviewPending,
   isCurrentMedication,
   type HealthDeclarant,
+  type MedicationClass,
+  type MedicineClassAnswer,
   type MissingPersonDatum,
   type PregnancyToday,
   type Vitals,
@@ -227,9 +229,14 @@ export interface DeclaredHealthGroup {
   conditions: string[]
   medications: string[]
   pregnancy: boolean
+  /** Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (el corazón, la anestesia…). */
+  interview?: DeclaredInterviewKey[]
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
+
+/** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
+export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {
@@ -265,6 +272,8 @@ export interface PatientHealth {
   pregnancy?: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo. */
   declarations?: HealthDeclarationView[]
+  /** Anticoagulantes y medicinas para los huesos: si toma, si dijo que no, si no sabe o si nadie se lo preguntó. */
+  medicineClasses?: Record<MedicationClass, MedicineClassAnswer>
   latestAnamnesis: {
     id: string
     version: number

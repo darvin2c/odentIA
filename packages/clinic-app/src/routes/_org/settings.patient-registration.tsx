@@ -27,9 +27,9 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { QrCode } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { RegistrationQuestionnaire } from "../../components/patient/registration-questionnaire"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
@@ -43,7 +43,11 @@ import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
-import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
+import {
+  fetchRegistrationConfig,
+  markRegistrationQuestionsSeen,
+  saveRegistrationConfig,
+} from "../../lib/patient-registration"
 import { brandedQrDataUrl, brandedQrPng, registrationSheetPng } from "../../lib/branded-qr"
 import { PatientRegistrationPageSkeleton, PatientRegistrationSkeleton } from "../../components/skeletons/settings"
 
@@ -54,9 +58,9 @@ export const Route = createFileRoute("/_org/settings/patient-registration")({
 
 const orgRouteApi = getRouteApi("/_org")
 
-const TITLE = "Registro de pacientes"
+const TITLE = "Preguntas al paciente"
 const SUBTITLE =
-  "Qué le pedimos a cada paciente, lo registre recepción o se registre solo, y el aviso de privacidad."
+  "Lo que se le pregunta al paciente al registrarse y en su enlace, lo registre recepción o se registre solo. Lo que responde llega a su ficha como «lo dijo él» y quien atiende lo revisa con él."
 
 /** La tarjeta de página, la misma en toda la plataforma. */
 const CARD = "elevated flex flex-col gap-5 rounded-xl border bg-card p-5 sm:p-6"
@@ -145,6 +149,17 @@ function RegistrationSettings() {
   /** «Lo revisé», para el aviso sugerido (ADR 0141). */
   const [reviewed, setReviewed] = useState(false)
   const receptionName = useReceptionName()
+  // «Nueva» sigue en cada fila mientras no salga de la página, aunque pulse «Entendido» (B10).
+  const [newSnapshot, setNewSnapshot] = useState<RegistrationFieldKey[] | null>(null)
+  useEffect(() => {
+    if (newSnapshot === null && configQuery.data) setNewSnapshot((configQuery.data.meta.newQuestions ?? []).map((item) => item.key))
+  }, [configQuery.data, newSnapshot])
+  const [seenBusy, setSeenBusy] = useState(false)
+  const [seenDone, setSeenDone] = useState(false)
+  const seenRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (seenDone) seenRef.current?.focus()
+  }, [seenDone])
 
   const form = useAppForm({
     defaultValues: draftOf(DEFAULT_REGISTRATION_CONFIG),
@@ -162,7 +177,7 @@ function RegistrationSettings() {
         setReviewed(false)
         setExpectedVersion(result.data.version)
         form.reset(draftOf(result.data))
-        toast.success("Registro de pacientes guardado")
+        toast.success("Preguntas al paciente guardadas")
         void queryClient.invalidateQueries({ queryKey: ["patient-registration-config"] })
       } catch (error) {
         if (error instanceof ApiError && error.shape.code === "STALE_REGISTRATION_CONFIG") {
@@ -199,11 +214,11 @@ function RegistrationSettings() {
         <PageHeader title={TITLE} subtitle={SUBTITLE} />
         {configQuery.isError ? (
           <SettingsLoadError
-            what="el registro de pacientes"
+            what="las preguntas al paciente"
             onRetry={() => void configQuery.refetch()}
           />
         ) : (
-          <SkeletonRegion message="Cargando el registro de pacientes…">
+          <SkeletonRegion message="Cargando las preguntas al paciente…">
             <PatientRegistrationSkeleton />
           </SkeletonRegion>
         )}
@@ -214,6 +229,8 @@ function RegistrationSettings() {
   const today = configQuery.data?.meta.today ?? ""
   const noticeSuggested = configQuery.data?.meta.noticeSuggested === true
   const noticeShown = configQuery.data?.meta.noticeShown ?? ""
+  const newQuestions = configQuery.data?.meta.newQuestions ?? []
+  const newKeys = new Set<RegistrationFieldKey>(newSnapshot ?? newQuestions.map((item) => item.key))
   const { fields, enabled, privacyNotice, askReminders, askMessages } = values
   const published = loaded?.enabled ?? false
 
@@ -228,6 +245,25 @@ function RegistrationSettings() {
       for (const key of keys) delete next[key]
       return next
     })
+  }
+
+  async function handleQuestionsSeen() {
+    // Una sola vez mientras guarda (B10).
+    if (seenBusy) return
+    setSeenBusy(true)
+    try {
+      await markRegistrationQuestionsSeen()
+      // Sin configuración guardada, «Entendido» guarda la de siempre y su versión sube: el borrador
+      // sigue sobre esa, para que el próximo «Guardar» no diga que otra persona guardó antes.
+      const fresh = await configQuery.refetch()
+      if (fresh.data) setExpectedVersion(fresh.data.data.version)
+      // El aviso se va: el foco pasa a lo que dice que quedó, no al cuerpo de la página.
+      setSeenDone(true)
+    } catch {
+      toast.error("No pudimos guardarlo. Vuelve a intentarlo.")
+    } finally {
+      setSeenBusy(false)
+    }
   }
 
   async function handleCopyLink() {
@@ -268,18 +304,75 @@ function RegistrationSettings() {
     <div className="flex max-w-6xl flex-col gap-6">
       <PageDraftGuard dirty={dirty} />
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      {canWrite ? (
+        // «Guardar» arriba, a la vista mientras se baja: lo marcado se pregunta desde que se guarda.
+        // Debajo de un aviso de arriba (el de soporte), como los paneles (`side-dock`), y compacta a 390 (B12).
+        <div className="sticky top-[var(--notice-strip-h,0px)] z-10 flex flex-row items-center justify-between gap-2 rounded-2xl border bg-card/95 p-2 backdrop-blur sm:p-3">
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Lo que marques «Opcional» u «Obligatorio» se le pregunta desde que guardes. A quien ya respondió
+            solo se le pregunta lo que le falta.
+          </p>
+          <p className="text-xs text-muted-foreground sm:hidden">Se pregunta desde que guardes.</p>
+          <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+            <SubmitButton
+              type="button"
+              className="min-h-11"
+              pending={isSubmitting}
+              onClick={() => void submitForm(form)}
+            >
+              {dirty ? "Guardar cambios" : "Guardar"}
+            </SubmitButton>
+            {submitError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {submitError}
+              </p>
+            ) : null}
+            {/* Junto al botón que se pulsó, no al pie de la página (B12). */}
+            {conflict ? (
+              <p role="alert" className="max-w-sm text-sm text-warning">
+                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y vuelve a guardar.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {newQuestions.length > 0 && canWrite ? (
+        <Alert>
+          <AlertDescription className="flex flex-col gap-2">
+            <span>
+              Hay preguntas nuevas: {newQuestions.map((item) => item.label).join(", ")}. Ya se le preguntan
+              a tus pacientes como «Opcional» y nada es obligatorio. Si no las quieres, márcalas «No
+              preguntar» y guarda.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-11 self-start sm:min-h-8"
+              disabled={seenBusy}
+              onClick={() => void handleQuestionsSeen()}
+            >
+              Entendido
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : seenDone ? (
+        <p ref={seenRef} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
+          Listo: las preguntas nuevas siguen en «Opcional». Las marcadas «Nueva» son esas.
+        </p>
+      ) : null}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-6">
           {configQuery.isError ? (
             <SettingsLoadError
               stale
-              what="el registro de pacientes"
+              what="las preguntas al paciente"
               onRetry={() => void configQuery.refetch()}
             />
           ) : null}
           {!canWrite ? (
             <p role="note" className="text-sm text-muted-foreground">
-              Puedes ver el registro; cambiarlo es de quien administra la clínica.
+              Puedes ver las preguntas; cambiarlas es de quien administra la clínica.
             </p>
           ) : null}
 
@@ -300,6 +393,7 @@ function RegistrationSettings() {
               disabled={!canWrite}
               showOrigin={clinicalProfile.origin}
               errors={pickerErrors}
+              newKeys={newKeys}
             />
           </section>
 
@@ -490,33 +584,18 @@ function RegistrationSettings() {
             )}
           </section>
 
-          {conflict ? (
-            <Alert>
-              <AlertDescription>
-                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y
-                vuelve a guardar.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {canWrite ? (
-            <div className="flex flex-col gap-2">
-              <div>
-                <SubmitButton
-                  type="button"
-                  className="min-h-11"
-                  pending={isSubmitting}
-                  onClick={() => void submitForm(form)}
-                >
-                  Guardar
-                </SubmitButton>
-              </div>
-              {submitError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {submitError}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          <section className={CARD} aria-labelledby="registro-falta">
+            <h2 id="registro-falta" className="font-heading text-base font-medium">
+              ¿Te falta una pregunta?
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Lo que tu clínica pregunta y no está aquí, pregúntalo en la consulta y anótalo en una{" "}
+              <Link to="/settings/consultation-forms" className="underline underline-offset-4">
+                ficha de consulta
+              </Link>
+              . Si crees que toda clínica debería preguntarlo, cuéntanoslo desde Ayuda.
+            </p>
+          </section>
         </div>
         <aside
           className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4"

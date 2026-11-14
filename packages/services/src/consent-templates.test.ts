@@ -12,7 +12,7 @@ import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { consentTemplate, consentTemplateService } from "@odentia/db/schema/clinical-forms"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
-import { savePatientHealth } from "./clinical.js"
+import { recordHealthDeclaration, savePatientHealth } from "./clinical.js"
 import {
   createConsentDocument,
   createConsentTemplate,
@@ -32,9 +32,11 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { renderConsentPreviewPdf } from "./consent-pdf.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { addEncounterProcedure } from "./encounters.js"
-import { patientHealthToAsk } from "./patient-registration.js"
+import { markRegistrationQuestionsSeen, patientHealthQuestions, patientHealthToAsk } from "./patient-registration.js"
+import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { listWorkspaceNotifications } from "./workspace.js"
 
 setupTestDb()
 
@@ -334,7 +336,9 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
   const { orgId, run } = await newClinic()
   const patient = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Sin Salud" }))
   expect(await run((tx) => patientHealthToAsk(tx, orgId, patient.id))).toBe(true)
-  // Envió sus datos dejando la salud en blanco, que es opcional: no se le insiste.
+  // Envió sus datos dejando la salud en blanco, que es opcional: no se le insiste con eso. Lo envió
+  // con la lista de antes: de las preguntas que la lista sumó después (que nunca vio), sí; se le
+  // muestran al abrir su enlace, pero el aviso al reservar no sale solo por ellas (revisión de la 6).
   await ownerDb.insert(appointmentBookingLink).values({
     organizationId: orgId,
     patientId: patient.id,
@@ -343,8 +347,26 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
     expiresAt: new Date(Date.now() + 86_400_000),
     dataSubmittedAt: new Date(),
   } as typeof appointmentBookingLink.$inferInsert)
-  expect(await run((tx) => patientHealthToAsk(tx, orgId, patient.id))).toBe(false)
-  // Y a quien ya tiene su salud registrada tampoco.
+  // Lo dejó todo en blanco: no se le insiste.
+  expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])
+  // Lo que dijo, con la lista de antes (sin las dos clases de medicina).
+  await run((tx) =>
+    recordHealthDeclaration(tx, orgId, patient.id, {
+      via: "enlace",
+      by: { kind: "patient", name: null, relation: null },
+      health: { allergies: { state: "none", items: [] } },
+    }),
+  )
+  const onlyNew = await run((tx) => patientHealthQuestions(tx, orgId, patient.id))
+  expect(onlyNew).toEqual(expect.arrayContaining(["anticoagulants", "boneMedicines", "dental.corazon"]))
+  for (const key of ["allergies", "conditions", "medications", "bloodGroup"]) expect(onlyNew).not.toContain(key)
+  const todo = await run((tx) =>
+    patientTodo(tx, orgId, { patientId: patient.id, contactId: patient.personId, withAppointment: false }),
+  )
+  expect(todo).toMatchObject({ health: true, healthOnlyNew: true })
+  // Sin otro dato que le falte, el aviso al reservar no cuenta «sus datos» solo por esas preguntas.
+  expect(remoteTodoCount({ ...todo, missing: [] }, { health: true }).data).toBe(false)
+  // A quien el equipo ya le anotó alergias, enfermedades y medicinas se le pregunta solo lo demás (entrega 6).
   const other = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Con Salud" }))
   await run((tx) =>
     savePatientHealth(tx, orgId, ACTOR, other.id, {
@@ -355,7 +377,11 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
       medications: [],
     }),
   )
-  expect(await run((tx) => patientHealthToAsk(tx, orgId, other.id))).toBe(false)
+  const left = await run((tx) => patientHealthQuestions(tx, orgId, other.id))
+  expect(left).not.toEqual(expect.arrayContaining(["allergies"]))
+  for (const key of ["allergies", "conditions", "medications", "anticoagulants", "boneMedicines"])
+    expect(left).not.toContain(key)
+  expect(left).toEqual(expect.arrayContaining(["dental.corazon", "dental.problemaAnestesia", "medical.tabaco"]))
 })
 
 it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nunca sin ninguno (M3)", async () => {
@@ -375,4 +401,41 @@ it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nun
   expect(await linkedKeys(orgId, row.id)).toEqual(["odontopediatria"])
   await run((tx) => ensureClinicConsents(tx, orgId, null))
   expect(await linkedKeys(orgId, row.id)).toEqual(["pulpectomia"])
+})
+
+// QA del 14 nov (B6): quien se registró en línea con la lista de hoy ya respondió: su enlace no le
+// insiste con lo que dejó en blanco.
+it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en blanco", async () => {
+  const { orgId, run } = await newClinic()
+  const patient = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Ya Registrada" }))
+  await run((tx) =>
+    recordHealthDeclaration(tx, orgId, patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: { allergies: { state: "none", items: [] }, anticoagulants: { state: "unanswered" }, boneMedicines: { state: "none" } },
+    }),
+  )
+  expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])
+})
+
+// QA del 14 nov (B10): «Hay preguntas nuevas» llega a la campana de quien administra y se va con
+// «Entendido», que deja en la actividad que vio las preguntas, aunque la clínica no tuviera configuración.
+it("«Hay preguntas nuevas» llega a la campana de quien administra y se va con «Entendido»", async () => {
+  const { orgId, run } = await newClinic()
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${randomUUID()}, ${orgId}, ${ACTOR}, 'owner', now())`,
+  )
+  // Sin configuración guardada (una clínica nueva) no hay aviso.
+  expect((await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))).items).toEqual([])
+  // Una clínica que ya existía: su configuración quedó en la versión 1 de la lista.
+  await ownerDb.execute(sql`insert into patient_registration_config (organization_id, fields, questions_version) values (${orgId}, '{}'::jsonb, 1)`)
+  const before = await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))
+  expect(before.items.map((item) => item.title)).toContain("Hay preguntas nuevas para tus pacientes")
+  await run((tx) => markRegistrationQuestionsSeen(tx, orgId, ACTOR))
+  const after = await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))
+  expect(after.items.map((item) => item.title)).not.toContain("Hay preguntas nuevas para tus pacientes")
+  const seen = await ownerDb.execute(
+    sql`select metadata from audit_event where organization_id = ${orgId} and action = 'patient-registration.questions_seen'`,
+  )
+  expect(seen).toHaveLength(1)
 })

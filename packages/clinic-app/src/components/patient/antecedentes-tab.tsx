@@ -37,6 +37,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   declaredGroupOf,
+  declaredInterviewRows,
   declaredMarkWords,
   pregnancyGroupOf,
   pregnancyWords,
@@ -768,7 +769,15 @@ export function AntecedentesTab({
           sex={sex}
         />
       )}
-      <productHealth.Summary answers={(health.latestAnamnesis?.answers ?? {}) as Rec} />
+      <productHealth.Summary
+        answers={(health.latestAnamnesis?.answers ?? {}) as Rec}
+        // Lo que dijo la persona y nadie revisó, con su marca dato por dato (QA del 14 nov, causa raíz).
+        marks={Object.fromEntries(
+          (health.declared ?? []).flatMap((group) =>
+            (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
+          ),
+        )}
+      />
 
       <FormDrawer
         {...surface}
@@ -1168,7 +1177,7 @@ export function AntecedentesTab({
  * revisión. Sin formularios. Las alergias tienen su propia tarjeta arriba
  * (`AllergiesCard`).
  */
-function AntecedentesSummary({
+export function AntecedentesSummary({
   saved,
   pendingReview,
   groups,
@@ -1205,7 +1214,15 @@ function AntecedentesSummary({
         return group ? [saidByWords(group.by, sex)] : []
       })),
     ]
-    return who.length > 0 ? `${capital(who.join(" y "))} · sin revisar` : undefined
+    // Con algo que anotó el equipo en la misma tarjeta, la marca va en cada fila, no sobre todo (B7).
+    const allSaid = ids.length > 0 && ids.every((id) => declaredGroupOf(groups, topic, id))
+    return who.length > 0 && allSaid ? `${capital(who.join(" y "))} · sin revisar` : undefined
+  }
+  /** El nombre de cada fila, con «lo dijo ella, sin revisar» si la dijo y en la tarjeta hay también lo del equipo. */
+  const rowWords = (topic: "conditions" | "medications", id: string | undefined, text: string, ids: string[]): string => {
+    if (!id || saidWord(topic, ids)) return text
+    const group = declaredGroupOf(groups, topic, id)
+    return group ? `${text} (${saidByWords(group.by, sex)}, sin revisar)` : text
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancyText = pregnancy ? pregnancyWords(pregnancy) : null
@@ -1218,7 +1235,9 @@ function AntecedentesSummary({
         asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
         activeCon.length > 0
-          ? activeCon.map((row) => row.name).join(", ")
+          ? activeCon
+              .map((row) => rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))))
+              .join(", ")
           : conditions.length > 0
             ? "Ninguna activa"
             : "Sin registros",
@@ -1230,7 +1249,14 @@ function AntecedentesSummary({
       detail:
         activeMed.length > 0
           ? activeMed
-              .map((row) => [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "))
+              .map((row) =>
+                rowWords(
+                  "medications",
+                  row.id,
+                  [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "),
+                  activeMed.flatMap((item) => (item.id ? [item.id] : [])),
+                ),
+              )
               .join(", ")
           : medications.length > 0
             ? "Ninguna vigente"
@@ -1355,6 +1381,21 @@ const RESPONDENT_LABELS: Record<string, string> = {
   staff: "Personal",
 }
 
+/** «Anticoagulantes · Sí: warfarina 5 mg», como lo respondió en «Tus medicinas». */
+function DirectedLine({ title, answer }: { title: string; answer: unknown }): React.JSX.Element | null {
+  if (!answer || typeof answer !== "object") return null
+  const state = (answer as Rec)["state"]
+  const detail = (answer as Rec)["detail"]
+  if (typeof state !== "string" || state === "unanswered") return null
+  return (
+    <p>
+      <span className="font-medium">{title} · </span>
+      {state in DECLARATION_STATE_LABELS ? DECLARATION_STATE_LABELS[state as keyof typeof DECLARATION_STATE_LABELS] : state}
+      {state === "recorded" && typeof detail === "string" && detail ? `: ${detail}` : ""}
+    </p>
+  )
+}
+
 function SnapshotGroup({
   title,
   group,
@@ -1409,7 +1450,7 @@ function declaredPregnancyText(health: Rec): string | null {
 
 /**
  * Lo que dijo de su salud en una declaración, tal como llegó: alergias,
- * enfermedades, medicación y el embarazo (QA del 14 nov, H2 de desarrollo: el
+ * enfermedades, anticoagulantes, medicinas para los huesos, medicación y el embarazo (QA del 14 nov, H2 de desarrollo: el
  * del registro no salía), igual para el registro y para lo que envió después.
  */
 export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.Element {
@@ -1418,13 +1459,25 @@ export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.E
     <>
       <SnapshotGroup title="Alergias" group={health["allergies"]} nameKey="substance" />
       <SnapshotGroup title="Enfermedades" group={health["conditions"]} nameKey="name" />
-      <SnapshotGroup title="Medicación" group={health["medications"]} nameKey="name" />
+      <DirectedLine title="Anticoagulantes" answer={health["anticoagulants"]} />
+      <DirectedLine title="Medicinas para los huesos" answer={health["boneMedicines"]} />
+      <SnapshotGroup
+        title={health["anticoagulants"] || health["boneMedicines"] ? "Otros medicamentos" : "Medicación"}
+        group={health["medications"]}
+        nameKey="name"
+      />
       {pregnancy ? (
         <p>
           <span className="font-medium">Embarazo · </span>
           {pregnancy}
         </p>
       ) : null}
+      {declaredInterviewRows(health).map((row) => (
+        <p key={row.label}>
+          <span className="font-medium">{row.label} · </span>
+          {row.value}
+        </p>
+      ))}
     </>
   )
 }
@@ -1577,7 +1630,7 @@ function RegistrationSnapshotDialog({
               </div>
             </dl>
             <DeclaredHealthSnapshot health={health} />
-            {dental ? (
+            {dental && ["ultimaVisita", "experienciaPrevia", "ansiedadDental"].some((key) => typeof dental[key] === "string") ? (
               <section className="flex flex-col gap-1">
                 <h4 className="text-sm font-medium">Odontológicos</h4>
                 <dl className="grid gap-1">

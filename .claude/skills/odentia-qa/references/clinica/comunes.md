@@ -17,7 +17,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 
 ## P-COM-02 Configuración clínica
 
-**Dónde:** Servicios y precios (`R/_org/services.*`, la biblioteca por país), Consentimientos (`R/_org/settings.forms.tsx`), Especialidades (`settings.specialties.tsx`) y Registro de pacientes (`settings.patient-registration.tsx`). Las tablas `treatment_template`, `dental_template_rule`, `service_catalog`, `consent_template`, `consent_template_service`, `clinical_form_template` y `service_material`.
+**Dónde:** Servicios y precios (`R/_org/services.*`, la biblioteca por país), Consentimientos (`R/_org/settings.forms.tsx`), Especialidades (`settings.specialties.tsx`) y Preguntas al paciente (`settings.patient-registration.tsx`). Las tablas `treatment_template`, `dental_template_rule`, `service_catalog`, `consent_template`, `consent_template_service`, `clinical_form_template` y `service_material`.
 
 - [ ] Cada servicio tiene lo que la atención necesita: código oficial (CPMS en el Perú), sesiones habituales, caras que admite y lo que deja en la pieza (odentIA), el consentimiento que pide y los materiales que descuenta.
 - [ ] La biblioteca trae los servicios de todos los días para cada pieza (la endodoncia de anterior, premolar y molar) y una clínica nueva no arranca con huecos clínicos.
@@ -26,11 +26,11 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] La lista de diagnósticos de la clínica (CIE-10 del MINSA o CIE-11) se elige y no mezcla códigos.
 - [ ] Lo que se pregunta al registrar coincide con lo que la clínica pidió.
 - [ ] La lista de diagnósticos de la clínica trae los códigos que propone el odontograma (la caries con exposición pulpar, K02.5, en la CIE-10).
-- [ ] La dueña encuentra dónde armar un formulario propio desde «Registro de pacientes» y desde el menú, no solo al pie de Consentimientos.
+- [ ] La dueña encuentra dónde armar un formulario propio desde «Preguntas al paciente» y desde el menú, no solo al pie de Consentimientos.
 - [ ] En el constructor se lee cada pregunta entera, se puede subir, bajar y duplicar una pregunta, y se ve el formulario como lo verá quien lo responde antes de publicarlo.
 - [ ] Al publicar un formulario del equipo habiendo otro vigente, la pantalla dice que el nuevo lo reemplaza, y la lista muestra cuál es el que está en uso.
 - [ ] Un formulario del equipo publicado se puede dejar de usar (apagar) sin publicar otro; lo ya respondido no cambia.
-- [ ] Lo que se le pregunta al paciente se decide en un solo lugar (Registro de pacientes), con la vista del adulto, de quien cuida a un niño y de antes de una cita.
+- [ ] Lo que se le pregunta al paciente se decide en un solo lugar (Preguntas al paciente), con la vista del adulto, de quien cuida a un niño y de antes de una cita.
 
 **Ya falló:** la demo solo tenía «Endodoncia anterior vital» activa y se ofrecía para un molar.
 **Fuentes:** ADR 0039, 0069, 0093, 0117, 0141 y 0164.
@@ -73,6 +73,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 
 **Ya falló:** la declaración no se veía en el enlace y faltaba la pieza (PR 479); un documento mandado por enlace en vez del PDF (PR 501).
 **Fuentes:** ADR 0037, 0101, 0116, 0148 y 0156; Ley 27337, Título Preliminar, art. I (niño hasta cumplir 12 años; por verificar); política sobre chupones de la AAPD (dejar la succión no nutritiva hacia los 36 meses; por verificar).
+
+**Sumado por la QA de la entrega 6 (14 nov 2026):**
+- [ ] Quien responde por otra persona lee también las respuestas en tercera persona («Nunca fumó», «Fuma», «Lo dejó»).
+- [ ] A un menor de 12 no se le pregunta si fuma ni si toma alcohol. Caso: «Mateo, 7 años, registrado por su mamá».
 
 ## P-COM-05 Papeles emitidos y su comprobación
 

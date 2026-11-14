@@ -1,0 +1,1 @@
+ALTER TABLE "patient_registration_config" ADD COLUMN "questions_version" integer DEFAULT 1 NOT NULL;

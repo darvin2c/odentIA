@@ -33,7 +33,7 @@ export type RegistrationEntryPoint = "platform" | "public_link" | "qr" | "conver
 export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
-/** «No se pide», «Opcional» y «Obligatorio» en «Registro de pacientes». */
+/** «No se pide», «Opcional» y «Obligatorio» en «Preguntas al paciente». */
 export type RegistrationFieldMode = "hidden" | "optional" | "required"
 export const REGISTRATION_MODE_LABELS: Record<RegistrationFieldMode, string> = {
   hidden: "No se pide",
@@ -73,7 +73,7 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * - `always`: los fija odentIA porque hacen falta para atender (nombres y
  *   apellidos, fecha de nacimiento, un teléfono o correo suyo o de quien habla
  *   por ella). Siempre cuentan para el aviso «Faltan datos para atenderla».
- * - `clinic`: los que la clínica decide en «Registro de pacientes»; cuentan
+ * - `clinic`: los que la clínica decide en «Preguntas al paciente»; cuentan
  *   solo si los marca obligatorios.
  * - `census`: opcionales y nunca obligatorios (nadie los usa para atender: ni
  *   impresos ni el agente; Reportes solo suma «Cómo nos conoció»). Nunca cuentan.
@@ -81,10 +81,16 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  *   entrevista (`personal.*` y `dental.*`) llegan a «Entrevista de salud»
  *   de la ficha con las mismas claves y solo pueden ser opcionales.
  *
- * Un dato con `product` es de ese producto (ADR 0079): «Tu boca» (`dental.*`)
- * solo lo preguntan las clínicas dentales; la lactancia y los hábitos
- * (`medical.*`), los consultorios de latidIA (issue 229, decisión 13), que
- * guardan el embarazo con la fecha del registro.
+ * Un dato con `products` es solo de esos productos (ADR 0079): «Tu boca»
+ * (`dental.*`), el corazón y la anestesia del dentista solo los preguntan las
+ * clínicas dentales; el alcohol, los consultorios de latidIA. La lactancia y el
+ * tabaco nacieron en latidIA (issue 229, decisión 13; por eso `medical.*`) y
+ * también los pregunta odentIA, con la misma clave y la misma forma de guardarlos:
+ * no hay dos datos para lo mismo.
+ *
+ * `step` es el paso en que se pregunta: «Tu salud» (`salud`) y, aparte y una sola
+ * vez, «Tus medicinas» (`medicinas`): primero las dos que cambian lo que se hace
+ * en la cita (anticoagulantes y medicinas para los huesos) y al final «algún otro».
  *
  * Solo entran aquí datos que el paciente sabe responder solo y que la ficha ya
  * guarda. Lo que se pregunta junto (la referencia con la dirección, el
@@ -92,6 +98,14 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * a su dato y nunca es obligatorio.
  */
 export type RegistrationFieldGroup = "always" | "clinic" | "census" | "health"
+
+interface RegistrationFieldDef {
+  key: string
+  label: string
+  step: string
+  group: RegistrationFieldGroup
+  products?: readonly ClinicalProduct[]
+}
 
 export const REGISTRATION_FIELDS = [
   { key: "displayName", label: "Nombres y apellidos", step: "datos", group: "always" },
@@ -114,25 +128,69 @@ export const REGISTRATION_FIELDS = [
   // Solo en clínicas de Perú (`clinicalProfileFor(...).origin`).
   { key: "origin", label: "Procedencia", step: "contacto", group: "census" },
   { key: "bloodGroup", label: "Grupo sanguíneo", step: "salud", group: "health" },
-  { key: "allergies", label: "Alergias", step: "salud", group: "health" },
+  { key: "allergies", label: "Alergias y qué le pasó", step: "salud", group: "health" },
   { key: "conditions", label: "Enfermedades", step: "salud", group: "health" },
-  { key: "medications", label: "Medicación", step: "salud", group: "health" },
+  { key: "dental.corazon", label: "Corazón", step: "salud", group: "health", products: ["dental"] },
+  { key: "dental.problemaAnestesia", label: "Problemas con la anestesia", step: "salud", group: "health", products: ["dental"] },
+  { key: "anticoagulants", label: "Anticoagulantes", step: "medicinas", group: "health", products: ["dental", "medical"] },
+  { key: "boneMedicines", label: "Medicinas para los huesos", step: "medicinas", group: "health", products: ["dental", "medical"] },
+  { key: "medications", label: "Otros medicamentos", step: "medicinas", group: "health" },
   { key: "personal.embarazo", label: "Embarazo", step: "personales", group: "health" },
   { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
   { key: "personal.hospitalizaciones", label: "Hospitalizaciones", step: "personales", group: "health" },
   { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
-  { key: "medical.lactancia", label: "Lactancia", step: "personales", group: "health", product: "medical" },
-  { key: "medical.tabaco", label: "Tabaco", step: "habitos", group: "health", product: "medical" },
-  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", product: "medical" },
-  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.cepilladosAlDia", label: "Cepillado diario", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health", product: "dental" },
-  { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health", product: "dental" },
-] as const
+  { key: "medical.lactancia", label: "Lactancia", step: "personales", group: "health", products: ["medical", "dental"] },
+  { key: "medical.tabaco", label: "Si fuma y cuánto", step: "habitos", group: "health", products: ["medical", "dental"] },
+  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", products: ["dental", "medical"] },
+  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.cepilladosAlDia", label: "Cepillado diario", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health", products: ["dental"] },
+  { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health", products: ["dental"] },
+] as const satisfies readonly RegistrationFieldDef[]
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
+
+/**
+ * La versión de la lista de preguntas: sube cuando se suman preguntas, para
+ * avisarle a quien administra una clínica que ya existía («Hay preguntas nuevas»).
+ * `QUESTIONS_SINCE` dice desde qué versión existe cada pregunta nueva; con un
+ * mapa por producto, desde cuándo la pregunta ese producto (la lactancia y el
+ * tabaco ya eran de latidIA: son nuevos solo en odentIA). Lo que no figura es de
+ * la versión 1.
+ */
+export const REGISTRATION_QUESTIONS_VERSION = 2
+const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Record<ClinicalProduct, number>>>> = {
+  "dental.corazon": 2,
+  "dental.problemaAnestesia": 2,
+  anticoagulants: 2,
+  boneMedicines: 2,
+  "medical.lactancia": { dental: 2 },
+  "medical.tabaco": { dental: 2 },
+  "medical.alcohol": { dental: 2 },
+}
+
+const fieldProducts = (field: (typeof REGISTRATION_FIELDS)[number]): readonly ClinicalProduct[] | null =>
+  "products" in field ? field.products : null
+
+/**
+ * Las preguntas que la lista sumó después de la versión que la clínica ya vio
+ * (`seenVersion`), para su producto: las que nacieron encendidas sin que nadie
+ * de la clínica las mirara todavía.
+ */
+export function newRegistrationQuestions(
+  seenVersion: number,
+  product: ClinicalProduct = "dental",
+): Array<{ key: RegistrationFieldKey; label: string }> {
+  return REGISTRATION_FIELDS.filter((field) => {
+    const products = fieldProducts(field)
+    if (products && !products.includes(product)) return false
+    const since = QUESTIONS_SINCE[field.key]
+    const version = typeof since === "number" ? since : (since?.[product] ?? 1)
+    return version > seenVersion
+  }).map(({ key, label }) => ({ key, label }))
+}
 /** Datos que se piden siempre: el registro los guarda como obligatorios y no se cambian. */
 export const ALWAYS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
   .filter((field) => field.group === "always").map((field) => field.key)
@@ -160,7 +218,19 @@ export interface RegistrationConfig {
   /** El registro pregunta si acepta otros mensajes de la clínica. */
   askMessages: boolean
 }
-const optionalDefaults: Record<string, true> = { docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true, allergies: true, conditions: true, medications: true }
+/**
+ * Lo que se pregunta como «Opcional» mientras la clínica no diga otra cosa. Las
+ * preguntas de salud que suma la lista nacen aquí: una clínica nueva las trae
+ * encendidas y una que ya existía las recibe igual (su configuración guardada no
+ * las nombra y toman este valor; mesa del 13 nov, decisión 10), con el aviso de
+ * `newRegistrationQuestions` a quien la administra.
+ */
+const optionalDefaults: Record<string, true> = {
+  docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true,
+  allergies: true, conditions: true, medications: true,
+  anticoagulants: true, boneMedicines: true, "dental.corazon": true, "dental.problemaAnestesia": true,
+  "medical.lactancia": true, "medical.tabaco": true, "medical.alcohol": true,
+}
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
   version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
   fields: Object.fromEntries(REGISTRATION_FIELDS.map(({ key }) => [key,
@@ -203,9 +273,61 @@ export const healthMedicationDeclarationSchema = z.strictObject({
 export type HealthAllergyDeclaration = z.infer<typeof healthAllergyDeclarationSchema>
 export type HealthConditionDeclaration = z.infer<typeof healthConditionDeclarationSchema>
 export type HealthMedicationDeclaration = z.infer<typeof healthMedicationDeclarationSchema>
-const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
+/** `emptyYes`: un Sí sin decir cuál vale (los medicamentos, QA del 14 nov, B15). */
+const declaration = <T extends z.ZodType>(item: T, options: { emptyYes?: boolean } = {}) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
-}).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+}).refine(v => v.state === "recorded" ? options.emptyYes === true || v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+/** Por qué toma la medicina para los huesos, y cómo: cambian el riesgo antes de una extracción. */
+export const BONE_MEDICINE_REASONS = ["osteoporosis", "cancer", "no_sabe"] as const
+export const BONE_MEDICINE_FORMS = ["pastillas", "inyeccion"] as const
+export const BONE_MEDICINE_REASON_LABELS: Record<(typeof BONE_MEDICINE_REASONS)[number], string> = {
+  osteoporosis: "por osteoporosis",
+  cancer: "por un cáncer",
+  no_sabe: "no sabe por qué",
+}
+export const BONE_MEDICINE_FORM_LABELS: Record<(typeof BONE_MEDICINE_FORMS)[number], string> = { pastillas: "pastillas", inyeccion: "inyección" }
+/**
+ * Una medicina que se pregunta por su clase («¿Tomas algún anticoagulante?»):
+ * Sí (`recorded`), No (`none`) o No sé (`unknown`), con los mismos estados de
+ * los demás grupos de salud, y «¿Cuál?» solo con el Sí. La marca de la ficha
+ * sale de esta respuesta, no de reconocer el nombre escrito.
+ */
+export const directedMedicineSchema = z.strictObject({
+  state: z.enum(["unanswered", "unknown", "none", "recorded"]), detail: text(200).optional(),
+  /**
+   * De las medicinas para los huesos, con el Sí y opcional (QA del 14 nov, B3 y C3; AAOMS 2022):
+   * si la toma hoy (`false`: ya no), por qué (osteoporosis o un cáncer) y cómo (pastillas o inyección).
+   */
+  now: z.boolean().optional(), reason: z.enum(BONE_MEDICINE_REASONS).optional(), form: z.enum(BONE_MEDICINE_FORMS).optional(),
+}).refine(v => v.state === "recorded" || (!v.detail && v.now === undefined && !v.reason && !v.form), "Indica cuál solo cuando la respuesta sea Sí")
+export type DirectedMedicineDeclaration = z.infer<typeof directedMedicineSchema>
+/** Sí, No o No sé de una pregunta de la entrevista, como lo dice quien responde. */
+export const INTERVIEW_ANSWERS = ["si", "no", "no_sabe"] as const
+export type InterviewAnswer = (typeof INTERVIEW_ANSWERS)[number]
+export const INTERVIEW_ANSWER_LABELS: Record<InterviewAnswer, string> = { si: "Sí", no: "No", no_sabe: "No sabe" }
+/**
+ * Cuánto fuma quien fuma, como lo responde el paciente: el corte de 10 al día
+ * es el del grado de la periodontitis (AAP/EFP 2018) y el de los implantes. Va
+ * junto a `habitos.tabaco` de la entrevista (la forma de latidIA); el número
+ * exacto (`cigarrillosDia`) lo anota el profesional si lo pregunta.
+ */
+export const CIGARETTE_BANDS = ["menos_10", "10_o_mas"] as const
+/** Si fuma, como lo responde el paciente (la forma de `habitos.tabaco` en la entrevista). */
+export const TOBACCO_ANSWERS = ["nunca", "fuma", "dejo"] as const
+export type CigaretteBand = (typeof CIGARETTE_BANDS)[number]
+export const CIGARETTE_BAND_LABELS: Record<CigaretteBand, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
+/**
+ * Las enfermedades que el paciente marca de una lista, en sus palabras; lo que
+ * no está lo escribe en «Otra». Cada una entra a Antecedentes con este nombre y
+ * sin código: lo que marca un paciente no es un diagnóstico, y el código de la
+ * lista de la clínica (CIE-10) lo pone el profesional al revisarlo, como en
+ * cualquier enfermedad declarada. «Problemas de sangrado» y «Radioterapia en
+ * cabeza o cuello» cambian una extracción (historia de salud de la ADA).
+ */
+export const DECLARED_CONDITION_OPTIONS = [
+  "Diabetes", "Presión alta", "Problema del corazón (infarto, angina, arritmia, marcapasos)", "Asma", "Epilepsia", "Hepatitis",
+  "Problemas de sangrado", "Radioterapia en cabeza o cuello",
+] as const
 export const registrationContactInputSchema = z.strictObject({
   contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(),
   /** Parentesco con HL7 v3 RoleCode, si se conoce. */
@@ -227,7 +349,11 @@ export const registrationAnswersSchema = z.strictObject({
     bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
     allergies: declaration(healthAllergyDeclarationSchema).optional(),
     conditions: declaration(healthConditionDeclarationSchema).optional(),
-    medications: declaration(healthMedicationDeclarationSchema).optional(),
+    /** «¿Algún otro medicamento todos los días?»: lo que no es anticoagulante ni para los huesos. */
+    medications: declaration(healthMedicationDeclarationSchema, { emptyYes: true }).optional(),
+    /** Anticoagulantes o aspirina diaria (grupo ATC B01A) y medicinas para los huesos (M05B), ahora o antes. */
+    anticoagulants: directedMedicineSchema.optional(),
+    boneMedicines: directedMedicineSchema.optional(),
     /** «Entrevista de salud» de la ficha, `antecedentesPersonales`, con sus mismas claves. */
     personal: z.strictObject({
       embarazo: z.boolean().optional(), semanasEmbarazo: z.number().int().min(0).max(42).optional(),
@@ -238,12 +364,27 @@ export const registrationAnswersSchema = z.strictObject({
       ansiedadDental: z.enum(["ninguna", "leve", "moderada", "alta"]).optional(),
       cepilladosAlDia: z.number().int().min(0).max(10).optional(), hiloDental: z.boolean().optional(),
       bruxismo: z.boolean().optional(), habitos: z.array(text(100).min(1)).max(10).optional(),
+      /**
+       * Lo que decide un antibiótico antes de atender (AHA 2021, prevención de la endocarditis): una
+       * válvula operada, un problema del corazón de nacimiento o una endocarditis previa, y si un
+       * médico ya se lo indicó.
+       */
+      corazon: z.strictObject({
+        riesgoEndocarditis: z.enum(INTERVIEW_ANSWERS).optional(), antibioticoPrevio: z.enum(INTERVIEW_ANSWERS).optional(),
+      }).refine(v => v.riesgoEndocarditis !== undefined || v.antibioticoPrevio !== undefined, "Responde al menos una de las dos").optional(),
+      /** Un problema con la anestesia del dentista o un sangrado largo tras una extracción. */
+      problemaAnestesia: z.enum(INTERVIEW_ANSWERS).optional(),
     }).optional(),
-    /** Lo que pregunta latidIA: va a «Embarazo y lactancia» y «Hábitos» de su entrevista. */
+    /**
+     * Lactancia y hábitos: van a «Embarazo y lactancia» y «Hábitos» de la entrevista, con la forma
+     * de latidIA. La lactancia y el tabaco los pregunta también odentIA; el alcohol, solo latidIA.
+     */
     medical: z.strictObject({
-      lactancia: z.boolean().optional(), tabaco: z.enum(["nunca", "fuma", "dejo"]).optional(),
+      lactancia: z.boolean().optional(), tabaco: z.enum(TOBACCO_ANSWERS).optional(),
+      /** Cuánto, solo de quien fuma. */
+      cigarrillos: z.enum(CIGARETTE_BANDS).optional(),
       alcohol: z.enum(["no", "ocasional", "frecuente"]).optional(),
-    }).optional(),
+    }).refine(v => v.cigarrillos === undefined || v.tabaco === "fuma", { message: "Cuántos al día se dice solo de quien fuma", path: ["cigarrillos"] }).optional(),
     /** vistIA todavía no pregunta nada propio en el registro: sus antecedentes de la vista llegan con el examen. */
     optical: z.strictObject({}).optional(),
   }).optional(),
@@ -422,8 +563,70 @@ function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGIST
     const answers: Record<string, unknown> | undefined = data.health?.[section]
     return answers?.[key.slice(section.length + 1)]
   }
-  if (field.step === "salud") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
+  if (field.group === "health") return data.health?.[key as keyof NonNullable<RegistrationAnswers["health"]>]
   return data.demographics[key as keyof RegistrationDemographics]
+}
+
+/**
+ * Si de su salud se respondió algo: un grupo con respuesta, el grupo sanguíneo o
+ * cualquier dato de la entrevista. Un registro que solo dice el embarazo o que
+ * no toma anticoagulantes también es una declaración: no se pierde.
+ */
+export function declaredHealthAnswered(health: RegistrationAnswers["health"]): boolean {
+  if (!health) return false
+  if (health.bloodGroup != null) return true
+  for (const group of [health.allergies, health.conditions, health.medications, health.anticoagulants, health.boneMedicines])
+    if (group && group.state !== "unanswered") return true
+  return [health.personal, health.dental, health.medical].some((group) =>
+    Object.values(group ?? {}).some((value) => value !== undefined && value !== ""),
+  )
+}
+
+/**
+ * La lactancia y el tabaco que declaró, con las claves de la entrevista de la
+ * ficha: la lactancia con el día en que se dijo (`embarazoLactancia.lactancia`,
+ * como el embarazo) y el tabaco con cuánto fuma (`habitos.tabaco` y
+ * `habitos.cigarrillos`). Una sola forma para odentIA y latidIA: no hay dos
+ * datos para lo mismo. El alcohol lo suma solo latidIA.
+ */
+export function declaredLactationAndTobacco(
+  medical: NonNullable<RegistrationAnswers["health"]>["medical"],
+  today: string,
+): { embarazoLactancia?: { lactancia: { estado: "si" | "no"; fecha: string } }; habitos?: Record<string, string> } {
+  const out: ReturnType<typeof declaredLactationAndTobacco> = {}
+  if (typeof medical?.lactancia === "boolean")
+    out.embarazoLactancia = { lactancia: { estado: medical.lactancia ? "si" : "no", fecha: today } }
+  if (medical?.tabaco)
+    out.habitos = {
+      tabaco: medical.tabaco,
+      ...(medical.tabaco === "fuma" && medical.cigarrillos ? { cigarrillos: medical.cigarrillos } : {}),
+    }
+  // El alcohol, con la misma clave en los dos productos (QA del 14 nov, C4: también en odentIA).
+  if (medical?.alcohol) out.habitos = { ...(out.habitos ?? {}), alcohol: medical.alcohol }
+  return out
+}
+
+/**
+ * A quién se le pregunta cada dato de salud: el embarazo y la lactancia, solo a
+ * mujeres de 12 a 55 años (sin el sexo o la edad en la ficha se pregunta: no se
+ * supone). Una sola regla para el registro, «Su enlace» y lo que el servidor
+ * cuenta como «falta preguntar».
+ */
+export function registrationFieldApplies(
+  key: RegistrationFieldKey,
+  person: { sex?: string | null; age?: number | null },
+): boolean {
+  // El tabaco y el alcohol, desde los 12 años: a un niño de 7 no se le pregunta si fuma (QA del 14 nov, B4).
+  if (key === "medical.tabaco" || key === "medical.alcohol") return person.age == null || person.age >= 12
+  if (key !== "personal.embarazo" && key !== "medical.lactancia") return true
+  if (person.sex === "M") return false
+  return person.age == null || (person.age >= 12 && person.age <= 55)
+}
+
+/** Los años cumplidos a una fecha (YYYY-MM-DD); null si la fecha de nacimiento no es real. */
+export function ageInYears(birthDate: string | null | undefined, today: string): number | null {
+  if (!birthDate || !isRealDate(birthDate)) return null
+  return Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4)) - (today.slice(5) < birthDate.slice(5) ? 1 : 0)
 }
 function isUnanswered(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
@@ -463,7 +666,7 @@ export const REPRESENTATIVE_DOC_GAP: MissingPersonDatum = {
  * «Faltan datos para atenderla»: una sola regla para la página de la persona,
  * la Agenda, la nota del caso y el registro (decisión 10 de la fase 3). Cuentan
  * siempre nombres, apellidos, fecha de nacimiento y un teléfono o correo
- * (suyo o de quien habla por ella); además, lo que «Registro de pacientes»
+ * (suyo o de quien habla por ella); además, lo que «Preguntas al paciente»
  * marca obligatorio de lo que pide la clínica. Los datos censales nunca
  * cuentan. `representativeContact`: quien habla por ella tiene teléfono o correo.
  */
@@ -499,7 +702,7 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
 
 /**
  * Si el registro de esta clínica pregunta ese dato: «Procedencia» solo en
- * clínicas de Perú y lo de un producto (`dental.*`, «Tu boca»; `medical.*`)
+ * clínicas de Perú y lo de un producto (`products`: «Tu boca», el alcohol)
  * solo en las de ese producto.
  */
 export function registrationFieldAsked(
@@ -510,7 +713,8 @@ export function registrationFieldAsked(
 ): boolean {
   if (key === "origin" && !clinicalProfileFor(countryCode).origin) return false
   const field = REGISTRATION_FIELDS.find((item) => item.key === key)
-  if (field && "product" in field && field.product !== product) return false
+  const products = field ? fieldProducts(field) : null
+  if (products && !products.includes(product)) return false
   return config.fields[key] !== "hidden"
 }
 

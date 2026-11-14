@@ -18,6 +18,7 @@ import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, it, vi } from "vitest"
 import {
+  addDeclaredHealth,
   getPatientHealth,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
@@ -1130,4 +1131,43 @@ it("QA de la entrega 2 (revisor): el motivo de una corrección, si se guarda, no
   await expect(ownerDb.insert(clinicalFormAddendum).values(row("x".repeat(2001)))).rejects.toThrow()
   await ownerDb.insert(clinicalFormAddendum).values(row(null))
   await ownerDb.insert(clinicalFormAddendum).values(row("Lo confirmó en consulta"))
+})
+
+// QA de la entrega 6: la copia trae la entrevista entera (corazón, anestesia, tabaco, lactancia), con
+// quién lo dijo, y «Tus medicinas» con su «No sé» y su «No», en el PDF y en FHIR.
+it("la copia trae lo que dijo del corazón, la anestesia y sus medicinas, con quién lo dijo", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const declared = {
+    dental: { corazon: { riesgoEndocarditis: "si" as const }, problemaAnestesia: "no_sabe" as const },
+    medical: { tabaco: "fuma" as const, cigarrillos: "menos_10" as const },
+    anticoagulants: { state: "unknown" as const },
+    boneMedicines: { state: "none" as const },
+  }
+  await run(async (tx) => {
+    await addDeclaredHealth(tx, "org_a", null, f.patient.id, declared, { entity: "registration_hold", entityId: f.patient.id, at: new Date() })
+    await recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const entries = record.interview?.entries ?? []
+  const heart = entries.find((entry) => entry.key === "antecedentesOdontologicos.corazon")
+  expect(heart?.value).toBe("válvula, problema de nacimiento o endocarditis: sí")
+  expect(heart?.unreviewed?.by).toMatchObject({ kind: "patient" })
+  expect(entries.find((entry) => entry.key === "habitos.tabaco")?.value).toBe("fuma, menos de 10 al día")
+  expect(record.medicineClasses).toEqual([
+    { group: "anticoagulants", answer: "unknown", said: true },
+    { group: "boneMedicines", answer: "no", said: true },
+  ])
+  const text = await printedText(record)
+  expect(text).toContain("Anticoagulante: no sabe · lo dijo la persona")
+  expect(text).toContain("Medicina para los huesos: no toma · lo dijo la persona")
+  const statements = resourcesOf(record).filter((resource) => String(resource.id).startsWith("clase-"))
+  expect(statements.map((resource) => [resource.id, resource.status])).toEqual([
+    ["clase-anticoagulants", "unknown"],
+    ["clase-boneMedicines", "not-taken"],
+  ])
 })

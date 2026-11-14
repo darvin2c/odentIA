@@ -257,7 +257,7 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 - [ ] Una receta ya emitida dice con qué hoja salió.
 
 ### T-ADM-02 Decidir qué se le pregunta al paciente y tener mi propia ficha
-**Dónde:** Configuración › «Registro de pacientes» (`R/_org/settings.patient-registration.tsx`) y «Formularios propios» (`R/_org/settings.forms.tsx`); en la ficha, Clínica › Documentos (`C/patient/formularios-tab.tsx`).
+**Dónde:** Configuración › «Preguntas al paciente» (`R/_org/settings.patient-registration.tsx`) y «Formularios propios» (`R/_org/settings.forms.tsx`); en la ficha, Clínica › Documentos (`C/patient/formularios-tab.tsx`).
 - [ ] «Quiero mi propia ficha (ortodoncia, odontopediatría) para llenarla en la consulta, con medidas en mm y un Sí/No»: la encuentro desde Configuración sin la Ayuda y la veo al atender.
 - [ ] «Mi paciente nuevo completa antes de venir lo mismo que preguntaba mi hoja de papel: nacimiento, DNI, alergias, medicación y embarazo»: lo que contesta aparece en Antecedentes de la ficha, y lo que puse como Opcional u Obligatorio se pregunta de verdad.
 - [ ] «Quiero agregar una pregunta mía (¿toma anticoagulantes?) a lo que se le pregunta al paciente antes de venir»: sé dónde, el paciente la ve y su respuesta llega a la ficha.

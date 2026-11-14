@@ -11,7 +11,7 @@ import { orgProductName } from "./locale.js"
 /**
  * El aviso de privacidad sugerido, con los datos de la clínica. Lo publica
  * marcado «Sin revisar»: la clínica es la responsable de lo que dice y lo
- * revisa en Configuración › Registro de pacientes. No afirma cumplir ninguna
+ * revisa en Configuración › Preguntas al paciente. No afirma cumplir ninguna
  * ley: dice para qué se usan los datos y cómo pedir verlos o corregirlos.
  */
 export interface SuggestedNoticeClinic {
