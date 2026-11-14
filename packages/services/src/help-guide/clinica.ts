@@ -238,6 +238,21 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        // Mesa de formularios del 13 nov, entrega 10 (C6).
+        id: "pacientes-dijo-que-cambio",
+        q: "¿Qué quiere decir «dijo que cambió» arriba de su ficha?",
+        a: "Antes de su cita se le preguntó «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?» y dijo que sí, o corrigió lo que había enviado. Volvió a responder: lo nuevo sale arriba como lo que dijo, sin revisar, y lo que ya estaba en su ficha y no volvió a nombrar queda como «dijo que cambió», sin borrarse. Revísalo con el paciente y corrige sus antecedentes (por ejemplo, termina el anticoagulante que dejó): al guardar, la marca se va. Si dijo que nada cambió, la ficha lo dice con su fecha.",
+        forms: [
+          "dijo que cambio",
+          "que significa dijo que cambio",
+          "el paciente dijo que cambio su medicina",
+          "nada cambio en su salud",
+          "le cambiaron el anticoagulante",
+        ],
+        area: "clinica",
+        needs: "clinical.read",
+      },
+      {
         id: "pacientes-embarazo-donde-se-ve",
         q: "¿Dónde veo que está embarazada?",
         a: "Arriba de su ficha y de la atención, junto a sus alergias: «Embarazo · 32 semanas hoy (30 el 13 nov)» dice la semana de hoy y cuántas dijo el día en que lo contó. Si lo dijo ella y nadie lo revisó, va bajo «Lo dijo ella… sin revisar». Pasadas las 42 semanas deja de mostrarse como alerta y dice «Embarazo por confirmar»: pregúntale y anótalo en sus antecedentes. Es un aviso: no impide atender, recetar ni firmar.",
