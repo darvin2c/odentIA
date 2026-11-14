@@ -64,6 +64,8 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
+  clinicalFormResponse,
+  clinicalFormTemplate,
   consentDocument,
   consentTemplate,
   issuedPaper,
@@ -4766,6 +4768,100 @@ for (const seed of [
   seedRoles,
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
+}
+
+// Fichas de consulta (ADR 0117), los casos de la mesa del 13 nov. Las cuatro del producto ya están
+// (`seedClinicalForms`); una clínica nueva las trae «Sin mirar» («Miraste 0 de 4», caso C11).
+// - C5 · Diego Ramos, 14 años, en ortodoncia con el Dr. Luis: su ficha del 12 oct ya finalizada y hoy
+//   su control, en atención. «Fichas para esta atención» ofrece la de ortodoncia por la especialidad
+//   de su cita, y «Empezar la de hoy» la abre con la del 12 oct al lado.
+// - C3 · Thiago, 6 años, con una cita sin servicio con la Dra. Ana: se le ofrece la de odontopediatría
+//   por su edad, y la odontoestomatológica por la especialidad de quien atiende.
+{
+  const [ortho] = await db
+    .select()
+    .from(clinicalFormTemplate)
+    .where(
+      and(
+        eq(clinicalFormTemplate.organizationId, ORG_A),
+        eq(clinicalFormTemplate.key, "ficha-de-ortodoncia"),
+        eq(clinicalFormTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  if (!ortho) throw new Error("Falta la ficha de ortodoncia del producto en la demo")
+  const diego = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Diego Ramos Cárdenas",
+    givenNames: "Diego",
+    familyName: "Ramos Cárdenas",
+    birthDate: "2012-04-18",
+    phone: "+51987650730",
+    registeredBranchId: miraflores.id,
+  })
+  // La del 12 oct (32 días antes de la demo), finalizada por el Dr. Luis.
+  const october = daysAgo(32)
+  await db.insert(clinicalFormResponse).values({
+    organizationId: ORG_A,
+    templateId: ortho.id,
+    templateVersion: ortho.version,
+    templateTitle: ortho.title,
+    templateSnapshot: ortho.schema,
+    patientId: diego.id,
+    professionalUserId: LUIS_ID,
+    authorUserId: LUIS_ID,
+    status: "finalizado",
+    source: "staff",
+    finalizedAt: october,
+    createdAt: october,
+    updatedAt: october,
+    answers: {
+      clase_molar: "Clase II división 1",
+      overjet: 6,
+      overbite: 4,
+      linea_media: "Desviada a la derecha",
+      linea_media_mm: 2,
+      mordida_cruzada: ["Posterior derecha"],
+      apinamiento: "Moderado",
+      habitos: ["Respiración bucal"],
+      observaciones: "Inicio de aparatología fija superior e inferior.",
+    },
+  })
+  const diegoToday = await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: diego.id,
+    professionalUserId: LUIS_ID,
+    serviceId: serviceIdA("ORTODONCIA_CTRL"),
+    startsAt: lima(0, "10:30"),
+    endsAt: lima(0, "11:00"),
+    status: "confirmada",
+    outsideSchedule: true,
+    overrideBusy: true,
+    notice: false,
+  })
+  await createEncounter(db, ORG_A, LUIS_ID, diego.id, { appointmentId: diegoToday.id })
+
+  const thiago = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Thiago Quispe Ramos",
+    givenNames: "Thiago",
+    familyName: "Quispe Ramos",
+    birthDate: "2020-06-02",
+    phone: "+51987650731",
+    registeredBranchId: miraflores.id,
+  })
+  // Su cita no dice de qué es: recepción la dio sin servicio.
+  const thiagoToday = await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: thiago.id,
+    professionalUserId: ANA_ID,
+    startsAt: lima(0, "12:00"),
+    endsAt: lima(0, "12:30"),
+    status: "confirmada",
+    reason: "Manchas en las muelas de abajo",
+    outsideSchedule: true,
+    overrideBusy: true,
+    notice: false,
+  })
+  await createEncounter(db, ORG_A, ANA_ID, thiago.id, { appointmentId: thiagoToday.id })
 }
 // Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
 // por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.
