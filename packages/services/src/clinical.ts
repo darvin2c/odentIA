@@ -862,8 +862,8 @@ function declaredGroupsOf(input: {
   declarations: HealthDeclaration[]
   latest: AnamnesisRow | null
   pregnancy: PregnancyToday | null
-  /** Lo del producto que dijo, en palabras (`ProductInterview.declaredLines`). */
-  interviewLines: (health: DeclaredPatientHealthInput) => Array<{ label: string; value: string }>
+  /** Lo del producto que dijo, en palabras (`ProductInterview.declaredLines`); sin él (solo alergias), nada. */
+  interviewLines?: (health: DeclaredPatientHealthInput) => Array<{ label: string; value: string }>
 }): DeclaredHealthGroup[] {
   const { health, reviewPending, authorship, declarations, latest } = input
   const groups = new Map<string, DeclaredHealthGroup>()
@@ -918,9 +918,10 @@ function declaredGroupsOf(input: {
     }
     // Lo del producto (odentIA: «de pequeño»), de la última declaración que lo dijo, mientras nadie del
     // equipo haya guardado la entrevista después.
-    const saidLines = declarations.find((row) => input.interviewLines(row.health).length > 0)
+    const lines = input.interviewLines ?? (() => [])
+    const saidLines = declarations.find((row) => lines(row.health).length > 0)
     if (saidLines && sinceStaff(saidLines.enteredAt))
-      groupOf(saidLines, saidLines.enteredAt).productLines = input.interviewLines(saidLines.health)
+      groupOf(saidLines, saidLines.enteredAt).productLines = lines(saidLines.health)
   }
   // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
   const saidNo = {

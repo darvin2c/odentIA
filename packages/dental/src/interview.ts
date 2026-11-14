@@ -46,8 +46,24 @@ export function dentalInterviewEntries(answers: unknown): InterviewEntry[] {
     "Hábitos",
     Array.isArray(given.habitos) ? given.habitos.filter((item) => typeof item === "string" && item.trim()).join(", ") : null,
   )
+  // Lo de pequeño que contó quien cuida a un niño (entrega 7), con los nombres de Antecedentes.
+  for (const [key, label] of CHILDHOOD_ENTRY_LABELS) {
+    const value = given[key]
+    const words: Record<string, string> = CHILDHOOD_WORDS[key]
+    const said = typeof value === "string" ? words[value] : undefined
+    add(key, label, said ? said.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) : null)
+  }
   return out
 }
+
+/** «De pequeño» en la copia de la historia: cada respuesta con su nombre en Antecedentes. */
+const CHILDHOOD_ENTRY_LABELS = [
+  ["biberon", "Biberón o pecho para dormir"],
+  ["chupon", "Chupón o dedo"],
+  ["dulcesEntreComidas", "Dulces o jugos entre comidas"],
+  ["pastaConFluor", "Pasta de dientes con flúor"],
+  ["quienCepilla", "Quién le cepilla los dientes"],
+] as const
 
 /** Cuántos hábitos se registran como mucho. */
 export const DENTAL_HABITS_MAX = 10

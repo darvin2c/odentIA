@@ -109,4 +109,20 @@ describe("«Odontológicos y hábitos» en palabras (copia de la historia)", () 
     ])
     expect(dentalInterviewEntries(undefined)).toEqual([])
   })
+
+  it("lo de pequeño que contó quien cuida a un niño también va en la copia, con las palabras de la pantalla", () => {
+    expect(
+      dentalInterviewEntries({
+        antecedentesOdontologicos: { biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" },
+      }).map((entry) => `${entry.key} · ${entry.label}: ${entry.value}`),
+    ).toEqual([
+      "antecedentesOdontologicos.biberon · Biberón o pecho para dormir: Ya no toma biberón",
+      "antecedentesOdontologicos.chupon · Chupón o dedo: Se chupa el dedo",
+      "antecedentesOdontologicos.dulcesEntreComidas · Dulces o jugos entre comidas: 4 o más veces al día",
+      "antecedentesOdontologicos.pastaConFluor · Pasta de dientes con flúor: Pasta con flúor",
+      "antecedentesOdontologicos.quienCepilla · Quién le cepilla los dientes: Se cepilla sin ayuda",
+    ])
+    // Una respuesta que no es de la lista no sale.
+    expect(dentalInterviewEntries({ antecedentesOdontologicos: { biberon: "mucho" } })).toEqual([])
+  })
 })
