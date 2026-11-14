@@ -304,11 +304,29 @@ function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean
     const diff = own.filter((stem) => !theirs.includes(stem))
     if (shared.length >= 1 && diff.length >= 1 && diff.length <= 2 && !diff.some((stem) => said.has(stem))) return false
   }
-  // La primera palabra sola no basta: «mordida abierta» no es «Mordida cruzada». Lo que va después de
-  // «de» es su complemento: «intensidad» basta para «Intensidad del dolor».
-  const [head, ...rest] = labelStems(question.label.split(/\s(?:de|del)\s/i)[0] ?? question.label)
-  if (head && rest.length && said.has(head) && !rest.some((stem) => said.has(stem))) return false
   return true
+}
+
+/**
+ * ¿La frase nombra otra cosa con la primera palabra de la pregunta? «mordida
+ * abierta» no es «Mordida cruzada», ni «riesgo de caries» es «Riesgo
+ * estomatológico»: la palabra que sigue no es de la pregunta ni de sus opciones.
+ * «intensidad ocho», «higiene regular» o «sondaje de cuatro» sí hablan de ella.
+ */
+function namesAnother(question: DictationFormQuestion, text: string): boolean {
+  const [head, ...rest] = labelStems(question.label)
+  if (!head || rest.length === 0) return false
+  const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf)])
+  const words = plain(text)
+    .split(/[^a-z0-9]+/)
+    .filter((word) => (word.length >= 3 && !FILLER.has(word)) || /^[0-9]+$/.test(word))
+  return words.some((word, index) => {
+    if (stemsOf(word)[0] !== head) return false
+    const next = words[index + 1]
+    if (!next || /^[0-9]+$/.test(next) || saidNumbers(next).length > 0) return false
+    const stem = stemsOf(next)[0]
+    return !!stem && !known.has(stem)
+  })
 }
 
 /** Otra unidad de la misma magnitud dicha en la frase: no se convierte, no se propone. */
@@ -434,7 +452,7 @@ function checkFormAnswer(
   const spoken = new Set(stemsOf(said))
   // La frase (o su oración) tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
   const context = new Set([...spoken, ...stemsOf(sentence)])
-  if (!talksAbout(question, context)) return null
+  if (!talksAbout(question, context) || namesAnother(question, said)) return null
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })

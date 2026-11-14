@@ -224,6 +224,36 @@ describe("lo que la medición del 14 nov mostró que se perdía", () => {
     expect(ask("ceod_c", "5", "cinco cariados", "CPOD de diez. Ahora, cinco cariados.")).toBeNull()
   })
 
+  it("la primera palabra con otra cosa detrás no es la pregunta; con su valor, sí", () => {
+    const more = formQuestionsOf([
+      {
+        id: "g",
+        title: "Ficha",
+        snapshot: {
+          sections: [
+            {
+              id: "g",
+              title: "General",
+              fields: [
+                { id: "higiene", label: "Higiene oral", type: "opcion_unica", options: ["Buena", "Regular", "Mala"] },
+                { id: "conducta", label: "Conducta (escala de Frankl)", type: "opcion_unica", options: ["1 · Definitivamente negativa", "2 · Negativa", "3 · Positiva", "4 · Definitivamente positiva"] },
+                { id: "riesgo", label: "Riesgo estomatológico", type: "opcion_unica", options: ["Bajo", "Moderado", "Alto"] },
+                { id: "sondaje", label: "Sondaje periodontal más profundo", type: "numero", unit: "mm" },
+              ],
+            },
+          ],
+        },
+        answers: {},
+      },
+    ])
+    const say = (fieldId: string, answer: string, said: string) =>
+      prepareFormAnswer({ payload: { question: more.find((item) => item.fieldId === fieldId)?.number, answer }, sourceText: said }, more, FDI)?.payload["value"] ?? null
+    expect(say("higiene", "Regular", "higiene regular")).toBe("Regular")
+    expect(say("conducta", "3 · Positiva", "conducta positiva")).toBe("3 · Positiva")
+    expect(say("sondaje", "4", "sondaje de cuatro milímetros")).toBe(4)
+    expect(say("riesgo", "Alto", "riesgo de caries alto")).toBeNull()
+  })
+
   it("«la derecha en clase dos» no elige canina ni molar", () => {
     expect(ask("clase_canina_derecha", "Clase II", "la derecha en clase dos")).toBeNull()
     expect(ask("clase_canina_derecha", "Clase II", "canina derecha clase dos")?.payload["value"]).toBe("Clase II")
