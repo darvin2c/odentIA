@@ -141,4 +141,41 @@ describe("BirthDateInput", () => {
     expect(field().value).toBe("01/03/2020")
     expect(screen.queryByText(/años/)).toBeNull()
   })
+
+  // QA de la entrega 3 (14 nov): «1990-04-03» tecleado quedaba «19/90/0403».
+  it("tecleada con el año primero, como en ISO, se entiende y pasa al orden de la clínica", async () => {
+    const onChange = vi.fn()
+    render(<Harness onChange={onChange} />)
+    await userEvent.type(field(), "1990-04-03")
+    expect(field().value).toBe("03/04/1990")
+    expect(onChange).toHaveBeenLastCalledWith("1990-04-03", expect.objectContaining({ iso: "1990-04-03" }))
+  })
+
+  it("con el año primero y mes o día de un número, también", async () => {
+    render(<Harness />)
+    await userEvent.type(field(), "1990-4-3")
+    fireEvent.blur(field())
+    expect(field().value).toBe("03/04/1990")
+  })
+
+  it("quien escribe la barra después del mes no empieza por el año", async () => {
+    expect(await written("12/10/1990")).toBe("12/10/1990")
+    expect(await written("20-01-2005")).toBe("20/01/2005")
+  })
+
+  // QA de la entrega 3 (14 nov): «3/4/90» decía «Escribe día, mes y año», y sí los había escrito.
+  it("con el año en dos números no lo adivina: pide sus cuatro números, al salir", async () => {
+    render(<Harness />)
+    await userEvent.type(field(), "3/4/90")
+    expect(screen.queryByText(/cuatro números/)).toBeNull()
+    fireEvent.blur(field())
+    expect(screen.getByText("Escribe el año con sus cuatro números, por ejemplo 1990")).toBeTruthy()
+  })
+
+  it("si la pantalla ya dice el problema, el campo no lo repite", async () => {
+    render(<Harness problemOutside invalid />)
+    await userEvent.type(field(), "31021990")
+    expect(screen.queryByText(/Ese mes tiene 28 días/)).toBeNull()
+    expect(field().getAttribute("aria-invalid")).toBe("true")
+  })
 })

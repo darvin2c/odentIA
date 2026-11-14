@@ -59,14 +59,18 @@ import {
 import {
   advanceOnEnter,
   BirthDateInput,
+  clinicDateLocale,
   type FieldControl,
   normalizeCountry,
   PhoneInput,
+  readWrittenDate,
   setSubmitErrors,
   submitForm,
   useAppForm,
   useFieldControl,
   useFormSubmitError,
+  writtenDateFormat,
+  writtenDateProblemText,
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
@@ -920,6 +924,15 @@ export function RegistrationQuestionnaire({
         : null
   const needs = (condition: boolean, field: keyof Draft, message: string): Found =>
     condition ? { field, message } : null
+  /**
+   * Lo que no vale de la fecha escrita, con las palabras del campo («Ese mes tiene 28 días: revisa
+   * el día.»): la pantalla lo dice una sola vez (el campo no lo repite, `problemOutside`).
+   */
+  const birthDateProblem = (): string => {
+    const format = writtenDateFormat(clinicDateLocale(countryCode))
+    const problem = readWrittenDate(draft.birthDate, today, format).problem
+    return problem ? `${writtenDateProblemText(problem, format)}.` : "Revisa la fecha: escribe día, mes y año."
+  }
   /** Lo que la regla de la ficha dice de lo escrito en un campo, con sus mismas palabras. */
   const says = (field: keyof Draft, problem: string | null): Found => (problem ? { field, message: problem } : null)
 
@@ -998,11 +1011,7 @@ export function RegistrationQuestionnaire({
             needs(wants("givenNames") && !draft.givenNames.trim(), "givenNames", "Escribe los nombres.") ??
             needs(wants("familyName") && !draft.surnames.trim(), "surnames", "Escribe los apellidos.") ??
             needs(wants("birthDate") && !draft.birthDate, "birthDate", "Escribe la fecha de nacimiento.") ??
-            needs(
-              wants("birthDate") && !isRealDate(draft.birthDate),
-              "birthDate",
-              "Revisa la fecha: escribe día, mes y año.",
-            ) ??
+            needs(wants("birthDate") && !isRealDate(draft.birthDate), "birthDate", birthDateProblem()) ??
             needs(
               !fill && !forOther && minor,
               "birthDate",
@@ -1062,6 +1071,7 @@ export function RegistrationQuestionnaire({
                 today={today}
                 country={countryCode}
                 invalid={control.invalid}
+                problemOutside={control.invalid}
                 aria-describedby={control.describedBy}
                 onBlur={control.onBlur}
               />

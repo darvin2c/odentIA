@@ -121,6 +121,18 @@ export function padWrittenDate(text: string, format: WrittenDateFormat = written
     .join(format.separator)
 }
 
+/**
+ * «1990-04-03» tecleado de corrido: el campo ya había puesto sus separadores en el orden de la
+ * clínica («19/90/0403»). Con el año primero (`yearFirst`), sus ocho números se leen como año,
+ * mes y día, y se escriben en el orden de la clínica. `null` si aún no son ocho o no existe.
+ */
+export function yearFirstDate(written: string, format: WrittenDateFormat = writtenDateFormat()): string | null {
+  const digits = written.replace(/\D/g, "")
+  if (digits.length !== 8) return null
+  const iso = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
+  return isIsoDate(iso) ? writeDate(iso, format) : null
+}
+
 /** `1995-07-30` → `30/07/1995` en el orden de la clínica; lo que no es ISO queda igual. */
 export function writeDate(iso: string, format: WrittenDateFormat = writtenDateFormat()): string {
   const match = ISO_DATE.exec(iso.trim())
@@ -145,6 +157,7 @@ function daysInMonth(year: number, month: number): number {
 /** Lo que impide guardar una fecha escrita, dicho para arreglarlo. */
 export type WrittenDateProblem =
   | { kind: "incompleta" }
+  | { kind: "anio-corto" }
   | { kind: "mes" }
   | { kind: "dia" }
   | { kind: "no-existe"; days: number }
@@ -173,7 +186,16 @@ export function readWrittenDate(
 ): WrittenDateReading {
   const digits = text.replace(/\D/g, "")
   if (digits === "") return { iso: null, empty: true, problem: null }
-  if (digits.length < 8) return { iso: null, empty: false, problem: { kind: "incompleta" } }
+  if (digits.length < 8) {
+    // «3/4/90»: el año con dos números no se adivina (¿1990 o 1890?); se pide con sus cuatro.
+    const parts = text.split(/\D+/).filter(Boolean)
+    const year = format.order.indexOf("year")
+    const short =
+      parts.length === 3 &&
+      parts[year]?.length === 2 &&
+      format.order.every((part, index) => part === "year" || parts[index]?.length === PART_LENGTH[part])
+    return { iso: null, empty: false, problem: { kind: short ? "anio-corto" : "incompleta" } }
+  }
   const values: Partial<Record<DatePart, string>> = {}
   let offset = 0
   for (const part of format.order) {
@@ -203,6 +225,8 @@ export function writtenDateProblemText(
   switch (problem.kind) {
     case "incompleta":
       return `Escribe día, mes y año: ${format.placeholder}`
+    case "anio-corto":
+      return "Escribe el año con sus cuatro números, por ejemplo 1990"
     case "mes":
       return "El mes va del 01 al 12"
     case "dia":

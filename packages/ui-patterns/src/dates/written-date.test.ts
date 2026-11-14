@@ -76,7 +76,11 @@ describe("fecha escrita", () => {
     const peru = writtenDateFormat("es-PE")
     const problem = (text: string) => readWrittenDate(text, TODAY, peru).problem
     expect(readWrittenDate("", TODAY, peru)).toEqual({ iso: null, empty: true, problem: null })
-    expect(problem("30/07/19")).toEqual({ kind: "incompleta" })
+    expect(problem("30/07/1")).toEqual({ kind: "incompleta" })
+    // El año en dos números no se adivina: se pide con sus cuatro.
+    expect(problem("30/07/19")).toEqual({ kind: "anio-corto" })
+    expect(problem("3/4/90")).toEqual({ kind: "incompleta" })
+    expect(problem("03/04/90")).toEqual({ kind: "anio-corto" })
     expect(problem("30/13/1995")).toEqual({ kind: "mes" })
     expect(problem("00/07/1995")).toEqual({ kind: "dia" })
     expect(problem("31/02/1995")).toEqual({ kind: "no-existe", days: 28 })
