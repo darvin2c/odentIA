@@ -156,6 +156,20 @@ export function answerWords(field: Pick<FormFieldDef, "type" | "unit">, value: u
 }
 
 /**
+ * Quién responde por una ficha nueva: el de la atención, si atiende; si no se
+ * dice (desde Documentos), quien la empieza, si atiende. Vacío es «Sin asignar».
+ */
+export function defaultResponsible(
+  given: string | undefined,
+  me: string,
+  responsibles: ReadonlyArray<{ userId: string }>,
+): string {
+  const attends = (id: string | undefined) => Boolean(id) && responsibles.some((member) => member.userId === id)
+  if (given !== undefined) return attends(given) ? (given ?? "") : ""
+  return attends(me) ? me : ""
+}
+
+/**
  * Lo que «Usar» copia de la anterior a la de hoy: la misma respuesta, si la
  * pregunta de hoy la admite (mismo tipo y, en las de opciones, opciones que
  * siguen). Una firma o un archivo no se copian; nada se copia solo.

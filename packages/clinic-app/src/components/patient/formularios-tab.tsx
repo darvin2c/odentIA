@@ -32,7 +32,7 @@ import {
   startFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
-import { useMemberName, useOrgMembers, usePermission } from "../../lib/crm"
+import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
@@ -44,7 +44,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
-import { answerWords, draftOf, reusableAnswer } from "../../lib/consultation-forms"
+import { answerWords, defaultResponsible, draftOf, reusableAnswer } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -103,6 +103,7 @@ export function NewResponseDrawer({
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
   const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
+  const me = useMyUserId()
   const queryClient = useQueryClient()
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
@@ -118,7 +119,7 @@ export function NewResponseDrawer({
   const form = useAppForm({
     defaultValues: {
       templateId: "",
-      professionalUserId: responsibles.some((member) => member.userId === defaultProfessionalUserId) ? (defaultProfessionalUserId ?? "") : "",
+      professionalUserId: defaultResponsible(defaultProfessionalUserId, me, responsibles),
     },
     validators: { onSubmit: newResponseSchema },
     onSubmit: async ({ value }) => {

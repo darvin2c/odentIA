@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { FormTemplate } from "./clinical-forms"
 import {
   answerWords,
+  defaultResponsible,
   appearsWords,
   formRowTitle,
   lookedCount,
@@ -146,4 +147,14 @@ it("el botón de una ficha ofrecida dice qué hace, de cuál es y por qué apare
   expect(
     offerButtonName({ title: "Ficha de odontopediatría", today: null, why: "edad", specialtyName: "Odontopediatría", underYears: 12 }),
   ).toBe("Empezar la de hoy: Ficha de odontopediatría. Por su edad: menor de 12 años")
+})
+
+// QA del 14 nov (UX U9): desde Documentos la ficha nacía «Sin asignar» aunque quien la empezaba atiende.
+it("«Nuevo › Ficha» trae como responsable a quien la empieza, si atiende", () => {
+  const team = [{ userId: "ana" }, { userId: "luis" }]
+  expect(defaultResponsible(undefined, "ana", team)).toBe("ana")
+  expect(defaultResponsible(undefined, "recepcion", team)).toBe("")
+  // Desde la atención manda quien atiende.
+  expect(defaultResponsible("luis", "ana", team)).toBe("luis")
+  expect(defaultResponsible("se-fue", "ana", team)).toBe("")
 })
