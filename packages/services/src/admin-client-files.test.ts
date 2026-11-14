@@ -269,21 +269,29 @@ describe("borrado a los 30 días", () => {
 })
 
 describe("el texto del correo", () => {
-  it("se borra a los 30 días de llegar, con o sin cliente; el de hoy se queda", async () => {
+  it("solo el de la carga (soporte@ con adjuntos) se borra a los 30 días, con o sin cliente; lo demás se queda", async () => {
     const now = new Date()
     const old = new Date(now.getTime() - 31 * DAY)
-    const insert = async (messageId: string, receivedAt: Date, client: string | null) => {
+    const sent = [{ filename: "pacientes.xlsx", contentType: "text/csv", size: 3, fileId: null }]
+    const insert = async (
+      messageId: string,
+      receivedAt: Date,
+      client: string | null,
+      mailbox: "soporte" | "hola" = "soporte",
+      attachments: typeof sent = sent,
+    ) => {
       const [row] = await ownerDb
         .insert(saasInboundEmail)
         .values({
           clientId: client,
-          mailbox: "soporte",
+          mailbox,
           product: "dental",
           messageId,
           fromAddress: "clinica@files.test",
-          toAddress: "soporte@odentia32.com",
+          toAddress: `${mailbox}@odentia32.com`,
           textBody: "Rosa Díaz, DNI 12345678, 999 888 777",
           receivedAt,
+          attachments,
         })
         .returning({ id: saasInboundEmail.id })
       return row?.id ?? ""
@@ -291,6 +299,8 @@ describe("el texto del correo", () => {
     const oldWithClient = await insert("<texto-viejo@files.test>", old, clientId)
     const oldOrphan = await insert("<texto-viejo-solo@files.test>", old, null)
     const fresh = await insert("<texto-nuevo@files.test>", now, clientId)
+    const oldHola = await insert("<texto-viejo-hola@files.test>", old, clientId, "hola")
+    const oldSupportNoFiles = await insert("<texto-viejo-sin@files.test>", old, null, "soporte", [])
     await purgeDueClientFiles(ownerDb, fakeStorage(), now)
     const text = async (id: string) =>
       (
@@ -302,5 +312,35 @@ describe("el texto del correo", () => {
     expect(await text(oldWithClient)).toBeNull()
     expect(await text(oldOrphan)).toBeNull()
     expect(await text(fresh)).toContain("Rosa")
+    expect(await text(oldHola)).toContain("Rosa")
+    expect(await text(oldSupportNoFiles)).toContain("Rosa")
+  })
+
+  it("los adjuntos de un correo sin cliente que no es de la carga no se borran", async () => {
+    const now = new Date()
+    const kept: StoredInboundAttachment[] = [
+      {
+        filename: "contrato.pdf",
+        contentType: "application/pdf",
+        size: 3,
+        fileId: null,
+        objectKey: "inbound/contrato-hola.pdf",
+      },
+    ]
+    const [row] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<hola-huerfano@files.test>",
+        fromAddress: "nadie@files.test",
+        toAddress: "hola@odentia32.com",
+        receivedAt: new Date(now.getTime() - 40 * DAY),
+        attachments: kept,
+      })
+      .returning({ id: saasInboundEmail.id })
+    expect(row).toBeDefined()
+    const due = await dueClientFileDeletions(ownerDb, now, 1000)
+    expect(due.map((item) => item.objectKey)).not.toContain("inbound/contrato-hola.pdf")
   })
 })

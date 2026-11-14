@@ -19,8 +19,10 @@
  * teléfono ni por nombre.
  *
  * Con cliente, deja una actividad «correo» que entró y sus adjuntos pasan a
- * ser documentos del cliente, solo de Administración y con borrado a los 30
- * días. Los adjuntos se guardan; nadie ni nada los abre ni los manda al modelo.
+ * ser documentos del cliente, solo de Administración. Solo lo que puede ser la
+ * carga de datos (soporte@ con adjuntos, `isCargaEmail`) se borra a los 30
+ * días, con su texto; lo demás se guarda. Nadie ni nada abre los adjuntos ni
+ * los manda al modelo.
  */
 
 import { CLINICAL_PRODUCTS, isClinicalProduct } from "@odentia/clinical"
@@ -30,6 +32,7 @@ import {
   type SaasInboundMailbox,
   type SaasInboundMatch,
   saasClient,
+  saasClientFile,
   saasInboundEmail,
   saasOutreach,
 } from "@odentia/db/schema/admin-arm"
@@ -40,6 +43,7 @@ import { z } from "zod"
 import {
   cleanFilename,
   clientFileDeleteAfter,
+  isCargaEmail,
   registerClientFile,
   type StoredInboundAttachment,
 } from "./admin-client-files.js"
@@ -269,6 +273,8 @@ async function attachToClient(
   clientId: string,
   attachments: StoredInboundAttachment[],
   receivedAt: Date,
+  /** Llegó a soporte@ con adjuntos: puede ser la carga, que se borra a los 30 días. */
+  carga: boolean,
   now: Date,
 ): Promise<{ attachments: StoredInboundAttachment[]; fileIds: string[] }> {
   const fileIds: string[] = []
@@ -291,7 +297,8 @@ async function attachToClient(
         contentType: attachment.contentType,
         sizeBytes: attachment.size,
         adminOnly: true,
-        deleteAfter: clientFileDeleteAfter(from),
+        // Solo lo de la carga (soporte@ con adjuntos) se borra a los 30 días; lo demás se guarda.
+        deleteAfter: carga ? clientFileDeleteAfter(from) : null,
         source: "correo",
       },
       now,
@@ -382,7 +389,20 @@ export async function ingestInboundEmail(
       : null
   let fileIds: string[] = []
   if (match) {
-    const attached = await attachToClient(tx, null, match.clientId, stored, input.receivedAt, now)
+    const carga = isCargaEmail({
+      mailbox: input.mailbox,
+      attachments: stored.length,
+      notice: input.notice,
+    })
+    const attached = await attachToClient(
+      tx,
+      null,
+      match.clientId,
+      stored,
+      input.receivedAt,
+      carga,
+      now,
+    )
     fileIds = attached.fileIds
     await tx
       .update(saasInboundEmail)
@@ -464,6 +484,11 @@ export async function assignInboundEmail(
     clientId,
     email.attachments as StoredInboundAttachment[],
     email.receivedAt,
+    isCargaEmail({
+      mailbox: email.mailbox,
+      attachments: (email.attachments as StoredInboundAttachment[]).length,
+      notice: email.notice,
+    }),
     now,
   )
   await tx
@@ -504,6 +529,8 @@ export interface InboundEmailReply {
   createdBy: string | null
   createdAt: Date
   sentAt: Date | null
+  /** Los documentos que llevó adjuntos (los que quien mira puede ver). */
+  files: Array<{ id: string; filename: string }>
 }
 
 export interface InboundEmailDetail {
@@ -514,7 +541,7 @@ export interface InboundEmailDetail {
   fromName: string | null
   to: string
   subject: string | null
-  /** Nulo después de 30 días: el texto se borra. */
+  /** Nulo si era de la carga de datos y pasaron 30 días: el texto se borra. */
   text: string | null
   /** El aviso del correo entrante (adjuntos que no se guardaron), aparte del texto; se borra con él. */
   notice: string | null
@@ -577,6 +604,19 @@ export async function getInboundEmail(
       ),
     )
     .orderBy(desc(saasOutreach.createdAt))
+  const replyFileIds = [...new Set(replies.flatMap((reply) => reply.fileIds))]
+  const replyFileRows = replyFileIds.length
+    ? await tx
+        .select({ id: saasClientFile.id, filename: saasClientFile.filename })
+        .from(saasClientFile)
+        .where(
+          and(
+            inArray(saasClientFile.id, replyFileIds),
+            actor.role === "admin" ? undefined : eq(saasClientFile.adminOnly, false),
+          ),
+        )
+    : []
+  const fileName = new Map(replyFileRows.map((file) => [file.id, file.filename]))
   const canReply = actor.role === "admin" || row.mailbox === "soporte"
   // La marca del cliente si ya es de uno; si no, la del buzón donde llegó (como al enviar).
   const [client] = row.clientId
@@ -626,6 +666,10 @@ export async function getInboundEmail(
       createdBy: reply.createdBy,
       createdAt: reply.createdAt,
       sentAt: reply.sentAt,
+      files: reply.fileIds.flatMap((id) => {
+        const filename = fileName.get(id)
+        return filename ? [{ id, filename }] : []
+      }),
     })),
   }
 }

@@ -810,15 +810,8 @@
     {
       "idx": 115,
       "version": "7",
-      "when": 1794662821375,
-      "tag": "0115_fichas_en_uso",
-      "breakpoints": true
-    },
-    {
-      "idx": 116,
-      "version": "7",
-      "when": 1794662826969,
-      "tag": "0116_fichas_en_uso_reglas",
+      "when": 1794659473120,
+      "tag": "0115_adjuntos_de_la_respuesta",
       "breakpoints": true
     }
   ]
