@@ -1426,9 +1426,10 @@ export async function saveDictationSegment(
     return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
-  // Las preguntas con el número que vio Clío, menos las que alguien respondió mientras ordenaba: esas no se proponen.
-  const openNow = await dictationFormQuestions(tx, orgId, encounterId)
-  const formQuestions = (segment.formQuestions ?? openNow).filter((question) =>
+  // Las preguntas con el número que vio Clío, menos las que alguien respondió mientras ordenaba: esas no
+  // se proponen. Sin la lista que vio, el número no dice a cuál pregunta se refería: no se propone nada.
+  const openNow = segment.formQuestions?.length ? await dictationFormQuestions(tx, orgId, encounterId) : []
+  const formQuestions = (segment.formQuestions ?? []).filter((question) =>
     openNow.some((item) => item.responseId === question.responseId && item.fieldId === question.fieldId),
   )
   const scope: DictationScope = { ...(await dictationScope(tx, orgId)), formQuestions }
