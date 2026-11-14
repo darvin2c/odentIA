@@ -307,22 +307,24 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
   })
 }
 
-/** Cuándo fue la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
+/** Cuándo terminó la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
 async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
+  // Una cita cuenta como pasada al terminar, no al empezar: mientras la persona espera en la sala
+  // (o se atiende), lo que envió para ella sigue siendo de esta cita.
   const [row] = await tx
-    .select({ startsAt: appointment.startsAt })
+    .select({ endsAt: appointment.endsAt })
     .from(appointment)
     .where(
       and(
         eq(appointment.organizationId, orgId),
         eq(appointment.patientId, patientId),
-        lte(appointment.startsAt, new Date()),
+        lte(appointment.endsAt, new Date()),
         sql`${appointment.status} <> 'cancelada'`,
       ),
     )
-    .orderBy(desc(appointment.startsAt))
+    .orderBy(desc(appointment.endsAt))
     .limit(1)
-  return row?.startsAt ?? null
+  return row?.endsAt ?? null
 }
 
 /**

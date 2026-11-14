@@ -1788,3 +1788,17 @@ it("«Lo que nos contaste» es de la cita que viene: lo enviado antes de su últ
   await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, visit))
   expect(await told(fresh.token)).toEqual(["datos", "salud", "cuestionario"])
 })
+
+// QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita
+// de hoy, mientras la persona aún esperaba en la sala.
+it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  const told = async () => (await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).told?.items.map((item) => item.what) ?? null
+  // Lo envió hace una hora; la cita empezó hace diez minutos y termina en veinte: está en la sala.
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000)
+  await ownerDb.update(clinicalFormResponse).set({ submittedAt: minutes(-60) }).where(eq(clinicalFormResponse.patientId, marta.patientId))
+  await ownerDb.update(appointment).set({ startsAt: minutes(-10), endsAt: minutes(20) }).where(eq(appointment.id, visit))
+  expect(await told()).toEqual(["cuestionario"])
+})

@@ -1296,6 +1296,8 @@ export function RegistrationQuestionnaire({
               {(control) => (
                 <Input
                   {...control.props}
+                  // El DNI y el certificado de nacido vivo son solo números: el teléfono abre su teclado.
+                  inputMode={draft.docType === "DNI" || draft.docType === "CNV" ? "numeric" : undefined}
                   autoComplete="off"
                   maxLength={20}
                   value={draft.docNumber}
@@ -1686,9 +1688,10 @@ export function RegistrationQuestionnaire({
             <DeclaredField
               name="allergies"
               optional={!required("allergies")}
+              // Sin género: el sexo puede no estar elegido aún, y la pregunta es la misma para todos.
               label={you(
-                "¿Eres alérgico a algún medicamento o material?",
-                `¿${first || "La persona"} es alérgico a algún medicamento o material?`,
+                "¿Tienes alergia a algún medicamento o material?",
+                `¿${first || "La persona"} tiene alergia a algún medicamento o material?`,
               )}
               hint="Por ejemplo, penicilina, anestesia o látex."
               detailLabel="¿A qué? Si son varias cosas, sepáralas con comas."

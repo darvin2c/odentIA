@@ -66,7 +66,7 @@ const answer = (name: RegExp, text: string) => {
 // a la pantalla siguiente y dejaba sin ver «¿Tienes alguna enfermedad?» y la medicación.
 it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambiar de pantalla", async () => {
   healthOnly()
-  await screen.findAllByRole("group", { name: /algún medicamento o material/ })
+  await screen.findAllByRole("group", { name: /alergia a algún medicamento o material/ })
   answer(/algún medicamento o material/, "Sí")
   const what = await screen.findByLabelText(/¿A qué\?/)
   fireEvent.change(what, { target: { value: "penicilina" } })
@@ -78,7 +78,7 @@ it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambia
 // …y en la última pantalla, Enter en la última respuesta escrita lo enviaba todo.
 it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", async () => {
   const onSubmit = healthOnly()
-  await screen.findAllByRole("group", { name: /algún medicamento o material/ })
+  await screen.findAllByRole("group", { name: /alergia a algún medicamento o material/ })
   answer(/algún medicamento o material/, "No")
   answer(/alguna enfermedad/, "No")
   answer(/algún medicamento todos los días/, "Sí")

@@ -13,7 +13,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
-import type { ClinicalOrder } from "../../lib/clinical-forms"
+import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
   consentSignatureWords,
@@ -889,6 +889,16 @@ function PrescriptionRow({
   )
 }
 
+/**
+ * Lo que dice el panel de un formulario bajo su título: el borrador se guarda solo; uno
+ * finalizado ya no se cambia (decir «se guarda solo» ahí prometía algo que no pasa).
+ */
+export function formDetailDescription(response: Pick<FormResponse, "status"> | null, canWrite: boolean): string | undefined {
+  if (response?.status === "borrador" && canWrite) return "Se guarda solo mientras lo completas."
+  if (response?.status === "finalizado") return "Finalizado: ya no se cambia. Para corregir algo, agrega una adenda."
+  return undefined
+}
+
 /** Un formulario de la atención se completa al lado, sin salir. */
 function FormDetail({
   patientId,
@@ -913,7 +923,7 @@ function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Formulario"}
-      description="Se guarda solo mientras lo completas."
+      description={formDetailDescription(response, canWrite)}
       onClose={onClose}
     >
       {response ? (
