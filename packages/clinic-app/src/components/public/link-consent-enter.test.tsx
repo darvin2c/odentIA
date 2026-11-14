@@ -78,3 +78,13 @@ it("Enter en el documento pasa a lo siguiente: no firma ni marca la firma que fa
   expect(sign).not.toHaveBeenCalled()
   expect(document.activeElement).not.toBe(doc)
 })
+
+// Verificación de la entrega 3 (14 nov): el DNI de la firma abría el teclado de letras; el del registro, el de números.
+it("el DNI de la firma abre el teclado de números", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <LinkConsentStep slug="dental-smile" token="t" consentId="c1" onSigned={() => {}} />
+    </QueryClientProvider>,
+  )
+  expect((await screen.findByLabelText("Escribe tu DNI")).getAttribute("inputmode")).toBe("numeric")
+})

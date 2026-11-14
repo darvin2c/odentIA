@@ -218,6 +218,8 @@ export function LinkConsentStep({
                     description="Lo comparamos con el de tu ficha; no lo mostramos."
                     inputClassName="min-h-11"
                     autoComplete="off"
+                    // El DNI son solo números: el teléfono abre su teclado, como en «Tus datos».
+                    inputMode={docLabel === "DNI" ? "numeric" : undefined}
                     enterKeyHint="next"
                     maxLength={20}
                   />
