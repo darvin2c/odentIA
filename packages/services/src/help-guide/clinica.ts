@@ -321,9 +321,20 @@ export const CLINICA: readonly HelpMore[] = [
     topic: "fichas",
     faqs: [
       {
+        id: "fichas-odontopediatria-por-edad",
+        q: "Me sale la ficha de odontopediatría, ¿por qué?",
+        a: "Porque el paciente tiene menos de 12 años: en odentIA la Ficha de odontopediatría aparece sola a todo menor de 12, aunque la cita sea de otra especialidad o no tenga servicio, y lo dice debajo («Por su edad: menor de 12 años»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Si no la usas en tu clínica, apaga su interruptor «En uso» en Configuración › Fichas de consulta.",
+        forms: [
+          "me sale la ficha de odontopediatria por que",
+          "por que aparece odontopediatria en un nino con cita de limpieza",
+          "en la atencion de un nino sin servicio me sale la ficha de odontopediatria",
+        ],
+        own: true,
+      },
+      {
         id: "fichas-ortodoncia-donde",
         q: "¿Dónde hago mi ficha de ortodoncia?",
-        a: "Ya viene con odentIA: en Configuración › Fichas de consulta está «Ficha de ortodoncia», con la clase de Angle, el overjet y el overbite en mm, la línea media, las mordidas cruzadas y los hábitos. Ya se usa: aparece sola en la atención cuando la cita es de ortodoncia. «Ver y ajustar» la abre para cambiar, agregar o quitar preguntas; lo ya anotado conserva las suyas. En el control, «Empezar la de hoy» la abre con la anterior al lado. Vienen también la de endodoncia, la de odontopediatría (que además aparece sola a los menores de 12 años) y la odontoestomatológica que pide la norma de historia clínica.",
+        a: "Ya viene con odentIA: en Configuración › Fichas de consulta está «Ficha de ortodoncia», con la clase de Angle, el overjet y el overbite en mm, la línea media, las mordidas cruzadas y los hábitos. Ya se usa: aparece sola en la atención cuando la cita es de ortodoncia. «Ver y ajustar» («Ver y cambiar», si ya la miraste) la abre para cambiar, agregar o quitar preguntas; lo ya anotado conserva las suyas. En el control, «Empezar la de hoy» la abre con la anterior debajo de cada pregunta, y «Usar» copia una respuesta de la anterior. Vienen también la de endodoncia, la de odontopediatría (que además aparece sola a los menores de 12 años) y la odontoestomatológica que pide la norma de historia clínica.",
         forms: [
           "quiero mi propia ficha de ortodoncia",
           "ficha de endodoncia",
