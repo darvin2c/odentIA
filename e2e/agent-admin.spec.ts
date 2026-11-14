@@ -363,7 +363,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await expect(others).toBeChecked()
   await others.click()
   await page.getByRole("button", { name: "Guardar", exact: true }).click()
-  await expect(page.getByText("Registro de pacientes guardado", { exact: true })).toBeVisible()
+  await expect(page.getByText("Preguntas al paciente guardadas", { exact: true })).toBeVisible()
   await expect.poll(config).toMatchObject({ askMessages: false })
 
   // --- Ficha: los tres interruptores de «Tus mensajes»; cada cambio pregunta antes cómo lo dijo (ADR 0040) ---

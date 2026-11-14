@@ -421,7 +421,7 @@ En todas las tareas de Agenda, además de lo propio:
 - [ ] Se deja de preguntar algo desde la pantalla, con «Deshacer».
 - [ ] Teclado: la pregunta nueva recibe el foco, vacía; la pregunta se lee entera.
 **Ya falló:** «Crear un formulario» al pie de 12 consentimientos; publicar otro cuestionario reemplazó al vigente para todos sin avisar; «Nuevo campo» se pegaba a lo tecleado.
-**Patrones:** el control de tres estados y «Así lo ve el paciente» de Registro de pacientes; «Se pide para» de `CA/settings/consent-templates.tsx`.
+**Patrones:** el control de tres estados y «Así lo ve el paciente» de Preguntas al paciente; «Se pide para» de `CA/settings/consent-templates.tsx`.
 
 ### M-FRM-02 El paciente responde antes de su cita, en el celular
 **Quién:** paciente o quien lo cuida; antes de cada cita (supuesto).

@@ -13,7 +13,7 @@ const SECTIONS: Array<[string, string]> = [
   ["Protección de datos", "/settings/data-protection"],
   ["Especialidades", "/settings/specialties"],
   ["Consentimientos", "/settings/forms"],
-  ["Registro de pacientes", "/settings/patient-registration"],
+  ["Preguntas al paciente", "/settings/patient-registration"],
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],
   ["Comisiones por profesional", "/settings/commissions"],
