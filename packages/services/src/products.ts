@@ -48,6 +48,11 @@ export async function productDictation(tx: Db, orgId: string): Promise<ProductDi
   return (await productHooks(tx, orgId)).dictation
 }
 
+/** Lo que hace un producto, sin clínica (las mediciones: sus fichas, su «dónde», su catálogo). */
+export function productHooksFor(product: ClinicalProduct): ProductHooks {
+  return HOOKS[product]
+}
+
 /** Lo que Clío dicta en un producto, sin clínica (las mediciones); null si no dicta. */
 export function dictationFor(product: ClinicalProduct): ProductDictation | null {
   return HOOKS[product].dictation

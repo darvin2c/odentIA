@@ -18,14 +18,11 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { type DictationFormQuestion, formQuestionsOf, NO_SITE, prepareFormAnswer } from "@odentia/services"
-import { DENTAL_FORMS, dentalProductSite, dictationFindingsText } from "@odentia/services/dental"
-import { examSystemsText } from "@odentia/services/medical"
+import { type DictationFormQuestion, formQuestionsOf, prepareFormAnswer, productHooksFor } from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
-import { DENTAL_DICTATION_PROFILE } from "./dental/dictation.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
-import { MEDICAL_DICTATION_PROFILE } from "./medical/dictation.js"
+import { dictationProfileFor } from "./products.js"
 
 interface FormCase {
   id: string
@@ -48,10 +45,15 @@ const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/dictado-fichas.js
 const spec = resolveLlmSpec(platformLlmFromEnv(process.env))
 if (spec.provider === "fake") throw new Error("Esta medición es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor")
 
-const PRODUCTS = {
-  odentia: { profile: DENTAL_DICTATION_PROFILE, catalog: dictationFindingsText(), site: dentalProductSite },
-  latidia: { profile: MEDICAL_DICTATION_PROFILE, catalog: examSystemsText(), site: NO_SITE },
-} as const
+/** Cada producto por el registro común (ADR 0079): su perfil de Clío, su catálogo, su «dónde» y sus fichas. */
+function productOf(name: "odentia" | "latidia") {
+  const product = name === "odentia" ? "dental" : "medical"
+  const hooks = productHooksFor(product)
+  const profile = dictationProfileFor(product)
+  if (!profile || !hooks.dictation) throw new Error(`${name} no dicta`)
+  return { profile, catalog: hooks.dictation.catalogText(), site: hooks.site, forms: hooks.forms.suggestions }
+}
+const PRODUCTS = { odentia: productOf("odentia"), latidia: productOf("latidia") }
 const models = new Map<string, unknown>()
 /** El modelo de cada producto, con su razonamiento, como en la atención. */
 async function modelOf(profile: DictationProfile): Promise<unknown> {
@@ -64,7 +66,7 @@ async function modelOf(profile: DictationProfile): Promise<unknown> {
 function formOf(key: string): { title: string; schema: unknown } {
   const own = bank.fichasPropias?.[key]
   if (own) return own
-  const product = DENTAL_FORMS.suggestions.find((form) => form.key === key)
+  const product = PRODUCTS.odentia.forms.find((form) => form.key === key)
   if (!product) throw new Error(`El banco nombra una ficha que no existe: ${key}`)
   return { title: product.title, schema: product.schema }
 }
