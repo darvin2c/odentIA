@@ -23,7 +23,7 @@ function guardianOf(contacts: readonly PatientContactLink[]): { kin: string; nam
     guardian.kinship && guardian.kinship in KINSHIP_LABELS
       ? KINSHIP_LABELS[guardian.kinship as keyof typeof KINSHIP_LABELS]
       : guardian.relationshipDetail?.trim()
-  return { kin: (kin || "representante").toLocaleLowerCase("es"), name: guardian.displayName }
+  return { kin: specificKin(kin) ?? "representante", name: guardian.displayName }
 }
 
 /**
@@ -38,6 +38,21 @@ export function askWhom(contacts: readonly PatientContactLink[]): string | null 
 
 type Sex = string | null | undefined
 
+/**
+ * El parentesco, si dice cuál es. «Madre, padre o tutor» es la opción del
+ * registro, no un parentesco: no se escribe «su madre, padre o tutor» ni se
+ * inventa cuál de los tres fue (QA del 14 nov).
+ */
+const GENERIC_KIN = new Set(["madre, padre o tutor", "madre, padre o tutora", "representante"])
+function specificKin(relation: string | null | undefined): string | null {
+  const kin = relation?.trim().toLocaleLowerCase("es")
+  return kin && !GENERIC_KIN.has(kin) ? kin : null
+}
+
+/** «quien la cuida» (o «lo»), y sin sexo registrado, «su representante»: no se supone ninguno. */
+const caregiver = (sex: Sex): string =>
+  sex === "F" ? "quien la cuida" : sex === "M" ? "quien lo cuida" : "su representante"
+
 /** «ella», «él» o, sin sexo registrado, nada: no se supone ninguno. */
 const pronoun = (sex: Sex): string => (sex === "F" ? "ella" : sex === "M" ? "él" : "")
 
@@ -51,8 +66,11 @@ export function whoWords(by: HealthDeclarant, sex: Sex): string {
   if (by.kind === "staff") return "el equipo"
   if (by.kind === "unknown") return ""
   const first = by.name?.trim().split(/\s+/)[0] ?? ""
-  if (by.relation && first) return `su ${by.relation}, ${first}`
-  if (by.relation) return `su ${by.relation}`
+  const kin = specificKin(by.relation)
+  if (kin && first) return `su ${kin}, ${first}`
+  if (kin) return `su ${kin}`
+  // Eligió «Madre, padre o tutor» en el registro: quien la cuida, sin decir cuál de los tres.
+  if (by.relation) return first ? `${caregiver(sex)}, ${first}` : caregiver(sex)
   if (first) return first
   return sex === "F" ? "quien habla por ella" : sex === "M" ? "quien habla por él" : "quien habla en su nombre"
 }
@@ -108,7 +126,8 @@ export function saidByWords(by: HealthDeclarant, sex: Sex): string {
 export function saidNoWords(by: HealthDeclarant, sex: Sex): string {
   if (by.kind === "staff") return "El equipo anotó que no"
   if (by.kind === "representative") {
-    const who = by.relation ? `su ${by.relation}` : whoWords(by, sex)
+    const kin = specificKin(by.relation)
+    const who = kin ? `su ${kin}` : by.relation ? caregiver(sex) : whoWords(by, sex)
     return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que no`
   }
   return "Dijo que no"

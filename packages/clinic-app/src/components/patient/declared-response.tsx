@@ -47,6 +47,11 @@ function dayAndTime(value: string): string {
     .replace(/\.(?=,)/, "")
 }
 
+/** Cierra la frase con un punto, sin duplicar el de «p. m.» (QA del 14 nov: «12:40 a. m..»). */
+export function sentence(text: string): string {
+  return text.endsWith(".") ? text : `${text}.`
+}
+
 const NOBODY: HealthDeclarant = { kind: "unknown", name: null, relation: null }
 
 /**
@@ -58,7 +63,7 @@ export function sentWords(response: FormResponse): string {
   if (!response.submittedAt) return `Lo está respondiendo ${name}: todavía no lo envió.`
   const via =
     response.submittedVia === "enlace" ? " desde su enlace" : response.submittedVia === "portal" ? " desde el portal" : ""
-  return `Lo envió ${name}${via} el ${dayAndTime(response.submittedAt)}.`
+  return sentence(`Lo envió ${name}${via} el ${dayAndTime(response.submittedAt)}`)
 }
 
 /** Una respuesta en palabras, como la escribió: «Sí», «8 de 10», la lista unida o el texto tal cual. */

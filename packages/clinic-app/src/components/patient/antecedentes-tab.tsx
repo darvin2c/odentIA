@@ -64,6 +64,7 @@ import {
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
 import { AllergiesCard } from "./allergies-card"
+import { sentence } from "./declared-response"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import {
   BLOOD_GROUP_LABELS,
@@ -1506,8 +1507,11 @@ function RegistrationSnapshotDialog({
               <div className="flex flex-col gap-0.5">
                 <h3 className="font-medium">{title}</h3>
                 <p className="text-muted-foreground">
-                  {saidByWords(declaration.by, sex).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} el{" "}
-                  {new Date(declaration.at).toLocaleString(activeOrgLocale(), { dateStyle: "long", timeStyle: "short" })}.
+                  {sentence(
+                    `${saidByWords(declaration.by, sex).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} el ${new Date(
+                      declaration.at,
+                    ).toLocaleString(activeOrgLocale(), { dateStyle: "long", timeStyle: "short" })}`,
+                  )}
                 </p>
               </div>
               <DeclaredHealthSnapshot health={sent} />

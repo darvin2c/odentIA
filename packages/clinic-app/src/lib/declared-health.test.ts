@@ -71,6 +71,19 @@ describe("las palabras de lo que dijo el paciente", () => {
     expect(saidNoWords(staff, "F")).toBe("El equipo anotó que no")
   })
 
+  // QA del 14 nov: el registro guarda la opción «Madre, padre o tutor» y la ficha decía «Lo dijo su
+  // madre, padre o tutor, Carla». No se inventa cuál de los tres fue.
+  it("«Madre, padre o tutor» se dice «quien la cuida», sin inventar el parentesco", () => {
+    const chip = { kind: "representative" as const, name: "Carla Ríos", relation: "madre, padre o tutor" }
+    expect(declaredMarkWords(chip, "2026-11-13", "F")).toBe("Lo dijo quien la cuida, Carla, el 13 nov, sin revisar")
+    expect(whoWords(chip, "M")).toBe("quien lo cuida, Carla")
+    expect(whoWords(chip, null)).toBe("su representante, Carla")
+    expect(saidNoWords(chip, "M")).toBe("Quien lo cuida dijo que no")
+    expect(askWhom([{ ...guardian, kinship: null, relationshipDetail: "Madre, padre o tutor" }])).toBe(
+      "su representante (Carla Paz Soto)",
+    )
+  })
+
   it("cada fila se busca en su declaración: con dos fechas o dos personas, cada cosa con la suya", () => {
     const group = (by: HealthDeclarant, at: string, patch: Partial<DeclaredHealthGroup>): DeclaredHealthGroup => ({
       by,

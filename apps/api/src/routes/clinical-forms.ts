@@ -228,8 +228,9 @@ const addendumInput = z
     text: z
       .string()
       .trim()
-      .min(1, "Escribe la adenda.")
-      .max(5000, "La adenda admite hasta 5000 caracteres."),
+      // Las mismas palabras que la pantalla: lo que el paciente envió se corrige con una «corrección».
+      .min(1, "Escribe la corrección.")
+      .max(5000, "La corrección admite hasta 5000 caracteres."),
   })
   .strict()
 

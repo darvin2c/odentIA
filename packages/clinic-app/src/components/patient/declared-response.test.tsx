@@ -76,6 +76,9 @@ describe("lo que envió el paciente, para leer", () => {
 
   it("dice quién lo envió y por dónde, solo con lo que quedó guardado", () => {
     expect(sentWords(sent)).toMatch(/^Lo envió Marta Ríos desde su enlace el 13 nov, /)
+    // Un solo punto al final, aunque la hora termine en «p. m.» (QA del 14 nov).
+    expect(sentWords(sent)).toMatch(/m\.$/)
+    expect(sentWords(sent)).not.toMatch(/\.\.$/)
     expect(sentWords({ ...sent, submittedVia: "portal" })).toContain("desde el portal")
     // Lo de antes, sin el canal guardado: no se afirma ninguno.
     expect(sentWords({ ...sent, submittedVia: null })).not.toMatch(/enlace|portal/)

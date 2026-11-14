@@ -1331,6 +1331,10 @@ it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Ma
   })
   expect(edited.status).toBe(409)
   expect((await json<ErrorBody>(edited)).error.code).toBe("DECLARED_READ_ONLY")
+  // Vacía, el servidor la pide con las palabras de la pantalla: «corrección», no «adenda» (QA del 14 nov).
+  const empty = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, { text: " " })
+  expect(empty.status).toBe(400)
+  expect(JSON.stringify(await json<ErrorBody>(empty))).toContain("Escribe la corrección.")
   // La corrección va aparte, antes de revisar.
   const correction = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, {
     text: "Dice que fue con amoxicilina, hace años.",
