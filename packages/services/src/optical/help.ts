@@ -566,6 +566,11 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "pacientes-dictado-corregir-pausar": () => [],
   "pacientes-dictado-ficha": () => [],
   "pacientes-dictado-ficha-no-lleno": () => [],
+  "pacientes-dictado-ficha-revisar": () => [],
+  "pacientes-dictado-dos-fichas": () => [],
+  "pacientes-dictado-firmar-sin-decidir": () => [],
+  "pacientes-dictado-tercera-ficha": () => [],
+  "pacientes-dictado-corregir-confirmada": () => [],
   "agente-clio-probar-dictado": () => [],
   "elijo-tratamientos-trae-cita": (faq) => [
     {

@@ -467,6 +467,19 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       forms: ["clio no lleno la ficha", "por que clio no puso el peso", "clio no la lleno", "la ficha quedo vacia despues de dictar"],
     },
   ],
+  "pacientes-dictado-dos-fichas": (faq) => [
+    {
+      ...faq,
+      a: swaps(
+        faq.a,
+        ["(«ceod: tres cariados», «conducta positiva»)", "(«pesa veintidós kilos», «sin fiebre en casa»)"],
+        ["Si las dos preguntan lo mismo (el ceod)", "Si las dos preguntan lo mismo (el peso)"],
+      ),
+    },
+  ],
+  "pacientes-dictado-tercera-ficha": (faq) => [
+    { ...faq, a: swaps(faq.a, ["(por ejemplo endodoncia, odontopediatría y la odontoestomatológica)", "(por ejemplo control del niño sano, nutrición y vacunas)"]), forms: ["tenia tres fichas y una quedo vacia", "una ficha quedo vacia despues de dictar", "clio no lleno una de las fichas"] },
+  ],
   // Sin presupuesto que aceptar, el embudo va de venir a pagar (`funnelStepsOf`).
   "caen-pacientes": (faq) => [
     {
