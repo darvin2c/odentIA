@@ -812,6 +812,59 @@ export async function allergiesSaidNoByPatient(
 }
 
 /**
+ * Lo que recepción (`clinical.alerts`) puede saber de lo declarado: qué alergias
+ * activas dijo la persona y nadie revisó, y su «No» a las alergias, con quién lo
+ * dijo y cuándo (QA del 14 nov, H5 de clínica). Es la misma regla de
+ * `health.declared` (`declaredGroupsOf`), leída solo con las alergias: sin
+ * enfermedades, medicación ni embarazo, y la salida se arma campo por campo
+ * para que nada más viaje aunque la regla crezca.
+ */
+export async function declaredAllergiesByPatient(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<Array<{ by: HealthDeclarant; at: Date | null; allergies: string[]; saidNo: boolean }>> {
+  const [header] = await tx
+    .select({ reviewStatus: patient.healthReviewStatus, allergiesReviewedAt: patient.allergiesReviewedAt })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  if (!header) throw notFound("Paciente")
+  const allergies = await tx
+    .select()
+    .from(patientAllergy)
+    .where(
+      and(
+        eq(patientAllergy.patientId, patientId),
+        eq(patientAllergy.organizationId, orgId),
+        eq(patientAllergy.isActive, true),
+      ),
+    )
+  const state = (header.reviewStatus as { allergies?: unknown } | null)?.allergies
+  const groups = declaredGroupsOf({
+    health: {
+      allergies,
+      conditions: [],
+      medications: [],
+      reviewStatus: {
+        allergies: state === "none" || state === "recorded" ? state : "unknown",
+        conditions: "unknown",
+        medications: "unknown",
+      },
+      allergiesReviewedAt: header.allergiesReviewedAt,
+    },
+    reviewPending: false,
+    authorship: await healthAuthorshipOf(tx, orgId, patientId),
+    declarations: await healthDeclarationsOf(tx, orgId, patientId),
+    latest: null,
+    pregnancy: null,
+  })
+  return groups
+    .filter((group) => group.allergies.length > 0 || group.saidNo.allergies)
+    .map((group) => ({ by: group.by, at: group.at, allergies: group.allergies, saidNo: group.saidNo.allergies }))
+}
+
+/**
  * Quien respondió, visto desde su contacto: la propia persona o quien habla
  * por ella, con su nombre y su vínculo en palabras (el parentesco de HL7 si se
  * conoce, o el escrito al vincularlo). Es la misma forma para la franja de la

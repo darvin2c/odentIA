@@ -1042,6 +1042,11 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /**
+   * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
+   * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
+   */
+  declaredAllergies?: Array<{ by: HealthDeclarant; at: string | null; allergies: string[]; saidNo: boolean }>
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }

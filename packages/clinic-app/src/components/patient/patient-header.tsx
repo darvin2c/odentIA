@@ -101,6 +101,24 @@ export function clinicalAlerts(
   return [...severe, ...other, ...conditions, ...medications]
 }
 
+/** Lo declarado que llega a quien solo ve las alergias, como grupos de la franja. */
+function receptionGroups(
+  detail: Pick<PatientFull, "allergySaidNo" | "declaredAllergies">,
+): DeclaredHealthGroup[] {
+  const only = (by: DeclaredHealthGroup["by"], at: string | null, allergies: string[], saidNo: boolean) => ({
+    by,
+    at,
+    allergies,
+    conditions: [],
+    medications: [],
+    pregnancy: false,
+    saidNo: { allergies: saidNo, conditions: false, medications: false },
+  })
+  if (detail.declaredAllergies)
+    return detail.declaredAllergies.map((group) => only(group.by, group.at, group.allergies, group.saidNo))
+  return detail.allergySaidNo ? [only(detail.allergySaidNo.by, detail.allergySaidNo.at, [], true)] : []
+}
+
 /**
  * Franja clínica reutilizable (cabecera y editor de atención): alergias,
  * enfermedades, lo que toma y el embarazo, sin botones. Sin alergias
@@ -122,7 +140,12 @@ export function PatientClinicalStrip({
 }: {
   detail: Pick<
     PatientFull,
-    "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidNo"
+    | "activeAllergies"
+    | "activeConditions"
+    | "currentMedications"
+    | "allergyReview"
+    | "allergySaidNo"
+    | "declaredAllergies"
   >
   onAntecedentes?: () => void
   /** Para quien lee la historia: si se le preguntó qué toma (sin medicación registrada). */
@@ -134,21 +157,9 @@ export function PatientClinicalStrip({
 }) {
   const stripId = useId()
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
-  // Quien solo ve las alergias (recepción) recibe una sola cosa de lo declarado: su «No», con quién lo dijo.
-  const groups: DeclaredHealthGroup[] =
-    health?.declared ??
-    (detail.allergySaidNo
-      ? [
-          {
-            ...detail.allergySaidNo,
-            allergies: [],
-            conditions: [],
-            medications: [],
-            pregnancy: false,
-            saidNo: { allergies: true, conditions: false, medications: false },
-          },
-        ]
-      : [])
+  // Quien solo ve las alergias (recepción) recibe de lo declarado solo las alergias y su «No», con
+  // quién lo dijo y cuándo: la misma caja, sin nada más de su salud (QA del 14 nov, H5 de clínica).
+  const groups: DeclaredHealthGroup[] = health?.declared ?? receptionGroups(detail)
   const groupIndex = (find: (group: DeclaredHealthGroup) => boolean): number | null => {
     const index = groups.findIndex(find)
     return index === -1 ? null : index

@@ -215,4 +215,23 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(second?.inside.replace(/^\|+/, "")).toMatch(/^Alergia severa: Penicilinas/)
     expect(markup.replace(/<[^>]+>/g, "|")).toContain("+1 alerta")
   })
+
+  it("recepción ve la alergia que dijo la paciente con su marca, y nada más de su salud", () => {
+    const reception: Detail = {
+      activeAllergies: [allergy("a1", "Látex"), severeAllergy("a2", "Penicilinas")],
+      activeConditions: [],
+      currentMedications: [],
+      allergyReview: "recorded",
+      allergySaidNo: null,
+      declaredAllergies: [
+        { by: { kind: "patient", name: null, relation: null }, at: "2026-11-13T19:27:00.000Z", allergies: ["a1"], saidNo: false },
+      ],
+    }
+    const markup = html(<PatientClinicalStrip detail={reception} sex="F" />)
+    const [box, ...others] = boxes(markup)
+    expect(others).toHaveLength(0)
+    expect(box?.label).toBe("Lo dijo ella el 13 nov, sin revisar")
+    expect(box?.inside).toContain("Alergia: Látex")
+    expect(box?.inside).not.toContain("Penicilinas")
+  })
 })
