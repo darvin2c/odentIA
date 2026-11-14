@@ -112,6 +112,7 @@ export function clinicalAlerts(
 /** «No se le preguntó» no es «dijo que no»: lo que se sabe de cada clase, en la atención. */
 const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, (said: boolean) => string> = {
   unasked: () => "no se le preguntó",
+  saidYes: () => "dijo que toma, falta anotar cuál",
   no: (said) => (said ? "dijo que no" : "no toma"),
   unknown: () => "no sabe",
 }

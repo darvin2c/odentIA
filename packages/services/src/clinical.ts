@@ -716,6 +716,7 @@ export async function getPatientHealth(
       declarations,
       // Lo que toma hoy: sin fin, o con un fin que aún no llega.
       current: medications.filter((row) => !row.endDate || row.endDate >= today),
+      ended: medications.filter((row) => !!row.endDate && row.endDate < today),
     }),
   }
 }
@@ -1508,6 +1509,14 @@ export async function addDeclaredHealth(
       .orderBy(desc(patientAnamnesis.version))
       .limit(1)
     const merged = withoutRetiredInterview(mergeInterview((latest?.answers ?? {}) as Record<string, unknown>, said))
+    // Cuántos al día va solo con «fuma»: si dijo que no fuma o que lo dejó, el número que anotó el
+    // equipo ya no vale, y dejarlo haría que la entrevista entera no pase y se pierda lo que dijo.
+    const saidHabits = said["habitos"] as Record<string, unknown> | undefined
+    const habits = merged["habitos"] as Record<string, unknown> | undefined
+    if (saidHabits && "tabaco" in saidHabits && saidHabits["tabaco"] !== "fuma" && !("cigarrillos" in saidHabits) && habits) {
+      const { cigarrillos: _stale, ...rest } = habits
+      merged["habitos"] = rest
+    }
     let answers: Record<string, unknown> | null = null
     try {
       answers = hooks.interview.check(assertNewInterview(merged), today)

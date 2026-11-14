@@ -76,19 +76,37 @@ function declarationHas(health: DeclaredHealth, key: RegistrationFieldKey): bool
  * de la entrevista) o los respondió en una declaración. Lo demás es lo que
  * falta preguntarle.
  */
+/**
+ * Si «no toma medicamentos» quiere decir «ninguno»: lo anotó el equipo o lo dijo
+ * en un registro de antes, cuando era una sola pregunta. Desde la entrega 6, el
+ * «No» de una declaración que ya preguntó por las dos clases es solo de «algún
+ * otro», y no dice nada del anticoagulante ni de los huesos.
+ */
+function takesNoMedicine(input: Pick<KnownHealthInput, "reviewStatus" | "declarations">): boolean {
+  return (
+    input.reviewStatus.medications === "none" &&
+    !input.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  )
+}
+
 export function knownHealthQuestions(input: KnownHealthInput): Set<RegistrationFieldKey> {
   const known = new Set<RegistrationFieldKey>()
+  const hasClass = (key: MedicationClass) => input.medications.some((row) => medicationClassOf(row.atcCode) === key)
   for (const field of REGISTRATION_FIELDS) {
     if (field.group !== "health") continue
     const key = field.key
     if (input.declarations.some((row) => declarationHas(row.health, key))) known.add(key)
     else if (key === "bloodGroup" && input.bloodGroup) known.add(key)
     else if (key === "allergies" && (input.activeAllergies > 0 || input.reviewStatus.allergies !== "unknown")) known.add(key)
-    else if ((key === "conditions" || key === "medications") && input.reviewStatus[key] !== "unknown") known.add(key)
-    else if (key === "anticoagulants" || key === "boneMedicines") {
-      // Una medicina de esa clase, o que no toma ninguna medicina, ya lo responde.
-      if (input.reviewStatus.medications === "none" || input.medications.some((row) => medicationClassOf(row.atcCode) === key))
+    else if (key === "conditions" && input.reviewStatus.conditions !== "unknown") known.add(key)
+    else if (key === "medications") {
+      // «Algún otro»: lo sabe un «no toma» o una medicina que no es de las dos clases. Un «tiene» que
+      // solo trae el anticoagulante o la de los huesos no responde «¿algún otro?».
+      if (input.reviewStatus.medications === "none" || input.medications.some((row) => !medicationClassOf(row.atcCode)))
         known.add(key)
+    } else if (key === "anticoagulants" || key === "boneMedicines") {
+      // Una medicina de esa clase, o que no toma ninguna medicina, ya lo responde.
+      if (takesNoMedicine(input) || hasClass(key)) known.add(key)
     } else if (interviewHas(input.interview, key)) known.add(key)
   }
   return known
@@ -115,12 +133,14 @@ export function healthQuestionsToAsk(
 
 /**
  * Lo que se sabe de una clase de medicina, para la atención: `yes` (toma una;
- * la marca va arriba), `no` (dijo que no, o no toma ninguna medicina),
- * `unknown` (dijo «No sé») o `unasked` (nadie se lo preguntó). `said`: lo
- * respondió en una declaración y no lo anotó el equipo.
+ * la marca va arriba), `saidYes` (dijo que toma una y ninguna medicina anotada
+ * lleva esa clase: hay que preguntarle cuál), `no` (dijo que no, el equipo la
+ * terminó, o no toma ninguna medicina), `unknown` (dijo «No sé») o `unasked`
+ * (nadie se lo preguntó). `said`: lo respondió en una declaración y no lo anotó
+ * el equipo.
  */
 export interface MedicineClassAnswer {
-  answer: "yes" | "no" | "unknown" | "unasked"
+  answer: "yes" | "saidYes" | "no" | "unknown" | "unasked"
   said: boolean
 }
 
@@ -128,18 +148,25 @@ export function medicineClassAnswers(
   input: Pick<KnownHealthInput, "reviewStatus" | "declarations"> & {
     /** Lo que toma hoy (no lo que ya dejó). */
     current: ReadonlyArray<{ atcCode?: string | null }>
+    /** Lo que ya dejó: una medicina terminada de la clase dice que hoy no la toma. */
+    ended?: ReadonlyArray<{ atcCode?: string | null }>
   },
 ): Record<MedicationClass, MedicineClassAnswer> {
   const of = (group: MedicationClass): MedicineClassAnswer => {
-    if (input.current.some((row) => medicationClassOf(row.atcCode) === group)) return { answer: "yes", said: false }
+    const isOf = (row: { atcCode?: string | null }) => medicationClassOf(row.atcCode) === group
+    if (input.current.some(isOf)) return { answer: "yes", said: false }
     const said = input.declarations.find((row) => {
       const state = row.health[group]?.state
       return state !== undefined && state !== "unanswered"
     })?.health[group]?.state
-    // Dijo que sí y ya no figura: el equipo la quitó o la terminó, así que hoy no la toma.
-    if (said === "none" || said === "recorded") return { answer: "no", said: said === "none" }
-    if (input.reviewStatus.medications === "none") return { answer: "no", said: false }
+    if (said === "recorded") {
+      // Dijo que sí y el equipo la terminó: hoy no la toma. Si no figura con su clase (la escribieron
+      // a mano, o le cambiaron el nombre), nunca «no toma»: dijo que sí y falta anotar cuál.
+      return (input.ended ?? []).some(isOf) ? { answer: "no", said: false } : { answer: "saidYes", said: true }
+    }
+    if (said === "none") return { answer: "no", said: true }
     if (said === "unknown") return { answer: "unknown", said: true }
+    if (takesNoMedicine(input)) return { answer: "no", said: false }
     return { answer: "unasked", said: false }
   }
   return { anticoagulants: of("anticoagulants"), boneMedicines: of("boneMedicines") }
