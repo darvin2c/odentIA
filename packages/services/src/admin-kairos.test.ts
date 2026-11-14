@@ -649,16 +649,30 @@ describe("la pasada de Kairós", () => {
       clientId: ids.carga,
       report: { organizationId: LOAD_ORG, number: 1, to: "duena@carga.test", canResend: false },
     })
+    // Las dos son solo de Administración: Soporte no las ve, aunque sea el responsable.
+    expect([...pending, ...urgent].every((task) => task.adminOnly)).toBe(true)
     const forSupport = await ownerDb.transaction((tx) =>
       todayForStaff(tx, support, { who: "todas" }, NOW),
     )
     expect(forSupport.tasks.every((task) => task.report === undefined)).toBe(true)
+    expect(
+      forSupport.tasks.some((task) => task.clientId === ids.cargada || task.clientId === ids.carga),
+    ).toBe(false)
+    const supportDone = await kairosDone(ownerDb, support, { limit: 200 })
+    expect(supportDone.some((entry) => entry.words.includes("Enviar el informe"))).toBe(false)
+    expect(
+      (await kairosDone(ownerDb, admin, { limit: 200 })).some((entry) =>
+        entry.words.includes("Enviar el informe"),
+      ),
+    ).toBe(true)
   })
 
   it("riesgo: cada señal con su tarea, una vez por hecho; el comprobante, como tarea de cobro", async () => {
     const tasks = await tasksOf(ids.riesgo as string)
     const kinds = tasks.map((task) => task.kind).sort()
     expect(kinds).toEqual(["cobro", "llamar", "otro"])
+    // La de cobro queda marcada solo de Administración; las otras, no.
+    expect(tasks.filter((task) => task.adminOnly).map((task) => task.kind)).toEqual(["cobro"])
     const codes = (
       await ownerDb
         .select({ metadata: adminAudit.metadata })
@@ -1128,6 +1142,8 @@ describe("Hoy", () => {
       todayForStaff(tx, support, { who: "todas" }, NOW),
     )
     expect(today.tasks.some((task) => task.kind === "cobro")).toBe(false)
+    // Las de Soporte siguen ahí.
+    expect(today.tasks.some((task) => task.clientId === ids.nueva)).toBe(true)
     const risk = today.atRisk.find((row) => row.clientId === ids.riesgo)
     expect(risk?.why).not.toContain("comprobante")
     expect(risk?.why).toContain("Un caso de soporte espera a la clínica")

@@ -28,6 +28,7 @@ import {
   linkClientToOrganization,
   proposalLiveSql,
   proposalOfOpenSaleSql,
+  seesTask,
   taskOverdue,
   visibleTaskSql,
 } from "./admin-clients.js"
@@ -1470,6 +1471,8 @@ class Pass {
     if (found) return null
     const client = await this.client(plan.clientId)
     if (!client) return null
+    // Solo de Administración: lo marcado así y toda tarea de cobro. Soporte no la ve.
+    const adminOnly = plan.adminOnly === true || plan.kind === "cobro"
     const [row] = await this.tx
       .insert(saasTask)
       .values({
@@ -1479,6 +1482,7 @@ class Pass {
         dueOn: plan.dueOn ?? this.today,
         dueAt: plan.dueAt ?? null,
         assigneeUserId: client.ownerUserId,
+        adminOnly,
         contactId: plan.contactId ?? null,
         demoId: plan.demoId ?? null,
         byKairos: true,
@@ -1497,7 +1501,7 @@ class Pass {
         rule: plan.rule,
         kind: plan.kind,
         clientId: plan.clientId,
-        adminOnly: plan.adminOnly ?? plan.kind === "cobro",
+        adminOnly,
       },
     })
     this.result.tasks += 1
@@ -2586,7 +2590,7 @@ async function kairosDoneRaw(
     .where(
       and(
         eq(saasTask.byKairos, true),
-        admin ? undefined : ne(saasTask.kind, "cobro"),
+        visibleTaskSql(actor),
         options.before
           ? sql`${saasTask.createdAt} < ${options.before.toISOString()}::timestamptz`
           : undefined,
@@ -2610,6 +2614,7 @@ async function kairosDoneRaw(
             title: saasTask.title,
             status: saasTask.status,
             kind: saasTask.kind,
+            adminOnly: saasTask.adminOnly,
             clientId: saasTask.clientId,
           })
           .from(saasTask)
@@ -2672,7 +2677,7 @@ async function kairosDoneRaw(
       case "kairos.task_created": {
         const task = a.entityId ? tasks.get(a.entityId) : undefined
         if (!task) break
-        if (!admin && task.kind === "cobro") break
+        if (!seesTask(actor, task)) break
         words = `Puso la tarea «${task.title}»`
         if (task.status === "abierta") undo = { kind: "cancelar_tarea", taskId: task.id }
         group = taskGroup(task.title, pass)

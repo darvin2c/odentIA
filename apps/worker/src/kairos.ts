@@ -18,6 +18,7 @@ import {
   LOST_REASON_WORDS,
   purgeDueClientFiles,
   type Storage,
+  taskHiddenFromSupportSql,
   writeAdminAudit,
   writeKairosWeekly,
 } from "@odentia/services"
@@ -255,11 +256,11 @@ export async function clientSummaryFacts(
       `actividad:${entry.id}`,
     )
   }
-  // Las tareas de cobro no las ve Soporte.
+  // Las tareas solo de Administración (y las de cobro) no las ve Soporte.
   const tasks = await ownerDb.execute<{ id: string; title: string; due_on: string }>(
-    sql`select id, title, due_on::text as due_on from saas_task
-      where client_id = ${client.id}::uuid and status = 'abierta' and kind <> 'cobro'
-      order by due_on limit 3`,
+    sql`select t.id, t.title, t.due_on::text as due_on from saas_task t
+      where t.client_id = ${client.id}::uuid and t.status = 'abierta' and not ${taskHiddenFromSupportSql("t")}
+      order by t.due_on limit 3`,
   )
   for (const task of tasks)
     add(`Tarea abierta: ${task.title}, para el ${summaryDay(task.due_on)}`, `tarea:${task.id}`)

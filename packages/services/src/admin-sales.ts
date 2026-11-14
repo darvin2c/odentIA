@@ -95,6 +95,7 @@ import {
   proposalLiveSql,
   proposalOfOpenSaleSql,
   proposalReplacedBySql,
+  seesTask,
   seesTaskKind,
   taskOverdue,
   visibleTaskSql,
@@ -277,15 +278,48 @@ async function proposalOfClient(
   return row
 }
 
-/** Una persona del personal activa: a quien se le asigna una tarea. */
-async function requireActiveStaff(tx: Db, userId: string, field: string): Promise<string> {
+/**
+ * Una persona del personal activa: a quien se le asigna una tarea. Con
+ * `adminOnly`, además de Administración: Soporte no vería esa tarea.
+ */
+async function requireActiveStaff(
+  tx: Db,
+  userId: string,
+  field: string,
+  options: { adminOnly?: boolean } = {},
+): Promise<string> {
   const [row] = await tx
-    .select({ userId: adminStaff.userId })
+    .select({ userId: adminStaff.userId, role: adminStaff.role })
     .from(adminStaff)
     .where(and(eq(adminStaff.userId, userId), eq(adminStaff.active, true)))
     .limit(1)
   if (!row) throw invalidField(field, "Esa persona no es del equipo de la administración")
+  if (options.adminOnly && row.role !== "admin")
+    throw invalidField(
+      field,
+      "Esta tarea es solo de Administración: asígnala a alguien de Administración",
+    )
   return row.userId
+}
+
+/**
+ * Sin responsable elegido, la tarea va al responsable del cliente; si es solo
+ * de Administración y el responsable no lo es (o no está activo), a quien la pone.
+ */
+async function defaultAssignee(
+  tx: Db,
+  ownerUserId: string | null,
+  actor: AdminActor,
+  adminOnly: boolean,
+): Promise<string> {
+  if (!ownerUserId) return actor.userId
+  if (!adminOnly) return ownerUserId
+  const [row] = await tx
+    .select({ role: adminStaff.role })
+    .from(adminStaff)
+    .where(and(eq(adminStaff.userId, ownerUserId), eq(adminStaff.active, true)))
+    .limit(1)
+  return row?.role === "admin" ? ownerUserId : actor.userId
 }
 
 /** La solicitud más reciente del cliente (la que sigue la lista vieja), si tiene. */
@@ -466,6 +500,8 @@ export interface TaskRow {
   demoId: string | null
   status: SaasTaskStatus
   byKairos: boolean
+  /** Solo de Administración (las de cobro, siempre): Soporte no la ve. */
+  adminOnly?: boolean
   doneAt: Date | null
   doneNote: string | null
   createdAt: Date
@@ -488,9 +524,12 @@ async function insertTask(
     throw invalidField("dueAt", "Elige la hora")
   if (input.dueAt && limaDate(input.dueAt) !== dueOn)
     throw invalidField("dueAt", "La hora tiene que ser del mismo día")
+  // Una tarea de cobro es solo de Administración: si la tuviera alguien de
+  // Soporte, tendría una tarea que no ve.
+  const adminOnly = input.kind === "cobro"
   const assignee = input.assigneeUserId
-    ? await requireActiveStaff(tx, input.assigneeUserId, "assigneeUserId")
-    : (client.ownerUserId ?? actor.userId)
+    ? await requireActiveStaff(tx, input.assigneeUserId, "assigneeUserId", { adminOnly })
+    : await defaultAssignee(tx, client.ownerUserId, actor, adminOnly)
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const demoId = await requireDemo(tx, input.demoId)
   const [row] = await tx
@@ -502,6 +541,7 @@ async function insertTask(
       dueOn,
       dueAt: input.dueAt ?? null,
       assigneeUserId: assignee,
+      adminOnly,
       contactId: contact?.id ?? null,
       demoId,
       createdBy: actor.userId,
@@ -535,8 +575,8 @@ export async function createClientTask(
 async function lockTask(tx: Db, actor: AdminActor, id: string) {
   if (!UUID.test(id)) throw notFound("Tarea")
   const [row] = await tx.select().from(saasTask).where(eq(saasTask.id, id)).limit(1).for("update")
-  // Una tarea de cobro, para Soporte, no existe: la misma respuesta que una que no hay.
-  if (!row || !seesTaskKind(actor, row.kind)) throw notFound("Tarea")
+  // Una tarea solo de Administración, para Soporte, no existe: la misma respuesta que una que no hay.
+  if (!row || !seesTask(actor, row)) throw notFound("Tarea")
   return row
 }
 
@@ -589,6 +629,7 @@ function taskRowOf(
     demoId: task.demoId,
     status: task.status as SaasTaskStatus,
     byKairos: task.byKairos,
+    adminOnly: task.adminOnly || task.kind === "cobro",
     doneAt: task.doneAt,
     doneNote: task.doneNote,
     createdAt: task.createdAt,

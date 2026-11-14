@@ -168,15 +168,40 @@ function requireAdmin(actor: AdminActor | null): AdminActor {
 const isAdmin = (actor: AdminActor) => actor.role === "admin"
 
 /**
- * ¿Ve este actor una tarea de este tipo? Las de cobro son solo de la
+ * ¿Puede este actor poner una tarea de este tipo? Las de cobro son solo de la
  * administración: para Soporte no existen, como los casos de cobro (ADR 0181).
+ * Solo para crear; para ver una que ya existe, `seesTask`.
  */
 export const seesTaskKind = (actor: AdminActor, kind: string): boolean =>
   kind !== "cobro" || actor.role === "admin"
 
-/** La condición SQL de `seesTaskKind`: sin nada para la administración. */
-export const visibleTaskSql = (actor: AdminActor): SQL | undefined =>
-  actor.role === "admin" ? undefined : ne(saasTask.kind, "cobro")
+/** ¿Es una tarea que Soporte no ve? Las marcadas solo de Administración y las de cobro. */
+export const taskHiddenFromSupport = (task: {
+  kind: string
+  adminOnly?: boolean | null
+}): boolean => Boolean(task.adminOnly) || task.kind === "cobro"
+
+/** ¿Ve este actor esta tarea? Administración, todas; Soporte, las que no le son ajenas. */
+export const seesTask = (
+  actor: AdminActor,
+  task: { kind: string; adminOnly?: boolean | null },
+): boolean => actor.role === "admin" || !taskHiddenFromSupport(task)
+
+const TASK_ALIAS = /^[a-z_][a-z0-9_]*$/
+
+/**
+ * La condición SQL de `taskHiddenFromSupport`. Sin alias, con las columnas de
+ * `saasTask`; con alias (`t`), para SQL crudo.
+ */
+export function taskHiddenFromSupportSql(alias?: string): SQL {
+  if (alias === undefined) return sql`(${saasTask.adminOnly} or ${saasTask.kind} = 'cobro')`
+  if (!TASK_ALIAS.test(alias)) throw new Error(`Alias inválido: ${alias}`)
+  return sql.raw(`(${alias}.admin_only or ${alias}.kind = 'cobro')`)
+}
+
+/** Las tareas que ve el actor, en SQL: sin nada para la administración. */
+export const visibleTaskSql = (actor: AdminActor, alias?: string): SQL | undefined =>
+  actor.role === "admin" ? undefined : sql`not ${taskHiddenFromSupportSql(alias)}`
 
 /* ---------- Tareas ---------- */
 
@@ -751,9 +776,9 @@ export async function listClients(
     .leftJoin(user, eq(user.id, saasClient.ownerUserId))
     .where(and(base, viewSql(view, stage)))
     .orderBy(
-      // Soporte no ordena por una tarea de cobro que no ve.
+      // Soporte no ordena por una tarea que no ve.
       sql`(select min(t.due_on) from ${saasTask} t where t.client_id = ${saasClient.id} and t.status = 'abierta'
-        and (t.kind <> 'cobro' or ${isAdmin(staff)})) asc nulls last`,
+        and (not ${taskHiddenFromSupportSql("t")} or ${isAdmin(staff)})) asc nulls last`,
       desc(saasClient.createdAt),
       asc(saasClient.id),
     )
@@ -2684,6 +2709,7 @@ export async function clientTimeline(
           eq(saasTask.clientId, clientId),
           eq(saasTask.status, "hecha"),
           isNotNull(saasTask.doneAt),
+          visibleTaskSql(staff),
           beforeOf(saasTask.doneAt),
         ),
       )
@@ -2698,8 +2724,8 @@ export async function clientTimeline(
         category: taskCategory(t.kind),
         title: `Hecho: ${t.title}`,
         detail: clip(t.doneNote),
-        // Una tarea de cobro es solo de la administración (ADR 0181).
-        adminOnly: t.kind === "cobro",
+        // Una tarea de cobro o marcada solo de Administración: Soporte no la ve (ADR 0181).
+        adminOnly: taskHiddenFromSupport(t),
         link: { kind: "tarea", id: t.id },
       })
     }
