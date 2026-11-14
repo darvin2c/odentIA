@@ -499,3 +499,21 @@ it("apagar una ficha del producto cuenta como decidida, y encenderla otra vez no
   // Las cuatro siguen siendo del producto, en uso o no: el total no cambia.
   expect([...(await marks()).values()].filter((row) => row.fromProduct)).toHaveLength(4)
 })
+
+// QA del 14 nov (desarrollo H6 y H7): la API ofrecía fichas en una atención firmada o anulada, y de una especialidad desactivada.
+it("una atención firmada o anulada no ofrece ninguna ficha, ni una especialidad desactivada ofrece las suyas", async () => {
+  const c = await clinic()
+  const signed = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  expect(await c.offers(signed.id)).toHaveLength(1)
+  // La siguiente atención firma la anterior.
+  const open = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  expect(await c.offers(signed.id)).toEqual([])
+  // Una especialidad desactivada (aquí, a mano): su ficha no se ofrece aunque la cita sea de ella.
+  await ownerDb
+    .update(orgSpecialty)
+    .set({ isActive: false })
+    .where(eq(orgSpecialty.id, c.specialties.get("ortodoncia_ortopedia_maxilar")!.id))
+  expect((await c.offers(open.id)).map((offer) => offer.key)).not.toContain("ficha-de-ortodoncia")
+  await c.run((tx) => voidEncounter(tx, c.orgId, c.actor, c.patient.id, open.id, { reason: "Paciente equivocado" }))
+  expect(await c.offers(open.id)).toEqual([])
+})

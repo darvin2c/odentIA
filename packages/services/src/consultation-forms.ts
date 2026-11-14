@@ -18,8 +18,8 @@ import { notFound } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { specialtyForKind } from "./product-catalog.js"
 import { productHooks } from "./products.js"
-import { patientAge } from "./responsibilities.js"
 import { librarySpecialtyIds } from "./specialties.js"
+import { patientAge } from "./responsibilities.js"
 
 /**
  * Fichas de consulta (ADR 0117): el formulario que llena el equipo en la
@@ -246,7 +246,7 @@ export interface FormOffer {
   previous: { responseId: string; finalizedAt: Date; professionalUserId: string | null } | null
 }
 
-/** Las especialidades de la clínica que reciben un tipo de la biblioteca del producto; no crea ninguna. */
+/** Las especialidades activas de la clínica que reciben un tipo de la biblioteca del producto; no crea ninguna. */
 async function specialtyIdsOfKind(tx: Db, orgId: string, kind: string): Promise<string[]> {
   const { catalog } = await productHooks(tx, orgId)
   const owner = specialtyForKind(catalog.specialties(await findOrgCountry(tx, orgId)), kind)
@@ -255,7 +255,7 @@ async function specialtyIdsOfKind(tx: Db, orgId: string, kind: string): Promise<
   const rows = await tx
     .select({ id: orgSpecialty.id })
     .from(orgSpecialty)
-    .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.key, keys)))
+    .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.key, keys), eq(orgSpecialty.isActive, true)))
   return rows.map((row) => row.id)
 }
 
@@ -379,11 +379,14 @@ export async function getEncounterFormOffers(
       id: encounter.id,
       professionalUserId: encounter.professionalUserId,
       appointmentId: encounter.appointmentId,
+      status: encounter.status,
     })
     .from(encounter)
     .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)))
     .limit(1)
   if (!session) throw notFound("Atención")
+  // Firmada o anulada, la atención ya no empieza fichas: no se ofrece ninguna (la regla es del servidor).
+  if (session.status !== "borrador") return []
 
   const templates = await tx
     .select({
@@ -396,7 +399,12 @@ export async function getEncounterFormOffers(
     .from(clinicalFormTemplate)
     .innerJoin(
       orgSpecialty,
-      and(eq(orgSpecialty.organizationId, clinicalFormTemplate.organizationId), eq(orgSpecialty.id, clinicalFormTemplate.specialtyId)),
+      and(
+        eq(orgSpecialty.organizationId, clinicalFormTemplate.organizationId),
+        eq(orgSpecialty.id, clinicalFormTemplate.specialtyId),
+        // Una especialidad desactivada no ofrece sus fichas.
+        eq(orgSpecialty.isActive, true),
+      ),
     )
     .where(
       and(
