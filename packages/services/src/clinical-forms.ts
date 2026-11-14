@@ -1986,6 +1986,56 @@ export type ListedFormResponse = FormResponseRow & {
   clioAccepted: Record<string, { by: string | null; at: Date; atSign?: true }>
 }
 
+/** Una respuesta que propuso Clío y confirmó una persona: quién, cuándo y si entró al firmar. */
+export interface ClioMark {
+  by: string | null
+  byName: string | null
+  at: Date
+  atSign: boolean
+}
+
+/**
+ * Las marcas de Clío de las fichas de un paciente, por pregunta, mientras la
+ * respuesta siga siendo la que se confirmó (cambiada a mano ya es de la
+ * persona). La misma regla en la ficha, la Historia y la copia (entrega 11).
+ */
+export async function clioMarksFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<(response: { id: string; answers: unknown }) => Record<string, ClioMark>> {
+  const accepted = await tx
+    .select({
+      payload: encounterDictationSuggestion.payload,
+      by: encounterDictationSuggestion.decidedBy,
+      byName: user.name,
+      at: encounterDictationSuggestion.decidedAt,
+    })
+    .from(encounterDictationSuggestion)
+    .leftJoin(user, eq(user.id, encounterDictationSuggestion.decidedBy))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.kind, "ficha"),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+      ),
+    )
+  return (response) => {
+    const answers = (response.answers ?? {}) as Record<string, unknown>
+    const marks: Record<string, ClioMark> = {}
+    for (const item of accepted) {
+      const fieldId = item.payload["fieldId"]
+      if (item.payload["responseId"] !== response.id || typeof fieldId !== "string" || !item.at) continue
+      if (JSON.stringify(answers[fieldId] ?? null) !== JSON.stringify(item.payload["value"] ?? null)) continue
+      // Entró con la firma de la atención: así lo dice la ficha.
+      const atSign = (item.payload["_meta"] as { atSign?: boolean } | undefined)?.atSign === true
+      marks[fieldId] = { by: item.by, byName: item.byName, at: item.at, atSign }
+    }
+    return marks
+  }
+}
+
 export async function listFormResponses(
   tx: Db,
   orgId: string,
@@ -2058,34 +2108,13 @@ export async function listFormResponses(
       null,
     )
   }
-  // Lo que aceptó una persona de lo que propuso Clío (entrega 11): la sugerencia confirmada guarda quién y cuándo.
-  const staff = rows.filter((row) => row.response.source === "staff" && row.response.encounterId)
-  const accepted = staff.length
-    ? await tx
-        .select({ payload: encounterDictationSuggestion.payload, by: encounterDictationSuggestion.decidedBy, at: encounterDictationSuggestion.decidedAt })
-        .from(encounterDictationSuggestion)
-        .where(
-          and(
-            eq(encounterDictationSuggestion.organizationId, orgId),
-            eq(encounterDictationSuggestion.patientId, query.patientId),
-            eq(encounterDictationSuggestion.kind, "ficha"),
-            eq(encounterDictationSuggestion.status, "confirmada"),
-          ),
-        )
-    : []
-  const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] => {
-    const answers = (response.answers ?? {}) as Record<string, unknown>
-    const marks: ListedFormResponse["clioAccepted"] = {}
-    for (const item of accepted) {
-      const fieldId = item.payload["fieldId"]
-      if (item.payload["responseId"] !== response.id || typeof fieldId !== "string" || !item.at) continue
-      // Entró con la firma de la atención: así lo dice la ficha.
-      const atSign = (item.payload["_meta"] as { atSign?: boolean } | undefined)?.atSign === true
-      if (JSON.stringify(answers[fieldId] ?? null) === JSON.stringify(item.payload["value"] ?? null))
-        marks[fieldId] = { by: item.by, at: item.at, ...(atSign ? { atSign: true as const } : {}) }
-    }
-    return marks
-  }
+  // Lo que confirmó una persona de lo que propuso Clío (entrega 11), solo si hay fichas del equipo.
+  const staff = rows.some((row) => row.response.source === "staff" && row.response.encounterId)
+  const marksOf = staff ? await clioMarksFor(tx, orgId, query.patientId) : (): Record<string, ClioMark> => ({})
+  const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] =>
+    Object.fromEntries(
+      Object.entries(marksOf(response)).map(([fieldId, mark]) => [fieldId, { by: mark.by, at: mark.at, ...(mark.atSign ? { atSign: true as const } : {}) }]),
+    )
   return rows.map((row) => ({
     ...row.response,
     clioAccepted: clioAccepted(row.response),

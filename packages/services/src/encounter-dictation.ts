@@ -59,9 +59,9 @@ import {
   type DictationFormQuestion,
   dictationFormQuestions,
   formAnswerDropReason,
-  formAnswerTwins,
   formAnswerWords,
   prepareFormAnswer,
+  withFormTwins,
 } from "./dictation-forms.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
@@ -1577,15 +1577,8 @@ export async function saveDictationSegment(
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   const droppedForms: Array<{ said: string; why: string }> = []
-  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada; la
-  // gemela que no se comprueba no es algo que no se pudo usar: la original ya se usó.
-  const twins = new Set<DictationDraft>()
-  const drafts = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS).flatMap((draft) => {
-    if (draft.kind !== "ficha") return [draft]
-    const more = formAnswerTwins(draft, scope.formQuestions)
-    for (const twin of more) twins.add(twin)
-    return [draft, ...more]
-  })
+  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada.
+  const { drafts, twins } = withFormTwins(segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS), scope.formQuestions)
   for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) preparedDrafts.push({ draft, prepared })

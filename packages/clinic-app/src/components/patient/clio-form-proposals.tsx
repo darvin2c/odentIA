@@ -1,5 +1,6 @@
 import { Button } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
+import { formAnswerWords } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { createContext, useContext } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
@@ -79,15 +80,8 @@ export function formsToStartWords(titles: readonly string[]): string | null {
   return `Empieza ${list} para que ${CLINICAL_NAME} proponga sus respuestas mientras dictas.`
 }
 
-/** El valor propuesto, dicho corto: «Sí», «Clase I», «6 mm». */
-export function proposedWords(item: DictationSuggestion): string {
-  const value = item.payload["value"]
-  const unit = typeof item.payload["unit"] === "string" && item.payload["unit"] ? ` ${item.payload["unit"]}` : ""
-  if (typeof value === "boolean") return value ? "Sí" : "No"
-  if (typeof value === "number") return `${String(value).replace(".", ",")}${unit}`
-  if (Array.isArray(value)) return value.join(", ")
-  return typeof value === "string" ? value : ""
-}
+/** El valor propuesto, dicho corto («Sí», «Clase I», «6 mm»), como lo dice el servidor. */
+export const proposedWords = (item: DictationSuggestion): string => formAnswerWords(item.payload)
 
 /**
  * El aviso en la fila de la ficha (en «Fichas para esta atención» o en

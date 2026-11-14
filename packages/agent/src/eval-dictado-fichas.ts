@@ -18,7 +18,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { type DictationFormQuestion, formAnswerTwins, formQuestionsOf, prepareFormAnswer, productHooksFor } from "@odentia/services"
+import { type DictationFormQuestion, formQuestionsOf, prepareFormAnswer, productHooksFor, withFormTwins } from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
@@ -129,12 +129,7 @@ for (const dictation of cases) {
   const reviewed = new Set<string>()
   // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
   // la misma pregunta en una pausa vale la última.
-  const twins = new Set<object>()
-  const expanded = answers.flatMap((draft) => {
-    const more = formAnswerTwins(draft, questions)
-    for (const twin of more) twins.add(twin)
-    return [draft, ...more]
-  })
+  const { drafts: expanded, twins } = withFormTwins(answers, questions)
   const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
   const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))

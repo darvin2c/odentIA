@@ -113,7 +113,7 @@ import {
   type DictationSuggestion,
   useDictationSession,
 } from "./dictation-session"
-import { DictationSignList, markedAtSign, signWithDictationLabel } from "./dictation-sign-dialog"
+import { DictationSignList, markedAtSign, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"

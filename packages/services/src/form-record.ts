@@ -11,13 +11,13 @@
 import { whoWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { encounter, encounterDictationSuggestion, patient, patientContact, patientDocument } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientContact, patientDocument } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { declarantOfLink } from "./clinical.js"
-import { conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
+import { clioMarksFor, conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
 import { dayTimeWords, type Zone } from "./document-kit.js"
 import { findOrgLocale } from "./locale.js"
 import type { ProductSite } from "./product-hooks.js"
@@ -386,18 +386,7 @@ export async function loadFormRecords(
     .where(and(eq(clinicalFormAddendum.organizationId, orgId), inArray(clinicalFormAddendum.responseId, responseIds)))
     .orderBy(asc(clinicalFormAddendum.createdAt), asc(clinicalFormAddendum.id))
   // Lo que propuso Clío y confirmó una persona: la marca va en su pregunta, en la Historia y en la copia.
-  const accepted = await tx
-    .select({ payload: encounterDictationSuggestion.payload, by: user.name, at: encounterDictationSuggestion.decidedAt })
-    .from(encounterDictationSuggestion)
-    .leftJoin(user, eq(user.id, encounterDictationSuggestion.decidedBy))
-    .where(
-      and(
-        eq(encounterDictationSuggestion.organizationId, orgId),
-        eq(encounterDictationSuggestion.patientId, patientId),
-        eq(encounterDictationSuggestion.kind, "ficha"),
-        eq(encounterDictationSuggestion.status, "confirmada"),
-      ),
-    )
+  const marksOf = await clioMarksFor(tx, orgId, patientId)
   const schemas = new Map(rows.map(({ row }) => [row.id, schemaOf(row.templateSnapshot)]))
   // Un adjunto se nombra por su papel, aunque después se haya retirado.
   const attachmentIds = rows.flatMap(({ row }) =>
@@ -452,16 +441,10 @@ export async function loadFormRecords(
             patientRow?.sex ?? null,
           ) || (byPatient ? "el paciente" : null)
     const answers = (row.answers ?? {}) as Record<string, unknown>
+    const marks = marksOf(row)
     const clioOf = (fieldId: string): string | null => {
-      const mark = accepted.find(
-        (item) =>
-          item.payload["responseId"] === row.id &&
-          item.payload["fieldId"] === fieldId &&
-          JSON.stringify(item.payload["value"] ?? null) === JSON.stringify(answers[fieldId] ?? null),
-      )
-      if (!mark?.at) return null
-      const atSign = (item: typeof mark) => (item.payload["_meta"] as { atSign?: boolean } | undefined)?.atSign === true
-      return `Clío · ${atSign(mark) ? "confirmó al firmar" : "confirmó"} ${mark.by ?? "alguien del equipo"} el ${dayTimeWords(mark.at, zone)}`
+      const mark = marks[fieldId]
+      return mark ? `Clío · ${mark.atSign ? "confirmó al firmar" : "confirmó"} ${mark.byName ?? "alguien del equipo"} el ${dayTimeWords(mark.at, zone)}` : null
     }
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({

@@ -1,3 +1,4 @@
+import { formAnswerWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { and, desc, eq } from "drizzle-orm"
@@ -417,6 +418,25 @@ export function formAnswerTwins<T extends { payload: Record<string, unknown> }>(
   return questions.filter(same).map((other) => ({ ...draft, payload: { ...draft.payload, question: other.number } }))
 }
 
+/**
+ * Lo dicho de una pausa con las gemelas de cada respuesta de ficha
+ * (`formAnswerTwins`) detrás de la suya. `twins`: las agregadas, que si no se
+ * comprueban no son algo que no se pudo usar. Lo usan el servidor y la medición.
+ */
+export function withFormTwins<T extends { kind: string; payload: Record<string, unknown> }>(
+  drafts: readonly T[],
+  questions: readonly DictationFormQuestion[],
+): { drafts: T[]; twins: Set<T> } {
+  const twins = new Set<T>()
+  const all = drafts.flatMap((draft) => {
+    if (draft.kind !== "ficha") return [draft]
+    const more = formAnswerTwins(draft, questions)
+    for (const twin of more) twins.add(twin)
+    return [draft, ...more]
+  })
+  return { drafts: all, twins }
+}
+
 /** La misma respuesta, sin mirar el orden de varias opciones. */
 function sameAnswer(a: unknown, b: unknown): boolean {
   const norm = (value: unknown) => JSON.stringify(Array.isArray(value) ? [...value].map(String).sort() : value)
@@ -561,15 +581,8 @@ function checkFormAnswer(
   }
 }
 
-/** La respuesta de una ficha, dicha corta: «Sí», «Clase I», «6 mm», «Rx periapical y Rx panorámica». */
-export function formAnswerWords(payload: Record<string, unknown>): string {
-  const value = payload["value"]
-  if (typeof value === "boolean") return value ? "Sí" : "No"
-  if (typeof value === "number") return `${String(value).replace(".", ",")}${typeof payload["unit"] === "string" && payload["unit"] ? ` ${payload["unit"]}` : ""}`
-  if (Array.isArray(value)) return value.join(", ")
-  if (typeof value === "string") return value
-  return "sin proponer"
-}
+/** La respuesta de una ficha, dicha corta: la misma regla que la pantalla (`@odentia/clinical`). */
+export { formAnswerWords }
 
 /** Lo que pasó al aceptar una propuesta de ficha. */
 export type FormAnswerOutcome =
