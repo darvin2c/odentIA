@@ -1713,6 +1713,7 @@ export function EncounterEditor({
         await dictation.acceptForms.mutateAsync(items)
       },
       discard: (item) => dictation.act.mutate({ item, action: "discard" }),
+      restore: (item) => dictation.act.mutate({ item, action: "restore" }),
       busy: dictation.acceptForms.isPending || dictation.act.isPending,
       setFormOpen: (key, open, responseId) => {
         if (open) formOpenRef.current.set(key, responseId ?? null)

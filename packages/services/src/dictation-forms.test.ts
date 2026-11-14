@@ -7,7 +7,13 @@ import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { listFormResponses } from "./clinical-forms.js"
 import { type DictationFormQuestion, dictationFormQuestions, formQuestionsOf, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
-import { confirmDictationSuggestion, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
+import {
+  confirmDictationSuggestion,
+  discardDictationSuggestion,
+  listDictationSuggestions,
+  restoreDictationSuggestion,
+  saveDictationSegment,
+} from "./encounter-dictation.js"
 import { voidEncounter } from "./encounters.js"
 import { loadFormRecords } from "./form-record.js"
 import type { ProductSite } from "./product-hooks.js"
@@ -534,6 +540,23 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
       ["Ficha de ortodoncia", 6],
       ["Control de ortodoncia", 6],
     ])
+  })
+
+  it("la × de la ficha se deshace: la propuesta vuelve como estaba; lo descartado por otra vía, no", async () => {
+    const { save, fx } = await startedForm()
+    const saved = await save([
+      { payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" },
+      { payload: { question: 1, answer: "Clase II división 1" }, sourceText: "clase molar derecha clase dos" },
+    ])
+    const [overjet, molar] = [saved.suggestions.find((item) => item.payload["fieldId"] === "overjet")!, saved.suggestions.find((item) => item.payload["fieldId"] === "clase_molar_derecha")!]
+    await fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, overjet.id))
+    const back = await fx.run((tx) => restoreDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, overjet.id))
+    expect(back).toMatchObject({ status: "lista", payload: { value: 6 } })
+    // Otro toque de «Deshacer»: queda como está.
+    expect(await fx.run((tx) => restoreDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, overjet.id))).toMatchObject({ status: "lista" })
+    // Descartada al firmar o al anular (sin la ×): no se deshace desde aquí.
+    await ownerDb.update(encounterDictationSuggestion).set({ status: "descartada" }).where(eq(encounterDictationSuggestion.id, molar.id))
+    await expect(fx.run((tx) => restoreDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, molar.id))).rejects.toMatchObject({ code: "SUGGESTION_DECIDED" })
   })
 
   it("anular la atención descarta lo que Clío proponía", async () => {

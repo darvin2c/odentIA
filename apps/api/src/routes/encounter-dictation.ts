@@ -10,6 +10,7 @@ import {
   dictationTeeth,
   dictationSegmentSeen,
   discardDictationSuggestion,
+  restoreDictationSuggestion,
   discardPendingDictation,
   getAgentConfig,
   issueDictationPrescription,
@@ -244,6 +245,18 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => keepConfirmedDictation(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId)),
+    )
+  })
+
+  /** «Deshacer» de la × en la ficha: la respuesta descartada a mano vuelve a como estaba. */
+  app.post(`${base}/:suggestionId/restore`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        restoreDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+      ),
     )
   })
 

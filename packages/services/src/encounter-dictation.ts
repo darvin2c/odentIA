@@ -172,6 +172,8 @@ interface SuggestionMeta {
   onFile?: string | undefined
   /** Una respuesta de ficha que entró con la firma: la ficha dice «confirmó al firmar». */
   atSign?: true | undefined
+  /** Descartada con la × de su ficha: cómo estaba, para «Deshacer». */
+  discarded?: { status: "lista" | "por_revisar" } | undefined
 }
 const META = "_meta"
 
@@ -2650,12 +2652,62 @@ export async function discardDictationSuggestion(
 ): Promise<void> {
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
+  // La de una ficha se puede deshacer desde su aviso: se conserva cómo estaba.
+  const parts = splitMeta(row.payload)
   await tx
     .update(encounterDictationSuggestion)
-    .set({ status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "descartada",
+      ...(row.kind === "ficha" ? { payload: withMeta(parts.data, { ...parts.meta, discarded: { status: row.status as "lista" | "por_revisar" } }) } : {}),
+      decidedBy: actorUserId,
+      decidedAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(encounterDictationSuggestion.id, id))
   if (row.kind === "alergia") await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
   if (row.kind === "plan") await refreshBudgetPreview(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
+}
+
+/**
+ * «Deshacer» de la × en la ficha: la respuesta de ficha descartada a mano vuelve
+ * a como estaba. Solo la que descartó quien lleva la atención, mientras siga en
+ * borrador; si ya volvió (otro toque), queda como está.
+ */
+export async function restoreDictationSuggestion(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  id: string,
+): Promise<DictationSuggestion> {
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const dictation = await requireDictatingProduct(tx, orgId)
+  const [row] = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.id, id),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  if (!row) throw notFound("Sugerencia")
+  const zone = await findOrgLocale(tx, orgId)
+  if (row.status === "lista" || row.status === "por_revisar") return toItem(row, zone, dictation)
+  const { data, meta } = splitMeta(row.payload)
+  if (row.status !== "descartada" || !meta.discarded) throw conflict("SUGGESTION_DECIDED", "Esta ya no se puede deshacer")
+  const [restored] = await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: meta.discarded.status, payload: withMeta(data, { ...meta, discarded: undefined }), decidedBy: null, decidedAt: null, updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, id))
+    .returning()
+  if (!restored) throw new Error("No se pudo deshacer el descarte")
+  return toItem(restored, zone, dictation)
 }
 
 /** Descarta todo lo que quede sin decidir: lo que no se confirma no entra a la historia. */

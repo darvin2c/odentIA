@@ -18,6 +18,8 @@ export interface ClioFormProposals {
   /** Confirma en el orden de la ficha: la pregunta de la que depende otra, primero. */
   accept: (items: DictationSuggestion[]) => Promise<void>
   discard: (item: DictationSuggestion) => void
+  /** «Deshacer» de la ×: la propuesta vuelve a su pregunta. */
+  restore: (item: DictationSuggestion) => void
   busy: boolean
   /**
    * El panel de una ficha se abrió o se cerró: dictar no le pone encima «Lo dictado», y

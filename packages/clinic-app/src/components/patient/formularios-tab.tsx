@@ -496,6 +496,17 @@ function StaffResponseDetail({
     clio.discard(item)
     setAnnouncement("Propuesta descartada.")
     focusAfter(String(item.payload["fieldId"]))
+    // Como los demás «Deshacer» de la app: tiempo para leerlo y volver atrás.
+    toast(item.status === "lista" ? `Descartaste lo que proponía ${CLINICAL_NAME}: «${proposedWords(item)}».` : "Descartaste el aviso de esa pregunta.", {
+      duration: 10_000,
+      action: {
+        label: "Deshacer",
+        onClick: () => {
+          discardSent.current.delete(item.id)
+          clio.restore(item)
+        },
+      },
+    })
   }
   // Lo que entró a la ficha desde fuera de este panel (lo aceptado de Clío, aquí o en la barra del
   // dictado) se adopta en las preguntas que aquí nadie tocó: así no aparece «Otra pestaña guardó…».
