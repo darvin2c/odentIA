@@ -54,13 +54,14 @@ import {
   updateFormTemplate,
 } from "../../lib/clinical-forms"
 import { ApiError } from "../../lib/api"
-import { formatDate } from "../../lib/clinical-journey"
+import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import {
   currentLine,
   leaveWords,
   NEW_FIELD_PLACEHOLDER,
   newField,
+  oneAtATime,
   publishedButNotReaching,
   publishWords,
   reuseWords,
@@ -68,6 +69,7 @@ import {
   settleFieldKeys,
   templateGroups,
   touchesPatients,
+  twinDetail,
   uniqueKey,
   versionStatusWords,
 } from "../../lib/form-templates"
@@ -170,7 +172,10 @@ function FormTemplatesPanel() {
     void queryClient.invalidateQueries({ queryKey: ["form-templates-published"] })
   }
 
+  // Un envío a la vez: el segundo clic de un doble clic llega antes de que el botón se apague.
+  const sending = useRef(oneAtATime()).current
   const leaveMutation = useMutation({
+    onSettled: sending.done,
     mutationFn: (current: FormTemplate) => archiveFormTemplate(current.id),
     onSuccess: (_result, current) => {
       setConfirm(null)
@@ -184,6 +189,7 @@ function FormTemplatesPanel() {
   })
 
   const reuseMutation = useMutation({
+    onSettled: sending.done,
     mutationFn: (last: FormTemplate) => reuseFormTemplate(last.id),
     onSuccess: (result, last) => {
       setConfirm(null)
@@ -202,10 +208,11 @@ function FormTemplatesPanel() {
   /** Uno del equipo vuelve sin preguntar; el que responde el paciente dice antes a quién le llega. */
   const reuse = (last: FormTemplate) => {
     if (last.respondent === "portal") setConfirm({ kind: "reuse", last })
-    else reuseMutation.mutate(last)
+    else sending.run(() => reuseMutation.mutate(last))
   }
 
   const publishMutation = useMutation({
+    onSettled: sending.done,
     mutationFn: (draft: FormTemplate) => publishFormTemplate(draft.id),
     onSuccess: (_result, draft) => {
       setConfirm(null)
@@ -219,6 +226,7 @@ function FormTemplatesPanel() {
   })
 
   const archiveMutation = useMutation({
+    onSettled: sending.done,
     mutationFn: (draft: FormTemplate) => archiveFormTemplate(draft.id),
     onSuccess: (_result, draft) => {
       setConfirm(null)
@@ -236,6 +244,17 @@ function FormTemplatesPanel() {
   const leaving = confirm?.kind === "leave" ? confirm.current : null
   const reusing = confirm?.kind === "reuse" ? confirm.last : null
   const empty = listed.length === 0 && unused.length === 0
+  // Uno por formulario (su versión en uso o la última): entre estos se busca un título repetido.
+  const shownTogether = useMemo(
+    () => [
+      ...listed.flatMap((versions) => {
+        const shown = versions.find((version) => version.status === "publicado") ?? versions[0]
+        return shown ? [shown] : []
+      }),
+      ...unused.map((item) => item.last),
+    ],
+    [listed, unused],
+  )
 
   // A quién le llega hoy y a quién le llegará después del cambio: lo dice el servidor al abrir la
   // confirmación, solo si el cambio toca un cuestionario del paciente. La pantalla no lo calcula.
@@ -302,6 +321,12 @@ function FormTemplatesPanel() {
                       <div className="min-w-0">
                         <p className="font-medium">{latest.title}</p>
                         <p className="text-sm text-muted-foreground">{currentLine(versions, templates)}</p>
+                        {/* Otro formulario se llama igual: lo que los distingue, sin abrirlos. */}
+                        {twinDetail(current ?? latest, shownTogether, formatDateTime) ? (
+                          <p className="text-sm text-muted-foreground">
+                            {twinDetail(current ?? latest, shownTogether, formatDateTime)}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {versions.map((version) => (
@@ -371,6 +396,7 @@ function FormTemplatesPanel() {
                       <p className="text-sm text-muted-foreground">
                         Se dejó de usar el {formatDate(leftAt)}
                         {last.respondent === "portal" ? " · lo responde el paciente" : ""}
+                        {twinDetail(last, shownTogether, formatDateTime) ? ` · ${twinDetail(last, shownTogether, formatDateTime)}` : ""}
                       </p>
                     </div>
                     {canAdmin ? (
@@ -415,13 +441,13 @@ function FormTemplatesPanel() {
       <ConfirmDialog
         open={confirm?.kind === "publish"}
         variant="default"
-        title={publishing ? `Publicar la versión ${publishing.version}` : "Publicar"}
+        title={publishing ? `¿Publicar la versión ${publishing.version} de «${publishing.title}»?` : "Publicar"}
         // Lo que de verdad pasa: el del paciente dice a quién le llega y a cuál reemplaza, por su nombre.
         description={publishing ? (reachLoading ? CHECKING : publishWords(publishing, templates, reach)) : ""}
         confirmLabel="Publicar"
         pending={publishMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
-        onConfirm={() => confirm?.kind === "publish" && publishMutation.mutate(confirm.draft)}
+        onConfirm={() => confirm?.kind === "publish" && sending.run(() => publishMutation.mutate(confirm.draft))}
       />
       <ConfirmDialog
         open={confirm?.kind === "leave"}
@@ -431,7 +457,7 @@ function FormTemplatesPanel() {
         confirmLabel="Dejar de usar"
         pending={leaveMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
-        onConfirm={() => confirm?.kind === "leave" && leaveMutation.mutate(confirm.current)}
+        onConfirm={() => confirm?.kind === "leave" && sending.run(() => leaveMutation.mutate(confirm.current))}
       />
       <ConfirmDialog
         open={confirm?.kind === "reuse"}
@@ -441,7 +467,7 @@ function FormTemplatesPanel() {
         confirmLabel="Volver a usar"
         pending={reuseMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
-        onConfirm={() => confirm?.kind === "reuse" && reuseMutation.mutate(confirm.last)}
+        onConfirm={() => confirm?.kind === "reuse" && sending.run(() => reuseMutation.mutate(confirm.last))}
       />
       <ConfirmDialog
         open={confirm?.kind === "archive"}
@@ -451,7 +477,7 @@ function FormTemplatesPanel() {
         confirmLabel="Archivar"
         pending={archiveMutation.isPending}
         onClose={() => setConfirm(null)}
-        onConfirm={() => confirm?.kind === "archive" && archiveMutation.mutate(confirm.draft)}
+        onConfirm={() => confirm?.kind === "archive" && sending.run(() => archiveMutation.mutate(confirm.draft))}
       />
     </div>
   )
