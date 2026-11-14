@@ -33,6 +33,7 @@ import {
   FHIR_VERSION,
   FORM_FIELD_TYPE_FHIR,
   fhirCode,
+  type HealthDeclarant,
   HL7_IDENTIFIER_TYPE_SYSTEM,
   hl7DocumentTypeCode,
   type InterviewEntry,
@@ -42,6 +43,8 @@ import {
   legacyPregnancySaidOn,
   PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
+  saidNoWords,
+  saidWhenWords,
   SEX_LABELS,
   SEX_TO_FHIR_GENDER,
   VITAL_SIGNS,
@@ -68,6 +71,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
+import { type DeclaredHealthGroup, getPatientHealth, type HealthDeclaration } from "./clinical.js"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { loadDocumentClinic } from "./document-clinic.js"
@@ -104,19 +108,32 @@ import { listDecisionRecipients } from "./responsibilities.js"
 type RecordSite = { siteWords: string | null; bodySite: { text: string } | null }
 
 /**
+ * De quién es algo de la entrevista y de cuándo. `declared`: lo dijo alguien (la
+ * persona, quien habla por ella, o el equipo que anotó lo que le dijeron), con la
+ * misma señal de la ficha: la declaración que entró a su ficha en ese instante
+ * (`patient_health_declaration`), no quién tenía la sesión abierta. `recorded`:
+ * lo escribió alguien del equipo en Antecedentes.
+ */
+export type RecordSaid =
+  | { kind: "declared"; by: HealthDeclarant; at: Date }
+  | { kind: "recorded"; by: string | null; at: Date }
+
+/**
  * La «Entrevista de salud» vigente como la cuenta el producto (`ProductInterview.record`),
- * con quién la guardó y cuándo. Lo que viene igual desde una versión anterior dice
- * desde cuál: así lo que la persona declaró se sigue leyendo como suyo aunque el
- * equipo haya guardado después otra versión.
+ * con quién la dijo o la registró y cuándo. Lo que viene igual desde una versión
+ * anterior dice de cuál: así lo que la persona declaró se sigue leyendo como suyo
+ * aunque el equipo haya guardado después otra versión.
  */
 export interface RecordInterview {
   version: number
-  recordedAt: Date
-  /** Quién la guardó; null si no hay quién (la declaró la persona). */
-  recordedBy: string | null
-  /** La declaró la persona o quien la representa (registro o enlace), no el equipo. */
-  declared: boolean
-  entries: Array<InterviewEntry & { since: { at: Date; by: string | null; declared: boolean } | null }>
+  said: RecordSaid
+  entries: Array<
+    InterviewEntry & {
+      since: RecordSaid | null
+      /** Lo dijo alguien y ningún profesional lo revisó todavía (hoy, el embarazo): quién y cuándo. */
+      unreviewed?: { by: HealthDeclarant; at: Date | null }
+    }
+  >
 }
 
 export interface PatientRecord {
@@ -147,6 +164,12 @@ export interface PatientRecord {
   allergies: Array<typeof patientAllergy.$inferSelect>
   conditions: Array<typeof patientCondition.$inferSelect>
   medications: Array<typeof patientMedication.$inferSelect>
+  /**
+   * Lo que alguien dijo de su salud y ningún profesional revisó todavía, por
+   * declaración: quién, cuándo y qué. Lo decide el servidor (`PatientHealth.declared`),
+   * igual que para la ficha.
+   */
+  declared: DeclaredHealthGroup[]
   /** null si no hay nada que contar: nunca se guardó una entrevista, o la vigente quedó sin datos. */
   interview: RecordInterview | null
   familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
@@ -178,17 +201,27 @@ function interviewOf(
   versions: Array<{ version: number; answers: unknown; createdAt: Date; createdBy: string | null; authorName: string | null }>,
   /** `current`: es la versión vigente (lo que se sabe de un embarazo sin fecha solo vale para ella). */
   entriesOf: (answers: unknown, current: boolean) => InterviewEntry[],
+  health: { declarations: HealthDeclaration[]; declared: DeclaredHealthGroup[] },
 ): RecordInterview | null {
   const latest = versions.at(-1)
   const current = latest ? entriesOf(latest.answers, true) : []
   // Sin ningún dato vigente no hay entrevista que mostrar: un encabezado solo, con quién y cuándo, no dice nada.
   if (!latest || current.length === 0) return null
   const told = versions.map((row) => new Map(entriesOf(row.answers, false).map((entry) => [entry.key, entry.value])))
+  // Una versión que entró con una declaración comparte su instante: de ella salen quién lo dijo y
+  // cuándo. Sin declaración, la escribió el equipo; la que no tiene autor (lo de antes de guardarse
+  // quién fue) se declaró, y no se afirma quién.
+  const saidOf = (row: (typeof versions)[number]): RecordSaid => {
+    const declaration = health.declarations.find((item) => item.enteredAt.getTime() === row.createdAt.getTime())
+    if (declaration) return { kind: "declared", by: declaration.by, at: declaration.at }
+    if (row.createdBy === null)
+      return { kind: "declared", by: { kind: "unknown", name: null, relation: null }, at: row.createdAt }
+    return { kind: "recorded", by: row.authorName, at: row.createdAt }
+  }
+  const unreviewedPregnancy = health.declared.find((group) => group.pregnancy)
   return {
     version: latest.version,
-    recordedAt: latest.createdAt,
-    recordedBy: latest.authorName,
-    declared: latest.createdBy === null,
+    said: saidOf(latest),
     entries: current.map((entry) => {
       let first = versions.length - 1
       // El embarazo trae su propio día (el que se dijo): no se le busca otro en las versiones.
@@ -197,7 +230,10 @@ function interviewOf(
       const from = versions[first]
       return {
         ...entry,
-        since: from && from !== latest ? { at: from.createdAt, by: from.authorName, declared: from.createdBy === null } : null,
+        since: from && from !== latest ? saidOf(from) : null,
+        ...(entry.key === PREGNANCY_ENTRY_KEY && unreviewedPregnancy
+          ? { unreviewed: { by: unreviewedPregnancy.by, at: unreviewedPregnancy.at } }
+          : {}),
       }
     }),
   }
@@ -342,6 +378,8 @@ export async function loadPatientRecord(
   const hooks = await productHooks(tx, orgId)
   const productSections = await hooks.recordSections(tx, { orgId, patientId })
   const today = await clinicToday(tx, orgId)
+  // Quién dijo cada cosa y qué sigue sin revisar lo decide el servidor, igual que para la ficha.
+  const health = await getPatientHealth(tx, orgId, patientId)
   // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: sale de las
   // versiones de la entrevista (de la más nueva a la más antigua), como en la ficha.
   const legacySaidOn = legacyPregnancySaidOn(
@@ -385,8 +423,11 @@ export async function loadPatientRecord(
     conditions,
     medications,
     // Cada producto cuenta su entrevista (odentIA: lo de la boca; latidIA: embarazo y lactancia con fecha).
-    interview: interviewOf(interviewVersions, (answers, current) =>
-      hooks.interview.record(answers, today, current ? { legacySaidOn } : {}),
+    declared: health.declared,
+    interview: interviewOf(
+      interviewVersions,
+      (answers, current) => hooks.interview.record(answers, today, current ? { legacySaidOn } : {}),
+      health,
     ),
     familyHistory,
     encounters: encounters.map((row) => ({
@@ -477,18 +518,47 @@ const CONSENT_WORDS: Record<string, string> = {
   anulado: "anulado",
 }
 
-/** «Registrada por Ana Torres el 13 de noviembre de 2026, 15:02»: de quién es la entrevista vigente. */
-function interviewWords(interview: RecordInterview, zone: Zone): string {
-  const who = interview.declared
-    ? "Declarada por el paciente o su responsable"
-    : `Registrada por ${interview.recordedBy ?? "el equipo"}`
-  return `${who} el ${dayTimeWords(interview.recordedAt, zone)}`
+/**
+ * «Lo dijo ella el 13 de noviembre de 2026», «Lo dijo su madre, Carla, el …», «Lo
+ * anotó el equipo el …»: quién lo dijo y cuándo, con las palabras de la ficha
+ * (`saidWhenWords`). Lo que escribió el equipo en Antecedentes: «Lo registró Ana Torres el …».
+ */
+function saidWords(said: RecordSaid, sex: string | null, zone: Zone): string {
+  const day = dayWords(said.at, zone)
+  return said.kind === "declared" ? saidWhenWords(said.by, day, sex) : `Lo registró ${said.by ?? "el equipo"} el ${day}`
 }
 
-/** Desde cuándo consta un dato que viene igual de una versión anterior, y si lo declaró la persona. */
-function sinceWords(since: NonNullable<RecordInterview["entries"][number]["since"]>, zone: Zone): string {
-  if (since.declared) return `Lo declaró el paciente o su responsable el ${dayWords(since.at, zone)}`
-  return `Consta desde el ${dayWords(since.at, zone)}${since.by ? `, lo registró ${since.by}` : ""}`
+/** «Lo dijo ella el 13 de noviembre de 2026, sin revisar»: la marca de lo que nadie del equipo revisó. */
+function unreviewedWords(said: { by: HealthDeclarant; at: Date | null }, sex: string | null, zone: Zone): string {
+  return `${saidWhenWords(said.by, said.at ? dayWords(said.at, zone) : "", sex)}, sin revisar`
+}
+
+/** Lo que acompaña a un dato de la entrevista: que sigue sin revisar, o de qué versión anterior viene. */
+function entryNote(entry: RecordInterview["entries"][number], sex: string | null, zone: Zone): string | null {
+  if (entry.unreviewed) return unreviewedWords(entry.unreviewed, sex, zone)
+  return entry.since ? saidWords(entry.since, sex, zone) : null
+}
+
+/** De qué declaración sin revisar es una alergia, una enfermedad o una medicina; undefined si ya se revisó o la anotó el equipo. */
+function declaredGroupOf(
+  record: PatientRecord,
+  topic: "allergies" | "conditions" | "medications",
+  id: string,
+): DeclaredHealthGroup | undefined {
+  return record.declared.find((group) => group[topic].includes(id))
+}
+
+/**
+ * Quién lo afirma, como referencia de FHIR R4 (`asserter`, `informationSource`):
+ * la paciente, o quien habló por ella con el nombre y el vínculo que quedaron
+ * guardados ese día (no se enlaza a una persona vinculada de hoy: no se deduce
+ * quién fue). Lo que anotó el equipo o no dice quién: sin referencia.
+ */
+function asserterOf(by: HealthDeclarant, patientRef: { reference: string }): Record<string, unknown> | null {
+  if (by.kind === "patient") return patientRef
+  if (by.kind !== "representative") return null
+  const display = [by.name, by.relation ? `(${by.relation})` : null].filter(Boolean).join(" ")
+  return display ? { display } : null
 }
 
 /** «Madre: Diabetes tipo 2 (CIE-10 · E11)». */
@@ -579,8 +649,29 @@ export async function renderPatientRecordPdf(
     )
 
   section("Alergias y antecedentes")
-  if (!record.allergies.length && !record.conditions.length && !record.medications.length)
+  // Lo que dijo la persona y nadie revisó va marcado, con quién lo dijo y cuándo, como en la ficha.
+  const markOf = (topic: "allergies" | "conditions" | "medications", id: string): string | null => {
+    const group = declaredGroupOf(record, topic, id)
+    return group ? unreviewedWords(group, p.sex, zone) : null
+  }
+  // Su «no» a un grupo también es algo que dijo: no es que no se le preguntó, ni el «niega» de un profesional.
+  const saidNo = record.declared.flatMap((group) =>
+    (
+      [
+        ["allergies", "Alergias"],
+        ["conditions", "Enfermedades"],
+        ["medications", "Medicación"],
+      ] as const
+    )
+      .filter(([topic]) => group.saidNo[topic])
+      .map(
+        ([, label]) =>
+          `${label}: ${saidNoWords(group.by, p.sex)}${group.at ? ` el ${dayWords(group.at, zone)}` : ""}, sin revisar`,
+      ),
+  )
+  if (!record.allergies.length && !record.conditions.length && !record.medications.length && !saidNo.length)
     kit.text("Sin registros.")
+  if (saidNo.length) kit.bullets(saidNo)
   if (record.allergies.length)
     kit.table({
       columns: [{ label: "" }, { label: "", align: "right" }],
@@ -592,6 +683,9 @@ export async function renderPatientRecordPdf(
             inlines: `${a.kind === "intolerancia" ? "Intolerancia a" : "Alergia a"} ${a.substance}`,
             face: "sansSemi" as const,
           },
+          ...(markOf("allergies", a.id)
+            ? [{ inlines: markOf("allergies", a.id) as string, tone: "gray" as const, size: SIZE.second }]
+            : []),
         ],
         [
           {
@@ -607,33 +701,29 @@ export async function renderPatientRecordPdf(
     kit.bullets(
       record.conditions.map(
         (c) =>
-          `Antecedente: ${c.name} · ${c.status}${c.diagnosisCode ? ` · ${c.diagnosisCode}` : ""}`,
+          `Antecedente: ${c.name} · ${c.status}${c.diagnosisCode ? ` · ${c.diagnosisCode}` : ""}${markOf("conditions", c.id) ? ` · ${markOf("conditions", c.id)}` : ""}`,
       ),
     )
   if (record.medications.length)
     kit.bullets(
       record.medications.map(
         (m) =>
-          `Medicamento: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}`,
+          `Medicamento: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${markOf("medications", m.id) ? ` · ${markOf("medications", m.id)}` : ""}`,
       ),
     )
 
   section("Entrevista de salud")
   if (!record.interview && !record.familyHistory.length) kit.text("Sin entrevista de salud registrada.")
   if (record.interview) {
-    kit.text(`Versión ${record.interview.version} · ${interviewWords(record.interview, zone)}`, {
+    kit.text(`Versión ${record.interview.version} · ${saidWords(record.interview.said, p.sex, zone)}`, {
       size: SIZE.second,
       tone: "gray",
     })
     dataRows(
-      record.interview.entries.map((entry) => [
-        entry.label,
-        [
-          entry.since
-            ? [entry.value, { text: ` · ${sinceWords(entry.since, zone)}`, tone: "gray" as const }]
-            : entry.value,
-        ],
-      ]),
+      record.interview.entries.map((entry) => {
+        const note = entryNote(entry, p.sex, zone)
+        return [entry.label, [note ? [entry.value, { text: ` · ${note}`, tone: "gray" as const }] : entry.value]]
+      }),
       140,
     )
   }
@@ -971,6 +1061,18 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       relationship: [{ text: c.detail ?? c.relationship }],
       ...(c.phone ? { telecom: [{ system: "phone", value: c.phone }] } : {}),
     })
+  // Lo que dijo la persona y nadie revisó: quién lo afirma, en el campo de R4 para eso, y una nota
+  // con la marca de la ficha («Lo dijo ella el …, sin revisar»).
+  const statedBy = (
+    topic: "allergies" | "conditions" | "medications",
+    id: string,
+    field: "asserter" | "informationSource",
+  ): Record<string, unknown> => {
+    const group = declaredGroupOf(record, topic, id)
+    if (!group) return {}
+    const who = asserterOf(group.by, patientRef)
+    return { ...(who ? { [field]: who } : {}), note: [{ text: unreviewedWords(group, p.sex, record.clinic) }] }
+  }
   for (const a of record.allergies) {
     const category = fhirCode(ALLERGY_CATEGORY_FHIR, a.category)
     const severity = fhirCode(ALLERGY_SEVERITY_FHIR, a.severity)
@@ -993,6 +1095,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ? { criticality: fhirCode(ALLERGY_CRITICALITY_FHIR, a.criticality) }
         : {}),
       code: { text: a.substance },
+      ...statedBy("allergies", a.id, "asserter"),
       ...(a.reaction || severity
         ? {
             reaction: [
@@ -1021,6 +1124,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       category: [{ text: "Antecedente" }],
       code: diagnosisCodeable(c.diagnosisSystem, c.diagnosisCode, c.name),
       ...(c.startDate ? { onsetDateTime: c.startDate } : {}),
+      ...statedBy("conditions", c.id, "asserter"),
     })
   for (const m of record.medications)
     resources.push({
@@ -1029,6 +1133,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       subject: patientRef,
       status: m.endDate ? "completed" : "active",
       medicationCodeableConcept: { text: m.name },
+      ...statedBy("medications", m.id, "informationSource"),
       ...(m.dose || m.frequency
         ? { dosage: [{ text: [m.dose, m.frequency].filter(Boolean).join(" · ") }] }
         : {}),
@@ -1285,9 +1390,14 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         id: `${p.patientId}-entrevista`,
         title: "Entrevista de salud",
         version: record.interview.version,
-        authored: record.interview.recordedAt,
+        authored: record.interview.said.at,
         patientRef,
-        author: record.interview.recordedBy ? { display: record.interview.recordedBy } : null,
+        // Quien la anotó, si fue el equipo; quien la dijo, si se declaró y consta quién.
+        author:
+          record.interview.said.kind === "recorded" && record.interview.said.by
+            ? { display: record.interview.said.by }
+            : null,
+        source: record.interview.said.kind === "declared" ? asserterOf(record.interview.said.by, patientRef) : null,
         groups: [
           {
             linkId: "entrevista",
@@ -1301,10 +1411,11 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           },
         ],
         notes: [
-          interviewWords(record.interview, record.clinic),
-          ...record.interview.entries.flatMap((entry) =>
-            entry.since ? [`${entry.label}: ${sinceWords(entry.since, record.clinic)}`] : [],
-          ),
+          saidWords(record.interview.said, p.sex, record.clinic),
+          ...record.interview.entries.flatMap((entry) => {
+            const note = entryNote(entry, p.sex, record.clinic)
+            return note ? [`${entry.label}: ${note}`] : []
+          }),
         ],
       }),
     )

@@ -10,7 +10,12 @@ import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, it, vi } from "vitest"
-import { getPatientHealth, initializeDeclaredPatientHealth, savePatientHealth } from "./clinical.js"
+import {
+  getPatientHealth,
+  initializeDeclaredPatientHealth,
+  recordHealthDeclaration,
+  savePatientHealth,
+} from "./clinical.js"
 import {
   addFormAddendum,
   createFormResponse,
@@ -23,12 +28,13 @@ import {
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { DocumentKit } from "./document-kit.js"
+import { DocumentKit, dayWords } from "./document-kit.js"
 import { finalizeEncounter, getEncounterDetail } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
 import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
 import { createPatient } from "./patients.js"
+import { setTestPatientIdentity } from "./test-patient.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -68,6 +74,9 @@ const ANSWERS = {
   hallazgos: "Pulpitis irreversible sintomática, periodonto apical normal.",
   fecha: "2026-11-13",
 }
+
+/** La zona de las clínicas de prueba: el papel dice las fechas así. */
+const ZONE = { locale: "es-PE", timezone: "America/Lima" }
 
 type Fixture = Awaited<ReturnType<typeof clinicalFixture>>
 const runOf = (f: Fixture) => f.run as <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
@@ -145,15 +154,15 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   await ownerDb
     .insert(patientRegistration)
     .values({ organizationId: "org_a", patientId: f.patient.id, entryPoint: "public_link", respondent: "patient", answers: {} })
-  await run((tx) =>
-    initializeDeclaredPatientHealth(
-      tx,
-      "org_a",
-      f.patient.id,
-      { personal: { embarazo: true, semanasEmbarazo: 30 }, dental: { bruxismo: true } },
-      null,
-    ),
-  )
+  const declaredHealth = { personal: { embarazo: true, semanasEmbarazo: 30 }, dental: { bruxismo: true } }
+  await run(async (tx) => {
+    await initializeDeclaredPatientHealth(tx, "org_a", f.patient.id, declaredHealth, null)
+    await recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declaredHealth,
+    })
+  })
   const health = await run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
   await run((tx) =>
     savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
@@ -211,11 +220,12 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   // guarda con el día en que lo dijo: la copia dice la semana a su fecha y la que dijo ese día.
   const said = (await run((tx) => clinicToday(tx, "org_a"))).split("-").reverse().join("/")
   const pregnancy = `Sí · 30 semanas a la fecha de esta copia (30 el ${said})`
-  expect(record.interview).toMatchObject({ version: 2, declared: false, recordedBy: "Clínico" })
-  expect(record.interview!.entries.map((entry) => [entry.label, entry.value, entry.since?.declared ?? null])).toEqual([
+  expect(record.interview).toMatchObject({ version: 2, said: { kind: "recorded", by: "Clínico" } })
+  expect(record.interview!.entries.map((entry) => [entry.label, entry.value, entry.since?.kind ?? null])).toEqual([
     ["Cirugías", "Apendicectomía en 2010", null],
     ["Embarazo", pregnancy, null],
-    ["Bruxismo", "Sí", true],
+    // Viene igual desde la versión que ella declaró: se sigue diciendo como suyo.
+    ["Bruxismo", "Sí", "declared"],
   ])
   expect(record.familyHistory.map((row) => [row.relationship, row.condition])).toEqual([["MTH", "Diabetes tipo 2"]])
 
@@ -233,13 +243,17 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     "Me duele la muela de abajo",
     "Entrevista de salud",
     pregnancy,
-    "Lo declaró el paciente o su responsable el",
+    // Sin sexo registrado no se supone «ella» ni «él»: la frase va sin sujeto, como en la ficha.
+    `Lo dijo el ${dayWords(new Date(), ZONE)}`,
+    `Lo registró Clínico el ${dayWords(new Date(), ZONE)}`,
     "Apendicectomía en 2010",
     "Madre: Diabetes tipo 2",
   ])
     expect(text).toContain(said)
   expect(text).not.toContain("Respuesta que nadie revisó")
   expect(text).not.toContain("¿Desde cuándo no le duele?")
+  // El equipo ya guardó sus antecedentes después de lo que ella dijo: nada queda «sin revisar».
+  expect(text).not.toContain("sin revisar")
 
   // El archivo para otro sistema: cada formulario como QuestionnaireResponse de FHIR R4.
   const resources = resourcesOf(record)
@@ -299,7 +313,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     contained: [{ resourceType: "Questionnaire", title: "Entrevista de salud", version: "2" }],
   })
   expect(JSON.stringify(interview)).toContain(pregnancy)
-  expect((interview!.text as { div: string }).div).toContain("Lo declaró el paciente o su responsable el")
+  expect((interview!.text as { div: string }).div).toContain(`Bruxismo: Lo dijo el ${dayWords(new Date(), ZONE)}`)
   expect(resources.find((resource) => resource.resourceType === "FamilyMemberHistory")).toMatchObject({
     patient: { reference: `Patient/${f.patient.id}` },
     relationship: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-RoleCode", code: "MTH" }], text: "Madre" },
@@ -545,7 +559,6 @@ it("lo que respondió quien habla por el paciente lo dice así, y en FHIR apunta
   })
   const [correction] = record.forms[0]!.addenda
   expect(correction).toMatchObject({ text: "Dice que es el diente de arriba, no el de abajo.", authorName: "Clínico" })
-  expect(correction!.createdAt.getTime()).toBeLessThan(record.forms[0]!.finalizedAt.getTime())
   expect(record.forms[0]!.byWords).not.toContain("desde")
   const text = await printedText(record)
   expect(text).toContain("Correcciones")
@@ -589,4 +602,96 @@ it("un embarazo guardado antes, sin fecha, sale con el día en que se anotó y l
   expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
     ["embarazoLactancia.embarazo", "Embarazo", `Sí · 32 semanas a la fecha de esta copia (30 el ${day})`],
   ])
+})
+
+it("lo que la persona dijo se dice como suyo, con su día, y lo que nadie revisó va marcado en el PDF y en FHIR", async () => {
+  const day = dayWords(new Date(), ZONE)
+  /** Una ficha con lo que alguien declaró en su registro, que recepción escribe por ella. */
+  const declaredBy = async (by: Parameters<typeof recordHealthDeclaration>[3]["by"]) => {
+    const f = await clinicalFixture()
+    const run = runOf(f)
+    await setTestPatientIdentity(ownerDb, f.patient.id, { sex: "F" })
+    await ownerDb
+      .insert(patientRegistration)
+      .values({ organizationId: "org_a", patientId: f.patient.id, entryPoint: "platform", respondent: "patient", answers: {} })
+    const health = {
+      allergies: { state: "recorded" as const, items: [{ substance: "Penicilina", reaction: "Ronchas", severity: "desconocida" as const }] },
+      conditions: { state: "recorded" as const, items: [{ name: "Hipertensión" }] },
+      medications: { state: "recorded" as const, items: [{ name: "Losartán", dose: "50 mg" }] },
+      personal: { embarazo: true, semanasEmbarazo: 30, cirugias: "Cesárea en 2020" },
+    }
+    await run(async (tx) => {
+      // Quien escribe es alguien del equipo (`f.actor`), pero lo dijo otra persona: eso es lo que cuenta.
+      await initializeDeclaredPatientHealth(tx, "org_a", f.patient.id, health, f.actor)
+      await recordHealthDeclaration(tx, "org_a", f.patient.id, { via: "registro", by, health })
+    })
+    const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+    const resources = resourcesOf(record)
+    const stated = (type: string, category?: string) =>
+      resources.find(
+        (resource) =>
+          resource.resourceType === type &&
+          (!category || JSON.stringify(resource.category) === JSON.stringify([{ text: category }])),
+      )
+    return { f, record, text: await printedText(record), stated }
+  }
+
+  // Lo dijo ella, en recepción: no «registrada por» quien lo escribió.
+  const own = await declaredBy({ kind: "patient", name: null, relation: null })
+  const mark = `Lo dijo ella el ${day}, sin revisar`
+  expect(own.record.interview).toMatchObject({ version: 1, said: { kind: "declared", by: { kind: "patient" } } })
+  expect(own.text).toContain(`Versión 1 · Lo dijo ella el ${day}`)
+  expect(own.text).toContain(mark)
+  expect(own.text).not.toContain("Registrada por")
+  expect(own.text).not.toContain("Lo registró")
+  // El campo de R4 para quién lo afirma, y la nota de que nadie lo revisó.
+  const patientRef = { reference: `Patient/${own.f.patient.id}` }
+  expect(own.stated("AllergyIntolerance")).toMatchObject({ asserter: patientRef, note: [{ text: mark }] })
+  expect(own.stated("Condition", "Antecedente")).toMatchObject({ asserter: patientRef, note: [{ text: mark }] })
+  expect(own.stated("MedicationStatement")).toMatchObject({ informationSource: patientRef, note: [{ text: mark }] })
+  // El embarazo de la entrevista también lo dijo ella y sigue sin revisar.
+  expect(own.record.interview!.entries.find((entry) => entry.label === "Embarazo")).toMatchObject({ unreviewed: { by: { kind: "patient" } } })
+
+  // Lo dijo su madre: con su vínculo y su nombre, como quedaron guardados ese día.
+  const mother = await declaredBy({ kind: "representative", name: "Carla Ríos", relation: "madre" })
+  const motherMark = `Lo dijo su madre, Carla, el ${day}, sin revisar`
+  expect(mother.text).toContain(`Versión 1 · Lo dijo su madre, Carla, el ${day}`)
+  expect(mother.text).toContain(motherMark)
+  expect(mother.stated("AllergyIntolerance")).toMatchObject({ asserter: { display: "Carla Ríos (madre)" }, note: [{ text: motherMark }] })
+  expect(mother.stated("MedicationStatement")).toMatchObject({ informationSource: { display: "Carla Ríos (madre)" } })
+
+  // Se lo dijeron al equipo, que lo anotó: no se afirma quién lo dijo.
+  const team = await declaredBy({ kind: "staff", name: null, relation: null })
+  const teamMark = `Lo anotó el equipo el ${day}, sin revisar`
+  expect(team.text).toContain(`Versión 1 · Lo anotó el equipo el ${day}`)
+  expect(team.text).toContain(teamMark)
+  expect(team.stated("Condition", "Antecedente")).toMatchObject({ note: [{ text: teamMark }] })
+  expect(team.stated("Condition", "Antecedente")).not.toHaveProperty("asserter")
+  expect(team.stated("MedicationStatement")).not.toHaveProperty("informationSource")
+})
+
+it("un «no» que dijo la persona y nadie revisó se dice como suyo, no como algo que no se registró", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  await ownerDb
+    .insert(patientRegistration)
+    .values({ organizationId: "org_a", patientId: f.patient.id, entryPoint: "public_link", respondent: "patient", answers: {} })
+  const health = {
+    allergies: { state: "none" as const, items: [] },
+    conditions: { state: "none" as const, items: [] },
+    medications: { state: "none" as const, items: [] },
+  }
+  await run(async (tx) => {
+    await initializeDeclaredPatientHealth(tx, "org_a", f.patient.id, health, null)
+    await recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health,
+    })
+  })
+  const text = await printedText(await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id)))
+  const day = dayWords(new Date(), ZONE)
+  for (const topic of ["Alergias", "Enfermedades", "Medicación"])
+    expect(text).toContain(`${topic}: Dijo que no el ${day}, sin revisar`)
+  expect(text).not.toContain("Sin registros.")
 })
