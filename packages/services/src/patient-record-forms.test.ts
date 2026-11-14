@@ -326,9 +326,12 @@ it("sin formularios ni entrevista, la copia lo dice y no trae recursos vacíos",
   const record = await runOf(f)((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
   expect(record.forms).toEqual([])
   expect(record.interview).toBeNull()
+  expect(record.declarations).toEqual([])
   const text = await printedText(record)
   expect(text).toContain("Sin formularios finalizados.")
   expect(text).toContain("Sin entrevista de salud registrada.")
+  // Sin nada declarado no se anuncia una sección vacía.
+  expect(text).not.toContain("Lo que declaró de su salud")
   const types = resourcesOf(record).map((resource) => resource.resourceType)
   expect(types).not.toContain("QuestionnaireResponse")
   expect(types).not.toContain("FamilyMemberHistory")
@@ -652,6 +655,36 @@ it("lo que la persona dijo se dice como suyo, con su día, y lo que nadie revis�
   // El embarazo de la entrevista también lo dijo ella y sigue sin revisar.
   expect(own.record.interview!.entries.find((entry) => entry.label === "Embarazo")).toMatchObject({ unreviewed: { by: { kind: "patient" } } })
 
+  // La declaración original va también, tal como llegó: lo que envió, con su fecha y quién.
+  expect(own.record.declarations).toMatchObject([
+    {
+      via: "registro",
+      by: { kind: "patient" },
+      entries: [
+        { label: "Alergias", value: "Penicilina · Ronchas" },
+        { label: "Enfermedades", value: "Hipertensión" },
+        { label: "Medicación", value: "Losartán · 50 mg" },
+        { label: "Embarazo", value: "Sí, 30 semanas" },
+        { label: "Cirugías", value: "Cesárea en 2020" },
+      ],
+    },
+  ])
+  expect(own.text).toContain("Lo que declaró de su salud (1)")
+  expect(own.text).toContain("En su registro")
+  expect(own.text).toContain("Penicilina · Ronchas")
+  expect(own.text).toContain("Sí, 30 semanas")
+  const original = own.record.declarations[0]!
+  const sent = resourcesOf(own.record).find((resource) => resource.id === `${own.f.patient.id}-declaracion-1`)
+  expect(sent).toMatchObject({
+    resourceType: "QuestionnaireResponse",
+    status: "completed",
+    authored: original.at.toISOString(),
+    source: patientRef,
+    contained: [{ resourceType: "Questionnaire", title: "Declaración de salud" }],
+  })
+  expect(sent).not.toHaveProperty("author")
+  expect(JSON.stringify(sent)).toContain('"valueString":"Penicilina · Ronchas"')
+
   // Lo dijo su madre: con su vínculo y su nombre, como quedaron guardados ese día.
   const mother = await declaredBy({ kind: "representative", name: "Carla Ríos", relation: "madre" })
   const motherMark = `Lo dijo su madre, Carla, el ${day}, sin revisar`
@@ -689,9 +722,16 @@ it("un «no» que dijo la persona y nadie revisó se dice como suyo, no como alg
       health,
     })
   })
-  const text = await printedText(await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id)))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const text = await printedText(record)
   const day = dayWords(new Date(), ZONE)
   for (const topic of ["Alergias", "Enfermedades", "Medicación"])
     expect(text).toContain(`${topic}: Dijo que no el ${day}, sin revisar`)
   expect(text).not.toContain("Sin registros.")
+  // Y en su declaración, tal como lo respondió.
+  expect(record.declarations[0]!.entries).toEqual([
+    { key: "allergies", label: "Alergias", value: "No" },
+    { key: "conditions", label: "Enfermedades", value: "No" },
+    { key: "medications", label: "Medicación", value: "No" },
+  ])
 })

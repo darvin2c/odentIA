@@ -136,6 +136,19 @@ export interface RecordInterview {
   >
 }
 
+/**
+ * Una declaración de salud tal como llegó (`patient_health_declaration`): lo que
+ * la persona, o quien habló por ella, envió ese día, con quién y cuándo. No cambia
+ * aunque el equipo corrija lo vigente: es la «declaración original» de la ficha.
+ */
+export interface RecordDeclaration {
+  at: Date
+  via: HealthDeclaration["via"]
+  by: HealthDeclarant
+  /** Lo que respondió, en palabras; lo que dejó sin responder no sale. */
+  entries: InterviewEntry[]
+}
+
 export interface PatientRecord {
   generatedAt: Date
   /** La clínica como la dice su papel. */
@@ -170,6 +183,11 @@ export interface PatientRecord {
    * igual que para la ficha.
    */
   declared: DeclaredHealthGroup[]
+  /**
+   * Lo que declaró de su salud, tal como llegó, de lo más antiguo a lo más nuevo. Lo
+   * que dijo en un formulario no se repite aquí: va con su formulario.
+   */
+  declarations: RecordDeclaration[]
   /** null si no hay nada que contar: nunca se guardó una entrevista, o la vigente quedó sin datos. */
   interview: RecordInterview | null
   familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
@@ -194,6 +212,65 @@ export interface PatientRecord {
   forms: FormRecord[]
   documents: Array<typeof patientDocument.$inferSelect>
   appointments: Array<typeof appointment.$inferSelect>
+}
+
+/** Cómo respondió a un grupo de su declaración: «No», «No sabe» o lo que anotó; null si no respondió. */
+function declaredGroupWords(
+  group: { state: string; items: ReadonlyArray<Record<string, unknown>> } | undefined,
+  itemWords: (item: Record<string, unknown>) => string,
+): string | null {
+  if (!group || group.state === "unanswered") return null
+  if (group.state === "none") return "No"
+  if (group.state === "unknown") return "No sabe"
+  return group.items.map(itemWords).join("; ") || null
+}
+
+const textOf = (value: unknown): string => (typeof value === "string" ? value.trim() : "")
+const joined = (...parts: string[]): string => parts.filter(Boolean).join(" · ")
+
+/**
+ * Lo que trae una declaración, como lo respondió: sus alergias, enfermedades y
+ * medicinas, el grupo sanguíneo, el embarazo con las semanas que dijo y lo demás
+ * de la entrevista, que cuenta el producto (`interviewEntries`).
+ */
+function declarationEntries(
+  health: HealthDeclaration["health"],
+  interviewEntries: InterviewEntry[],
+): InterviewEntry[] {
+  const out: InterviewEntry[] = []
+  const add = (key: string, label: string, value: string | null) => {
+    if (value) out.push({ key, label, value })
+  }
+  add(
+    "allergies",
+    "Alergias",
+    declaredGroupWords(health.allergies, (item) => {
+      const severity = textOf(item.severity)
+      return `${joined(textOf(item.substance), textOf(item.reaction))}${severity && severity !== "desconocida" ? ` (${severity})` : ""}`
+    }),
+  )
+  add("conditions", "Enfermedades", declaredGroupWords(health.conditions, (item) => joined(textOf(item.name), textOf(item.notes))))
+  add(
+    "medications",
+    "Medicación",
+    declaredGroupWords(health.medications, (item) =>
+      joined(textOf(item.name), textOf(item.dose), textOf(item.frequency), textOf(item.notes)),
+    ),
+  )
+  add("bloodGroup", "Grupo sanguíneo", health.bloodGroup ?? null)
+  const personal = health.personal
+  if (typeof personal?.embarazo === "boolean")
+    add(
+      PREGNANCY_ENTRY_KEY,
+      "Embarazo",
+      !personal.embarazo
+        ? "No"
+        : typeof personal.semanasEmbarazo === "number"
+          ? `Sí, ${personal.semanasEmbarazo} ${personal.semanasEmbarazo === 1 ? "semana" : "semanas"}`
+          : "Sí",
+    )
+  // El embarazo ya va arriba, con las semanas que dijo ese día: no se recalcula a la fecha de la copia.
+  return [...out, ...interviewEntries.filter((entry) => entry.key !== PREGNANCY_ENTRY_KEY)]
 }
 
 /** La entrevista vigente y, de cada dato, desde qué versión consta igual. */
@@ -424,6 +501,22 @@ export async function loadPatientRecord(
     medications,
     // Cada producto cuenta su entrevista (odentIA: lo de la boca; latidIA: embarazo y lactancia con fecha).
     declared: health.declared,
+    declarations: health.declarations
+      .filter((declaration) => declaration.via !== "formulario")
+      .map((declaration) => {
+        const day = clinicDay(declaration.at, establishmentRow?.timezone || "UTC")
+        return {
+          at: declaration.at,
+          via: declaration.via,
+          by: declaration.by,
+          entries: declarationEntries(
+            declaration.health,
+            // Lo de la entrevista, como lo cuenta el producto, con las claves con que entró ese día.
+            hooks.interview.record(hooks.interview.declared(declaration.health, day), day),
+          ),
+        }
+      })
+      .reverse(),
     interview: interviewOf(
       interviewVersions,
       (answers, current) => hooks.interview.record(answers, today, current ? { legacySaidOn } : {}),
@@ -559,6 +652,13 @@ function asserterOf(by: HealthDeclarant, patientRef: { reference: string }): Rec
   if (by.kind !== "representative") return null
   const display = [by.name, by.relation ? `(${by.relation})` : null].filter(Boolean).join(" ")
   return display ? { display } : null
+}
+
+/** Por dónde llegó una declaración, como título. */
+const DECLARATION_VIA_WORDS: Record<RecordDeclaration["via"], string> = {
+  registro: "En su registro",
+  enlace: "Desde su enlace",
+  formulario: "En un formulario",
 }
 
 /** «Madre: Diabetes tipo 2 (CIE-10 · E11)». */
@@ -728,6 +828,29 @@ export async function renderPatientRecordPdf(
     )
   }
   dataRows([["Antecedentes familiares", record.familyHistory.map(familyWords)]], 140)
+
+  // La declaración original: lo que envió, con su fecha y quién. Lo vigente, que el equipo revisa
+  // y corrige, está arriba; esto sigue diciendo lo que se declaró.
+  if (record.declarations.length) {
+    section(`Lo que declaró de su salud (${record.declarations.length})`)
+    kit.text(
+      "Tal como llegó. Lo vigente, que el equipo revisa y corrige, está en «Alergias y antecedentes» y en «Entrevista de salud».",
+      { size: SIZE.second, tone: "gray" },
+    )
+    for (const declaration of record.declarations) {
+      kit.ensure(40)
+      kit.gap(6)
+      kit.text(DECLARATION_VIA_WORDS[declaration.via], { face: "sansBold", size: SIZE.table })
+      kit.text(saidWhenWords(declaration.by, dayTimeWords(declaration.at, zone), p.sex), {
+        size: SIZE.second,
+        tone: "gray",
+      })
+      dataRows(
+        declaration.entries.map((entry) => [entry.label, entry.value]),
+        140,
+      )
+    }
+  }
 
   section(`Atenciones (${record.encounters.length})`)
   if (!record.encounters.length) kit.text("Sin atenciones registradas.")
@@ -903,7 +1026,8 @@ const xhtml = (text: string) =>
 function questionnaireResponse(input: {
   id: string
   title: string
-  version: number
+  /** La versión de lo que se respondió; una declaración no tiene. */
+  version?: number
   authored: Date
   patientRef: { reference: string }
   encounterId?: string | null
@@ -914,7 +1038,7 @@ function questionnaireResponse(input: {
   groups: Array<{ linkId: string; text: string; items: AskedItem[] }>
   notes: string[]
 }): Resource {
-  const lines = [`${input.title} · versión ${input.version}`, ...input.notes]
+  const lines = [input.version === undefined ? input.title : `${input.title} · versión ${input.version}`, ...input.notes]
   // FHIR no admite textos vacíos: una sección sin título va sin `text`.
   const labelOf = (group: { linkId: string; text: string }) => ({
     linkId: group.linkId,
@@ -932,7 +1056,7 @@ function questionnaireResponse(input: {
         resourceType: "Questionnaire",
         id: "cuestionario",
         title: input.title,
-        version: String(input.version),
+        ...(input.version === undefined ? {} : { version: String(input.version) }),
         // La plantilla pudo archivarse después: aquí solo consta la versión que se respondió.
         status: "unknown",
         item: input.groups.map((group) => ({
@@ -1419,6 +1543,35 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ],
       }),
     )
+  // Cada declaración original, como lo que es: lo que envió, con su fecha y quién. La fuente es quien
+  // lo dijo; nadie del equipo figura como autor.
+  record.declarations.forEach((declaration, index) => {
+    if (declaration.entries.length === 0) return
+    resources.push(
+      questionnaireResponse({
+        id: `${p.patientId}-declaracion-${index + 1}`,
+        title: "Declaración de salud",
+        authored: declaration.at,
+        patientRef,
+        source: asserterOf(declaration.by, patientRef),
+        groups: [
+          {
+            linkId: "declaracion",
+            text: DECLARATION_VIA_WORDS[declaration.via],
+            items: declaration.entries.map((entry) => ({
+              linkId: entry.key,
+              text: entry.label,
+              type: "string",
+              answers: [{ valueString: entry.value }],
+            })),
+          },
+        ],
+        notes: [
+          `${DECLARATION_VIA_WORDS[declaration.via]}. ${saidWhenWords(declaration.by, dayTimeWords(declaration.at, record.clinic), p.sex)}.`,
+        ],
+      }),
+    )
+  })
   // El parentesco ya se guarda con su código HL7 v3 RoleCode. `partial`: es lo que se sabe de ese familiar.
   for (const row of record.familyHistory)
     resources.push({
