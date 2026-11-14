@@ -134,4 +134,14 @@ describe("RadioChips", () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Quitar respuesta" })).toBeNull()
   })
+
+  // QA de la entrega 3 (14 nov): el foco del teclado casi no se veía (el borde de un círculo de 16 px)
+  // y la opción elegida se veía igual con foco que sin él.
+  it("el foco del teclado se marca en toda la pastilla, con el anillo de los botones, no en el círculo", () => {
+    render(<Questionnaire onSubmit={() => {}} level="8" />)
+    const chosen = option("¿Cuánto te duele?", "8")
+    const chip = chosen.closest("label") as HTMLElement
+    expect(chip.className).toContain("has-[[role=radio]:focus-visible]:ring-3")
+    expect(chosen.className).toContain("focus-visible:ring-0")
+  })
 })

@@ -26,6 +26,10 @@ export interface RadioChipsProps<T extends string> {
   className?: string
 }
 
+/** El anillo de foco de `Button` (`ring-3`), algo más fuerte porque rodea una pastilla clara. */
+const FOCUS_RING =
+  "has-[[role=radio]:focus-visible]:border-ring has-[[role=radio]:focus-visible]:ring-3 has-[[role=radio]:focus-visible]:ring-ring/50"
+
 /**
  * Opciones excluyentes como pastillas: el grupo de radio del sistema
  * (`RadioGroup` de `@odentia/ui`, patrón de WAI-ARIA), para elegir entre pocas
@@ -69,11 +73,19 @@ export function RadioChips<T extends string>({
         <FieldLabel
           key={option.value}
           className={cn(
-            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal transition-shadow",
             value === option.value && "border-primary bg-primary-soft",
+            // El foco del teclado se ve en toda la pastilla, como el anillo de un botón, y se
+            // distingue de «elegida» (borde y fondo): con foco, el anillo; sin foco, nada más.
+            FOCUS_RING,
           )}
         >
-          <RadioGroupItem value={option.value} aria-invalid={invalid || undefined} />
+          {/* El anillo lo lleva la pastilla: el del círculo de 16 px casi no se veía. */}
+          <RadioGroupItem
+            value={option.value}
+            aria-invalid={invalid || undefined}
+            className="focus-visible:ring-0 aria-invalid:ring-0"
+          />
           {option.label}
         </FieldLabel>
       ))}
