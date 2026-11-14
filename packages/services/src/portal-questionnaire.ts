@@ -4,7 +4,7 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, isNull } from "drizzle-orm"
+import { and, desc, eq, isNull, ne } from "drizzle-orm"
 import {
   assertAnswers,
   assertFormSchema,
@@ -63,7 +63,8 @@ async function respondentOf(tx: Db, who: Respondent) {
   return row
 }
 
-async function currentTemplate(tx: Db, orgId: string) {
+/** El cuestionario que reciben los pacientes. `exceptKey`: cuál sería si ese formulario dejara de estar publicado. */
+async function currentTemplate(tx: Db, orgId: string, exceptKey?: string) {
   const [template] = await tx
     .select()
     .from(clinicalFormTemplate)
@@ -72,11 +73,50 @@ async function currentTemplate(tx: Db, orgId: string) {
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.status, "publicado"),
         eq(clinicalFormTemplate.respondent, "portal"),
+        exceptKey ? ne(clinicalFormTemplate.key, exceptKey) : undefined,
       ),
     )
     .orderBy(desc(clinicalFormTemplate.publishedAt))
     .limit(1)
   return template ?? null
+}
+
+/** Un cambio de Configuración sobre una plantilla: publicar su borrador, dejar de usarla o volver a usarla. */
+export const FORM_TEMPLATE_CHANGES = ["publish", "leave", "reuse"] as const
+export type FormTemplateChange = (typeof FORM_TEMPLATE_CHANGES)[number]
+
+/** Un cuestionario del paciente, nombrado para decirlo en una confirmación. */
+export interface ReachedQuestionnaire {
+  key: string
+  title: string
+}
+
+/**
+ * A quién le llega: el cuestionario que hoy reciben los pacientes (`now`) y el
+ * que recibirán después del cambio (`after`), con la regla de `currentTemplate`.
+ * Solo lee: la confirmación de Configuración lo dice antes de hacer el cambio y
+ * no lo calcula por su cuenta. Publicar o volver a usar uno «que responde el
+ * paciente» lo deja como el último publicado; en los demás casos queda el
+ * último de los otros, porque la versión publicada de esta plantilla deja de estarlo.
+ */
+export async function previewPatientQuestionnaire(
+  tx: Db,
+  orgId: string,
+  templateId: string,
+  change: FormTemplateChange,
+): Promise<{ now: ReachedQuestionnaire | null; after: ReachedQuestionnaire | null }> {
+  const [template] = await tx
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)))
+    .limit(1)
+  if (!template) throw notFound("Plantilla")
+  const named = (row: FormTemplateRow | null) => (row ? { key: row.key, title: row.title } : null)
+  const becomes = change !== "leave" && template.respondent === "portal"
+  return {
+    now: named(await currentTemplate(tx, orgId)),
+    after: named(becomes ? template : await currentTemplate(tx, orgId, template.key)),
+  }
 }
 
 /**

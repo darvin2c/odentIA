@@ -36,6 +36,7 @@ import {
 import { createEncounter } from "./encounters.js"
 import { getPatientMissingData, getStaffMissingData } from "./patient-registration.js"
 import { createPatient, getPatient } from "./patients.js"
+import { submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { appDb, container, ownerDb, setupTestDb } from "./test-setup.js"
@@ -646,27 +647,24 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
   await expect(
     run((tx) => createFormResponse(tx, "org_a", ACTOR, { templateId: template.id, patientId: patient.id })),
   ).rejects.toMatchObject({ status: 400 })
+  // Con el envío de verdad (el de «Su enlace»), que valida las respuestas contra la plantilla.
+  const own = (await run((tx) => getPatient(tx, "org_a", patient.id))).contacts.find((link) => link.relationship === "self")
+  if (!own) throw new Error("Sin persona propia")
   const declared = async (answers: Record<string, unknown>) => {
-    const [row] = await run((tx) =>
-      tx
-        .insert(clinicalFormResponse)
-        .values({
-          organizationId: "org_a",
-          templateId: template.id,
-          templateVersion: template.version,
-          templateTitle: template.title,
-          templateSnapshot: template.schema as Record<string, unknown>,
-          patientId: patient.id,
-          status: "borrador",
-          answers,
-          source: "portal",
-          submittedAt: new Date(),
-        })
-        .returning(),
+    await run((tx) =>
+      submitQuestionnaireFromLink(tx, { orgId: "org_a", patientId: patient.id, contactId: own.contactId }, answers),
     )
+    const [row] = await ownerDb
+      .select()
+      .from(clinicalFormResponse)
+      .where(and(eq(clinicalFormResponse.patientId, patient.id), eq(clinicalFormResponse.status, "borrador")))
     if (!row) throw new Error("Sin respuesta declarada")
+    expect(row).toMatchObject({ source: "portal", templateId: template.id, respondentContactId: own.contactId })
+    expect(row.submittedAt).toBeInstanceOf(Date)
     return row
   }
+  // Lo que no cumple la plantilla no entra: falta la pregunta obligatoria.
+  await expect(declared({ alergia_cual: "Penicilina" })).rejects.toMatchObject({ status: 400 })
   const response = await declared({ alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" })
   // Mientras no se finaliza, nada pasa a los antecedentes.
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)

@@ -4,8 +4,10 @@
  * al responder y que nada de esto trabe la atención: el formulario empezado
  * antes de firmar se termina después, y el cierre lo avisa sin frenar.
  */
+import { randomUUID } from "node:crypto"
+import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
-import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
@@ -20,7 +22,7 @@ import {
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createEncounter, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
-import { listClinicFormTemplates } from "./portal-questionnaire.js"
+import { listClinicFormTemplates, previewPatientQuestionnaire } from "./portal-questionnaire.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -258,7 +260,7 @@ it("un formulario empezado antes de firmar la atención se termina después, y e
     f.run((tx) =>
       createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id }),
     ),
-  ).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED", status: 409 })
+  ).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED", status: 409, message: expect.stringContaining("ya está firmada") })
   await expect(
     f.run((tx) => createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id })),
   ).resolves.toMatchObject({ status: "borrador", encounterId: null })
@@ -272,5 +274,149 @@ it("un formulario empezado antes de firmar la atención se termina después, y e
     f.run((tx) =>
       createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: voided.id }),
     ),
-  ).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED", status: 409 })
+    // Una atención anulada no se dice «cerrada» ni «firmada».
+  ).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED", status: 409, message: expect.stringContaining("está anulada") })
+})
+
+it("el borrador vacío de otra persona, o el de hace semanas, no es «el mismo»: se empieza uno nuevo", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Evaluación de otra persona")
+  // La Dra. B, otra persona del equipo.
+  const other = randomUUID()
+  await ownerDb.insert(user).values({ id: other, name: "Dra. B", email: `${other}@example.test` })
+  const start = (actor: string) =>
+    f.run((tx) =>
+      createFormResponse(tx, ORG, actor, {
+        templateId: template.id,
+        patientId: f.patient.id,
+        professionalUserId: f.actor,
+        answers: {},
+      }),
+    )
+  const ofA = await start(f.actor)
+  // Otra persona empieza la misma, vacía y recién creada: recibe la suya, con su autoría.
+  const ofB = await start(other)
+  expect(ofB.id).not.toBe(ofA.id)
+  expect(ofB.authorUserId).toBe(other)
+  expect(ofA.authorUserId).toBe(f.actor)
+  // La de A quedó vacía hace tres semanas: hoy A empieza otra, con la fecha de hoy.
+  await ownerDb
+    .update(clinicalFormResponse)
+    .set({ createdAt: new Date(Date.now() - 21 * 24 * 3600_000) })
+    .where(eq(clinicalFormResponse.id, ofA.id))
+  const today = await start(f.actor)
+  expect(today.id).not.toBe(ofA.id)
+  expect(Date.now() - today.createdAt.getTime()).toBeLessThan(60_000)
+  // Y el doble clic de la misma persona sigue siendo uno solo.
+  expect((await start(f.actor)).id).toBe(today.id)
+})
+
+it("dos «Volver a usar» a la vez: uno lo pone en uso y el otro recibe que ya está en uso, no un error interno", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Ficha que vuelve dos veces")
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))
+  const results = await Promise.allSettled(
+    [1, 2, 3].map(() => f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, template.id))),
+  )
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+  const rejected = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
+  expect(rejected).toHaveLength(2)
+  for (const reason of rejected) expect(reason).toMatchObject({ status: 409 })
+  const versions = (await f.run((tx) => listFormTemplates(tx, ORG, {}))).filter((row) => row.key === template.key)
+  expect(versions.map((row) => `${row.version}:${row.status}`).sort()).toEqual(["1:archivado", "2:publicado"])
+})
+
+it("volver a usar revisa las preguntas como al publicar: si ya no valen, lo dice y no pone en uso algo que no se puede llenar", async () => {
+  const f = await clinicalFixture()
+  // Quedó archivada con una pregunta de opciones que hoy no se puede publicar (una sola opción).
+  const [old] = await ownerDb
+    .insert(clinicalFormTemplate)
+    .values({
+      organizationId: ORG,
+      key: "ficha-con-reglas-de-antes",
+      title: "Ficha con reglas de antes",
+      version: 1,
+      status: "archivado",
+      schema: {
+        sections: [{ id: "s", title: "S", fields: [{ id: "lado", label: "Lado", type: "opcion_unica", options: ["Derecho"] }] }],
+      },
+      respondent: "staff",
+      publishedAt: new Date(Date.now() - 90 * 24 * 3600_000),
+    })
+    .returning()
+  await expect(f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, old!.id))).rejects.toMatchObject({
+    code: "SCHEMA_OUTDATED",
+    status: 409,
+    message: expect.stringMatching(/«Ficha con reglas de antes».*Lado.*versión nueva/s),
+  })
+  const versions = (await f.run((tx) => listFormTemplates(tx, ORG, {}))).filter((row) => row.key === old!.key)
+  expect(versions.map((row) => row.status)).toEqual(["archivado"])
+  // La salida: una versión nueva desde esa, corregida, se guarda y se publica.
+  const fixed = await f.run(async (tx) => {
+    const draft = await createFormTemplate(tx, ORG, f.actor, {
+      key: old!.key,
+      title: old!.title,
+      schema: { sections: [{ id: "s", title: "S", fields: [{ id: "lado", label: "Lado", type: "opcion_unica", options: ["Derecho", "Izquierdo"] }] }] },
+    })
+    return publishFormTemplate(tx, ORG, f.actor, draft.id)
+  })
+  expect(fixed).toMatchObject({ version: 2, status: "publicado" })
+})
+
+it("«Dejar de usar» y archivar un borrador quedan anotados como cosas distintas", async () => {
+  const f = await clinicalFixture()
+  const used = await inUse(f, "Ficha que se deja de usar (rastro)")
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, used.id))
+  const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador que se archiva (rastro)", schema }))
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, draft.id))
+  const actionOf = async (id: string) =>
+    (
+      await ownerDb
+        .select({ action: auditEvent.action })
+        .from(auditEvent)
+        .where(and(eq(auditEvent.entity, "clinical_form_template"), eq(auditEvent.entityId, id)))
+    )
+      .map((row) => row.action)
+      .filter((action) => action.startsWith("form_template.") && !["form_template.create", "form_template.publish"].includes(action))
+  expect(await actionOf(used.id)).toEqual(["form_template.leave"])
+  expect(await actionOf(draft.id)).toEqual(["form_template.archive"])
+})
+
+it("antes de publicar, dejar de usar o volver a usar, el servidor dice qué cuestionario reciben los pacientes hoy y cuál recibirán", async () => {
+  const f = await clinicalFixture()
+  const preview = (id: string, change: "publish" | "leave" | "reuse") =>
+    f.run((tx) => previewPatientQuestionnaire(tx, ORG, id, change))
+  // Parte sin ningún cuestionario del paciente publicado: los de las pruebas de arriba se dejan de usar.
+  for (const row of await f.run((tx) => listFormTemplates(tx, ORG, { status: "publicado" })))
+    if (row.respondent === "portal") await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, row.id))
+  // (a) La versión 1 la llenaba el equipo y nadie recibe nada: la 2, del paciente, no reemplaza a ninguno.
+  const ingreso = await inUse(f, "Ficha de ingreso (a quién le llega)")
+  const ingresoV2 = await f.run((tx) =>
+    createFormTemplate(tx, ORG, f.actor, { key: ingreso.key, title: ingreso.title, respondent: "portal", schema }),
+  )
+  expect(await preview(ingresoV2.id, "publish")).toEqual({
+    now: null,
+    after: { key: ingreso.key, title: ingreso.title },
+  })
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, ingresoV2.id))
+
+  const previo = await inUse(f, "Cuestionario previo (a quién le llega)", "portal")
+  const salud = await inUse(f, "Cuestionario de salud (a quién le llega)", "portal")
+  const named = (row: { key: string; title: string }) => ({ key: row.key, title: row.title })
+  // (b) La versión nueva de «salud» pasa al equipo: los pacientes pasan a recibir «previo», que sigue publicado.
+  const saludV2 = await f.run((tx) =>
+    createFormTemplate(tx, ORG, f.actor, { key: salud.key, title: salud.title, respondent: "staff", schema }),
+  )
+  expect(await preview(saludV2.id, "publish")).toEqual({ now: named(salud), after: named(previo) })
+  // Dejar de usar el que les llega: después reciben el otro; dejar el otro no les cambia nada.
+  expect(await preview(salud.id, "leave")).toEqual({ now: named(salud), after: named(previo) })
+  expect(await preview(previo.id, "leave")).toEqual({ now: named(salud), after: named(salud) })
+  // Y lo que anuncia es lo que pasa.
+  await f.run((tx) => publishFormTemplate(tx, ORG, f.actor, saludV2.id))
+  const marks = new Map((await f.run((tx) => listClinicFormTemplates(tx, ORG))).map((row) => [row.id, row.reachesPatients]))
+  expect(marks.get(previo.id)).toBe(true)
+  // Volver a usar uno del paciente lo deja como el que les llega.
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, previo.id))
+  expect(await preview(previo.id, "reuse")).toEqual({ now: null, after: named(previo) })
+  await expect(preview("00000000-0000-4000-8000-000000000000", "publish")).rejects.toMatchObject({ status: 404 })
 })

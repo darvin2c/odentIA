@@ -1251,7 +1251,13 @@ export async function archiveFormTemplate(
     )
     .returning()
   if (!row) throw notFound("Plantilla")
-  await audit(tx, orgId, actorUserId, "form_template.archive", "clinical_form_template", row.id, {})
+  // «Dejar de usar» la que estaba en uso no es lo mismo que archivar un borrador: «Actividad del
+  // equipo» lo dice con las palabras de la pantalla.
+  const action = current.status === "publicado" ? "form_template.leave" : "form_template.archive"
+  await audit(tx, orgId, actorUserId, action, "clinical_form_template", row.id, {
+    key: row.key,
+    version: row.version,
+  })
   return row
 }
 
@@ -1275,13 +1281,16 @@ export async function reuseFormTemplate(
     )
     .limit(1)
   if (!current) throw notFound("Plantilla")
-  // Todas sus versiones, bloqueadas: dos «Volver a usar» a la vez no dejan dos vigentes.
+  // Un «Volver a usar» a la vez por formulario: el segundo espera aquí y, al leer las versiones,
+  // ya ve la que publicó el primero. Bloquear las filas no alcanza, porque el primero solo inserta.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('form-template:' || ${orgId} || ':' || ${current.key}))`,
+  )
   const versions = await tx
     .select()
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)))
     .orderBy(desc(clinicalFormTemplate.version))
-    .for("update")
   if (versions.some((row) => row.status === "publicado"))
     throw conflict("IN_USE", "Este formulario ya está en uso")
   if (versions.some((row) => row.status === "borrador")) {
@@ -1291,6 +1300,17 @@ export async function reuseFormTemplate(
   const last = versions.find((row) => row.publishedAt !== null)
   if (!last || last.id !== current.id)
     throw conflict("NOT_LAST_USED", "Solo se vuelve a usar la última versión que estuvo en uso")
+  // Como al publicar: si las reglas de las preguntas cambiaron desde que se archivó, no se pone en
+  // uso algo con lo que «Empezar» fallaría. Se dice qué pregunta es y cómo seguir.
+  try {
+    assertFormSchema(last.schema)
+  } catch (error) {
+    if (!(error instanceof ServiceError) || error.status !== 400) throw error
+    throw conflict(
+      "SCHEMA_OUTDATED",
+      `«${last.title}» tiene una pregunta que hoy no se puede publicar como quedó (${error.message}). Prepara una versión nueva, corrígela y publícala.`,
+    )
+  }
   // Una especialidad que ya no está activa no frena volver a usarlo: queda sin especialidad.
   const [specialty] = last.specialtyId
     ? await tx
@@ -1322,6 +1342,13 @@ export async function reuseFormTemplate(
       publishedAt: now,
     })
     .returning()
+    .catch((error: unknown) => {
+      // Otra operación creó esa versión mientras tanto (una versión nueva desde el constructor):
+      // el índice único lo impide y se responde como un choque, no como un error interno.
+      if (isUniqueViolation(error)) throw conflict("DUPLICATE", "Este formulario cambió mientras tanto: recarga para ver cómo quedó")
+      throw error
+    })
+  if (!row) throw notFound("Plantilla")
   await audit(tx, orgId, actorUserId, "form_template.reuse", "clinical_form_template", row.id, {
     key: row.key,
     version: row.version,
@@ -1364,6 +1391,9 @@ async function requireVisibleEncounter(
   if (!row) throw notFound("Atención")
   return row
 }
+
+/** Cuánto dura «seguidos»: un segundo «Empezar» igual dentro de estos minutos es el mismo borrador. */
+const DOUBLE_START_MINUTES = 2
 
 /**
  * Los formularios del equipo que la atención tiene a medias. El cierre los
@@ -1420,8 +1450,14 @@ export async function createFormResponse(
   if (input.encounterId) {
     const visible = await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
     // Solo empezarlo: el que ya estaba empezado se sigue llenando y se finaliza después de firmar.
+    // La pantalla que recibe este rechazo lo empieza sin unirlo a la atención (`ENCOUNTER_CLOSED`).
     if (visible.status !== "borrador")
-      throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: empieza el formulario desde Documentos")
+      throw conflict(
+        "ENCOUNTER_CLOSED",
+        visible.status === "anulada"
+          ? "La atención está anulada: el formulario se empieza sin unirlo a ella"
+          : "La atención ya está firmada: el formulario se empieza sin unirlo a ella",
+      )
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
   }
@@ -1435,9 +1471,10 @@ export async function createFormResponse(
   }
   const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
-  // Dos «Empezar» seguidos (o a la vez) del mismo formulario, para el mismo paciente y la misma
-  // atención, son el mismo borrador: se devuelve el que ya está tal como nació. Uno con algo
-  // escrito ya no es «el mismo», y se puede empezar otro.
+  // Dos «Empezar» seguidos (o a la vez) de la misma persona, del mismo formulario, para el mismo
+  // paciente y la misma atención, son el mismo borrador: se devuelve el que acaba de nacer, tal
+  // como nació. El de otra persona, el de hace un rato o uno con algo escrito no son «el mismo»:
+  // se empieza otro, con su autor y su fecha.
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('form-response:' || ${input.patientId} || ':' || ${template.id}))`,
   )
@@ -1452,6 +1489,8 @@ export async function createFormResponse(
         encounterId ? eq(clinicalFormResponse.encounterId, encounterId) : isNull(clinicalFormResponse.encounterId),
         eq(clinicalFormResponse.status, "borrador"),
         eq(clinicalFormResponse.source, "staff"),
+        eq(clinicalFormResponse.authorUserId, actorUserId),
+        sql`${clinicalFormResponse.createdAt} > now() - make_interval(mins => ${DOUBLE_START_MINUTES})`,
       ),
     )
     .orderBy(asc(clinicalFormResponse.createdAt))

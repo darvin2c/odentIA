@@ -585,7 +585,10 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "form_template.create": say("Creó el borrador de una plantilla de formulario"),
   "form_template.update": say("Editó el borrador de una plantilla de formulario"),
   "form_template.publish": say("Publicó una versión de una plantilla de formulario"),
-  "form_template.archive": say("Archivó una plantilla de formulario"),
+  "form_template.archive": say("Archivó el borrador de una plantilla de formulario"),
+  // Con las palabras de «Formularios propios»: «Dejar de usar» y «Volver a usar».
+  "form_template.leave": say("Dejó de usar un formulario"),
+  "form_template.reuse": say("Volvió a usar un formulario"),
   "consent_template.create": say("Creó el borrador de una plantilla de consentimiento"),
   "consent_template.update": say("Editó el borrador de una plantilla de consentimiento"),
   "consent_template.publish": say("Publicó una versión de una plantilla de consentimiento"),
