@@ -336,6 +336,30 @@ it("interno: el envelope crea la ficha con snapshot platform/staff", async () =>
   })
 })
 
+// Mesa de formularios del 13 nov, entrega 10 (C10): recepción ve si respondió, con el permiso de «Faltan datos».
+it("«Antes de su cita» lo ve quien edita sus datos, sin permiso nuevo; quien no, recibe 403", async () => {
+  const app = buildApp("before-visit")
+  const created = await app.request("/api/patients", {
+    method: "POST",
+    headers: authed("owner", SLUG_A),
+    body: JSON.stringify({
+      submissionId: crypto.randomUUID(),
+      answers: {
+        demographics: { displayName: "Paciente Antes", birthDate: "1990-01-01", phone: "+51977550009" },
+        respondent: "staff",
+        privacyAccepted: false,
+      },
+    }),
+  })
+  const { data } = (await created.json()) as { data: { id: string } }
+  const reception = await app.request(`/api/patients/${data.id}/personal-link/before-visit`, { headers: authed("reception", SLUG_A) })
+  expect(reception.status).toBe(200)
+  // Sin cita por venir no hay nada que decir.
+  expect(((await reception.json()) as { data: unknown }).data).toBeNull()
+  const member = await app.request(`/api/patients/${data.id}/personal-link/before-visit`, { headers: authed("member", SLUG_A) })
+  expect(member.status).toBe(403)
+})
+
 it("configuración: CAS rechaza versión obsoleta y acepta la vigente", async () => {
   const app = buildApp("cfg-cas")
   const stale = await app.request("/api/patient-registration/config", {
