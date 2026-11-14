@@ -251,7 +251,8 @@ export const DEVICE_DRAFT_PROMISE = "Lo que escribas se guarda en este celular h
 export function draftResumeWords(step: DeviceDraftStep | null, until: string): { title: string; text: string } {
   return {
     title: step ? `Vas en el paso ${step.current} de ${step.total}` : "Lo que escribiste sigue aquí",
-    text: `Lo que escribiste sigue guardado en este celular ${until}. Todavía no lo enviaste.`,
+    // Sin repetir el punto de «p. m.».
+    text: `Lo que escribiste sigue guardado en este celular ${until}${until.endsWith(".") ? "" : "."} Todavía no lo enviaste.`,
   }
 }
 

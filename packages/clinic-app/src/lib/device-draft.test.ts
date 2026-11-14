@@ -228,8 +228,10 @@ describe("lo que dice la pantalla", () => {
     expect(until).toMatch(/^hasta mañana, 2:15\sp\.\sm\.$/)
     expect(draftResumeWords(step3, until)).toEqual({
       title: "Vas en el paso 3 de 6",
-      text: `Lo que escribiste sigue guardado en este celular ${until}. Todavía no lo enviaste.`,
+      text: `Lo que escribiste sigue guardado en este celular ${until} Todavía no lo enviaste.`,
     })
+    // Una hora sin punto final lo lleva.
+    expect(draftResumeWords(step3, "hasta mañana, 14:15").text).toContain("hasta mañana, 14:15. Todavía")
     expect(draftResumeWords(null, until).title).toBe("Lo que escribiste sigue aquí")
   })
 
