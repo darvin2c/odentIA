@@ -73,7 +73,7 @@ export function altaWhoWords(card: Pick<AltaCardData, "who" | "owner">): string 
   if (!card.who) return card.owner ? `Responsable: ${card.owner.name}` : "Sin responsable"
   if (card.who.kind === "clinica") return "Espera a la clínica"
   if (card.who.kind === "meta") return "Espera a Meta"
-  if (card.who.kind === "nosotros") return `Nos toca: ${card.who.person?.name || "sin responsable"}`
+  if (card.who.kind === "nosotros") return `Nos toca: ${card.who.person?.name || "falta asignar responsable"}`
   return "Sin saber a quién le toca"
 }
 

@@ -283,7 +283,7 @@ test("Alta: la posible carga por correo, el Embudo › Alta, «No aplica» con t
       ? "Espera a la clínica"
       : card?.who?.kind === "meta"
         ? "Espera a Meta"
-        : `Nos toca: ${card?.who?.person?.name || "sin responsable"}`
+        : `Nos toca: ${card?.who?.person?.name || "falta asignar responsable"}`
   await page.goto(`${ADMIN}/pipeline?pestana=alta`)
   const board = page.getByRole("region", { name: "Tablero del alta" })
   const inColumn = board.getByRole("region", { name: new RegExp(`^${title}`) })
