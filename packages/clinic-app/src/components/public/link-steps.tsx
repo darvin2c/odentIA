@@ -1,6 +1,7 @@
 import { Button, Checkbox } from "@odentia/ui"
 import {
   advanceOnEnter,
+  EmptyState,
   ErrorState,
   FormChoiceField,
   LoadingState,
@@ -11,7 +12,8 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { ReactElement } from "react"
+import { CircleCheck } from "lucide-react"
+import { type ReactElement, useEffect } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, type LinkConsent, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
@@ -256,10 +258,29 @@ export function LinkConsentStep({
   )
 }
 
+/** El servidor dice que el cuestionario ya está enviado (`ALREADY_SUBMITTED`): «Ya lo enviaste: …». */
+function alreadySent(error: unknown): { title: string; description: string } | null {
+  if (!(error instanceof ApiError) || error.shape.code !== "ALREADY_SUBMITTED") return null
+  const [title = "Ya lo enviaste", ...rest] = (error.shape.message ?? "").split(": ")
+  const description = rest.join(": ")
+  return { title: title || "Ya lo enviaste", description: description.charAt(0).toUpperCase() + description.slice(1) }
+}
+
+/**
+ * El cuestionario no se pudo abrir. Si es porque ya está enviado (lo envió en otra pestaña o en
+ * otro teléfono), se dice eso, como al enviar, y no hay nada que reintentar; si falló de verdad,
+ * el motivo y «Reintentar».
+ */
+export function QuestionnaireUnavailable({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const sent = alreadySent(error)
+  if (sent) return <EmptyState icon={CircleCheck} title={sent.title} description={sent.description} />
+  return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(error, "Vuelve a intentarlo.")} onRetry={onRetry} />
+}
+
 /**
  * «Antes de tu cita»: el cuestionario de la clínica, en una sola página. Al enviarlo avisa a la
  * página (`onSent`); si ya estaba enviado (otra pestaña, otro teléfono), el servidor lo dice
- * junto al botón y la página se pone al día (`onAlreadySent`).
+ * (al abrirlo o junto al botón) y la página se pone al día (`onAlreadySent`).
  */
 export function LinkQuestionnaireStep({
   slug,
@@ -300,8 +321,14 @@ export function LinkQuestionnaireStep({
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const answers = useStore(form.store, (state) => state.values.answers)
+  // Ya estaba enviado al abrirlo: la página se pone al día y deja de ofrecerlo.
+  const sentElsewhere = query.isError && alreadySent(query.error) !== null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: avisa una vez, cuando el servidor lo dice.
+  useEffect(() => {
+    if (sentElsewhere) onAlreadySent?.()
+  }, [sentElsewhere])
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
-  if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
+  if (query.isError) return <QuestionnaireUnavailable error={query.error} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data
   return (
     // Enter (o «Ir» en el teléfono) pasa a la pregunta siguiente: solo «Enviar respuestas» envía.
