@@ -262,16 +262,27 @@ const STAND_INS: Record<string, string> = {
 }
 
 /**
+ * Lo que de un emoji no es texto: el dibujo, su tono de piel, el selector que lo
+ * pide en color, la unión entre dibujos y el marco de una tecla («1️⃣»). Quitado
+ * eso, lo que queda (el «1» de la tecla) se escribe como texto.
+ */
+const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}‍︎️⃣]/gu
+
+/**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con
- * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`) o, si no
- * lo tiene, como `?`, sin error. Los blancos heredados pasan a espacios y los
- * caracteres de control se quitan.
+ * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`). Un emoji
+ * no se dibuja: se quita, sin dejar un `?` que cambie lo que dijo la persona (QA de
+ * la copia de la historia, 14 nov: «muela de atrás ??»). Una letra con un acento que
+ * la letra no tiene sale sin el acento. Solo lo que no tiene ninguna de esas salidas
+ * (otra escritura) queda como `?`, sin error. Los blancos heredados pasan a espacios
+ * y los caracteres de control se quitan.
  */
 export function printable(value: string, face: Face = "sans"): string {
   const { font } = fontData(face)
   const covered = (text: string) => [...text].every((char) => font.hasGlyphForCodePoint(char.codePointAt(0) ?? 0))
   const clean = value.normalize("NFC").replace(/\r\n?/g, "\n").replace(/\t/g, " ")
   let out = ""
+  let dropped = false
   for (const { segment } of GRAPHEMES.segment(clean)) {
     if (segment === "\n" || segment === " ") {
       out += segment
@@ -284,9 +295,21 @@ export function printable(value: string, face: Face = "sans"): string {
       continue
     }
     const standIn = STAND_INS[segment]
-    out += standIn && covered(standIn) ? standIn : "?"
+    if (standIn && covered(standIn)) {
+      out += standIn
+      continue
+    }
+    const text = segment.replace(EMOJI_PARTS, "")
+    if (text !== segment) {
+      dropped = true
+      if (text && covered(text)) out += text
+      continue
+    }
+    const bare = segment.normalize("NFD").replace(/\p{M}/gu, "")
+    out += bare && covered(bare) ? bare : "?"
   }
-  return out
+  // Sin el emoji no quedan dos espacios juntos ni uno al final de la línea.
+  return dropped ? out.replace(/ {2,}/g, " ").replace(/ +(\n|$)/g, "$1") : out
 }
 
 // --- Color ---------------------------------------------------------------------
