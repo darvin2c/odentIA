@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { byFormOrder } from "./clio-form-proposals"
+import { byFormOrder, inFormOrder } from "./clio-form-proposals"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
@@ -61,9 +61,17 @@ const CONTEXT_CHARS = 600
 /**
  * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
- * El descanso médico tampoco (latidIA, issue 229).
+ * El descanso médico tampoco (latidIA, issue 229). La respuesta de una ficha
+ * tampoco: se confirma en su pregunta, dentro de la ficha (forma B, ADR 0187).
  */
-export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso"
+export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha"
+/** Lo que se confirma al firmar si está marcado: también las respuestas de ficha. */
+const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && item.status === "lista")
+/** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
+const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
+/** Confirmar una respuesta de ficha manda lo que se veía: si una pausa la cambió, el servidor avisa. */
+const confirmBody = (item: DictationSuggestion): RequestInit =>
+  item.kind === "ficha" ? { method: "POST", body: JSON.stringify({ expectedValue: item.payload["value"] ?? null }) } : { method: "POST" }
 
 /** Espera antes del único reintento automático de un tramo que no se pudo ordenar. */
 const RETRY_MS = 3000
@@ -505,15 +513,9 @@ export function useDictationSession({
       let current: DictationSuggestion | null = null
       setConfirmReadyFailed(null)
       try {
-        // Las de una ficha, en su orden: la pregunta de la que depende otra entra primero.
-        for (const item of suggestions.filter(confirmable).sort(byFormOrder)) {
+        for (const item of suggestions.filter(confirmable)) {
           current = item
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
-          // La pregunta de la ficha que alguien respondió a mano: queda la suya, y se dice.
-          if (response?.data?.status === "descartada") {
-            if (response.data.note) toast(response.data.note)
-            continue
-          }
           done.push({ ...item, joined: response?.data?.joined })
         }
       } catch (error) {
@@ -536,9 +538,10 @@ export function useDictationSession({
       let current: DictationSuggestion | null = null
       setConfirmManyFailed(null)
       try {
-        for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate)).sort(byFormOrder)) {
+        // Las de una ficha, en su orden: la pregunta de la que depende otra entra primero.
+        for (const item of inFormOrder(suggestions.filter((candidate) => ids.includes(candidate.id) && confirmableAtSign(candidate)))) {
           current = item
-          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item))
           // La pregunta de la ficha que alguien respondió a mano: queda la suya y no frena la firma.
           if (response?.data?.status === "descartada") {
             if (response.data.note) toast(response.data.note)
@@ -562,9 +565,11 @@ export function useDictationSession({
   })
 
   /**
-   * «Aceptar» y «Aceptar las N» en la ficha (entrega 11): una por una, en el
-   * orden de la ficha. Lo que alguien ya respondió a mano no se pisa: el
-   * servidor la descarta y se dice por qué.
+   * «Confirmar» y «Confirmar las N» en la ficha (entrega 11): una por una, en
+   * el orden de la ficha, con el valor que se veía. Lo que alguien ya respondió
+   * a mano no se pisa: el servidor la descarta y se dice por qué. La que ya se
+   * decidió (doble toque, otra pestaña) cuenta como hecha; si una pausa cambió
+   * la propuesta, se detiene y lo dice.
    */
   const acceptForms = useMutation({
     retry: false,
@@ -572,8 +577,11 @@ export function useDictationSession({
       const done: DictationSuggestion[] = []
       const notes: string[] = []
       try {
-        for (const item of [...items].filter(confirmable).sort(byFormOrder)) {
-          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+        for (const item of items.filter((candidate) => candidate.kind === "ficha" && candidate.status === "lista").sort(byFormOrder)) {
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item)).catch((error: unknown) => {
+            if (alreadyDecided(error)) return undefined
+            throw error
+          })
           if (response?.data?.status === "descartada") {
             if (response.data.note) notes.push(response.data.note)
             continue

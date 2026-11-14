@@ -11,9 +11,9 @@ import type { DictationSuggestion } from "./dictation-session"
  * atención con Clío no hay contexto y nada de esto se ve.
  */
 export interface ClioFormProposals {
-  /** Las propuestas sin decidir, listas y por revisar. */
+  /** Las propuestas sin decidir: por confirmar y por revisar. */
   items: DictationSuggestion[]
-  /** Acepta en el orden de la ficha: la pregunta de la que depende otra, primero. */
+  /** Confirma en el orden de la ficha: la pregunta de la que depende otra, primero. */
   accept: (items: DictationSuggestion[]) => Promise<void>
   discard: (item: DictationSuggestion) => void
   busy: boolean
@@ -32,12 +32,24 @@ export const useClioFormProposals = (): ClioFormProposals | null => useContext(C
 export const proposalsOf = (proposals: ClioFormProposals | null, responseId: string): DictationSuggestion[] =>
   (proposals?.items ?? []).filter((item) => item.payload["responseId"] === responseId)
 
-/** El orden de la ficha: así se acepta la pregunta de la que depende otra antes que esa. */
+/** El orden de la ficha entre respuestas de ficha: la pregunta de la que depende otra, antes que esa. */
 export function byFormOrder(a: DictationSuggestion, b: DictationSuggestion): number {
-  if (a.kind !== "ficha" || b.kind !== "ficha") return 0
   const form = String(a.payload["responseId"]).localeCompare(String(b.payload["responseId"]))
   return form !== 0 ? form : Number(a.payload["order"] ?? 0) - Number(b.payload["order"] ?? 0)
 }
+
+/**
+ * Las respuestas de ficha en el orden de la ficha, y lo demás donde estaba:
+ * ordenar todo junto con `byFormOrder` mezclaba clases que no se comparan.
+ */
+export function inFormOrder(items: readonly DictationSuggestion[]): DictationSuggestion[] {
+  const forms = items.filter((item) => item.kind === "ficha").sort(byFormOrder)
+  let next = 0
+  return items.map((item) => (item.kind === "ficha" ? (forms[next++] ?? item) : item))
+}
+
+/** La etiqueta de la lista de Clío de una ficha: la barra del dictado lleva ahí («Ficha de ortodoncia: 3 por confirmar ↓»). */
+export const formNoticeLabel = (title: string) => `Sugerencias de ${CLINICAL_NAME}: ${title}`
 
 /** El valor propuesto, dicho corto: «Sí», «Clase I», «6 mm». */
 export function proposedWords(item: DictationSuggestion): string {
@@ -51,9 +63,9 @@ export function proposedWords(item: DictationSuggestion): string {
 
 /**
  * El aviso en la fila de la ficha (en «Fichas para esta atención» o en
- * Documentos): solo avisa y abre la ficha, donde se acepta cada respuesta.
- * Lleva el nombre de la lista de sugerencias de la barra del dictado
- * («Fichas ↓» lleva aquí).
+ * Documentos): solo avisa y abre la ficha, donde se confirma cada respuesta.
+ * Lleva el nombre de la ficha en su lista: el enlace de la barra del dictado
+ * («Ficha de ortodoncia: 3 por confirmar ↓») la encuentra y la abre.
  */
 export function ClioFormNotice({
   responseId,
@@ -74,7 +86,8 @@ export function ClioFormNotice({
   return (
     <div
       role="group"
-      aria-label={`Sugerencias de ${CLINICAL_NAME}: Fichas`}
+      aria-label={formNoticeLabel(title)}
+      data-clio-form={responseId}
       className="flex basis-full flex-wrap items-center justify-between gap-2 rounded-xl border border-agent-border bg-agent-soft p-2 text-sm"
     >
       <span className="flex items-center gap-2">

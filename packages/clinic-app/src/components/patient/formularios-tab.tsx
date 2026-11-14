@@ -330,6 +330,15 @@ export function ResponseDetail({
   return <StaffResponseDetail response={response} previous={latest} first={first} canWrite={canWrite} onChanged={onChanged} />
 }
 
+/** Otra pestaña o persona guardó esta ficha mientras se escribía. */
+const isStale = (error: unknown) => error instanceof ApiError && error.shape.code === "STALE_DRAFT"
+
+/** Las marcas de Clío que siguen valiendo tras guardar: la pregunta cambiada a mano ya es de la persona. */
+function marksKept(before: FormResponse, after: FormResponse): FormResponse["clioAccepted"] {
+  const same = (id: string) => JSON.stringify(before.answers?.[id] ?? null) === JSON.stringify(after.answers?.[id] ?? null)
+  return Object.fromEntries(Object.entries(after.clioAccepted ?? before.clioAccepted ?? {}).filter(([id]) => same(id)))
+}
+
 function StaffResponseDetail({
   response,
   previous: latest = null,
@@ -367,7 +376,7 @@ function StaffResponseDetail({
   /** Lo guardado deja al día la lista: al reabrir el formulario se parte de lo último. */
   const remember = (updated: FormResponse) =>
     queryClient.setQueryData<{ data: FormResponse[] }>(["form-responses", response.patientId], (old) =>
-      old ? { ...old, data: old.data.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)) } : old,
+      old ? { ...old, data: old.data.map((row) => (row.id === updated.id ? { ...row, ...updated, clioAccepted: marksKept(row, updated) } : row)) } : old,
     )
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Si el último guardado falló: el autoguardado corre con el estado de su render, que
@@ -389,13 +398,18 @@ function StaffResponseDetail({
   })
 
   const validators = useMemo(() => ({ onSubmit: finalizeSchema(schema) }), [schema])
+  // Los valores de partida, una sola vez: rehechos en cada render, el formulario los tomaba como
+  // nuevos con la ficha sin tocar, y lo confirmado de Clío dejaba atrás la base del próximo
+  // guardado (409 `STALE_DRAFT`, y la respuesta siguiente no se guardaba).
+  const [defaultValues] = useState(() => ({ answers: { ...response.answers } as Record<string, unknown> }))
   const form = useAppForm({
-    defaultValues: { answers: { ...response.answers } as Record<string, unknown> },
+    defaultValues,
     validators,
     listeners: {
       onChange: ({ fieldApi }) => {
         version.current += 1
         changed.current.add(fieldApi.name)
+        typedHere.current.add(fieldApi.name.replace(/^answers\./, ""))
         setSaveState("pendiente")
       },
     },
@@ -410,39 +424,74 @@ function StaffResponseDetail({
   const answers = useStore(form.store, (state) => state.values.answers)
   const formError = useFormSubmitError(form)
 
-  // Lo que propuso Clío al dictar (entrega 11, forma B): se acepta aquí, en cada pregunta.
+  // Lo que propuso Clío al dictar (entrega 11, forma B): se confirma aquí, en cada pregunta.
   const clio = useClioFormProposals()
   const proposals = editable ? proposalsOf(clio, response.id) : []
   const readyProposals = proposals.filter((item) => item.status === "lista")
   const proposalFor = (fieldId: string) => proposals.find((item) => item.payload["fieldId"] === fieldId) ?? null
+  // Las preguntas que se escribieron en este panel: si otra persona respondió otra, el descarte lo dice.
+  const typedHere = useRef(new Set<string>())
+  // Las propuestas cuyo descarte ya salió: el efecto no lo manda dos veces mientras llega.
+  const discardSent = useRef(new Set<string>())
+  // Ocupado desde el primer toque: guardar lo escrito antes de confirmar también cuenta.
+  const [confirming, setConfirming] = useState(false)
+  // Lo que oye el lector de pantalla: cuándo llegan propuestas y cuándo se confirmaron.
+  const [announcement, setAnnouncement] = useState("")
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llegan propuestas nuevas.
+  useEffect(() => {
+    if (readyProposals.length > 0) setAnnouncement(`${CLINICAL_NAME} propone ${readyProposals.length === 1 ? "1 respuesta" : `${readyProposals.length} respuestas`} en esta ficha.`)
+  }, [readyProposals.length])
+  const busy = confirming || !!clio?.busy
+  /** Tras confirmar o descartar el botón desaparece: el foco vuelve a la pregunta, o a la ficha. */
+  const focusAfter = (fieldId: string | null) =>
+    requestAnimationFrame(() => {
+      const question = fieldId ? articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, button, [role="combobox"])`) : null
+      ;(question ?? articleRef.current)?.focus()
+    })
   // Respondida a mano, la pregunta ya es de la persona: lo que proponía Clío ahí se descarta solo,
-  // y no aparece después en «Firmar la atención».
+  // y no aparece después en «Firmar la atención». Si la respondió otra persona, se dice qué quedó.
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambian las respuestas guardadas o lo propuesto.
   useEffect(() => {
-    if (!clio || clio.busy) return
+    if (!clio || busy) return
     const saved = (response.answers ?? {}) as Record<string, unknown>
     for (const item of proposals) {
-      const value = saved[String(item.payload["fieldId"])]
+      const fieldId = String(item.payload["fieldId"])
+      const value = saved[fieldId]
       const answered = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)
-      // Con el mismo valor es la que se acaba de aceptar: esa no se toca.
-      if (answered && JSON.stringify(value) !== JSON.stringify(item.payload["value"] ?? null)) clio.discard(item)
+      // Con el mismo valor es la que se acaba de confirmar: esa no se toca.
+      if (!answered || JSON.stringify(value) === JSON.stringify(item.payload["value"] ?? null) || discardSent.current.has(item.id)) continue
+      discardSent.current.add(item.id)
+      clio.discard(item)
+      if (item.status === "lista" && !typedHere.current.has(fieldId)) {
+        const field = schema.sections.flatMap((section) => section.fields).find((candidate) => candidate.id === fieldId)
+        toast(`${CLINICAL_NAME} proponía «${proposedWords(item)}» en «${field?.label ?? "una pregunta"}»; quedó «${proposedWords({ ...item, payload: { ...item.payload, value } })}», que escribió otra persona.`)
+      }
     }
   }, [response.answers, proposals.length])
   const accept = async (items: DictationSuggestion[]) => {
-    if (!clio) return
+    if (!clio || confirming) return
+    setConfirming(true)
+    // Lo que se confirma ahora es de Clío: su marca se ve aunque antes se haya tocado la pregunta.
+    for (const item of items) typedHere.current.delete(String(item.payload["fieldId"]))
     try {
-      // Lo escrito aquí sale antes: así lo aceptado no lo pisa ni choca con su guardado.
+      // Lo escrito aquí sale antes: así lo confirmado no lo pisa ni choca con su guardado.
       await persist()
       await clio.accept(items)
-      // El botón desaparece con la propuesta: el foco vuelve a la pregunta que se respondió.
-      const fieldId = items.length === 1 ? String(items[0]?.payload["fieldId"]) : null
-      if (fieldId)
-        requestAnimationFrame(() =>
-          articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, button, [role="combobox"])`)?.focus(),
-        )
+      setAnnouncement(items.length === 1 ? "Confirmada." : `Confirmadas las ${items.length}.`)
+      focusAfter(items.length === 1 ? String(items[0]?.payload["fieldId"]) : null)
     } catch (error) {
+      if (isStale(error)) setStale(true)
       toast.error(submitErrorMessage(error))
+    } finally {
+      setConfirming(false)
     }
+  }
+  const discardProposal = (item: DictationSuggestion) => {
+    if (!clio) return
+    discardSent.current.add(item.id)
+    clio.discard(item)
+    setAnnouncement("Propuesta descartada.")
+    focusAfter(String(item.payload["fieldId"]))
   }
   // Lo que entró a la ficha desde fuera de este panel (lo aceptado de Clío, aquí o en la barra del
   // dictado) se adopta en las preguntas que aquí nadie tocó: así no aparece «Otra pestaña guardó…».
@@ -452,10 +501,13 @@ function StaffResponseDetail({
     for (const [id, value] of Object.entries(server)) {
       const base = savedAnswers.current[id] ?? null
       if (JSON.stringify(value ?? null) === JSON.stringify(base)) continue
-      if (JSON.stringify(form.state.values.answers[id] ?? null) !== JSON.stringify(base)) continue
+      const mine = JSON.stringify(form.state.values.answers[id] ?? null)
+      // Ya está en pantalla (lo confirmado de Clío): solo se pone al día la base del guardado.
+      const shown = mine === JSON.stringify(value ?? null)
+      if (!shown && mine !== JSON.stringify(base)) continue
       const wasSaved = version.current === saved.current
       savedAnswers.current = { ...savedAnswers.current, [id]: value }
-      form.setFieldValue(`answers.${id}`, value)
+      if (!shown) form.setFieldValue(`answers.${id}`, value, { dontRunListeners: true })
       // Ya está guardado en el servidor: no es un cambio por guardar.
       if (wasSaved) {
         saved.current = version.current
@@ -563,7 +615,27 @@ function StaffResponseDetail({
         if (Object.keys(unsaved).length > 0) addSubmitErrors(form, unsaved)
         else if (failedBefore) clearSubmitErrors(form)
       })
-      .catch((error: unknown) => applySubmitError(form, error))
+      .catch((error: unknown) => {
+        if (isStale(error)) setStale(true)
+        applySubmitError(form, error)
+      })
+  }
+  // Otra pestaña o persona guardó mientras se escribía: se trae lo último y lo escrito aquí se queda.
+  const [stale, setStale] = useState(false)
+  const bringLatest = async () => {
+    await onChanged()
+    const latest = queryClient.getQueryData<{ data: FormResponse[] }>(["form-responses", response.patientId])?.data.find((row) => row.id === response.id)
+    if (!latest) return
+    const server = (latest.answers ?? {}) as Record<string, unknown>
+    for (const [id, value] of Object.entries(server)) {
+      if (!changed.current.has(`answers.${id}`)) form.setFieldValue(`answers.${id}`, value, { dontRunListeners: true })
+    }
+    savedAnswers.current = server
+    setStale(false)
+    clearSubmitErrors(form)
+    // Lo escrito aquí sale de nuevo, ahora sobre lo último.
+    version.current += 1
+    autosave()
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: guarda al cambiar respuestas; `autosave` se rehace en cada render.
   useEffect(() => {
@@ -669,9 +741,13 @@ function StaffResponseDetail({
   return (
     <article
       ref={articleRef}
+      tabIndex={-1}
       aria-labelledby={`${ids}-title`}
-      className="flex flex-col gap-4 rounded-md border p-4"
+      className="flex flex-col gap-4 rounded-md border p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 id={`${ids}-title`} className="text-base font-semibold">
@@ -743,11 +819,11 @@ function StaffResponseDetail({
                   <strong>
                     {CLINICAL_NAME} propone {readyProposals.length === 1 ? "1 respuesta" : `${readyProposals.length} respuestas`}
                   </strong>{" "}
-                  de lo que dictaste. Ninguna entra hasta que la aceptes.
+                  de lo que dictaste. {readyProposals.length === 1 ? "No entra hasta que la confirmes." : "Ninguna entra hasta que la confirmes."}
                 </>
               ) : (
                 <>
-                  {CLINICAL_NAME} no pudo llenar {proposals.length === 1 ? "1 pregunta" : `${proposals.length} preguntas`}: elige tú en cada una.
+                  {CLINICAL_NAME} no pudo llenar {proposals.length === 1 ? "1 pregunta: elige tú." : `${proposals.length} preguntas: elige tú en cada una.`}
                 </>
               )}
             </span>
@@ -757,10 +833,10 @@ function StaffResponseDetail({
               type="button"
               size="sm"
               className="min-h-11 sm:min-h-8"
-              disabled={clio?.busy}
+              disabled={busy}
               onClick={() => void accept(readyProposals)}
             >
-              Aceptar las {readyProposals.length}
+              Confirmar las {readyProposals.length}
             </Button>
           ) : null}
         </div>
@@ -783,7 +859,7 @@ function StaffResponseDetail({
                     const proposal = proposalFor(field.id)
                     // Lo aceptado de Clío, mientras siga siendo eso: si se cambia a mano, ya es de la persona.
                     const mark = response.clioAccepted?.[field.id]
-                    const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null)
+                    const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null) && !typedHere.current.has(field.id)
                     return (
                       <div className="flex flex-col gap-1" data-field={field.id}>
                         <AnswerAppField
@@ -797,7 +873,7 @@ function StaffResponseDetail({
                           <div
                             role="group"
                             aria-label={`Propuesta de ${CLINICAL_NAME} para «${field.label}»`}
-                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-xs ${proposal.status === "lista" ? "bg-agent-soft" : "bg-muted"}`}
+                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${proposal.status === "lista" ? "bg-agent-soft" : "bg-muted"}`}
                           >
                             <span className="min-w-0 [overflow-wrap:anywhere]">
                               {proposal.status === "lista" ? (
@@ -817,11 +893,11 @@ function StaffResponseDetail({
                                   type="button"
                                   size="sm"
                                   className="min-h-11 sm:min-h-8"
-                                  aria-label={`Aceptar ${proposedWords(proposal)} en «${field.label}»`}
-                                  disabled={clio?.busy}
+                                  aria-label={`Confirmar ${proposedWords(proposal)} en «${field.label}»`}
+                                  disabled={busy}
                                   onClick={() => void accept([proposal])}
                                 >
-                                  Aceptar
+                                  Confirmar
                                 </Button>
                               ) : null}
                               <Button
@@ -830,8 +906,8 @@ function StaffResponseDetail({
                                 size="icon"
                                 className="size-11 sm:size-8"
                                 aria-label={`Descartar la propuesta de ${CLINICAL_NAME} para «${field.label}»`}
-                                disabled={clio?.busy}
-                                onClick={() => clio?.discard(proposal)}
+                                disabled={busy}
+                                onClick={() => discardProposal(proposal)}
                               >
                                 <X className="size-4" aria-hidden />
                               </Button>
@@ -840,7 +916,7 @@ function StaffResponseDetail({
                         ) : null}
                         {marked ? (
                           <p className="text-xs text-muted-foreground">
-                            Lo propuso {CLINICAL_NAME} · lo aceptó {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
+                            {CLINICAL_NAME} · confirmó {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
                           </p>
                         ) : null}
                         {previous && before ? (
@@ -871,8 +947,13 @@ function StaffResponseDetail({
         </section>
       ))}
       {formError ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           {formError}
+          {stale ? (
+            <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => void bringLatest()}>
+              Traer lo último sin perder lo tuyo
+            </Button>
+          ) : null}
         </p>
       ) : null}
       {editable ? (

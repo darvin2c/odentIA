@@ -71,10 +71,18 @@ function goToSuggestions(label: string): void {
   list.scrollIntoView({ block: "center" })
 }
 
+/** Abre la ficha desde su aviso en la atención: ahí se confirma cada respuesta. */
+function openFormSuggestions(responseId: string): void {
+  const notice = document.querySelector<HTMLElement>(`[data-clio-form="${CSS.escape(responseId)}"]`)
+  if (!notice) return
+  notice.scrollIntoView({ block: "center" })
+  notice.querySelector<HTMLButtonElement>("button")?.click()
+}
+
 function readiness(session: DictationSession): string {
-  // La receta no se confirma con las demás: tiene su «Emitir receta».
+  // La receta no se confirma con las demás: tiene su «Emitir receta». Las de ficha, en su ficha.
   const prescription = session.suggestions.some((item) => item.kind === "receta")
-  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.status !== "lista").length
+  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
   const counts = [
     session.ready > 0 ? plural(session.ready, "lista", "listas") : "",
     review > 0 ? `${review} por revisar` : "",
@@ -245,9 +253,22 @@ export function DictationPanel({
   const suggestionKinds = [
     ...new Set(
       session.suggestions
-        .filter((item) => item.status === "lista" || item.status === "por_revisar")
+        .filter((item) => item.kind !== "ficha" && (item.status === "lista" || item.status === "por_revisar"))
         .map((item) => DICTATION_KIND_LABEL[item.kind]),
     ),
+  ]
+  // Lo de una ficha se confirma en la ficha: un enlace por ficha que la abre (forma B, ADR 0187).
+  const formLinks = [
+    ...session.suggestions
+      .filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))
+      .reduce((forms, item) => {
+        const id = String(item.payload["responseId"])
+        const form = forms.get(id) ?? { id, title: String(item.payload["formTitle"] ?? "Ficha"), ready: 0, review: 0 }
+        if (item.status === "lista") form.ready += 1
+        else form.review += 1
+        return forms.set(id, form)
+      }, new Map<string, { id: string; title: string; ready: number; review: number }>())
+      .values(),
   ]
   // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085, tablero C4).
   const blocked = session.blocked
@@ -406,7 +427,7 @@ export function DictationPanel({
             )}
           </p>
           {/* A dónde quedó cada sugerencia: un toque lleva a su bloque. */}
-          {pending > 0 && suggestionKinds.length > 0 ? (
+          {pending > 0 && suggestionKinds.length + formLinks.length > 0 ? (
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {suggestionKinds.map((label) => (
                 <Button
@@ -417,6 +438,11 @@ export function DictationPanel({
                   onClick={() => goToSuggestions(label)}
                 >
                   {label} ↓
+                </Button>
+              ))}
+              {formLinks.map((form) => (
+                <Button key={form.id} type="button" variant="link" className="h-auto p-0" onClick={() => openFormSuggestions(form.id)}>
+                  {form.title}: {[form.ready > 0 ? `${form.ready} por confirmar` : "", form.review > 0 ? `${form.review} por revisar` : ""].filter(Boolean).join(" y ")} ↓
                 </Button>
               ))}
             </p>
