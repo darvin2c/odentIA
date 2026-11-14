@@ -65,6 +65,13 @@ it("un emoji se quita sin dejar «?»; otra escritura sin glifo sale como ? y no
   expect(printable("muela de atrás 🦷😬\nme duele 🙏")).toBe("muela de atrás\nme duele")
   expect(printable("Familia 👨‍👩‍👧 y 🇵🇪 bandera")).toBe("Familia y bandera")
   expect(printable("Paso 1️⃣ listo ✅")).toBe("Paso 1 listo")
+  // Sin el emoji no queda un espacio antes del signo (verificador, QA de la entrega 2).
+  expect(printable("muela de atrás 🦷😬. Año")).toBe("muela de atrás. Año")
+  expect(printable("Tomo ácido fólico 🍼; estoy")).toBe("Tomo ácido fólico; estoy")
+  expect(printable("🙏 gracias")).toBe("gracias")
+  // Lo que era solo emojis no queda en blanco (revisor).
+  expect(printable("👍")).toBe("(emoji)")
+  expect(printable(" 🦷😬 ")).toBe("(emoji)")
   for (const face of ["sans", "sansSemi", "sansBold", "serif"] as const)
     expect(printable("Formulario largo ñandú 🦷", face)).not.toContain("?")
   expect(printable("日本")).toBe("??")

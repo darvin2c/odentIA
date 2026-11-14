@@ -268,6 +268,11 @@ const STAND_INS: Record<string, string> = {
  */
 const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}‍︎️⃣]/gu
 
+/** Donde había un emoji: se marca para ordenar después los espacios que deja. */
+const GAP = "\u0000"
+/** Un espacio que dejó un emoji quitado: se borra antes de un signo o al borde de una línea. */
+const SOFT = "\u0001"
+
 /**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con
  * todas sus partes cuenta como uno) sale con su equivalente (`STAND_INS`). Un emoji
@@ -275,14 +280,15 @@ const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Mo
  * la copia de la historia, 14 nov: «muela de atrás ??»). Una letra con un acento que
  * la letra no tiene sale sin el acento. Solo lo que no tiene ninguna de esas salidas
  * (otra escritura) queda como `?`, sin error. Los blancos heredados pasan a espacios
- * y los caracteres de control se quitan.
+ * y los caracteres de control se quitan. Quitado el emoji, no queda un espacio suelto
+ * («muela de atrás . Año») y lo que era solo emojis dice «(emoji)», no un blanco
+ * (revisor y verificador, QA de la entrega 2).
  */
 export function printable(value: string, face: Face = "sans"): string {
   const { font } = fontData(face)
   const covered = (text: string) => [...text].every((char) => font.hasGlyphForCodePoint(char.codePointAt(0) ?? 0))
   const clean = value.normalize("NFC").replace(/\r\n?/g, "\n").replace(/\t/g, " ")
   let out = ""
-  let dropped = false
   for (const { segment } of GRAPHEMES.segment(clean)) {
     if (segment === "\n" || segment === " ") {
       out += segment
@@ -301,15 +307,21 @@ export function printable(value: string, face: Face = "sans"): string {
     }
     const text = segment.replace(EMOJI_PARTS, "")
     if (text !== segment) {
-      dropped = true
-      if (text && covered(text)) out += text
+      out += text && covered(text) ? text : GAP
       continue
     }
     const bare = segment.normalize("NFD").replace(/\p{M}/gu, "")
     out += bare && covered(bare) ? bare : "?"
   }
-  // Sin el emoji no quedan dos espacios juntos ni uno al final de la línea.
-  return dropped ? out.replace(/ {2,}/g, " ").replace(/ +(\n|$)/g, "$1") : out
+  if (!out.includes(GAP)) return out
+  const tidy = out
+    // Los espacios y emojis seguidos valen un espacio, si había alguno («Hola 👍 Ñandú»), o nada («a👍b»).
+    .replace(new RegExp(`[ ${GAP}]*${GAP}[ ${GAP}]*`, "g"), (run) => (run.includes(" ") ? SOFT : ""))
+    // Ese espacio sobra antes de un signo y al borde de una línea.
+    .replace(new RegExp(`${SOFT}(?=[.,;:!?)\\]}»”\\n]|$)`, "g"), "")
+    .replace(new RegExp(`(^|\\n)${SOFT}`, "g"), "$1")
+    .replaceAll(SOFT, " ")
+  return tidy.trim() === "" && clean.trim() !== "" ? "(emoji)" : tidy
 }
 
 // --- Color ---------------------------------------------------------------------
