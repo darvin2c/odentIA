@@ -122,7 +122,8 @@ export function DictationSignDialog({
                           {title}
                         </label>
                         <span className="text-muted-foreground">
-                          {DICTATION_KIND_LABEL[item.kind]}
+                          {/* Una respuesta de ficha dice de cuál ficha es: puede haber dos abiertas. */}
+                          {item.kind === "ficha" && typeof item.payload["formTitle"] === "string" ? item.payload["formTitle"] : DICTATION_KIND_LABEL[item.kind]}
                           {can && !checked ? " · desmarcada: no entra" : ""}
                         </span>
                         {can && checked && session.noteAddsTo(item) ? <span className="text-muted-foreground">{session.noteAddsTo(item)}</span> : null}
