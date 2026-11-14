@@ -418,11 +418,12 @@ const SettingsDotcommissionsRoute = SettingsDotcommissionsRouteImport.update({
   path: '/commissions',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsDotconsultationFormsRoute = SettingsDotconsultationFormsRouteImport.update({
-  id: '/consultation-forms',
-  path: '/consultation-forms',
-  getParentRoute: () => SettingsRoute,
-} as any)
+const SettingsDotconsultationFormsRoute =
+  SettingsDotconsultationFormsRouteImport.update({
+    id: '/consultation-forms',
+    path: '/consultation-forms',
+    getParentRoute: () => SettingsRoute,
+  } as any)
 const SettingsDotdataProtectionRoute =
   SettingsDotdataProtectionRouteImport.update({
     id: '/data-protection',
