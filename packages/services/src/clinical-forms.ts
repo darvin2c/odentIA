@@ -927,6 +927,8 @@ function assertAnswer(
     case "pieza": {
       // Un sitio suelto del producto (odentIA: una pieza FDI).
       const tooth = answerNumber(value)
+      // Lo que no es un número se dice así, sin repetir el valor que llegó («inválida: true»).
+      if (site && !Number.isFinite(tooth)) throw validation(`"${field.label}" debe ser el número de una pieza`)
       if (!site || site.code(tooth) === null)
         throw validation(`"${field.label}": ${site?.invalid(value) ?? "esta clínica no registra dónde"}`)
       return tooth
@@ -1472,7 +1474,12 @@ export async function createFormResponse(
     .limit(1)
   if (!template) throw notFound("Plantilla")
   if (template.status !== "publicado") {
-    throw invalidField("templateId", "Solo una plantilla publicada admite capturas")
+    throw invalidField(
+      "templateId",
+      template.status === "archivado"
+        ? "Este formulario ya no se usa: elige otro, o vuelve a usarlo desde Configuración"
+        : "Este formulario aún es un borrador: publícalo para empezar a llenarlo",
+    )
   }
   // La pantalla ya no lo ofrece; el servidor tampoco lo acepta.
   if (template.respondent === "portal") {
