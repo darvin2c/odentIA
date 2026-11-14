@@ -6,6 +6,7 @@ import {
   formRowTitle,
   lookedCount,
   offerActionWords,
+  offersView,
   offerStateWords,
   offerWhyWords,
   unlooked,
@@ -61,6 +62,15 @@ describe("fichas ofrecidas en la atención", () => {
     expect(offerWhyWords({ why: "profesional", specialtyName: "Endodoncia", underYears: null })).toBe(
       "Por la especialidad de quien atiende: Endodoncia",
     )
+  })
+
+  it("«Otra ficha…» está siempre: sin ninguna ofrecida queda sola, en una línea", () => {
+    expect(offersView([{ today: null }], true)).toBe("lista")
+    expect(offersView([], true)).toBe("solo-otra")
+    // Quien no puede empezar una no ve una salida que no puede usar.
+    expect(offersView([], false)).toBe("nada")
+    // Mientras llegan, no se dice nada.
+    expect(offersView(undefined, true)).toBe("nada")
   })
 
   it("un solo botón: empezar, seguir o ver la de hoy; nunca «pendiente»", () => {

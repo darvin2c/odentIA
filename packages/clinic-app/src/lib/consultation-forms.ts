@@ -55,6 +55,20 @@ export function offerStateWords(offer: Pick<FormOffer, "today">): string | null 
   return offer.today.status === "borrador" ? "A medias" : "Finalizada"
 }
 
+/**
+ * Qué muestra la atención de sus fichas: con alguna ofrecida, la lista con «Otra ficha…» al pie;
+ * sin ninguna, solo «Otra ficha…», en una línea, para que siempre esté; sin poder empezar una
+ * ni nada que ver, nada. Mientras llegan las ofrecidas, nada: no se dice que no hay.
+ */
+export function offersView(
+  offers: readonly Pick<FormOffer, "today">[] | undefined,
+  canStart: boolean,
+): "lista" | "solo-otra" | "nada" {
+  if (offers === undefined) return "nada"
+  if (offers.length > 0) return "lista"
+  return canStart ? "solo-otra" : "nada"
+}
+
 /** La ficha en uso (o la última versión) de cada una que vino con el producto y sigue en la lista. */
 function productForms(listed: readonly FormTemplate[][]): FormTemplate[] {
   return listed.flatMap((versions) => {

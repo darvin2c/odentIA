@@ -8,6 +8,7 @@ import {
   type FormOffer,
   offerActionWords,
   offerStateWords,
+  offersView,
   offerWhyWords,
 } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -67,8 +68,19 @@ export function FormOffersBox({
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const list = offers.data?.data ?? []
-  // Sin ninguna que ofrecer, nada: «Nuevo › Ficha» sigue ahí.
-  if (list.length === 0) return null
+  // Si no se pudo leer, igual se ofrece elegir una: «Otra ficha…» está siempre.
+  const view = offersView(offers.data?.data ?? (offers.isError ? [] : undefined), canStart)
+  if (view === "nada") return null
+  if (view === "solo-otra") {
+    return (
+      <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+        Ninguna ficha aparece sola en esta atención.
+        <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={onOther}>
+          Otra ficha…
+        </Button>
+      </p>
+    )
+  }
 
   const act = (offer: FormOffer) => {
     if (offer.today) onOpen(offer.today.responseId)
