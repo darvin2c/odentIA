@@ -57,6 +57,7 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import {
+  advanceOnEnter,
   BirthDateInput,
   type FieldControl,
   normalizeCountry,
@@ -2378,30 +2379,10 @@ function Question({
           event.preventDefault()
           return
         }
-        if (event.key !== "Enter" || event.nativeEvent.isComposing || !typing) return
-        // En el buscador de país, Enter elige el país; nunca envía el formulario.
-        if (target.getAttribute("role") === "combobox") {
-          event.preventDefault()
-          return
-        }
-        // Enter pasa al campo siguiente; en el último, sigue a la otra pantalla.
-        event.preventDefault()
-        const fields = [
-          ...event.currentTarget.querySelectorAll<HTMLInputElement>(
-            "input:not([hidden]):not([type=hidden]):not([type=radio]):not([type=checkbox]):not(:disabled)",
-          ),
-        ].filter((input) => input.tabIndex !== -1)
-        const next = fields[fields.indexOf(target as HTMLInputElement) + 1]
-        if (next) {
-          next.focus()
-          return
-        }
-        if (!blocked(event.currentTarget))
-          event.currentTarget
-            .querySelector<HTMLButtonElement>(
-              "[data-slot=questionnaire-next]:not([hidden]), [data-slot=questionnaire-submit]:not([hidden])",
-            )
-            ?.click()
+        // Enter (o «Siguiente» del teléfono) pasa a la pregunta siguiente, también a las de
+        // botones (Sí, No, No sé), y en la última lleva a «Siguiente» o «Enviar» sin pulsarlo:
+        // nunca salta de pantalla con preguntas sin ver ni envía. Lo que falta lo dice el botón.
+        advanceOnEnter(event)
       }}
     >
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
