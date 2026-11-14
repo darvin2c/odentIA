@@ -92,6 +92,15 @@ describe("lo que propone Clío se comprueba contra lo que se dijo", () => {
     expect(propose({ question: 1, answer: "clase i" }, "clase uno molar derecha")).toMatchObject({ status: "lista", payload: { value: "Clase I" } })
     expect(propose({ question: 1, answer: "Clase IV" }, "clase cuatro")).toBeNull()
   })
+  it("el número de una opción es solo un rótulo si se dijeron sus palabras y ninguna otra calza mejor", () => {
+    const frankl = [question(1, { fieldId: "conducta", label: "Conducta (Frankl)", type: "opcion_unica", options: ["1 · Definitivamente negativa", "2 · Negativa", "3 · Positiva", "4 · Definitivamente positiva"] })]
+    const check = (answer: string, said: string) => prepareFormAnswer({ payload: { question: 1, answer }, sourceText: said }, frankl, FDI)
+    expect(check("1 · Definitivamente negativa", "conducta definitivamente negativa")).toMatchObject({ status: "lista" })
+    expect(check("2 · Negativa", "conducta definitivamente negativa")).toMatchObject({ status: "por_revisar" })
+    expect(check("3 · Positiva", "Frankl tres")).toMatchObject({ status: "lista" })
+    // Con un número dicho que es de la lista, las palabras no bastan: «clase dos» no es «Clase I».
+    expect(propose({ question: 1, answer: "Clase I" }, "clase dos molar derecha")).toMatchObject({ status: "por_revisar" })
+  })
   it("la pieza tiene que existir y haberse dicho", () => {
     expect(propose({ question: 5, answer: "46" }, "en la cuarenta y seis")).toMatchObject({ status: "lista", payload: { value: 46 } })
     expect(propose({ question: 5, answer: "19" }, "la diecinueve")).toMatchObject({ status: "por_revisar" })

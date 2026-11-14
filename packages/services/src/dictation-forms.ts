@@ -285,9 +285,20 @@ export function prepareFormAnswer(
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
   const option = (spoken: string) => (question.options ?? []).find((item) => plain(item) === plain(spoken)) ?? null
   /** La opción, si lo que la distingue de las otras (su clase, su grado, su división) se dijo. */
+  const spoken = new Set(plain(said).split(/[^a-z]+/).filter((word) => word.length >= 3))
+  /** Las palabras de una opción, sin sus números («1 · Definitivamente negativa»: definitivamente, negativa). */
+  const wordsOf = (option: string) => plain(option).split(/[^a-z]+/).filter((word) => word.length >= 3)
+  const wordsSaid = (option: string) => wordsOf(option).length > 0 && wordsOf(option).every((word) => spoken.has(word))
   const chosen = (value: string): { ok: true } | { ok: false; note: string } => {
     const numbers = optionNumbers(value)
     if (containsAll(heard, numbers)) return { ok: true }
+    // Su número es solo un rótulo («1 · Definitivamente negativa») si se dijeron sus palabras, alguna la
+    // distingue de las otras, ninguna otra calza con más de lo dicho y no se dijo un número de la lista.
+    const others = (question.options ?? []).filter((item) => item !== value)
+    const listNumbers = (question.options ?? []).flatMap(optionNumbers)
+    const distinct = wordsOf(value).some((word) => others.some((item) => !wordsOf(item).includes(word)))
+    const better = others.some((item) => wordsSaid(item) && wordsOf(item).length > wordsOf(value).length)
+    if (wordsSaid(value) && distinct && !better && !heard.some((number) => listNumbers.includes(number))) return { ok: true }
     const known = numbers.filter((number) => containsAll(heard, [number]))
     const close = (question.options ?? []).filter((item) => containsAll(optionNumbers(item), known))
     const between = close.length >= 2 ? `no alcanza para elegir entre ${close.map((item) => `«${item}»`).join(" y ")}` : "elige tú la opción"
