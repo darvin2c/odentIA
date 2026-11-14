@@ -368,6 +368,22 @@ export function formAnswerDropReason(draft: { payload: Record<string, unknown>; 
   return `No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`
 }
 
+/**
+ * La misma respuesta para la pregunta gemela de otra ficha empezada (el ceod
+ * en la odontopediátrica y en la odontoestomatológica): mismo rótulo, tipo y
+ * opciones. Cada una se vuelve a comprobar contra lo dicho (QA del 14 nov, E27).
+ */
+export function formAnswerTwins<T extends { payload: Record<string, unknown> }>(draft: T, questions: readonly DictationFormQuestion[]): T[] {
+  const question = questions.find((item) => item.number === draft.payload["question"])
+  if (!question) return []
+  const same = (other: DictationFormQuestion) =>
+    other.responseId !== question.responseId &&
+    plain(other.label) === plain(question.label) &&
+    other.type === question.type &&
+    JSON.stringify(other.options ?? null) === JSON.stringify(question.options ?? null)
+  return questions.filter(same).map((other) => ({ ...draft, payload: { ...draft.payload, question: other.number } }))
+}
+
 /** La misma respuesta, sin mirar el orden de varias opciones. */
 function sameAnswer(a: unknown, b: unknown): boolean {
   const norm = (value: unknown) => JSON.stringify(Array.isArray(value) ? [...value].map(String).sort() : value)

@@ -59,6 +59,7 @@ import {
   type DictationFormQuestion,
   dictationFormQuestions,
   formAnswerDropReason,
+  formAnswerTwins,
   formAnswerWords,
   prepareFormAnswer,
 } from "./dictation-forms.js"
@@ -1570,7 +1571,11 @@ export async function saveDictationSegment(
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   const droppedForms: Array<{ said: string; why: string }> = []
-  for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
+  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada.
+  const drafts = segment.drafts
+    .slice(0, DICTATION_MAX_SUGGESTIONS)
+    .flatMap((draft) => (draft.kind === "ficha" ? [draft, ...formAnswerTwins(draft, scope.formQuestions)] : [draft]))
+  for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) preparedDrafts.push({ draft, prepared })
     else if (draft.kind === "ficha" && draft.sourceText?.trim()) droppedForms.push({ said: draft.sourceText.trim(), why: formAnswerDropReason(draft, scope.formQuestions) })

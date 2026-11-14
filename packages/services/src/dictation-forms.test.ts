@@ -419,6 +419,16 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(titles(open)).toEqual(["Ficha de ortodoncia", "Segunda", "Tercera"])
   })
 
+  it("un dato que preguntan dos fichas empezadas se propone en las dos", async () => {
+    const { form, save } = await startedForm()
+    await ownerDb.insert(clinicalFormResponse).values({ ...form, id: undefined, templateTitle: "Control de ortodoncia", answers: {}, createdAt: new Date() })
+    const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis milímetros" }])
+    expect(saved.suggestions.map((item) => [item.payload["formTitle"], item.payload["value"]])).toEqual([
+      ["Ficha de ortodoncia", 6],
+      ["Control de ortodoncia", 6],
+    ])
+  })
+
   it("anular la atención descarta lo que Clío proponía", async () => {
     const { save, fx } = await startedForm()
     await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])
