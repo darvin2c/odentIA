@@ -60,7 +60,7 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await page.getByRole("link", { name: "Integraciones", exact: true }).click()
   const confirmation = page.getByRole("alertdialog")
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(name).toHaveValue("Borrador de organización")
   await expect(name).toBeFocused()
   await expect(page).toHaveURL(/\/settings\/?$/)
@@ -78,7 +78,7 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
 
   await page.evaluate(() => window.history.back())
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(name).toHaveValue("Borrador de organización")
   await expect(name).toBeFocused()
   await page.evaluate(() => window.history.back())
@@ -97,7 +97,7 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await name.fill("Borrador para adelante")
   await page.evaluate(() => window.history.forward())
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(name).toHaveValue("Borrador para adelante")
 
   // Un fallo no resetea ninguno de los campos; el siguiente envío usa el borrador.
@@ -110,7 +110,7 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await expect(page.getByLabel("Dirección fiscal", { exact: true })).toHaveValue("Dirección conservada")
   await page.getByRole("link", { name: "Pacientes", exact: true }).click()
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
 
   await page.unroute("**/api/org-profile")
   await page.getByRole("button", { name: "Guardar", exact: true }).click()
@@ -147,7 +147,7 @@ test("Portal del paciente conserva lo marcado con fallo de guardado y navegació
   await page.getByRole("link", { name: "Datos de la clínica", exact: true }).click()
   const confirmation = page.getByRole("alertdialog")
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(documents).toBeChecked({ checked: next })
   await cancelReload(page)
   await expect(documents).toBeChecked({ checked: next })
@@ -158,7 +158,7 @@ test("Portal del paciente conserva lo marcado con fallo de guardado y navegació
   await expect(documents).toBeChecked({ checked: next })
   await page.evaluate(() => window.history.back())
   await expect(confirmation).toBeVisible()
-  await confirmation.getByRole("button", { name: "Continuar editando" }).click()
+  await confirmation.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(documents).toBeChecked({ checked: next })
 
   await page.unroute("**/api/portal/policy")

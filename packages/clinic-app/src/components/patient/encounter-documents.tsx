@@ -13,7 +13,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
-import type { ClinicalOrder } from "../../lib/clinical-forms"
+import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
   consentSignatureWords,
@@ -936,6 +936,22 @@ function PrescriptionRow({
 }
 
 /**
+ * Lo que dice el panel de un formulario bajo su título: el borrador se guarda solo; uno
+ * finalizado ya no se cambia (decir «se guarda solo» ahí prometía algo que no pasa). Lo
+ * que respondió el paciente no lleva frase: no lo escribe el equipo, y su vista ya dice
+ * de quién es y qué se puede hacer («Agregar una corrección», «Marcar como revisado»).
+ */
+export function formDetailDescription(
+  response: (Pick<FormResponse, "status"> & Partial<Pick<FormResponse, "source">>) | null,
+  canWrite: boolean,
+): string | undefined {
+  if (response?.source === "portal") return undefined
+  if (response?.status === "borrador" && canWrite) return "Se guarda sola mientras la llenas."
+  if (response?.status === "finalizado") return "Finalizada: ya no se cambia. Para corregir algo, agrega una adenda."
+  return undefined
+}
+
+/**
  * Los formularios que la atención firmada dejó a medias, una sola vez y con su
  * única salida: «Completar». Lo usan Documentos de la atención firmada y
  * «Atención finalizada», el aviso que sale justo al firmar.
@@ -1021,7 +1037,7 @@ export function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Ficha"}
-      description={response?.source === "portal" ? undefined : "Se guarda sola mientras la llenas."}
+      description={formDetailDescription(response, canWrite)}
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
     >

@@ -174,17 +174,18 @@ it("el servidor rechaza una fecha imposible y un valor que no es del tipo de la 
   )
   const save = (answers: Record<string, unknown>) =>
     f.run((tx) => updateFormResponseDraft(tx, ORG, f.actor, response.id, { answers }))
-  await expect(save({ fecha: "2026-02-31" })).rejects.toMatchObject({
-    status: 400,
-    fields: { "answers.fecha": expect.stringContaining("Fecha de evaluación") },
-  })
-  await expect(save({ fecha: "2026-13-01" })).rejects.toMatchObject({ status: 400 })
-  await expect(save({ intensidad: true })).rejects.toMatchObject({
-    status: 400,
-    fields: { "answers.intensidad": expect.stringContaining("Intensidad") },
-  })
-  await expect(save({ dolor: true })).rejects.toMatchObject({ status: 400 })
-  await expect(save({ intensidad: [7] })).rejects.toMatchObject({ status: 400 })
+  // El borrador se guarda por partes (entrega 3): lo que no vale no se guarda y vuelve en
+  // `rejected`, dicho en su pregunta, sin frenar a las demás ni pisar lo que había.
+  const refused = async (answers: Record<string, unknown>, id: string, words: string) => {
+    const result = await save(answers)
+    expect(result.rejected[`answers.${id}`]).toEqual(expect.stringContaining(words))
+    expect((result.answers as Record<string, unknown>)[id] ?? null).toBeNull()
+  }
+  await refused({ fecha: "2026-02-31" }, "fecha", "Esa fecha no existe")
+  await refused({ fecha: "2026-13-01" }, "fecha", "Esa fecha no existe")
+  await refused({ intensidad: true }, "intensidad", "Escribe un número")
+  await refused({ dolor: true }, "dolor", "Va de 0 a 10")
+  await refused({ intensidad: [7] }, "intensidad", "Escribe un número")
   // Lo que sí es de su tipo se guarda: el 29 de febrero de un año bisiesto existe.
   const saved = await save({ fecha: "2028-02-29", intensidad: 7, dolor: "4" })
   expect(saved.answers).toMatchObject({ fecha: "2028-02-29", intensidad: 7, dolor: 4 })
@@ -513,9 +514,9 @@ it("los rechazos al empezar o llenar un formulario se dicen con palabras de la p
     createFormResponse(tx, ORG, f.actor, { templateId: template.id, patientId: f.patient.id }),
   )
   // Un sí/no donde va una pieza: se dice qué va ahí, no «inválida: true».
-  await expect(
-    f.run((tx) => updateFormResponseDraft(tx, ORG, f.actor, response.id, { answers: { pieza: true } })),
-  ).rejects.toMatchObject({ status: 400, fields: { "answers.pieza": '"Pieza" debe ser el número de una pieza' } })
+  // Guardado por partes (entrega 3): no frena lo demás y se dice en su pregunta.
+  const saved = await f.run((tx) => updateFormResponseDraft(tx, ORG, f.actor, response.id, { answers: { pieza: true } }))
+  expect(saved.rejected["answers.pieza"]).toEqual(expect.stringContaining('"Pieza" debe ser el número de una pieza'))
   const start = (templateId: string) =>
     f.run((tx) => createFormResponse(tx, ORG, f.actor, { templateId, patientId: f.patient.id }))
   // Uno que ya no se usa.

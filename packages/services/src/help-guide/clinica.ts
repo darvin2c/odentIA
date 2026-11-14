@@ -275,6 +275,20 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.read",
       },
       {
+        id: "pacientes-formulario-salir-sin-guardar",
+        q: "Me pregunta «¿Salir sin guardar?» en un formulario, ¿se perdió lo que llené?",
+        a: "Arriba del formulario dice cómo va. «Guardado»: todo está guardado y salir no pregunta. «Cambios sin guardar» o «Guardando…»: se está guardando, y si sales se guarda igual al cerrar. «Guardado, menos lo marcado»: quedó guardado todo menos la respuesta marcada en rojo, que no vale (un 15 en una escala de 0 a 10); bajo ella dice qué sigue guardado. «No se guardó»: tus últimos cambios no llegaron. Solo en esos dos casos, al salir con ×, Escape o el menú, pregunta «¿Salir sin guardar?» y dice qué se pierde. «Seguir aquí» te deja corregirlo; «Descartar y salir» sale sin guardar eso ni lo último que cambiaste, y lo que ya estaba guardado se queda.",
+        forms: [
+          "me dice que salga sin guardar aunque ya guarde se perdio",
+          "que significa guardado menos lo marcado",
+          "que pasa si le doy descartar y salir",
+          "se perdio lo que llene en el formulario",
+          "dice no se guardo en el formulario",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-documentos-buscar-retirar",
         q: "¿Cómo retiro un archivo que subí por error?",
         a: "No se borra: se retira. En su página › Clínica › Documentos, ábrelo y toca «Retirar…», con el motivo; deja de salir en la lista y al pie se pueden ver los retirados. «Buscar un papel» y los filtros de arriba encuentran cualquier documento. Una imagen dice «Sin informar» hasta que, en «Informe y datos», tocas «Marcar como informada»; «Volver a pendiente» lo deshace. Lo hace quien escribe en la historia clínica.",

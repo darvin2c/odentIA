@@ -10,6 +10,10 @@ export interface DetailContainerProps
   isDirty?: boolean
   /** Escritura en curso: el cierre se ignora mientras dure. */
   isSubmitting?: boolean
+  /** Qué se pierde al cerrar, si el contenido lo dijo (ver `useCloseGuard`). */
+  lost?: string | null
+  /** «Descartar y salir» (ver `useCloseGuard`). */
+  onDiscard?: () => void
   /** Layout extra de la superficie (p. ej. ancho forzado del drawer). */
   className?: string
 }
@@ -32,10 +36,12 @@ export function DetailPanel({
   onClose,
   isDirty = false,
   isSubmitting = false,
+  lost,
+  onDiscard,
   className,
   ...surface
 }: DetailPanelProps) {
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, lost, onDiscard, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
 

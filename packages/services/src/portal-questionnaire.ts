@@ -256,6 +256,19 @@ export async function pendingQuestionnaire(
   return { id: template.id, title: template.title, version: template.version, schema: assertFormSchema(template.schema) }
 }
 
+/**
+ * El cuestionario vigente de ese paciente, ya enviado: cuándo, y si lo envió esa persona (`own`)
+ * u otra que también decide por él. Es lo único que «Su enlace» dice de lo enviado: que llegó y
+ * cuándo, nunca las respuestas.
+ */
+export async function questionnaireSent(tx: Db, who: Respondent): Promise<{ at: Date; own: boolean } | null> {
+  const template = await currentTemplate(tx, who.orgId)
+  if (!template) return null
+  const latest = await latestResponse(tx, who, template.key)
+  if (!latest?.submittedAt || latest.templateId !== template.id) return null
+  return { at: latest.submittedAt, own: latest.respondentContactId === who.contactId }
+}
+
 /** Lo envía desde «Su enlace» la persona o quien habla por ella: queda declarado y lo revisa el equipo. */
 export async function submitQuestionnaireFromLink(
   tx: Db,

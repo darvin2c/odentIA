@@ -6,7 +6,11 @@ import { regionToday } from "../schedule/time.js"
 import {
   ageText,
   clinicDateLocale,
+  padWrittenDate,
+  padWrittenPart,
   readWrittenDate,
+  yearFirstDate,
+  TYPED_DATE_SEPARATOR,
   type WrittenDateFormat,
   type WrittenDateReading,
   writeDate,
@@ -45,6 +49,11 @@ export interface BirthDateInputProps {
   required?: boolean
   /** El error lo dice la pantalla: el campo solo se marca. */
   invalid?: boolean
+  /**
+   * La pantalla ya dice el problema de la fecha con las mismas palabras (`writtenDateProblemText`):
+   * el campo no lo repite debajo. Sin esto, una fecha imposible decía dos cosas a la vez.
+   */
+  problemOutside?: boolean
   className?: string
   onBlur?: React.FocusEventHandler<HTMLInputElement>
   "aria-label"?: string
@@ -73,6 +82,7 @@ export function BirthDateInput({
   disabled = false,
   required,
   invalid = false,
+  problemOutside = false,
   className,
   onBlur,
   "aria-label": ariaLabel,
@@ -93,21 +103,53 @@ export function BirthDateInput({
     setDisplay(writeDate(value, format))
   }, [value, format])
 
-  const options = React.useMemo(() => maskOptions(format), [format])
+  // Se empezó por el año («1990-…»): sus ocho números se leen como año, mes y día.
+  const yearFirst = React.useRef(false)
+  // Ya tecleó un separador: quien escribe «12/10/…» nunca empezó por el año.
+  const typedSeparator = React.useRef(false)
+  const options = React.useMemo(
+    () =>
+      maskOptions(format, {
+        startYearFirst: () => {
+          yearFirst.current = true
+        },
+        isYearFirst: () => yearFirst.current,
+        separatorTyped: () => {
+          const before = typedSeparator.current
+          typedSeparator.current = true
+          return before
+        },
+      }),
+    [format],
+  )
   const maskRef = useMaskito({ options })
 
   const reading = readWrittenDate(display, today, format)
-  // A medias solo se avisa al salir; una fecha completa que no vale, enseguida.
+  // A medias (o con el año en dos números, que puede seguir) solo se avisa al salir; una fecha
+  // completa que no vale, enseguida.
   const showProblem =
-    reading.problem !== null && (touched || reading.problem.kind !== "incompleta")
+    reading.problem !== null && (touched || (reading.problem.kind !== "incompleta" && reading.problem.kind !== "anio-corto"))
   const hint = showProblem && reading.problem
-    ? writtenDateProblemText(reading.problem, format)
+    ? problemOutside
+      ? ""
+      : writtenDateProblemText(reading.problem, format)
     : showAge && reading.iso
       ? ageText(reading.iso, today)
       : ""
 
   function handleChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const next = event.target.value
+    let next = event.target.value
+    if (next.replace(/\D/g, "") === "") {
+      yearFirst.current = false
+      typedSeparator.current = false
+    }
+    if (yearFirst.current) {
+      const turned = yearFirstDate(next, format)
+      if (turned !== null) {
+        next = turned
+        yearFirst.current = false
+      }
+    }
     setDisplay(next)
     const nextReading = readWrittenDate(next, today, format)
     const out = nextReading.iso ?? (nextReading.empty ? "" : next)
@@ -134,6 +176,18 @@ export function BirthDateInput({
         onChange={handleChange}
         onBlur={(event) => {
           setTouched(true)
+          // «1990-4-3»: con el año primero, el día de un número lleva su cero al salir.
+          if (yearFirst.current && display.replace(/\D/g, "").length === 7) {
+            const turned = yearFirstDate(`${display.slice(0, -1)}0${display.slice(-1)}`, format)
+            if (turned !== null) {
+              yearFirst.current = false
+              setDisplay(turned)
+              const turnedReading = readWrittenDate(turned, today, format)
+              const out = turnedReading.iso ?? turned
+              emitted.current = out
+              onChange(out, turnedReading)
+            }
+          }
           onBlur?.(event)
         }}
       />
@@ -156,15 +210,49 @@ export function PastDateInput(props: Omit<BirthDateInputProps, "showAge">) {
 
 /**
  * Máscara del campo: dígitos y separadores fijos en el orden de la clínica. Una
- * fecha ISO pegada o autocompletada (`1995-07-30`) se pasa al orden del campo.
+ * fecha ISO pegada o autocompletada (`1995-07-30`) se pasa al orden del campo, y
+ * la escrita como se dice, con barras y sin ceros («3/4/1990»), se completa.
  */
-function maskOptions(format: WrittenDateFormat): MaskitoOptions {
+function maskOptions(
+  format: WrittenDateFormat,
+  yearFirst: { startYearFirst: () => void; isYearFirst: () => boolean; separatorTyped: () => boolean },
+): MaskitoOptions {
   return {
     mask: writtenDateMask(format),
     preprocessors: [
       ({ elementState, data }, actionType) => {
         if (actionType === "insert" && ISO_DATE.test(data.trim())) {
           return { elementState, data: writeDate(data.trim(), format) }
+        }
+        if (actionType === "insert") {
+          const whole = padWrittenDate(data, format)
+          if (whole) return { elementState, data: whole }
+          const [from, to] = elementState.selection
+          const atEnd = from === to && to === elementState.value.length
+          if (atEnd && data.length === 1 && TYPED_DATE_SEPARATOR.test(data)) {
+            // «1990-»: cuatro números de corrido y un guion, el primer separador tecleado, son un año
+            // (como en ISO 8601). El campo ya puso su barra («19/90»): lo demás se lee como mes y
+            // día al completar los ocho. Quien escribe «12/10/…» tecleó antes su barra: no cambia.
+            const digits = elementState.value.replace(/\D/g, "")
+            const yearAt = format.order.indexOf("year")
+            const firstSeparator = !yearFirst.separatorTyped()
+            if (yearAt !== 0 && firstSeparator && data === "-" && digits.length === 4) {
+              yearFirst.startYearFirst()
+              return { elementState, data: "" }
+            }
+            // Con el año primero, el mes de un número lleva su cero («1990-4-» → mes 04).
+            if (yearFirst.isYearFirst()) {
+              if (digits.length !== 5) return { elementState, data: "" }
+              // Se vuelve a escribir su número detrás de un cero: así el campo lo toma como tecleado.
+              const value = `${elementState.value.slice(0, -1)}0`
+              return { elementState: { value, selection: [value.length, value.length] }, data: elementState.value.slice(-1) }
+            }
+            // El separador que teclee (barra, guion, punto, espacio) vale por el del campo.
+            const padded = padWrittenPart(elementState.value, format)
+            return padded === null
+              ? { elementState, data: format.separator }
+              : { elementState: { value: padded, selection: [padded.length, padded.length] }, data: format.separator }
+          }
         }
         if (actionType === "validation" && ISO_DATE.test(elementState.value.trim())) {
           const written = writeDate(elementState.value.trim(), format)
