@@ -1258,8 +1258,9 @@ function AntecedentesSummary({
           <span className="text-sm text-muted-foreground">
             {pregnancyText.confirm
               ? `${pregnancyText.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}. Pregúntale si sigue embarazada.`
-              : pregnancy?.weeksToday === null
-                ? pregnancyText.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
+              : pregnancy?.weeksToday === null || pregnancyText.detail.startsWith("lo dijo")
+                ? // «lo dijo el 14 nov» ya dice quién: no se antepone «Dijo».
+                  pregnancyText.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
                 : `Dijo ${pregnancyText.detail}`}
           </span>
           {pregnancyGroup ? (
