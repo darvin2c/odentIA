@@ -806,6 +806,27 @@
       "when": 1794611115349,
       "tag": "0114_quien_y_cuando_lo_dijo_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1794659473120,
+      "tag": "0115_adjuntos_de_la_respuesta",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1794666238302,
+      "tag": "0116_fichas_en_uso",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1794666241982,
+      "tag": "0117_fichas_en_uso_reglas",
+      "breakpoints": true
     }
   ]
 }

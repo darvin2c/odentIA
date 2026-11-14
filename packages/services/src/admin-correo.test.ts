@@ -9,6 +9,7 @@ import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
+import { clientFileKey, registerClientFile } from "./admin-client-files.js"
 import { clientTimeline } from "./admin-clients.js"
 import { type AdminActor, setAdminStaffActive } from "./admin-core.js"
 import {
@@ -393,6 +394,136 @@ describe("responder un correo", () => {
       [reply.id, commercial.id].map((id) => ownerDb.transaction((tx) => outreachEmail(tx, id))),
     )
     expect(a?.messageId).not.toBe(b?.messageId)
+  })
+})
+
+describe("formato y adjuntos de la respuesta", () => {
+  it("lo escrito sale con su formato; la firma y la cita, como texto", async () => {
+    const inbound = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", text: "Hola, ¿qué es **eso**?" }),
+    )
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, {
+        body: "Hola **Rosa**, mira [los precios](https://odentia32.com/precios):\n- Agenda\n- Cobros",
+      }),
+    )
+    const email = await ownerDb.transaction((tx) => outreachEmail(tx, reply.id))
+    expect(email.html).toContain("<strong>Rosa</strong>")
+    expect(email.html).toContain('href="https://odentia32.com/precios"')
+    expect(email.html).toContain("<li")
+    // Lo que escribió la clínica se cita tal cual: sus asteriscos no se vuelven formato.
+    expect(email.html).toContain("&gt; Hola, ¿qué es **eso**?")
+    expect(email.text).toContain(
+      "Hola Rosa, mira los precios (https://odentia32.com/precios):\n\n- Agenda\n- Cobros",
+    )
+  })
+
+  it("adjunta documentos del cliente, hasta 10 MB juntos; Soporte, solo lo que puede ver", async () => {
+    const file = (filename: string, sizeBytes: number, adminOnly: boolean) =>
+      registerClientFile(ownerDb, admin, {
+        clientId,
+        kind: "otro",
+        filename,
+        objectKey: clientFileKey(clientId, "pdf"),
+        contentType: "application/pdf",
+        sizeBytes,
+        adminOnly,
+      })
+    const contract = await file("contrato.pdf", 9 * 1024 * 1024, true)
+    const logo = await file("logo.pdf", 2 * 1024 * 1024, false)
+    const inbound = await ingestInboundEmail(ownerDb, mail({ from: "rosa@hilo.test" }))
+    expect(inbound.clientId).toBe(clientId)
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, inbound.id, { body: "Va el contrato.", fileIds: [contract.id] }),
+    )
+    const read: string[] = []
+    const email = await ownerDb.transaction((tx) =>
+      outreachEmail(tx, reply.id, async (key) => {
+        read.push(key)
+        return new Uint8Array([1, 2, 3])
+      }),
+    )
+    expect(email.attachments).toEqual([
+      {
+        filename: "contrato.pdf",
+        content: new Uint8Array([1, 2, 3]),
+        contentType: "application/pdf",
+      },
+    ])
+    expect(read).toHaveLength(1)
+    // Sin cómo leerlos no se arma: nunca sale sin sus adjuntos.
+    await expect(ownerDb.transaction((tx) => outreachEmail(tx, reply.id))).rejects.toMatchObject({
+      code: "STORAGE_UNAVAILABLE",
+    })
+    const detail = await ownerDb.transaction((tx) => getInboundEmail(tx, admin, inbound.id))
+    expect(detail.replies[0]?.files).toEqual([{ id: contract.id, filename: "contrato.pdf" }])
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, inbound.id, { body: "Dos", fileIds: [contract.id, logo.id] }),
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      fields: { fileIds: expect.stringMatching(/10 MB/) },
+    })
+    const toSupport = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", mailbox: "soporte", to: "soporte@odentia32.com" }),
+    )
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, support, toSupport.id, { body: "Va", fileIds: [contract.id] }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION" })
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, support, toSupport.id, { body: "Va", fileIds: [logo.id] }),
+      ),
+    ).resolves.toMatchObject({ inReplyToEmailId: toSupport.id })
+  })
+
+  it("los documentos solo salen a un contacto del cliente, con la extensión de su tipo real", async () => {
+    const page = await registerClientFile(ownerDb, admin, {
+      clientId,
+      kind: "otro",
+      filename: "factura.html",
+      objectKey: clientFileKey(clientId, "pdf"),
+      contentType: "application/pdf",
+      sizeBytes: 10,
+    })
+    // El From es del cliente, pero pide la respuesta en otra dirección (sin verificar).
+    const elsewhere = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", replyTo: "tercero@otro.test" }),
+    )
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, elsewhere.id, { body: "Va", fileIds: [page.id] }),
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      fields: { fileIds: expect.stringContaining("tercero@otro.test") },
+    })
+    const home = await ingestInboundEmail(ownerDb, mail({ from: "rosa@hilo.test" }))
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, home.id, { body: "Va", fileIds: [page.id] }),
+    )
+    const email = await ownerDb.transaction((tx) =>
+      outreachEmail(tx, reply.id, async () => new Uint8Array([1])),
+    )
+    expect(email.attachments[0]?.filename).toBe("factura.pdf")
+  })
+
+  it("un correo sin cliente no lleva adjuntos", async () => {
+    const inbound = await ingestInboundEmail(ownerDb, mail({ from: "otra.persona@gmail.com" }))
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, inbound.id, {
+          body: "Hola",
+          fileIds: ["00000000-0000-4000-8000-000000000000"],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION" })
   })
 })
 

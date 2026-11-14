@@ -8,6 +8,7 @@ import {
   oneAtATime,
   publishWords,
   reuseWords,
+  requiredWithoutNone,
   rowButtonAfter,
   sameTitleTemplate,
   settleFieldKeys,
@@ -107,7 +108,7 @@ it("publicar un cuestionario del paciente dice a quién le llega y a cuál reemp
   const ficha = template({ key: "ficha", title: "Ficha", status: "borrador", publishedAt: null })
   expect(touchesPatients(ficha, [previo, ficha])).toBe(false)
   expect(publishWords(ficha, [previo, ficha], null)).toBe(
-    "Quedará disponible para responder en la ficha. Una versión publicada ya no se edita: para cambiarla se prepara la siguiente.",
+    "Quedará en uso: se llena en la atención y en «Nuevo» › «Ficha». Una versión publicada ya no se edita: para cambiarla se prepara la siguiente.",
   )
   // Sin el dato del servidor (no se pudo consultar) no nombra a ninguno.
   expect(publishWords(nuevo, [previo, nuevo], null)).not.toContain("en lugar de")
@@ -146,9 +147,11 @@ it("la nueva versión pasa al equipo y hay otro cuestionario del paciente public
 it("dejar de usar dice qué deja de pasar y que lo ya llenado no cambia", () => {
   const ficha = template({ key: "periodontal", title: "Ficha periodontal" })
   const staff = leaveWords(ficha, null)
-  expect(staff).toContain("Deja de ofrecerse")
+  // QA del 14 nov: decía «Deja de ofrecerse… volver a usarlo» y no que deja de aparecer sola en la atención.
+  expect(staff).toContain("Deja de aparecer sola en la atención")
   expect(staff).toContain("Lo ya llenado sigue en cada paciente")
-  expect(staff).toContain("volver a usarlo")
+  expect(staff).toContain("volver a usarla, enciende su interruptor «En uso»")
+  expect(staff).not.toContain("usarlo")
   // El cuestionario que les llega: dice qué reciben después, con lo que dice el servidor.
   const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal" })
   const salud = template({ key: "salud", title: "Cuestionario de salud", respondent: "portal", reachesPatients: true })
@@ -295,4 +298,20 @@ it("Enter en una pregunta pasa al campo siguiente", () => {
   // En el último no hay a dónde ir: se queda donde está, y tampoco guarda.
   expect(nextAfter(stops, "quitar")).toBeNull()
   expect(nextAfter(stops, "otro")).toBeNull()
+})
+
+it("una ficha apagada sigue en la lista, con su versión «sin usar», y no pasa a «Ya no se usan»", () => {
+  const off = template({ key: "periodontal", title: "Ficha periodontal", status: "publicado", inUse: false, publishedAt: "2026-11-01T00:00:00Z" })
+  expect(versionStatusWords(off)).toBe("sin usar")
+  const { listed, unused } = templateGroups([off])
+  expect(listed).toHaveLength(1)
+  expect(unused).toHaveLength(0)
+})
+
+// QA del 14 nov (H2 del novato): una casilla obligatoria sin «No tiene» trababa la ficha en consulta.
+it("avisa al hacer obligatoria una pregunta de casillas que no tiene cómo decir «no tiene»", () => {
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: true, options: ["Anterior", "Posterior"] })).toBe(true)
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: true, options: ["No tiene", "Anterior"] })).toBe(false)
+  expect(requiredWithoutNone({ type: "opcion_multiple", required: false, options: ["Anterior"] })).toBe(false)
+  expect(requiredWithoutNone({ type: "opcion_unica", required: true, options: ["Sí", "No"] })).toBe(false)
 })

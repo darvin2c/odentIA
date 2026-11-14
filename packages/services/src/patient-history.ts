@@ -983,7 +983,7 @@ async function loadBornForEncounters(
     const discarded = row.status === "descartado"
     of(row.encounterId).forms.push({
       id: row.id,
-      title: row.templateTitle ?? "Formulario clínico",
+      title: row.templateTitle ?? "Ficha de consulta",
       state: finalized ? "finalizado" : discarded ? "descartado" : "a_medias",
       finalizedAt: row.finalizedAt,
       // Terminado después de firmar la atención: lleva su propia fecha, y la Historia lo dice.
@@ -1574,14 +1574,18 @@ export async function getTimeline(
         encounterId: row.encounterId,
       })
     }
-  // El formulario finalizado es su título con lo respondido en una línea; «Ver» lo abre con todo.
+  // La ficha finalizada es su título con lo respondido en una línea; «Ver» la abre con todo.
+  // Lo del equipo es una ficha de consulta; lo del paciente se dice como lo que es.
   for (const form of await loadFormRecords(tx, orgId, patientId, { ids: ids("form") })) {
     hydrated.set(form.id, {
       id: form.id,
       refId: form.id,
       type: "form",
       createdAt: form.finalizedAt,
-      title: form.title,
+      title:
+        form.source === "portal"
+          ? `Lo que respondió el paciente: ${form.title}`
+          : `Se completó la ficha de consulta: ${form.title}`,
       detail: form.summary || null,
       byText: form.whoWords,
       status: "finalizado",

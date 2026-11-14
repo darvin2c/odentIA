@@ -4,7 +4,6 @@ import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { clinicToday } from "./inventory-stock.js"
 import { and, asc, eq, ilike, sql } from "drizzle-orm"
 import {
   addFormAddendum,
@@ -35,6 +34,7 @@ import {
   updateSpecialty,
   type FormSchemaDef,
 } from "./clinical-forms.js"
+import { ensureClinicForms, markFormTemplateLooked } from "./consultation-forms.js"
 
 /**
  * Semilla del dominio formularios clínicos/consentimientos/órdenes.
@@ -70,46 +70,14 @@ export async function seedClinicalForms(
   // Quien crea la clínica atiende la cirugía; la endodoncia la adscribe seed-dev.
   await setProfessionalSpecialties(tx, orgId, ownerUserId, ownerUserId, [cirugia.id])
 
-  const evaluacionSchema: FormSchemaDef = {
-    sections: [
-      {
-        id: "sintomas",
-        title: "Síntomas",
-        fields: [
-          { id: "dolor", label: "¿Presenta dolor?", type: "booleano", required: true },
-          {
-            id: "intensidad",
-            label: "Intensidad del dolor (0–10)",
-            type: "numero",
-            min: 0,
-            max: 10,
-          },
-          {
-            id: "zona",
-            label: "Zona del dolor",
-            type: "opcion_unica",
-            options: ["Localizado", "Irradiado", "Generalizado"],
-          },
-        ],
-      },
-      {
-        id: "examen",
-        title: "Examen",
-        fields: [
-          { id: "hallazgos", label: "Hallazgos", type: "texto_largo", required: true },
-          { id: "fecha_evaluacion", label: "Fecha de evaluación", type: "fecha", required: true },
-        ],
-      },
-    ],
-  }
-
-  const template = await upsertFormTemplate(tx, orgId, ownerUserId, {
-    key: "evaluacion-endodoncia",
-    title: "Evaluación de endodoncia",
-    description: "Ficha de evaluación previa al tratamiento de conducto.",
-    specialtyId: endodoncia.id,
-    schema: evaluacionSchema,
-  })
+  // Las fichas de consulta que vienen con el producto (ADR 0117), como en toda clínica nueva. La de
+  // endodoncia ya la abrió alguien: la lista dice «Miraste 1 de 4».
+  await ensureClinicForms(tx, orgId)
+  const template = (await listFormTemplates(tx, orgId, { status: "publicado" })).find(
+    (t) => t.key === "evaluacion-de-endodoncia",
+  )
+  if (!template) throw new Error("Falta la ficha de endodoncia del producto en la semilla")
+  await markFormTemplateLooked(tx, orgId, ownerUserId, template.id)
 
   // Plantillas por procedimiento (secciones fijas). En la demo se publican
   // para poder usarlas; en una organización real quedan en borrador hasta
@@ -172,13 +140,17 @@ export async function seedClinicalForms(
         status: "finalizado",
         finalizedAt: signed.finalizedAt ?? signed.startedAt,
         finalizedBy: ownerUserId,
+        // La 46 es la del dolor de su atención y la de su endodoncia.
         answers: {
-          dolor: true,
-          intensidad: 7,
-          zona: "Localizado",
-          hallazgos: "Dolor provocado al frío en pieza 36, percusión positiva leve.",
-          // El día de la clínica, no el de UTC: una atención de la noche no cae en el día siguiente.
-          fecha_evaluacion: await clinicToday(tx, orgId, signed.startedAt),
+          pieza: 46,
+          dolor: "Provocado",
+          dolor_intensidad: 7,
+          frio: "Aumentada, persiste",
+          percusion: "Positiva",
+          palpacion: "Negativa",
+          diagnostico_pulpar: "Pulpitis irreversible sintomática",
+          diagnostico_apical: "Periodontitis apical sintomática",
+          observaciones: "Dolor provocado al frío en la pieza 46, que persiste al retirar el estímulo.",
         },
       })
     // La otra, fuera de una atención (borrador → finalizado): un hecho suelto de la Historia.
@@ -191,9 +163,15 @@ export async function seedClinicalForms(
     await updateFormResponseDraft(tx, orgId, ownerUserId, response.id, {
       professionalUserId: ownerUserId,
       answers: {
-        dolor: false,
-        hallazgos: "Pieza 46 sin dolor espontáneo; sensibilidad leve al frío que cede sola. Se mantiene en observación.",
-        fecha_evaluacion: await clinicToday(tx, orgId),
+        // La 36 es la de su caries: lo que cede al retirar el frío se obtura y se controla.
+        pieza: 36,
+        dolor: "Sin dolor",
+        frio: "Aumentada, cede al retirar el estímulo",
+        percusion: "Negativa",
+        palpacion: "Negativa",
+        diagnostico_pulpar: "Pulpitis reversible",
+        diagnostico_apical: "Tejidos apicales normales",
+        observaciones: "Pieza 36 con caries: sensibilidad al frío que cede sola, sin dolor espontáneo. Se obtura y se controla.",
       },
     })
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)

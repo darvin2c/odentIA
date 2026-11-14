@@ -199,7 +199,7 @@ describe("la guía de vistIA", () => {
   it("Clínica tiene cuatro secciones, con «Recetas de lentes»", () => {
     const answer = answerOf("quedaron-atenciones-recetas-u-ordenes")
     expect(answer).toContain("Clínica tiene cuatro secciones: Antecedentes, Recetas de lentes, Historia y Documentos.")
-    expect(answer).toContain("(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes y otros archivos)")
+    expect(answer).toContain("(presupuestos, recetas, órdenes, consentimientos, fichas, imágenes y otros archivos)")
     expect(text).not.toMatch(/tres secciones/)
   })
 

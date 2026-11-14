@@ -34,9 +34,9 @@ it("firmar o anular una atención nombra la fila, con su cargo en «También»; 
   expect(alsoAuditWords(pagos, leadAuditIndex(pagos))).toEqual([{ what: "Aplicó un pago a un cargo", count: 1 }])
 })
 
-it("dejar de usar y volver a usar un formulario se dicen con las palabras de la pantalla", () => {
-  expect(describeAuditEvent("form_template.leave").what).toBe("Dejó de usar un formulario")
-  expect(describeAuditEvent("form_template.reuse").what).toBe("Volvió a usar un formulario")
+it("dejar de usar y volver a usar una ficha se dicen con las palabras de la pantalla", () => {
+  expect(describeAuditEvent("form_template.leave").what).toBe("Dejó de usar una ficha de consulta")
+  expect(describeAuditEvent("form_template.reuse").what).toBe("Volvió a usar una ficha de consulta")
   // Archivar es de un borrador: no es lo mismo que dejar de usar el que estaba en uso.
-  expect(describeAuditEvent("form_template.archive").what).toBe("Archivó el borrador de una plantilla de formulario")
+  expect(describeAuditEvent("form_template.archive").what).toBe("Archivó el borrador de una ficha de consulta")
 })

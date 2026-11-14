@@ -5,6 +5,7 @@ import {
   applySubmitError,
   ConfirmDialog,
   clearSubmitErrors,
+  DetailDrawer,
   focusFirstInvalid,
   FormDrawer,
   submitErrorMessage,
@@ -16,6 +17,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useStore } from "@tanstack/react-form"
+import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -32,7 +34,8 @@ import {
   startFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
-import { useMemberName, useOrgMembers } from "../../lib/crm"
+import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
+import { appWords } from "../../lib/product-words"
 import { DeclaredResponse } from "./declared-response"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
@@ -44,6 +47,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
+import { answerWords, defaultResponsible, draftOf, newFormSubmitWords, reusableAnswer } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -69,7 +73,7 @@ function statusOf(response: FormResponse): {
 }
 
 const newResponseSchema = z.object({
-  templateId: z.string().min(1, "Elige el formulario."),
+  templateId: z.string().min(1, "Elige la ficha."),
   professionalUserId: z.string(),
 })
 
@@ -80,6 +84,8 @@ export function NewResponseDrawer({
   patientId,
   encounterId,
   defaultProfessionalUserId,
+  loading = false,
+  drafts = [],
   onCreated,
 }: {
   open: boolean
@@ -90,10 +96,15 @@ export function NewResponseDrawer({
   encounterId?: string
   /** Desde la atención, el responsable por defecto es quien atiende. */
   defaultProfessionalUserId?: string
+  /** Mientras llegan las fichas en uso: sin ellas todavía no se dice que no hay ninguna. */
+  loading?: boolean
+  /** Las fichas a medias de esta atención: elegir una de ellas la abre, en vez de empezar otra igual. */
+  drafts?: ReadonlyArray<Pick<FormResponse, "id" | "templateId" | "templateTitle" | "status" | "source">>
   onCreated: (id: string) => Promise<void>
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
   const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
+  const me = useMyUserId()
   const queryClient = useQueryClient()
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
@@ -109,17 +120,25 @@ export function NewResponseDrawer({
   const form = useAppForm({
     defaultValues: {
       templateId: "",
-      professionalUserId: responsibles.some((member) => member.userId === defaultProfessionalUserId) ? (defaultProfessionalUserId ?? "") : "",
+      professionalUserId: defaultResponsible(defaultProfessionalUserId, me, responsibles),
     },
     validators: { onSubmit: newResponseSchema },
     onSubmit: async ({ value }) => {
+      // La que ya está a medias se abre: una ficha a medias se ve una sola vez.
+      const chosen = templates.find((template) => template.id === value.templateId)
+      const open = chosen ? draftOf(chosen, drafts) : null
+      if (open) {
+        form.reset()
+        await onCreated(open)
+        return
+      }
       const result = await create.mutateAsync(value)
       form.reset()
       if (result.detached) {
         // La pantalla tenía un dato viejo (la atención se firmó o se anuló en otra pestaña): se
         // dice lo que pasó y se vuelve a pedir todo, para que deje de ofrecer esa atención.
         toast.info(
-          "La atención ya no está en curso, así que el formulario se empezó sin unirlo a ella. Queda en Documentos de la ficha.",
+          "La atención ya no está en curso: la ficha de consulta se empezó suelta y quedó en Documentos, en la página del paciente.",
           { duration: 10_000 },
         )
         void queryClient.invalidateQueries()
@@ -128,6 +147,10 @@ export function NewResponseDrawer({
     },
   })
   const surface = useFormSurface(form)
+  // Si la elegida ya está a medias, el botón dice lo que hace: la abre.
+  const chosenId = useStore(form.store, (state) => state.values.templateId)
+  // Sin ninguna ficha en uso no se abre una lista vacía: se dice dónde se crean.
+  if (open && !loading && templates.length === 0) return <NoFormsDrawer onClose={onClose} />
   return (
     <FormDrawer
       {...surface}
@@ -136,18 +159,21 @@ export function NewResponseDrawer({
         form.reset()
         onClose()
       }}
-      title="Nuevo formulario"
-      description="Solo se ofrece la versión vigente de cada plantilla. La captura se guarda sola mientras la completas."
-      submitLabel="Empezar"
+      title="Nueva ficha"
+      description="Se ofrece la versión en uso de cada ficha. Se guarda sola mientras la llenas."
+      submitLabel={newFormSubmitWords(chosenId, templates, drafts)}
     >
       <div className="flex flex-col gap-4">
         <form.AppField name="templateId">
           {(field) => (
             <field.SelectField
-              label="Formulario"
-              placeholder="Elige el formulario"
+              label="Ficha"
+              placeholder="Elige la ficha"
               // Dos formularios con el mismo título llevan lo que los distingue: preguntas y fecha.
-              options={templates.map((t) => ({ value: t.id, label: templateOptionLabel(t, templates, whenAt) }))}
+              options={templates.map((t) => ({
+                value: t.id,
+                label: `${templateOptionLabel(t, templates, whenAt)}${draftOf(t, drafts) ? " · a medias: se abre la que empezaste" : ""}`,
+              }))}
             />
           )}
         </form.AppField>
@@ -165,6 +191,40 @@ export function NewResponseDrawer({
       </div>
     </FormDrawer>
   )
+}
+
+/** «Nuevo › Ficha» sin ninguna en uso: dónde se crean, y el camino si se puede abrir Configuración. */
+function NoFormsDrawer({ onClose }: { onClose: () => void }) {
+  const canSettings = usePermission("settings.read")
+  return (
+    <DetailDrawer open title="Nueva ficha" description="Aún no tienes fichas en uso." onClose={onClose}>
+      <div className="flex flex-col gap-3 text-sm">
+        <p>
+          Las fichas se crean y se ajustan en Configuración › Fichas de consulta. Ahí también están las que vienen con{" "}
+          {appWords().name}, si las dejaste de usar.
+        </p>
+        {canSettings ? (
+          <Link
+            to="/settings/consultation-forms"
+            className="w-fit font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Ir a Fichas de consulta
+          </Link>
+        ) : (
+          <p className="text-muted-foreground">Pídeselo a quien administra la clínica.</p>
+        )}
+      </div>
+    </DetailDrawer>
+  )
+}
+
+/** La pregunta de la anterior con la misma clave, si la tenía. */
+function previousField(previous: FormResponse, id: string) {
+  for (const section of previous.templateSnapshot.sections) {
+    const field = section.fields.find((item) => item.id === id)
+    if (field) return field
+  }
+  return null
 }
 
 /** `parcial`: se guardó todo menos las respuestas que no valen, que siguen marcadas en su pregunta. */
@@ -239,12 +299,18 @@ const addendumSchema = z.object({
  */
 export function ResponseDetail({
   response,
+  previous: latest = null,
+  first = null,
   canWrite,
   sex,
   encounterId,
   onChanged,
 }: {
   response: FormResponse
+  /** La anterior del mismo tipo, ya finalizada: su respuesta va debajo de cada pregunta de la de hoy. */
+  previous?: FormResponse | null
+  /** La de inicio, si no es la anterior: «Comparar con: Anterior · Inicio». */
+  first?: FormResponse | null
   canWrite: boolean
   /** El sexo registrado del paciente, para decir quién lo dijo. */
   sex?: string | null
@@ -256,20 +322,29 @@ export function ResponseDetail({
     return (
       <DeclaredResponse response={response} canWrite={canWrite} sex={sex} encounterId={encounterId} onChanged={onChanged} />
     )
-  return <StaffResponseDetail response={response} canWrite={canWrite} onChanged={onChanged} />
+  return <StaffResponseDetail response={response} previous={latest} first={first} canWrite={canWrite} onChanged={onChanged} />
 }
 
 function StaffResponseDetail({
   response,
+  previous: latest = null,
+  first = null,
   canWrite,
   onChanged,
 }: {
   response: FormResponse
+  /** La anterior del mismo tipo, ya finalizada: su respuesta va debajo de cada pregunta de la de hoy. */
+  previous?: FormResponse | null
+  /** La de inicio, si no es la anterior: «Comparar con: Anterior · Inicio». */
+  first?: FormResponse | null
   canWrite: boolean
   onChanged: () => Promise<void>
 }) {
   const ids = useId()
   const queryClient = useQueryClient()
+  // Con qué se compara: la anterior, o la de inicio en un tratamiento largo.
+  const [against, setAgainst] = useState<"anterior" | "inicio">("anterior")
+  const previous = against === "inicio" && first ? first : latest
   const memberName = useMemberName()
   const schema = response.templateSnapshot
   const editable = response.status === "borrador" && canWrite
@@ -445,7 +520,7 @@ function StaffResponseDetail({
   useEffect(
     () => () => {
       if (discarded.current) return
-      const title = response.templateTitle ?? "el formulario"
+      const title = response.templateTitle ?? "la ficha"
       // Primero termina el guardado en curso; después, si aún falta algo, sale con la base que dejó.
       void (async () => {
         while (inFlight.current) await inFlight.current.catch(() => {})
@@ -480,7 +555,7 @@ function StaffResponseDetail({
       .mutateAsync()
       .then(async () => {
         setFinalizeOpen(false)
-        toast.success("Formulario finalizado")
+        toast.success("Ficha finalizada")
         await onChanged()
       })
       .catch((error: unknown) => {
@@ -540,7 +615,7 @@ function StaffResponseDetail({
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 id={`${ids}-title`} className="text-base font-semibold">
-            {response.templateTitle ?? "Formulario"} · versión {response.templateVersion}
+            {response.templateTitle ?? "Ficha"} · versión {response.templateVersion}
           </h3>
           <p className="text-xs text-muted-foreground">
             {response.professionalUserId ? memberName(response.professionalUserId) : "Sin profesional asignado"}
@@ -573,16 +648,80 @@ function StaffResponseDetail({
           Descartado {when(response.discardedAt)} · {response.discardReason}
         </p>
       ) : null}
+      {first && latest ? (
+        <div role="group" aria-label="Comparar con" className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Comparar con:</span>
+          {(["anterior", "inicio"] as const).map((option) => (
+            <Button
+              key={option}
+              type="button"
+              size="sm"
+              variant={against === option ? "default" : "outline"}
+              className="min-h-11 sm:min-h-8"
+              aria-pressed={against === option}
+              onClick={() => setAgainst(option)}
+            >
+              {option === "anterior" ? `Anterior · ${when(latest.finalizedAt)}` : `Inicio · ${when(first.finalizedAt)}`}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {previous ? (
+        <p className="rounded-md bg-muted p-3 text-sm">
+          Debajo de cada pregunta, {against === "inicio" && first ? "lo de la de inicio" : "lo de la anterior"}:{" "}
+          {when(previous.finalizedAt)}
+          {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
+        </p>
+      ) : null}
       {schema.sections.map((section) => (
         <section key={section.id} className="flex flex-col gap-3">
           <h4 className="text-sm font-semibold">{section.title}</h4>
           {section.fields
             .filter((field) => isFieldVisible(field, answers))
-            .map((field) => (
-              <form.AppField key={field.id} name={`answers.${field.id}`}>
-                {() => <AnswerAppField field={field} disabled={!editable} attachments={attachments} />}
-              </form.AppField>
-            ))}
+            .map((field) => {
+              // Por la clave de la pregunta: una versión nueva de la ficha conserva las que no cambió.
+              const before = previous ? previousField(previous, field.id) : null
+              return (
+                <form.AppField key={field.id} name={`answers.${field.id}`}>
+                  {(answerField) => {
+                    const earlier = previous?.answers?.[field.id]
+                    // «Usar»: copia la respuesta anterior a la de hoy con un clic (la pieza, la clase…); nada se copia solo.
+                    const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
+                    const beforeId = `${ids}-antes-${field.id}`
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <AnswerAppField
+                          field={field}
+                          disabled={!editable}
+                          attachments={attachments}
+                          // La respuesta anterior se oye al llegar a la pregunta, no solo se ve.
+                          describedBy={previous && before ? beforeId : undefined}
+                        />
+                        {previous && before ? (
+                          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                            <span id={beforeId}>
+                              {when(previous.finalizedAt)}: {answerWords(before, earlier)}
+                            </span>
+                            {reusable !== undefined ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="link"
+                                className="h-auto min-h-8 p-0 text-xs"
+                                aria-label={`Usar la respuesta anterior en «${field.label}»: ${answerWords(before, earlier)}`}
+                                onClick={() => answerField.handleChange(reusable)}
+                              >
+                                Usar
+                              </Button>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  }}
+                </form.AppField>
+              )
+            })}
         </section>
       ))}
       {formError ? (
@@ -659,7 +798,7 @@ function StaffResponseDetail({
       <ConfirmDialog
         open={finalizeOpen}
         variant="default"
-        title="Finalizar formulario"
+        title="Finalizar ficha"
         description="Quedará inmutable en la historia clínica. Las correcciones posteriores se hacen con adendas."
         confirmLabel="Finalizar"
         pending={finalize.isPending}

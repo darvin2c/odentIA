@@ -12,6 +12,7 @@ import {
   type FormTemplateRow,
   listFormTemplates,
 } from "./clinical-forms.js"
+import { ageOfferedSpecialties, type ProductFormMark, productFormMarks } from "./consultation-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
@@ -74,11 +75,13 @@ async function currentTemplate(tx: Db, orgId: string, exceptKey?: string) {
       and(
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.status, "publicado"),
+        eq(clinicalFormTemplate.inUse, true),
         eq(clinicalFormTemplate.respondent, "portal"),
         exceptKey ? ne(clinicalFormTemplate.key, exceptKey) : undefined,
       ),
     )
-    .orderBy(desc(clinicalFormTemplate.publishedAt))
+    // El último publicado o vuelto a usar: encender uno apagado lo deja como el que les llega.
+    .orderBy(desc(clinicalFormTemplate.updatedAt))
     .limit(1)
   return template ?? null
 }
@@ -112,7 +115,7 @@ export async function previewPatientQuestionnaire(
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)))
     .limit(1)
-  if (!template) throw notFound("Plantilla")
+  if (!template) throw notFound("Ficha")
   const named = (row: FormTemplateRow | null) => (row ? { key: row.key, title: row.title } : null)
   const becomes = change !== "leave" && template.respondent === "portal"
   return {
@@ -125,6 +128,9 @@ export async function previewPatientQuestionnaire(
  * Las plantillas para Configuración, con la que hoy reciben los pacientes
  * marcada (`reachesPatients`): de las publicadas «que responde el paciente» les
  * llega una sola, la de `currentTemplate`. La lista lo dice con esa misma regla.
+ * Y de cada ficha, si vino con el producto y si la clínica ya la miró
+ * (`fromProduct`, `looked`) y si además se ofrece por la edad
+ * (`offeredUnderYears`): lo dice el servidor, no la pantalla.
  * `formCreatedAt`: cuándo se creó el formulario, que es su primera versión; no
  * cambia al publicar otra ni al volver a usarlo, y por eso sirve para distinguir
  * a dos formularios con el mismo título.
@@ -133,9 +139,13 @@ export async function listClinicFormTemplates(
   tx: Db,
   orgId: string,
   query: Parameters<typeof listFormTemplates>[2] = {},
-): Promise<Array<FormTemplateRow & { reachesPatients: boolean; formCreatedAt: Date }>> {
+): Promise<
+  Array<FormTemplateRow & { reachesPatients: boolean; offeredUnderYears: number | null; formCreatedAt: Date } & ProductFormMark>
+> {
   const rows = await listFormTemplates(tx, orgId, query)
   const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
+  const marks = rows.length > 0 ? await productFormMarks(tx, orgId) : new Map<string, ProductFormMark>()
+  const byAge = rows.length > 0 ? await ageOfferedSpecialties(tx, orgId) : null
   const keys = [...new Set(rows.map((row) => row.key))]
   // De todas las versiones de cada formulario, también las que la lista pedida no trae (las archivadas).
   const firsts = keys.length
@@ -149,6 +159,11 @@ export async function listClinicFormTemplates(
   return rows.map((row) => ({
     ...row,
     reachesPatients: row.id === reaching?.id,
+    ...(marks.get(row.key) ?? { fromProduct: false, looked: true }),
+    offeredUnderYears:
+      byAge && row.respondent === "staff" && row.specialtyId && byAge.specialtyIds.includes(row.specialtyId)
+        ? byAge.underYears
+        : null,
     formCreatedAt: createdOf.get(row.key) ?? row.createdAt,
   }))
 }

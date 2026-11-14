@@ -62,6 +62,7 @@ const STATUS_WORDS: Record<FormTemplate["status"], string> = {
 
 /** El estado de una versión en su etiqueta: de los cuestionarios del paciente, «vigente» es solo el que les llega. */
 export function versionStatusWords(version: FormTemplate): string {
+  if (version.status === "publicado" && version.inUse === false) return "sin usar"
   return publishedButNotReaching(version) ? "no llega a los pacientes" : STATUS_WORDS[version.status]
 }
 
@@ -117,7 +118,7 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
     return `Desde ese momento lo reciben los pacientes con cita por venir, para responderlo antes de venir. ${before}`
   }
   if (replaced) {
-    const base = `La versión ${replaced.version} se archiva y los formularios nuevos usarán la ${draft.version}.`
+    const base = `La versión ${replaced.version} se archiva y las fichas nuevas usarán la ${draft.version}.`
     if (replaced.respondent !== "portal") return `${base} ${KEEPS}`
     // La versión anterior la respondía el paciente y esta la llena el equipo.
     if (!reach) return `${base} Como ahora lo llena el equipo, cambia lo que reciben los pacientes antes de su cita. ${KEEPS}`
@@ -127,14 +128,14 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
       : "los pacientes dejan de recibirlo y no recibirán ningún cuestionario antes de su cita."
     return `${base} Como ahora lo llena el equipo, ${instead} ${KEEPS}`
   }
-  return `Quedará disponible para responder en la ficha. ${FROZEN}`
+  return `Quedará en uso: se llena en la atención y en «Nuevo» › «Ficha». ${FROZEN}`
 }
 
-/** Lo que pasa al dejar de usar un formulario en uso. */
+/** Lo que pasa al apagar una ficha en uso: lo que deja de pasar, lo que se queda y cómo volver. */
 export function leaveWords(current: FormTemplate, reach: TemplateReach | null): string {
-  const again = "Puedes volver a usarlo cuando quieras."
+  const again = "Para volver a usarla, enciende su interruptor «En uso»: vuelve la misma, con sus preguntas."
   if (current.respondent !== "portal") {
-    return `Deja de ofrecerse en «Nuevo» › «Formulario». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
+    return `Deja de aparecer sola en la atención y en «Nuevo» › «Ficha». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
   }
   const kept = `Lo que ya respondieron sigue en cada paciente. ${again}`
   if (!reach) return `Si es el que reciben los pacientes con cita por venir, dejarán de recibirlo. ${kept}`
@@ -202,6 +203,22 @@ export function sameTitleTemplate(
  */
 export function rowButtonAfter(change: "publish" | "leave" | "reuse"): "leave" | "reuse" {
   return change === "leave" ? "reuse" : "leave"
+}
+
+/** Una opción que dice «no tiene»: con ella, una pregunta de casillas obligatoria se puede responder. */
+const NONE_OPTION = /^(no|no tiene|ninguno|ninguna|nada)$/i
+
+/**
+ * Una pregunta de casillas obligatoria sin opción «No tiene»: dejarla sin marcar
+ * ya no vale como respuesta y la ficha no se puede finalizar si el paciente no
+ * tiene nada. El editor lo avisa al marcar «Obligatorio», sin impedirlo.
+ */
+export function requiredWithoutNone(field: Pick<FormFieldDef, "type" | "required" | "options">): boolean {
+  return (
+    field.type === "opcion_multiple" &&
+    field.required === true &&
+    !(field.options ?? []).some((option) => NONE_OPTION.test(option.trim()))
+  )
 }
 
 /** El que sigue a `current` en una lista de paradas, o null si es el último o no está. */

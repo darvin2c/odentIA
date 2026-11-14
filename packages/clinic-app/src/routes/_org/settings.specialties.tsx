@@ -188,7 +188,7 @@ function SpecialtiesPage() {
         open={archiving !== null}
         onClose={() => setArchiving(null)}
         title={`Archivar «${archiving?.name ?? ""}»`}
-        description="Deja de ofrecerse al elegir la especialidad de un servicio y al crear plantillas. Sus servicios la conservan y la agenda deja de aplicarla: los ofrece a cualquiera. Puedes reactivarla después."
+        description="Deja de ofrecerse al elegir la especialidad de un servicio y al crear fichas de consulta. Sus servicios la conservan y la agenda deja de aplicarla: los ofrece a cualquiera. Puedes reactivarla después."
         confirmLabel="Archivar"
         variant="default"
         pending={archiveMutation.isPending}

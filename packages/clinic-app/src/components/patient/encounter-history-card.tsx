@@ -56,7 +56,7 @@ function retiredWords(born: EncounterBorn): string {
       count(born.indicated.filter((row) => row.retired).length, "tratamiento", "tratamientos"),
       count(born.followUps.filter((row) => row.retired).length, "control", "controles"),
       count(born.consents.filter((row) => row.status === "anulado").length, "consentimiento", "consentimientos"),
-      count(born.forms.filter((row) => row.retired).length, "formulario", "formularios"),
+      count(born.forms.filter((row) => row.retired).length, "ficha", "fichas"),
     ].filter((part): part is string => part !== null),
   )
 }
@@ -103,10 +103,10 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
     indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + retiredForms.length > 0
   return (
     <>
-      {/* Un formulario finalizado es algo que se anotó en la atención, no que se indicó:
+      {/* Una ficha finalizada es algo que se anotó en la atención, no que se indicó:
           va aparte, con lo respondido en una línea y «Ver» (QA de formularios del 13 nov). */}
       {noted.length > 0 ? (
-        <Part label={noted.length === 1 ? "Formulario" : "Formularios"}>
+        <Part label={noted.length === 1 ? "Ficha" : "Fichas"}>
           <ul className="flex flex-col gap-2 text-sm">
             {noted.map((row) => (
               <li key={row.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -184,7 +184,7 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
             ))}
             {retiredForms.map((row) => (
               <li key={row.id}>
-                {row.state === "a_medias" ? "Formulario a medias" : "Formulario"}: {row.title}
+                {row.state === "a_medias" ? "Ficha a medias" : "Ficha"}: {row.title}
                 <span className="text-muted-foreground"> · de una atención anulada</span>
               </li>
             ))}

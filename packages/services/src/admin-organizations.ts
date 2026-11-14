@@ -37,6 +37,7 @@ import { invalidField, isUniqueViolation, issueFields, ServiceError } from "./er
 
 import { initialOrgRegion } from "./organization-profile.js"
 import { ensureClinicConsents } from "./clinical-forms.js"
+import { ensureClinicForms } from "./consultation-forms.js"
 import { ensureClinicSpecialties } from "./specialties.js"
 import type { OrganizationBillingSummary } from "./saas-billing.js"
 
@@ -852,6 +853,8 @@ export async function createAssistedOrganization(
   await ensureClinicSpecialties(tx, organizationId)
   // Y con sus consentimientos activos; los crea odentIA, no alguien de la clínica.
   await ensureClinicConsents(tx, organizationId, null)
+  // Y con las fichas de consulta de su producto, ya en uso (ADR 0117).
+  await ensureClinicForms(tx, organizationId)
   if (loaders.startTrial) {
     await loaders.startTrial(tx, organizationId, {
       planCode: input.planCode,

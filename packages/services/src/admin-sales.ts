@@ -51,6 +51,7 @@ import {
   type SaasTaskStatus,
   saasClient,
   saasClientContact,
+  saasClientFile,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -68,6 +69,7 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { brandPaper, type MailBrand, type MailMessage, renderEmail } from "@odentia/mail"
+import { markdownText, parseMarkdown } from "@odentia/mail/markdown"
 import {
   and,
   asc,
@@ -81,6 +83,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm"
+import { filenameForType } from "./admin-client-files.js"
 import {
   type ClientSignal,
   clientSignals,
@@ -2247,6 +2250,53 @@ export interface EmailReplyInput {
   proposalId?: string | null
   /** El borrador de Kairós de este correo (`responder_correo`), si sale de él. */
   kairosItemId?: string | null
+  /** Documentos del cliente del correo que van adjuntos (hasta 5 y 10 MB en total). */
+  fileIds?: readonly string[] | null
+}
+
+/** Cuántos documentos y cuánto pesan, juntos, los adjuntos de una respuesta. */
+export const REPLY_FILES_MAX = 5
+export const REPLY_FILES_MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * Los documentos que van adjuntos a una respuesta: del cliente del correo,
+ * vigentes y que quien responde puede ver (Soporte, nunca lo `admin_only`).
+ * Devuelve sus ids en el orden en que se eligieron, sin repetir.
+ */
+async function replyFiles(
+  tx: Db,
+  actor: AdminActor,
+  clientId: string | null,
+  input: readonly string[],
+): Promise<string[]> {
+  const ids = [...new Set(input)]
+  if (ids.length === 0) return []
+  if (!clientId)
+    throw invalidField("fileIds", "Este correo no es de un cliente: ligalo antes de adjuntar")
+  if (ids.length > REPLY_FILES_MAX)
+    throw invalidField("fileIds", `Adjunta como máximo ${REPLY_FILES_MAX} documentos`)
+  if (ids.some((id) => !UUID.test(id))) throw invalidField("fileIds", "Ese documento no existe")
+  const rows = await tx
+    .select({
+      id: saasClientFile.id,
+      sizeBytes: saasClientFile.sizeBytes,
+      adminOnly: saasClientFile.adminOnly,
+    })
+    .from(saasClientFile)
+    .where(
+      and(
+        inArray(saasClientFile.id, ids),
+        eq(saasClientFile.clientId, clientId),
+        isNull(saasClientFile.deletedAt),
+      ),
+    )
+  const visible = rows.filter((row) => actor.role === "admin" || !row.adminOnly)
+  if (visible.length !== ids.length)
+    throw invalidField("fileIds", "Un documento ya no está o no es de este cliente")
+  const total = visible.reduce((sum, row) => sum + row.sizeBytes, 0)
+  if (total > REPLY_FILES_MAX_BYTES)
+    throw invalidField("fileIds", "Los adjuntos pasan de 10 MB juntos: quita alguno")
+  return ids
 }
 
 /** «Re: <asunto>», sin repetir el «Re:» que ya trae. */
@@ -2353,6 +2403,7 @@ export async function prepareEmailReply(
       throw invalidField("proposalId", "Este correo no es de un cliente: ligalo antes de adjuntar")
     proposalId = await sendableProposal(tx, actor, client.id, input.proposalId, now)
   }
+  const fileIds = await replyFiles(tx, actor, client?.id ?? null, input.fileIds ?? [])
   let kairosItemId: string | null = null
   if (input.kairosItemId) {
     if (!UUID.test(input.kairosItemId))
@@ -2390,6 +2441,25 @@ export async function prepareEmailReply(
         )
         .limit(1)
     : []
+  const to = email.replyTo ?? email.fromAddress
+  if (fileIds.length > 0 && client) {
+    // El Reply-To no está verificado: los documentos del cliente solo salen a un contacto suyo.
+    const [known] = await tx
+      .select({ id: saasClientContact.id })
+      .from(saasClientContact)
+      .where(
+        and(
+          eq(saasClientContact.clientId, client.id),
+          sql`lower(${saasClientContact.email}) = lower(${to})`,
+        ),
+      )
+      .limit(1)
+    if (!known)
+      throw invalidField(
+        "fileIds",
+        `La respuesta va a ${to}, que no es un contacto del cliente: agrégalo como contacto o envía sin adjuntos`,
+      )
+  }
   const [row] = await tx
     .insert(saasOutreach)
     .values({
@@ -2402,6 +2472,7 @@ export async function prepareEmailReply(
       body,
       proposalId,
       kairosItemId,
+      fileIds,
       inReplyToEmailId: email.id,
       fromAddress: sender.address,
       messageId: newMessageId(product),
@@ -2418,7 +2489,14 @@ export async function prepareEmailReply(
     action: "arm.reply_prepared",
     organizationId: client?.organizationId ?? null,
     entityId: client?.id ?? email.id,
-    metadata: { outreachId: row.id, emailId: email.id, mailbox, proposalId, kairosItemId },
+    metadata: {
+      outreachId: row.id,
+      emailId: email.id,
+      mailbox,
+      proposalId,
+      kairosItemId,
+      files: fileIds.length,
+    },
   })
   return outreachRowOf(row)
 }
@@ -2735,7 +2813,12 @@ export function quotedEmail(email: {
  * responde un correo, las cabeceras del hilo y el correo citado debajo. Si
  * lleva propuesta, su PDF adjunto.
  */
-export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> {
+export async function outreachEmail(
+  tx: Db,
+  id: string,
+  /** Lee un documento del bucket privado, para los adjuntos de una respuesta. */
+  readFile?: (objectKey: string) => Promise<Uint8Array>,
+): Promise<OutreachEmail> {
   if (!UUID.test(id)) throw notFound("Envío")
   const [row] = await tx
     .select({
@@ -2758,10 +2841,8 @@ export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> 
   const sender = outreach.fromAddress
     ? await senderOfAddress(tx, product, outreach.fromAddress)
     : brandMailbox(product, "hola")
-  const paragraphs = outreach.body
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean)
+  // Lo que escribió la persona va con su formato básico (`@odentia/mail/markdown`); la firma y la cita, como texto.
+  const paragraphs: string[] = []
   if (email) {
     // Una respuesta firma con quien sale como remitente (el borrador de Kairós viene sin firma).
     const signature = replySignature(sender, product)
@@ -2773,11 +2854,36 @@ export async function outreachEmail(tx: Db, id: string): Promise<OutreachEmail> 
     const pdf = await proposalPdf(tx, outreach.proposalId, sender.address)
     attachments.push({ filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" })
   }
+  if (outreach.fileIds.length > 0) {
+    if (!readFile)
+      throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudieron leer los adjuntos")
+    const files = await tx
+      .select({
+        id: saasClientFile.id,
+        filename: saasClientFile.filename,
+        objectKey: saasClientFile.objectKey,
+        contentType: saasClientFile.contentType,
+      })
+      .from(saasClientFile)
+      .where(and(inArray(saasClientFile.id, outreach.fileIds), isNull(saasClientFile.deletedAt)))
+    if (files.length !== outreach.fileIds.length)
+      throw new ServiceError("FILE_GONE", 409, "Un adjunto ya no está: vuelve a elegirlos")
+    for (const fileId of outreach.fileIds) {
+      const file = files.find((row) => row.id === fileId)
+      if (!file) continue
+      attachments.push({
+        filename: filenameForType(file.filename, file.contentType),
+        content: await readFile(file.objectKey),
+        contentType: file.contentType,
+      })
+    }
+  }
   const template = renderEmail({
     brand,
     subject: outreach.subject,
-    preview: paragraphs[0]?.slice(0, 140) ?? outreach.subject,
+    preview: markdownText(parseMarkdown(outreach.body)).slice(0, 140) || outreach.subject,
     title: outreach.subject,
+    formatted: outreach.body,
     paragraphs,
     reason: row.clientName
       ? `Le escribimos por la relación de ${row.clientName} con ${brandPaper(brand).name}.`

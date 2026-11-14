@@ -308,8 +308,8 @@ export function EncounterVoidDialog({
                       <li>Sus diagnósticos, procedimientos y lo registrado en ella.</li>
                       <li>{voidedPapersText()}</li>
                       <li>
-                        Sus formularios a medias se descartan con este motivo. Los que ya finalizaste se
-                        conservan, marcados como de una atención anulada.
+                        Sus fichas a medias se descartan con este motivo. Las que ya finalizaste se
+                        conservan, marcadas como de una atención anulada.
                       </li>
                       <li>Lo que se dio por hecho aquí vuelve a quedar pendiente, sin cargos.</li>
                       <li>

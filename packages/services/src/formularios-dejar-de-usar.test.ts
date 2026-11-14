@@ -86,7 +86,7 @@ it("un formulario nuevo no nace como versión de otro, aunque el título sea igu
   ).rejects.toMatchObject({ code: "DRAFT_EXISTS" })
 })
 
-it("dejar de usar un formulario deja de ofrecerlo y volver a usarlo crea la versión siguiente con las mismas preguntas", async () => {
+it("apagar una ficha deja de ofrecerla y encenderla vuelve a usar la misma versión, sin crear otra", async () => {
   const f = await clinicalFixture()
   const periodontal = await inUse(f, "Ficha periodontal de prueba")
   const llenado = await f.run((tx) =>
@@ -94,51 +94,76 @@ it("dejar de usar un formulario deja de ofrecerlo y volver a usarlo crea la vers
   )
   await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, llenado.id))
 
+  // «Sin usar»: la misma versión, publicada y apagada.
   const left = await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, periodontal.id))
-  expect(left.status).toBe("archivado")
+  expect(left).toMatchObject({ id: periodontal.id, status: "publicado", inUse: false, version: 1 })
   const offered = await f.run((tx) => listFormTemplates(tx, ORG, { status: "publicado" }))
   expect(offered.some((row) => row.key === periodontal.key)).toBe(false)
-  // Ya no se empieza uno nuevo con ella.
+  // Configuración la sigue viendo, apagada.
+  const all = await f.run((tx) => listFormTemplates(tx, ORG, {}))
+  expect(all.find((row) => row.id === periodontal.id)).toMatchObject({ status: "publicado", inUse: false })
+  // Ya no se empieza una nueva con ella.
   await expect(
     f.run((tx) => createFormResponse(tx, ORG, f.actor, { templateId: periodontal.id, patientId: f.patient.id })),
   ).rejects.toMatchObject({ status: 400 })
 
+  // «En uso» otra vez: la misma versión, sin una nueva.
   const back = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, periodontal.id))
-  expect(back).toMatchObject({
-    key: periodontal.key,
-    version: 2,
-    status: "publicado",
-    title: periodontal.title,
-    respondent: "staff",
-  })
-  expect(back.schema).toEqual(periodontal.schema)
-  expect(back.publishedAt).toBeInstanceOf(Date)
-  // La que se dejó de usar no cambia, y lo ya llenado conserva sus preguntas.
-  const all = await f.run((tx) => listFormTemplates(tx, ORG, {}))
-  expect(all.find((row) => row.id === periodontal.id)?.status).toBe("archivado")
+  expect(back).toMatchObject({ id: periodontal.id, key: periodontal.key, version: 1, status: "publicado", inUse: true })
+  expect((await f.run((tx) => listFormTemplates(tx, ORG, {}))).filter((row) => row.key === periodontal.key)).toHaveLength(1)
+  // Lo ya llenado conserva sus preguntas.
   const [kept] = await ownerDb.select().from(clinicalFormResponse).where(eq(clinicalFormResponse.id, llenado.id))
   expect(kept).toMatchObject({ status: "finalizado", templateVersion: 1, answers: { hallazgos: "Bolsa de 5 mm" } })
   const [trace] = await ownerDb
     .select()
     .from(auditEvent)
     .where(and(eq(auditEvent.action, "form_template.reuse"), eq(auditEvent.entityId, back.id)))
-  expect(trace?.metadata).toMatchObject({ key: periodontal.key, version: 2, from: 1 })
+  expect(trace?.metadata).toMatchObject({ key: periodontal.key, version: 1, from: 1 })
 
-  // En uso otra vez: no se vuelve a usar dos veces, ni una versión anterior.
+  // En uso: no se vuelve a encender dos veces.
   await expect(f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, periodontal.id))).rejects.toMatchObject({ status: 409 })
   // Un borrador que se archivó nunca estuvo en uso: no hay a qué volver.
   const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador que no se usó", schema }))
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, draft.id))
   await expect(f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, draft.id))).rejects.toMatchObject({ status: 409 })
-  // Con un borrador preparado se publica ese borrador.
+  // Apagada con un borrador preparado: se enciende igual, y el borrador sigue ahí.
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, back.id))
-  await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { key: back.key, title: back.title, schema }))
-  await expect(f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, back.id))).rejects.toMatchObject({
-    code: "DRAFT_EXISTS",
-  })
+  const pending = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { key: back.key, title: back.title, schema }))
+  expect(await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, back.id))).toMatchObject({ id: back.id, inUse: true })
+  expect((await f.run((tx) => listFormTemplates(tx, ORG, {}))).find((row) => row.id === pending.id)?.status).toBe("borrador")
   await expect(
     f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, "00000000-0000-4000-8000-000000000000")),
   ).rejects.toMatchObject({ status: 404 })
+})
+
+it("publicar la versión siguiente de una ficha apagada la deja apagada; una que se dejó de usar antes del interruptor vuelve como versión nueva", async () => {
+  const f = await clinicalFixture()
+  const off = await inUse(f, "Ficha apagada con versión nueva")
+  await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, off.id))
+  const next = await f.run(async (tx) => {
+    const draft = await createFormTemplate(tx, ORG, f.actor, { key: off.key, title: off.title, schema })
+    return publishFormTemplate(tx, ORG, f.actor, draft.id)
+  })
+  expect(next).toMatchObject({ version: 2, status: "publicado", inUse: false })
+
+  // Antes del interruptor, dejar de usar archivaba la versión: de ahí no se sale, y nace la siguiente.
+  const legacy = await inUse(f, "Ficha dejada de usar antes del interruptor")
+  await ownerDb.update(clinicalFormTemplate).set({ status: "archivado" }).where(eq(clinicalFormTemplate.id, legacy.id))
+  const revived = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, legacy.id))
+  expect(revived).toMatchObject({ key: legacy.key, version: 2, status: "publicado", inUse: true })
+})
+
+it("la base deja apagar y encender la versión publicada sin tocar nada más, y nada de una archivada", async () => {
+  const f = await clinicalFixture()
+  const template = await inUse(f, "Ficha que la base protege")
+  await ownerDb.update(clinicalFormTemplate).set({ inUse: false }).where(eq(clinicalFormTemplate.id, template.id))
+  await expect(
+    ownerDb.update(clinicalFormTemplate).set({ inUse: true, title: "Otro título" }).where(eq(clinicalFormTemplate.id, template.id)),
+  ).rejects.toMatchObject({ cause: { code: "25001" } })
+  await ownerDb.update(clinicalFormTemplate).set({ status: "archivado" }).where(eq(clinicalFormTemplate.id, template.id))
+  await expect(
+    ownerDb.update(clinicalFormTemplate).set({ inUse: true }).where(eq(clinicalFormTemplate.id, template.id)),
+  ).rejects.toMatchObject({ cause: { code: "25001" } })
 })
 
 it("el servidor rechaza una fecha imposible y un valor que no es del tipo de la pregunta", async () => {
@@ -328,8 +353,9 @@ it("dos «Volver a usar» a la vez: uno lo pone en uso y el otro recibe que ya e
   const rejected = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
   expect(rejected).toHaveLength(2)
   for (const reason of rejected) expect(reason).toMatchObject({ status: 409 })
+  // La misma versión, encendida una sola vez.
   const versions = (await f.run((tx) => listFormTemplates(tx, ORG, {}))).filter((row) => row.key === template.key)
-  expect(versions.map((row) => `${row.version}:${row.status}`).sort()).toEqual(["1:archivado", "2:publicado"])
+  expect(versions.map((row) => `${row.version}:${row.status}:${row.inUse}`)).toEqual(["1:publicado:true"])
 })
 
 it("volver a usar revisa las preguntas como al publicar: si ya no valen, lo dice y no pone en uso algo que no se puede llenar", async () => {
@@ -497,13 +523,13 @@ it("los rechazos al empezar o llenar un formulario se dicen con palabras de la p
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))
   await expect(start(template.id)).rejects.toMatchObject({
     status: 400,
-    fields: { templateId: "Este formulario ya no se usa: elige otro, o vuelve a usarlo desde Configuración" },
+    fields: { templateId: "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración" },
   })
   // Uno que todavía es un borrador.
   const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador con mensajes claros", schema }))
   await expect(start(draft.id)).rejects.toMatchObject({
     status: 400,
-    fields: { templateId: "Este formulario aún es un borrador: publícalo para empezar a llenarlo" },
+    fields: { templateId: "Esta ficha aún es un borrador: publícala para empezar a llenarla" },
   })
 })
 
@@ -517,16 +543,17 @@ it("«Actividad del equipo» dice de qué formulario se trata al publicarlo, dej
   const { items } = await f.run((tx) => listWorkspaceAudit(tx, ORG, { area: "configuracion" }))
   const about = (id: string, action: string) => items.find((item) => item.entityId === id && item.action === action)
   expect(about(template.id, "form_template.publish")).toMatchObject({
-    what: "Publicó una versión de una plantilla de formulario",
+    what: "Publicó una versión de una ficha de consulta",
     about: "«Ficha con nombre en la actividad» · versión 1",
   })
   expect(about(template.id, "form_template.leave")).toMatchObject({
-    what: "Dejó de usar un formulario",
+    what: "Dejó de usar una ficha de consulta",
     about: "«Ficha con nombre en la actividad» · versión 1",
   })
+  // Volver a usarla enciende la misma versión.
   expect(about(back.id, "form_template.reuse")).toMatchObject({
-    what: "Volvió a usar un formulario",
-    about: "«Ficha con nombre en la actividad» · versión 2",
+    what: "Volvió a usar una ficha de consulta",
+    about: "«Ficha con nombre en la actividad» · versión 1",
   })
 })
 
@@ -617,20 +644,27 @@ it("la atención anulada dice en la Historia qué formularios tenía: el que se 
   expect(live?.born?.forms ?? []).toEqual([])
 })
 
-it("la fecha en que se creó un formulario es la de su primera versión, y no cambia al volver a usarlo", async () => {
+it("la fecha en que se creó un formulario es la de su primera versión, y no cambia al volver a usarlo ni al publicar otra", async () => {
   const f = await clinicalFixture()
   const first = await inUse(f, "Ficha con fecha estable")
+  // Apagarla y encenderla es la misma versión: su fecha no cambia.
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, first.id))
   const back = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, first.id))
-  expect(back.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime())
+  expect(back.id).toBe(first.id)
+  // Una versión nueva sí nace después, y dice la fecha de la primera.
+  const next = await f.run(async (tx) => {
+    const draft = await createFormTemplate(tx, ORG, f.actor, { key: first.key, title: first.title, schema })
+    return publishFormTemplate(tx, ORG, f.actor, draft.id)
+  })
+  expect(next.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime())
   const rows = (await f.run((tx) => listClinicFormTemplates(tx, ORG))).filter((row) => row.key === first.key)
   expect(rows).toHaveLength(2)
   // Las dos versiones dicen la misma fecha: la de la primera. Es lo que distingue a dos con el mismo título.
   for (const row of rows) expect(row.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
-  // También en lo que ofrece «Nuevo» › «Formulario», que solo trae la versión en uso.
+  // También en lo que ofrece «Nuevo» › «Ficha», que solo trae la versión en uso.
   const [offered] = (await f.run((tx) => listClinicFormTemplates(tx, ORG, { status: "publicado" }))).filter(
     (row) => row.key === first.key,
   )
-  expect(offered).toMatchObject({ id: back.id, version: 2 })
+  expect(offered).toMatchObject({ id: next.id, version: 2 })
   expect(offered?.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
 })

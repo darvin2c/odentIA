@@ -212,11 +212,14 @@ export function AnswerAppField({
   field,
   disabled = false,
   attachments,
+  describedBy,
   enterKeyHint,
 }: {
   field: FormFieldDef
   disabled?: boolean
   attachments?: AttachmentOption[]
+  /** Otro texto que describe la pregunta (la respuesta anterior): se oye con ella. */
+  describedBy?: string
   /** En un cuestionario donde Enter pasa de pregunta (`advanceOnEnter`): la tecla del teléfono dice «Siguiente», no «Ir». */
   enterKeyHint?: "next"
 }): React.JSX.Element | null {
@@ -245,7 +248,7 @@ export function AnswerAppField({
           invalid={control.invalid}
           onBlur={control.onBlur}
           aria-labelledby={labelId}
-          aria-describedby={control.describedBy}
+          aria-describedby={[control.describedBy, describedBy].filter(Boolean).join(" ") || undefined}
         />
       )}
     </AnswerFrame>
