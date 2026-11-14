@@ -4,7 +4,9 @@ import {
   ageInYears,
   DEFAULT_REGISTRATION_CONFIG,
   declaredHealthAnswered,
+  isChildAge,
   newRegistrationQuestions,
+  OPTIONAL_ONLY_REGISTRATION_FIELDS,
   REGISTRATION_QUESTIONS_VERSION,
   type RegistrationAnswers,
   registrationAnswersSchema,
@@ -55,7 +57,21 @@ describe("los datos de salud nuevos", () => {
       "boneMedicines",
       "medical.lactancia",
       "medical.tabaco",
+      "dental.biberon",
+      "dental.chupon",
+      "dental.dulcesEntreComidas",
+      "dental.pastaConFluor",
+      "dental.quienCepilla",
     ])
+    // Quien ya vio las de la entrega 6 ve solo las de un niño, y solo en odentIA.
+    expect(newRegistrationQuestions(2, "dental").map((item) => item.key)).toEqual([
+      "dental.biberon",
+      "dental.chupon",
+      "dental.dulcesEntreComidas",
+      "dental.pastaConFluor",
+      "dental.quienCepilla",
+    ])
+    expect(newRegistrationQuestions(2, "medical")).toEqual([])
     // latidIA ya preguntaba la lactancia y el tabaco: para ella son nuevas solo las dos medicinas.
     expect(newRegistrationQuestions(1, "medical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
     expect(newRegistrationQuestions(1, "optical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
@@ -182,6 +198,84 @@ describe("los datos de salud nuevos", () => {
     expect(declaredHealthAnswered({ anticoagulants: { state: "none" } })).toBe(true)
     expect(declaredHealthAnswered({ dental: { problemaAnestesia: "no" } })).toBe(true)
     expect(declaredHealthAnswered({ medical: { tabaco: "nunca" } })).toBe(true)
+  })
+})
+
+describe("lo de un niño, para quien lo cuida (menores de 12)", () => {
+  const thiago: RegistrationAnswers = {
+    demographics: { displayName: "Thiago Quispe", birthDate: "2020-05-10", sex: "M" },
+    respondent: "representative",
+    representative: {
+      displayName: "Carla Ramos",
+      relationship: "guardian",
+      relationshipDetail: "Madre, padre o tutor",
+      phone: "+51999999999",
+      docType: "DNI",
+      docNumber: "45678912",
+    },
+    privacyAccepted: true,
+    health: {
+      allergies: { state: "none", items: [] },
+      conditions: { state: "recorded", items: [{ name: "Asma" }] },
+      medications: { state: "unanswered", items: [] },
+      dental: { biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" },
+    },
+  }
+
+  it("un niño es quien no ha cumplido 12; sin la edad no se supone", () => {
+    expect(isChildAge(6)).toBe(true)
+    expect(isChildAge(11)).toBe(true)
+    expect(isChildAge(12)).toBe(false)
+    expect(isChildAge(null)).toBe(false)
+    expect(isChildAge(undefined)).toBe(false)
+  })
+
+  it("al niño no se le pregunta embarazo, lactancia, tabaco ni alcohol; al adulto, sí", () => {
+    for (const key of ["personal.embarazo", "medical.lactancia", "medical.tabaco", "medical.alcohol"] as const) {
+      expect(registrationFieldApplies(key, { sex: "F", age: 6 })).toBe(false)
+      expect(registrationFieldApplies(key, { sex: null, age: 11 })).toBe(false)
+      expect(registrationFieldApplies(key, { sex: "F", age: 30 })).toBe(true)
+    }
+    // De 12 a 17 sigue como hasta hoy (fuera de esta entrega).
+    expect(registrationFieldApplies("medical.tabaco", { sex: "M", age: 15 })).toBe(true)
+  })
+
+  it("biberón y chupón, solo hasta los 6 años: a un niño de 8 no se le preguntan", () => {
+    expect(registrationFieldApplies("dental.biberon", { sex: "M", age: 6 })).toBe(true)
+    expect(registrationFieldApplies("dental.chupon", { sex: "M", age: 6 })).toBe(true)
+    expect(registrationFieldApplies("dental.biberon", { sex: "M", age: 8 })).toBe(false)
+    expect(registrationFieldApplies("dental.chupon", { sex: "F", age: 8 })).toBe(false)
+    // Dulces, flúor y quién le cepilla, a todo menor de 12.
+    expect(registrationFieldApplies("dental.dulcesEntreComidas", { sex: "M", age: 8 })).toBe(true)
+    expect(registrationFieldApplies("dental.pastaConFluor", { sex: "M", age: 11 })).toBe(true)
+    expect(registrationFieldApplies("dental.quienCepilla", { sex: "M", age: 8 })).toBe(true)
+    // A un adulto, o sin la edad, «de pequeño» no se pregunta.
+    expect(registrationFieldApplies("dental.quienCepilla", { sex: "F", age: 30 })).toBe(false)
+    expect(registrationFieldApplies("dental.dulcesEntreComidas", { sex: null, age: null })).toBe(false)
+  })
+
+  it("«de pequeño» nace en «Opcional», es solo de odentIA y nunca es obligatorio", () => {
+    expect(DEFAULT_REGISTRATION_CONFIG.fields["dental.quienCepilla"]).toBe("optional")
+    expect(registrationFieldAsked(config, "dental.biberon", "PE", "dental")).toBe(true)
+    expect(registrationFieldAsked(config, "dental.biberon", "PE", "medical")).toBe(false)
+    expect(registrationFieldAsked(config, "dental.biberon", "PE", "optical")).toBe(false)
+    expect(OPTIONAL_ONLY_REGISTRATION_FIELDS).toContain("dental.pastaConFluor")
+  })
+
+  it("C3 · Carla registra a Thiago, 6 años: lo de un niño se acepta y lo de un adulto no", () => {
+    expect(validateRegistrationAnswers(config, thiago, publicContext)).toEqual({})
+    const withAdult = { ...thiago, health: { ...thiago.health, medical: { tabaco: "nunca" as const } } }
+    expect(validateRegistrationAnswers(config, withAdult, publicContext)).toHaveProperty("health.medical.tabaco")
+    // A los 8 años, el biberón ya no se pregunta y no se acepta.
+    const eight = { ...thiago, demographics: { ...thiago.demographics, birthDate: "2018-05-10" } }
+    expect(validateRegistrationAnswers(config, eight, publicContext)).toHaveProperty("health.dental.biberon")
+    // A un adulto no se le acepta «de pequeño».
+    expect(
+      validateRegistrationAnswers(config, withHealth({ dental: { quienCepilla: "solo" } }), publicContext),
+    ).toHaveProperty("health.dental.quienCepilla")
+    expect(
+      registrationAnswersSchema.safeParse({ ...thiago, health: { dental: { dulcesEntreComidas: "mucho" } } }).success,
+    ).toBe(false)
   })
 })
 

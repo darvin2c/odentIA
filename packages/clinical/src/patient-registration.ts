@@ -149,6 +149,13 @@ export const REGISTRATION_FIELDS = [
   { key: "dental.hiloDental", label: "Hilo dental", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.bruxismo", label: "Bruxismo", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.habitos", label: "Hábitos", step: "odontologicos", group: "health", products: ["dental"] },
+  // «Thiago de pequeño»: solo a quien cuida a un menor de 12 (`registrationFieldApplies`); lo que decide el
+  // riesgo de caries (AAPD, Caries-risk Assessment 2022). Pediatría dental: solo odentIA.
+  { key: "dental.biberon", label: "Biberón o pecho para dormir", step: "ninez", group: "health", products: ["dental"] },
+  { key: "dental.chupon", label: "Chupón o dedo", step: "ninez", group: "health", products: ["dental"] },
+  { key: "dental.dulcesEntreComidas", label: "Dulces o jugos entre comidas", step: "ninez", group: "health", products: ["dental"] },
+  { key: "dental.pastaConFluor", label: "Pasta de dientes con flúor", step: "ninez", group: "health", products: ["dental"] },
+  { key: "dental.quienCepilla", label: "Quién le cepilla los dientes", step: "ninez", group: "health", products: ["dental"] },
 ] as const satisfies readonly RegistrationFieldDef[]
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
 
@@ -160,7 +167,7 @@ export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
  * tabaco ya eran de latidIA: son nuevos solo en odentIA). Lo que no figura es de
  * la versión 1.
  */
-export const REGISTRATION_QUESTIONS_VERSION = 2
+export const REGISTRATION_QUESTIONS_VERSION = 3
 const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Record<ClinicalProduct, number>>>> = {
   "dental.corazon": 2,
   "dental.problemaAnestesia": 2,
@@ -168,6 +175,12 @@ const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Rec
   boneMedicines: 2,
   "medical.lactancia": { dental: 2 },
   "medical.tabaco": { dental: 2 },
+  // Lo de un niño, para quien lo cuida (mesa del 13 nov, entrega 7).
+  "dental.biberon": 3,
+  "dental.chupon": 3,
+  "dental.dulcesEntreComidas": 3,
+  "dental.pastaConFluor": 3,
+  "dental.quienCepilla": 3,
 }
 
 const fieldProducts = (field: (typeof REGISTRATION_FIELDS)[number]): readonly ClinicalProduct[] | null =>
@@ -203,7 +216,11 @@ export const CENSUS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGIS
 export const OPTIONAL_ONLY_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
   .filter(
     (field) =>
-      field.group === "census" || field.step === "personales" || field.step === "odontologicos" || field.step === "habitos",
+      field.group === "census" ||
+      field.step === "personales" ||
+      field.step === "odontologicos" ||
+      field.step === "habitos" ||
+      field.step === "ninez",
   )
   .map((field) => field.key)
 
@@ -229,6 +246,8 @@ const optionalDefaults: Record<string, true> = {
   allergies: true, conditions: true, medications: true,
   anticoagulants: true, boneMedicines: true, "dental.corazon": true, "dental.problemaAnestesia": true,
   "medical.lactancia": true, "medical.tabaco": true,
+  "dental.biberon": true, "dental.chupon": true, "dental.dulcesEntreComidas": true, "dental.pastaConFluor": true,
+  "dental.quienCepilla": true,
 }
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
   version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
@@ -301,6 +320,38 @@ export const TOBACCO_ANSWERS = ["nunca", "fuma", "dejo"] as const
 export type CigaretteBand = (typeof CIGARETTE_BANDS)[number]
 export const CIGARETTE_BAND_LABELS: Record<CigaretteBand, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
 /**
+ * Niño: quien no ha cumplido 12 años (Código de los Niños y Adolescentes, Ley 27337, Título
+ * Preliminar, art. I). Su salud la responde quien lo cuida, con ejemplos de niño, y no se le
+ * pregunta embarazo, lactancia, tabaco ni alcohol. De 12 a 17 sigue como hasta hoy (pendiente legal).
+ */
+export const CHILD_AGE_LIMIT = 12
+/**
+ * Biberón y chupón, solo hasta los 6 años: la AAPD pide dejar la succión no nutritiva hacia los
+ * 36 meses y a un niño de 8 ya no se le pregunta. El corte es supuesto de la mesa del 13 nov, por
+ * confirmar con una clínica real.
+ */
+export const EARLY_CHILDHOOD_MAX_AGE = 6
+/** Si a esa edad se le pregunta lo de un niño. Sin la edad no se supone. */
+export function isChildAge(age: number | null | undefined): boolean {
+  return typeof age === "number" && age >= 0 && age < CHILD_AGE_LIMIT
+}
+/** «¿Toma biberón o pecho para dormir?» */
+export const BOTTLE_ANSWERS = ["no", "si", "ya_no"] as const
+/** «¿Usa chupón o se chupa el dedo?» */
+export const PACIFIER_ANSWERS = ["no", "chupon", "dedo"] as const
+/**
+ * Dulces o jugos entre comidas, al día: el corte de riesgo de caries de la AAPD es «más de 3»,
+ * por eso «1 a 3» y «4 o más».
+ */
+export const SWEETS_ANSWERS = ["casi_nunca", "1_a_3", "4_o_mas"] as const
+/** Quién le cepilla: él o ella sin ayuda, un adulto o los dos. */
+export const BRUSHER_ANSWERS = ["solo", "adulto", "ambos"] as const
+/**
+ * Las enfermedades que marca quien cuida a un niño: las de un niño. Ningún paso le pregunta
+ * «¿diabetes, presión alta?» con ejemplos de adulto; la diabetes sigue en la lista (la tipo 1).
+ */
+export const DECLARED_CHILD_CONDITION_OPTIONS = ["Asma", "Epilepsia o convulsiones", "Diabetes", "Problemas de sangrado"] as const
+/**
  * Las enfermedades que el paciente marca de una lista, en sus palabras; lo que
  * no está lo escribe en «Otra». Cada una entra a Antecedentes con este nombre y
  * sin código: lo que marca un paciente no es un diagnóstico, y el código de la
@@ -357,6 +408,12 @@ export const registrationAnswersSchema = z.strictObject({
       }).refine(v => v.riesgoEndocarditis !== undefined || v.antibioticoPrevio !== undefined, "Responde al menos una de las dos").optional(),
       /** Un problema con la anestesia del dentista o un sangrado largo tras una extracción. */
       problemaAnestesia: z.enum(INTERVIEW_ANSWERS).optional(),
+      /** «De pequeño», lo que cuenta quien cuida a un menor de 12. */
+      biberon: z.enum(BOTTLE_ANSWERS).optional(),
+      chupon: z.enum(PACIFIER_ANSWERS).optional(),
+      dulcesEntreComidas: z.enum(SWEETS_ANSWERS).optional(),
+      pastaConFluor: z.enum(INTERVIEW_ANSWERS).optional(),
+      quienCepilla: z.enum(BRUSHER_ANSWERS).optional(),
     }).optional(),
     /**
      * Lactancia y hábitos: van a «Embarazo y lactancia» y «Hábitos» de la entrevista, con la forma
@@ -587,16 +644,37 @@ export function declaredLactationAndTobacco(
   return out
 }
 
+/** Lo que no se le pregunta a un niño (menor de 12): lo de un adulto. */
+const NOT_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set([
+  "personal.embarazo",
+  "medical.lactancia",
+  "medical.tabaco",
+  "medical.alcohol",
+])
+/** Lo que solo se le pregunta a quien cuida a un niño: «de pequeño». */
+const ONLY_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set(
+  REGISTRATION_FIELDS.filter((field) => field.step === "ninez").map((field) => field.key),
+)
+/** Biberón y chupón: solo hasta los 6 años. */
+const EARLY_CHILDHOOD: ReadonlySet<RegistrationFieldKey> = new Set(["dental.biberon", "dental.chupon"])
+
 /**
  * A quién se le pregunta cada dato de salud: el embarazo y la lactancia, solo a
  * mujeres de 12 a 55 años (sin el sexo o la edad en la ficha se pregunta: no se
- * supone). Una sola regla para el registro, «Su enlace» y lo que el servidor
- * cuenta como «falta preguntar».
+ * supone). A un niño (menor de 12) no se le pregunta lo de un adulto (embarazo,
+ * lactancia, tabaco ni alcohol); a quien lo cuida, «de pequeño», con biberón y
+ * chupón solo hasta los 6 años. Sin la edad, «de pequeño» no se pregunta: no se
+ * supone que es un niño. Una sola regla para el registro, «Su enlace» y lo que
+ * el servidor cuenta como «falta preguntar».
  */
 export function registrationFieldApplies(
   key: RegistrationFieldKey,
   person: { sex?: string | null; age?: number | null },
 ): boolean {
+  const child = isChildAge(person.age)
+  if (ONLY_FOR_CHILDREN.has(key))
+    return child && (!EARLY_CHILDHOOD.has(key) || (person.age as number) <= EARLY_CHILDHOOD_MAX_AGE)
+  if (child && NOT_FOR_CHILDREN.has(key)) return false
   if (key !== "personal.embarazo" && key !== "medical.lactancia") return true
   if (person.sex === "M") return false
   return person.age == null || (person.age >= 12 && person.age <= 55)
@@ -774,12 +852,18 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       }
       return errors
     }
+    // A quién se le pregunta cada dato de salud: la misma regla del registro y de su enlace.
+    const person = { sex: data.demographics.sex, age: ageInYears(data.demographics.birthDate, context.today) }
     for (const field of REGISTRATION_FIELDS) {
       const key = field.key
       const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
       const value = registrationFieldValue(data, field)
       if (!registrationFieldAsked(config, key, context.countryCode, context.product)) {
         if (value !== undefined) errors[path] = "Este dato no se pide en el registro"
+        continue
+      }
+      if (field.group === "health" && !registrationFieldApplies(key, person)) {
+        if (value !== undefined) errors[path] = "Este dato no se le pregunta a esta persona"
         continue
       }
       if (contactCoveredByRepresentative(key, representativeContact)) continue
