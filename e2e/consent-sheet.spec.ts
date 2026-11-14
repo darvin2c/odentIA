@@ -45,7 +45,7 @@ test("consentimientos: nacen activos; se leen, se cambian sobre la hoja, se ve e
 
   // Salir con cambios pregunta; un campo vacío se dice en su lugar, sin perder lo escrito.
   await page.getByRole("button", { name: "Consentimientos", exact: true }).click()
-  await page.getByRole("button", { name: "Continuar editando" }).click()
+  await page.getByRole("button", { name: "Seguir aquí" }).click()
   const procedure = sheet.getByRole("textbox", { name: "Procedimiento propuesto" })
   const before = await procedure.inputValue()
   await procedure.fill("")

@@ -48,7 +48,7 @@ function Guard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage 
     <div role="alertdialog">
       Si sales, se perderán
       <button type="button" onClick={blocker.reset}>
-        Continuar editando
+        Seguir aquí
       </button>
       <button type="button" onClick={blocker.proceed}>
         Descartar y salir
@@ -98,7 +98,7 @@ it("con la pantalla que conserva sus cajones, cambiar de pestaña no pregunta; c
   // Otra sede sí pregunta: lo escrito se guardaría en ella.
   void router.navigate({ href: "/finance?tab=caja&branch=norte" })
   await screen.findByRole("alertdialog")
-  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
   expect(router.state.location.search).toEqual({ tab: "caja", branch: "centro" })
 
@@ -161,7 +161,7 @@ it("lo que se guarda solo: con todo guardado salir no pregunta, y un cambio que 
   // Aún sin guardar: avisa, como siempre.
   void router.navigate({ href: "/agenda" })
   await screen.findByRole("alertdialog")
-  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
 
   fireEvent.click(screen.getByRole("button", { name: "Termina el autoguardado" }))

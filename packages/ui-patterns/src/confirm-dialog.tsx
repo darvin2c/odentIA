@@ -6,8 +6,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  Button,
 } from "@odentia/ui"
-import type { ReactNode } from "react"
+import { type ReactNode, useRef } from "react"
 import { common } from "./common.js"
 import { SubmitButton } from "./form/submit-button.js"
 
@@ -92,6 +93,56 @@ export function ConfirmDialog({
           >
             {confirmLabel}
           </SubmitButton>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+export interface UnsavedDialogProps {
+  open: boolean
+  /**
+   * Qué se pierde de verdad, en palabras de quien decide («No se guardó «15» en
+   * «Intensidad del dolor (0–10)». Lo demás ya está guardado.»). Sin él, el texto común.
+   */
+  lost?: string | null
+  /** «Seguir aquí», Escape o el clic fuera: no se sale y no se pierde nada. */
+  onStay: () => void
+  /** «Descartar y salir». */
+  onDiscard: () => void
+  /** A dónde vuelve el foco al quedarse (el campo que se estaba editando); `false`, a quien la abrió. */
+  finalFocus?: () => HTMLElement | boolean | null
+}
+
+/**
+ * La pregunta de «salir sin guardar», la misma para cerrar un formulario o un
+ * detalle (×, Escape, «Cancelar») y para salir a otra pantalla con algo sin
+ * guardar en la página o en el panel lateral. Dice lo que se pierde y su
+ * acción principal es quedarse: es la que no pierde nada, y la que recibe el
+ * foco. «Descartar y salir» va aparte, en rojo.
+ */
+export function UnsavedDialog({ open, lost, onStay, onDiscard, finalFocus }: UnsavedDialogProps) {
+  const stay = useRef<HTMLButtonElement>(null)
+  const words = common.confirm.unsaved
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onStay()
+      }}
+    >
+      <AlertDialogContent size="sm" initialFocus={stay} finalFocus={finalFocus}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{words.title}</AlertDialogTitle>
+          <AlertDialogDescription>{lost || words.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <Button type="button" variant="destructive" onClick={onDiscard}>
+            {words.discard}
+          </Button>
+          <AlertDialogCancel ref={stay} variant="default">
+            {words.keepEditing}
+          </AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

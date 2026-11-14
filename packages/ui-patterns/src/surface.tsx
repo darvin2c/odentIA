@@ -1,7 +1,7 @@
 import { Button, cn, ScrollArea, Skeleton } from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
-import { ConfirmDialog } from "./confirm-dialog.js"
+import { UnsavedDialog } from "./confirm-dialog.js"
 
 /**
  * Chrome compartido por las dos familias de superficies laterales: el
@@ -223,14 +223,10 @@ export function useCloseGuard({
   }, [isSubmitting, isDirty, onClose])
 
   const confirmDialog = (
-    <ConfirmDialog
+    <UnsavedDialog
       open={asking}
-      title={common.confirm.unsaved.title}
-      description={common.confirm.unsaved.description}
-      cancelLabel={common.confirm.unsaved.keepEditing}
-      confirmLabel={common.confirm.unsaved.discard}
-      onClose={() => setAsking(false)}
-      onConfirm={() => {
+      onStay={() => setAsking(false)}
+      onDiscard={() => {
         setAsking(false)
         onClose()
       }}
