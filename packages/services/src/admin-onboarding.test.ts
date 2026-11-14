@@ -629,7 +629,7 @@ describe("«Datos recibidos» y lo que se borró sin cargar", () => {
       deleteAfter: dayAgo(10),
       deletedAt: ago(9),
     })
-    // El relleno de 0119 lo dejó alcanzado.
+    // El relleno de 0120 lo dejó alcanzado.
     await ownerDb
       .insert(saasClientMilestone)
       .values({ clientId, step: "archivos", reachedAt: ago(40), source: "hecho" })

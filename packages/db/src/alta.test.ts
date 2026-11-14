@@ -11,7 +11,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createOwnerDb, type Db } from "./client.js"
 
-// Kairós vigila el alta (0118 y 0119): cuándo llegó cada archivo, la carga marcada, las tareas
+// Kairós vigila el alta (0119 y 0120): cuándo llegó cada archivo, la carga marcada, las tareas
 // solo de Administración y la primera vez de cada paso del alta. La base se migra hasta la 0117,
 // con datos como los de producción (correos de soporte@, una carga, tareas y los hechos del alta
 // de una clínica), y después se despliega el resto.
@@ -187,7 +187,7 @@ beforeAll(async () => {
   ownerDb = createOwnerDb(
     `postgres://dentalagent:dentalagent@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`,
   )
-  before = migrationsBefore("0118_kairos_vigila_el_alta")
+  before = migrationsBefore("0119_kairos_vigila_el_alta")
   await migrate(ownerDb, { migrationsFolder: before })
 
   await ownerDb.execute(sql`

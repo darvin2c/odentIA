@@ -659,9 +659,9 @@ export async function confirmClientFileDeletions(
 /**
  * Lo que el código anterior todavía programó para borrarse mientras se desplegaba (un adjunto
  * de `soporte@` registrado con `delete_after`, `received_at` de ahora y sin su correo, después
- * de que corrió la 0118): deja de estarlo, con la misma auditoría que el relleno
+ * de que corrió la 0119): deja de estarlo, con la misma auditoría que el relleno
  * (`client_file.retention_lifted`, con el día que tenía), y se liga a su correo con la hora del
- * correo, como hizo la 0118. Idempotente y barata (lo normal es que no encuentre nada): la
+ * correo, como hizo la 0119. Idempotente y barata (lo normal es que no encuentre nada): la
  * corre cada pasada de Kairós antes de mirar el alta. Devuelve cuántos levantó.
  */
 export async function liftLeftoverCorreoRetention(tx: Db): Promise<number> {

@@ -3437,7 +3437,7 @@ export async function kairosRulesPass(
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kairos:pass'))`)
   await expireKairosItems(tx, now)
   // Mientras se despliega, el código anterior todavía puede programar el borrado de un adjunto
-  // de soporte@: se levanta como lo hizo la 0118 (y la regla de la posible carga lo pregunta).
+  // de soporte@: se levanta como lo hizo la 0119 (y la regla de la posible carga lo pregunta).
   await liftLeftoverCorreoRetention(tx)
   // La primera vez de cada paso del alta, antes de las reglas: las del alta leen su estado.
   const sync = await syncOnboardingMilestones(tx, now, options)

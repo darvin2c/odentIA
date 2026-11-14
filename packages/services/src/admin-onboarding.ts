@@ -264,7 +264,7 @@ function asDate(value: unknown): Date | null {
 
 /**
  * Lo que dice el hecho de un paso: hecho (`at`, la primera vez que se ve en los datos, la misma
- * que lee el relleno de 0119) o lo que falta. `lost` hace que falte aunque esté guardado.
+ * que lee el relleno de 0120) o lo que falta. `lost` hace que falte aunque esté guardado.
  */
 interface Fact {
   at: Date | null
@@ -588,7 +588,7 @@ async function factsOf(
   facts.carta = await letterFact(tx, clientId)
 
   // 5, 6 y 7. La carga y el informe: del registro que muestra Alta (lo que hizo la skill). La
-  // primera vez es la de la primera fila del registro, como en el relleno de 0119.
+  // primera vez es la de la primera fila del registro, como en el relleno de 0120.
   const [firsts] = await tx
     .select({
       setup: sql<Date | null>`min(${adminAudit.createdAt}) filter (where ${adminAudit.action} = 'org.setup_import')`,
