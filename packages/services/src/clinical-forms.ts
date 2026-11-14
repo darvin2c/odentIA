@@ -1680,6 +1680,8 @@ export async function updateFormResponseDraft(
     professionalUserId?: string | null
     /** Las respuestas guardadas de las que partió quien escribe: otra pestaña no se pisa (`STALE_DRAFT`). */
     baseAnswers?: unknown
+    /** Lo que dice la auditoría además de quién: Clío dice de qué pregunta (sin el valor clínico). */
+    auditMetadata?: Record<string, unknown>
   },
   // `rejected`: las preguntas cuyo valor no valía (`answers.<id>` → por qué y qué quedó); conservan lo ya guardado, lo demás se guarda.
 ): Promise<FormResponseRow & { rejected: Record<string, string> }> {
@@ -1753,7 +1755,7 @@ export async function updateFormResponseDraft(
     )
     .returning()
   if (!row) throw notFound("Ficha")
-  await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {})
+  await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, input.auditMetadata ?? {})
   return { ...row, rejected }
 }
 

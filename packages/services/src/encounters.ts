@@ -17,6 +17,7 @@ import {
   diagnosisCatalog,
   encounter,
   encounterDiagnosis,
+  encounterDictationSuggestion,
   encounterPlanItem,
   encounterProcedure,
   encounterSite,
@@ -4095,6 +4096,17 @@ export async function voidEncounter(
       ),
     )
   await voidEncounterPapers(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
+  // Lo que Clío proponía y nadie confirmó ya no tiene dónde entrar: se descarta con el motivo.
+  await tx
+    .update(encounterDictationSuggestion)
+    .set({ status: "descartada", note: cascade, decidedBy: actorUserId, decidedAt: at, updatedAt: at })
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar"]),
+      ),
+    )
   await undoCompletionsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await settleEncounterVoidBudgets(tx, orgId, actorUserId, patientId, encounterId, budgets)
   const [row] = await tx

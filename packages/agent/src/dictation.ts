@@ -7,6 +7,7 @@ import {
   type DiagnosisSystemKey,
   type DictationDraft,
   type DictationFormQuestion,
+  formAnswerWords,
   operationAgentSchema,
 } from "@odentia/services"
 import { z } from "zod"
@@ -257,11 +258,12 @@ function formQuestionWords(question: DictationFormQuestion): string {
   const depends = question.dependsOn
     ? ` (solo si «${question.dependsOn.label}» es «${equals === true ? "Sí" : equals === false ? "No" : String(equals)}»)`
     : ""
-  return `${question.number}. ${question.label} · ${how}${depends}`
+  const now = question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
+  return `${question.number}. ${question.label} · ${how}${depends}${now}`
 }
 
 /**
- * Las fichas empezadas con sus preguntas vacías y cómo se responden. Va en el
+ * Las fichas empezadas con sus preguntas (y lo que ya dicen) y cómo se responden. Va en el
  * mensaje de la pausa y no en las instrucciones fijas: sin ficha empezada el
  * modelo no lee nada nuevo y lo de siempre no cambia.
  */
@@ -274,6 +276,7 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
     "- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).",
     "- Una opción: una de la lista, tal cual está escrita. Si lo dicho no alcanza para elegir una sola (falta el lado, la división o el grado), no la respondas.",
     "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad que la de la pregunta, no la respondas.",
+    "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
     "- Lo que respondes en una ficha no lo repitas en el texto de la consulta.",
     ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
   ].join("\n")

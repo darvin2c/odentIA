@@ -1426,12 +1426,16 @@ export async function saveDictationSegment(
     return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
-  // Las preguntas con el número que vio Clío, menos las que alguien respondió mientras ordenaba: esas no
-  // se proponen. Sin la lista que vio, el número no dice a cuál pregunta se refería: no se propone nada.
+  // Las preguntas con el número que vio Clío y lo que dicen ahora, menos las que alguien respondió
+  // mientras ordenaba: lo recién escrito gana. Sin la lista que vio, el número no dice a cuál
+  // pregunta se refería: no se propone nada.
   const openNow = segment.formQuestions?.length ? await dictationFormQuestions(tx, orgId, encounterId) : []
-  const formQuestions = (segment.formQuestions ?? []).filter((question) =>
-    openNow.some((item) => item.responseId === question.responseId && item.fieldId === question.fieldId),
-  )
+  const formQuestions = (segment.formQuestions ?? []).flatMap((question): DictationFormQuestion[] => {
+    const now = openNow.find((item) => item.responseId === question.responseId && item.fieldId === question.fieldId)
+    if (!now || (question.answered === undefined && now.answered !== undefined)) return []
+    const { answered: _seen, ...rest } = question
+    return [now.answered === undefined ? rest : { ...rest, answered: now.answered }]
+  })
   const scope: DictationScope = { ...(await dictationScope(tx, orgId)), formQuestions }
   const pendingRow = async (id: string) => {
     const [row] = await tx
@@ -1478,7 +1482,14 @@ export async function saveDictationSegment(
     const voice = meta.voice ?? { payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before }
     await tx
       .update(encounterDictationSuggestion)
-      .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice })), status: ready.status, note: ready.note, updatedAt: new Date() })
+      .set({
+        payload: withMeta(ready.payload, stamp({ ...meta, voice })),
+        status: ready.status,
+        note: ready.note,
+        // Una respuesta de ficha se comprueba contra lo que dijo al corregirla: es la frase que se ve.
+        ...(row.kind === "ficha" && said ? { sourceText: said.slice(0, DICTATION_SOURCE_CHARS) } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(encounterDictationSuggestion.id, row.id))
     if (!corrected.includes(row.id)) corrected.push(row.id)
     return true
@@ -1572,9 +1583,11 @@ export async function saveDictationSegment(
   // Una pregunta de ficha con propuesta pendiente: lo último que dijo la cambia, no se propone dos veces.
   const formKey = (payload: Record<string, unknown>) => `${String(payload["responseId"])}:${String(payload["fieldId"])}`
   const pendingForms = new Map(pendingNow.filter((item) => item.kind === "ficha").map((item) => [formKey(item.payload), item.id]))
-  const formsHere = new Set<string>()
+  // Dos respuestas a la misma pregunta en una pausa («seis… no, nueve»): vale la última que dijo.
+  const lastForm = new Map(preparedDrafts.flatMap((item, index) => (item.draft.kind === "ficha" ? [[formKey(item.prepared.payload), index] as const] : [])))
   const alreadyOnFile: string[] = []
-  for (const { draft, prepared } of preparedDrafts) {
+  for (const [index, { draft, prepared }] of preparedDrafts.entries()) {
+    if (draft.kind === "ficha" && lastForm.get(formKey(prepared.payload)) !== index) continue
     const ready = await withPatient(tx, orgId, patientId, encounterId, draft.kind, prepared, checks, scope)
     // Una sola elección por presupuesto (decisión 3): la siguiente de este mismo tramo también espera.
     if (isPlanChoice(draft.kind, ready.payload)) checks.choiceBlocked ??= CHOICE_ALREADY_HERE
@@ -1645,10 +1658,7 @@ export async function saveDictationSegment(
       pendingPlans.push(entry)
     }
     if (draft.kind === "ficha") {
-      const key = formKey(ready.payload)
-      if (formsHere.has(key)) continue
-      formsHere.add(key)
-      const earlier = pendingForms.get(key)
+      const earlier = pendingForms.get(formKey(ready.payload))
       if (earlier) {
         const row = await pendingRow(earlier)
         if (!row) continue
@@ -2112,11 +2122,19 @@ export async function confirmDictationSuggestion(
   patientId: string,
   encounterId: string,
   id: string,
+  /** Lo que veía quien confirma: una pausa pudo cambiar la propuesta con el mismo id mientras tanto. */
+  options: { expectedValue?: unknown } = {},
 ): Promise<DictationSuggestion> {
   const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
+  if (row.kind === "ficha" && options.expectedValue !== undefined) {
+    const data = splitMeta(row.payload).data
+    if (JSON.stringify(data["value"] ?? null) !== JSON.stringify(options.expectedValue ?? null)) {
+      throw conflict("SUGGESTION_CHANGED", `Clío la cambió mientras la veías: ahora propone «${formAnswerWords(data)}». Revísala y confírmala otra vez.`)
+    }
+  }
   // Emitir una receta es firmarla: tiene su propio botón (decisión 4 de la fase 2). El descanso médico también.
   if (row.kind === "receta") throw conflict("PRESCRIPTION_NEEDS_ISSUE", "Una receta dictada se emite con «Emitir receta»")
   if (row.kind === "descanso") throw conflict("MEDICAL_LEAVE_NEEDS_ISSUE", "Un descanso médico dictado se emite con «Emitir descanso»")
@@ -2197,17 +2215,9 @@ export async function confirmDictationSuggestion(
   } else if (row.kind === "presupuesto") {
     entityId = await confirmBudget(tx, orgId, actorUserId, patientId, encounterId, row.id)
   } else if (row.kind === "ficha") {
-    // Se escribe en la ficha con su validación, solo en la pregunta vacía. La que depende de otra
-    // acepta antes la propuesta pendiente de esa otra, si la hay; si no, pide responderla primero.
-    const outcome = await answerFormFromDictation(tx, orgId, actorUserId, payload, async (parentId) => {
-      const pending = await listDictationSuggestions(tx, orgId, patientId, encounterId)
-      const parent = pending.find(
-        (item) => item.kind === "ficha" && item.status === "lista" && item.payload["responseId"] === payload["responseId"] && item.payload["fieldId"] === parentId,
-      )
-      if (!parent) return false
-      await confirmDictationSuggestion(tx, orgId, actorUserId, patientId, encounterId, parent.id)
-      return true
-    })
+    // Se escribe en la ficha como a mano, solo en la pregunta vacía. La que depende de otra no
+    // acepta esa otra por su cuenta: «Confirmar las N» las manda en el orden de la ficha.
+    const outcome = await answerFormFromDictation(tx, orgId, actorUserId, payload)
     if (!outcome.written) {
       // Lo que escribió la persona gana: la propuesta se descarta y se dice por qué.
       const [dropped] = await tx

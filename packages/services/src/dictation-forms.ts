@@ -1,11 +1,9 @@
 import type { Db } from "@odentia/db"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
-import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
-import { assertAnswers, assertFormSchema, conditionMet, type FormFieldDef, isEmptyAnswer as isEmpty } from "./clinical-forms.js"
+import { assertFormSchema, conditionMet, type FormFieldDef, isEmptyAnswer as isEmpty, updateFormResponseDraft } from "./clinical-forms.js"
 import { ServiceError } from "./errors.js"
 import type { ProductSite } from "./product-hooks.js"
-import { productHooks } from "./products.js"
 
 /*
  * ---------- Clío propone las respuestas de la ficha de consulta empezada ----------
@@ -50,14 +48,21 @@ export interface DictationFormQuestion {
    * en la frase.
    */
   siblings?: Array<{ label: string; type: string; options: string[] | null }>
+  /**
+   * Lo que ya dice la pregunta, si está respondida. Clío la lee para que «corrijo,
+   * es división uno» quede como propuesta por revisar: lo escrito no se cambia solo.
+   */
+  answered?: unknown
 }
 
 /**
- * Las preguntas que Clío puede proponer en esta atención: las vacías de las
- * fichas del equipo en borrador (empezadas: una ficha solo ofrecida no cuenta,
- * decisión 4 del 14 nov), de los tipos que se comprueban con la frase. Una que
- * depende de otra ya respondida de forma que la oculta no se pregunta. Sin
- * fichas empezadas devuelve una lista vacía y el dictado queda como siempre.
+ * Las preguntas que Clío puede proponer en esta atención: las de las fichas
+ * del equipo en borrador (empezadas: una ficha solo ofrecida no cuenta,
+ * decisión 4 del 14 nov), de los tipos que se comprueban con la frase. Las ya
+ * respondidas van con lo que dicen (`answered`): solo se proponen si lo dictado
+ * las cambia, y quedan por revisar. Una que depende de otra ya respondida de
+ * forma que la oculta no se pregunta. Sin fichas empezadas devuelve una lista
+ * vacía y el dictado queda como siempre.
  */
 export async function dictationFormQuestions(tx: Db, orgId: string, encounterId: string): Promise<DictationFormQuestion[]> {
   const rows = await tx
@@ -104,7 +109,6 @@ export function formQuestionsOf(
     fields.forEach((field, order) => {
       if (questions.length >= DICTATION_MAX_FORM_QUESTIONS) return
       if (!(DICTATION_FORM_TYPES as readonly string[]).includes(field.type)) return
-      if (!isEmpty(answers[field.id])) return
       const parent = field.showIf ? fields.find((item) => item.id === field.showIf?.field) : undefined
       // La que depende de una ya respondida que la oculta no se ve: no se pregunta.
       if (field.showIf && !isEmpty(answers[field.showIf.field]) && !conditionMet(field.showIf, answers[field.showIf.field])) return
@@ -122,6 +126,7 @@ export function formQuestionsOf(
         order,
         dependsOn: field.showIf && parent ? { fieldId: parent.id, label: parent.label, equals: field.showIf.equals } : null,
         siblings: fields.filter((item) => item.id !== field.id).map((item) => ({ label: item.label, type: item.type, options: item.options ?? null })),
+        ...(isEmpty(answers[field.id]) ? {} : { answered: answers[field.id] }),
       })
     })
   }
@@ -324,9 +329,31 @@ const shortSaid = (said: string) => (said.length > 80 ? `${said.slice(0, 77)}…
  * propone (sin frase, otra pregunta, un número que no se dijo, un «No» que no
  * se negó, otra unidad). Lo que se dijo pero no alcanza para elegir (la clase
  * II sin su división), o un número fuera del rango de la pregunta, queda por
- * revisar: se ve en la pregunta y lo elige el profesional.
+ * revisar: se ve en la pregunta y lo elige el profesional. Sobre una pregunta
+ * ya respondida, solo si dice otra cosa, y siempre por revisar: lo escrito lo
+ * cambia una persona.
  */
 export function prepareFormAnswer(
+  draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+): PreparedFormAnswer | null {
+  const proposed = checkFormAnswer(draft, questions, site)
+  const question = questions.find((item) => item.number === draft.payload["question"])
+  if (!proposed || question?.answered === undefined) return proposed
+  const value = proposed.payload["value"]
+  if (value === null || value === undefined || sameAnswer(value, question.answered)) return null
+  const now = formAnswerWords({ value: question.answered, unit: question.unit })
+  return { payload: proposed.payload, status: "por_revisar", note: `Ya dice «${now}». Si cambió, cámbiala tú en la ficha.` }
+}
+
+/** La misma respuesta, sin mirar el orden de varias opciones. */
+function sameAnswer(a: unknown, b: unknown): boolean {
+  const norm = (value: unknown) => JSON.stringify(Array.isArray(value) ? [...value].map(String).sort() : value)
+  return norm(a) === norm(b)
+}
+
+function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
@@ -464,66 +491,45 @@ export type FormAnswerOutcome =
   | { written: false; note: string }
 
 /**
- * Escribe en la ficha la respuesta que propuso Clío, con la validación de
- * siempre, solo si la pregunta sigue vacía: lo que escribió la persona gana y
- * la propuesta se descarta. Una pregunta que depende de otra aún sin la
- * respuesta que la muestra no se escribe en silencio (`assertAnswers` la
- * dejaría vacía): pide responder primero esa. `answerParent` intenta aceptar la
- * propuesta pendiente de la pregunta de la que depende.
+ * Escribe en la ficha la respuesta que propuso Clío como se guarda a mano
+ * (`updateFormResponseDraft`: validación, permisos de la ficha y auditoría),
+ * solo si la pregunta sigue vacía: lo que escribió la persona gana y la
+ * propuesta se descarta con lo que quedó. Una pregunta que depende de otra: si
+ * esa otra ya está respondida de forma que la oculta, la propuesta se descarta;
+ * si está vacía, pide responderla primero. Nunca acepta la otra por su cuenta.
  */
-export async function answerFormFromDictation(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  payload: Record<string, unknown>,
-  answerParent: (fieldId: string) => Promise<boolean>,
-): Promise<FormAnswerOutcome> {
+export async function answerFormFromDictation(tx: Db, orgId: string, actorUserId: string, payload: Record<string, unknown>): Promise<FormAnswerOutcome> {
   const responseId = String(payload["responseId"] ?? "")
   const fieldId = String(payload["fieldId"] ?? "")
-  const lock = async () => {
-    const [row] = await tx
-      .select()
-      .from(clinicalFormResponse)
-      .where(and(eq(clinicalFormResponse.organizationId, orgId), eq(clinicalFormResponse.id, responseId)))
-      .for("update")
-      .limit(1)
-    return row
-  }
-  let current = await lock()
+  const [current] = await tx
+    .select()
+    .from(clinicalFormResponse)
+    .where(and(eq(clinicalFormResponse.organizationId, orgId), eq(clinicalFormResponse.id, responseId)))
+    .for("update")
+    .limit(1)
   if (!current || current.status !== "borrador" || current.source !== "staff") {
     return { written: false, note: "La ficha ya no está a medias: no se escribió nada." }
   }
-  const schema = assertFormSchema(current.templateSnapshot)
-  const fields = schema.sections.flatMap((section) => section.fields)
+  const fields = assertFormSchema(current.templateSnapshot).sections.flatMap((section) => section.fields)
   const field = fields.find((item) => item.id === fieldId)
   if (!field) return { written: false, note: "Esa pregunta ya no está en la ficha." }
-  let answers = { ...((current.answers ?? {}) as Record<string, unknown>) }
-  if (!isEmpty(answers[fieldId])) return { written: false, note: `«${field.label}» ya tenía respuesta: quedó la que estaba.` }
+  const answers = (current.answers ?? {}) as Record<string, unknown>
+  const words = (value: unknown, unit?: string | null) => formAnswerWords({ value, unit })
+  if (!isEmpty(answers[fieldId])) {
+    return { written: false, note: `Clío proponía «${words(payload["value"], field.unit)}»; quedó «${words(answers[fieldId], field.unit)}», que ya estaba escrito.` }
+  }
   if (field.showIf && !conditionMet(field.showIf, answers[field.showIf.field])) {
     const parent = fields.find((item) => item.id === field.showIf?.field)
-    const accepted = isEmpty(answers[field.showIf.field]) && (await answerParent(field.showIf.field))
-    if (accepted) {
-      current = await lock()
-      answers = { ...((current?.answers ?? {}) as Record<string, unknown>) }
-    }
-    if (!accepted || !conditionMet(field.showIf, answers[field.showIf.field])) {
-      throw new ServiceError("FORM_ANSWER_DEPENDS", 409, `Primero responde «${parent?.label ?? "la pregunta de la que depende"}»: esta pregunta depende de ella.`)
-    }
+    const label = parent?.label ?? "la pregunta de la que depende"
+    if (!isEmpty(answers[field.showIf.field])) return { written: false, note: `«${label}» quedó en «${words(answers[field.showIf.field])}»: esta pregunta ya no va.` }
+    throw new ServiceError("FORM_ANSWER_DEPENDS", 409, `Primero confirma o responde «${label}»: esta pregunta depende de ella.`)
   }
-  const site: ProductSite = (await productHooks(tx, orgId)).site
-  const validated = assertAnswers(schema, { ...answers, [fieldId]: payload["value"] }, { requireAll: false, site })
-  await tx
-    .update(clinicalFormResponse)
-    .set({ answers: validated, updatedAt: new Date() })
-    .where(and(eq(clinicalFormResponse.organizationId, orgId), eq(clinicalFormResponse.id, responseId)))
-  // Quién y cuándo ya viven en la sugerencia; aquí solo de qué pregunta, sin el valor clínico.
-  await tx.insert(auditEvent).values({
-    organizationId: orgId,
-    actorUserId,
-    action: "form_response.update",
-    entity: "clinical_form_response",
-    entityId: responseId,
-    metadata: { field: fieldId, by: "clio" },
+  // Quién y cuándo ya viven en la sugerencia; la auditoría dice de qué pregunta, sin el valor clínico.
+  const saved = await updateFormResponseDraft(tx, orgId, actorUserId, responseId, {
+    answers: { ...answers, [fieldId]: payload["value"] },
+    auditMetadata: { field: fieldId, by: "clio" },
   })
+  const rejected = saved.rejected[fieldId]
+  if (rejected) return { written: false, note: `No se escribió: ${rejected}` }
   return { written: true, responseId }
 }

@@ -46,6 +46,10 @@ const dictateInput = z
   })
   .strict()
 // Lo que el odontólogo puede corregir de una sugerencia; el servicio vuelve a validarla contra su operación.
+/** Al confirmar una respuesta de ficha: el valor que se veía. */
+const confirmInput = z
+  .object({ expectedValue: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(200)).max(40), z.null()]).optional() })
+  .strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
 
 export interface EncounterDictationDeps extends CrmDeps {
@@ -185,9 +189,12 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const { orgId, userId } = orgContextOf(c)
     const at = suggestionParams.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
+    // Sin cuerpo, como siempre; una respuesta de ficha manda el valor que se veía (409 si Clío lo cambió).
+    const parsed = confirmInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+        confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId, parsed.data),
       ),
     )
   })

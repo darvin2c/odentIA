@@ -8,6 +8,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { listFormResponses } from "./clinical-forms.js"
 import { type DictationFormQuestion, dictationFormQuestions, formQuestionsOf, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
 import { confirmDictationSuggestion, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
+import { voidEncounter } from "./encounters.js"
 import type { ProductSite } from "./product-hooks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -245,10 +246,12 @@ async function startedForm(answers: Record<string, unknown> = {}) {
 }
 
 describe("la ficha empezada recibe lo que propone Clío (base)", () => {
-  it("Clío ve solo las preguntas vacías que puede comprobar; sin ficha empezada, ninguna", async () => {
+  it("Clío ve las preguntas que puede comprobar, las respondidas con lo que dicen; sin ficha empezada, ninguna", async () => {
     const { questions, fx } = await startedForm({ overbite: 4 })
     const list = await questions()
-    expect(list.map((item) => item.fieldId)).toEqual(["clase_molar_derecha", "overjet", "dolor", "intensidad"])
+    expect(list.map((item) => item.fieldId)).toEqual(["clase_molar_derecha", "overjet", "overbite", "dolor", "intensidad"])
+    expect(list.find((item) => item.fieldId === "overbite")?.answered).toBe(4)
+    expect(list.find((item) => item.fieldId === "overjet")).not.toHaveProperty("answered")
     expect(list.find((item) => item.fieldId === "intensidad")?.dependsOn).toMatchObject({ fieldId: "dolor", equals: true })
     await ownerDb.update(clinicalFormResponse).set({ status: "finalizado", finalizedAt: new Date() }).where(eq(clinicalFormResponse.encounterId, fx.encounter.id))
     expect(await questions()).toEqual([])
@@ -276,7 +279,7 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     await ownerDb.update(clinicalFormResponse).set({ answers: { overjet: 5 } }).where(eq(clinicalFormResponse.id, form.id))
     const result = await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, saved.suggestions[0]!.id))
     expect(result.status).toBe("descartada")
-    expect(result.note).toContain("ya tenía respuesta")
+    expect(result.note).toBe("Clío proponía «6 mm»; quedó «5 mm», que ya estaba escrito.")
     expect(await answersNow()).toMatchObject({ overjet: 5 })
   })
 
@@ -296,17 +299,92 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(saved.suggestions).toEqual([])
   })
 
-  it("la que depende de otra acepta primero la propuesta de esa otra", async () => {
+  it("la que depende de otra no acepta esa otra por su cuenta: se confirman en el orden de la ficha", async () => {
     const { save, fx, answersNow } = await startedForm()
     const saved = await save([
       { payload: { question: 4, answer: "Sí" }, sourceText: "presenta dolor" },
-      { payload: { question: 5, answer: "8" }, sourceText: "ocho de diez" },
+      { payload: { question: 5, answer: "8" }, sourceText: "intensidad ocho de diez" },
     ])
+    const pain = saved.suggestions.find((item) => item.payload["fieldId"] === "dolor")!
     const intensity = saved.suggestions.find((item) => item.payload["fieldId"] === "intensidad")!
+    // Desmarcada «¿Presenta dolor?» al firmar, la intensidad sola no la acepta.
+    await expect(fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, intensity.id))).rejects.toMatchObject({
+      code: "FORM_ANSWER_DEPENDS",
+    })
+    expect(await answersNow()).toEqual({})
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, pain.id))
     await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, intensity.id))
     expect(await answersNow()).toMatchObject({ dolor: true, intensidad: 8 })
+  })
+
+  it("respondida la otra de forma que la oculta, la propuesta se descarta con el motivo, sin error", async () => {
+    const { save, fx, form, answersNow } = await startedForm()
+    const saved = await save([{ payload: { question: 5, answer: "8" }, sourceText: "intensidad ocho de diez" }])
+    await ownerDb.update(clinicalFormResponse).set({ answers: { dolor: false } }).where(eq(clinicalFormResponse.id, form.id))
+    const result = await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, saved.suggestions[0]!.id))
+    expect(result.status).toBe("descartada")
+    expect(result.note).toBe("«¿Presenta dolor?» quedó en «No»: esta pregunta ya no va.")
+    expect(await answersNow()).toEqual({ dolor: false })
+  })
+
+  it("confirma lo que se veía: si una pausa la cambió, avisa y no escribe", async () => {
+    const { save, fx, answersNow } = await startedForm()
+    const first = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])
+    await save([{ payload: { question: 2, answer: "9" }, sourceText: "no, overjet de nueve" }])
+    await expect(
+      fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, first.suggestions[0]!.id, { expectedValue: 6 })),
+    ).rejects.toMatchObject({ code: "SUGGESTION_CHANGED" })
+    expect(await answersNow()).toEqual({})
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, first.suggestions[0]!.id, { expectedValue: 9 }))
+    expect(await answersNow()).toMatchObject({ overjet: 9 })
+  })
+
+  it("dos respuestas a la misma pregunta en una pausa: vale la última", async () => {
+    const { save } = await startedForm()
+    const saved = await save([
+      { payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" },
+      { payload: { question: 2, answer: "9" }, sourceText: "perdón, overjet de nueve" },
+    ])
+    expect(saved.suggestions).toHaveLength(1)
+    expect(saved.suggestions[0]).toMatchObject({ payload: { value: 9 }, sourceText: "perdón, overjet de nueve" })
+  })
+
+  it("corregida por voz, la propuesta muestra la frase nueva", async () => {
+    const { save, fx, questions } = await startedForm()
+    const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])
+    const id = saved.suggestions[0]!.id
+    const formQuestions = await questions()
+    await fx.run((tx) =>
+      saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        drafts: [],
+        corrections: [{ suggestionId: id, changes: { answer: "7" }, said: "no, el overjet es de siete" }],
+        formQuestions,
+      }),
+    )
     const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
-    expect(pending.filter((item) => item.kind === "ficha")).toEqual([])
+    expect(pending.find((item) => item.id === id)).toMatchObject({ payload: { value: 7 }, sourceText: "no, el overjet es de siete" })
+  })
+
+  it("sobre una ya respondida, lo que la cambia queda por revisar con lo que dice; lo mismo no se propone", async () => {
+    const { save, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
+    const same = await save([{ payload: { question: 1, answer: "Clase II división 2" }, sourceText: "clase molar derecha clase dos división dos" }])
+    expect(same.suggestions).toEqual([])
+    const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
+    expect(changed.suggestions).toHaveLength(1)
+    expect(changed.suggestions[0]).toMatchObject({
+      status: "por_revisar",
+      payload: { value: "Clase II división 1" },
+      note: "Ya dice «Clase II división 2». Si cambió, cámbiala tú en la ficha.",
+    })
+    expect(await answersNow()).toEqual({ clase_molar_derecha: "Clase II división 2" })
+  })
+
+  it("anular la atención descarta lo que Clío proponía", async () => {
+    const { save, fx } = await startedForm()
+    await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])
+    await fx.run((tx) => voidEncounter(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { reason: "Paciente equivocado" }))
+    const rows = await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.encounterId, fx.encounter.id))
+    expect(rows.map((row) => [row.status, row.note])).toEqual([["descartada", "Atención anulada: Paciente equivocado"]])
   })
 
   it("lo último que dijo para la misma pregunta cambia la propuesta, no la repite", async () => {
