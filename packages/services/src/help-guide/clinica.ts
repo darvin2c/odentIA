@@ -213,7 +213,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-terminar-tras-firmar",
         q: "Firmé la atención y me quedó un formulario a medias, ¿qué hago?",
-        a: "Termínalo cuando puedas: firmar la atención no lo cierra, y el cierre te lo avisa sin frenarte. En la atención ya firmada, en Documentos, sale arriba «Falta terminar un formulario» con «Completar». También está en Documentos de la ficha, en «Requieren acción». Ábrelo, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, sus formularios a medias se descartan con el motivo de la anulación.",
+        a: "Termínalo cuando puedas: firmar la atención no lo cierra. El cierre te lo avisa sin frenarte, con «Completar ahora» por si prefieres terminarlo antes de firmar. Ya firmada, «Atención finalizada» lo nombra con «Completar», y en la atención, en Documentos, sale arriba «Falta terminar un formulario». También está en Documentos de la ficha, en «Requieren acción». Ábrelo, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, sus formularios a medias se descartan con el motivo de la anulación.",
         forms: ["firme la atencion y quedo un formulario a medias", "terminar un formulario despues de firmar", "desde donde termino el formulario que deje a medias"],
         area: "clinica",
         needs: "clinical.write",
@@ -336,7 +336,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "formularios-formulario-mismo-titulo",
         q: "Hice dos formularios con el mismo nombre, ¿qué pasa?",
-        a: "Son dos formularios distintos: ninguno reemplaza al otro ni se vuelve su versión. Al escribir un título que ya existe, la pantalla avisa «Ya tienes un formulario con ese título» y deja guardar igual. En la lista de «Formularios propios» y en «Nuevo» › «Formulario», los que se llaman igual dicen cuántas preguntas tienen y cuándo se crearon, para distinguirlos. Si uno sobra, «Dejar de usar».",
+        a: "Son dos formularios distintos: ninguno reemplaza al otro ni se vuelve su versión. Al escribir un título que ya existe, la pantalla avisa «Ya tienes un formulario con ese título»: ofrece «Cambiar el que ya tengo» si lo que querías era ese, o «Volver a usar» si lo habías dejado, y deja guardar igual. En la lista de «Formularios propios» y en «Nuevo» › «Formulario», los que se llaman igual dicen cuántas preguntas tienen y cuándo se crearon, para distinguirlos. Si uno sobra, «Dejar de usar».",
         forms: ["dos formularios con el mismo nombre", "tengo un formulario repetido con el mismo titulo", "cual de los dos formularios iguales es el mio"],
       },
       {
