@@ -64,7 +64,13 @@ export interface DictationFormQuestion {
  * forma que la oculta no se pregunta. Sin fichas empezadas devuelve una lista
  * vacía y el dictado queda como siempre.
  */
-export async function dictationFormQuestions(tx: Db, orgId: string, encounterId: string): Promise<DictationFormQuestion[]> {
+export async function dictationFormQuestions(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+  /** `open`: las fichas abiertas en pantalla, que se leen siempre, además del tope. */
+  options: { open?: readonly string[] } = {},
+): Promise<DictationFormQuestion[]> {
   const rows = await tx
     .select({
       id: clinicalFormResponse.id,
@@ -83,10 +89,11 @@ export async function dictationFormQuestions(tx: Db, orgId: string, encounterId:
       ),
     )
     .orderBy(desc(clinicalFormResponse.updatedAt), desc(clinicalFormResponse.createdAt))
-    .limit(DICTATION_MAX_FORMS)
+  // Las dos últimas tocadas y las abiertas en pantalla (QA del 14 nov, D23).
+  const chosen = rows.filter((row, index) => index < DICTATION_MAX_FORMS || options.open?.includes(row.id))
   // Las elegidas, en el orden en que se empezaron: el número de cada pregunta no salta entre pausas.
-  rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-  return formQuestionsOf(rows.map((row) => ({ id: row.id, title: row.title, snapshot: row.snapshot, answers: (row.answers ?? {}) as Record<string, unknown> })))
+  chosen.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  return formQuestionsOf(chosen.map((row) => ({ id: row.id, title: row.title, snapshot: row.snapshot, answers: (row.answers ?? {}) as Record<string, unknown> })))
 }
 
 /**
@@ -345,6 +352,20 @@ export function prepareFormAnswer(
   if (value === null || value === undefined || sameAnswer(value, question.answered)) return null
   const now = formAnswerWords({ value: question.answered, unit: question.unit })
   return { payload: proposed.payload, status: "por_revisar", note: `Ya dice «${now}». Si cambió, cámbiala tú en la ficha.` }
+}
+
+/**
+ * Por qué lo dicho para una ficha no quedó como propuesta, para «No pude usar
+ * esto»: la frase no se pierde en silencio (QA del 14 nov, D21).
+ */
+export function formAnswerDropReason(draft: { payload: Record<string, unknown>; sourceText?: string | undefined }, questions: readonly DictationFormQuestion[]): string {
+  const question = questions.find((item) => item.number === draft.payload["question"])
+  if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
+  const said = draft.sourceText ?? ""
+  const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
+  if (question.unit && unit?.test(plain(said))) return `«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`
+  if (!talksAbout(question, new Set(stemsOf(said)))) return `No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`
+  return `No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`
 }
 
 /** La misma respuesta, sin mirar el orden de varias opciones. */

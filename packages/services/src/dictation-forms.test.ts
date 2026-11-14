@@ -387,6 +387,31 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(listed.find((row) => row.id === form.id)?.clioAccepted["overjet"]).toMatchObject({ by: fx.actor, atSign: true })
   })
 
+  it("lo dicho para la ficha que no queda como propuesta vuelve con su motivo", async () => {
+    const { save } = await startedForm()
+    const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis centímetros" }])
+    expect(saved.suggestions).toEqual([])
+    expect(saved.droppedForms).toEqual([{ said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha." }])
+  })
+
+  it("la ficha abierta en pantalla se lee siempre, además de las dos últimas tocadas", async () => {
+    const { fx, form, questions } = await startedForm()
+    const more = async (title: string, updatedAt: Date) =>
+      (
+        await ownerDb
+          .insert(clinicalFormResponse)
+          .values({ ...form, id: undefined, templateTitle: title, answers: {}, createdAt: updatedAt, updatedAt })
+          .returning()
+      )[0]!
+    await ownerDb.update(clinicalFormResponse).set({ updatedAt: new Date(Date.now() - 60_000) }).where(eq(clinicalFormResponse.id, form.id))
+    await more("Segunda", new Date())
+    await more("Tercera", new Date())
+    const titles = (list: DictationFormQuestion[]) => [...new Set(list.map((item) => item.formTitle))]
+    expect(titles(await questions())).toEqual(["Segunda", "Tercera"])
+    const open = await fx.run((tx) => dictationFormQuestions(tx, ORG, fx.encounter.id, { open: [form.id] }))
+    expect(titles(open)).toEqual(["Ficha de ortodoncia", "Segunda", "Tercera"])
+  })
+
   it("anular la atención descarta lo que Clío proponía", async () => {
     const { save, fx } = await startedForm()
     await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])

@@ -20,6 +20,7 @@ import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
+import { formsToStartWords, useFormsToStart } from "./clio-form-proposals"
 import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -249,6 +250,8 @@ export function DictationPanel({
   })
   const role = useMyRole()
   const { mode, pending, ready } = session
+  // Sin ficha empezada, Clío no propone en ella: se dice dónde se decide dictar.
+  const startForms = formsToStartWords(useFormsToStart(session.patientId, session.encounterId, session.enabled))
   // Los bloques con sugerencias por revisar, con el nombre de su lista («Receta», «Plan de tratamiento»).
   const suggestionKinds = [
     ...new Set(
@@ -426,6 +429,7 @@ export function DictationPanel({
               </>
             )}
           </p>
+          {startForms && (session.dictating || pending > 0) ? <p className="mt-1 text-sm text-muted-foreground">{startForms}</p> : null}
           {/* A dónde quedó cada sugerencia: un toque lleva a su bloque. */}
           {pending > 0 && suggestionKinds.length + formLinks.length > 0 ? (
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
@@ -553,7 +557,7 @@ function UnusedNotice({ session }: { session: DictationSession }) {
           </p>
           {phrases.slice(0, UNUSED_SHOWN).map((phrase) => (
             <p key={phrase} className="[overflow-wrap:anywhere]">
-              «{phrase}»
+              «{phrase}»{session.unused.why[phrase] ? <span className="text-muted-foreground"> · {session.unused.why[phrase]}</span> : null}
             </p>
           ))}
           {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
@@ -599,6 +603,7 @@ function FailedSegmentCard({ session, segment }: { session: DictationSession; se
  * sugerencia y lo subrayado no se pudo usar.
  */
 export function DictationTranscript({ session }: { session: DictationSession }) {
+  const startForms = formsToStartWords(useFormsToStart(session.patientId, session.encounterId, session.enabled))
   const parts = highlightTranscript(session.transcript, session.highlights, session.unused.phrases)
   const marked = parts.some((part) => part.mark === "used")
   const unusedShown = parts.some((part) => part.mark === "unused")
@@ -649,7 +654,8 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
           editarla a mano.
         </p>
         <p className="text-muted-foreground">
-          Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo aceptas ahí.
+          Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo confirmas ahí. Lee las dos fichas que
+          tocaste último y la que tengas abierta.{startForms ? ` ${startForms}` : ""}
         </p>
         <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>
       </div>

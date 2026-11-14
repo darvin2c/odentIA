@@ -1164,6 +1164,7 @@ export function EncounterEditor({
     active: canWrite && attending,
     onApplied: applyDictation,
     noteText: (key) => String(draftForm.getFieldValue(key as DraftTextKey) ?? ""),
+    openForms: () => [...new Set([...formOpenRef.current.values()].filter((id): id is string => !!id))],
   })
   // Sugerencias que el odontólogo aún no confirmó ni descartó.
   const dictationPending = dictation.enabled ? dictation.pending : 0
@@ -1692,7 +1693,8 @@ export function EncounterEditor({
     ) : null
 
   // Una ficha abierta al lado: dictar no le pone encima «Lo dictado» (lo dictado para ella aparece en sus preguntas).
-  const formOpenRef = useRef(new Set<string>())
+  // Qué ficha muestra cada panel abierto: Clío la lee siempre, además de las dos últimas tocadas.
+  const formOpenRef = useRef(new Map<string, string | null>())
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
     setDictationTyping(false)
@@ -1712,8 +1714,8 @@ export function EncounterEditor({
       },
       discard: (item) => dictation.act.mutate({ item, action: "discard" }),
       busy: dictation.acceptForms.isPending || dictation.act.isPending,
-      setFormOpen: (key, open) => {
-        if (open) formOpenRef.current.add(key)
+      setFormOpen: (key, open, responseId) => {
+        if (open) formOpenRef.current.set(key, responseId ?? null)
         else formOpenRef.current.delete(key)
       },
     }),

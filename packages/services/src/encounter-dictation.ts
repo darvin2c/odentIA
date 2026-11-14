@@ -54,7 +54,14 @@ import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetO
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
 import { createPrescription, currentMedicationsOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
-import { answerFormFromDictation, type DictationFormQuestion, dictationFormQuestions, formAnswerWords, prepareFormAnswer } from "./dictation-forms.js"
+import {
+  answerFormFromDictation,
+  type DictationFormQuestion,
+  dictationFormQuestions,
+  formAnswerDropReason,
+  formAnswerWords,
+  prepareFormAnswer,
+} from "./dictation-forms.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
 
@@ -1384,6 +1391,8 @@ export interface DictationSegmentResult {
   alreadyOnFile: string[]
   /** Lo hecho que ya está registrado en esta atención («Profilaxis»): no se propone otra vez, se avisa. */
   alreadyDone: string[]
+  /** Lo dicho para una ficha que no quedó como propuesta, con por qué: va a «No pude usar esto». */
+  droppedForms: Array<{ said: string; why: string }>
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
 }
@@ -1425,13 +1434,15 @@ export async function saveDictationSegment(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const segmentId = segment.segmentId
   if (segmentId && (await dictationSegmentSeen(tx, orgId, patientId, encounterId, segmentId))) {
-    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], repeated: true }
+    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   // Las preguntas con el número que vio Clío y lo que dicen ahora, menos las que alguien respondió
   // mientras ordenaba: lo recién escrito gana. Sin la lista que vio, el número no dice a cuál
   // pregunta se refería: no se propone nada.
-  const openNow = segment.formQuestions?.length ? await dictationFormQuestions(tx, orgId, encounterId) : []
+  const openNow = segment.formQuestions?.length
+    ? await dictationFormQuestions(tx, orgId, encounterId, { open: [...new Set(segment.formQuestions.map((question) => question.responseId))] })
+    : []
   const formQuestions = (segment.formQuestions ?? []).flatMap((question): DictationFormQuestion[] => {
     const now = openNow.find((item) => item.responseId === question.responseId && item.fieldId === question.fieldId)
     if (!now || (question.answered === undefined && now.answered !== undefined)) return []
@@ -1558,9 +1569,11 @@ export async function saveDictationSegment(
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
+  const droppedForms: Array<{ said: string; why: string }> = []
   for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) preparedDrafts.push({ draft, prepared })
+    else if (draft.kind === "ficha" && draft.sourceText?.trim()) droppedForms.push({ said: draft.sourceText.trim(), why: formAnswerDropReason(draft, scope.formQuestions) })
   }
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
   // Las alergias, antes que las recetas: la que se acaba de dictar ya avisa en este mismo tramo.
@@ -1711,7 +1724,7 @@ export async function saveDictationSegment(
     })
   }
   const zone = await findOrgLocale(tx, orgId)
-  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, alreadyDone, repeated: false }
+  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, alreadyDone, droppedForms, repeated: false }
 }
 
 /**

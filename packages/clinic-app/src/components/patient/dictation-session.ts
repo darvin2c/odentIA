@@ -126,6 +126,8 @@ interface SegmentResponse {
     /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
     omitted: number
     unused: string[]
+    /** Por qué no se usó una frase, cuando se sabe (lo de una ficha lo dice el servidor). */
+    unusedWhy?: Record<string, string>
     /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
     alreadyOnFile?: string[]
     alreadyDone?: string[]
@@ -138,9 +140,11 @@ interface SegmentResponse {
 export interface UnusedDictation {
   phrases: string[]
   unnamed: boolean
+  /** Por qué no se usó cada frase, cuando se sabe. */
+  why: Record<string, string>
 }
 
-const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false }
+const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false, why: {} }
 
 export type DictationMode = "off" | "listening" | "paused"
 
@@ -163,6 +167,7 @@ export function useDictationSession({
   active,
   onApplied,
   noteText,
+  openForms,
 }: {
   patientId: string
   encounterId: string
@@ -172,6 +177,8 @@ export function useDictationSession({
   onApplied: (item: DictationSuggestion) => void
   /** Lo que muestra hoy un campo de la nota. */
   noteText: (key: string) => string
+  /** Las fichas abiertas en pantalla: Clío las lee aunque no sean de las dos últimas tocadas. */
+  openForms?: () => string[]
 }) {
   const queryClient = useQueryClient()
   const base = `/api/patients/${patientId}/encounters/${encounterId}/dictation`
@@ -246,7 +253,12 @@ export function useDictationSession({
     async (segment: Segment) => {
       const response = await apiFetch<SegmentResponse>(base, {
         method: "POST",
-        body: JSON.stringify({ transcript: segment.text, segmentId: segment.id, ...(segment.context ? { context: segment.context } : {}) }),
+        body: JSON.stringify({
+          transcript: segment.text,
+          segmentId: segment.id,
+          ...(segment.context ? { context: segment.context } : {}),
+          ...(openForms?.().length ? { openForms: openForms().slice(0, 5) } : {}),
+        }),
       })
       if (!mounted.current) return
       const data = response.data
@@ -259,6 +271,7 @@ export function useDictationSession({
         setUnused((current) => ({
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
           unnamed: current.unnamed || data.unused.length === 0,
+          why: { ...current.why, ...(data.unusedWhy ?? {}) },
         }))
       }
       await refresh()

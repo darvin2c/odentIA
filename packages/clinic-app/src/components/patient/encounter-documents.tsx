@@ -1039,9 +1039,9 @@ export function FormDetail({
   const panelKey = useId()
   const shown = responseId !== null && response !== null
   useEffect(() => {
-    clio?.setFormOpen(panelKey, shown)
+    clio?.setFormOpen(panelKey, shown, responseId)
     return () => clio?.setFormOpen(panelKey, false)
-  }, [clio, panelKey, shown])
+  }, [clio, panelKey, shown, responseId])
   // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
   const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
   const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null

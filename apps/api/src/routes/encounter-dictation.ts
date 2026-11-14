@@ -43,6 +43,8 @@ const dictateInput = z
     transcript: z.string().trim().min(3).max(12_000),
     context: z.string().max(2_000).optional(),
     segmentId: z.uuid().optional(),
+    /** Las fichas abiertas en pantalla: Clío las lee además de las dos últimas tocadas. */
+    openForms: z.array(z.uuid()).max(5).optional(),
   })
   .strict()
 // Lo que el odontólogo puede corregir de una sugerencia; el servicio vuelve a validarla contra su operación.
@@ -108,7 +110,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = dictateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { transcript, context, segmentId } = parsed.data
+    const { transcript, context, segmentId, openForms } = parsed.data
     try {
       return await runService(c, 201, async () => {
         // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo nuevo.
@@ -124,7 +126,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           return {
             list,
             // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
-            forms: await dictationFormQuestions(tx, orgId, at.data.encounterId),
+            forms: await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] }),
             pendingCount: pending.length,
             labels: [
               ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
@@ -132,7 +134,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             ],
           }
         })
-        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
@@ -164,10 +166,18 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
-        const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
+        // Lo de una ficha que el servidor no dejó pasar no dio nada: no se resalta (QA del 14 nov, D20).
+        const dropped = new Set(saved.droppedForms.map((item) => item.said))
+        const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals]
+          .map((item) => item.sourceText ?? "")
+          .filter((said) => said && !dropped.has(said.trim()))
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
-        const unused = [...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said) => said && !extracted.unused.includes(said))]
-        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length, unused, model: extracted.model }
+        const unused = [
+          ...new Set([...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said), ...dropped]),
+        ]
+        // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor.
+        const unusedWhy = Object.fromEntries(saved.droppedForms.map((item) => [item.said, item.why]))
+        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
