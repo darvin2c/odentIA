@@ -138,6 +138,8 @@ export const dentalUi: ProductUi = {
       { block: "Control", say: "«Control en un mes»" },
       { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
       { block: "Procedimientos", say: "«Le hice la profilaxis» · «Terminé la resina de la 36»" },
+      // Solo con la ficha ya empezada: Clío propone en sus preguntas y se acepta en la ficha.
+      { block: "Ficha", say: "«Overjet de seis milímetros» · «Clase uno molar izquierda»" },
       { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
     ],
     placeholder: "En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…",

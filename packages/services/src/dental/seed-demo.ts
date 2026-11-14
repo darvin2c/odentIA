@@ -34,6 +34,7 @@ import {
   clinicalNote,
   encounter,
   encounterDiagnosis,
+  encounterDictationSuggestion,
   encounterPlanItem,
   encounterProcedure,
   encounterSite,
@@ -4830,6 +4831,9 @@ for (const seed of [
 //   de su cita, y «Empezar la de hoy» la abre con la del 12 oct al lado.
 // - C3 · Thiago, 6 años, con una cita sin servicio con la Dra. Ana: se le ofrece la de odontopediatría
 //   por su edad, y la odontoestomatológica por la especialidad de quien atiende.
+// - Entrega 11 · Mateo Flores, 16 años, control de ortodoncia con el Dr. Luis: la ficha de hoy ya
+//   empezada y lo que propuso Clío al dictar: overjet y clase I izquierda por aceptar, la clase II
+//   derecha sin su división (por revisar: la elige él) y el overbite ya aceptado.
 {
   const [ortho] = await db
     .select()
@@ -4919,6 +4923,104 @@ for (const seed of [
     notice: false,
   })
   await createEncounter(db, ORG_A, ANA_ID, thiago.id, { appointmentId: thiagoToday.id })
+
+  const mateo = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Mateo Flores Guzmán",
+    givenNames: "Mateo",
+    familyName: "Flores Guzmán",
+    birthDate: "2010-02-11",
+    phone: "+51987650732",
+    registeredBranchId: miraflores.id,
+  })
+  const mateoToday = await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: mateo.id,
+    professionalUserId: LUIS_ID,
+    serviceId: serviceIdA("ORTODONCIA_CTRL"),
+    startsAt: lima(0, "11:30"),
+    endsAt: lima(0, "12:00"),
+    status: "confirmada",
+    outsideSchedule: true,
+    overrideBusy: true,
+    notice: false,
+  })
+  const mateoVisit = await createEncounter(db, ORG_A, LUIS_ID, mateo.id, { appointmentId: mateoToday.id })
+  const dictatedAt = new Date()
+  const [mateoForm] = await db
+    .insert(clinicalFormResponse)
+    .values({
+      organizationId: ORG_A,
+      templateId: ortho.id,
+      templateVersion: ortho.version,
+      templateTitle: ortho.title,
+      templateSnapshot: ortho.schema,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      authorUserId: LUIS_ID,
+      status: "borrador",
+      source: "staff",
+      answers: { overbite: 3 },
+    })
+    .returning({ id: clinicalFormResponse.id })
+  if (!mateoForm) throw new Error("No se creó la ficha de Mateo")
+  // Lo que Clío propuso del dictado, con la forma que guarda el servicio (`prepareFormAnswer`).
+  const proposal = (fieldId: string, label: string, type: string, order: number, value: unknown, extra: Record<string, unknown> = {}) => ({
+    responseId: mateoForm.id,
+    fieldId,
+    formTitle: ortho.title,
+    label,
+    type,
+    order,
+    value,
+    ...extra,
+  })
+  await db.insert(encounterDictationSuggestion).values([
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("overjet", "Overjet", "numero", 4, 5, { unit: "mm" }),
+      sourceText: "Overjet de cinco milímetros",
+      status: "lista",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("clase_molar_izquierda", "Clase molar izquierda (Angle)", "opcion_unica", 1, "Clase I"),
+      sourceText: "Clase uno molar izquierda",
+      status: "lista",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("clase_molar_derecha", "Clase molar derecha (Angle)", "opcion_unica", 0, null),
+      sourceText: "clase dos molar derecha",
+      status: "por_revisar",
+      note: "Dijiste «clase dos molar derecha»: no alcanza para elegir entre «Clase II división 1» y «Clase II división 2». Elige tú.",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("overbite", "Overbite", "numero", 5, 3, { unit: "mm" }),
+      sourceText: "overbite de tres",
+      status: "confirmada",
+      entityId: mateoForm.id,
+      decidedBy: LUIS_ID,
+      decidedAt: dictatedAt,
+    },
+  ])
 }
 // Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
 // por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.

@@ -62,6 +62,8 @@ export const medicalUi: ProductUi = {
       { block: "Descanso", say: "«Descanso de tres días»" },
       { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
       { block: "Procedimientos", say: "«Le hice la nebulización»" },
+      // Solo con la ficha ya empezada: Clío propone en sus preguntas y se acepta en la ficha.
+      { block: "Ficha", say: "«Pesa veintidós kilos» · «Sin fiebre en casa»" },
       { block: "Corregir", say: "«No, la temperatura es 38,4» · «Quita el ibuprofeno»" },
     ],
     placeholder: "Presión 118 con 76, temperatura 38 y medio, amígdalas con placas, pulmones limpios…",

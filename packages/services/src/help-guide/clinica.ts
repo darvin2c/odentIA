@@ -97,6 +97,22 @@ export const CLINICA: readonly HelpMore[] = [
         area: "clinica",
         needs: "clinical.write",
       },
+      {
+        id: "pacientes-dictado-ficha",
+        q: "¿Clío puede llenar la ficha de consulta mientras dicto?",
+        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención») y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Aceptar» y la ×. Arriba, «Aceptar las N» acepta todas. Nada entra hasta que lo aceptas, y lo que ya escribiste a mano no se cambia. Lo aceptado dice «Lo propuso Clío · lo aceptó…». Si firmas sin decidir, lo propuesto viene marcado en «Firmar la atención» y la ficha sigue a medias.",
+        forms: ["clio puede llenar la ficha", "dictar la ficha de ortodoncia", "llenar la ficha con el dictado", "que significa clio propone en la ficha"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "pacientes-dictado-ficha-no-lleno",
+        q: "¿Por qué Clío no puso en la ficha lo que dije?",
+        a: "Pasa por una de estas razones: la ficha no estaba empezada cuando dictaste; la pregunta es de texto o de fecha, que Clío todavía no llena; ya tenía una respuesta tuya; o lo que dijiste no alcanzaba para elegir una sola opción («clase dos» cuando la ficha separa división 1 y división 2). En ese último caso, debajo de la pregunta dice «Clío no la llenó:» y la eliges tú. Clío tampoco responde «No» si no lo negaste en voz alta, ni convierte unidades: si la pregunta es en milímetros y dijiste centímetros, la deja vacía.",
+        forms: ["clio no lleno la ficha", "por que clio no puso el overjet", "clio no la lleno", "la ficha quedo vacia despues de dictar"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
 
       // ---------- Antecedentes ----------
       {

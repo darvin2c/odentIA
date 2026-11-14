@@ -622,6 +622,9 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
           {upperFirst(productUi().dictation?.corrections.remove ?? "")}» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
           editarla a mano.
         </p>
+        <p className="text-muted-foreground">
+          Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo aceptas ahí.
+        </p>
         <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>
       </div>
     </div>
