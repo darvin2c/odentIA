@@ -434,6 +434,12 @@ function StaffResponseDetail({
       // Lo escrito aquí sale antes: así lo aceptado no lo pisa ni choca con su guardado.
       await persist()
       await clio.accept(items)
+      // El botón desaparece con la propuesta: el foco vuelve a la pregunta que se respondió.
+      const fieldId = items.length === 1 ? String(items[0]?.payload["fieldId"]) : null
+      if (fieldId)
+        requestAnimationFrame(() =>
+          articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, button, [role="combobox"])`)?.focus(),
+        )
     } catch (error) {
       toast.error(submitErrorMessage(error))
     }
@@ -779,7 +785,7 @@ function StaffResponseDetail({
                     const mark = response.clioAccepted?.[field.id]
                     const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null)
                     return (
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-1" data-field={field.id}>
                         <AnswerAppField
                           field={field}
                           disabled={!editable}
