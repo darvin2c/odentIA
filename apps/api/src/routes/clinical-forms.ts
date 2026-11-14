@@ -1,5 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  ADDENDUM_REASON_MAX,
   addFormAddendum,
   advanceClinicalOrder,
   archiveConsentTemplate,
@@ -237,7 +238,11 @@ const addendumInput = z
       .min(1, "Escribe la corrección.")
       .max(5000, "La corrección admite hasta 5000 caracteres."),
     /** Por qué se corrige: opcional, vacío no traba (decisión del 14 nov). */
-    reason: z.string().trim().max(2000, "El motivo admite hasta 2000 caracteres.").nullish(),
+    reason: z
+      .string()
+      .trim()
+      .max(ADDENDUM_REASON_MAX, `El motivo admite hasta ${ADDENDUM_REASON_MAX} caracteres.`)
+      .nullish(),
   })
   .strict()
 
