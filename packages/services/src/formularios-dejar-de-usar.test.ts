@@ -519,11 +519,11 @@ it("«Actividad del equipo» dice de qué formulario se trata al publicarlo, dej
     about: "«Ficha con nombre en la actividad» · versión 1",
   })
   expect(about(template.id, "form_template.leave")).toMatchObject({
-    what: "Dejó de usar un formulario",
+    what: "Dejó de usar una ficha de consulta",
     about: "«Ficha con nombre en la actividad» · versión 1",
   })
   expect(about(back.id, "form_template.reuse")).toMatchObject({
-    what: "Volvió a usar un formulario",
+    what: "Volvió a usar una ficha de consulta",
     about: "«Ficha con nombre en la actividad» · versión 2",
   })
 })
