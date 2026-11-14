@@ -520,6 +520,8 @@ const HEALTH_ITEM_OF_STEP: Record<string, string> = {
   odontologicos: "dental",
   habitos: "habits",
 }
+/** Las pantallas de su salud en el orden en que se ven (en la lista, los hábitos van antes que la boca). */
+const HEALTH_ITEMS = ["health", "medicines", "history", "dental", "habits"] as const
 /** El sexo en lo que llena la persona. */
 const PERSON_SEX_CODES = ["F", "M"] as const
 const PERSON_KEYS = ["givenNames", "familyName", "birthDate", "sex", "nationality", "birthPlace"] as const
@@ -586,11 +588,13 @@ export function RegistrationQuestionnaire({
     if (wants("emergencyContactName")) return "emergency"
     if (wants("insuranceType")) return "insurance"
     if (!fill.health) return "send"
-    // La primera pantalla de su salud con algo que preguntarle.
-    const first = fill.healthKeys
-      ? REGISTRATION_FIELDS.find((field) => field.group === "health" && fill.healthKeys?.has(field.key))
-      : null
-    return (first && HEALTH_ITEM_OF_STEP[first.step]) || "health"
+    // La primera pantalla de su salud con algo que preguntarle, en el orden en que se ven.
+    const wanted = new Set(
+      REGISTRATION_FIELDS.filter((field) => field.group === "health" && fill.healthKeys?.has(field.key)).map(
+        (field) => HEALTH_ITEM_OF_STEP[field.step],
+      ),
+    )
+    return (fill.healthKeys && HEALTH_ITEMS.find((screen) => wanted.has(screen))) || "health"
   })
   // Lo escrito antes de recargar, en esta pestaña: se repone ya montada la página (el
   // servidor no lo conoce, y pintarlo distinto rompería la hidratación).
@@ -1978,6 +1982,7 @@ export function RegistrationQuestionnaire({
               hint="Por ejemplo, warfarina, Sintrom, rivaroxabán, apixabán o clopidogrel."
               detailLabel="¿Cuál? (si lo sabes)"
               detailOptional
+              detailMax={200}
               state={draft.anticoagulants}
               text={draft.anticoagulantsText}
               onState={(value) => set({ anticoagulants: value })}
@@ -1995,6 +2000,7 @@ export function RegistrationQuestionnaire({
               hint="Pastillas, como el alendronato, o una inyección."
               detailLabel="¿Cuál y desde cuándo? (si lo sabes)"
               detailOptional
+              detailMax={200}
               state={draft.boneMedicines}
               text={draft.boneMedicinesText}
               onState={(value) => set({ boneMedicines: value })}
@@ -2904,6 +2910,7 @@ function DeclaredField({
   hint,
   detailLabel,
   detailOptional = false,
+  detailMax = 600,
   state,
   text,
   onState,
@@ -2917,6 +2924,8 @@ function DeclaredField({
   hint?: string
   detailLabel: string
   detailOptional?: boolean
+  /** Lo que admite el detalle: el mismo tope que el servidor (las dos medicinas guardan 200). */
+  detailMax?: number
   state: Declared
   text: string
   onState: (value: Declared) => void
@@ -2947,7 +2956,7 @@ function DeclaredField({
                 aria-describedby={control.describedBy}
                 placeholder={detailLabel}
                 autoComplete="off"
-                maxLength={600}
+                maxLength={detailMax}
                 value={text}
                 aria-invalid={control.invalid && !detailOptional && !text.trim() ? true : undefined}
                 onChange={(event) => onText(event.target.value)}

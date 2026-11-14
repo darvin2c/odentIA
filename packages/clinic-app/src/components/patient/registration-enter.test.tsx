@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, expect, it, vi } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { RegistrationQuestionnaire } from "./registration-questionnaire"
@@ -131,4 +131,33 @@ it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", 
   expect(stops.length).toBeGreaterThan(0)
   for (const stop of stops) expect(stop.hasAttribute("data-enter-skip")).toBe(true)
   // Recorre dos pasos del cuestionario: con todo el paquete corriendo a la vez pasa de los 5 s.
+}, 20_000)
+
+// Revisión de la entrega 6 (14 nov): si solo faltaban el tabaco y la última visita al dentista, el enlace
+// abría en «Tus hábitos» (que en la lista va antes que la boca) y «Tu boca» nunca se mostraba.
+it("con lo que falta en «Tu boca» y en «Tus hábitos», empieza por «Tu boca», que se ve primero", async () => {
+  // La clínica pregunta la última visita (en la lista de hoy viene apagada); el tabaco ya viene en «Opcional».
+  const config = {
+    ...DEFAULT_REGISTRATION_CONFIG,
+    fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, "dental.ultimaVisita": "optional" as const },
+  }
+  render(
+    <RegistrationQuestionnaire
+      config={config}
+      today="2026-11-14"
+      countryCode="PE"
+      fill={{
+        missing: new Set(),
+        health: true,
+        healthKeys: new Set(["medical.tabaco", "dental.ultimaVisita"]),
+        hasRepresentative: false,
+        firstName: "Rosa",
+      }}
+      onSubmit={vi.fn(async () => {})}
+    />,
+  )
+  // La pantalla que se ve es la única sin `hidden`, con `data-active`.
+  const shown = () =>
+    document.querySelector("[data-slot=questionnaire-item][data-active] [data-slot=questionnaire-title]")?.textContent
+  await waitFor(() => expect(shown()).toBe("Tu boca"), { timeout: 5000 })
 }, 20_000)

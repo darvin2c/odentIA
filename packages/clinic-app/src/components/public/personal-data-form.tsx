@@ -113,8 +113,9 @@ export function PersonalDataForm({
         fill={{
           missing: new Set(form.missing.map((item) => item.key)),
           health: form.asksHealth,
-          // De su salud, solo lo que falta: lo que ya se sabe no se le muestra.
-          healthKeys: new Set(form.healthQuestions ?? []),
+          // De su salud, solo lo que falta: lo que ya se sabe no se le muestra. Sin la lista (una API
+          // anterior), todo lo que la clínica pregunta: un conjunto vacío no mostraría nada.
+          healthKeys: form.healthQuestions ? new Set(form.healthQuestions) : undefined,
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
           privacy: form.pending.privacy,

@@ -239,7 +239,10 @@ function RegistrationSettings() {
   async function handleQuestionsSeen() {
     try {
       await markRegistrationQuestionsSeen()
-      void queryClient.invalidateQueries({ queryKey: ["patient-registration-config"] })
+      // Sin configuración guardada, «Entendido» guarda la de siempre y su versión sube: el borrador
+      // sigue sobre esa, para que el próximo «Guardar» no diga que otra persona guardó antes.
+      const fresh = await configQuery.refetch()
+      if (fresh.data) setExpectedVersion(fresh.data.data.version)
     } catch {
       toast.error("No pudimos guardarlo. Vuelve a intentarlo.")
     }
