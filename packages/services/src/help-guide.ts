@@ -96,6 +96,13 @@ const INTEGRATIONS = `${SETTINGS} › Integraciones`
  */
 export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
 
+/**
+ * Lo que odentIA le pregunta a quien cuida a un niño, «de pequeño» (pediatría dental): las guías de
+ * latidIA y vistIA lo quitan de su respuesta.
+ */
+export const CHILDHOOD_DENTAL_SENTENCE =
+  " En el paso «De pequeño», con el nombre del niño, se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga aquí, en «Si se atiende un niño»."
+
 const BASE_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",
@@ -2228,6 +2235,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "preguntar-anticoagulantes",
         q: "¿Cómo le pregunto a mis pacientes si toman anticoagulantes?",
         a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicinas para los huesos». Si lo escribe solo en «otro medicamento», no sale la marca: pregúntaselo en la consulta.",
+      },
+      {
+        // Mesa del 13 nov, entrega 7. Lo de «de pequeño» es de odentIA: latidIA y vistIA lo quitan (`BY_ID`).
+        id: "que-le-preguntan-a-la-mama-de-un-nino",
+        q: "¿Qué le preguntan a la mamá de un niño?",
+        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago es alérgico a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
+        forms: [
+          "que se le pregunta a un niño",
+          "registro de un niño",
+          "preguntas para la mamá",
+          "biberón y chupón",
+          "salud de un niño",
+        ],
       },
       {
         id: "preguntas-nuevas",

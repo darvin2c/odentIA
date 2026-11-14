@@ -1,4 +1,4 @@
-import { SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import { CHILDHOOD_DENTAL_SENTENCE, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en vistIA ----------
@@ -562,6 +562,18 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // «De pequeño» es de odentIA (pediatría dental); en una óptica, solo lo común de quien cuida a un niño.
+  "que-le-preguntan-a-la-mama-de-un-nino": (faq) => [
+    {
+      ...faq,
+      a: swaps(
+        faq.a,
+        [CHILDHOOD_DENTAL_SENTENCE, ""],
+        [" En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día.", ""],
+      ),
+      forms: (faq.forms ?? []).filter((form) => form !== "biberón y chupón"),
+    },
+  ],
   // Sin dictado no hay sugerencias que corregir ni página de Clío donde probarlo.
   "pacientes-dictado-corregir-pausar": () => [],
   "agente-clio-probar-dictado": () => [],
