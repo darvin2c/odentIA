@@ -631,6 +631,8 @@ export function EncounterEditor({
   const [signUnmarked, setSignUnmarked] = useState<string[]>([])
   // Las fichas a medias que se finalizan con la firma, como quedaron («Finalizarla al firmar»).
   const [finishFormsAtSign, setFinishFormsAtSign] = useState<string[]>([])
+  // Las que de verdad se finalizaron al firmar: «Atención finalizada» ya no las da por a medias.
+  const [finishedAtSign, setFinishedAtSign] = useState<string[]>([])
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
@@ -1313,12 +1315,16 @@ export function EncounterEditor({
       await flush()
       // «Finalizarla al firmar»: la ficha a medias queda como está. Si le falta algo que pide,
       // no frena la firma: se dice y sigue a medias.
+      const finished: string[] = []
       for (const formId of finishFormsAtSign) {
         const title = docs.forms.find((item) => item.id === formId)?.templateTitle ?? "La ficha"
-        await finalizeFormResponse(formId, encounterId).catch((cause: unknown) =>
-          toast.warning(`«${title}» sigue a medias`, { description: cause instanceof ApiError ? cause.message : "No se pudo finalizar." }),
+        await finalizeFormResponse(formId, encounterId).then(
+          () => finished.push(formId),
+          (cause: unknown) => toast.warning(`«${title}» sigue a medias`, { description: cause instanceof ApiError ? cause.message : "No se pudo finalizar." }),
         )
       }
+      setFinishedAtSign(finished)
+      if (finished.length) void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
       const endedAt = endedAtIso(value.endTime)
       const result = await apiFetch<{
         data: {
@@ -1761,6 +1767,7 @@ export function EncounterEditor({
   const openSign = () => {
     setSignUnmarked([])
     setFinishFormsAtSign([])
+    setFinishedAtSign([])
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
     // viene con lo que ya tiene el perfil y, si falta, lo que propone el país (COP, CMP).
     const current = closingForm.state.values
@@ -3060,7 +3067,7 @@ export function EncounterEditor({
           </DialogHeader>
           {/* Lo que quedó a medias, arriba y con su salida: en un teléfono no queda bajo el pliegue. */}
           <UnfinishedFormsBox
-            forms={finalizedBilling ? unfinishedAfterSigning(docs.forms, "finalizada") : []}
+            forms={finalizedBilling ? unfinishedAfterSigning(docs.forms, "finalizada", finishedAtSign) : []}
             canComplete={canWrite}
             onOpen={setFinishingForm}
           />

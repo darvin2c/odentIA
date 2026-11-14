@@ -581,12 +581,14 @@ export function canFillFormInAttention(canWrite: boolean, attentionLocked: boole
 }
 
 /** Los formularios del equipo que una atención ya firmada dejó a medias: los dice arriba, con «Completar». */
-export function unfinishedAfterSigning<T extends Pick<FormResponse, "status" | "source">>(
+export function unfinishedAfterSigning<T extends Pick<FormResponse, "id" | "status" | "source">>(
   forms: readonly T[],
   attentionStatus: string,
+  /** Las que se finalizaron con la firma («Finalizarla al firmar»): la lista puede no traerlo aún. */
+  finishedNow: readonly string[] = [],
 ): T[] {
   return attentionStatus === "finalizada"
-    ? forms.filter((form) => form.status === "borrador" && form.source === "staff")
+    ? forms.filter((form) => form.status === "borrador" && form.source === "staff" && !finishedNow.includes(form.id))
     : []
 }
 

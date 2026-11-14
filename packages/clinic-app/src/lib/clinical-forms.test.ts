@@ -70,6 +70,8 @@ it("la atención firmada dice qué formularios le quedaron a medias", () => {
   expect(unfinishedAfterSigning(forms, "finalizada").map((form) => form.id)).toEqual(["a"])
   // Mientras sigue en curso no es un pendiente aparte: se está llenando.
   expect(unfinishedAfterSigning(forms, "borrador")).toEqual([])
+  // «Finalizarla al firmar»: la que se finalizó con la firma no sale como a medias (verificación del 14 nov).
+  expect(unfinishedAfterSigning(forms, "finalizada", ["a"])).toEqual([])
 })
 
 it("lo finalizado se dice con fecha y hora, y si fue después de firmar su atención", () => {
