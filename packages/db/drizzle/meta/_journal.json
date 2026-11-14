@@ -806,6 +806,20 @@
       "when": 1794611115349,
       "tag": "0114_quien_y_cuando_lo_dijo_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1794630061122,
+      "tag": "0115_preguntas_al_paciente",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1794630071122,
+      "tag": "0116_preguntas_al_paciente_reglas",
+      "breakpoints": true
     }
   ]
 }
