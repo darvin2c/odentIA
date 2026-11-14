@@ -892,8 +892,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno va recomendado: nace el primero y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: «Antes de enviar» te recuerda cuál es. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
-        forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno va recomendado: nace el primero y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: «Antes de enviar» te recuerda cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        forms: [
+          "dos caminos",
+          "conservar o extraer",
+          "otro camino para la pieza",
+          "alternativas de tratamiento",
+          "opcion recomendada",
+          "cambiar la recomendada",
+          "le sale marcada otra opcion",
+          "ya lo envie y la recomendada esta mal",
+        ],
         area: "plan",
       },
       {
