@@ -1,4 +1,4 @@
-import type { ConsentSections } from "@odentia/clinical"
+import type { ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch, apiFetchBytes } from "./api"
 
@@ -91,11 +91,56 @@ export interface FormResponse {
   templateTitle: string | null
   source: "staff" | "portal"
   submittedAt: string | null
+  /** Por dónde lo envió el paciente; nulo si no quedó guardado (lo de antes) o es del equipo. */
+  submittedVia?: "portal" | "enlace" | null
+  /** Quién lo finalizó: en lo que envió el paciente, quien lo revisó. */
+  finalizedBy?: string | null
+  /** Quién lo envió: la persona o quien habla por ella, con su nombre y su vínculo (lo dice el servidor). */
+  respondent?: (HealthDeclarant & { name: string }) | null
+  /** El equipo cambió las respuestas después del envío, antes de que quedaran protegidas: cuándo. */
+  editedByTeamAt?: string | null
   discardedAt: string | null
   discardReason: string | null
   createdAt: string
   updatedAt: string
 }
+
+/** El paciente lo envió y nadie del equipo lo revisó todavía. */
+export function isDeclaredUnreviewed(response: FormResponse): boolean {
+  return response.source === "portal" && response.status === "borrador" && response.submittedAt !== null
+}
+
+/**
+ * Lo que envió el paciente y va arriba al abrir esta atención: lo que sigue sin
+ * revisar y lo que se revisó aquí, que no desaparece.
+ */
+export function declaredFormsOfEncounter(
+  forms: readonly FormResponse[],
+  encounterId: string,
+  /** Lo que ya estaba a la vista: si otra persona lo revisa o lo descarta, no desaparece, dice quién (QA del 14 nov). */
+  onScreen: ReadonlySet<string> = new Set(),
+): FormResponse[] {
+  return forms.filter(
+    (form) =>
+      form.source === "portal" &&
+      (isDeclaredUnreviewed(form) ||
+        (form.status === "finalizado" && form.encounterId === encounterId) ||
+        onScreen.has(form.id)),
+  )
+}
+
+/**
+ * Los formularios de la lista de documentos de la atención: los que llena el
+ * equipo. Lo que envió el paciente ya está arriba, entero, y no se repite.
+ */
+export function teamFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+  return forms.filter(
+    (form) => form.encounterId === encounterId && form.status !== "descartado" && form.source !== "portal",
+  )
+}
+
+/** Lo que pasó al finalizar: las alergias que de verdad entraron a Antecedentes. */
+export type FinalizedFormResponse = FormResponse & { passedAllergies?: string[] }
 
 export interface FormAddendum {
   id: string
@@ -464,8 +509,9 @@ export function updateFormResponse(
   return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
 }
 
-export function finalizeFormResponse(id: string) {
-  return post<FormResponse>(`${BASE}/form-responses/${id}/finalize`, {})
+/** `encounterId`: la atención en curso desde la que se revisa; la respuesta queda ligada a ella. */
+export function finalizeFormResponse(id: string, encounterId?: string | null) {
+  return post<FinalizedFormResponse>(`${BASE}/form-responses/${id}/finalize`, encounterId ? { encounterId } : {})
 }
 
 export function discardFormResponse(id: string, reason: string) {

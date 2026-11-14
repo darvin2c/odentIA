@@ -7,6 +7,7 @@ import { CLINICAL_PRODUCTS } from "@odentia/clinical"
 import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions, matchHelpTopics, PRODUCT_ONLY_SCREENS } from "./help-guide.js"
 import { helpTopicsFor } from "./products.js"
 import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-suite.js"
+import { exactHelpOption } from "./help.js"
 
 /**
  * La guía de Ariadna contra el código y contra lo que pregunta la gente. Sin
@@ -158,5 +159,30 @@ describe("cada respuesta tiene su nombre fijo", () => {
     const ids = helpTopicsFor(product).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id))
     expect(ids.filter((id) => !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id))).toEqual([])
     expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([])
+  })
+})
+
+// QA del 14 nov (H5 de desarrollo y el auditor): preguntas de «lo que dijo el paciente» que la guía no
+// reconocía, sobre todo después de otra pregunta en la misma conversación.
+describe("lo que dijo el paciente, con las palabras de quien pregunta", () => {
+  const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null
+  it.each([
+    ["El paciente puso algo mal, ¿cómo lo corrijo?", "pacientes-cuestionario-corregir-lo-que-puso"],
+    ["¿Qué pasa cuando le doy Marcar como revisado?", "pacientes-cuestionario-respondio-antes-de-venir"],
+    ["¿Qué significa que diga lo dijo ella sin revisar?", "pacientes-antecedentes-declaracion-original"],
+    ["La mamá marcó que no tiene alergias, ¿cuenta como niega?", "pacientes-antecedentes-declaracion-original"],
+  ])("«%s»", (question, faq) => {
+    expect(firstFaq(question)).toBe(faq)
+  })
+  it("«El paciente puso algo mal, ¿cómo lo corrijo?» se reconoce tal cual, sin pasar por Jev ni por la pregunta anterior", () => {
+    const exact = exactHelpOption("El paciente puso algo mal, ¿cómo lo corrijo?", HELP_TOPICS)
+    expect(exact?.kind === "faq" ? exact.faq.id : null).toBe("pacientes-cuestionario-corregir-lo-que-puso")
+  })
+  it("no promete que lo revisado siga a la vista en la atención firmada", () => {
+    const answer = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find(
+      (faq) => faq.id === "pacientes-cuestionario-respondio-antes-de-venir",
+    )?.a
+    expect(answer).not.toContain("sigue a la vista ahí")
+    expect(answer).toContain("después de firmarla")
   })
 })

@@ -20,6 +20,7 @@ import {
   FORM_RESPONSE_STATUS_LABELS,
   fetchConsents,
   fetchFormResponses,
+  teamFormsOfEncounter,
   fetchFormTemplates,
   fetchOrders,
   phoneSignBlockWords,
@@ -174,9 +175,9 @@ export function useEncounterDocuments(
   const ownPrescriptions = (prescriptions.data?.data ?? []).filter(
     (rx) => rx.encounterId === encounterId && rx.status === "emitida",
   )
-  const ownForms = (forms.data?.data ?? []).filter(
-    (form) => form.encounterId === encounterId && form.status !== "descartado",
-  )
+  // Lo que envió el paciente y se revisó en esta atención ya está arriba, entero, en su caja
+  // (`DeclaredQuestionnaireNotice`): aquí van los formularios que llena el equipo, y no se repite.
+  const ownForms = teamFormsOfEncounter(forms.data?.data ?? [], encounterId)
   const ownLeaves = (leaves.data?.data ?? []).filter(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
@@ -836,6 +837,8 @@ export function EncounterDocumentsBlock({
       ) : null}
       <FormDetail
         patientId={patientId}
+        encounterId={encounterId}
+        sex={patient.patient.sex ?? null}
         responseId={openForm}
         canWrite={canWrite && !disabled}
         onClose={() => setOpenForm(null)}
@@ -892,12 +895,16 @@ function PrescriptionRow({
 /** Un formulario de la atención se completa al lado, sin salir. */
 function FormDetail({
   patientId,
+  encounterId,
+  sex,
   responseId,
   canWrite,
   onClose,
   onChanged,
 }: {
   patientId: string
+  encounterId: string
+  sex: string | null
   responseId: string | null
   canWrite: boolean
   onClose: () => void
@@ -913,7 +920,7 @@ function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Formulario"}
-      description="Se guarda solo mientras lo completas."
+      description={response?.source === "portal" ? undefined : "Se guarda solo mientras lo completas."}
       onClose={onClose}
     >
       {response ? (
@@ -921,6 +928,8 @@ function FormDetail({
           key={response.id}
           response={response}
           canWrite={canWrite}
+          sex={sex}
+          encounterId={encounterId}
           onChanged={onChanged}
         />
       ) : null}

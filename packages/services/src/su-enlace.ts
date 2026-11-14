@@ -70,7 +70,9 @@ import { currentCatalogMessage } from "./clinic-messages.js"
 import {
   type DeclaredPatientHealthInput,
   getPatientHealth,
+  declarantOfContact,
   initializeDeclaredPatientHealth,
+  recordHealthDeclaration,
 } from "./clinical.js"
 import {
   CONSENT_SIGNATURE_WORDS,
@@ -964,8 +966,21 @@ async function saveLinkData(
   }
   if (Object.keys(patch).length > 0) await updatePatient(tx, orgId, actor, patientId, patch)
   // Su salud entra como declarada por la persona: la revisa quien atiende.
-  if (withHealth && input.health)
-    await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
+  if (withHealth && input.health) {
+    const saved = await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
+    // Y queda aparte tal como la envió, con quién y cuándo: Antecedentes guarda lo vigente, que el
+    // equipo corrige; «Ver declaración original» muestra esto. Sin nada respondido, no hay qué guardar.
+    if (saved.revision > 0)
+      await recordHealthDeclaration(tx, orgId, patientId, {
+        via: "enlace",
+        // Quien abrió el enlace y lo envió: la persona o quien decide por ella, con su vínculo.
+        by:
+          link.row.contactId === personId
+            ? { kind: "patient", name: null, relation: null }
+            : await declarantOfContact(tx, orgId, patientId, link.row.contactId),
+        health: input.health,
+      })
+  }
   const person = await requirePatient(tx, orgId, patientId)
   const stillMissing = await getPatientMissingData(tx, orgId, patientId)
   if (personId) {

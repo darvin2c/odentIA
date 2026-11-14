@@ -46,13 +46,31 @@ describe("la receta de latidIA (issue 229, decisión 12)", () => {
     expect(check.warnings).toEqual([
       "Enalapril: está embarazada (12 semanas) y los IECA están contraindicados en el embarazo (ATC C09AA02).",
     ])
-    // Un embarazo que por sus semanas ya terminó no se da por vigente: se pide actualizarlo.
+    // Un embarazo que por sus semanas ya pasó su término queda «por confirmar», como en la franja de
+    // la ficha, y la receta no deja de avisar en silencio: lo contraindicado se avisa con esas palabras.
     const old = context({
       embarazoLactancia: { embarazo: { estado: "si", fecha: "2025-09-01", semanas: 20 } },
     })
     const stale = checkPrescription(old, [{ genericName: "enalapril" }], null)
-    expect(stale.warnings).toEqual([])
-    expect(stale.reminders[0]).toMatch(/ya habría terminado/)
+    expect(stale.reminders[0]).toMatch(/^Embarazo por confirmar \(registrado el 01\/09\/2025\)/)
+    expect(stale.warnings).toEqual([
+      "Enalapril: tiene un embarazo por confirmar y los IECA están contraindicados en el embarazo (ATC C09AA02).",
+    ])
+    // Sin las semanas, la misma regla: en pie hasta 42 semanas después de haberlo dicho, no para siempre.
+    const noWeeks = (fecha: string) =>
+      checkPrescription(context({ embarazoLactancia: { embarazo: { estado: "si", fecha } } }), [{ genericName: "enalapril" }], null)
+    expect(noWeeks("2026-09-01").warnings).toEqual([
+      "Enalapril: está embarazada y los IECA están contraindicados en el embarazo (ATC C09AA02).",
+    ])
+    expect(noWeeks("2025-09-01").reminders[0]).toMatch(/^Embarazo por confirmar/)
+    expect(noWeeks("2025-09-01").warnings[0]).toMatch(/tiene un embarazo por confirmar/)
+    // Un «no» no avisa nada.
+    const not = checkPrescription(
+      context({ embarazoLactancia: { embarazo: { estado: "no", fecha: "2026-09-01" } } }),
+      [{ genericName: "enalapril" }],
+      null,
+    )
+    expect(not).toMatchObject({ warnings: [], reminders: [] })
   })
 
   it("la lactancia se recuerda con su fecha", () => {

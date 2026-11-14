@@ -1,5 +1,5 @@
-import { findMedication, type MedicationEntry } from "@odentia/clinical"
-import { dayWords, type MedicalHistory, pregnancyWeeks } from "./history.js"
+import { findMedication, type MedicationEntry, pregnancyToday } from "@odentia/clinical"
+import { dayWords, type MedicalHistory } from "./history.js"
 
 /**
  * Lo que la receta de latidIA revisa además de las alergias (issue 229,
@@ -108,14 +108,17 @@ export function checkPrescription(
   const reminders: string[] = []
   const embarazo = context.history.embarazoLactancia?.embarazo
   const lactancia = context.history.embarazoLactancia?.lactancia
-  const weeks = pregnancyWeeks(context.history, context.today)
-  // Un embarazo que por sus semanas ya habría terminado no se da por vigente: se pide actualizarlo.
-  const pregnant = embarazo?.estado === "si" && (weeks === null || weeks <= 42)
-  if (embarazo?.estado === "si")
+  // La misma regla que la franja de la ficha (`pregnancyToday`): en pie hasta la semana 42 y, después,
+  // «por confirmar». La receta nunca deja de avisar en silencio: con el embarazo por confirmar sigue
+  // avisando lo contraindicado, con esas palabras, hasta que alguien actualice sus antecedentes.
+  const pregnancy = pregnancyToday(context.history, context.today)
+  const weeks = pregnancy?.weeksToday ?? null
+  const unconfirmed = pregnancy?.state === "por_confirmar"
+  if (pregnancy && embarazo)
     reminders.push(
-      pregnant
-        ? `Está embarazada${weeks === null ? "" : `, ${weeks} semanas`} (registrado el ${dayWords(embarazo.fecha)}): revisa que cada medicamento sea seguro en el embarazo.`
-        : `El embarazo registrado el ${dayWords(embarazo.fecha)} ya habría terminado: actualiza sus antecedentes.`,
+      unconfirmed
+        ? `Embarazo por confirmar (registrado el ${dayWords(embarazo.fecha)}): ya pasó el tiempo de un embarazo. Pregúntale y actualiza sus antecedentes; mientras tanto se sigue avisando lo contraindicado en el embarazo.`
+        : `Está embarazada${weeks === null ? "" : `, ${weeks} semanas`} (registrado el ${dayWords(embarazo.fecha)}): revisa que cada medicamento sea seguro en el embarazo.`,
     )
   if (lactancia?.estado === "si")
     reminders.push(
@@ -130,10 +133,12 @@ export function checkPrescription(
       errors.push(
         `${capitalized(name)} es ${controlled}, un medicamento controlado: no va en la receta común, usa la receta oficial.`,
       )
-    const avoid = pregnant ? prefixOf(PREGNANCY_CONTRAINDICATED, atc) : null
+    const avoid = pregnancy ? prefixOf(PREGNANCY_CONTRAINDICATED, atc) : null
     if (avoid)
       warnings.push(
-        `${capitalized(name)}: está embarazada${weeks === null ? "" : ` (${weeks} semanas)`} y ${avoid} en el embarazo (ATC ${atc}).`,
+        unconfirmed
+          ? `${capitalized(name)}: tiene un embarazo por confirmar y ${avoid} en el embarazo (ATC ${atc}).`
+          : `${capitalized(name)}: está embarazada${weeks === null ? "" : ` (${weeks} semanas)`} y ${avoid} en el embarazo (ATC ${atc}).`,
       )
   }
   const age = ageInYears(context.birthDate, context.today)

@@ -26,6 +26,11 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] La lista de diagnósticos de la clínica (CIE-10 del MINSA o CIE-11) se elige y no mezcla códigos.
 - [ ] Lo que se pregunta al registrar coincide con lo que la clínica pidió.
 - [ ] La lista de diagnósticos de la clínica trae los códigos que propone el odontograma (la caries con exposición pulpar, K02.5, en la CIE-10).
+- [ ] La dueña encuentra dónde armar un formulario propio desde «Registro de pacientes» y desde el menú, no solo al pie de Consentimientos.
+- [ ] En el constructor se lee cada pregunta entera, se puede subir, bajar y duplicar una pregunta, y se ve el formulario como lo verá quien lo responde antes de publicarlo.
+- [ ] Al publicar un formulario del equipo habiendo otro vigente, la pantalla dice que el nuevo lo reemplaza, y la lista muestra cuál es el que está en uso.
+- [ ] Un formulario del equipo publicado se puede dejar de usar (apagar) sin publicar otro; lo ya respondido no cambia.
+- [ ] Lo que se le pregunta al paciente se decide en un solo lugar (Registro de pacientes), con la vista del adulto, de quien cuida a un niño y de antes de una cita.
 
 **Ya falló:** la demo solo tenía «Endodoncia anterior vital» activa y se ofrecía para un molar.
 **Fuentes:** ADR 0039, 0069, 0093, 0117, 0141 y 0164.
@@ -50,16 +55,24 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 **Dónde:** `R/public/portal.tsx` (el portal), «Su enlace» (ADR 0037), `R/public/registro.tsx`, la firma por enlace y el cuestionario antes de la cita (`S/portal-questionnaire.ts`). Las tablas `portal_link`, `portal_session` y `portal_access_log`.
 
 - [ ] El paciente ve su próxima cita, «Antes de tu cita» si hay cuestionario, lo que tiene por decidir (un presupuesto con sus opciones) y sus documentos, según lo que la clínica le dio.
-- [ ] Lo que responde en el cuestionario llega a Antecedentes como «declarado por el paciente», y el profesional lo revisa antes de atender. **Hoy solo pasan las alergias** (`S/clinical-forms.ts`, `FIELD_DEFINITIONS`): la medicación y las enfermedades declaradas (un anticoagulante) se quedan en la respuesta del formulario y no se ven al indicar una exodoncia.
+- [ ] Lo que responde en el cuestionario llega a Antecedentes como «declarado por el paciente», y el profesional lo revisa antes de atender. **Hoy solo pasa la respuesta de texto marcada «Son alergias»** (`S/clinical-forms.ts`, `FIELD_DEFINITIONS`): la medicación y las enfermedades declaradas (un anticoagulante) se quedan en la respuesta del formulario y no se ven al indicar una exodoncia.
 - [ ] El adolescente: lo que el representante ve en el portal respeta la confidencialidad que la norma le da al adolescente (planificación familiar, salud mental). Hoy el representante ve todo.
 - [ ] Firmar un consentimiento por el enlace muestra la misma hoja que el papel, con la misma declaración, y queda pendiente hasta que el profesional lo confirma.
 - [ ] Un menor: decide y firma su representante, y el niño no recibe lo que no le toca.
 - [ ] Los papeles de salud se envían solo a quien decide (`S/health-documents.ts`).
 - [ ] Cada envío manda el PDF, y el portal muestra todo lo suyo (ADR 0156).
 - [ ] A 390 px y con un celular viejo, se lee y se usa.
+- [ ] Lo que la persona marca en un cuestionario propio sobre su medicación y sus enfermedades (anticoagulantes, medicinas para los huesos, cardiopatía, embarazo) llega a Antecedentes como declarado y se ve en la franja de la atención.
+- [ ] A quien registra o responde por un menor de 12 años se le pregunta lo de un niño, con su nombre, y no embarazo ni tabaco; biberón y chupón, solo a los más chicos.
+- [ ] Quien responde por un menor lee las preguntas dichas para él («¿su hijo…?»), no en segunda persona.
+- [ ] «Pasar a Antecedentes» dice lo que pasó y lo que no, y las respuestas siguen a la vista en la atención después de revisarlas.
+- [ ] Lo declarado por la persona no se puede cambiar; si el equipo corrige algo al revisarlo, queda aparte lo que ella envió y lo que se corrigió, con quién y cuándo.
+- [ ] Antes de una cita que es la sesión de un tratamiento o un control no se pregunta a qué viene: solo si le duele y si cambió algo.
+- [ ] «¿Cambió algo de tu salud?» se pregunta antes de cada cita si pasó más de un mes, y lo que cambió se ve al abrir la atención junto al dato anterior.
+- [ ] Recepción sabe si la persona ya respondió su cuestionario, sin ver las respuestas.
 
 **Ya falló:** la declaración no se veía en el enlace y faltaba la pieza (PR 479); un documento mandado por enlace en vez del PDF (PR 501).
-**Fuentes:** ADR 0037, 0101, 0116, 0148 y 0156.
+**Fuentes:** ADR 0037, 0101, 0116, 0148 y 0156; Ley 27337, Título Preliminar, art. I (niño hasta cumplir 12 años; por verificar); política sobre chupones de la AAPD (dejar la succión no nutritiva hacia los 36 meses; por verificar).
 
 ## P-COM-05 Papeles emitidos y su comprobación
 
@@ -119,9 +132,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] El recordatorio del control coincide con el control de la ficha.
 - [ ] **odentIA tiene sus propias señales de alarma.** Hoy la lista está vacía (`S/dental/agent-texts.ts`, `alarmSignals: []`): una celulitis que cierra el ojo, no deja tragar o da fiebre (angina de Ludwig), un sangrado que no para después de una exodoncia o un diente que se cayó por un golpe dependen de lo que diga el modelo.
 - [ ] La duda clínica que escribe el paciente llega al profesional que lo atiende (P-COM-12).
+- [ ] Un dolor alto declarado antes de la cita llega a quien lo atiende antes de esa cita, y el paciente recibe los signos por los que no debe esperar (también P-COM-12).
 
 **Huecos conocidos:** las señales de alarma dentales están vacías.
-**Fuentes:** ADR 0010, 0095 y 0104 («Sofi trabaja con la atención entera»); guías de infecciones odontogénicas; IADT para el trauma.
+**Fuentes:** ADR 0010, 0095 y 0104 («Sofi trabaja con la atención entera»); guías de infecciones odontogénicas; IADT para el trauma; SDCEP, *Management of Acute Dental Problems* (tiempos de emergencia, urgencia y no urgencia; edición y plazos por verificar).
 
 ## P-COM-10 Tareas y derivación dentro de la clínica
 
@@ -183,11 +197,22 @@ No tiene camino en el código.
 
 ## P-COM-17 Formularios clínicos llenados en la atención
 
-**Dónde:** `clinical_form_template`, `clinical_form_response` y `clinical_form_addendum` (`DB/clinical-forms.ts`); por ejemplo, la «Evaluación de endodoncia» de la semilla.
+**Dónde:** Documentos › «Nuevo» › «Formulario» en la ficha y en la atención (`CA/formularios-tab.tsx`, `CA/encounter-documents.tsx`); `S/clinical-forms.ts` (`createFormResponse`, `finalizeFormResponse`, `addFormAddendum`); la Historia (`S/patient-history.ts`, `CA/encounter-history-card.tsx`, `CA/encounter-detail-view.tsx`); la copia y el FHIR (`S/patient-record.ts`). Las tablas `clinical_form_template`, `clinical_form_response` y `clinical_form_addendum` (`DB/clinical-forms.ts`); por ejemplo, la «Evaluación de endodoncia» de la semilla.
 
-- [ ] Los campos obligatorios se piden, lo finalizado se corrige con una adenda y lo descartado pide motivo.
-- [ ] Lo respondido aparece en la Historia, el PDF y FHIR.
-- [ ] Lo que se anota ahí (vitalidad, percusión) no queda aislado del examen ni del diagnóstico.
+- [ ] «Nuevo» › «Formulario» ofrece solo los que llena el equipo, con los de la especialidad de quien atiende primero.
+- [ ] La ficha se ofrece también cuando la cita no tiene servicio (por la edad del paciente o la especialidad de quien atiende).
+- [ ] Los obligatorios se piden al finalizar y el error sale en su pregunta; un número fuera de rango y una pieza que no existe se rechazan con un texto que dice qué corregir.
+- [ ] Lo finalizado se corrige con una adenda y lo descartado pide motivo.
+- [ ] Lo declarado se puede corregir aparte antes de marcarlo revisado.
+- [ ] La atención firmada muestra el formulario con sus respuestas (no «Sin registrar: documentos») y la Historia lo lista como hecho, no bajo «Se indicó».
+- [ ] La Historia deja leer las respuestas sin ir a Documentos.
+- [ ] La copia de la historia (PDF) y la exportación FHIR traen los formularios finalizados con sus preguntas y respuestas. Hoy no los traen.
+- [ ] El formulario se puede imprimir o llevar en PDF con la hoja de la clínica.
+- [ ] Lo que se anota ahí (la pieza, la vitalidad, la clase de Angle) no queda aislado: la pieza del formulario aparece en la historia de esa pieza, y en la atención siguiente se ve el último formulario de ese tipo.
+- [ ] Un formulario que se repite (el control de ortodoncia) puede empezar con las respuestas del anterior.
+- [ ] Una escala con puntaje (ansiedad dental de 5 preguntas, índice de higiene) muestra su total.
+
+**Fuentes:** NTS 139-MINSA/2018/DGAIN (5.3.3: nada se elimina, la corrección es un registro nuevo con su motivo); HL7 FHIR R4 `Questionnaire` y `QuestionnaireResponse`, y SDC para la extracción a `AllergyIntolerance`, `Condition` y `MedicationStatement`; formulario de historia de salud de la ADA (actualizar en cada visita).
 
 ## P-COM-18 Sospecha de violencia o maltrato
 
@@ -302,6 +327,9 @@ No tiene camino en el código.
 | CC18 | La paciente trae una periapical de la 36 de hace tres años y se adjunta en la atención de hoy, con su pieza. | 24 y P-ODO-14, P-ODO-17 | La pieza, Documentos y la tarjeta dicen la toma de hace tres años; el detalle no dice «Piezas tratadas: 36» (hoy sí). |
 | CC19 | La propietaria da acceso a soporte como el profesional para revisar la historia anterior de una paciente alérgica a penicilinas (HC-000001); soporte abre su Historia, el PDF de la clínica anterior, la conversación de WhatsApp y la ficha de un niño de 11 años; después la propietaria da otro acceso como Recepción y lo quita. | 06, 07, 24, 25 | El cuadro dijo lo que vería; cada cosa abierta queda en el caso y en «Consultas a la historia»; el PDF no se puede llevar; el segundo acceso reemplaza al primero y al quitarlo soporte ve «El acceso terminó»; Actividad dice los dos roles. |
 | CC20 | Mientras soporte mira, el odontólogo abre la ficha de esa paciente; al día siguiente busca qué miró soporte. | 06, 25 | Ve la franja sin «Quitar»; lo de después depende de la decisión pendiente. |
+| CC21 | La dueña arma un cuestionario de salud propio (anticoagulantes, medicinas para los huesos, enfermedades para marcar, alergias, tabaco y una declaración firmada), lo publica habiendo ya otro, y una paciente de 66 años con warfarina y alendronato lo responde desde su celular antes de una exodoncia. | 02, 04, 17 y P-ODO-02 | El diálogo avisa que reemplaza al anterior; lo marcado llega a Antecedentes como declarado y se ve en la franja; lo que ella envió no cambia aunque el equipo corrija; la Historia y la copia lo traen. |
+| CC22 | Una mamá registra a su hijo de 6 años en el enlace público y responde el cuestionario antes de la cita; el odontólogo llena la ficha de odontopediatría en la primera visita y el niño vuelve a su control. | 04, 17 y P-ODO-01, P-ODO-21 | Las preguntas son las de un niño y están dichas para la mamá; en el control se ve la ficha de la primera visita. |
+| CC23 | Una paciente que respondió hace 3 meses vuelve con el anticoagulante cambiado y dolor 8 de 10 la víspera. | 04, 09 y P-ODO-02 | Se le pregunta si cambió algo; lo que cambió y el dolor se ven al abrir la atención; el dato anterior no se pierde. |
 
 ## P-COM-25 Soporte de la plataforma mira la clínica
 

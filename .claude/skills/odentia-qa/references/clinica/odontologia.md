@@ -110,6 +110,12 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] «Pregúntale a…» sale solo con lo que de verdad falta, nunca bloquea y desaparece al contestar (ADR 0163). Lo declarado por el paciente no se presenta como confirmado.
 - [ ] Quitar una alergia pide motivo y no la borra. La revisión cada 6 meses se pide.
 - [ ] El látex como alergia avisa también en los materiales que lo llevan, no solo en la receta.
+- [ ] El embarazo declarado (en el registro, en el enlace o en un formulario propio) se ve con sus semanas en la franja de la ficha y al abrir la atención, no solo dentro de la entrevista de salud. Caso: C18, gestante de 30 semanas que se registra sola.
+- [ ] El embarazo declarado dice la semana de hoy y deja de mostrarse como vigente pasada la fecha probable de parto.
+- [ ] Un «No» a las alergias que dio la persona o su apoderado en línea se lee como «declaró que no tiene», no como «Niega alergias» ni «se le preguntó», hasta que alguien lo revisa con ella.
+- [ ] «Ver declaración original» muestra lo que la persona declaró desde su enlace («Tus datos y tu salud»), con su fecha, y no solo el alta que hizo recepción.
+- [ ] La misma medicina no queda dos veces ni contradicha cuando se pregunta en general y por su clase (anticoagulante, huesos); la clase se reconoce también por el nombre.
+- [ ] A quien nunca se le preguntó por anticoagulantes o medicinas para los huesos, la atención lo dice («no se le preguntó»).
 
 **Ya falló:** se anestesiaba sin antecedentes ni ASA (8 nov, PR 528); un aviso falso de antecedentes «declarados por el paciente» (PR 550).
 **Huecos conocidos:** nada cruza un anticoagulante o un bifosfonato con exodoncia, cirugía o implante; no hay aviso de profilaxis antibiótica; la ASA no se sugiere; el látex no avisa en los materiales.
@@ -128,6 +134,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Hay un solo borrador por paciente. Si otro profesional lo toma, queda registrado (`takeOverEncounter`).
 - [ ] Se atiende sin cita (ADR 0098) y en domingo o fuera de horario, si la clínica lo permite.
 - [ ] Si viene por la cita de un control, «Hoy viene a…» lo sigue diciendo después de usar la cita como motivo, y el cierre nombra el control que se cumple y quién lo indicó.
+- [ ] Si la persona escribió su motivo antes de venir (en el cuestionario o en la cita), «Hoy viene a…» lo ofrece con «Usar como motivo»; no hay que copiarlo a mano.
 
 **Ya falló:** la atención sin cita salía en blanco (8 nov, PR 549); por la cita no proponía el diagnóstico, y por la ficha sí (9 nov); «Hoy viene a…» ofrecía «Corona · Hacerla hoy» con la endodoncia en curso (9 nov, tarde).
 **Fuentes:** NTS 139-MINSA (motivo, tiempo de enfermedad y relato); ADR 0002, 0003, 0098, 0128, 0139 y 0165.
@@ -141,9 +148,10 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Lo que la consulta mira siempre, con un lugar donde anotarlo: apertura bucal, oclusión (clase de Angle), pruebas de vitalidad y percusión antes de una endodoncia, y lesiones de mucosa sospechosas. Hoy todo es texto libre.
 - [ ] Un índice de caries (CPOD o ceod) y el riesgo de caries, donde la clínica los use.
 - [ ] Es opcional para cerrar y no traba.
+- [ ] La ficha odontoestomatológica de la norma tiene dónde anotarse: índice de caries (CPOD o ceod), índice de higiene oral simplificado (placa blanda y calcificada en 16, 11, 26, 36, 31 y 46), riesgo estomatológico (bajo, moderado o alto) y el alta básica con su fecha. Hoy solo caben en un formulario propio.
 
 **Huecos conocidos:** sin oclusión, apertura, vitalidad ni percusión estructuradas; sin tamizaje de cáncer oral; sin índices ni riesgo de caries; sin aviso de presión alta.
-**Fuentes:** LOINC y UCUM; ICDAS; CPOD y ceod (OMS, *Oral Health Surveys: Basic Methods*).
+**Fuentes:** LOINC y UCUM; ICDAS; CPOD y ceod (OMS, *Oral Health Surveys: Basic Methods*); NTS 139-MINSA/2018/DGAIN, numeral 5.2.2 12) Fichas odonto-estomatológicas, y su «Ficha de evaluación odontológica»; Greene y Vermillion, JADA 1964;68:7-13.
 
 ## P-ODO-05 Odontograma
 
@@ -166,7 +174,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 **Ya falló:** la caries quedaba rotulada con el código de la pulpitis elegida en el mismo panel (9 nov); una caries de dos caras contaba como dos hallazgos y quedaba una vigente tras la endodoncia (PR 553); la 38 no se podía elegir (PR 481); las piezas a 390 px medían 20 px; «Evolución» salía vacío sobre la lista.
 **Huecos conocidos:** no hay cara cervical (la clase V va como vestibular, palatina o lingual).
-**Fuentes:** ISO 3950 (notación FDI); NTS 188-MINSA (odontograma); ADR 0036 y 0079.
+**Fuentes:** ISO 3950 (notación FDI); NTS N.° 188-MINSA/DGIESP-2022 (odontograma), aprobada por la RM N.° 559-2022/MINSA (deroga la RM 272-2019/MINSA y la NTS 150), numerales 5.2 a 5.13; ADR 0036 y 0079.
 
 ## P-ODO-06 Diagnóstico
 
@@ -425,6 +433,8 @@ No tienen pantalla propia: viven en el plan, las sesiones, los controles y los p
 - [ ] **Prótesis y corona:** preparación, impresión, prueba y cementación como sesiones, con el provisional y el trabajo del laboratorio.
 - [ ] **Implante:** cirugía, oseointegración, segunda fase y corona, con la trazabilidad del implante.
 - [ ] **Odontopediatría:** dentición temporal y mixta, sellantes, flúor barniz, pulpotomía, conducta del niño, anestesia por peso y consentimiento del representante.
+- [ ] **Ortodoncia:** la ficha de inicio (clase molar y canina, overjet, overbite, línea media, apiñamiento, mordidas cruzadas, hábitos) tiene un lugar, y en cada control se ve la de inicio para comparar.
+- [ ] **Odontopediatría:** lo que cuenta el apoderado (biberón, chupón, dulces entre comidas, flúor, quién le cepilla) y lo que anota el odontólogo (ceod, riesgo de caries, conducta de Frankl) quedan en la historia del niño y se ven en la visita siguiente.
 
 **Fuentes:** las guías de cada especialidad; para odontopediatría, las guías de la AAPD.
 
@@ -506,6 +516,7 @@ Cada caso va de punta a punta, con datos coherentes, y dice qué procesos recorr
 | C15 | Toda la consulta C1 dictada a Clío. | 19 y los de C1 | Cada propuesta se confirma; el odontograma, el diagnóstico y la receta dictados son correctos. |
 | C17 | Niño de 6 años con pulpitis en la 75 a quien se le indica «Endodoncia posterior vital». | 05, 06, 07 | Avisa que la pieza es temporal; ofrece la pulpectomía si la clínica la tiene. |
 | C16 | Adulto con necrosis en la 14, a quien se le indica «Endodoncia posterior no vital». | 05, 06, 07, 09 | Avisa y ofrece la de bicúspide no vital; el consentimiento dice premolar. |
+| C18 | Gestante de 30 semanas, alérgica al látex, que se registra sola en el enlace público y viene por dolor. | 01, 02, 10, 13 | El embarazo y sus semanas en la franja y al abrir la atención; el látex a la vista. |
 
 ### El recorrido largo
 

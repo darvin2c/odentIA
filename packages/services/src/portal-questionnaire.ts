@@ -10,11 +10,13 @@ import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
+import { contactDecides } from "./responsibilities.js"
 
 /**
- * Cuestionario previo a la cita desde el portal: lo responde el paciente o su
- * representante (quien tiene la sesión), queda «declarado» al enviarlo y el
- * equipo lo revisa y finaliza. Usa la misma validación que la ficha.
+ * Cuestionario previo a la cita desde el portal: lo responde quien decide por
+ * el paciente (él mismo o su representante legal vigente, `requireDecisionContact`:
+ * la misma regla de «Su enlace»), queda «declarado» al enviarlo y el equipo lo
+ * revisa y finaliza. Usa la misma validación que la ficha.
  */
 export interface PortalQuestionnaireView {
   template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
@@ -97,7 +99,9 @@ export async function getPortalQuestionnaire(
 ): Promise<PortalQuestionnaireView> {
   requireScope(ctx.session, "appointments")
   const respondent = await respondentOf(tx, fromSession(ctx))
-  const template = await currentTemplate(tx, ctx.orgId)
+  // El portal y el enlace usan la misma regla: el cuestionario es de quien decide por el paciente.
+  const decides = await contactDecides(tx, ctx.orgId, ctx.session.patientId, ctx.session.contactId)
+  const template = decides ? await currentTemplate(tx, ctx.orgId) : null
   const response = template ? await latestResponse(tx, fromSession(ctx), template.key) : null
   await logAccess(tx, ctx.orgId, ctx.session.id, "questionnaire.viewed")
   return {
@@ -180,6 +184,9 @@ async function saveQuestionnaire(
   input: { answers: unknown; submit?: boolean; origin?: "portal" | "enlace" },
 ): Promise<string> {
   await respondentOf(tx, who)
+  // Una sola regla para el portal y «Su enlace»: lo responde quien decide por el paciente.
+  if (!(await contactDecides(tx, who.orgId, who.patientId, who.contactId)))
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este cuestionario lo responde el paciente o quien decide por él")
   const template = await currentTemplate(tx, who.orgId)
   if (!template) throw notFound("Cuestionario")
   const schema = assertFormSchema(template.schema)
@@ -199,6 +206,8 @@ async function saveQuestionnaire(
       `Ya enviaste este cuestionario; tu ${productWords(await orgProduct(tx, who.orgId)).clinician.one} lo revisará`,
     )
   const now = new Date()
+  // Por dónde llegó se guarda al enviarlo: la pantalla del equipo lo dice tal cual.
+  const submittedVia = input.submit ? (input.origin ?? "portal") : null
   let id: string
   if (open) {
     const [row] = await tx
@@ -207,6 +216,7 @@ async function saveQuestionnaire(
         answers,
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
         updatedAt: now,
       })
       .where(and(eq(clinicalFormResponse.id, open.id), isNull(clinicalFormResponse.submittedAt)))
@@ -228,6 +238,7 @@ async function saveQuestionnaire(
         source: "portal",
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
       })
       .returning({ id: clinicalFormResponse.id })
     id = row!.id

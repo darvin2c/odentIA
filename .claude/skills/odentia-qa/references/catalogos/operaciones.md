@@ -18,8 +18,9 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] El día y la hora son los de la sede: de noche, en el cambio de día y en el cambio de mes.
 - [ ] La sede de lo que se crea es la que la persona eligió o ve, no la que quedó guardada en el navegador.
 - [ ] Lo común hace lo mismo en los tres productos. La semilla de cada producto corre completa.
+- [ ] Una migración de datos que retira algo en uso (plantillas, preguntas) dice qué pasa con lo que quedó a medias: se descarta con motivo o se conserva, nunca huérfano.
 
-**Ya falló:** un id con un carácter de más dio error del servidor en citas, cierres de caja y gastos; guardar una pantalla de configuración devolvió a su valor anterior lo que otra pestaña acababa de cambiar; una pantalla usó UTC cuando la sede no tenía zona y desde la tarde mostraba lo de pasado mañana; el error de una transición salió con el texto interno; la semilla de un producto falló por una regla que la del otro no tocaba.
+**Ya falló:** un id con un carácter de más dio error del servidor en citas, cierres de caja y gastos; formularios: un id con un carácter de más dio 500 en finalizar, guardar, publicar, adendas y la lista (mesa del 13 nov); guardar una pantalla de configuración devolvió a su valor anterior lo que otra pestaña acababa de cambiar; una pantalla usó UTC cuando la sede no tenía zona y desde la tarde mostraba lo de pasado mañana; el error de una transición salió con el texto interno; la semilla de un producto falló por una regla que la del otro no tocaba.
 
 ## O-GEN-02 Lo que la pantalla recuerda en el navegador
 
@@ -363,6 +364,28 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 - [ ] Nada que se pueda tocar desaparece solo mientras la persona está encima.
 
 **Ya falló:** las demostraciones crecían y se encogían y corrían hasta 384 enlaces y botones por web; al girar, el alto se volvía a medir a mitad de camino; la entrada de las secciones bajaba 16 px al cargar; en pausa, el chat de Sofi quedaba en blanco (2026-11-11).
+
+## O-FRM-01 Formularios: plantilla, respuesta y lo que declara el paciente
+
+**Dónde:** `S/clinical-forms.ts` (plantillas y respuestas), `S/portal-questionnaire.ts` (lo que responde el paciente, portal y enlace), `S/su-enlace.ts` (cuándo se le pide), `S/patient-history.ts` y `S/patient-record.ts` (dónde se lee después).
+
+- [ ] Una plantilla nueva nunca se toma por versión de otra: dos títulos iguales o con el mismo comienzo dan dos formularios, o se dice antes.
+- [ ] Lo que el paciente declaró no se edita: el profesional lo revisa y agrega lo suyo aparte, con autor. Quién revisó queda en la respuesta, no solo en la auditoría.
+- [ ] Lo que la pantalla dice que pasa a Antecedentes pasa de verdad, y lo que no pasa no se promete.
+- [ ] «Pendiente» del cuestionario es una sola regla para el enlace y el portal, y dice si es por cita o por paciente.
+- [ ] El segundo envío dice que ya se envió, no que el enlace venció.
+- [ ] Lo que la pantalla esconde (tipo de respuesta, plantilla del paciente en la ficha) también lo rechaza el servidor.
+- [ ] Los formularios finalizados están en la Historia y en la copia de la historia (PDF y FHIR `QuestionnaireResponse`).
+- [ ] Una fecha imposible y un tipo que no es el de la pregunta se rechazan en el servidor.
+- [ ] El autoguardado deja el formulario «sin cambios»: salir no avisa de una pérdida que no hay.
+- [ ] Una marca que sale en la franja (anticoagulante, huesos, embarazo) sale de la respuesta a su pregunta, con su código, no de reconocer el nombre escrito; y lleva la fecha en que se dijo.
+- [ ] Lo que se pregunta antes de una cita queda unido a esa cita; dos envíos para la misma cita dejan uno (lo cuida la base).
+- [ ] Un dato nuevo del registro no empieza a preguntarse solo en las clínicas que ya existen; guardar el registro sin cambios no corta a quien lo está llenando.
+- [ ] Dejar de usar algo se deshace sin pelear con la inmutabilidad de la base.
+
+**Ya falló:** (mesa del 13 nov) «Pasar a Antecedentes» avisó «pasó» y la alergia escrita en texto libre no llegó a la lista; el odontólogo reescribió el motivo del paciente sin rastro y la Historia lo dio por «respondido por la persona»; la copia de la historia salió sin formularios; una plantilla nueva con el título de otra se volvió su versión 2; cinco rutas de formularios dieron 500 con un id mal escrito.
+
+**Caso:** CO29 · El paciente responde «Antes de tu cita» con una alergia en texto libre; el profesional corrige una respuesta y lo pasa a Antecedentes; vuelve a los 6 meses; se pide la copia de su historia. → Lo declarado intacto y la corrección con autor; la alergia en su lista o un aviso honesto; el cuestionario según la regla dicha; la copia con el formulario.
 
 ## Casos
 
