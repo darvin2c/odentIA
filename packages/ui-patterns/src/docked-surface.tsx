@@ -309,8 +309,8 @@ function DockedColumn({
       {DraftGuard ? (
         <DraftGuard
           dirty={draft.unsaved || typed}
-          // Si lo único que falta es lo que el contenido dijo, se dice qué es.
-          lost={draft.unsaved && !typed ? draft.lost : null}
+          // Lo que el contenido dice que se pierde (con lo último escrito, si lo hay) es lo que se dice.
+          lost={draft.unsaved ? draft.lost : null}
           onDiscard={draft.discard}
           keptInPage={keptInPage}
         />

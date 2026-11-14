@@ -368,6 +368,12 @@ export function ResponseDetail({
   // Guardado automático 1,2 s después del último cambio: lo que el servidor
   // rechaza se dice en su pregunta (`answers.<id>`) o junto a los botones.
   const autosave = () => {
+    // Mientras se decide «¿Salir sin guardar?» (o cualquier otra pregunta) no se guarda:
+    // «Descartar y salir» no debe encontrar guardado lo que descarta. Al seguir aquí, se guarda.
+    if (document.querySelector('[role="alertdialog"]')) {
+      timer.current = setTimeout(autosave, 500)
+      return
+    }
     const failedBefore = saveFailed.current
     persist()
       .then((unsaved) => {

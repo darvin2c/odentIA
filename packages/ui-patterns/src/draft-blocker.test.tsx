@@ -141,6 +141,8 @@ function AutosavedAnswers() {
   return (
     <>
       <input aria-label="Hallazgos" onInput={() => setState("pendiente")} />
+      {/* Un campo que escribe sin que el contenido lo cuente aparte: lo que se pierde lo sigue diciendo él. */}
+      <input aria-label="Notas" />
       <button type="button" onClick={() => setState("guardado")}>
         Termina el autoguardado
       </button>
@@ -377,6 +379,8 @@ it("con algo que no se guardó, ×, Escape y el menú preguntan lo mismo y dicen
   fireEvent.click(screen.getByRole("button", { name: common.confirm.unsaved.keepEditing }))
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
 
+  // También después de escribir algo más: el diálogo del menú dice lo mismo que × y Escape.
+  fireEvent.input(screen.getByLabelText("Notas"), { target: { value: "más" } })
   void router.navigate({ href: "/agenda" })
   expect((await screen.findByRole("alertdialog")).textContent).toContain(LOST)
   expect(closed).toBe(0)

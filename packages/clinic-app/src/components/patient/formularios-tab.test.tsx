@@ -131,6 +131,9 @@ describe("salir de un formulario que se guarda solo", () => {
     expect(dialog.textContent).toContain("No se guardó «15» en «Intensidad del dolor (0–10)».")
     expect(dialog.textContent).toContain("Tampoco lo último que cambiaste")
 
+    // Decidir lleva su tiempo: el autoguardado no corre mientras la pregunta está abierta.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    expect(update).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole("button", { name: "Descartar y salir", hidden: true }))
     await screen.findByText("Cerrado")
     await new Promise((resolve) => setTimeout(resolve, 1500))
