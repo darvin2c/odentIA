@@ -23,6 +23,7 @@ import {
   ensureSuggestedFormsEverywhere,
   kairosAiUseRecorder,
   mailBrandDomains,
+  metaSignupConfigured,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -491,6 +492,7 @@ queues.push(
     ownerDb,
     writer: createKairosWriter({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
     storage,
+    metaSignupAvailable: metaSignupConfigured(env),
   }),
 )
 

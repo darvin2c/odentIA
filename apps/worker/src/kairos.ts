@@ -50,6 +50,8 @@ export interface KairosTickDeps {
   ownerDb: Db
   writer: KairosWriter
   storage: Pick<Storage, "deleteAttachment">
+  /** «Conectar con Facebook» está configurado (`metaSignupConfigured`): sin él, WhatsApp espera a Meta. */
+  metaSignupAvailable?: boolean
   /** La hora de la base; las pruebas la fijan. */
   now?: Date
 }
@@ -376,7 +378,9 @@ export async function runKairosTick(deps: KairosTickDeps): Promise<KairosTickRes
     errors: [],
   }
   try {
-    result.pass = await deps.ownerDb.transaction((tx) => kairosRulesPass(tx, now))
+    result.pass = await deps.ownerDb.transaction((tx) =>
+      kairosRulesPass(tx, now, { metaSignupAvailable: deps.metaSignupAvailable === true }),
+    )
   } catch (error) {
     result.errors.push(`reglas: ${message(error)}`)
   }

@@ -3,24 +3,28 @@ import {
   kairosItem,
   saasClient,
   saasClientContact,
+  saasClientFile,
+  saasClientMilestone,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { supportCase } from "@odentia/db/schema/admin-support"
-import { member, organization, user } from "@odentia/db/schema/auth"
+import { invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   saasFollowUp,
   saasPayment,
   saasPlan,
+  saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { and, eq, like, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
+import { cargaDeleteAfter, markClientFileCarga } from "./admin-client-files.js"
 import type { AdminActor } from "./admin-core.js"
 import {
   decideKairosItem,
@@ -38,7 +42,7 @@ import {
   todayForStaff,
 } from "./admin-kairos.js"
 import { pendingKairosDraftJobs } from "./admin-kairos-drafts.js"
-import { PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
+import { listClinicLoads, PROGRESS_REPORT_ACTIONS } from "./clinic-progress-report.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import { createSaasPlan } from "./saas-billing.js"
@@ -49,6 +53,9 @@ setupTestDb()
 const admin: AdminActor = { userId: "kz-admin", role: "admin" }
 const support: AdminActor = { userId: "kz-support", role: "support" }
 const OWNER = "kz-owner"
+/** Quien carga en las clínicas del alta (de Administración) y una que ya no está en el equipo. */
+const LOADER = "kz-alta-cargadora"
+const GONE = "kz-alta-inactiva"
 const RISK_ORG = "kz-riesgo"
 const DEMO_ORG = "kz-demo-org"
 const LOAD_ORG = "kz-carga"
@@ -163,6 +170,11 @@ const executors: KairosExecutors = {
     calls.push({ op: "createProposal", args: [actor.userId, clientId, input] })
     return { id: "00000000-0000-4000-8000-000000000000" }
   },
+  // La operación real de Documentos: la marca de verdad.
+  async markClientFileCarga(tx, actor, fileId) {
+    calls.push({ op: "markClientFileCarga", args: [actor.userId, fileId] })
+    return markClientFileCarga(tx, actor, fileId, NOW)
+  },
 }
 const lastCall = (op: string) => [...calls].reverse().find((call) => call.op === op)
 const decide = (
@@ -173,11 +185,290 @@ const decide = (
 ) => ownerDb.transaction((tx) => decideKairosItem(tx, actor, id, input, ex, NOW))
 const pass = () => ownerDb.transaction((tx) => kairosRulesPass(tx, NOW))
 
+/* ---------- El alta: clínicas propias (kz-alta-*), para no tocar los conteos de arriba ---------- */
+
+const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+let fileSeq = 0
+
+/** Un archivo del cliente: un adjunto (`correo`), lo marcado como la carga o la carta. */
+async function clientFile(
+  clientId: string,
+  kind: "correo" | "archivo_clinica" | "carta",
+  filename: string,
+  contentType: string,
+  options: { receivedAt: Date; deletedAt?: Date; deleteAfter?: string | null; cargaAt?: Date },
+): Promise<string> {
+  fileSeq += 1
+  const [row] = await ownerDb
+    .insert(saasClientFile)
+    .values({
+      clientId,
+      kind,
+      filename,
+      objectKey: `clients/${clientId}/kz-alta-${fileSeq}`,
+      contentType,
+      sizeBytes: 10,
+      receivedAt: options.receivedAt,
+      createdAt: options.receivedAt,
+      deleteAfter:
+        options.deleteAfter !== undefined
+          ? options.deleteAfter
+          : kind === "archivo_clinica"
+            ? cargaDeleteAfter(options.receivedAt, NOW)
+            : null,
+      cargaAt: kind === "archivo_clinica" ? (options.cargaAt ?? options.receivedAt) : null,
+      deletedAt: options.deletedAt ?? null,
+    })
+    .returning({ id: saasClientFile.id })
+  if (!row) throw new Error("sin archivo")
+  return row.id
+}
+
+/** Una clínica con cuenta, su cliente (sin venta abierta) y, si se pide, su propietaria. */
+async function altaClient(
+  key: string,
+  options: { owner?: string; ownerMember?: Date } = {},
+): Promise<string> {
+  const org = `kz-alta-${key}`
+  await insertOrg(ownerDb, org, org)
+  const id = await client(`alta-${key}`, `Clínica Alta ${key} (ficticia)`, {
+    open: false,
+    organizationId: org,
+    ...(options.owner ? { owner: options.owner } : {}),
+  })
+  ids[`alta-${key}`] = id
+  if (options.ownerMember) {
+    await ownerDb.insert(user).values({
+      id: `${org}-duena`,
+      name: `Dueña ${key}`,
+      email: `${org}@kairos.test`,
+    })
+    await ownerDb.insert(member).values({
+      id: `${org}-m`,
+      organizationId: org,
+      userId: `${org}-duena`,
+      role: "owner",
+      createdAt: options.ownerMember,
+    })
+  }
+  return id
+}
+
+/** Un paso ya guardado hace tiempo (así el alta lleva días sin avanzar). */
+async function milestone(clientId: string, step: string, at: Date): Promise<void> {
+  await ownerDb
+    .insert(saasClientMilestone)
+    .values({ clientId, step, reachedAt: at, source: "hecho", createdAt: at, updatedAt: at })
+}
+
+async function seedAlta(): Promise<void> {
+  // E4: lo que llegó por correo a un cliente (sin cuenta todavía).
+  const posible = await client("alta-posible", "Clínica Alta Posible (ficticia)", { open: false })
+  ids.fileXlsx = await clientFile(posible, "correo", "pacientes.xlsx", XLSX, { receivedAt: ago(3) })
+  ids.fileCsv = await clientFile(posible, "correo", "pacientes.csv", "text/csv", {
+    receivedAt: ago(5),
+  })
+  ids.fileDocx = await clientFile(posible, "correo", "datos.docx", DOCX, { receivedAt: ago(1) })
+  ids.filePdf = await clientFile(posible, "correo", "contrato.pdf", "application/pdf", {
+    receivedAt: ago(2),
+  })
+  ids.fileJpg = await clientFile(posible, "correo", "captura.jpg", "image/jpeg", {
+    receivedAt: ago(2),
+  })
+  ids.fileLate = await clientFile(posible, "correo", "lista.xlsx", XLSX, { receivedAt: ago(26) })
+  ids.fileOld = await clientFile(posible, "correo", "vieja.xlsx", XLSX, { receivedAt: ago(31) })
+  // Lo que estaba programado para borrarse antes del cambio: se sugiere una vez, aunque sea un PDF.
+  ids.fileLifted = await clientFile(posible, "correo", "escaneo.pdf", "application/pdf", {
+    receivedAt: ago(40),
+  })
+  await ownerDb.insert(adminAudit).values({
+    actorRole: "system",
+    action: "client_file.retention_lifted",
+    entityId: ids.fileLifted,
+    metadata: { clientId: posible },
+  })
+
+  // E5: marcada hace 3 días sin cargar (antes cargó Carla); otra a 4 días de borrarse; otra
+  // que se borró a los 30 días sin cargar (con su tarea abierta); y una borrada a mano.
+  const plazo = await altaClient("plazo", { owner: support.userId })
+  await ownerDb.insert(adminAudit).values({
+    actorUserId: LOADER,
+    actorRole: "admin",
+    action: "org.setup_import",
+    organizationId: "kz-alta-plazo",
+    metadata: { nueva: 3, planSha256: "e".repeat(64) },
+    createdAt: ago(10),
+  })
+  ids.filePlazo = await clientFile(plazo, "archivo_clinica", "carga.xlsx", XLSX, {
+    receivedAt: ago(3),
+  })
+  const borra = await altaClient("borra", { owner: support.userId })
+  await clientFile(borra, "archivo_clinica", "carga.xlsx", XLSX, { receivedAt: ago(26) })
+  const borrado = await altaClient("borrado", { owner: support.userId })
+  ids.fileBorrado = await clientFile(borrado, "archivo_clinica", "carga.xlsx", XLSX, {
+    receivedAt: ago(31),
+    deletedAt: new Date(NOW.getTime() - 3_600_000),
+  })
+  await ownerDb.insert(saasTask).values({
+    clientId: borrado,
+    kind: "alta",
+    title: `Cargar los datos de Clínica Alta borrado (ficticia)`,
+    dueOn: plusDays(-5),
+    byKairos: true,
+    adminOnly: true,
+    kairosKey: `carga_pendiente:${borrado}:${ids.fileBorrado}:${plusDays(-5)}`,
+  })
+  const manual = await altaClient("manual", { owner: support.userId })
+  await clientFile(manual, "archivo_clinica", "carga.xlsx", XLSX, {
+    receivedAt: ago(10),
+    deletedAt: NOW,
+  })
+
+  // E6: la configuración con 3 que no entraron y una tanda de pacientes con 1; y otra que
+  // cargó alguien que ya no está en el equipo.
+  await altaClient("errores", { owner: support.userId })
+  await ownerDb.insert(adminAudit).values([
+    {
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-errores",
+      metadata: { nueva: 5, error: 3, planSha256: "f".repeat(64) },
+      createdAt: ago(1),
+    },
+    {
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.data_import",
+      organizationId: "kz-alta-errores",
+      metadata: { planSha256: "1".repeat(64), from: 0, creadas: 4, errores: 1 },
+      createdAt: ago(1),
+    },
+  ])
+  await altaClient("inactiva", { owner: LOADER })
+  await ownerDb.insert(adminAudit).values({
+    actorUserId: GONE,
+    actorRole: "admin",
+    action: "org.setup_import",
+    organizationId: "kz-alta-inactiva",
+    metadata: { nueva: 2, error: 2, planSha256: "2".repeat(64) },
+    createdAt: ago(1),
+  })
+
+  // E9: la propietaria invitada hace 3 días; el equipo con una invitación vencida; la prueba
+  // que termina en 5 días, otra en 8 y otra pagada; el pago revertido.
+  const duena = await altaClient("duena", { owner: support.userId })
+  await ownerDb.insert(invitation).values({
+    id: "kz-alta-inv-duena",
+    organizationId: "kz-alta-duena",
+    email: "duena@alta.test",
+    role: "owner",
+    status: "pending",
+    expiresAt: new Date(NOW.getTime() + 2 * DAY),
+    createdAt: ago(3),
+    inviterId: admin.userId,
+  })
+  // Lleva días sin avanzar, pero lo de la propietaria ya lo cubre su recordatorio.
+  await milestone(duena, "contrato", ago(10))
+  await altaClient("equipo", { owner: support.userId, ownerMember: ago(9) })
+  await ownerDb.insert(invitation).values({
+    id: "kz-alta-inv-equipo",
+    organizationId: "kz-alta-equipo",
+    email: "asistente@alta.test",
+    role: "member",
+    status: "pending",
+    expiresAt: ago(1),
+    createdAt: ago(8),
+    inviterId: "kz-alta-equipo-duena",
+  })
+  await altaClient("prueba", { owner: LOADER })
+  await altaClient("prueba8", { owner: LOADER })
+  await altaClient("pagada", { owner: LOADER })
+  // Toda cuenta nace con su prueba (el disparador de la base): se mueve su fin.
+  for (const [org, days] of [
+    ["kz-alta-prueba", 5],
+    ["kz-alta-prueba8", 8],
+    ["kz-alta-pagada", 3],
+  ] as const)
+    await ownerDb
+      .update(saasSubscription)
+      .set({ status: "prueba", trialEndsAt: new Date(NOW.getTime() + days * DAY) })
+      .where(eq(saasSubscription.organizationId, org))
+  await altaClient("revertido", { owner: LOADER })
+  await ownerDb.insert(saasPayment).values([
+    {
+      organizationId: "kz-alta-pagada",
+      amountCents: 2900,
+      currency: "USD",
+      methodCode: "transferencia",
+      status: "confirmado",
+      idempotencyKey: "kz-alta-pago-1",
+      confirmedAt: ago(2),
+      confirmedBy: admin.userId,
+    },
+    {
+      organizationId: "kz-alta-revertido",
+      amountCents: 2900,
+      currency: "USD",
+      methodCode: "transferencia",
+      status: "reversado",
+      idempotencyKey: "kz-alta-pago-2",
+      confirmedAt: ago(10),
+      confirmedBy: admin.userId,
+      reversedAt: ago(2),
+      reversedBy: admin.userId,
+      reverseReason: "El abono se devolvió",
+    },
+  ])
+
+  // Trabadas: una a la que le toca a la clínica (el contrato) y otra que espera a Meta.
+  const trabada = await altaClient("trabada", { owner: support.userId, ownerMember: ago(10) })
+  await milestone(trabada, "entro", ago(10))
+  const meta = await altaClient("meta", { owner: support.userId, ownerMember: ago(20) })
+  for (const step of [
+    "entro",
+    "contrato",
+    "carta",
+    "archivos",
+    "configuracion",
+    "pacientes",
+    "informe",
+    "equipo",
+  ])
+    await milestone(meta, step, ago(20))
+
+  // La carta salió hace 8 días y llegó un correo con adjuntos: eso no calla el pedido.
+  const carta = await altaClient("carta", { owner: support.userId })
+  await clientFile(carta, "carta", "carta.pdf", "application/pdf", { receivedAt: ago(8) })
+  await ownerDb.insert(saasInboundEmail).values({
+    clientId: carta,
+    mailbox: "soporte",
+    product: "dental",
+    messageId: "<kz-alta-carta@kairos.test>",
+    fromAddress: "alta-carta@kairos.test",
+    toAddress: "soporte@odentia32.com",
+    subject: "Unas fotos",
+    receivedAt: ago(2),
+    attachments: [{ filename: "foto.jpg", contentType: "image/jpeg", size: 3, fileId: null }],
+  })
+}
+
 beforeAll(async () => {
   await ownerDb.insert(user).values([
     { id: admin.userId, name: "Ada Administración", email: "ada@kairos.test" },
     { id: support.userId, name: "Sofía Soporte", email: "sofia@kairos.test" },
     { id: OWNER, name: "Dueña Riesgo", email: "duena@kairos.test" },
+    { id: LOADER, name: "Carla Cargadora", email: "carla@kairos.test" },
+    { id: GONE, name: "Inés Inactiva", email: "ines@kairos.test" },
+  ])
+  // A quién van las tareas: solo a quien está activo en el equipo (y, si es solo de
+  // Administración, a quien es de Administración).
+  await ownerDb.insert(adminStaff).values([
+    { userId: admin.userId, role: "admin" },
+    { userId: support.userId, role: "support" },
+    { userId: LOADER, role: "admin" },
+    { userId: GONE, role: "admin", active: false },
   ])
 
   // Una clínica con cuenta, sin cliente todavía, que nadie usa: Kairós crea su cliente y la marca en riesgo.
@@ -509,6 +800,7 @@ beforeAll(async () => {
     .returning({ id: saasInboundEmail.id })
   ids.personEmail = toPerson?.id ?? ""
 
+  await seedAlta()
   first = await pass()
 })
 
@@ -620,10 +912,13 @@ describe("la pasada de Kairós", () => {
   })
 
   it("lo que cargó la skill: cada carga quieta en «Lo que hizo» con sus cifras y quién; la que sigue llegando, todavía no", async () => {
-    const noticed = await ownerDb
-      .select({ organizationId: adminAudit.organizationId, metadata: adminAudit.metadata })
-      .from(adminAudit)
-      .where(eq(adminAudit.action, "kairos.load_noticed"))
+    // Las de las clínicas del alta (kz-alta-*) se miran abajo.
+    const noticed = (
+      await ownerDb
+        .select({ organizationId: adminAudit.organizationId, metadata: adminAudit.metadata })
+        .from(adminAudit)
+        .where(eq(adminAudit.action, "kairos.load_noticed"))
+    ).filter((row) => !row.organizationId?.startsWith("kz-alta-"))
     expect(noticed.map((row) => row.organizationId).sort()).toEqual([LOADED_ORG, LOAD_ORG].sort())
     expect(noticed[0]?.metadata).toMatchObject({
       loadKind: "configuracion",
@@ -633,10 +928,10 @@ describe("la pasada de Kairós", () => {
     })
   })
 
-  it("se cargó y no hay informe: «Enviar el informe» al responsable; si se intentó, no", async () => {
+  it("se cargó y no hay informe: «Enviar el informe» a quien cargó (su responsable es de Soporte); si se intentó, no", async () => {
     const pending = await tasksOf(ids.cargada as string)
     expect(pending.map((task) => [task.title, task.assigneeUserId])).toEqual([
-      ["Enviar el informe", support.userId],
+      ["Enviar el informe", admin.userId],
     ])
     const urgent = await tasksOf(ids.carga as string)
     expect(urgent.map((task) => task.title)).toEqual(["Revisar en Zoho si salió el informe N.º 1"])
@@ -1128,8 +1423,11 @@ describe("Hoy", () => {
     expect(all.tasks.some((task) => task.clientId === ids.nueva)).toBe(true)
     expect(all.tasks.every((task) => task.why.length > 0)).toBe(true)
     const mine = await ownerDb.transaction((tx) => todayForStaff(tx, admin, { who: "mias" }, NOW))
-    expect(mine.tasks.map((task) => task.clientId)).toEqual([ids.fria])
-    expect(mine.tasks[0]?.why).toContain("La puso Kairós")
+    // La suya y «Enviar el informe», que va a quien cargó.
+    expect(mine.tasks.map((task) => task.clientId).sort()).toEqual(
+      [ids.fria as string, ids.cargada as string].sort(),
+    )
+    expect(mine.tasks.every((task) => task.why.includes("La puso Kairós"))).toBe(true)
     const cold = all.cooling.find((row) => row.clientId === ids.fria)
     expect(cold?.why).toContain("días sin contacto")
     const risk = all.atRisk.find((row) => row.clientId === ids.riesgo)
@@ -1291,5 +1589,327 @@ describe("lo que encontró la revisión", () => {
     await pass()
     const task = (await tasksOf(id)).find((t) => t.title.startsWith("Seguir el caso"))
     expect(task?.kind).toBe("cobro")
+  })
+})
+
+describe("Kairós vigila el alta", () => {
+  const possibleOf = async (fileId: string) =>
+    (await itemsOf(ids["alta-posible"] as string, "posible_carga")).filter(
+      (item) => item.payload.fileId === fileId,
+    )
+  const keyed = async (clientId: string, rule: string) =>
+    (await tasksOf(clientId)).filter((task) => task.kairosKey?.startsWith(`${rule}:`))
+
+  it("posible carga: Excel, CSV y Word de los últimos 30 días sí; PDF, imagen o lo de antes no; lo des-programado, una vez", async () => {
+    for (const key of ["fileXlsx", "fileCsv", "fileDocx", "fileLate", "fileLifted"])
+      expect(await possibleOf(ids[key] as string)).toHaveLength(1)
+    for (const key of ["filePdf", "fileJpg", "fileOld"])
+      expect(await possibleOf(ids[key] as string)).toHaveLength(0)
+    const [xlsx] = await possibleOf(ids.fileXlsx as string)
+    expect(xlsx).toMatchObject({ adminOnly: true, status: "espera" })
+    // Vence a los 30 días de llegar, no a las 48 h.
+    expect(xlsx?.expiresAt.getTime()).toBe(ago(3).getTime() + 30 * DAY)
+    expect(xlsx?.reason).toContain("Si es la carga, se borra el")
+    expect(xlsx?.payload).toMatchObject({
+      urgent: false,
+      dueNow: false,
+      filename: "pacientes.xlsx",
+    })
+    // A los 25 días ya llega urgente; lo que pasó los 30, «se borra al marcarlo» antes del sí.
+    const [late] = await possibleOf(ids.fileLate as string)
+    expect(late?.payload).toMatchObject({ urgent: true, dueNow: false })
+    expect(late?.reason).toMatch(/se borra en [45] días$/)
+    const [lifted] = await possibleOf(ids.fileLifted as string)
+    expect(lifted?.payload).toMatchObject({ dueNow: true, lifted: true })
+    expect(lifted?.reason).toContain("se borra al marcarlo")
+    expect(lifted?.expiresAt.getTime()).toBe(NOW.getTime() + 7 * DAY)
+  })
+
+  it("posible carga: Soporte no la ve ni la decide; en Hoy va primero, la urgente arriba", async () => {
+    const forSupport = await listKairosItems(
+      ownerDb,
+      support,
+      { status: "espera", limit: 100 },
+      NOW,
+    )
+    expect(forSupport.items.some((item) => item.kind === "posible_carga")).toBe(false)
+    const [xlsx] = await possibleOf(ids.fileXlsx as string)
+    await expect(decide(support, xlsx?.id as string, { action: "aprobar" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    const today = await ownerDb.transaction((tx) => todayForStaff(tx, admin, { who: "todas" }, NOW))
+    expect(today.kairosReady.items[0]).toMatchObject({ kind: "posible_carga" })
+    expect(today.kairosReady.items[0]?.payload.urgent).toBe(true)
+  })
+
+  it("posible carga: a los 25 días el mismo ítem pasa a urgente, sin otro", async () => {
+    const [before] = await possibleOf(ids.fileCsv as string)
+    await ownerDb.execute(
+      sql`update admin.saas_client_file set received_at = ${ago(26).toISOString()}::timestamptz where id = ${ids.fileCsv}::uuid`,
+    )
+    await pass()
+    const after = await possibleOf(ids.fileCsv as string)
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({ id: before?.id, status: "espera" })
+    expect(after[0]?.payload.urgent).toBe(true)
+  })
+
+  it("posible carga: «Sí, es la carga» la marca con la operación de Documentos; pasados los 30 días queda para borrarse ya", async () => {
+    const [xlsx] = await possibleOf(ids.fileXlsx as string)
+    const decision = await decide(admin, xlsx?.id as string, { action: "aprobar" })
+    expect(decision).toMatchObject({ status: "ejecutada" })
+    expect(decision.result).toMatchObject({
+      fileId: ids.fileXlsx,
+      dueNow: false,
+      deleteAfter: cargaDeleteAfter(ago(3), NOW),
+    })
+    expect(lastCall("markClientFileCarga")?.args).toEqual([admin.userId, ids.fileXlsx])
+    const [marked] = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, ids.fileXlsx as string))
+    expect(marked?.kind).toBe("archivo_clinica")
+    const [lifted] = await possibleOf(ids.fileLifted as string)
+    const late = await decide(admin, lifted?.id as string, { action: "aprobar" })
+    expect(late.result).toMatchObject({ dueNow: true })
+  })
+
+  it("posible carga: «No» no la vuelve a preparar, ni después de vencer; lo marcado en Documentos se retira solo", async () => {
+    const [docx] = await possibleOf(ids.fileDocx as string)
+    expect((await decide(admin, docx?.id as string, { action: "descartar" })).status).toBe(
+      "descartada",
+    )
+    const [csv] = await possibleOf(ids.fileCsv as string)
+    await ownerDb
+      .update(kairosItem)
+      .set({ expiresAt: new Date(NOW.getTime() - 1000) })
+      .where(eq(kairosItem.id, csv?.id as string))
+    // Lo de 26 días se marca en Documentos: su ítem se retira solo.
+    await ownerDb.transaction((tx) => markClientFileCarga(tx, admin, ids.fileLate as string, NOW))
+    await pass()
+    expect(await possibleOf(ids.fileDocx as string)).toHaveLength(1)
+    expect((await possibleOf(ids.fileCsv as string)).map((item) => item.status)).toEqual([
+      "vencida",
+    ])
+    const [late] = await possibleOf(ids.fileLate as string)
+    expect(late).toMatchObject({ status: "vencida" })
+    expect(late?.error).toContain("ya se marcó como la carga de datos")
+    const done = await kairosDone(ownerDb, admin, { limit: 200 })
+    expect(done.map((entry) => entry.words)).toContain(
+      "Retiró «¿Es la carga de datos? lista.xlsx»: ya se marcó como la carga de datos",
+    )
+  })
+
+  it("la carga marcada: a los 2 días, a quien cargó antes; urgente a 5 días de borrarse; se cierran al cargarla", async () => {
+    const [pending] = await keyed(ids["alta-plazo"] as string, "carga_pendiente")
+    expect(pending).toMatchObject({
+      title: "Cargar los datos de Clínica Alta plazo (ficticia)",
+      assigneeUserId: LOADER,
+      adminOnly: true,
+      status: "abierta",
+    })
+    // Su responsable es de Soporte y nadie cargó: no va a nadie (Soporte no la vería).
+    const [urgent] = await keyed(ids["alta-borra"] as string, "carga_por_borrarse")
+    expect(urgent?.title).toMatch(
+      /^Cargar los datos de Clínica Alta borra \(ficticia\): se borran en [45] días$/,
+    )
+    expect(urgent).toMatchObject({ assigneeUserId: null, adminOnly: true })
+    expect(urgent?.dueAt?.getTime()).toBe(NOW.getTime())
+    expect(await keyed(ids["alta-borra"] as string, "carga_pendiente")).toHaveLength(0)
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-plazo",
+      metadata: { nueva: 1, planSha256: "3".repeat(64) },
+      createdAt: NOW,
+    })
+    await pass()
+    const [closed] = await keyed(ids["alta-plazo"] as string, "carga_pendiente")
+    expect(closed).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: se cargaron sus datos",
+    })
+  })
+
+  it("se borró sin cargar: pedirlos otra vez (lo aprueba una persona) y se cierra lo que quedaba; un borrado a mano no da nada", async () => {
+    const borrado = ids["alta-borrado"] as string
+    const [message] = (await itemsOf(borrado, "mensaje")).filter(
+      (item) => item.payload.goal === "pedir_archivos_otra_vez",
+    )
+    expect(message).toMatchObject({ status: "espera", adminOnly: false })
+    const [task] = await keyed(borrado, "carga_pendiente")
+    expect(task).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: se borraron sin cargar",
+    })
+    const manual = ids["alta-manual"] as string
+    expect(await itemsOf(manual, "mensaje")).toHaveLength(0)
+    expect(await tasksOf(manual)).toHaveLength(0)
+  })
+
+  it("los que no entraron: una tarea por tipo de carga, a quien cargó, «Revisado» en Hoy; una carga sin errores cierra la suya", async () => {
+    const errores = ids["alta-errores"] as string
+    const tasks = await keyed(errores, "carga_con_errores")
+    expect(tasks.map((task) => task.title).sort()).toEqual([
+      "Revisar el 1 que no entró en la carga de pacientes",
+      "Revisar los 3 que no entraron en la configuración",
+    ])
+    expect(tasks.every((task) => task.assigneeUserId === LOADER && task.adminOnly)).toBe(true)
+    const today = await ownerDb.transaction((tx) => todayForStaff(tx, admin, { who: "todas" }, NOW))
+    const row = today.tasks.find((item) => item.title.startsWith("Revisar los 3"))
+    expect(row?.doneLabel).toBe("Revisado")
+    // Quien cargó ya no está en el equipo: va al responsable.
+    const [gone] = await keyed(ids["alta-inactiva"] as string, "carga_con_errores")
+    expect(gone).toMatchObject({
+      title: "Revisar los 2 que no entraron en la configuración",
+      assigneeUserId: LOADER,
+    })
+    // La configuración se vuelve a cargar sin errores; la de pacientes sigue.
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-errores",
+      metadata: { nueva: 3, planSha256: "4".repeat(64) },
+      createdAt: new Date(NOW.getTime() - 20 * 60_000),
+    })
+    // Cerrada a mano: no se reabre.
+    const patients = tasks.find((task) => task.title.includes("pacientes"))
+    await ownerDb
+      .update(saasTask)
+      .set({ status: "hecha", doneAt: NOW })
+      .where(eq(saasTask.id, patients?.id as string))
+    await pass()
+    const after = await keyed(errores, "carga_con_errores")
+    expect(after).toHaveLength(2)
+    expect(after.find((task) => task.title.includes("configuración"))?.doneNote).toBe(
+      "Kairós la cerró: la configuración se volvió a cargar sin errores",
+    )
+    // El registro de la carga dice quién y cuántos no entraron.
+    const loads = await listClinicLoads(ownerDb, "kz-alta-errores")
+    expect(loads.find((load) => load.kind === "pacientes")).toMatchObject({
+      byUserId: LOADER,
+      errors: 1,
+    })
+    expect(
+      loads.filter((load) => load.kind === "configuracion").map((load) => load.errors),
+    ).toEqual([0, 3])
+  })
+
+  it("la propietaria que no acepta: un recordatorio, que sale una sola vez en Hoy; aceptarla lo vence", async () => {
+    const duena = ids["alta-duena"] as string
+    const [reminder] = (await itemsOf(duena, "mensaje")).filter(
+      (item) => item.payload.goal === "recordar_propietaria",
+    )
+    expect(reminder?.payload).toMatchObject({ invitationIds: ["kz-alta-inv-duena"] })
+    // Lleva días sin avanzar, pero esto ya lo cubre: no hay «El alta no avanza».
+    expect(
+      [...(await itemsOf(duena)), ...(await tasksOf(duena))].some((row) =>
+        ("idempotencyKey" in row ? row.idempotencyKey : row.kairosKey)?.startsWith("alta_trabada:"),
+      ),
+    ).toBe(false)
+    const before = await ownerDb.transaction((tx) =>
+      todayForStaff(tx, admin, { who: "todas" }, NOW),
+    )
+    expect(before.owners.some((row) => row.clientId === duena)).toBe(true)
+    await ownerDb.transaction((tx) =>
+      saveKairosDraft(tx, reminder?.id as string, { body: "Hola, tu invitación te espera." }),
+    )
+    // Que vaya entre los primeros de «Kairós dejó listo» (lo demás vence a las 48 h).
+    await ownerDb
+      .update(kairosItem)
+      .set({ expiresAt: new Date(NOW.getTime() + 3_600_000) })
+      .where(eq(kairosItem.id, reminder?.id as string))
+    const after = await ownerDb.transaction((tx) => todayForStaff(tx, admin, { who: "todas" }, NOW))
+    expect(after.kairosReady.items.map((item) => item.id)).toContain(reminder?.id)
+    expect(after.owners.some((row) => row.clientId === duena)).toBe(false)
+    await ownerDb
+      .update(invitation)
+      .set({ status: "accepted" })
+      .where(eq(invitation.id, "kz-alta-inv-duena"))
+    expect((await decide(support, reminder?.id as string, { action: "aprobar" })).status).toBe(
+      "vencida",
+    )
+  })
+
+  it("el equipo con invitaciones vencidas: «Reenviar»; reenviarlas la cierra y, si vuelven a vencer, hay otra", async () => {
+    const equipo = ids["alta-equipo"] as string
+    const [first] = await keyed(equipo, "equipo_vencido")
+    expect(first).toMatchObject({
+      title: "Reenviar la invitación que venció",
+      assigneeUserId: support.userId,
+      adminOnly: false,
+    })
+    await ownerDb
+      .update(invitation)
+      .set({ expiresAt: new Date(NOW.getTime() + 7 * DAY) })
+      .where(eq(invitation.id, "kz-alta-inv-equipo"))
+    await pass()
+    expect((await keyed(equipo, "equipo_vencido"))[0]).toMatchObject({ status: "hecha" })
+    await ownerDb
+      .update(invitation)
+      .set({ expiresAt: new Date(NOW.getTime() - 3_600_000) })
+      .where(eq(invitation.id, "kz-alta-inv-equipo"))
+    await pass()
+    expect((await keyed(equipo, "equipo_vencido")).map((task) => task.status).sort()).toEqual([
+      "abierta",
+      "hecha",
+    ])
+  })
+
+  it("la prueba que termina en 7 días o menos, sin pago: una tarea de cobro; a 8 días o pagada, no", async () => {
+    const [trial] = await keyed(ids["alta-prueba"] as string, "prueba_por_terminar")
+    expect(trial).toMatchObject({ kind: "cobro", adminOnly: true, assigneeUserId: LOADER })
+    expect(trial?.title).toMatch(/^Su prueba termina el .+: hablar del primer pago$/)
+    expect(await keyed(ids["alta-prueba8"] as string, "prueba_por_terminar")).toHaveLength(0)
+    expect(await keyed(ids["alta-pagada"] as string, "prueba_por_terminar")).toHaveLength(0)
+  })
+
+  it("el primer pago revertido: una sola tarea de cobro", async () => {
+    const tasks = await keyed(ids["alta-revertido"] as string, "primer_pago_revertido")
+    expect(tasks.map((task) => [task.title, task.kind, task.adminOnly])).toEqual([
+      ["Se revirtió el primer pago de Clínica Alta revertido (ficticia)", "cobro", true],
+    ])
+  })
+
+  it("el alta trabada: mensaje si le toca a la clínica; si espera a Meta, solo una tarea", async () => {
+    const trabada = ids["alta-trabada"] as string
+    const [message] = (await itemsOf(trabada, "mensaje")).filter(
+      (item) => item.payload.goal === "alta_sin_avanzar",
+    )
+    expect(message?.title).toBe("El alta no avanza: falta que acepte el contrato de encargo")
+    expect(message?.reason).toMatch(/^Lleva 10 días sin avanzar/)
+    expect(await keyed(trabada, "alta_trabada")).toHaveLength(0)
+    const meta = ids["alta-meta"] as string
+    expect(
+      (await itemsOf(meta, "mensaje")).some((item) => item.payload.goal === "alta_sin_avanzar"),
+    ).toBe(false)
+    const [task] = await keyed(meta, "alta_trabada")
+    expect(task).toMatchObject({
+      title: "El alta espera a Meta: falta que conecte su WhatsApp",
+      kind: "alta",
+      assigneeUserId: support.userId,
+    })
+  })
+
+  it("«Pedir los archivos» no lo calla un correo con adjuntos; lo marcado como la carga lo cierra solo (tarea y mensaje)", async () => {
+    const carta = ids["alta-carta"] as string
+    const [task] = await keyed(carta, "carta_sin_archivos")
+    expect(task?.status).toBe("abierta")
+    const [message] = await itemsOf(carta, "mensaje")
+    expect(message?.status).toBe("espera")
+    await clientFile(carta, "archivo_clinica", "carga.xlsx", XLSX, { receivedAt: NOW })
+    await pass()
+    expect((await keyed(carta, "carta_sin_archivos"))[0]).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: llegaron sus archivos",
+    })
+    const [closed] = await itemsOf(carta, "mensaje")
+    expect(closed).toMatchObject({ status: "vencida" })
+  })
+
+  it("otra pasada no repite nada de lo del alta", async () => {
+    expect(await pass()).toMatchObject({ tasks: 0, items: 0, signals: 0 })
   })
 })

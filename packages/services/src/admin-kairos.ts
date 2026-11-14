@@ -17,11 +17,16 @@ import {
   saasOutreach,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
-import { isLikelyCarga } from "./admin-client-files.js"
+import {
+  type ClientFileRow,
+  cargaDeleteAfter,
+  isLikelyCarga,
+  likelyCargaSql,
+} from "./admin-client-files.js"
 import {
   clientDuplicatePairsSql,
   inboundMailboxWords,
@@ -33,6 +38,16 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
+import {
+  ALTA_MISSING_WORDS,
+  type AltaState,
+  cargaLoadedSql,
+  type LastLoader,
+  lastLoaderOf,
+  type OnboardingOptions,
+  type OnboardingStepKey,
+  syncOnboardingMilestones,
+} from "./admin-onboarding.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
 import { PRESENTATION_OUTCOMES, type PresentationOutcome } from "./admin-sales.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
@@ -53,6 +68,7 @@ import {
   type WaitlistHomeRow,
   waitlistHomeRows,
 } from "./saas-founders.js"
+import { SAAS_TRIAL_WARN_DAYS } from "./saas-terms.js"
 
 /**
  * Kairós, el agente de la administración de Sallca (el ARM): registra, sigue,
@@ -96,6 +112,18 @@ const MESSAGES_MIN_BEFORE = 20
 const CASE_WAITING_DAYS = 3
 /** Un comprobante rechazado en estos días, sin un pago confirmado después, es riesgo. */
 const PAYMENT_REJECTED_DAYS = 30
+/** La propietaria que no acepta su invitación en estos días: un recordatorio. */
+const OWNER_INVITE_DAYS = 2
+/** Lo marcado como la carga sin cargar en estos días: la tarea de cargarlo. */
+const CARGA_LOAD_DAYS = 2
+/** Lo marcado como la carga que se borra en estos días o menos, sin cargar: urgente. */
+const CARGA_DELETE_WARN_DAYS = 5
+/** Una posible carga sin decidir en estos días sube en Hoy. */
+const POSSIBLE_CARGA_REMIND_DAYS = 7
+/** Una posible carga sin decidir en estos días pasa a urgente (a los 30 se borraría al marcarla). */
+const POSSIBLE_CARGA_URGENT_DAYS = 25
+/** Una posible carga vence a los 30 días de llegar; la que ya los pasó, en estos días. */
+const POSSIBLE_CARGA_LATE_DAYS = 7
 /** Cuántos ítems en espera muestra Hoy (el resto, con su total, en la pantalla de Kairós). */
 const READY_ON_TODAY = 5
 /**
@@ -104,11 +132,12 @@ const READY_ON_TODAY = 5
  */
 const KAIROS_READER: AdminActor = { userId: "kairos", role: "admin" }
 
-/** Lo que solo aprueba Administración (precios, ligar personas, fusionar). */
+/** Lo que solo aprueba Administración (precios, ligar personas, fusionar, la carga de datos). */
 const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "propuesta",
   "vinculo",
   "duplicado",
+  "posible_carga",
 ])
 /** Lo que el modelo redacta antes de estar listo. */
 const DRAFT_KINDS = [
@@ -605,6 +634,15 @@ async function captureState(
     )
     state.data = row ?? null
   }
+  const fileId = str(payload.fileId)
+  if (kind === "posible_carga" && fileId) {
+    // Vale mientras siga siendo un adjunto sin marcar y sin borrar.
+    const [row] = await rows<{ kind: string; deleted: boolean }>(
+      tx,
+      sql`select kind, deleted_at is not null as deleted from saas_client_file where id = ${fileId}::uuid`,
+    )
+    state.file = row ? { kind: row.kind, deleted: row.deleted } : null
+  }
   const contactId = str(payload.contactId)
   if (kind === "vinculo" && contactId) {
     const [row] = await rows<{ user_id: string | null }>(
@@ -758,6 +796,11 @@ export interface KairosItemFilter {
   ready?: boolean
   clientId?: string
   limit?: number
+  /**
+   * Hoy: la posible carga de datos primero (la urgente, después la que espera
+   * `POSSIBLE_CARGA_REMIND_DAYS` o más), en el orden de la consulta, antes del tope.
+   */
+  cargaFirst?: boolean
 }
 
 /**
@@ -796,6 +839,14 @@ export async function listKairosItems(
     .leftJoin(decider, eq(decider.id, kairosItem.decidedBy))
     .where(where)
     .orderBy(
+      ...(filter.status === "espera" && filter.cargaFirst
+        ? [
+            sql`case when ${kairosItem.kind} <> 'posible_carga' then 3
+              when ${kairosItem.payload} ->> 'urgent' = 'true' then 0
+              when (${kairosItem.payload} ->> 'receivedAt')::timestamptz <= ${new Date(now.getTime() - POSSIBLE_CARGA_REMIND_DAYS * DAY).toISOString()}::timestamptz then 1
+              else 2 end`,
+          ]
+        : []),
       ...(filter.status === "espera"
         ? [asc(kairosItem.expiresAt), asc(kairosItem.id)]
         : [
@@ -889,6 +940,12 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
     clientId: string,
     input: KairosProposalInput,
   ): Promise<{ id: string }>
+  /** La misma operación que «Es la carga de datos» de Documentos (`markClientFileCarga`). */
+  markClientFileCarga(
+    tx: Db,
+    actor: AdminActor,
+    fileId: string,
+  ): Promise<{ file: Pick<ClientFileRow, "deleteAfter">; dueNow: boolean }>
 }
 
 export interface KairosDecideInput {
@@ -1106,9 +1163,17 @@ async function executeItem<O extends KairosOutreachPrepared>(
     case "guion":
       // El guion se lee; aprobarlo es «listo», no ejecuta nada.
       return { status: "ejecutada", result: { taskId: str(payload.taskId) } }
-    case "posible_carga":
-      // Ninguna regla la prepara todavía: marcar la carga llega con su operación.
-      throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Esto aún no se puede aprobar aquí")
+    case "posible_carga": {
+      const fileId = optText(payload.fileId)
+      if (!fileId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el archivo")
+      // Si ya pasaron 30 días desde que llegó, queda para borrarse ahora: lo borra el worker en
+      // su vuelta siguiente (aquí no hay almacenamiento) y la pantalla lo dijo antes del sí.
+      const marked = await executors.markClientFileCarga(tx, actor, fileId)
+      return {
+        status: "ejecutada",
+        result: { fileId, dueNow: marked.dueNow, deleteAfter: marked.file.deleteAfter },
+      }
+    }
   }
 }
 
@@ -1377,6 +1442,12 @@ class Pass {
   }
   private clients = new Map<string, ClientInfo>()
   private contacts = new Map<string, ContactInfo | null>()
+  /** El rol de cada persona del equipo activa; null si no está o no está activa. */
+  private staffRoles = new Map<string, string | null>()
+  /** Quién hizo la última carga de cada organización (`lastLoaderOf`); null si nadie activo. */
+  private loaders = new Map<string, LastLoader | null>()
+  /** Cómo va el alta de cada cliente, de `syncOnboardingMilestones` en esta pasada. */
+  alta: AltaState[] = []
 
   constructor(
     readonly tx: Db,
@@ -1410,6 +1481,125 @@ class Pass {
     if (!row) return null
     this.clients.set(id, row)
     return row
+  }
+
+  /** El rol de la persona si es del equipo y está activa; null si no. */
+  private async staffRole(userId: string): Promise<string | null> {
+    if (this.staffRoles.has(userId)) return this.staffRoles.get(userId) ?? null
+    const [row] = await this.tx
+      .select({ role: adminStaff.role, active: adminStaff.active })
+      .from(adminStaff)
+      .where(eq(adminStaff.userId, userId))
+      .limit(1)
+    const role = row?.active ? row.role : null
+    this.staffRoles.set(userId, role)
+    return role
+  }
+
+  /** Quién hizo la última carga de la organización, si sigue activo en el equipo. */
+  async lastLoader(orgId: string): Promise<LastLoader | null> {
+    if (this.loaders.has(orgId)) return this.loaders.get(orgId) ?? null
+    const found = (await lastLoaderOf(this.tx, [orgId])).get(orgId) ?? null
+    this.loaders.set(orgId, found)
+    return found
+  }
+
+  /**
+   * A quién va una tarea de Kairós: a quien hizo la última carga (solo en lo de la carga,
+   * `loaderFirst`), si no al responsable, si no a nadie. Cada uno solo si está activo en el
+   * equipo y, si la tarea es solo de Administración, si es de Administración: nunca una tarea
+   * que esa persona no podría ver.
+   */
+  async assigneeFor(
+    clientId: string,
+    adminOnly: boolean,
+    loaderFirst = false,
+  ): Promise<string | null> {
+    const client = await this.client(clientId)
+    if (!client) return null
+    const loader =
+      loaderFirst && client.organizationId ? await this.lastLoader(client.organizationId) : null
+    for (const userId of [loader?.userId ?? null, client.ownerUserId]) {
+      if (!userId) continue
+      const role = await this.staffRole(userId)
+      if (role && (!adminOnly || role === "admin")) return userId
+    }
+    return null
+  }
+
+  /** Cierra las tareas abiertas de Kairós con esa clave (`closeKairosTasks`). */
+  async closeTasks(prefix: string, why: string, clientId: string): Promise<number> {
+    const client = await this.client(clientId)
+    return closeKairosTasks(this.tx, {
+      prefix,
+      why,
+      now: this.now,
+      clientId,
+      organizationId: client?.organizationId ?? null,
+    })
+  }
+
+  /**
+   * Retira lo que espera un sí con esa clave (o esos ítems) porque ya no hace falta: queda
+   * vencido con su motivo y su clave libre, y «Lo que hizo» lo cuenta.
+   */
+  async closeItems(target: { prefix: string } | { ids: string[] }, why: string): Promise<number> {
+    if ("ids" in target && target.ids.length === 0) return 0
+    const closed = await this.tx
+      .update(kairosItem)
+      .set({
+        status: "vencida",
+        error: `Ya no hace falta: ${why}`.slice(0, 500),
+        idempotencyKey: sql`'vencida:' || ${kairosItem.id}::text || ':' || ${kairosItem.idempotencyKey}`,
+        updatedAt: this.now,
+      })
+      .where(
+        and(
+          eq(kairosItem.status, "espera"),
+          "ids" in target
+            ? inArray(kairosItem.id, target.ids)
+            : sql`left(${kairosItem.idempotencyKey}, ${target.prefix.length}) = ${target.prefix}`,
+        ),
+      )
+      .returning({
+        id: kairosItem.id,
+        kind: kairosItem.kind,
+        title: kairosItem.title,
+        clientId: kairosItem.clientId,
+        adminOnly: kairosItem.adminOnly,
+      })
+    for (const item of closed) {
+      const client = item.clientId ? await this.client(item.clientId) : null
+      await writeAdminAudit(this.tx, null, {
+        action: "kairos.item_closed",
+        entityId: item.id,
+        organizationId: client?.organizationId ?? null,
+        metadata: {
+          clientId: item.clientId,
+          itemId: item.id,
+          kind: item.kind,
+          title: item.title,
+          why,
+          adminOnly: item.adminOnly,
+        },
+      })
+    }
+    return closed.length
+  }
+
+  /** ¿Espera un sí algo de Kairós con esa clave? */
+  async pendingItem(prefix: string): Promise<boolean> {
+    const [found] = await this.tx
+      .select({ id: kairosItem.id })
+      .from(kairosItem)
+      .where(
+        and(
+          eq(kairosItem.status, "espera"),
+          sql`left(${kairosItem.idempotencyKey}, ${prefix.length}) = ${prefix}`,
+        ),
+      )
+      .limit(1)
+    return Boolean(found)
   }
 
   /** La persona principal del cliente (o la primera que se anotó). */
@@ -1456,6 +1646,8 @@ class Pass {
     contactId?: string | null
     demoId?: string | null
     adminOnly?: boolean
+    /** Lo de la carga: primero a quien hizo la última carga (`assigneeFor`). */
+    loaderFirst?: boolean
   }): Promise<string | null> {
     const prefix = `${plan.rule}:${plan.clientId}:${plan.fact}:`
     const [found] = await this.tx
@@ -1473,6 +1665,7 @@ class Pass {
     if (!client) return null
     // Solo de Administración: lo marcado así y toda tarea de cobro. Soporte no la ve.
     const adminOnly = plan.adminOnly === true || plan.kind === "cobro"
+    const assigneeUserId = await this.assigneeFor(plan.clientId, adminOnly, plan.loaderFirst)
     const [row] = await this.tx
       .insert(saasTask)
       .values({
@@ -1481,7 +1674,7 @@ class Pass {
         title: plan.title.slice(0, 200),
         dueOn: plan.dueOn ?? this.today,
         dueAt: plan.dueAt ?? null,
-        assigneeUserId: client.ownerUserId,
+        assigneeUserId,
         adminOnly,
         contactId: plan.contactId ?? null,
         demoId: plan.demoId ?? null,
@@ -1522,6 +1715,8 @@ class Pass {
     reason: string
     payload: Record<string, unknown>
     adminOnly: boolean
+    /** Su propio vencimiento; si no, `KAIROS_ITEM_HOURS`. */
+    expiresAt?: Date
   }): Promise<string | null> {
     const prefix = `${plan.rule}:${plan.clientId ?? "-"}:${plan.fact}:`
     const [found] = await this.tx
@@ -1541,7 +1736,7 @@ class Pass {
         payload: plan.payload,
         expectedState,
         idempotencyKey: `${prefix}${this.today}`,
-        expiresAt: new Date(this.now.getTime() + KAIROS_ITEM_HOURS * HOUR),
+        expiresAt: plan.expiresAt ?? new Date(this.now.getTime() + KAIROS_ITEM_HOURS * HOUR),
         adminOnly: plan.adminOnly,
         createdAt: this.now,
         updatedAt: this.now,
@@ -2140,8 +2335,37 @@ async function rulePresentations(pass: Pass): Promise<void> {
   }
 }
 
-/** (8) El alta: los archivos que no llegan, lo que cargó la skill, el informe que falta o no se sabe si salió, el equipo que no entra. */
+/**
+ * (8) El alta, de lo más concreto a lo más general: los archivos que no llegan, la posible
+ * carga, lo que cargó la skill y el informe, los plazos de la carga, el pago revertido, la
+ * propietaria y el equipo que no entran, la prueba que termina y, al final, el paso trabado
+ * que ninguna de las anteriores cubre.
+ */
 async function ruleOnboarding(pass: Pass): Promise<void> {
+  await ruleLetterWithoutFiles(pass)
+  await rulePossibleCarga(pass)
+  await ruleLoadsAndReports(pass)
+  await ruleCargaDeadlines(pass)
+  await ruleFirstPaymentReverted(pass)
+  await ruleOwnerInvite(pass)
+  await ruleTeam(pass)
+  await ruleTrialEnding(pass)
+  await ruleAltaStuck(pass)
+}
+
+/** Lo que calla «Pedir los archivos de la carga»: algo marcado como la carga después de la carta, o una carga. */
+const letterAnsweredSql = sql`(exists (select 1 from saas_client_file g where g.client_id = c.id
+    and g.kind = 'archivo_clinica' and g.received_at >= f.created_at)
+  or exists (select 1 from admin_audit l where l.organization_id = c.organization_id
+    and l.action in ('org.setup_import', 'org.data_import')))`
+
+/**
+ * (8a) La carta de bienvenida salió hace `LETTER_WAIT_DAYS` y no llegó la carga: tarea y
+ * mensaje. Solo lo calla lo marcado como la carga (`archivo_clinica`, aunque ya se haya
+ * borrado: de eso se ocupa `ruleCargaDeadlines`) o una carga; un correo con adjuntos no,
+ * porque puede ser cualquier cosa. Cuando llega, la tarea y el mensaje se cierran solos.
+ */
+async function ruleLetterWithoutFiles(pass: Pass): Promise<void> {
   const { tx } = pass
   const letters = await rows<{ client_id: string; file_id: string; sent_at: string }>(
     tx,
@@ -2152,10 +2376,7 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
       order by created_at desc limit 1
     ) f on true
     where c.archived_at is null and c.organization_id is not null and f.created_at <= ${pass.ago(LETTER_WAIT_DAYS)}
-      and not exists (select 1 from saas_client_file g where g.client_id = c.id and g.kind = 'archivo_clinica' and g.created_at >= f.created_at)
-      and not exists (select 1 from saas_inbound_email e where e.client_id = c.id and jsonb_array_length(e.attachments) > 0 and e.received_at >= f.created_at)
-      and not exists (select 1 from admin_audit l where l.organization_id = c.organization_id
-        and l.action in ('org.setup_import', 'org.data_import'))`,
+      and not ${letterAnsweredSql}`,
   )
   for (const letter of letters) {
     const sent = dayText(limaDate(new Date(letter.sent_at)))
@@ -2181,7 +2402,341 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
       adminOnly: false,
     })
   }
-  await ruleLoadsAndReports(pass)
+  // Lo que ya llegó: la tarea y el mensaje que quedaban se cierran solos.
+  const answered = await rows<{ client_id: string }>(
+    tx,
+    sql`select c.id as client_id
+    from saas_client c
+    join lateral (
+      select id, created_at from saas_client_file g where g.client_id = c.id and g.kind = 'carta'
+      order by created_at desc limit 1
+    ) f on true
+    where c.organization_id is not null
+      and (exists (select 1 from saas_task t where t.client_id = c.id and t.status = 'abierta' and t.by_kairos
+          and starts_with(t.kairos_key, 'carta_sin_archivos:' || c.id::text || ':'))
+        or exists (select 1 from kairos_item k where k.client_id = c.id and k.status = 'espera'
+          and starts_with(k.idempotency_key, 'carta_sin_archivos:' || c.id::text || ':')))
+      and ${letterAnsweredSql}`,
+  )
+  for (const { client_id: clientId } of answered) {
+    const prefix = `carta_sin_archivos:${clientId}:`
+    await pass.closeTasks(prefix, "llegaron sus archivos", clientId)
+    await pass.closeItems({ prefix }, "llegaron sus archivos")
+  }
+}
+
+/** «el 13 de noviembre» del día que vence (o venció) lo que llegó en `receivedAt` si se marca ahora. */
+function cargaDeleteWords(deleteOn: string, today: string): string {
+  const days = Math.round(
+    (Date.parse(`${deleteOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY,
+  )
+  if (days <= 0) return "se borra al marcarlo"
+  if (days === 1) return "se borra mañana"
+  return days <= CARGA_DELETE_WARN_DAYS
+    ? `se borra en ${days} días`
+    : `se borra el ${dayText(deleteOn)}`
+}
+
+/**
+ * (8b) Posible carga de datos: un adjunto que llegó por correo en los últimos 30 días con
+ * pinta de carga (Excel, CSV o Word: `likelyCargaSql`, sin abrirlo) o lo que estaba
+ * programado para borrarse antes del cambio (`client_file.retention_lifted`, de cualquier
+ * tipo). Kairós no decide: deja un ítem solo de Administración, una sola vez por archivo, que
+ * vence a los 30 días de llegar (lo que ya los pasó, a los `POSSIBLE_CARGA_LATE_DAYS`). A los
+ * `POSSIBLE_CARGA_URGENT_DAYS` el mismo ítem pasa a urgente. Si el archivo se marca en
+ * Documentos o se borra, el ítem se retira solo.
+ */
+async function rulePossibleCarga(pass: Pass): Promise<void> {
+  const { tx, now } = pass
+  const files = await rows<{
+    id: string
+    client_id: string
+    filename: string
+    content_type: string
+    received_at: string
+    inbound_email_id: string | null
+    lifted: boolean
+  }>(
+    tx,
+    sql`select f.id, f.client_id, f.filename, f.content_type, ${iso(sql`f.received_at`)} as received_at,
+      f.inbound_email_id,
+      exists (select 1 from admin_audit a where a.action = 'client_file.retention_lifted' and a.entity_id = f.id::text) as lifted
+    from saas_client_file f
+    join saas_client c on c.id = f.client_id
+    where f.kind = 'correo' and f.deleted_at is null and c.archived_at is null
+      and ((${likelyCargaSql("f")} and f.received_at > ${pass.ago(CLIENT_FILE_WINDOW_DAYS)})
+        or exists (select 1 from admin_audit a where a.action = 'client_file.retention_lifted' and a.entity_id = f.id::text))
+      and not exists (select 1 from kairos_item k where k.kind = 'posible_carga' and k.payload ->> 'fileId' = f.id::text)
+    order by f.received_at asc, f.id asc`,
+  )
+  for (const file of files) {
+    const receivedAt = new Date(file.received_at)
+    const words = possibleCargaWords(pass, receivedAt, file.lifted)
+    const thirty = new Date(receivedAt.getTime() + CLIENT_FILE_WINDOW_DAYS * DAY)
+    await pass.item({
+      rule: "posible_carga",
+      clientId: file.client_id,
+      fact: file.id,
+      kind: "posible_carga",
+      title: `¿Es la carga de datos? ${file.filename}`,
+      reason: words.reason,
+      adminOnly: true,
+      expiresAt:
+        thirty.getTime() > now.getTime()
+          ? thirty
+          : new Date(now.getTime() + POSSIBLE_CARGA_LATE_DAYS * DAY),
+      payload: {
+        fileId: file.id,
+        filename: file.filename,
+        contentType: file.content_type,
+        receivedAt: file.received_at,
+        inboundEmailId: file.inbound_email_id,
+        lifted: file.lifted,
+        ...words.payload,
+      },
+    })
+  }
+  // A los 25 días, el mismo ítem pasa a urgente (sin otro ítem ni otra tarea).
+  const late = await rows<{ id: string; received_at: string; lifted: boolean }>(
+    tx,
+    sql`select k.id, ${iso(sql`f.received_at`)} as received_at, coalesce((k.payload ->> 'lifted')::boolean, false) as lifted
+    from kairos_item k join saas_client_file f on f.id::text = k.payload ->> 'fileId'
+    where k.kind = 'posible_carga' and k.status = 'espera' and coalesce(k.payload ->> 'urgent', 'false') <> 'true'
+      and f.received_at <= ${pass.ago(POSSIBLE_CARGA_URGENT_DAYS)}`,
+  )
+  for (const item of late) {
+    const words = possibleCargaWords(pass, new Date(item.received_at), item.lifted)
+    await tx
+      .update(kairosItem)
+      .set({
+        reason: words.reason.slice(0, 1000),
+        payload: sql`${kairosItem.payload} || ${JSON.stringify(words.payload)}::jsonb`,
+        updatedAt: now,
+      })
+      .where(and(eq(kairosItem.id, item.id), eq(kairosItem.status, "espera")))
+  }
+  // Lo que ya se marcó en Documentos o se borró: el ítem se retira solo.
+  const settled = await rows<{ id: string; kind: string | null; deleted: boolean }>(
+    tx,
+    sql`select k.id, f.kind, coalesce(f.deleted_at is not null, true) as deleted
+    from kairos_item k left join saas_client_file f on f.id::text = k.payload ->> 'fileId'
+    where k.kind = 'posible_carga' and k.status = 'espera'
+      and (f.id is null or f.deleted_at is not null or f.kind <> 'correo')`,
+  )
+  const marked = settled.filter((row) => !row.deleted && row.kind === "archivo_clinica")
+  await pass.closeItems({ ids: marked.map((row) => row.id) }, "ya se marcó como la carga de datos")
+  await pass.closeItems(
+    { ids: settled.filter((row) => !marked.includes(row)).map((row) => row.id) },
+    "el archivo ya no está",
+  )
+}
+
+/** Los días que se cuenta lo que llega por correo (y lo marcado como la carga) para borrarlo. */
+const CLIENT_FILE_WINDOW_DAYS = 30
+
+/** Lo que dice una posible carga: cuándo llegó y qué pasa si se marca hoy (la fecha la da el servidor). */
+function possibleCargaWords(
+  pass: Pass,
+  receivedAt: Date,
+  lifted: boolean,
+): { reason: string; payload: Record<string, unknown> } {
+  const deleteOn = cargaDeleteAfter(receivedAt, pass.now)
+  const dueNow = deleteOn <= pass.today
+  const urgent = pass.now.getTime() - receivedAt.getTime() >= POSSIBLE_CARGA_URGENT_DAYS * DAY
+  const arrived = `Llegó por correo el ${dayText(limaDate(receivedAt))}`
+  const why = lifted
+    ? "estaba programado para borrarse y ahora se guarda hasta que digas si es la carga"
+    : "por su tipo puede ser la carga de datos (no se abrió)"
+  return {
+    reason: `${arrived}; ${why}. Si es la carga, ${cargaDeleteWords(deleteOn, pass.today)}`,
+    payload: { deleteOn, dueNow, urgent },
+  }
+}
+
+/**
+ * (8d) Los plazos de lo marcado como la carga, sin cargar: a los `CARGA_LOAD_DAYS` de
+ * marcarlo, «Cargar los datos de X» a quien hizo la última carga (o al responsable); a
+ * `CARGA_DELETE_WARN_DAYS` o menos de borrarse, la urgente. Se cierran al cargarlo. Si se
+ * borró sin cargar (la pasada lo guarda como «Se borraron sin cargar»), un mensaje para
+ * pedirlos otra vez, y las tareas se cierran. Lo de la carga es solo de Administración.
+ */
+async function ruleCargaDeadlines(pass: Pass): Promise<void> {
+  const { tx } = pass
+  const pending = await rows<{
+    client_id: string
+    name: string
+    file_id: string
+    marked_at: string
+    delete_after: string
+  }>(
+    tx,
+    sql`select c.id as client_id, c.name, f.id as file_id, ${iso(sql`f.marked_at`)} as marked_at,
+      f.delete_after::text as delete_after
+    from saas_client c
+    join lateral (
+      select g.id, coalesce(g.carga_at, g.created_at) as marked_at, g.delete_after from saas_client_file g
+      where g.client_id = c.id and g.kind = 'archivo_clinica' and g.deleted_at is null and g.delete_after is not null
+      order by g.received_at desc, g.id desc limit 1
+    ) f on true
+    where c.archived_at is null and c.organization_id is not null and not ${cargaLoadedSql("c")}
+    order by c.id`,
+  )
+  for (const row of pending) {
+    const days = Math.round(
+      (Date.parse(`${row.delete_after}T00:00:00Z`) - Date.parse(`${pass.today}T00:00:00Z`)) / DAY,
+    )
+    if (days <= CARGA_DELETE_WARN_DAYS) {
+      const when =
+        days <= 0 ? "se borran hoy" : days === 1 ? "se borran mañana" : `se borran en ${days} días`
+      const id = await pass.task({
+        rule: "carga_por_borrarse",
+        clientId: row.client_id,
+        fact: row.file_id,
+        repeat: "once",
+        kind: "alta",
+        title: `Cargar los datos de ${row.name}: ${when}`,
+        dueAt: pass.now,
+        adminOnly: true,
+        loaderFirst: true,
+      })
+      // La de los 2 días queda en la urgente: no dos tareas de lo mismo.
+      if (id)
+        await pass.closeTasks(`carga_pendiente:${row.client_id}:`, "pasó a urgente", row.client_id)
+      continue
+    }
+    if (Date.parse(row.marked_at) > pass.now.getTime() - CARGA_LOAD_DAYS * DAY) continue
+    if (await pass.openTask(`carga_por_borrarse:${row.client_id}:`)) continue
+    await pass.task({
+      rule: "carga_pendiente",
+      clientId: row.client_id,
+      fact: row.file_id,
+      repeat: "once",
+      kind: "alta",
+      title: `Cargar los datos de ${row.name}`,
+      adminOnly: true,
+      loaderFirst: true,
+    })
+  }
+  // Ya se cargó: las tareas se cierran solas.
+  const loaded = await rows<{ client_id: string }>(
+    tx,
+    sql`select c.id as client_id from saas_client c
+    where c.organization_id is not null and ${cargaLoadedSql("c")}
+      and exists (select 1 from saas_task t where t.client_id = c.id and t.status = 'abierta' and t.by_kairos
+        and (starts_with(t.kairos_key, 'carga_pendiente:' || c.id::text || ':')
+          or starts_with(t.kairos_key, 'carga_por_borrarse:' || c.id::text || ':')))`,
+  )
+  for (const { client_id: clientId } of loaded) {
+    await pass.closeTasks(`carga_pendiente:${clientId}:`, "se cargaron sus datos", clientId)
+    await pass.closeTasks(`carga_por_borrarse:${clientId}:`, "se cargaron sus datos", clientId)
+  }
+  // Se borraron sin cargar: pedirlos otra vez (lo decide una persona) y cerrar lo que quedaba.
+  const lost = await rows<{ client_id: string; lost_at: string }>(
+    tx,
+    sql`select m.client_id, ${iso(sql`m.lost_at`)} as lost_at
+    from saas_client_milestone m join saas_client c on c.id = m.client_id
+    where m.step = 'archivos' and m.lost_reason = 'borrados_sin_cargar' and m.reached_at is null
+      and c.archived_at is null
+    order by m.client_id`,
+  )
+  for (const row of lost) {
+    const day = dayText(limaDate(new Date(row.lost_at)))
+    await pass.closeTasks(
+      `carga_pendiente:${row.client_id}:`,
+      "se borraron sin cargar",
+      row.client_id,
+    )
+    await pass.closeTasks(
+      `carga_por_borrarse:${row.client_id}:`,
+      "se borraron sin cargar",
+      row.client_id,
+    )
+    await pass.message({
+      rule: "carga_borrada",
+      clientId: row.client_id,
+      fact: String(Date.parse(row.lost_at)),
+      goal: "pedir_archivos_otra_vez",
+      title: "Pedir otra vez los archivos de la carga",
+      reason: `Sus archivos se borraron el ${day} a los 30 días de llegar, sin cargarse`,
+      facts: [
+        `Los archivos que mandó para su carga se borraron el ${day}, sin cargarse`,
+        "Se borran a los 30 días de llegar, como se le prometió",
+      ],
+      adminOnly: false,
+    })
+  }
+}
+
+/** (8e) El primer pago se revirtió y no queda otro confirmado: una tarea de cobro, una vez por reversión. */
+async function ruleFirstPaymentReverted(pass: Pass): Promise<void> {
+  const reverted = await rows<{ client_id: string; name: string; lost_at: string }>(
+    pass.tx,
+    sql`select m.client_id, c.name, ${iso(sql`m.lost_at`)} as lost_at
+    from saas_client_milestone m join saas_client c on c.id = m.client_id
+    where m.step = 'primer_pago' and m.lost_reason = 'pago_revertido' and m.reached_at is null
+      and c.archived_at is null
+    order by m.client_id`,
+  )
+  for (const row of reverted)
+    await pass.task({
+      rule: "primer_pago_revertido",
+      clientId: row.client_id,
+      fact: String(Date.parse(row.lost_at)),
+      repeat: "once",
+      kind: "cobro",
+      title: `Se revirtió el primer pago de ${row.name}`,
+      adminOnly: true,
+    })
+}
+
+/**
+ * (8f) La propietaria que no acepta en `OWNER_INVITE_DAYS` la invitación que le hizo el
+ * personal (la misma de la fila «propietarias» de Hoy, que la deja de mostrar mientras este
+ * mensaje está listo): un recordatorio, mientras la invitación siga vigente. Aceptarla lo vence.
+ */
+async function ruleOwnerInvite(pass: Pass): Promise<void> {
+  const invites = await rows<{
+    client_id: string
+    id: string
+    created_at: string
+    expires_at: string
+  }>(
+    pass.tx,
+    sql`select c.id as client_id, i.id, ${iso(sql`i.created_at`)} as created_at, ${iso(sql`i.expires_at`)} as expires_at
+    from saas_client c
+    join invitation i on i.organization_id = c.organization_id
+    where c.archived_at is null and i.role = 'owner' and i.status = 'pending'
+      and i.created_at <= ${pass.ago(OWNER_INVITE_DAYS)} and i.expires_at > ${pass.nowSql}
+      and i.id = (select i2.id from invitation i2 where i2.organization_id = i.organization_id and i2.role = 'owner'
+        order by i2.created_at desc, i2.id desc limit 1)
+      and exists (select 1 from admin_staff s where s.user_id = i.inviter_id)
+      and not exists (select 1 from member m where m.organization_id = c.organization_id and m.role = 'owner')
+    order by c.id`,
+  )
+  for (const invite of invites) {
+    const invited = dayText(limaDate(new Date(invite.created_at)))
+    const expires = dayText(limaDate(new Date(invite.expires_at)))
+    await pass.message({
+      rule: "propietaria_sin_aceptar",
+      clientId: invite.client_id,
+      fact: invite.id,
+      goal: "recordar_propietaria",
+      title: "Recordar a la propietaria que acepte su invitación",
+      reason: `La invitamos el ${invited} y no aceptó; su invitación vence el ${expires}`,
+      facts: [`Su invitación para entrar a la cuenta vence el ${expires}`],
+      adminOnly: false,
+      extra: { invitationIds: [invite.id] },
+    })
+  }
+}
+
+/**
+ * (8g) El equipo: las invitaciones sin aceptar en `TEAM_INVITE_DAYS` (un recordatorio) y las
+ * que vencieron sin aceptar («Reenviar las invitaciones»; reenviarlas la cierra y, si vuelven a
+ * vencer, hay otra). Con «No aplica» en equipo, nada de lo vencido.
+ */
+async function ruleTeam(pass: Pass): Promise<void> {
+  const { tx } = pass
   const teams = await rows<{ client_id: string; ids: string[]; n: number }>(
     tx,
     sql`select c.id as client_id, array_agg(i.id order by i.id) as ids, count(*)::int as n
@@ -2208,6 +2763,148 @@ async function ruleOnboarding(pass: Pass): Promise<void> {
       extra: { invitationIds: team.ids },
     })
   }
+  const expired = await rows<{ client_id: string; signature: string; n: number }>(
+    tx,
+    sql`select c.id as client_id, count(*)::int as n,
+      string_agg(i.id || '@' || ${iso(sql`i.expires_at`)}, ',' order by i.id) as signature
+    from saas_client c join invitation i on i.organization_id = c.organization_id
+    where c.archived_at is null and i.status = 'pending' and coalesce(i.role, 'member') not like '%owner%'
+      and i.expires_at <= ${pass.nowSql}
+      and not exists (select 1 from saas_client_milestone m where m.client_id = c.id and m.step = 'equipo' and m.na_at is not null)
+    group by c.id`,
+  )
+  const still = new Set(expired.map((row) => row.client_id))
+  for (const team of expired)
+    await pass.task({
+      rule: "equipo_vencido",
+      clientId: team.client_id,
+      // Con el vencimiento: si se reenvían y vuelven a vencer, es otra tarea.
+      fact: createHash("sha256").update(team.signature).digest("hex").slice(0, 16),
+      repeat: "once",
+      kind: "alta",
+      title:
+        team.n === 1
+          ? "Reenviar la invitación que venció"
+          : `Reenviar las invitaciones: ${team.n} vencieron sin aceptar`,
+    })
+  const open = await rows<{ client_id: string }>(
+    tx,
+    sql`select distinct t.client_id from saas_task t
+    where t.status = 'abierta' and t.by_kairos and starts_with(t.kairos_key, 'equipo_vencido:')`,
+  )
+  for (const { client_id: clientId } of open)
+    if (!still.has(clientId))
+      await pass.closeTasks(
+        `equipo_vencido:${clientId}:`,
+        "ya no hay invitaciones vencidas",
+        clientId,
+      )
+}
+
+/**
+ * (8h) La prueba termina en `SAAS_TRIAL_WARN_DAYS` días o menos y no hay un pago confirmado:
+ * una tarea de cobro (solo de Administración). Es el mismo «por vencer» de `getSaasTrialWatch`
+ * (en prueba, sin demo).
+ */
+async function ruleTrialEnding(pass: Pass): Promise<void> {
+  const trials = await rows<{ client_id: string; ends_at: string }>(
+    pass.tx,
+    sql`select c.id as client_id, ${iso(sql`s.trial_ends_at`)} as ends_at
+    from saas_subscription s join saas_client c on c.organization_id = s.organization_id
+    where s.status = 'prueba' and not s.is_demo and c.archived_at is null
+      and s.trial_ends_at > ${pass.nowSql}
+      and s.trial_ends_at <= ${new Date(pass.now.getTime() + SAAS_TRIAL_WARN_DAYS * DAY).toISOString()}::timestamptz
+      and not exists (select 1 from saas_payment p where p.organization_id = s.organization_id
+        and p.status in ('confirmado', 'devuelto'))
+    order by c.id`,
+  )
+  for (const trial of trials) {
+    const day = limaDate(new Date(trial.ends_at))
+    await pass.task({
+      rule: "prueba_por_terminar",
+      clientId: trial.client_id,
+      fact: day,
+      repeat: "once",
+      kind: "cobro",
+      title: `Su prueba termina el ${dayText(day)}: hablar del primer pago`,
+      adminOnly: true,
+    })
+  }
+}
+
+/** Las reglas que ya se ocupan de cada paso: si una dejó algo abierto, «no avanza» no repite. */
+const STUCK_COVERED_BY: Partial<Record<OnboardingStepKey, readonly string[]>> = {
+  entro: ["propietaria_sin_aceptar"],
+  archivos: ["carta_sin_archivos", "carga_borrada"],
+  configuracion: ["carga_pendiente", "carga_por_borrarse", "carga_con_errores"],
+  pacientes: ["carga_pendiente", "carga_por_borrarse", "carga_con_errores"],
+  informe: ["carga_sin_informe", "informe_desconocido"],
+  equipo: ["equipo_sin_aceptar", "equipo_vencido"],
+  primer_pago: ["prueba_por_terminar", "primer_pago_revertido"],
+}
+/** Los pasos que hace Administración (la carga, el informe y el cobro): Soporte no ve su tarea. */
+const ADMIN_STEPS: ReadonlySet<OnboardingStepKey> = new Set<OnboardingStepKey>([
+  "configuracion",
+  "pacientes",
+  "informe",
+  "primer_pago",
+])
+/** Los pasos de la carga: su tarea va primero a quien hizo la última carga. */
+const LOADER_STEPS: ReadonlySet<OnboardingStepKey> = new Set<OnboardingStepKey>([
+  "configuracion",
+  "pacientes",
+  "informe",
+])
+
+/**
+ * (8i) El alta trabada (`isStuck`, los días desde el último avance o desde que se guardan
+ * sus pasos, así al desplegar no amanece trabada): lo que ninguna regla de arriba cubre. Si
+ * el paso que sigue le toca a la clínica (y no es el pago), un mensaje que una persona
+ * aprueba; si no (nosotros o Meta), una tarea. Una vez por paso y último avance.
+ */
+async function ruleAltaStuck(pass: Pass): Promise<void> {
+  for (const alta of pass.alta) {
+    const step = alta.next
+    if (!alta.stuck || !step || !alta.stuckSince) continue
+    let covered = false
+    for (const rule of STUCK_COVERED_BY[step] ?? []) {
+      const prefix = `${rule}:${alta.clientId}:`
+      if ((await pass.openTask(prefix)) || (await pass.pendingItem(prefix))) {
+        covered = true
+        break
+      }
+    }
+    if (covered) continue
+    const missing = ALTA_MISSING_WORDS[step]
+    const days = Math.floor((pass.now.getTime() - alta.stuckSince.getTime()) / DAY)
+    const fact = `${step}:${alta.lastProgressAt?.getTime() ?? "nunca"}`
+    if (alta.waitingOn === "clinica" && step !== "primer_pago") {
+      await pass.message({
+        rule: "alta_trabada",
+        clientId: alta.clientId,
+        fact,
+        goal: "alta_sin_avanzar",
+        title: `El alta no avanza: falta ${missing}`,
+        reason: `Lleva ${days} días sin avanzar y el paso que sigue le toca a la clínica: ${missing}`,
+        facts: [`Lleva ${days} días sin avanzar`, `Falta ${missing}`],
+        adminOnly: false,
+      })
+      continue
+    }
+    await pass.task({
+      rule: "alta_trabada",
+      clientId: alta.clientId,
+      fact,
+      repeat: "once",
+      kind: step === "primer_pago" ? "cobro" : "alta",
+      title:
+        alta.waitingOn === "meta"
+          ? `El alta espera a Meta: falta ${missing}`
+          : `El alta no avanza: falta ${missing}`,
+      adminOnly: ADMIN_STEPS.has(step),
+      loaderFirst: LOADER_STEPS.has(step),
+    })
+  }
 }
 
 /** Cuánto espera Kairós a que una carga termine antes de contarla: las tandas de pacientes siguen llegando. */
@@ -2217,6 +2914,15 @@ const LOAD_WORDS: Record<ClinicLoadRecord["kind"], string> = {
   configuracion: "Se cargó la configuración",
   pacientes: "Se cargaron los pacientes",
 }
+
+/** Dónde no entraron los errores de una carga, en la tarea que pide revisarlos. */
+const LOAD_PLACE_WORDS: Record<ClinicLoadRecord["kind"], string> = {
+  configuracion: "la configuración",
+  pacientes: "la carga de pacientes",
+}
+
+/** La clave de la tarea «Revisar los que no entraron»: su botón dice «Revisado». */
+const LOAD_ERRORS_RULE = "carga_con_errores"
 
 /** El prefijo de la clave de las tareas de Kairós de un informe que no se sabe si salió. */
 const unknownReportPrefix = (clientId: string, number: number) =>
@@ -2295,6 +3001,7 @@ async function ruleLoadsAndReports(pass: Pass): Promise<void> {
         kind: "alta",
         title: "Enviar el informe",
         adminOnly: true,
+        loaderFirst: true,
       })
     for (const report of reports) {
       // Una por vez: si la de antes sigue abierta (un reenvío que volvió a cortarse), basta esa.
@@ -2310,7 +3017,34 @@ async function ruleLoadsAndReports(pass: Pass): Promise<void> {
         // Urgente: arriba en Hoy desde ya.
         dueAt: pass.now,
         adminOnly: true,
+        loaderFirst: true,
       })
+    }
+    // (E6) La última carga quieta de cada tipo con errores: revisarlos, una vez por carga (un
+    // cierre a mano no la reabre). Una carga posterior sin errores de ese tipo la cierra.
+    for (const kind of ["configuracion", "pacientes"] as const) {
+      const latest = loads.find((load) => load.kind === kind && Date.parse(load.at) <= quiet)
+      if (!latest) continue
+      if (latest.errors > 0)
+        await pass.task({
+          rule: LOAD_ERRORS_RULE,
+          clientId,
+          fact: `${kind}-${latest.id}`,
+          repeat: "once",
+          kind: "alta",
+          title:
+            latest.errors === 1
+              ? `Revisar el 1 que no entró en ${LOAD_PLACE_WORDS[kind]}`
+              : `Revisar los ${latest.errors} que no entraron en ${LOAD_PLACE_WORDS[kind]}`,
+          adminOnly: true,
+          loaderFirst: true,
+        })
+      else
+        await pass.closeTasks(
+          `${LOAD_ERRORS_RULE}:${clientId}:${kind}-`,
+          `${LOAD_PLACE_WORDS[kind]} se volvió a cargar sin errores`,
+          clientId,
+        )
     }
     await settleReportTasks(tx, orgId, pass.now, { loads, reports, clientId })
   }
@@ -2357,34 +3091,61 @@ export async function settleReportTasks(
       why: `salió el informe N.º ${lastSent.number}`,
     })
   let closed = 0
-  for (const { prefix, why } of close) {
-    const done = await tx
-      .update(saasTask)
-      .set({
-        status: "hecha",
-        doneAt: now,
-        doneNote: `Kairós la cerró: ${why}`,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(saasTask.status, "abierta"),
-          eq(saasTask.byKairos, true),
-          sql`left(${saasTask.kairosKey}, ${prefix.length}) = ${prefix}`,
-        ),
-      )
-      .returning({ id: saasTask.id, title: saasTask.title })
-    for (const task of done) {
-      await writeAdminAudit(tx, null, {
-        action: "kairos.task_closed",
-        entityId: task.id,
-        organizationId: orgId,
-        metadata: { clientId, taskId: task.id, title: task.title, why, adminOnly: true },
-      })
-      closed += 1
-    }
-  }
+  for (const { prefix, why } of close)
+    closed += await closeKairosTasks(tx, { prefix, why, now, clientId, organizationId: orgId })
   return closed
+}
+
+/**
+ * Cierra las tareas abiertas de Kairós con esa clave, como hechas con su motivo («Kairós la
+ * cerró: …»), y deja en «Lo que hizo» que las cerró (solo lo ve quien ve la tarea). La usan
+ * la pasada (`Pass.closeTasks`) y `settleReportTasks`.
+ */
+export async function closeKairosTasks(
+  tx: Db,
+  input: {
+    prefix: string
+    why: string
+    now: Date
+    clientId: string
+    organizationId: string | null
+  },
+): Promise<number> {
+  const done = await tx
+    .update(saasTask)
+    .set({
+      status: "hecha",
+      doneAt: input.now,
+      doneNote: `Kairós la cerró: ${input.why}`,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(saasTask.status, "abierta"),
+        eq(saasTask.byKairos, true),
+        sql`left(${saasTask.kairosKey}, ${input.prefix.length}) = ${input.prefix}`,
+      ),
+    )
+    .returning({
+      id: saasTask.id,
+      title: saasTask.title,
+      kind: saasTask.kind,
+      adminOnly: saasTask.adminOnly,
+    })
+  for (const task of done)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.task_closed",
+      entityId: task.id,
+      organizationId: input.organizationId,
+      metadata: {
+        clientId: input.clientId,
+        taskId: task.id,
+        title: task.title,
+        why: input.why,
+        adminOnly: task.adminOnly || task.kind === "cobro",
+      },
+    })
+  return done.length
 }
 
 /** (9) Riesgo de las que tienen cuenta: cada señal con su tarea, una vez por hecho. */
@@ -2447,13 +3208,22 @@ async function ruleCoolingAndNextStep(pass: Pass): Promise<void> {
  * clave (`regla:cliente:hecho:día`), con la pasada bloqueada para que dos
  * workers no la corran a la vez. Solo pone tareas, marca señales, liga o crea
  * el cliente de una cuenta nueva, anota los correos que llegan y deja ítems
- * en espera; nunca envía ni decide. `now` lo da la base. Los borradores los
+ * en espera; nunca envía ni decide. `now` lo da la base. Antes guarda la
+ * primera vez de cada paso del alta (`syncOnboardingMilestones`, con `options`:
+ * sin «Conectar con Facebook», WhatsApp espera a Meta). Los borradores los
  * pide después `draftPendingKairosItems` (`admin-kairos-drafts.ts`).
  */
-export async function kairosRulesPass(tx: Db, now: Date): Promise<KairosPassResult> {
+export async function kairosRulesPass(
+  tx: Db,
+  now: Date,
+  options: OnboardingOptions = { metaSignupAvailable: false },
+): Promise<KairosPassResult> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kairos:pass'))`)
   await expireKairosItems(tx, now)
+  // La primera vez de cada paso del alta, antes de las reglas: las del alta leen su estado.
+  const sync = await syncOnboardingMilestones(tx, now, options)
   const pass = new Pass(tx, now)
+  pass.alta = sync.alta
   // Primero lo que crea clientes y actividades; las reglas de tareas, de lo más
   // concreto a lo más general: «sin próximo paso» al final, para no poner una
   // tarea genérica donde otra regla ya puso la suya.
@@ -2765,10 +3535,13 @@ async function kairosDoneRaw(
         break
       }
       case "kairos.item_closed": {
-        // Un borrador que ya no hace falta (`closeKairosReplyDrafts`: lo respondieron a mano).
+        // Lo que ya no hace falta: un borrador (`closeKairosReplyDrafts`: lo respondieron a
+        // mano) o algo que espera un sí (`Pass.closeItems`: ya llegó o ya se marcó).
         const title = meta(a.metadata, "title")
         const why = meta(a.metadata, "why")
-        words = title && why ? `Retiró su borrador «${title}»: ${why}` : null
+        const kind = meta(a.metadata, "kind")
+        const draft = !kind || (DRAFT_KINDS as readonly string[]).includes(kind)
+        words = title && why ? `Retiró ${draft ? "su borrador " : ""}«${title}»: ${why}` : null
         break
       }
     }
@@ -2867,6 +3640,8 @@ export interface TodayTaskRow {
    * Zoho: salió» o «No salió: reenviar»). Solo Administración.
    */
   report?: { organizationId: string; number: number; to: string | null; canResend: boolean }
+  /** Lo que dice su botón de cerrarla cuando no es «Hecho» («Revisado»: los que no entraron). */
+  doneLabel?: string
 }
 
 type WithWhy<T> = T & { clientId: string | null; why: string }
@@ -2932,11 +3707,12 @@ export async function todayForStaff(
   const admin = actor.role === "admin"
   const today = limaDate(now)
   await expireKairosItems(tx, now)
-  // Lo listo de Kairós, con la consulta de Kairós: lo que todavía redacta el modelo sale allá, no aquí.
+  // Lo listo de Kairós, con la consulta de Kairós: lo que todavía redacta el modelo sale allá,
+  // no aquí. La posible carga de datos va primero (tiene plazo: a los 30 días se borra).
   const kairosReady = await listKairosItems(
     tx,
     actor,
-    { status: "espera", ready: true, limit: READY_ON_TODAY },
+    { status: "espera", ready: true, limit: READY_ON_TODAY, cargaFirst: true },
     now,
   )
 
@@ -3013,6 +3789,9 @@ export async function todayForStaff(
         overdue,
         why: task.byKairos ? `${when} · La puso Kairós` : when,
         ...(report ? { report } : {}),
+        ...(task.byKairos && task.kairosKey?.startsWith(`${LOAD_ERRORS_RULE}:`)
+          ? { doneLabel: "Revisado" }
+          : {}),
       }
     },
   )
@@ -3062,6 +3841,13 @@ export async function todayForStaff(
     ).map((row) => [row.organizationId as string, row.id]),
   )
   const clientOfOrg = (orgId: string | null) => (orgId ? (orgClients.get(orgId) ?? null) : null)
+  // La propietaria que no aceptó sale una sola vez: si su recordatorio de Kairós ya está en
+  // «Kairós dejó listo», la fila de siempre no se repite.
+  const ownerReminders = new Set(
+    kairosReady.items
+      .filter((item) => item.kind === "mensaje" && item.payload.goal === "recordar_propietaria")
+      .map((item) => item.clientId),
+  )
 
   return {
     today,
@@ -3082,11 +3868,13 @@ export async function todayForStaff(
         ? `Responder hasta el ${dayText(limaDate(new Date(row.answerBy)))}`
         : `Nos espera desde el ${dayText(limaDate(new Date(row.waitingSince)))}`,
     })),
-    owners: owners.map((row) => ({
-      ...row,
-      clientId: clientOfOrg(row.organizationId),
-      why: `La propietaria no aceptó; su invitación ${row.expiresAt <= now ? "venció" : "vence"} el ${dayText(limaDate(row.expiresAt))}`,
-    })),
+    owners: owners
+      .filter((row) => !ownerReminders.has(clientOfOrg(row.organizationId)))
+      .map((row) => ({
+        ...row,
+        clientId: clientOfOrg(row.organizationId),
+        why: `La propietaria no aceptó; su invitación ${row.expiresAt <= now ? "venció" : "vence"} el ${dayText(limaDate(row.expiresAt))}`,
+      })),
     expiring: expiring.map((row) => ({
       ...row,
       clientId: clientOfOrg(row.organizationId),

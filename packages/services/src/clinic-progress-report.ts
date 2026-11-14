@@ -691,8 +691,12 @@ export interface ClinicLoadRecord {
   kind: "configuracion" | "pacientes"
   at: string
   by: string | null
+  /** Quién la hizo (la tanda más nueva): a esa persona le toca lo que siga de esa carga. */
+  byUserId: string | null
   /** Lo que quedó, en una frase: «20 nuevos · 2 cambiaron · 7 ya estaban». */
   summary: string
+  /** Cuántos no entraron (`error` de la configuración, `errores` de los pacientes, sumados por tandas). */
+  errors: number
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -723,15 +727,15 @@ function loadSummary(kind: ClinicLoadRecord["kind"], totals: Record<string, numb
  * pacientes se cargan por tandas: las tandas seguidas del mismo plan son una sola carga.
  */
 export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoadRecord[]> {
-  const rows = await tx.execute<{ id: string; action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null }>(sql`
-    select a.id, a.action, a.created_at, a.metadata, u.name
+  const rows = await tx.execute<{ id: string; action: string; created_at: Date | string; metadata: Record<string, unknown> | null; name: string | null; actor_user_id: string | null }>(sql`
+    select a.id, a.action, a.created_at, a.metadata, u.name, a.actor_user_id
     from admin_audit a left join "user" u on u.id = a.actor_user_id
     where a.organization_id = ${orgId} and a.action in ('org.setup_import', 'org.data_import')
     order by a.created_at desc
     limit 500`)
   // `open`: las tandas llegan de la más nueva a la más vieja, y la tanda 0 es el comienzo de
   // esa pasada; la anterior a ella (otra pasada del mismo plan) va en su propia fila.
-  const loads: Array<{ id: string; kind: ClinicLoadRecord["kind"]; at: string; by: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
+  const loads: Array<{ id: string; kind: ClinicLoadRecord["kind"]; at: string; by: string | null; byUserId: string | null; plan: unknown; open: boolean; totals: Record<string, number> }> = []
   for (const row of rows) {
     const meta = row.metadata ?? {}
     const kind = row.action === "org.setup_import" ? "configuracion" : "pacientes"
@@ -745,7 +749,15 @@ export async function listClinicLoads(tx: Db, orgId: string): Promise<ClinicLoad
       if (first) last.open = false
       continue
     }
-    loads.push({ id: row.id, kind, at: new Date(row.created_at).toISOString(), by: row.name, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
+    loads.push({ id: row.id, kind, at: new Date(row.created_at).toISOString(), by: row.name, byUserId: row.actor_user_id, plan: meta.planSha256, open: kind === "pacientes" && !first, totals })
   }
-  return loads.slice(0, 100).map(({ id, kind, at, by, totals }) => ({ id, kind, at, by, summary: loadSummary(kind, totals) }))
+  return loads.slice(0, 100).map(({ id, kind, at, by, byUserId, totals }) => ({
+    id,
+    kind,
+    at,
+    by,
+    byUserId,
+    summary: loadSummary(kind, totals),
+    errors: (kind === "configuracion" ? totals.error : totals.errores) ?? 0,
+  }))
 }

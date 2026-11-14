@@ -550,6 +550,7 @@ export function createApp(deps: AppDeps) {
       mailer: deps.mailer,
       ...(deps.conversationMailer ? { conversationMailer: deps.conversationMailer } : {}),
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
+      metaSignupAvailable: Boolean(deps.metaSignup),
     }),
   )
   app.route("/api/admin/reports", createAdminReportsRoute({ ownerDb: deps.ownerDb }))

@@ -40,7 +40,7 @@ import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasPlan } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, like, ne, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
-import { clientFileKey, registerClientFile } from "./admin-client-files.js"
+import { clientFileKey, markClientFileCarga, registerClientFile } from "./admin-client-files.js"
 import {
   addClientContact,
   createClient,
@@ -324,6 +324,12 @@ const GOAL_WORDS: Record<string, string> = {
   pedir_archivos:
     "para cargar tus datos nos faltan los archivos que pedimos en la carta de bienvenida.",
   recordar_equipo: "parte de tu equipo aún no aceptó su invitación. ¿Les reenvío el enlace?",
+  recordar_propietaria:
+    "tu invitación para entrar a tu cuenta sigue esperando. Si el correo no te llegó, dime y te la reenvío.",
+  pedir_archivos_otra_vez:
+    "los archivos para cargar tus datos se borraron sin cargarse, como prometemos a los 30 días. ¿Nos los vuelves a enviar?",
+  alta_sin_avanzar:
+    "queda un paso de tu lado para terminar de poner en marcha tu cuenta. ¿Te ayudo?",
 }
 
 /**
@@ -389,6 +395,7 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
+    markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
   }
 }
 
