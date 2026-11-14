@@ -7,6 +7,7 @@ import { unsignableWords } from "./link-steps"
 import {
   beforeVisitCard,
   type DraftOnDevice,
+  expiredLinkWords,
   pendingItems,
   toldWords,
   validatePersonalLinkSearch,
@@ -311,5 +312,24 @@ describe("si la interrumpen, lo escrito sigue en su celular", () => {
   it("una dirección sin «sigue» no repone sola", () => {
     expect(validatePersonalLinkSearch({ token, abre: "datos" }).sigue).toBeUndefined()
     expect(validatePersonalLinkSearch({ token, abre: "datos", sigue: "no" }).sigue).toBeUndefined()
+  })
+})
+
+// Entrega 9: al vencer el enlace se borra de su celular lo que dejó sin enviar; la pantalla no dice «No perdiste nada».
+describe("el enlace vencido dice lo que pasó con lo escrito", () => {
+  const offer = { channel: "whatsapp" as const, to: "•••701", sentAt: null }
+  it("sin nada a medias, no perdió nada", () => {
+    expect(expiredLinkWords(false, null)).toBe("No perdiste nada: escríbenos por el chat y te enviamos uno nuevo.")
+    expect(expiredLinkWords(false, offer)).toBe("No perdiste nada. Pide uno nuevo y te lo enviamos por WhatsApp al •••701.")
+  })
+
+  it("si se borró lo que había escrito sin enviar, lo dice", () => {
+    expect(expiredLinkWords(true, null)).toBe(
+      "Lo que habías escrito sin enviar se borró de este celular. Escríbenos por el chat y te enviamos uno nuevo.",
+    )
+    expect(expiredLinkWords(true, offer)).toBe(
+      "Lo que habías escrito sin enviar se borró de este celular. Pide uno nuevo y te lo enviamos por WhatsApp al •••701.",
+    )
+    expect(expiredLinkWords(true, offer)).not.toContain("No perdiste nada")
   })
 })

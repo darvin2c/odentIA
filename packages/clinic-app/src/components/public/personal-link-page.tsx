@@ -691,9 +691,11 @@ export function PersonalLinkPage({
     (viewQuery.error instanceof ApiError &&
       (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")) ||
     (!!view && (view.status !== "abierto" || (!view.data && !view.visit)))
+  // Si borró algo, la pantalla del enlace vencido lo dice en vez de «No perdiste nada».
+  const [draftDropped, setDraftDropped] = useState(false)
   useEffect(() => {
     if (!linkGone || !slug || !token) return
-    clearDeviceDraftsOfLink(slug, token)
+    if (clearDeviceDraftsOfLink(slug, token) > 0) setDraftDropped(true)
     setDraftOnDevice(null)
   }, [linkGone, slug, token])
 
@@ -762,7 +764,7 @@ export function PersonalLinkPage({
   })
 
   if (!ready && hydrated)
-    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
   if (viewQuery.isPending || landing) {
     return (
       <PageShell maxWidth="md">
@@ -778,7 +780,7 @@ export function PersonalLinkPage({
       viewQuery.error instanceof ApiError &&
       (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")
     ) {
-      return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+      return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
     }
     return (
       <PageShell maxWidth="md">
@@ -791,7 +793,7 @@ export function PersonalLinkPage({
     )
   }
   if (slug === null || token === undefined)
-    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
 
   const appointment = booked ?? view.appointment
   if (view.status !== "abierto") {
@@ -808,7 +810,7 @@ export function PersonalLinkPage({
         </PageShell>
       )
     }
-    return <Closed view={view} slug={slug} token={token} didSomething={didSomething} />
+    return <Closed view={view} slug={slug} token={token} didSomething={didSomething} draftDropped={draftDropped} />
   }
 
   const offersBooking = !!view.booking && !appointment
@@ -1346,11 +1348,14 @@ function Closed({
   slug,
   token,
   didSomething,
+  draftDropped = false,
 }: {
   view: PersonalLinkView | null
   slug: string | null
   token: string | null
   didSomething: boolean
+  /** Al cerrarse el enlace se borró de este celular lo que había escrito sin enviar. */
+  draftDropped?: boolean
 }) {
   const closed = view?.closed ?? null
   const shell = (content: ReactNode) => <PageShell maxWidth="md">{content}</PageShell>
@@ -1373,15 +1378,11 @@ function Closed({
     )
   }
   if (closed?.reason === "vencido" && closed.resend && slug && token) {
-    return shell(<Resend slug={slug} token={token} offer={closed.resend} />)
+    return shell(<Resend slug={slug} token={token} offer={closed.resend} draftDropped={draftDropped} />)
   }
   if (closed?.reason === "vencido") {
     return shell(
-      <EmptyState
-        icon={Clock}
-        title="Este enlace venció"
-        description="No perdiste nada: escríbenos por el chat y te enviamos uno nuevo."
-      />,
+      <EmptyState icon={Clock} title="Este enlace venció" description={expiredLinkWords(draftDropped, null)} />,
     )
   }
   if (closed?.reason === "quitado") {
@@ -1402,6 +1403,20 @@ function Closed({
   )
 }
 
+/**
+ * Lo que dice un enlace vencido. Lo enviado ya llegó, pero si dejó algo escrito sin
+ * enviar, al vencer se borró de este celular (entrega 9): se dice eso, no «No perdiste
+ * nada». Con `offer`, se puede pedir uno nuevo desde aquí.
+ */
+export function expiredLinkWords(draftDropped: boolean, offer: PersonalLinkResend | null): string {
+  const lost = draftDropped ? "Lo que habías escrito sin enviar se borró de este celular." : "No perdiste nada."
+  return offer
+    ? `${lost} Pide uno nuevo y te lo enviamos ${viaWords(offer)}.`
+    : draftDropped
+      ? `${lost} Escríbenos por el chat y te enviamos uno nuevo.`
+      : "No perdiste nada: escríbenos por el chat y te enviamos uno nuevo."
+}
+
 /** «por WhatsApp al •••701» o «por correo a e•••@gmail.com». */
 function viaWords(offer: PersonalLinkResend): string {
   if (offer.channel === "correo") return `por correo${offer.to ? ` a ${offer.to}` : ""}`
@@ -1417,10 +1432,13 @@ function Resend({
   slug,
   token,
   offer,
+  draftDropped,
 }: {
   slug: string
   token: string
   offer: PersonalLinkResend
+  /** Al vencer se borró de este celular lo que había escrito sin enviar. */
+  draftDropped: boolean
 }) {
   const send = useMutation({ retry: false, mutationFn: () => resendPersonalLink(slug, token) })
   const sent = send.data?.data ?? null
@@ -1453,7 +1471,7 @@ function Resend({
     <EmptyState
       icon={Clock}
       title="Este enlace venció"
-      description={`No perdiste nada. Pide uno nuevo y te lo enviamos ${viaWords(offer)}.`}
+      description={expiredLinkWords(draftDropped, offer)}
     >
       <div className="flex flex-col items-center gap-2">
         <SubmitButton
