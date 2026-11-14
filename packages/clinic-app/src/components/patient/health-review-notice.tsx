@@ -119,7 +119,8 @@ export function HealthReviewNotice({
       rows.push({
         label: "Alergias",
         value: saidAllergies
-          .map((row) => `${allergyTitle(row)} · ${row.reaction?.trim() || "no dijo qué le pasó"}`)
+          // El registro no pregunta qué le pasó: sin reacción no se dice «no dijo» (auditor, 14 nov).
+          .map((row) => [allergyTitle(row), row.reaction?.trim()].filter(Boolean).join(" · "))
           .join("; "),
       })
     else if (group.saidNo.allergies) rows.push({ label: "Alergias", value: no })

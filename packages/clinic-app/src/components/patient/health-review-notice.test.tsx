@@ -84,7 +84,9 @@ describe("«Pregúntale» en la atención", () => {
     expect(page).toContain("Lo dijo ella el 13 nov, sin revisar")
     // El embarazo, con la semana de hoy y lo que dijo ese día.
     expect(page).toContain("32 semanas hoy (dijo 30 el 13 nov)")
-    expect(page).toContain("Látex · no dijo qué le pasó")
+    // El registro no pregunta qué le pasó: no se dice que «no dijo» (auditor, 14 nov).
+    expect(page).toContain("<dd>Látex</dd>")
+    expect(page).not.toContain("no dijo qué le pasó")
     expect(page).toContain("Sulfato ferroso, Ácido fólico")
     // Su «No» es de ella: no se lee «niega».
     expect(page).toContain("dijo que no")

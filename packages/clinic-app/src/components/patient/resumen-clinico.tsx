@@ -234,7 +234,8 @@ export function ClinicalAlertsCard({
               .filter(Boolean)
               .join(" ")} · ${allergyName(allergy)}`}
             detail={[
-              allergy.reaction ?? (said("allergies", allergy.id) ? "no dijo qué le pasó" : "reacción no descrita"),
+              // Sin reacción no se afirma que «no dijo» algo que quizá no se le preguntó (auditor, 14 nov).
+              allergy.reaction ?? "reacción sin describir",
               said("allergies", allergy.id) ?? (allergy.source === "paciente" ? "la dijo el paciente" : null),
             ]
               .filter(Boolean)
