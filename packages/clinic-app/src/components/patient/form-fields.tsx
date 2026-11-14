@@ -370,6 +370,8 @@ export function AnswerInput({
           options={options.map((option) => ({ value: String(option.value), label: option.text }))}
           onChange={(picked) => onChange(options.find((option) => String(option.value) === picked)?.value ?? null)}
           onClear={field.required ? undefined : () => onChange(null)}
+          // La escala se detiene en 0 y en 10 (← en 0 no marca 10); los Sí/No dan la vuelta.
+          ordered={field.type === "escala"}
           className={ANSWER_CHOICES}
         />
       )

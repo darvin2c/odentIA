@@ -38,6 +38,7 @@ function Questionnaire({ onSubmit, pain = null, level = null }: { onSubmit: () =
         aria-labelledby="level"
         value={answers.level}
         options={SCALE}
+        ordered
         onChange={(next) => setAnswers((now) => ({ ...now, level: next }))}
         onClear={() => setAnswers((now) => ({ ...now, level: null }))}
       />
@@ -133,6 +134,30 @@ describe("RadioChips", () => {
     await userEvent.click(screen.getByRole("radio", { name: "No" }))
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Quitar respuesta" })).toBeNull()
+  })
+
+  // QA de la entrega 3 (14 nov): desde 0, la flecha ← marcaba 10 (el peor dolor), e Inicio y Fin no hacían nada.
+  it("en una escala las flechas se detienen en los extremos, e Inicio y Fin van a 0 y a 10", async () => {
+    render(<Questionnaire onSubmit={() => {}} level="0" />)
+    option("¿Cuánto te duele?", "0").focus()
+    await userEvent.keyboard("{ArrowLeft}")
+    expect(answers().level).toBe("0")
+    expect(document.activeElement).toBe(option("¿Cuánto te duele?", "0"))
+    await userEvent.keyboard("{End}")
+    expect(answers().level).toBe("10")
+    expect(document.activeElement).toBe(option("¿Cuánto te duele?", "10"))
+    await userEvent.keyboard("{ArrowRight}{ArrowDown}")
+    expect(answers().level).toBe("10")
+    await userEvent.keyboard("{Home}")
+    expect(answers().level).toBe("0")
+    expect(document.activeElement).toBe(option("¿Cuánto te duele?", "0"))
+  })
+
+  it("los Sí/No dan la vuelta, como un grupo de radios", async () => {
+    render(<Questionnaire onSubmit={() => {}} pain="no" />)
+    option("¿Tienes dolor ahora?", "No").focus()
+    await userEvent.keyboard("{ArrowRight}")
+    expect(answers().pain).toBe("si")
   })
 
   // QA de la entrega 3 (14 nov): el foco del teclado casi no se veía (el borde de un círculo de 16 px)
