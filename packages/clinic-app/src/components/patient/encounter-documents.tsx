@@ -981,7 +981,9 @@ export function UnfinishedFormsBox({
           {forms.length === 1 ? "Falta terminar una ficha" : `Falta terminar ${forms.length} fichas`}
         </span>
         <span className="text-xs text-muted-foreground">
-          Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora.
+          {forms.length === 1
+            ? "Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora."
+            : "Quedaron a medias al firmar la atención. Al terminarlas, cada una lleva su propia fecha y hora."}
         </span>
       </div>
       <ul className="flex flex-col gap-2">

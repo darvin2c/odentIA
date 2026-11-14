@@ -614,7 +614,7 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
   if (response.status === "descartado") return "Descartado"
   if (response.submittedAt) return "Lo declaró la persona · por revisar"
   return response.encounterStatus === "finalizada"
-    ? "Quedó a medias al firmar la atención: falta terminarlo"
+    ? "Quedó a medias al firmar la atención: falta terminarla"
     : "Sin finalizar"
 }
 
