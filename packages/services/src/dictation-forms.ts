@@ -370,15 +370,16 @@ export function formAnswerDropReason(draft: { payload: Record<string, unknown>; 
 
 /**
  * La misma respuesta para la pregunta gemela de otra ficha empezada (el ceod
- * en la odontopediátrica y en la odontoestomatológica): mismo rótulo, tipo y
- * opciones. Cada una se vuelve a comprobar contra lo dicho (QA del 14 nov, E27).
+ * en la odontopediátrica y en la odontoestomatológica): la misma clave o el
+ * mismo rótulo, con el mismo tipo y opciones. Cada una se vuelve a comprobar
+ * contra lo dicho (QA del 14 nov, E27).
  */
 export function formAnswerTwins<T extends { payload: Record<string, unknown> }>(draft: T, questions: readonly DictationFormQuestion[]): T[] {
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!question) return []
   const same = (other: DictationFormQuestion) =>
     other.responseId !== question.responseId &&
-    plain(other.label) === plain(question.label) &&
+    (other.fieldId === question.fieldId || plain(other.label) === plain(question.label)) &&
     other.type === question.type &&
     JSON.stringify(other.options ?? null) === JSON.stringify(question.options ?? null)
   return questions.filter(same).map((other) => ({ ...draft, payload: { ...draft.payload, question: other.number } }))

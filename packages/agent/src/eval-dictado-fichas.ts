@@ -18,7 +18,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { type DictationFormQuestion, formQuestionsOf, prepareFormAnswer, productHooksFor } from "@odentia/services"
+import { type DictationFormQuestion, formAnswerTwins, formQuestionsOf, prepareFormAnswer, productHooksFor } from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
@@ -62,13 +62,13 @@ async function modelOf(profile: DictationProfile): Promise<unknown> {
   return models.get(key)
 }
 
-/** La ficha por su clave: una de odentIA o una propia del banco. */
-function formOf(key: string): { title: string; schema: unknown } {
+/** La ficha por su clave: una del producto del dictado o una propia del banco. */
+function formOf(key: string, product: keyof typeof PRODUCTS): { title: string; schema: unknown } {
   const own = bank.fichasPropias?.[key]
   if (own) return own
-  const product = PRODUCTS.odentia.forms.find((form) => form.key === key)
-  if (!product) throw new Error(`El banco nombra una ficha que no existe: ${key}`)
-  return { title: product.title, schema: product.schema }
+  const found = PRODUCTS[product].forms.find((form) => form.key === key)
+  if (!found) throw new Error(`El banco nombra una ficha que no existe en ${product}: ${key}`)
+  return { title: found.title, schema: found.schema }
 }
 
 const same = (a: unknown, b: unknown) =>
@@ -81,10 +81,14 @@ const now = new Date()
 const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo || item.id === solo))
 
 for (const dictation of cases) {
-  const product = PRODUCTS[dictation.producto ?? "odentia"]
+  const productKey = dictation.producto ?? "odentia"
+  const product = PRODUCTS[productKey]
   // Cada ficha con su clave como id: así «ficha.pregunta» del banco es lo que se compara.
   const questions: DictationFormQuestion[] = formQuestionsOf(
-    dictation.fichas.map((item) => ({ id: item.ficha, title: formOf(item.ficha).title, snapshot: formOf(item.ficha).schema, answers: item.respondidas ?? {} })),
+    dictation.fichas.map((item) => {
+      const form = formOf(item.ficha, productKey)
+      return { id: item.ficha, title: form.title, snapshot: form.schema, answers: item.respondidas ?? {} }
+    }),
   )
   if (questions.length) totals.conFichas += 1
   const { read, reply } = await askDictationModel(
@@ -123,14 +127,25 @@ for (const dictation of cases) {
   const notes: string[] = []
   const listed = new Map<string, unknown>()
   const reviewed = new Set<string>()
-  for (const draft of answers) {
-    const prepared = prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site)
-    if (!prepared) {
-      totals.paradas += 1
+  // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
+  // la misma pregunta en una pausa vale la última.
+  const twins = new Set<object>()
+  const expanded = answers.flatMap((draft) => {
+    const more = formAnswerTwins(draft, questions)
+    for (const twin of more) twins.add(twin)
+    return [draft, ...more]
+  })
+  const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site) }))
+  const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
+  const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
+  for (const [index, { draft, ready }] of prepared.entries()) {
+    if (!ready) {
+      if (!twins.has(draft)) totals.paradas += 1
       continue
     }
-    const key = `${String(prepared.payload["responseId"])}.${String(prepared.payload["fieldId"])}`
-    if (prepared.status === "lista") listed.set(key, prepared.payload["value"])
+    const key = keyOf(ready.payload)
+    if (last.get(key) !== index) continue
+    if (ready.status === "lista") listed.set(key, ready.payload["value"])
     else reviewed.add(key)
   }
   const expected = dictation.espera.fichas ?? {}

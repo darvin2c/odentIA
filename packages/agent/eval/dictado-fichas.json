@@ -369,6 +369,84 @@
       "texto": "Pesa veinte kilos, temperatura treinta y siete.",
       "fichas": [],
       "espera": {}
+    },
+    {
+      "id": "orto-15-mordida-abierta",
+      "texto": "Presenta mordida abierta anterior de dos milímetros. Overjet de tres.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 3 } }
+    },
+    {
+      "id": "orto-16-una-clase-dos",
+      "texto": "Clase molar derecha, una clase dos, la división la veo en el modelo.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha"] }
+    },
+    {
+      "id": "orto-17-lado",
+      "texto": "Clase canina derecha clase uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase I" } }
+    },
+    {
+      "id": "orto-18-al-menos",
+      "texto": "Overbite de al menos dos milímetros, hay que medirlo bien.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.overbite"] }
+    },
+    {
+      "id": "orto-19-dos-en-una-pausa",
+      "texto": "Overjet de seis, perdón, de cuatro milímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4 } }
+    },
+    {
+      "id": "orto-20-corrige-respondida",
+      "texto": "Corrijo: la clase molar derecha es clase dos división uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "clase_molar_derecha": "Clase II división 2" } }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha"] }
+    },
+    {
+      "id": "orto-21-c15b",
+      "texto": "Control de ortodoncia. Overbite de tres, no, perdón, de dos y medio. La derecha en clase dos. Mordida abierta anterior.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2.5 }, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha", "ficha-de-ortodoncia.clase_canina_derecha"] }
+    },
+    {
+      "id": "endo-11-negativa-sin-negacion",
+      "texto": "Percusión positiva en la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.pieza": 46 } }
+    },
+    {
+      "id": "endo-12-fistula-no",
+      "texto": "Pieza treinta y seis. No se observa fístula.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.fistula": false } }
+    },
+    {
+      "id": "endo-13-cuatro-seis",
+      "texto": "Dolor a la percusión en la cuatro seis, ocho de diez.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.dolor_intensidad": 8 } }
+    },
+    {
+      "id": "endo-14-c15c-igual-que-antes",
+      "texto": "Control de la cuarenta y seis. Percusión igual que la vez pasada.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46 } }
+    },
+    {
+      "id": "endo-15-movilidad-un-diente",
+      "texto": "Un diente con movilidad grado dos, la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.movilidad": "Grado 2" } }
+    },
+    {
+      "id": "dos-fichas-3-ceod",
+      "texto": "ceod: tres cariados, uno con extracción indicada y dos obturados.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }, { "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.ceod_c": 3, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-odontoestomatologica.ceod_c": 3, "ficha-odontoestomatologica.ceod_e": 1, "ficha-odontoestomatologica.ceod_o": 2 } }
     }
   ]
 }

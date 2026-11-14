@@ -1571,14 +1571,20 @@ export async function saveDictationSegment(
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   const droppedForms: Array<{ said: string; why: string }> = []
-  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada.
-  const drafts = segment.drafts
-    .slice(0, DICTATION_MAX_SUGGESTIONS)
-    .flatMap((draft) => (draft.kind === "ficha" ? [draft, ...formAnswerTwins(draft, scope.formQuestions)] : [draft]))
+  // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada; la
+  // gemela que no se comprueba no es algo que no se pudo usar: la original ya se usó.
+  const twins = new Set<DictationDraft>()
+  const drafts = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS).flatMap((draft) => {
+    if (draft.kind !== "ficha") return [draft]
+    const more = formAnswerTwins(draft, scope.formQuestions)
+    for (const twin of more) twins.add(twin)
+    return [draft, ...more]
+  })
   for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) preparedDrafts.push({ draft, prepared })
-    else if (draft.kind === "ficha" && draft.sourceText?.trim()) droppedForms.push({ said: draft.sourceText.trim(), why: formAnswerDropReason(draft, scope.formQuestions) })
+    else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim())
+      droppedForms.push({ said: draft.sourceText.trim(), why: formAnswerDropReason(draft, scope.formQuestions) })
   }
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
   // Las alergias, antes que las recetas: la que se acaba de dictar ya avisa en este mismo tramo.
