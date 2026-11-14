@@ -111,22 +111,26 @@ const PRODUCT_FIELDS: Record<
   ClinicalProduct,
   {
     health: PickerItem[]
+    /** Pregunta por las dos medicinas (anticoagulantes y huesos): vistIA no (QA del 14 nov, C5). */
+    medicines: boolean
     personal: PickerItem[]
     own: { title: string; help: string; items: PickerItem[] } | null
   }
 > = {
   dental: {
     health: DENTAL_HEALTH,
+    medicines: true,
     // El alcohol, también en odentIA (QA del 14 nov, C4).
     personal: [LACTATION, TOBACCO, ALCOHOL],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
   },
   medical: {
     health: [],
+    medicines: true,
     personal: [LACTATION],
     own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
   },
-  optical: { health: [], personal: [], own: null },
+  optical: { health: [], medicines: false, personal: [], own: null },
 }
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -326,8 +330,7 @@ export function RegistrationFieldsPicker({
       <Group
         title="Su salud"
         help="Todo queda en sus Antecedentes; lo que cambia la cita sale arriba de su ficha y de la atención, y quien atiende lo revisa con él."
-        // vistIA no pregunta por las dos medicinas (QA del 14 nov, C5).
-        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...(product === "optical" ? [] : HEALTH_MEDICINES)]}
+        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...(PRODUCT_FIELDS[product].medicines ? HEALTH_MEDICINES : [])]}
         newKeys={newKeys}
         fields={fields}
         options={THREE}
