@@ -520,6 +520,40 @@ const HEALTH_ITEM_OF_STEP: Record<string, string> = {
   odontologicos: "dental",
   habitos: "habits",
 }
+/**
+ * Lo escrito separado por comas, punto y coma o saltos de línea, en partes. La coma entre dos
+ * números es decimal y no separa: «letrozol 2,5 mg» es uno (QA del 14 nov, C8).
+ */
+export function declaredListItems(text: string): string[] {
+  return text
+    .split(/(?<!\d),|,(?!\d)|[;\n]/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Las alergias que escribió, con «¿Qué te pasó?», que es uno: va con la primera y no se copia a las
+ * demás, porque no se sabe de cuál es (QA del 14 nov, B5).
+ */
+export function declaredAllergyItems(substances: string[], reaction: string) {
+  return substances.map((substance, index) => ({
+    substance,
+    severity: "desconocida" as const,
+    ...(reaction && index === 0 ? { reaction } : {}),
+  }))
+}
+
+/** Sin repetir lo mismo escrito dos veces, sin importar mayúsculas ni tildes. */
+export function uniqueByName(values: string[]): string[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const key = value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("es")
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 /** Las pantallas de su salud en el orden en que se ven (en la lista, los hábitos van antes que la boca). */
 const HEALTH_ITEMS = ["health", "medicines", "history", "dental", "habits"] as const
 /** El sexo en lo que llena la persona. */
@@ -819,31 +853,18 @@ export function RegistrationQuestionnaire({
 
     type Health = NonNullable<RegistrationAnswers["health"]>
     const health: Health = {}
-    const listed = (state: Declared, text: string) =>
-      state === "recorded"
-        ? text
-            .split(/[,;\n]/)
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : []
+    const listed = (state: Declared, text: string) => (state === "recorded" ? declaredListItems(text) : [])
     const stateOf = (state: Declared) => state || "unanswered"
     const reaction = d.allergiesReaction.trim()
     if (asked("allergies"))
-      health.allergies = {
-        state: stateOf(d.allergies),
-        items: listed(d.allergies, d.allergiesText).map((substance) => ({
-          substance,
-          severity: "desconocida",
-          ...(reaction ? { reaction } : {}),
-        })),
-      }
+      health.allergies = { state: stateOf(d.allergies), items: declaredAllergyItems(listed(d.allergies, d.allergiesText), reaction) }
     if (asked("conditions"))
       health.conditions = {
         state: stateOf(d.conditions),
-        items: [
-          ...(d.conditions === "recorded" ? d.conditionsPicked : []),
-          ...listed(d.conditions, d.conditionsText),
-        ].map((value) => ({ name: value })),
+        // Lo marcado de la lista y lo escrito en «Otra», sin repetir la misma enfermedad (B8).
+        items: uniqueByName([...(d.conditions === "recorded" ? d.conditionsPicked : []), ...listed(d.conditions, d.conditionsText)]).map(
+          (value) => ({ name: value }),
+        ),
       }
     // «¿Cuál?» va solo con el Sí: la marca de la ficha sale de la respuesta, no del nombre.
     const directed = (state: Declared, text: string): NonNullable<Health["anticoagulants"]> => ({

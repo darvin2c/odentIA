@@ -4,7 +4,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, expect, it, vi } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { RegistrationQuestionnaire } from "./registration-questionnaire"
+import { declaredAllergyItems, declaredListItems, RegistrationQuestionnaire, uniqueByName } from "./registration-questionnaire"
 
 declareProduct(bareProduct("dental"))
 
@@ -161,3 +161,16 @@ it("con lo que falta en «Tu boca» y en «Tus hábitos», empieza por «Tu boca
     document.querySelector("[data-slot=questionnaire-item][data-active] [data-slot=questionnaire-title]")?.textContent
   await waitFor(() => expect(shown()).toBe("Tu boca"), { timeout: 5000 })
 }, 20_000)
+
+// QA del 14 nov: C8 (la coma decimal partía «letrozol 2,5 mg») y B8 (la enfermedad marcada y escrita otra vez).
+it("la coma decimal no separa medicinas, y lo mismo escrito dos veces queda una vez", () => {
+  expect(declaredListItems("letrozol 2,5 mg, Losartán 50 mg; aspirina")).toEqual(["letrozol 2,5 mg", "Losartán 50 mg", "aspirina"])
+  expect(uniqueByName(["Diabetes", "diabetes", "Presión alta"])).toEqual(["Diabetes", "Presión alta"])
+})
+
+it("«¿Qué te pasó?» va con la primera alergia y no se copia a las demás (B5)", () => {
+  expect(declaredAllergyItems(["Penicilina", "Látex"], "Ronchas")).toEqual([
+    { substance: "Penicilina", severity: "desconocida", reaction: "Ronchas" },
+    { substance: "Látex", severity: "desconocida" },
+  ])
+})
