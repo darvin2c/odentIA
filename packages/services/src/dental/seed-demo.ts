@@ -112,6 +112,7 @@ import {
   decideBudget,
   deliverBudget,
   duplicateBudgetOption,
+  recommendBudgetOption,
   removeBudgetItems,
   reviseBudget,
   updateBudgetPresentation,
@@ -121,6 +122,7 @@ import {
   addClinicalNote,
   addDeclaredAllergies,
   correctDocumentContext,
+  recordHealthDeclaration,
   registerPatientDocument,
   retirePatientDocument,
   savePatientHealth,
@@ -2135,17 +2137,30 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
 // (sin codificar, para «Elegir de la lista»); el ibuprofeno se quitó porque
 // «era otra cosa». La última revisión fue hace 8 meses: la atención pide
 // preguntarle por alergias nuevas.
-await addDeclaredAllergies(
-  db,
-  ORG_A,
-  ANA_ID,
-  rosaPatientId,
-  [{ substance: "Látex", reaction: "Ronchas con los guantes" }],
-  {
-    entity: "seed",
-    entityId: "seed-rosa-alergias",
-  },
-)
+// En una transacción con su declaración: así la ficha dice que lo dijo ella, y cuándo.
+await db.transaction(async (tx) => {
+  await addDeclaredAllergies(
+    tx,
+    ORG_A,
+    ANA_ID,
+    rosaPatientId,
+    [{ substance: "Látex", reaction: "Ronchas con los guantes" }],
+    {
+      entity: "seed",
+      entityId: "seed-rosa-alergias",
+    },
+  )
+  await recordHealthDeclaration(tx, ORG_A, rosaPatientId, {
+    via: "formulario",
+    by: { kind: "patient", name: null, relation: null },
+    health: {
+      allergies: {
+        state: "recorded",
+        items: [{ substance: "Látex", reaction: "Ronchas con los guantes", severity: "desconocida" }],
+      },
+    },
+  })
+})
 await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
   substance: "amoxi",
   severity: "moderada",
@@ -3135,6 +3150,9 @@ await addBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
   itemIds: [coronaOpcion46.id],
   optionId: opcionB,
 })
+// La propuesta recomienda la corona: la marca tiene que decir lo mismo, porque es
+// la que Rosa ve marcada en su enlace y en el PDF (la A nace recomendada).
+await recommendBudgetOption(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, opcionB)
 await updateBudgetPresentation(
   db,
   ORG_A,
@@ -4155,6 +4173,41 @@ await db.transaction((tx) =>
           },
           conditions: { state: "unknown", items: [] },
           medications: { state: "none", items: [] },
+        },
+      },
+    },
+  ),
+)
+// Lucero se registró sola por el QR, embarazada de 30 semanas: su embarazo queda con el día en que
+// lo dijo y sale arriba de su ficha y de la atención con la semana de hoy; todo lo que dijo lleva
+// la misma marca («Lo dijo ella…, sin revisar») hasta que alguien lo revise, y su «No» a las
+// enfermedades se lee «dijo que no», no «niega».
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: {
+          displayName: "Lucero Vega Paz",
+          givenNames: "Lucero",
+          familyName: "Vega Paz",
+          birthDate: "1995-08-22",
+          sex: "F",
+          phone: "+51987000931",
+          docType: "DNI",
+          docNumber: "70090814",
+        },
+        respondent: "patient",
+        privacyAccepted: true,
+        health: {
+          allergies: { state: "recorded", items: [{ substance: "Látex", severity: "desconocida" }] },
+          conditions: { state: "none", items: [] },
+          medications: { state: "recorded", items: [{ name: "Sulfato ferroso" }, { name: "Ácido fólico" }] },
+          personal: { embarazo: true, semanasEmbarazo: 30 },
         },
       },
     },

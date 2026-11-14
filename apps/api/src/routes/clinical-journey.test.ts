@@ -3,7 +3,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
-import { createRoom, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
+import { createRoom, patientPersonId, secretsKeyFromEnv, setProfessionalSchedule, submitQuestionnaireFromLink } from "@odentia/services"
 import { createHash } from "node:crypto"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
@@ -1287,6 +1287,184 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
     reason: "Paciente equivocado",
   })
   expect(discarded.status).toBe(200)
+})
+
+it("formularios: un id mal escrito responde «no existe» (404), no un error interno", async () => {
+  const patientId = await createPatient()
+  const answers = { answers: {} }
+  const wrong: Array<[string, Promise<Response> | Response]> = [
+    ["finalizar", post(app, "/clinical-forms/form-responses/abc/finalize")],
+    ["guardar", patch(app, `/clinical-forms/form-responses/${crypto.randomUUID()}x`, answers)],
+    ["descartar", post(app, "/clinical-forms/form-responses/abc/discard", { reason: "x" })],
+    ["adendas", app.request("/clinical-forms/form-responses/abc/addenda")],
+    ["agregar adenda", post(app, "/clinical-forms/form-responses/abc/addenda", { text: "x" })],
+    ["publicar", post(app, "/clinical-forms/form-templates/abc/publish")],
+    ["archivar", post(app, "/clinical-forms/form-templates/abc/archive")],
+    ["volver a usar", post(app, "/clinical-forms/form-templates/abc/reuse")],
+    ["editar plantilla", patch(app, "/clinical-forms/form-templates/abc", { title: "Otro título" })],
+    ["lista por paciente", app.request("/clinical-forms/form-responses?patientId=abc")],
+    ["lista por atención", app.request(`/clinical-forms/form-responses?patientId=${patientId}&encounterId=abc`)],
+    ["lista por plantilla", app.request(`/clinical-forms/form-responses?patientId=${patientId}&templateId=abc`)],
+  ]
+  for (const [what, request] of wrong) {
+    const response = await request
+    expect(response.status, what).toBe(404)
+    expect((await json<ErrorBody>(response)).error.code, what).toBe("NOT_FOUND")
+  }
+  // Uno bien escrito que no existe sigue respondiendo lo mismo.
+  expect((await post(app, `/clinical-forms/form-templates/${crypto.randomUUID()}/publish`)).status).toBe(404)
+  expect((await post(app, `/clinical-forms/form-responses/${crypto.randomUUID()}/finalize`)).status).toBe(404)
+})
+
+it("formularios: un id con un guion fuera de sitio o un espacio de más llega a la base ya normalizado", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Plantilla con el id escrito raro",
+    schema: { sections: [{ id: "s", title: "S", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] },
+  })
+  const { id } = (await json<{ data: { id: string } }>(draft)).data
+  expect((await post(app, `/clinical-forms/form-templates/${id}/publish`)).status).toBe(201)
+  // El primer guion un lugar antes: la guarda lo acepta y PostgreSQL, tal cual, no lo lee.
+  const moved = `${id.slice(0, 7)}-${id.slice(7, 8)}${id.slice(9)}`
+  expect(moved).not.toBe(id)
+  expect(moved.replaceAll("-", "")).toBe(id.replaceAll("-", ""))
+  // Es la misma plantilla, ya publicada: 409, no un error interno ni «no existe».
+  const publishedAgain = await post(app, `/clinical-forms/form-templates/${moved}/publish`)
+  expect(publishedAgain.status).toBe(409)
+  expect((await post(app, `/clinical-forms/form-templates/${id}%20/publish`)).status).toBe(409)
+  // Lo mismo en las respuestas y en la lista por paciente.
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/form-responses", { templateId: id, patientId, answers: {} })
+  const responseId = (await json<{ data: { id: string } }>(created)).data.id
+  const movedResponse = `${responseId.slice(0, 7)}-${responseId.slice(7, 8)}${responseId.slice(9)}`
+  expect((await patch(app, `/clinical-forms/form-responses/${movedResponse}`, { answers: { motivo: "Dolor" } })).status).toBe(200)
+  expect((await app.request(`/clinical-forms/form-responses/${responseId}%20/addenda`)).status).toBe(200)
+  const movedPatient = `${patientId.slice(0, 7)}-${patientId.slice(7, 8)}${patientId.slice(9)}`
+  const listed = await app.request(`/clinical-forms/form-responses?patientId=${movedPatient}&templateId=${moved}`)
+  expect(listed.status).toBe(200)
+  expect((await json<{ data: Array<{ id: string }> }>(listed)).data.map((row) => row.id)).toEqual([responseId])
+  // Uno que no existe, escrito así, sigue siendo «no existe».
+  const unknown = crypto.randomUUID()
+  expect((await post(app, `/clinical-forms/form-responses/${unknown.slice(0, 7)}-${unknown.slice(7, 8)}${unknown.slice(9)}/finalize`)).status).toBe(404)
+  expect((await post(app, `/clinical-forms/form-templates/${id}/archive`)).status).toBe(200)
+})
+
+it("formularios: dejar de usar y volver a usar desde Configuración; la lista dice cuál le llega al paciente", async () => {
+  const schema = { sections: [{ id: "s", title: "Preguntas", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] }
+  const publish = async (title: string, respondent: "staff" | "portal") => {
+    const draft = await post(app, "/clinical-forms/form-templates", { title, respondent, schema })
+    expect(draft.status).toBe(201)
+    const { id } = (await json<{ data: { id: string } }>(draft)).data
+    expect((await post(app, `/clinical-forms/form-templates/${id}/publish`)).status).toBe(201)
+    return id
+  }
+  const first = await publish("Cuestionario de la clínica (ruta)", "portal")
+  const second = await publish("Cuestionario nuevo (ruta)", "portal")
+  type Row = { id: string; key: string; version: number; status: string; reachesPatients: boolean }
+  const list = async () => (await json<{ data: Row[] }>(await app.request("/clinical-forms/form-templates"))).data
+  let rows = await list()
+  expect(rows.find((row) => row.id === second)?.reachesPatients).toBe(true)
+  expect(rows.find((row) => row.id === first)?.reachesPatients).toBe(false)
+
+  // Recepción no deja de usar ni vuelve a usar un formulario.
+  const reception = buildApp("reception")
+  expect((await post(reception, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(403)
+  expect((await post(reception, `/clinical-forms/form-templates/${second}/reuse`)).status).toBe(403)
+
+  // Antes de dejar de usarlo, el servidor dice qué reciben hoy los pacientes y qué recibirán después.
+  const reachOf = async (id: string, change: string, from = app) => from.request(`/clinical-forms/form-templates/${id}/reach?change=${change}`)
+  const leaving = await reachOf(second, "leave")
+  expect(leaving.status).toBe(200)
+  expect((await json<{ data: unknown }>(leaving)).data).toEqual({
+    now: { key: expect.any(String), title: "Cuestionario nuevo (ruta)" },
+    after: { key: expect.any(String), title: "Cuestionario de la clínica (ruta)" },
+  })
+  expect((await reachOf(second, "otra-cosa")).status).toBe(400)
+  expect((await reachOf("abc", "leave")).status).toBe(404)
+  expect((await reachOf(second, "leave", reception)).status).toBe(403)
+
+  expect((await post(app, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(200)
+  rows = await list()
+  expect(rows.find((row) => row.id === first)?.reachesPatients).toBe(true)
+  const reused = await post(app, `/clinical-forms/form-templates/${second}/reuse`)
+  expect(reused.status).toBe(201)
+  const back = (await json<{ data: Row }>(reused)).data
+  expect(back).toMatchObject({ version: 2, status: "publicado" })
+  rows = await list()
+  expect(rows.find((row) => row.id === back.id)?.reachesPatients).toBe(true)
+  // Ya en uso, no hay a qué volver.
+  expect((await post(app, `/clinical-forms/form-templates/${second}/reuse`)).status).toBe(409)
+  // Los deja fuera de uso: las demás pruebas del archivo no cuentan con un cuestionario del paciente.
+  expect((await post(app, `/clinical-forms/form-templates/${back.id}/archive`)).status).toBe(200)
+  expect((await post(app, `/clinical-forms/form-templates/${first}/archive`)).status).toBe(200)
+})
+
+it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Marcar como revisado» dice qué pasó y en qué atención", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Antes de tu cita por la API",
+    respondent: "portal",
+    schema: {
+      sections: [
+        {
+          id: "antes",
+          title: "Antes de tu cita",
+          fields: [
+            { id: "motivo", label: "¿Por qué vienes?", type: "texto_largo", required: true },
+            { id: "alergias", label: "¿A qué eres alérgica?", type: "texto_largo", definition: "AllergyIntolerance.code" },
+          ],
+        },
+      ],
+    },
+  })
+  expect(draft.status).toBe(201)
+  const published = await post(app, `/clinical-forms/form-templates/${(await json<{ data: { id: string } }>(draft)).data.id}/publish`)
+  expect(published.ok).toBe(true)
+  const patientId = await createPatient()
+  const encounterId = await createEncounter(patientId, "Dolor")
+  // La persona lo envía desde su enlace.
+  await withOrgContext(appDb, "org_a", async (tx) => {
+    const personId = await patientPersonId(tx, "org_a", patientId)
+    await submitQuestionnaireFromLink(
+      tx,
+      { orgId: "org_a", patientId, contactId: personId! },
+      { motivo: "Me duele la muela", alergias: "Penicilina: ronchas" },
+    )
+  })
+  type Listed = { id: string; source: string; submittedVia: string | null; finalizedBy: string | null; encounterId: string | null; respondent: { kind: string; name: string } | null; editedByTeamAt: string | null }
+  const list = await json<{ data: Listed[] }>(await app.request(`/clinical-forms/form-responses?patientId=${patientId}`))
+  expect(list.data[0]).toMatchObject({ source: "portal", submittedVia: "enlace", respondent: { kind: "patient" }, editedByTeamAt: null })
+  const responseId = list.data[0]!.id
+
+  // No se edita: el servidor lo rechaza.
+  const edited = await patch(app, `/clinical-forms/form-responses/${responseId}`, {
+    answers: { motivo: "Otra cosa", alergias: "" },
+  })
+  expect(edited.status).toBe(409)
+  expect((await json<ErrorBody>(edited)).error.code).toBe("DECLARED_READ_ONLY")
+  // Vacía, el servidor la pide con las palabras de la pantalla: «corrección», no «adenda» (QA del 14 nov).
+  const empty = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, { text: " " })
+  expect(empty.status).toBe(400)
+  expect(JSON.stringify(await json<ErrorBody>(empty))).toContain("Escribe la corrección.")
+  // La corrección va aparte, antes de revisar.
+  const correction = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, {
+    text: "Dice que fue con amoxicilina, hace años.",
+  })
+  expect(correction.status).toBe(201)
+  // Recepción no lo revisa ni lo lee.
+  expect((await post(buildApp("reception"), `/clinical-forms/form-responses/${responseId}/finalize`)).status).toBe(403)
+  // «Marcar como revisado» desde la atención: dice lo que pasó y queda ligado a ella.
+  const reviewed = await post(app, `/clinical-forms/form-responses/${responseId}/finalize`, { encounterId })
+  expect(reviewed.status).toBe(200)
+  const body = await json<{ data: Listed & { status: string; passedAllergies: string[] } }>(reviewed)
+  expect(body.data).toMatchObject({ status: "finalizado", encounterId, passedAllergies: ["Penicilina"] })
+  expect(body.data.finalizedBy).toBeTruthy()
+  const inAttention = await json<{ data: Listed[] }>(
+    await app.request(`/clinical-forms/form-responses?patientId=${patientId}&encounterId=${encounterId}`),
+  )
+  expect(inAttention.data.map((row) => row.id)).toEqual([responseId])
+  // Un id de atención mal escrito se dice; no se guarda nada a medias.
+  expect((await post(app, `/clinical-forms/form-responses/${responseId}/finalize`, { encounterId: "no-es-un-id" })).status).toBe(400)
+  // Lo deja fuera de uso: las demás pruebas del archivo no cuentan con un cuestionario del paciente.
+  expect((await post(app, `/clinical-forms/form-templates/${(await json<{ data: { id: string } }>(published)).data.id}/archive`)).status).toBe(200)
 })
 
 it("órdenes: imagen con diagnóstico y hoja para imprimir; cancelar pide motivo; recepción no lee lo que pide la atención", async () => {

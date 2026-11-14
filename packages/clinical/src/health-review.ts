@@ -27,6 +27,18 @@ export interface HealthAuthorship {
 }
 
 /**
+ * Quién dijo algo de la salud de la persona, como quedó guardado el día en que
+ * lo dijo: ella misma, quien habla por ella (con su nombre y su vínculo en
+ * palabras, «madre», si se saben) o el equipo, que anotó lo que le dijeron. Lo
+ * decide el servidor; `unknown` es lo de antes de guardarse quién fue.
+ */
+export interface HealthDeclarant {
+  kind: "patient" | "representative" | "staff" | "unknown"
+  name: string | null
+  relation: string | null
+}
+
+/**
  * Hay información en los antecedentes (no es solo «No se le preguntó»): una
  * determinación explícita (negación o registro) en algún grupo, o entrevista.
  * La longitud de las listas por sí sola no basta: sangre, un «No» o una
@@ -78,8 +90,9 @@ export function healthReviewPending(
 
 /**
  * El comienzo de la nota de una enfermedad o un medicamento que la persona
- * declaró en su registro en línea cuando su ficha ya tenía antecedentes: así
- * lo reconoce la atención para pedir que se revise. Lo escribe el servidor
- * (`addDeclaredHealth`) y lo lee la pantalla: se cambian juntos.
+ * declaró en su registro en línea cuando su ficha ya tenía antecedentes: dice
+ * de dónde vino a quien lea la fila. Lo escribe el servidor (`addDeclaredHealth`).
+ * Qué sigue sin revisar y quién lo dijo no se deduce de esta nota: lo dice el
+ * servidor en `PatientHealth.declared`.
  */
 export const DECLARED_ONLINE_NOTE = "Lo declaró en su registro en línea"

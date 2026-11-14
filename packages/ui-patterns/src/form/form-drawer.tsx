@@ -16,6 +16,8 @@ export interface FormDrawerProps {
   children: React.ReactNode
   onSubmit: (event: React.FormEvent) => void
   isDirty?: boolean
+  /** Lo que dice «¿Salir sin guardar?» si parte ya se guardó aparte (`useCloseGuard`). */
+  unsavedDescription?: string
   isSubmitting?: boolean
   isLoading?: boolean
   error?: string | null
@@ -74,6 +76,7 @@ export function FormDrawer({
   children,
   onSubmit,
   isDirty = false,
+  unsavedDescription,
   isSubmitting = false,
   isLoading = false,
   error,
@@ -94,6 +97,7 @@ export function FormDrawer({
     isSubmitting,
     isDirty: dirty,
     lost,
+    unsavedDescription,
     onDiscard: draft.discard,
     onClose,
   })
@@ -148,7 +152,7 @@ export function FormDrawer({
           </DraftSavedProvider>
           {confirmDialog}
           {/* En el cajón (el teléfono), «Atrás» del navegador también pregunta por lo que no se guardó. */}
-          {DraftGuard && draft.unsaved ? <DraftGuard dirty lost={lost} onDiscard={draft.discard} /> : null}
+          {DraftGuard && draft.unsaved ? <DraftGuard dirty lost={lost || unsavedDescription} onDiscard={draft.discard} /> : null}
         </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>
@@ -161,6 +165,7 @@ export function FormDrawer({
         dirty={isDirty && !isSubmitting}
         fallback={drawer(true)}
         draft={draft}
+        unsavedDescription={unsavedDescription}
       >
         <FormPanel
           title={title}
@@ -170,6 +175,7 @@ export function FormDrawer({
           onSubmit={onSubmit}
           isDirty={dirty}
           lost={lost}
+          unsavedDescription={unsavedDescription}
           onDiscard={draft.discard}
           isSubmitting={isSubmitting}
           isLoading={isLoading}

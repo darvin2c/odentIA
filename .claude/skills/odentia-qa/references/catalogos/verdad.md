@@ -165,6 +165,16 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** la tarea se cerraba al poner el mensaje en cola, aunque después no saliera.
 **Caso:** el 16 de marzo a las 18:00 se envía el consentimiento de la exodoncia de la 48. El paciente lo firma a las 21:30. El 17 a las 09:00 la atención lo muestra firmado por enlace y pendiente de confirmar; tras confirmarlo, el PDF dice quién y cuándo.
 
+## V-EST-08 El cuestionario antes de la cita: cuál y cuándo
+**Aparece en:** Configuración › Formularios propios («Lo responde el paciente», «vigente»), «Antes de tu cita» en el enlace y el portal (`S/portal-questionnaire.ts`), el diálogo de publicar (`R/_org/settings.forms.tsx`) y la Ayuda.
+**A mano:** al paciente le llega uno solo: el último publicado con respuesta del paciente. Se pide una vez por plantilla.
+- [ ] Configuración marca en uso uno solo, y publicar otro dice que lo reemplaza.
+- [ ] Quien ya respondió para una cita no recibe otro «Por responder» para la misma cita sin que la clínica lo decida.
+- [ ] Lo que pregunta por esta visita (motivo, dolor) se vuelve a pedir en la cita siguiente.
+- [ ] Agregar un dato a lo que se pregunta llega también a quien ya respondió antes, en su próxima vez, y solo ese dato.
+
+**Caso:** el 13 la paciente responde el «Cuestionario previo» para su cita del 21. El 14 la clínica publica un «Cuestionario de salud» del paciente. El 15 su enlace no le pide otro para el 21 sin aviso, y Configuración dice cuál está en uso.
+
 ## V-DAT-01 «Qué sigue» de la persona
 **Aparece en:** ficha › Resumen y Plan (`CA/patient/plan/plan-next.tsx`, `S/plan-next.ts`), la fila de Pacientes (`R/_org/people.index.tsx`), «Lo que sigue» de la atención firmada (`CA/patient/encounter-handoff.tsx`), Inicio y lo que Sofi le dice a la persona.
 **A mano:** es una sola lista que arma el servidor, con el mismo orden en todas partes. Solo se agenda lo aceptado.
@@ -184,6 +194,7 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] «Falta su cita» no nombra a quien ya tiene cita para eso.
 - [ ] La Ayuda no afirma «son las mismas cuentas» si no lo son.
 - [ ] Reportes no se contradice entre pestañas: el mismo porcentaje usa la misma base.
+- [ ] «Faltan N» del enlace y «Faltan datos: …» de la ficha cuentan lo mismo; «Paso N de M» no cambia de total a mitad del registro.
 
 **Ya falló:** «N personas esperan» en el menú y otro número en Inicio, porque uno contaba tres grupos y el otro uno.
 **Caso:** una clínica con 40 personas que aceptaron y no tienen cita. Inicio, Pacientes › «Por agendar» y Reportes dicen 40; la lista trae 40 filas. Reservar una cita para una de ellas baja las tres a 39.
@@ -221,6 +232,20 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** «esos los ponemos desde tus datos» en una clínica de tres sedes sin dirección fiscal: el comprobante en hoja salió sin dirección (QA del 11 nov, corregido antes de unir).
 **Caso:** clínica con 3 sedes, sin dirección fiscal y sin logo. Sube su hoja: el cajón no promete teléfono. Cobra S/ 5 en la sede Miraflores: el comprobante A4 dice razón social, RUC, «Sede Miraflores» y una dirección.
 
+## V-DAT-06 Lo que el paciente declara antes de venir
+**Aparece en:** «Tus pendientes» del enlace (`CA/public/personal-link-page.tsx`), ficha › Antecedentes («Ver declaración original»), ficha › Clínica › Documentos (`CA/patient/formularios-tab.tsx`), la caja «respondió…» de la atención y el panel «Antecedentes y última atención» (`CA/patient/encounter-context.tsx`), Historia, y la Ayuda (`S/help-guide/clinica.ts`).
+**A mano:** lo declarado es una foto: quien revisa no la cambia, la corrige aparte. Cada lugar dice el mismo valor que escribió el paciente, y de dónde vino (su enlace o el portal; él o su responsable).
+- [ ] Cambiar una respuesta declarada deja la original visible y quién la cambió; nada del equipo queda como «del paciente».
+- [ ] El botón que «pasa» lo declarado a la ficha dice lo que pasó; si no pasó nada, no lo afirma.
+- [ ] La fila de Documentos no llama «Borrador» a lo que el paciente ya envió.
+- [ ] El paciente puede leer lo que envió.
+- [ ] Todo lo declarado sin revisar lleva la misma marca («declarado») en la franja, la ficha y la atención: alergias, enfermedades, medicación, anticoagulante y embarazo por igual.
+- [ ] Un dato que cambia con el tiempo (semanas de embarazo) se muestra calculado a hoy, con la fecha en que se dijo, y deja de afirmarse cuando ya no puede ser cierto.
+- [ ] «Revisado por…» aparece solo si hubo un acto de revisión con autor y hora.
+
+**Ya falló:** la paciente puso dolor 8; un clic del equipo lo dejó en 6 y la atención mostró «¿Cuánto te duele? 6 · desde su enlace» (mesa del 13 nov).
+**Caso:** el 13 de marzo la paciente responde dolor 8 y «alérgica a la penicilina» en texto libre. El 14 el odontólogo pulsa «Pasar a Antecedentes»: la atención, Documentos y la Historia dicen 8, y el aviso no afirma haber pasado una alergia que no pasó.
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.
@@ -228,6 +253,8 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] «Cancelar» descarta; si la pantalla autoguarda, el botón no se llama así.
 - [ ] «Guardado» aparece solo cuando algo cambió.
 - [ ] Anular dice todo lo que se anula con ello, y lo que no (la cita de un control).
+- [ ] «Deshacer» aparece solo si el servidor puede deshacer (archivar y volver a usar una plantilla).
+- [ ] «Si sales, sigue aquí al volver» se cumple también al cerrar el navegador del celular y volver a abrir el enlace.
 
 **Ya falló:** la barra de un mes abría los gastos de otro mes, sin filtro.
 **Caso:** en Reportes de febrero, sede Centro, la barra «Personal S/ 5,700». «Ver los gastos» abre Gastos de febrero, Centro, tipo Personal, y sus filas suman 5,700.
@@ -254,6 +281,7 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] No explica algo que se quitó o se movió.
 - [ ] Contesta sobre la pantalla donde está la persona.
 - [ ] Al agregar una función que cambia lo que sale en los papeles, se releen las respuestas viejas que dicen qué va dónde (razón social, color, logo).
+- [ ] «¿Cómo le mando el cuestionario?» con recepción responde «va en su enlace» y no la manda a diseñar plantillas.
 
 **Ya falló:** contestó sobre otra pantalla.
 **Caso:** recepción, en la Agenda, pregunta «¿cómo le mando a la señora el enlace de su cita?». La respuesta nombra dónde está el botón, y siguiéndola el enlace queda copiado o enviado. La misma pregunta con caja dice que eso lo hace recepción.
@@ -277,6 +305,7 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] Un control dice quién lo indicó y en qué atención.
 - [ ] La atención anulada nombra lo que se anuló con ella, y sus papeles no siguen «vigentes».
 - [ ] Un dato que agrega el equipo no queda como «declarado por el paciente», ni al revés.
+- [ ] Un formulario dice quién lo llenó y quién lo finalizó; «Sin profesional asignado» no reemplaza a quien lo escribió.
 
 **Ya falló:** se anuló una atención y la orden emitida en ella siguió vigente al comprobarla.
 **Caso:** el 9 de marzo se firma una atención con receta y orden de radiografía. El 10 se anula con motivo. Historia la muestra anulada, con quién y cuándo; la receta y la orden se ven anuladas en Documentos y al comprobar su código.

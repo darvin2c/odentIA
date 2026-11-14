@@ -1,4 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
+import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -36,6 +37,7 @@ import {
 import { createEncounter } from "./encounters.js"
 import { getPatientMissingData, getStaffMissingData } from "./patient-registration.js"
 import { createPatient, getPatient } from "./patients.js"
+import { submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { appDb, container, ownerDb, setupTestDb } from "./test-setup.js"
@@ -671,13 +673,29 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
     })
     return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
   })
-  const response = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" },
-    }),
-  )
+  // Lo envía el paciente desde su enlace o el portal: el equipo no crea una respuesta con esta plantilla.
+  await expect(
+    run((tx) => createFormResponse(tx, "org_a", ACTOR, { templateId: template.id, patientId: patient.id })),
+  ).rejects.toMatchObject({ status: 400 })
+  // Con el envío de verdad (el de «Su enlace»), que valida las respuestas contra la plantilla.
+  const own = (await run((tx) => getPatient(tx, "org_a", patient.id))).contacts.find((link) => link.relationship === "self")
+  if (!own) throw new Error("Sin persona propia")
+  const declared = async (answers: Record<string, unknown>) => {
+    await run((tx) =>
+      submitQuestionnaireFromLink(tx, { orgId: "org_a", patientId: patient.id, contactId: own.contactId }, answers),
+    )
+    const [row] = await ownerDb
+      .select()
+      .from(clinicalFormResponse)
+      .where(and(eq(clinicalFormResponse.patientId, patient.id), eq(clinicalFormResponse.status, "borrador")))
+    if (!row) throw new Error("Sin respuesta declarada")
+    expect(row).toMatchObject({ source: "portal", templateId: template.id, respondentContactId: own.contactId })
+    expect(row.submittedAt).toBeInstanceOf(Date)
+    return row
+  }
+  // Lo que no cumple la plantilla no entra: falta la pregunta obligatoria.
+  await expect(declared({ alergia_cual: "Penicilina" })).rejects.toMatchObject({ status: 400 })
+  const response = await declared({ alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" })
   // Mientras no se finaliza, nada pasa a los antecedentes.
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id))
@@ -703,13 +721,7 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
   expect(health.revision).toBe(2)
   expect(health.reviewStatus.allergies).toBe("recorded")
   // «Ninguna» no es una alergia, y repetir la penicilina no la duplica.
-  const again = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" },
-    }),
-  )
+  const again = await declared({ alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" })
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, again.id))
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(2)
   // Al escribir amoxicilina, la receta avisa la penicilina por su grupo, como cualquier

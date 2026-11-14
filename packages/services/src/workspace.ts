@@ -1369,6 +1369,11 @@ export interface WorkspaceAuditItem {
   also: Array<{ what: string; count: number }>
   /** Sobre quién y sobre qué; nulo si el registro no lo dice o la historia está bloqueada. */
   subject: WorkspaceAuditSubject | null
+  /**
+   * Lo que nombra una acción que no trata de una persona: el formulario que se
+   * publicó, se dejó de usar o se volvió a usar («Ficha periodontal · versión 2»).
+   */
+  about: string | null
 }
 
 /** Sobre quién fue una acción y, si lo hay, la cita, el ticket o el presupuesto. */
@@ -1406,6 +1411,15 @@ type AuditRow = {
   ticketNumber: number | null
   budgetId: string | null
   budgetNumber: number | null
+  /** La plantilla de formulario de la que trata, con su versión. */
+  formTitle: string | null
+  formVersion: number | null
+}
+
+/** De qué formulario trata una acción de Configuración: «Ficha periodontal · versión 2». */
+function auditAboutOf(rows: AuditRow[], lead: AuditRow): string | null {
+  const form = [lead, ...rows].find((row) => row.formTitle)
+  return form?.formTitle ? `«${form.formTitle}» · versión ${form.formVersion ?? 1}` : null
 }
 
 /** «17 nov, 10:00»; de otro año, con el año. */
@@ -1516,7 +1530,8 @@ export async function listWorkspaceAudit(
       ap.id as "appointmentId", ${iso(sql`ap.starts_at`)} as "appointmentAt",
       coalesce(tk.id, pa.ticket_id, pr.ticket_id) as "ticketId",
       coalesce(tk.ticket_number, (select t2.ticket_number from payment_ticket t2 where t2.organization_id = ${orgId} and t2.id = coalesce(pa.ticket_id, pr.ticket_id))) as "ticketNumber",
-      bu.id as "budgetId", bu.budget_number as "budgetNumber"
+      bu.id as "budgetId", bu.budget_number as "budgetNumber",
+      ft.title as "formTitle", ft.version as "formVersion"
     from (
       select a.id, a.action, a.entity, a.entity_id, a.actor_user_id, a.created_at,
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
@@ -1544,6 +1559,7 @@ export async function listWorkspaceAudit(
     left join clinical_follow_up fu on ev.entity = 'clinical_follow_up' and fu.organization_id = ${orgId} and fu.id = ev.eid
     left join conversation cv on ev.entity = 'conversation' and cv.organization_id = ${orgId} and cv.id = ev.eid
     left join opportunity op on ev.entity = 'opportunity' and op.organization_id = ${orgId} and op.id = ev.eid
+    left join clinical_form_template ft on ev.entity = 'clinical_form_template' and ft.organization_id = ${orgId} and ft.id = ev.eid
     left join patient pt on pt.organization_id = ${orgId} and pt.id = coalesce(
       ap.patient_id, tk.patient_id, pm.patient_id, pa.patient_id, ch.patient_id, rf.patient_id, pr.patient_id,
       cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, case when ev.entity = 'patient' then ev.eid end)
@@ -1599,6 +1615,7 @@ export async function listWorkspaceAudit(
       times: leadAuditCount(action.map((row) => row.action), lead),
       also: alsoAuditWords(action.map((row) => row.action), lead),
       subject: auditSubjectOf(action, head, zone),
+      about: auditAboutOf(action, head),
     }
   })
   // El cursor es el último registro mostrado, con su instante y su persona: la siguiente página

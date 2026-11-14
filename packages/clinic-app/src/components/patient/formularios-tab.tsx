@@ -21,17 +21,19 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
-  createFormResponse,
   discardFormResponse,
   FORM_RESPONSE_STATUS_LABELS,
   type FormResponse,
   type FormSchemaDef,
   type FormTemplate,
   fetchFormAddenda,
+  finalizedWords,
   finalizeFormResponse,
+  startFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
 import { useMemberName, useOrgMembers } from "../../lib/crm"
+import { DeclaredResponse } from "./declared-response"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
@@ -41,17 +43,20 @@ import {
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
-import { activeOrgLocale } from "../../lib/locale"
+import { templateOptionLabel } from "../../lib/form-templates"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
+
+/** «13 nov 2026, 9:51 p. m.», en la hora de la clínica. */
+const whenAt = (value: string) =>
+  new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short", timeZone: activeOrgTimeZone() })
 
 function statusOf(response: FormResponse): {
   label: string
   tone: "default" | "secondary" | "outline"
 } {
-  if (response.status === "borrador" && response.submittedAt)
-    return { label: "Declarado por el paciente", tone: "secondary" }
   return {
     label: FORM_RESPONSE_STATUS_LABELS[response.status],
     tone:
@@ -89,9 +94,11 @@ export function NewResponseDrawer({
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
   const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
+  const queryClient = useQueryClient()
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
-      createFormResponse({
+      // Si la atención ya no está en curso, se empieza igual sin unirlo a ella (`detached`).
+      startFormResponse({
         templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
@@ -108,6 +115,15 @@ export function NewResponseDrawer({
     onSubmit: async ({ value }) => {
       const result = await create.mutateAsync(value)
       form.reset()
+      if (result.detached) {
+        // La pantalla tenía un dato viejo (la atención se firmó o se anuló en otra pestaña): se
+        // dice lo que pasó y se vuelve a pedir todo, para que deje de ofrecer esa atención.
+        toast.info(
+          "La atención ya no está en curso, así que el formulario se empezó sin unirlo a ella. Queda en Documentos de la ficha.",
+          { duration: 10_000 },
+        )
+        void queryClient.invalidateQueries()
+      }
       await onCreated(result.data.id)
     },
   })
@@ -130,7 +146,8 @@ export function NewResponseDrawer({
             <field.SelectField
               label="Formulario"
               placeholder="Elige el formulario"
-              options={templates.map((t) => ({ value: t.id, label: t.title }))}
+              // Dos formularios con el mismo título llevan lo que los distingue: preguntas y fecha.
+              options={templates.map((t) => ({ value: t.id, label: templateOptionLabel(t, templates, whenAt) }))}
             />
           )}
         </form.AppField>
@@ -216,7 +233,33 @@ const addendumSchema = z.object({
   text: z.string().trim().min(1, "Escribe la adenda.").max(5000, "La adenda admite hasta 5000 caracteres."),
 })
 
+/**
+ * El detalle de una respuesta. Lo que respondió el paciente se lee y se corrige
+ * aparte (`DeclaredResponse`): nunca se edita; lo del equipo se llena aquí.
+ */
 export function ResponseDetail({
+  response,
+  canWrite,
+  sex,
+  encounterId,
+  onChanged,
+}: {
+  response: FormResponse
+  canWrite: boolean
+  /** El sexo registrado del paciente, para decir quién lo dijo. */
+  sex?: string | null
+  /** La atención en curso desde la que se abre: lo que se revise ahí queda ligado a ella. */
+  encounterId?: string
+  onChanged: () => Promise<void>
+}) {
+  if (response.source === "portal")
+    return (
+      <DeclaredResponse response={response} canWrite={canWrite} sex={sex} encounterId={encounterId} onChanged={onChanged} />
+    )
+  return <StaffResponseDetail response={response} canWrite={canWrite} onChanged={onChanged} />
+}
+
+function StaffResponseDetail({
   response,
   canWrite,
   onChanged,
@@ -500,12 +543,12 @@ export function ResponseDetail({
             {response.templateTitle ?? "Formulario"} · versión {response.templateVersion}
           </h3>
           <p className="text-xs text-muted-foreground">
-            {response.source === "portal"
-              ? `Respondido por el paciente desde el portal${response.submittedAt ? ` el ${when(response.submittedAt)}` : " (en curso)"}`
-              : response.professionalUserId
-                ? memberName(response.professionalUserId)
-                : "Sin profesional asignado"}
-            {response.finalizedAt ? ` · finalizado ${when(response.finalizedAt)}` : ""}
+            {response.professionalUserId ? memberName(response.professionalUserId) : "Sin profesional asignado"}
+            {/* Quién lo finalizó, con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
+            {response.finalizedAt
+              ? ` · ${finalizedWords(response, whenAt, response.finalizedBy ? memberName(response.finalizedBy) : null)}`
+              : ""}
+            {response.encounterStatus === "anulada" ? " · de una atención anulada" : ""}
           </p>
         </div>
         <span className="flex items-center gap-2">
@@ -525,12 +568,6 @@ export function ResponseDetail({
           ) : null}
         </span>
       </header>
-      {response.source === "portal" && response.status === "borrador" && response.submittedAt ? (
-        <p role="status" className="rounded-md bg-muted p-3 text-sm">
-          Respuestas declaradas por el paciente. Revísalas con él en la consulta y finaliza para
-          incorporarlas a la historia.
-        </p>
-      ) : null}
       {response.status === "descartado" ? (
         <p className="rounded-md bg-muted p-3 text-sm">
           Descartado {when(response.discardedAt)} · {response.discardReason}

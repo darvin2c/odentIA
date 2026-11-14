@@ -124,6 +124,34 @@ export const CambiosSinGuardar: Story = {
 }
 
 /**
+ * Si algo se guardó al pulsarlo (la recomendada de un presupuesto), la pregunta
+ * de salir dice que eso queda y que solo se pierde lo escrito.
+ */
+export const ConAlgoYaGuardado: Story = {
+  render: function SavedApartStory() {
+    const [open, setOpen] = useState(true)
+    return (
+      <div className="p-6">
+        <Button type="button" onClick={() => setOpen(true)}>
+          Abrir formulario
+        </Button>
+        <FormDrawer
+          open={open}
+          title="Revisar y enviar"
+          description="Intenta cerrar: lo escrito se pierde, la marca ya está guardada."
+          isDirty
+          unsavedDescription="Se pierde lo que escribiste. La recomendada ya quedó guardada: la opción B."
+          onClose={() => setOpen(false)}
+          onSubmit={demoSubmit}
+        >
+          <DemoFields />
+        </FormDrawer>
+      </div>
+    )
+  },
+}
+
+/**
  * Otra forma de guardar lo mismo («Guardar borrador») va en el pie, entre
  * «Cancelar» y la principal; Enter sigue haciendo la principal. En el teléfono,
  * si los tres no caben, la principal baja a otra fila y queda a la derecha.

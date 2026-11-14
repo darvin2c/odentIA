@@ -24,7 +24,7 @@ import {
   verifyPasskeyRegistration,
 } from "./portal-access.js"
 import { exchangePortalToken, issuePortalLink, requirePortalSession, revokePortalSession } from "./portal.js"
-import { getPortalQuestionnaire, savePortalQuestionnaire } from "./portal-questionnaire.js"
+import { getPortalQuestionnaire, savePortalQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import {
   createFormTemplate,
   finalizeFormResponse,
@@ -433,6 +433,49 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
   expect(
     await withOrgContext(appDb, ORG, (tx) => finalizeFormResponse(tx, ORG, ACTOR, responses[0]!.id)),
   ).toMatchObject({ status: "finalizado" })
+})
+
+it("el portal y el enlace usan la misma regla para responder el cuestionario", async () => {
+  // Otro vínculo del paciente, que no decide por él.
+  const [aunt] = await ownerDb
+    .insert(contact)
+    .values({ organizationId: ORG, displayName: "Tía Portal", phone: "+51999000222" })
+    .returning({ id: contact.id })
+  await withOrgContext(appDb, ORG, (tx) =>
+    tx.insert(patientContact).values({ organizationId: ORG, patientId: patient3Id, contactId: aunt!.id, relationship: "family", createdBy: ACTOR }),
+  )
+  const { raw } = await insertPendingLink(patient3Id)
+  const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+  // La operación decide por sí misma, sin depender de quién abrió la sesión.
+  const asAunt = <T>(fn: (tx: typeof appDb, ctx: Awaited<ReturnType<typeof requirePortalSession>>) => Promise<T>) =>
+    withOrgContext(appDb, ORG, async (tx) => {
+      const ctx = await requirePortalSession(tx, ORG, opened.sessionToken)
+      return fn(tx, { ...ctx, session: { ...ctx.session, contactId: aunt!.id } })
+    })
+  const before = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
+
+  // Como en «Su enlace»: no se le ofrece y, si lo intenta, no se guarda. Por el enlace, igual.
+  const view = await asAunt((tx, ctx) => getPortalQuestionnaire(tx, ctx))
+  expect(view).toMatchObject({ template: null, response: null })
+  expect(
+    await errorCode(
+      asAunt((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: false }, submit: true })),
+    ),
+  ).toBe("PORTAL_FORBIDDEN")
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) =>
+        submitQuestionnaireFromLink(tx, { orgId: ORG, patientId: patient3Id, contactId: aunt!.id }, { alergia: false }),
+      ),
+    ),
+  ).toBe("PORTAL_FORBIDDEN")
+  const after = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
+  expect(after.map((row) => row.id)).toEqual(before.map((row) => row.id))
+  // Quien decide sigue respondiendo: a la persona que abrió la sesión sí se le ofrece.
+  const own = await withOrgContext(appDb, ORG, async (tx) =>
+    getPortalQuestionnaire(tx, await requirePortalSession(tx, ORG, opened.sessionToken)),
+  )
+  expect(own.template?.title).toBe("Cuestionario previo")
 })
 
 it("el código de 6 dígitos siempre activa el acceso, también para volver a entrar", async () => {

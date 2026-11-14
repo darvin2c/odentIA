@@ -15,6 +15,7 @@ vi.mock("../../lib/crm", () => ({ useMemberName: () => () => "Dra. Ana", useOrgM
 vi.mock("../../lib/clinical-forms", async (original) => ({
   ...(await original<typeof import("../../lib/clinical-forms")>()),
   updateFormResponse: update,
+  fetchFormAddenda: async () => ({ data: [] }),
 }))
 
 const { ResponseDetail } = await import("./formularios-tab")
@@ -161,5 +162,44 @@ describe("salir de un formulario que se guarda solo", () => {
     await screen.findByText("Cerrado")
     await waitFor(() => expect(update).toHaveBeenCalledTimes(2))
     expect(update.mock.calls[1]?.[1].answers.intensidad).toBe(7)
+  })
+})
+
+// La mezcla de la entrega 1 con la 3: «Agregar una corrección» a lo que envió el paciente le dice a su
+// panel que hay algo escrito sin guardar, así que salir con la corrección a medias pregunta.
+describe("una corrección a medias de lo que envió el paciente", () => {
+  const declared: FormResponse = {
+    ...response,
+    source: "portal",
+    submittedAt: "2026-11-14T09:00:00Z",
+    answers: { intensidad: 6, hallazgos: "Me duele al morder" },
+  }
+
+  function DeclaredPanel() {
+    const [open, setOpen] = useState(true)
+    return (
+      <QueryClientProvider client={new QueryClient()}>
+        <DetailDrawer open={open} title="Cuestionario" onClose={() => setOpen(false)}>
+          {open ? <ResponseDetail response={declared} canWrite onChanged={async () => {}} /> : null}
+        </DetailDrawer>
+        {open ? null : <p>Cerrado</p>}
+      </QueryClientProvider>
+    )
+  }
+
+  it("salir con la corrección escrita pregunta y dice qué se pierde; sin escribir, sale directo", async () => {
+    render(<DeclaredPanel />)
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar una corrección", hidden: true }))
+    fireEvent.change(await screen.findByLabelText("Tu corrección"), { target: { value: "Le duele al masticar frío" } })
+    close()
+    const dialog = await screen.findByRole("alertdialog", { hidden: true })
+    expect(dialog.textContent).toContain("Se pierde la corrección que escribiste y no guardaste.")
+
+    fireEvent.click(screen.getByRole("button", { name: "Seguir aquí", hidden: true }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar", hidden: true }))
+    close()
+    await screen.findByText("Cerrado")
+    expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull()
   })
 })

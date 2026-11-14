@@ -183,8 +183,14 @@ function SurfaceError({ error, className }: { error: string; className?: string 
 export interface CloseGuardOptions {
   isSubmitting?: boolean
   isDirty?: boolean
-  /** Qué se pierde, si el contenido lo dijo (`useDraftSaved`); sin él, el texto común. */
+  /** Qué se pierde, si el contenido lo dijo (`useDraftSaved`); gana sobre `unsavedDescription`. */
   lost?: string | null
+  /**
+   * Lo que dice la pregunta de salir cuando parte del cambio ya se guardó al
+   * hacerlo (una marca que se guarda al pulsarla): «se pierden los cambios» no
+   * sería cierto. Sin esto ni `lost`, la frase común.
+   */
+  unsavedDescription?: string
   /** Se llama con «Descartar y salir», antes de cerrar: lo pendiente ya no se guarda. */
   onDiscard?: () => void
   onClose: () => void
@@ -215,6 +221,7 @@ export function useCloseGuard({
   isSubmitting = false,
   isDirty = false,
   lost = null,
+  unsavedDescription,
   onDiscard,
   onClose,
 }: CloseGuardOptions): CloseGuard {
@@ -231,7 +238,8 @@ export function useCloseGuard({
   const confirmDialog = (
     <UnsavedDialog
       open={asking}
-      lost={lost}
+      // Un solo diálogo: lo que el contenido dijo que se pierde, o la frase propia de la superficie.
+      lost={lost || unsavedDescription}
       onStay={() => setAsking(false)}
       onDiscard={() => {
         setAsking(false)

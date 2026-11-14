@@ -23,6 +23,12 @@ export interface DetailDrawerProps extends DetailContainerProps {
   open: boolean
   /** Ancho del panel de referencia: mantiene el tamaño al cruzar el corte. */
   size?: DetailPanelSize
+  /**
+   * `false`: siempre cajón modal, aunque haya columna lateral (como en
+   * `FormDrawer`). Para abrirlo encima de un diálogo: la columna lateral queda
+   * detrás del diálogo y no se podría usar.
+   */
+  dock?: boolean
 }
 
 /**
@@ -39,6 +45,7 @@ export function DetailDrawer({
   lost: given,
   onDiscard: discardGiven,
   size = "md",
+  dock = true,
   className,
   ...surface
 }: DetailDrawerProps) {
@@ -55,7 +62,7 @@ export function DetailDrawer({
   const DraftGuard = useSideDockDraftGuard()
   const titleId = React.useId()
   const descriptionId = React.useId()
-  const dockBounds = useDockDecision(open, { bounds: DOCK_SIZES[size] })
+  const dockBounds = useDockDecision(open, { bounds: DOCK_SIZES[size], disabled: !dock })
 
   const drawer = (drawerOpen: boolean) => (
     <Drawer

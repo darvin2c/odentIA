@@ -1,4 +1,3 @@
-import { DECLARED_ONLINE_NOTE, KINSHIP_LABELS } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -6,11 +5,12 @@ import { Plus } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
+import { declaredMarkWords, pregnancyWords, saidNoWords } from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import {
+  isCurrentMedication,
   markAllergiesReviewedApi,
   markHealthDeniedApi,
-  type PatientContactLink,
   type PatientHealth,
   unaskedHealthGroups,
 } from "../../lib/patients"
@@ -23,22 +23,8 @@ function listWords(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
 }
 
-/**
- * A quién se le pregunta cuando la persona tiene representante (QA del 10 nov, B11): «su padre
- * (Luis Ríos)», como lo dice la ficha. El preferido primero; el parentesco, el de HL7 si se
- * conoce o el escrito al vincularlo. Sin representante vigente, null: se le pregunta a ella.
- */
-export function askWhom(contacts: readonly PatientContactLink[]): string | null {
-  const [guardian] = contacts
-    .filter((contact) => contact.isActive && contact.relationship === "guardian")
-    .sort((a, b) => Number(b.isPreferred) - Number(a.isPreferred))
-  if (!guardian) return null
-  const kin =
-    guardian.kinship && guardian.kinship in KINSHIP_LABELS
-      ? KINSHIP_LABELS[guardian.kinship as keyof typeof KINSHIP_LABELS]
-      : guardian.relationshipDetail?.trim()
-  return `su ${(kin || "representante").toLocaleLowerCase("es")} (${guardian.displayName})`
-}
+// A quién se le pregunta cuando la persona tiene representante: la misma regla que dice quién lo dijo.
+export { askWhom } from "../../lib/declared-health"
 
 /**
  * «Antes de atenderla» en la atención (QA del 8 nov, A2): un solo aviso con lo
@@ -51,6 +37,13 @@ export function askWhom(contacts: readonly PatientContactLink[]): string | null 
  * (se ve en «Antecedentes y última atención» y al firmar con anestesia).
  * Avisa, nunca frena la firma. Solo para quien escribe en la historia. «No»
  * y «sí tiene» pesan lo mismo: el aviso pide preguntar, no negar a un toque.
+ * Lo que dijo la persona y nadie revisó (mesa del 13 nov) va en una fila, por
+ * tema y con sus palabras: el embarazo con la semana de hoy, cada alergia con
+ * lo que le pasó, sus medicinas y sus enfermedades, y su «No» como «dijo que
+ * no». Se decide por declaración, no por si la salud ya tuvo una revisión, y
+ * sus alergias se revisan ahí mismo: no se repiten en la fila «Alergias» ni
+ * se dan por vistas con «Sin cambios» (QA del 14 nov). Un embarazo que ya
+ * pasó su término pide confirmarlo.
  */
 export function HealthReviewNotice({
   patientId,
@@ -58,6 +51,7 @@ export function HealthReviewNotice({
   health,
   disabled = false,
   askTo = null,
+  sex,
 }: {
   patientId: string
   patientName: string
@@ -65,6 +59,8 @@ export function HealthReviewNotice({
   disabled?: boolean
   /** Con representante, a quién se le pregunta (`askWhom`): «su padre (Luis Ríos)». */
   askTo?: string | null
+  /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
+  sex?: string | null
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -101,32 +97,87 @@ export function HealthReviewNotice({
   })
   const allergiesDue = health.allergyReviewDue === true
   const unasked = unaskedHealthGroups(health, clinicToday())
-  // Lo que declaró la persona y nadie revisó todavía (lo dice el servidor): se pide revisarlo aquí, donde se
-  // decide. Se nombra lo que vino de su registro en línea; si no, lo que hay; si es solo su entrevista
-  // (un embarazo, una operación), se dice sin nombre.
-  // Solo lo que dice el servidor (sabe si lo anotó un clínico o lo declaró la persona): sin el dato, no se pide.
+  const today = clinicToday()
+  const pregnancy = health.pregnancy ?? null
+  // Una lista por declaración: cada cosa con quien la dijo y su día, sin juntar lo de dos fechas.
+  const saidGroups = (health.declared ?? []).map((group) => {
+    const no = saidNoWords(group.by, sex).toLocaleLowerCase("es")
+    const rows: Array<{ label: string; value: string }> = []
+    if (pregnancy && group.pregnancy) {
+      const words = pregnancyWords(pregnancy)
+      rows.push({
+        label: "Embarazo",
+        value: words.confirm
+          ? `${words.detail}; pregúntale si sigue embarazada`
+          : pregnancy.weeksToday === null
+            ? words.detail
+            : pregnancy.weeksSaid === pregnancy.weeksToday
+              ? // Sin una semana de diferencia, el dato se dice una vez: «20 semanas (lo dijo el 14 nov)».
+                `${words.title.replace("Embarazo · ", "")} (${words.detail})`
+              : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
+      })
+    }
+    const saidAllergies = health.allergies.filter((row) => group.allergies.includes(row.id))
+    if (saidAllergies.length > 0)
+      rows.push({
+        label: "Alergias",
+        value: saidAllergies
+          // El registro no pregunta qué le pasó: sin reacción no se dice «no dijo» (auditor, 14 nov).
+          .map((row) => [allergyTitle(row), row.reaction?.trim()].filter(Boolean).join(" · "))
+          .join("; "),
+      })
+    else if (group.saidNo.allergies) rows.push({ label: "Alergias", value: no })
+    const saidMedications = health.medications.filter(
+      (row) => group.medications.includes(row.id) && isCurrentMedication(row, today),
+    )
+    if (saidMedications.length > 0)
+      rows.push({ label: "Medicinas", value: saidMedications.map((row) => row.name).join(", ") })
+    else if (group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
+    const saidConditions = health.conditions.filter((row) => group.conditions.includes(row.id) && row.status === "activa")
+    if (saidConditions.length > 0)
+      rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
+    else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
+    return { title: declaredMarkWords(group.by, group.at, sex), rows }
+  })
+  const shownGroups = saidGroups.filter((group) => group.rows.length > 0)
+  // Lo que dijo y nadie revisó se decide por declaración (`health.declared`, del servidor), no por si
+  // la salud tuvo antes una revisión: un látex que llegó después de revisarla también se marca (QA del
+  // 14 nov, H2 de clínica). `reviewPending` solo dice si hay algo que revisar en Antecedentes.
   const pending = health.reviewPending === true
-  const rows = [...health.conditions, ...health.medications]
-  const online = rows.filter((row) => row.notes?.startsWith(DECLARED_ONLINE_NOTE)).map((row) => row.name)
-  const declared = pending ? (online.length ? online : rows.map((row) => row.name)) : []
-  if (!canWrite || (!allergiesDue && unasked.length === 0 && !pending)) return null
+  const declaredHere = shownGroups.length > 0 || pending
+  // Las alergias que dijo la persona (o su «No») se revisan aquí, con lo demás que dijo: no salen
+  // otra vez en una fila «Alergias» aparte ni se dan por vistas con «Sin cambios».
+  const declaredAllergyIds = new Set((health.declared ?? []).flatMap((group) => group.allergies))
+  const saidNoAllergies = (health.declared ?? []).some((group) => group.saidNo.allergies)
+  const allergiesSaid =
+    health.allergies.some((row) => row.isActive && declaredAllergyIds.has(row.id)) || saidNoAllergies
+  const pregnancyPending = (health.declared ?? []).some((group) => group.pregnancy)
+  // Un embarazo que ya pasó su término (o quedó sin fecha) y que ya nadie tiene por revisar: se pide confirmarlo.
+  const confirmPregnancy = pregnancy?.state === "por_confirmar" && !(declaredHere && pregnancyPending)
+  if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy)) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
-  const asked = active.length > 0 || health.reviewStatus.allergies === "none"
+  // Las que ya tenía, anotadas o revisadas por el equipo: revisar las alergias también las cubre.
+  const others = active.filter((allergy) => !declaredAllergyIds.has(allergy.id))
+  const allergyRow = allergiesDue && !allergiesSaid
+  // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
+  const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)
   // Con representante (un niño), se le pregunta a él, como lo dice la ficha; si no, a la persona.
   const first = askTo ?? patientName.trim().split(/\s+/)[0] ?? patientName
   const topics = [
-    allergiesDue ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
+    allergyRow ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
     unasked.includes("medications") ? "su medicación" : null,
   ].filter((topic): topic is string => topic !== null)
   const title =
-    !allergiesDue && unasked.length === 0
-      ? `Revisa con ${first} lo que declaró de su salud`
+    topics.length === 0
+      ? declaredHere
+        ? `Revisa con ${first} lo que dijo de su salud`
+        : `Pregúntale a ${first} si sigue embarazada`
       : unasked.length === 0
-      ? asked
-        ? `Pregúntale a ${first} si tiene alergias nuevas`
-        : `Pregúntale a ${first} si tiene alergias`
-      : `Pregúntale a ${first} por ${listWords(topics)}`
+        ? asked
+          ? `Pregúntale a ${first} si tiene alergias nuevas`
+          : `Pregúntale a ${first} si tiene alergias`
+        : `Pregúntale a ${first} por ${listWords(topics)}`
   const busy = disabled || reviewed.isPending || denied.isPending
   return (
     <section
@@ -145,7 +196,7 @@ export function HealthReviewNotice({
         ) : null}
       </div>
       <ul className="flex flex-col divide-y divide-warning/30">
-        {allergiesDue ? (
+        {allergyRow ? (
           <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
               <h3 className="text-sm font-medium">Alergias</h3>
@@ -197,17 +248,74 @@ export function HealthReviewNotice({
             </Button>
           </li>
         ) : null}
-        {pending ? (
+        {declaredHere ? (
+          <li className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex min-w-0 flex-col gap-2">
+              {shownGroups.length > 0 ? (
+                shownGroups.map((group) => (
+                  <div key={group.title} className="flex flex-col gap-1">
+                    <h3 className="text-sm font-medium">{group.title}</h3>
+                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+                      {group.rows.map((row) => (
+                        <div key={row.label} className="contents">
+                          <dt className="text-muted-foreground">{row.label}</dt>
+                          <dd>{row.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))
+              ) : (
+                <>
+                  <h3 className="text-sm font-medium">Sin revisar</h3>
+                  <p className="text-sm text-muted-foreground">Datos de su salud que nadie revisó todavía.</p>
+                </>
+              )}
+              {allergiesSaid && others.length > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Ya tenía anotadas: {others.map((allergy) => allergyTitle(allergy)).join(", ")}.
+                </p>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                {allergiesSaid && !pending
+                  ? `Confirma con ${first} sus alergias.`
+                  : allergiesSaid
+                    ? `Confírmalo con ${first}: sus alergias aquí y lo demás en sus antecedentes.`
+                    : `Confírmalo con ${first} en sus antecedentes.`}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {allergiesSaid ? (
+                <>
+                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => reviewed.mutate()}>
+                    {reviewed.isPending ? "Guardando…" : active.length === 0 ? "No tiene alergias" : "Alergias revisadas"}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setAdding(true)}>
+                    <Plus aria-hidden />
+                    Agregar alergia
+                  </Button>
+                </>
+              ) : null}
+              {pending && openWide ? (
+                <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+                  Revisar antecedentes
+                </Button>
+              ) : null}
+            </div>
+          </li>
+        ) : null}
+        {confirmPregnancy && pregnancy ? (
           <li className="flex flex-wrap items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
             <div className="flex min-w-0 flex-col gap-1">
-              <h3 className="text-sm font-medium">{online.length ? "Lo que declaró en línea" : "Lo que declaró"}</h3>
+              <h3 className="text-sm font-medium">Embarazo por confirmar</h3>
               <p className="text-sm text-muted-foreground">
-                {declared.length ? `${listWords(declared)}.` : "Datos de su salud que nadie revisó todavía."} Confírmalo con {first} en sus antecedentes.
+                {pregnancyWords(pregnancy).detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}. Ya pasó
+                el tiempo de un embarazo o no tiene fecha: anota en sus antecedentes cómo está hoy.
               </p>
             </div>
             {openWide ? (
               <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
-                Revisar antecedentes
+                Actualizar en antecedentes
               </Button>
             ) : null}
           </li>

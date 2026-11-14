@@ -3,7 +3,9 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
+  type HealthDeclarant,
   type MissingPersonDatum,
+  type PregnancyToday,
   type Vitals,
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
@@ -212,6 +214,33 @@ export interface SaveHealthInput {
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
 }
 
+/**
+ * Lo que alguien dijo de su salud en una misma declaración y ningún profesional revisó todavía:
+ * quién lo dijo, cuándo y qué. Con más de una declaración sin revisar hay un grupo por cada una.
+ */
+export interface DeclaredHealthGroup {
+  by: HealthDeclarant
+  /** Cuándo lo dijo; null si no consta. */
+  at: string | null
+  allergies: string[]
+  conditions: string[]
+  medications: string[]
+  pregnancy: boolean
+  /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
+  saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
+}
+
+/** Una declaración de salud tal como llegó. */
+export interface HealthDeclarationView {
+  /** Cuándo lo dijo. */
+  at: string
+  /** Cuándo entró a su ficha: el instante de su registro, si vino con él. */
+  enteredAt: string
+  via: "enlace" | "registro" | "formulario"
+  by: HealthDeclarant
+  health: Record<string, unknown>
+}
+
 export interface PatientHealth {
   revision: number
   reviewStatus: HealthReviewStatus
@@ -229,6 +258,12 @@ export interface PatientHealth {
   allergyReviewDue?: boolean
   /** Lo declarado por el paciente espera la revisión de un profesional (lo decide el servidor). */
   reviewPending?: boolean
+  /** Lo que se dijo de su salud y nadie revisó, por declaración: quién, cuándo y qué (lo decide el servidor). */
+  declared?: DeclaredHealthGroup[]
+  /** El embarazo a hoy, con el día en que se dijo y la semana calculada; null si no hay. */
+  pregnancy?: PregnancyToday | null
+  /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo. */
+  declarations?: HealthDeclarationView[]
   latestAnamnesis: {
     id: string
     version: number
@@ -792,7 +827,21 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /**
+   * Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una
+   * atención anulada, que trae también los descartados con su motivo (`discardedWithAttention`: lo
+   * descartó la propia anulación).
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    afterSigning: boolean
+    retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
+  }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
@@ -1005,6 +1054,13 @@ export interface PatientFull {
    * alergias; nulo para el resto.
    */
   allergyReview?: HealthReviewState | null
+  /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
+  allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /**
+   * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
+   * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
+   */
+  declaredAllergies?: Array<{ by: HealthDeclarant; at: string | null; allergies: string[]; saidNo: boolean }>
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }

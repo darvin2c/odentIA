@@ -3,6 +3,7 @@ import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
+import { saidByWords, saidNoWords } from "../../lib/declared-health"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type TaskItem, useCan, usePermission } from "../../lib/crm"
@@ -128,6 +129,7 @@ export function PersonSummary({
               patientId={patientId}
               patientName={person.displayName}
               health={health.data?.data ?? null}
+              sex={person.sex}
               onAntecedentes={() => openWide?.({ id: "antecedentes" })}
             />
           )}
@@ -210,8 +212,19 @@ export function PersonSummary({
           {patientId && canAlerts && detail && !clinical ? (
             <Fact label="Alergias">
               {allergies.length === 0
-                ? "Sin alergias registradas"
-                : allergies.map((allergy) => allergyName(allergy)).join(", ")}
+                ? // El «No» que marcó la persona (o quien habla por ella) no es un «niega» de la clínica.
+                  detail.allergySaidNo
+                  ? `${saidNoWords(detail.allergySaidNo.by, person.sex)} · sin revisar`
+                  : "Sin alergias registradas"
+                : allergies
+                    .map((allergy) => {
+                      // La que dijo y nadie revisó lleva su marca, como en la franja (QA del 14 nov).
+                      const said = detail.declaredAllergies?.find((group) => group.allergies.includes(allergy.id))
+                      return said
+                        ? `${allergyName(allergy)} (${saidByWords(said.by, person.sex)} · sin revisar)`
+                        : allergyName(allergy)
+                    })
+                    .join(", ")}
             </Fact>
           ) : null}
         </dl>

@@ -183,6 +183,8 @@ export interface DockedSurfaceProps {
   fallback: React.ReactNode
   /** Lo que el contenido guarda solo (`useDraftSavedScope` del contenedor, que lo usa también en su cierre). */
   draft?: DraftSavedScope
+  /** La frase propia de «¿Salir sin guardar?» al salir por el menú (la misma que su cierre, `useCloseGuard`). */
+  unsavedDescription?: string
   children: React.ReactNode
 }
 
@@ -192,10 +194,17 @@ export interface DockedSurfaceProps {
  * control que la abrió al cerrar y protege los cambios sin guardar frente a la
  * navegación (la página sigue usable al lado).
  */
-export function DockedSurface({ bounds, dirty = false, fallback, draft, children }: DockedSurfaceProps) {
+export function DockedSurface({
+  bounds,
+  dirty = false,
+  fallback,
+  draft,
+  unsavedDescription,
+  children,
+}: DockedSurfaceProps) {
   return (
     <SideDockPortal fallback={fallback}>
-      <DockedColumn bounds={bounds} dirty={dirty} draft={draft}>
+      <DockedColumn bounds={bounds} dirty={dirty} draft={draft} unsavedDescription={unsavedDescription}>
         {children}
       </DockedColumn>
     </SideDockPortal>
@@ -206,8 +215,9 @@ function DockedColumn({
   bounds,
   dirty,
   draft: given,
+  unsavedDescription,
   children,
-}: Pick<DockedSurfaceProps, "bounds" | "children" | "draft"> & { dirty: boolean }) {
+}: Pick<DockedSurfaceProps, "bounds" | "children" | "draft" | "unsavedDescription"> & { dirty: boolean }) {
   const [width, resize] = useSideColumnWidth(sidePanelWidthKey(bounds), bounds)
   const DraftGuard = useSideDockDraftGuard()
   const keptInPage = useDraftKeptInPage()
@@ -310,7 +320,7 @@ function DockedColumn({
         <DraftGuard
           dirty={draft.unsaved || typed}
           // Lo que el contenido dice que se pierde (con lo último escrito, si lo hay) es lo que se dice.
-          lost={draft.unsaved ? draft.lost : null}
+          lost={(draft.unsaved ? draft.lost : null) || unsavedDescription}
           onDiscard={draft.discard}
           keptInPage={keptInPage}
         />

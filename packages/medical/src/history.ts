@@ -14,6 +14,7 @@
  *
  * Las demás claves de la entrevista son comunes y no se tocan aquí.
  */
+import { pregnancyToday } from "@odentia/clinical"
 
 export const MEDICAL_INTERVIEW_GROUPS = [
   "embarazoLactancia",
@@ -251,22 +252,14 @@ export function readMedicalHistory(answers: unknown, today: string): MedicalHist
   return picked as MedicalHistory
 }
 
-function daysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
-}
-
 /**
  * Las semanas de embarazo hoy: las que se dijeron más lo que pasó desde
- * entonces o, sin ellas, desde la última regla. null si no está embarazada o
- * no se sabe.
+ * entonces o, sin ellas, desde la última regla. null si no está embarazada, no
+ * se sabe o el embarazo ya pasó su término. La regla es la común
+ * (`pregnancyToday` de `@odentia/clinical`): la misma de la franja de la ficha.
  */
 export function pregnancyWeeks(history: MedicalHistory, today: string): number | null {
-  const embarazo = history.embarazoLactancia?.embarazo
-  if (embarazo?.estado !== "si") return null
-  if (embarazo.semanas !== undefined)
-    return embarazo.semanas + Math.floor(daysBetween(embarazo.fecha, today) / 7)
-  const fur = history.ginecoObstetricos?.fur
-  return fur ? Math.floor(daysBetween(fur, today) / 7) : null
+  return pregnancyToday(history, today)?.weeksToday ?? null
 }
 
 /** «24/10/2026». */
@@ -280,11 +273,14 @@ export function pregnancyLines(history: MedicalHistory, today: string): string[]
   const lines: string[] = []
   const embarazo = history.embarazoLactancia?.embarazo
   if (embarazo) {
-    const weeks = pregnancyWeeks(history, today)
+    const view = pregnancyToday(history, today)
     lines.push(
-      embarazo.estado === "si"
-        ? `Embarazada${weeks === null ? "" : `, ${weeks} semanas`} (registrado el ${dayWords(embarazo.fecha)})`
-        : `No embarazada (registrado el ${dayWords(embarazo.fecha)})`,
+      !view
+        ? `No embarazada (registrado el ${dayWords(embarazo.fecha)})`
+        : view.state === "por_confirmar"
+          ? // Pasado su término ya no se afirma: se pide confirmarlo, como en la franja.
+            `Embarazo por confirmar (registrado el ${dayWords(embarazo.fecha)}): ya pasó el tiempo de un embarazo`
+          : `Embarazada${view.weeksToday === null ? "" : `, ${view.weeksToday} semanas`} (registrado el ${dayWords(embarazo.fecha)})`,
     )
   }
   const lactancia = history.embarazoLactancia?.lactancia

@@ -6,7 +6,9 @@ import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
 import { and, eq, ilike, sql } from "drizzle-orm"
 import {
+  addFormAddendum,
   advanceClinicalOrder,
+  archiveFormTemplate,
   archiveSpecialty,
   createClinicalOrder,
   createConsentDocument,
@@ -215,26 +217,72 @@ export async function seedClinicalForms(
   })
   const declared = await listFormResponses(tx, orgId, { patientId, templateId: previo.id })
   if (declared.length === 0) {
-    await tx.insert(clinicalFormResponse).values({
-      organizationId: orgId,
-      templateId: previo.id,
-      templateVersion: previo.version,
-      templateTitle: previo.title,
-      templateSnapshot: previo.schema,
-      patientId,
-      status: "borrador",
-      source: "portal",
-      respondentContactId: input.contactId,
-      submittedAt: new Date(),
-      answers: {
-        motivo: "Me duele una muela de abajo al tomar frío.",
-        dolor: true,
-        intensidad: 6,
-        nervios: true,
-        nervios_que: "Que me expliquen antes cada paso",
-        antes: "Trabajo de noche: prefiero las citas por la tarde.",
+    const [sent] = await tx
+      .insert(clinicalFormResponse)
+      .values({
+        organizationId: orgId,
+        templateId: previo.id,
+        templateVersion: previo.version,
+        templateTitle: previo.title,
+        templateSnapshot: previo.schema,
+        patientId,
+        status: "borrador",
+        source: "portal",
+        respondentContactId: input.contactId,
+        submittedAt: new Date(),
+        // Lo envió desde su enlace: la pantalla dice por dónde llegó.
+        submittedVia: "enlace",
+        answers: {
+          motivo: "Me duele una muela de abajo al tomar frío.",
+          dolor: true,
+          intensidad: 6,
+          nervios: true,
+          nervios_que: "Que me expliquen antes cada paso",
+          antes: "Trabajo de noche: prefiero las citas por la tarde.",
+        },
+      })
+      .returning({ id: clinicalFormResponse.id })
+    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo.
+    await addFormAddendum(
+      tx,
+      orgId,
+      ownerUserId,
+      sent!.id,
+      "Al llegar dice que el dolor es en la muela de arriba, no en la de abajo, y que empezó hace una semana.",
+    )
+  }
+
+  // Un formulario que la clínica dejó de usar: la demo muestra «Ya no se usan» y «Volver a usar».
+  // Solo la primera vez: si alguien lo volvió a usar en la demo, sembrar otra vez no lo toca.
+  const everHadPeriodontal = (await listFormTemplates(tx, orgId, {})).some((t) => t.key === "ficha-periodontal")
+  if (!everHadPeriodontal) {
+    const draft = await createFormTemplate(tx, orgId, ownerUserId, {
+      key: "ficha-periodontal",
+      title: "Ficha periodontal",
+      description: "Evaluación de encías antes de un tratamiento periodontal.",
+      schema: {
+        sections: [
+          {
+            id: "encias",
+            title: "Encías",
+            fields: [
+              { id: "sangrado", label: "¿Sangran al sondaje?", type: "booleano", required: true },
+              {
+                id: "zonas",
+                label: "¿Dónde?",
+                type: "opcion_multiple",
+                options: ["Superior derecha", "Superior izquierda", "Inferior derecha", "Inferior izquierda"],
+                showIf: { field: "sangrado", equals: true },
+              },
+              { id: "higiene", label: "Higiene", type: "opcion_unica", options: ["Buena", "Regular", "Deficiente"] },
+              { id: "observaciones", label: "Observaciones", type: "texto_largo" },
+            ],
+          },
+        ],
       },
     })
+    const published = await publishFormTemplate(tx, orgId, ownerUserId, draft.id)
+    await archiveFormTemplate(tx, orgId, ownerUserId, published.id)
   }
 
   const consents = await listConsentDocuments(tx, orgId, { patientId })

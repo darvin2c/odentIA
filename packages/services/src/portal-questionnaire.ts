@@ -4,17 +4,25 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, isNull } from "drizzle-orm"
-import { assertAnswers, assertFormSchema, type FormSchemaDef } from "./clinical-forms.js"
+import { and, desc, eq, inArray, isNull, min, ne } from "drizzle-orm"
+import {
+  assertAnswers,
+  assertFormSchema,
+  type FormSchemaDef,
+  type FormTemplateRow,
+  listFormTemplates,
+} from "./clinical-forms.js"
 import { notFound, ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
+import { contactDecides } from "./responsibilities.js"
 
 /**
- * Cuestionario previo a la cita desde el portal: lo responde el paciente o su
- * representante (quien tiene la sesión), queda «declarado» al enviarlo y el
- * equipo lo revisa y finaliza. Usa la misma validación que la ficha.
+ * Cuestionario previo a la cita desde el portal: lo responde quien decide por
+ * el paciente (él mismo o su representante legal vigente, `requireDecisionContact`:
+ * la misma regla de «Su enlace»), queda «declarado» al enviarlo y el equipo lo
+ * revisa y finaliza. Usa la misma validación que la ficha.
  */
 export interface PortalQuestionnaireView {
   template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
@@ -57,7 +65,8 @@ async function respondentOf(tx: Db, who: Respondent) {
   return row
 }
 
-async function currentTemplate(tx: Db, orgId: string) {
+/** El cuestionario que reciben los pacientes. `exceptKey`: cuál sería si ese formulario dejara de estar publicado. */
+async function currentTemplate(tx: Db, orgId: string, exceptKey?: string) {
   const [template] = await tx
     .select()
     .from(clinicalFormTemplate)
@@ -66,11 +75,82 @@ async function currentTemplate(tx: Db, orgId: string) {
         eq(clinicalFormTemplate.organizationId, orgId),
         eq(clinicalFormTemplate.status, "publicado"),
         eq(clinicalFormTemplate.respondent, "portal"),
+        exceptKey ? ne(clinicalFormTemplate.key, exceptKey) : undefined,
       ),
     )
     .orderBy(desc(clinicalFormTemplate.publishedAt))
     .limit(1)
   return template ?? null
+}
+
+/** Un cambio de Configuración sobre una plantilla: publicar su borrador, dejar de usarla o volver a usarla. */
+export const FORM_TEMPLATE_CHANGES = ["publish", "leave", "reuse"] as const
+export type FormTemplateChange = (typeof FORM_TEMPLATE_CHANGES)[number]
+
+/** Un cuestionario del paciente, nombrado para decirlo en una confirmación. */
+export interface ReachedQuestionnaire {
+  key: string
+  title: string
+}
+
+/**
+ * A quién le llega: el cuestionario que hoy reciben los pacientes (`now`) y el
+ * que recibirán después del cambio (`after`), con la regla de `currentTemplate`.
+ * Solo lee: la confirmación de Configuración lo dice antes de hacer el cambio y
+ * no lo calcula por su cuenta. Publicar o volver a usar uno «que responde el
+ * paciente» lo deja como el último publicado; en los demás casos queda el
+ * último de los otros, porque la versión publicada de esta plantilla deja de estarlo.
+ */
+export async function previewPatientQuestionnaire(
+  tx: Db,
+  orgId: string,
+  templateId: string,
+  change: FormTemplateChange,
+): Promise<{ now: ReachedQuestionnaire | null; after: ReachedQuestionnaire | null }> {
+  const [template] = await tx
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)))
+    .limit(1)
+  if (!template) throw notFound("Plantilla")
+  const named = (row: FormTemplateRow | null) => (row ? { key: row.key, title: row.title } : null)
+  const becomes = change !== "leave" && template.respondent === "portal"
+  return {
+    now: named(await currentTemplate(tx, orgId)),
+    after: named(becomes ? template : await currentTemplate(tx, orgId, template.key)),
+  }
+}
+
+/**
+ * Las plantillas para Configuración, con la que hoy reciben los pacientes
+ * marcada (`reachesPatients`): de las publicadas «que responde el paciente» les
+ * llega una sola, la de `currentTemplate`. La lista lo dice con esa misma regla.
+ * `formCreatedAt`: cuándo se creó el formulario, que es su primera versión; no
+ * cambia al publicar otra ni al volver a usarlo, y por eso sirve para distinguir
+ * a dos formularios con el mismo título.
+ */
+export async function listClinicFormTemplates(
+  tx: Db,
+  orgId: string,
+  query: Parameters<typeof listFormTemplates>[2] = {},
+): Promise<Array<FormTemplateRow & { reachesPatients: boolean; formCreatedAt: Date }>> {
+  const rows = await listFormTemplates(tx, orgId, query)
+  const reaching = rows.some((row) => row.respondent === "portal") ? await currentTemplate(tx, orgId) : null
+  const keys = [...new Set(rows.map((row) => row.key))]
+  // De todas las versiones de cada formulario, también las que la lista pedida no trae (las archivadas).
+  const firsts = keys.length
+    ? await tx
+        .select({ key: clinicalFormTemplate.key, createdAt: min(clinicalFormTemplate.createdAt) })
+        .from(clinicalFormTemplate)
+        .where(and(eq(clinicalFormTemplate.organizationId, orgId), inArray(clinicalFormTemplate.key, keys)))
+        .groupBy(clinicalFormTemplate.key)
+    : []
+  const createdOf = new Map(firsts.map((first) => [first.key, first.createdAt]))
+  return rows.map((row) => ({
+    ...row,
+    reachesPatients: row.id === reaching?.id,
+    formCreatedAt: createdOf.get(row.key) ?? row.createdAt,
+  }))
 }
 
 /** Borrador abierto del portal o, si no hay, el último enviado (solo lectura). */
@@ -97,7 +177,9 @@ export async function getPortalQuestionnaire(
 ): Promise<PortalQuestionnaireView> {
   requireScope(ctx.session, "appointments")
   const respondent = await respondentOf(tx, fromSession(ctx))
-  const template = await currentTemplate(tx, ctx.orgId)
+  // El portal y el enlace usan la misma regla: el cuestionario es de quien decide por el paciente.
+  const decides = await contactDecides(tx, ctx.orgId, ctx.session.patientId, ctx.session.contactId)
+  const template = decides ? await currentTemplate(tx, ctx.orgId) : null
   const response = template ? await latestResponse(tx, fromSession(ctx), template.key) : null
   await logAccess(tx, ctx.orgId, ctx.session.id, "questionnaire.viewed")
   return {
@@ -193,6 +275,9 @@ async function saveQuestionnaire(
   input: { answers: unknown; submit?: boolean; origin?: "portal" | "enlace" },
 ): Promise<string> {
   await respondentOf(tx, who)
+  // Una sola regla para el portal y «Su enlace»: lo responde quien decide por el paciente.
+  if (!(await contactDecides(tx, who.orgId, who.patientId, who.contactId)))
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este cuestionario lo responde el paciente o quien decide por él")
   const template = await currentTemplate(tx, who.orgId)
   if (!template) throw notFound("Cuestionario")
   const schema = assertFormSchema(template.schema)
@@ -212,6 +297,8 @@ async function saveQuestionnaire(
       `Ya enviaste este cuestionario; tu ${productWords(await orgProduct(tx, who.orgId)).clinician.one} lo revisará`,
     )
   const now = new Date()
+  // Por dónde llegó se guarda al enviarlo: la pantalla del equipo lo dice tal cual.
+  const submittedVia = input.submit ? (input.origin ?? "portal") : null
   let id: string
   if (open) {
     const [row] = await tx
@@ -220,6 +307,7 @@ async function saveQuestionnaire(
         answers,
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
         updatedAt: now,
       })
       .where(and(eq(clinicalFormResponse.id, open.id), isNull(clinicalFormResponse.submittedAt)))
@@ -241,6 +329,7 @@ async function saveQuestionnaire(
         source: "portal",
         respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
+        submittedVia,
       })
       .returning({ id: clinicalFormResponse.id })
     id = row!.id
