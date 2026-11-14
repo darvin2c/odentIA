@@ -1,4 +1,11 @@
-import { documentText, formatMoney } from "@odentia/clinical"
+import {
+  documentText,
+  formatMoney,
+  MEDICATION_CLASSES,
+  type MedicationClass,
+  type MedicineClassAnswer,
+  medicationAlertWords,
+} from "@odentia/clinical"
 import {
   Badge,
   Breadcrumb,
@@ -92,13 +99,21 @@ export function clinicalAlerts(
     tone: "warning" as const,
   }))
   // Lo que toma, con su nombre: un anticoagulante cambia la anestesia y la hemostasia
-  // (mesa del 9 nov). Antes solo se contaba («2 medicamentos vigentes»).
-  const medications = detail.currentMedications.map((m) => ({
-    id: m.id,
-    label: `Toma ${[m.name, m.dose].filter(Boolean).join(" ")}`,
-    tone: "secondary" as const,
-  }))
-  return [...severe, ...other, ...conditions, ...medications]
+  // (mesa del 9 nov). Un anticoagulante o una medicina para los huesos (grupos ATC B01A y M05B)
+  // llevan su marca, «Anticoagulante: warfarina 5 mg», y van antes que lo demás (mesa del 13 nov).
+  const medications = detail.currentMedications.map((m) => {
+    const words = medicationAlertWords(m)
+    return { id: m.id, label: words.label, tone: words.group ? ("warning" as const) : ("secondary" as const) }
+  })
+  const marked = medications.filter((m) => m.tone === "warning")
+  return [...severe, ...marked, ...other, ...conditions, ...medications.filter((m) => m.tone !== "warning")]
+}
+
+/** «No se le preguntó» no es «dijo que no»: lo que se sabe de cada clase, en la atención. */
+const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, (said: boolean) => string> = {
+  unasked: () => "no se le preguntó",
+  no: (said) => (said ? "dijo que no" : "no toma"),
+  unknown: () => "no sabe",
 }
 
 /**
@@ -117,6 +132,7 @@ export function PatientClinicalStrip({
   medicationReview,
   health,
   sex,
+  medicineClasses = false,
 }: {
   detail: Pick<
     PatientFull,
@@ -129,6 +145,11 @@ export function PatientClinicalStrip({
   health?: PatientHealth | null
   /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
   sex?: string | null
+  /**
+   * La atención dice también lo que no se sabe de anticoagulantes y medicinas para los huesos: «No
+   * se le preguntó», «dijo que no» o «no sabe» (mesa del 13 nov). La ficha muestra solo la marca.
+   */
+  medicineClasses?: boolean
 }) {
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
   // Quien solo ve las alergias (recepción) recibe una sola cosa de lo declarado: su «No», con quién lo dijo.
@@ -195,7 +216,22 @@ export function PatientClinicalStrip({
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
-  if (alerts.length === 0 && !allergyWord && !medicationWord) return null
+  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca.
+  const classWords =
+    medicineClasses && health?.medicineClasses
+      ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+          const known = health.medicineClasses?.[key]
+          if (!known || known.answer === "yes") return []
+          return [
+            {
+              key,
+              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}`,
+              warn: known.answer !== "no",
+            },
+          ]
+        })
+      : []
+  if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
     <Badge
@@ -242,6 +278,18 @@ export function PatientClinicalStrip({
           {medicationWord}
         </Badge>
       ) : null}
+      {classWords.map((word) => (
+        <Badge
+          key={word.key}
+          variant="outline"
+          className={cn(
+            "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
+            word.warn && "border-warning/30 bg-warning-soft text-warning",
+          )}
+        >
+          {word.label}
+        </Badge>
+      ))}
       {rest.map(chip)}
       {hidden > 0 && onAntecedentes ? (
         <Button

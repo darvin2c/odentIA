@@ -4,6 +4,8 @@ import {
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
   type HealthDeclarant,
+  type MedicationClass,
+  type MedicineClassAnswer,
   type MissingPersonDatum,
   type PregnancyToday,
   type Vitals,
@@ -264,6 +266,8 @@ export interface PatientHealth {
   pregnancy?: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo. */
   declarations?: HealthDeclarationView[]
+  /** Anticoagulantes y medicinas para los huesos: si toma, si dijo que no, si no sabe o si nadie se lo preguntó. */
+  medicineClasses?: Record<MedicationClass, MedicineClassAnswer>
   latestAnamnesis: {
     id: string
     version: number

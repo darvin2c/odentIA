@@ -2250,6 +2250,8 @@ export function EncounterEditor({
         health={stripHealth.data?.data ?? null}
         sex={patient.patient.sex}
         onAntecedentes={() => setContextOpen(true)}
+        // En la atención se dice también lo que nadie le preguntó de anticoagulantes y huesos.
+        medicineClasses={productUi().product !== "optical"}
       />
       {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}
       <PageHeader

@@ -131,4 +131,40 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     // El «niega» que anotó la clínica sigue diciéndose así.
     expect(text(<PatientClinicalStrip detail={none} sex="F" health={health([])} />)).toContain("Niega alergias")
   })
+
+  it("Marta: «Anticoagulante» y «Huesos» arriba, dichos por ella, antes que lo demás que toma", () => {
+    const marta: Detail = {
+      activeAllergies: [],
+      activeConditions: [],
+      currentMedications: [
+        medication("m0", "Losartán"),
+        { id: "m1", name: "warfarina", dose: "5 mg", atcCode: "B01A" } as unknown as PatientFull["currentMedications"][number],
+        { id: "m2", name: "alendronato", dose: null, atcCode: "M05B" } as unknown as PatientFull["currentMedications"][number],
+      ],
+      allergyReview: "none",
+    }
+    const page = text(
+      <PatientClinicalStrip detail={marta} sex="F" health={health([group({ medications: ["m1", "m2"] })])} />,
+    )
+    expect(page).toContain("Lo dijo ella el 13 nov, sin revisar:")
+    expect(page.indexOf("Anticoagulante: warfarina 5 mg")).toBeGreaterThan(-1)
+    expect(page.indexOf("Huesos: alendronato")).toBeGreaterThan(page.indexOf("Anticoagulante: warfarina 5 mg"))
+    expect(page.indexOf("Toma Losartán")).toBeGreaterThan(page.indexOf("Huesos: alendronato"))
+  })
+
+  it("en la atención, «No se le preguntó» no es «dijo que no»; la ficha no lo repite", () => {
+    const classes = {
+      medicineClasses: {
+        anticoagulants: { answer: "unasked", said: false },
+        boneMedicines: { answer: "no", said: true },
+      },
+    } as Partial<PatientHealth>
+    const encounter = text(
+      <PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} medicineClasses />,
+    )
+    expect(encounter).toContain("Anticoagulante: no se le preguntó")
+    expect(encounter).toContain("Huesos: dijo que no")
+    const chart = text(<PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} />)
+    expect(chart).not.toContain("no se le preguntó")
+  })
 })
