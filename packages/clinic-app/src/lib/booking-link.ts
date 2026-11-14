@@ -74,6 +74,8 @@ export interface PersonalLinkView {
   budgets: PortalBudget[]
   consents: PersonalLinkConsent[]
   questionnaire: { title: string } | null
+  /** «Lo que nos contaste»: qué envió quien abre y cuándo (en la zona de la clínica). Nunca lo que respondió. */
+  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "cuestionario"; at: string }> } | null
   /** Lo que aceptó de su presupuesto y aún no tiene cita: «Lo que aceptaste, por agendar». */
   toSchedule: Array<{ planItemId: string; title: string }>
   /** «Reservar otra» en «Tu cita»: las citas por venir y el tope; nulo si no le corresponde. */
@@ -179,6 +181,7 @@ export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
       signable: consent.signable ?? true,
       why: consent.why ?? null,
     })),
+    told: view.told ?? null,
     toSchedule: view.toSchedule ?? [],
     another: view.another ?? null,
     confirmVia: view.confirmVia ?? null,

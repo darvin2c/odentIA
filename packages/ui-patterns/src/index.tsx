@@ -116,7 +116,7 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
-export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
+export { DockedSurface, type DockedSurfaceProps, useDockDecision, useDraftSaved } from "./docked-surface.js"
 export {
   MobileNavTrigger,
   PageHeader,
@@ -155,6 +155,7 @@ export {
 } from "./side-dock.js"
 export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"
+export { RadioChips, type RadioChipsProps } from "./radio-chips.js"
 export {
   type RowActionItem,
   RowActions,

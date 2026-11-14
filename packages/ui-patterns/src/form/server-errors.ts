@@ -111,6 +111,29 @@ export function setSubmitErrors(form: AnyFormApi, errors: SubmitErrors): void {
 }
 
 /**
+ * Suma el aviso de unos campos sin borrar los que ya estaban a la vista: un
+ * autoguardado que señala una respuesta que no vale mientras siguen marcadas
+ * las que faltan responder. Cada uno se va al corregir su campo. Lo de un campo
+ * que no está en pantalla se dice junto a los botones.
+ */
+export function addSubmitErrors(form: AnyFormApi, fields: Record<string, string>): void {
+  const state = keptOf(form)
+  const unseen: string[] = []
+  for (const [name, message] of Object.entries(fields)) {
+    if (!message) continue
+    if (!isMounted(form, name)) {
+      unseen.push(message)
+      continue
+    }
+    setServerError(form, name, message)
+    state.fields.set(name, form.getFieldValue(name))
+  }
+  if (unseen.length === 0) return
+  state.form = { message: [...new Set([state.form?.message, ...unseen].filter(Boolean))].join(" "), values: form.state.values }
+  publish(state)
+}
+
+/**
  * Lo que dejó la validación al enviar: se conserva igual que un rechazo del
  * servidor. Con Zod (Standard Schema) el error de un campo es una lista de
  * issues. El de un dato que no tiene campo en pantalla (un paso que no está a

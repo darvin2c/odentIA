@@ -1,5 +1,4 @@
 import {
-  Button,
   Checkbox,
   cn,
   Field,
@@ -16,7 +15,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { DatePickerButton, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
+import { DatePickerButton, RadioChips, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
 import { FirmaPad, FirmaView } from "./firma-pad"
@@ -92,6 +91,12 @@ export interface AttachmentOption {
 }
 
 /**
+ * Las opciones de una escala o de un Sí/No: en el teléfono (ancho de teléfono o
+ * puntero de dedo) cada una mide al menos 44 px; con ratón, lo de siempre.
+ */
+const ANSWER_CHOICES = "max-sm:[&_label]:min-h-11 max-sm:[&_label]:min-w-11 pointer-coarse:[&_label]:min-h-11 pointer-coarse:[&_label]:min-w-11"
+
+/**
  * ¿La respuesta se da con varios controles (opciones, casillas, piezas,
  * firma)? Entonces va en `FieldSet` + `FieldLegend`; si no, en `Field` +
  * `FieldLabel htmlFor`.
@@ -152,6 +157,8 @@ function AnswerFrame({
       <FieldSet data-invalid={invalid || undefined} className="gap-1.5">
         <FieldLegend id={labelId} variant="label" className={cn("mb-0", invalid && "text-destructive")}>
           <AnswerLabel field={field} />
+          {/* El asterisco es solo para la vista y un grupo no lleva `aria-required`: se dice con palabras. */}
+          {field.required ? <span className="sr-only"> (obligatoria)</span> : null}
         </FieldLegend>
         {children(labelId)}
         {help}
@@ -205,10 +212,13 @@ export function AnswerAppField({
   field,
   disabled = false,
   attachments,
+  enterKeyHint,
 }: {
   field: FormFieldDef
   disabled?: boolean
   attachments?: AttachmentOption[]
+  /** En un cuestionario donde Enter pasa de pregunta (`advanceOnEnter`): la tecla del teléfono dice «Siguiente», no «Ir». */
+  enterKeyHint?: "next"
 }): React.JSX.Element | null {
   const formField = useFieldContext<unknown>()
   const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!field.help })
@@ -229,6 +239,7 @@ export function AnswerAppField({
           value={formField.state.value}
           disabled={disabled}
           attachments={attachments}
+          enterKeyHint={enterKeyHint}
           onChange={(next) => formField.handleChange(next)}
           id={control.id}
           invalid={control.invalid}
@@ -258,6 +269,7 @@ export function AnswerInput({
   id: givenId,
   invalid = false,
   onBlur,
+  enterKeyHint,
   ...aria
 }: {
   field: FormFieldDef
@@ -265,6 +277,8 @@ export function AnswerInput({
   disabled?: boolean
   onChange: (value: unknown) => void
   attachments?: AttachmentOption[]
+  /** La tecla Enter del teclado del teléfono en las respuestas de una línea. */
+  enterKeyHint?: "next"
   id?: string
   invalid?: boolean
   onBlur?: () => void
@@ -297,6 +311,7 @@ export function AnswerInput({
       return (
         <Input
           {...common}
+          enterKeyHint={enterKeyHint}
           value={typeof value === "string" ? value : ""}
           maxLength={500}
           onChange={(event) => onChange(event.target.value)}
@@ -318,6 +333,7 @@ export function AnswerInput({
           {...common}
           type="number"
           inputMode="decimal"
+          enterKeyHint={enterKeyHint}
           value={typeof value === "number" ? value : ""}
           min={field.min ?? undefined}
           max={field.max ?? undefined}
@@ -328,6 +344,9 @@ export function AnswerInput({
       )
     case "booleano":
     case "escala": {
+      // El grupo de radios del sistema: una sola parada de Tab, en la opción elegida; las flechas
+      // mueven y eligen, Espacio elige y Enter no marca. Lo que no es obligatorio se deja sin
+      // responder con «Quitar respuesta».
       const options: Array<{ value: boolean | number; text: string }> =
         field.type === "booleano"
           ? [
@@ -338,37 +357,21 @@ export function AnswerInput({
               const n = (field.min ?? 0) + i
               return { value: n, text: String(n) }
             })
+      const chosen = options.find((option) => option.value === value)
       return (
-        <div
+        <RadioChips
           id={id}
-          role="radiogroup"
-          aria-required={required}
           aria-labelledby={labelledBy}
           aria-describedby={describedBy}
-          aria-invalid={ariaInvalid}
-          onBlur={groupBlur}
-          className="flex flex-wrap gap-1.5"
-        >
-          {options.map((option) => {
-            const checked = value === option.value
-            return (
-              <Button
-                key={String(option.value)}
-                type="button"
-                size="sm"
-                role="radio"
-                aria-checked={checked}
-                aria-invalid={ariaInvalid}
-                variant={checked ? "default" : "outline"}
-                className={field.type === "escala" ? "w-10" : "min-w-16"}
-                disabled={disabled}
-                onClick={() => onChange(checked ? null : option.value)}
-              >
-                {option.text}
-              </Button>
-            )
-          })}
-        </div>
+          invalid={invalid}
+          onBlur={onBlur}
+          disabled={disabled}
+          value={chosen ? String(chosen.value) : null}
+          options={options.map((option) => ({ value: String(option.value), label: option.text }))}
+          onChange={(picked) => onChange(options.find((option) => String(option.value) === picked)?.value ?? null)}
+          onClear={field.required ? undefined : () => onChange(null)}
+          className={ANSWER_CHOICES}
+        />
       )
     }
     case "opcion_unica":

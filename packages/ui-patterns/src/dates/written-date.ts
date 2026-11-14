@@ -87,6 +87,40 @@ export function writtenDateMask(format: WrittenDateFormat): Array<RegExp | strin
   ])
 }
 
+/**
+ * Lo que la gente teclea entre el día, el mes y el año al escribir una fecha
+ * como la dice: barra, guion, punto, coma o espacio (lo que tenga a mano el
+ * teclado numérico del teléfono). Donde ese teclado no trae ninguno, como el
+ * del iPhone, la fecha se escribe con sus ocho números seguidos («03041990»).
+ */
+export const TYPED_DATE_SEPARATOR = /[/.,\-\s]/
+
+/**
+ * Al teclear un separador: si la parte en curso (día o mes) lleva un solo
+ * dígito, se completa con un cero («3» y «/» → «03»), para que «3/4/1990» sea
+ * el 3 de abril y no «34/19/90». `null`: no hay nada que completar.
+ */
+export function padWrittenPart(written: string, format: WrittenDateFormat = writtenDateFormat()): string | null {
+  const parts = written.split(format.separator)
+  const index = parts.length - 1
+  const part = format.order[index]
+  const current = parts[index] ?? ""
+  if (!part || part === "year" || !/^\d$/.test(current)) return null
+  return [...parts.slice(0, index), `0${current}`].join(format.separator)
+}
+
+/**
+ * Una fecha entera escrita o pegada sin ceros («3/4/1990», «3-4-1990») en el
+ * orden de la clínica, con sus ceros y su separador. `null` si no son tres partes.
+ */
+export function padWrittenDate(text: string, format: WrittenDateFormat = writtenDateFormat()): string | null {
+  const parts = text.trim().split(/[/.,\-\s]+/)
+  if (parts.length !== 3 || !parts.every((part) => /^\d{1,4}$/.test(part))) return null
+  return parts
+    .map((part, index) => (format.order[index] !== "year" && part.length === 1 ? `0${part}` : part))
+    .join(format.separator)
+}
+
 /** `1995-07-30` → `30/07/1995` en el orden de la clínica; lo que no es ISO queda igual. */
 export function writeDate(iso: string, format: WrittenDateFormat = writtenDateFormat()): string {
   const match = ISO_DATE.exec(iso.trim())

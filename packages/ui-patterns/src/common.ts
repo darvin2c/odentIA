@@ -9,6 +9,8 @@ export const common = {
     save: "Guardar",
     retry: "Reintentar",
     close: "Cerrar",
+    /** Bajo un grupo de opciones que se puede dejar sin responder. */
+    clearAnswer: "Quitar respuesta",
   },
   states: {
     loading: "Cargando…",

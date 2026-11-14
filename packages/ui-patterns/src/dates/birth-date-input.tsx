@@ -6,7 +6,10 @@ import { regionToday } from "../schedule/time.js"
 import {
   ageText,
   clinicDateLocale,
+  padWrittenDate,
+  padWrittenPart,
   readWrittenDate,
+  TYPED_DATE_SEPARATOR,
   type WrittenDateFormat,
   type WrittenDateReading,
   writeDate,
@@ -156,7 +159,8 @@ export function PastDateInput(props: Omit<BirthDateInputProps, "showAge">) {
 
 /**
  * Máscara del campo: dígitos y separadores fijos en el orden de la clínica. Una
- * fecha ISO pegada o autocompletada (`1995-07-30`) se pasa al orden del campo.
+ * fecha ISO pegada o autocompletada (`1995-07-30`) se pasa al orden del campo, y
+ * la escrita como se dice, con barras y sin ceros («3/4/1990»), se completa.
  */
 function maskOptions(format: WrittenDateFormat): MaskitoOptions {
   return {
@@ -165,6 +169,19 @@ function maskOptions(format: WrittenDateFormat): MaskitoOptions {
       ({ elementState, data }, actionType) => {
         if (actionType === "insert" && ISO_DATE.test(data.trim())) {
           return { elementState, data: writeDate(data.trim(), format) }
+        }
+        if (actionType === "insert") {
+          const whole = padWrittenDate(data, format)
+          if (whole) return { elementState, data: whole }
+          const [from, to] = elementState.selection
+          const atEnd = from === to && to === elementState.value.length
+          if (atEnd && data.length === 1 && TYPED_DATE_SEPARATOR.test(data)) {
+            // El separador que teclee (barra, guion, punto, espacio) vale por el del campo.
+            const padded = padWrittenPart(elementState.value, format)
+            return padded === null
+              ? { elementState, data: format.separator }
+              : { elementState: { value: padded, selection: [padded.length, padded.length] }, data: format.separator }
+          }
         }
         if (actionType === "validation" && ISO_DATE.test(elementState.value.trim())) {
           const written = writeDate(elementState.value.trim(), format)

@@ -5,6 +5,7 @@ import {
   EDUCATION_LEVEL_LABELS,
   EDUCATION_LEVELS,
   type IdentityDocType,
+  identityDocumentError,
   INSURANCE_TYPE_LABELS,
   type InsuranceType,
   isMinor,
@@ -918,6 +919,8 @@ export function RegistrationQuestionnaire({
         : null
   const needs = (condition: boolean, field: keyof Draft, message: string): Found =>
     condition ? { field, message } : null
+  /** Lo que la regla de la ficha dice de lo escrito en un campo, con sus mismas palabras. */
+  const says = (field: keyof Draft, problem: string | null): Found => (problem ? { field, message: problem } : null)
 
   return (
     <FormContext.Provider value={form}>
@@ -1161,7 +1164,8 @@ export function RegistrationQuestionnaire({
               true,
               "Escribe tu celular.",
             ) ??
-            needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.")
+            needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.") ??
+            says("repDoc", minor ? identityDocumentError(repDocType, draft.repDoc) : null)
           }
         >
           <Labeled name="repName" label="Tu nombre y apellidos">
@@ -1248,6 +1252,8 @@ export function RegistrationQuestionnaire({
               "docNumber",
               "Escribe el número.",
             ) ??
+            // El formato se revisa aquí, no recién al enviar: un DNI de 7 números se corrige en su pantalla.
+            says("docNumber", identityDocumentError(draft.docType, draft.docNumber)) ??
             needs(
               Boolean(draft.docType) &&
                 asksDocumentCountry(profile, draft.docType) &&
