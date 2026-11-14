@@ -18,7 +18,6 @@ import { notFound } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { specialtyForKind } from "./product-catalog.js"
 import { productHooks } from "./products.js"
-import { librarySpecialtyIds } from "./specialties.js"
 import { patientAge } from "./responsibilities.js"
 
 /**
@@ -56,11 +55,14 @@ export async function ensureClinicForms(tx: Db, orgId: string): Promise<FormTemp
     (suggestion) => !known.has(suggestion.key) && !titles.has(sameTitle(suggestion.title)),
   )
   if (missing.length === 0) return []
-  const specialtyOf = await librarySpecialtyIds(
-    tx,
-    orgId,
-    missing.map((suggestion) => suggestion.kind),
-  )
+  // Se une a la especialidad que la clínica ya tiene activa. Si no la tiene o la desactivó, entra
+  // sin especialidad (no aparece sola; se elige en «Otra ficha…»): copiar fichas nunca crea ni
+  // reactiva especialidades de paso.
+  const specialtyOf = new Map<string, string>()
+  for (const kind of new Set(missing.map((suggestion) => suggestion.kind))) {
+    const [id] = await specialtyIdsOfKind(tx, orgId, kind)
+    if (id) specialtyOf.set(kind, id)
+  }
   const now = new Date()
   const created: FormTemplateRow[] = []
   for (const suggestion of missing) {

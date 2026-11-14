@@ -518,3 +518,25 @@ it("una atención firmada o anulada no ofrece ninguna ficha, ni una especialidad
   expect(await c.offers(open.id)).toEqual([])
 })
 
+// QA del 14 nov (desarrollo H6): en clínicas sin especialidades, el worker creaba las 13 de la biblioteca, activas.
+it("copiar las fichas del producto no crea especialidades: sin la suya activa, la ficha entra sin especialidad", async () => {
+  const c = await clinic({ forms: false })
+  // Una clínica sin especialidades (como las que nacieron antes de que las tuvieran).
+  await ownerDb.delete(orgSpecialty).where(eq(orgSpecialty.organizationId, c.orgId))
+  const created = await c.run((tx) => ensureClinicForms(tx, c.orgId))
+  expect(created).toHaveLength(4)
+  expect(created.every((row) => row.specialtyId === null)).toBe(true)
+  expect(await ownerDb.select().from(orgSpecialty).where(eq(orgSpecialty.organizationId, c.orgId))).toEqual([])
+
+  // Con su especialidad desactivada, tampoco se une a ella ni la reactiva.
+  const other = await clinic({ forms: false })
+  const pediatric = other.specialties.get("odontopediatria")!
+  await ownerDb.update(orgSpecialty).set({ isActive: false }).where(eq(orgSpecialty.id, pediatric.id))
+  const copies = await other.run((tx) => ensureClinicForms(tx, other.orgId))
+  expect(copies.find((row) => row.key === "ficha-de-odontopediatria")?.specialtyId).toBeNull()
+  expect(copies.find((row) => row.key === "ficha-de-ortodoncia")?.specialtyId).toBe(
+    other.specialties.get("ortodoncia_ortopedia_maxilar")!.id,
+  )
+  const [still] = await ownerDb.select().from(orgSpecialty).where(eq(orgSpecialty.id, pediatric.id))
+  expect(still?.isActive).toBe(false)
+})
