@@ -1,6 +1,6 @@
 import type { ConsentSections } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
-import { apiFetch, apiFetchBytes } from "./api"
+import { ApiError, apiFetch, apiFetchBytes } from "./api"
 
 /**
  * Especialidad de la clínica: la única lista (ADR 0039). Nace con las de la
@@ -447,6 +447,23 @@ export function reuseFormTemplate(id: string) {
   return post<FormTemplate>(`${BASE}/form-templates/${id}/reuse`, {})
 }
 
+/** Un cuestionario del paciente, nombrado para decirlo en una confirmación. */
+export interface ReachedQuestionnaire {
+  key: string
+  title: string
+}
+
+/** A quién le llega: el que reciben hoy los pacientes (`now`) y el que recibirán después del cambio (`after`). */
+export interface TemplateReach {
+  now: ReachedQuestionnaire | null
+  after: ReachedQuestionnaire | null
+}
+
+/** Lo dice el servidor, con la regla del enlace y del portal: la pantalla no lo calcula. */
+export function fetchTemplateReach(id: string, change: "publish" | "leave" | "reuse") {
+  return apiFetch<{ data: TemplateReach }>(`${BASE}/form-templates/${id}/reach?change=${change}`)
+}
+
 // --- Capturas ---
 
 export function fetchFormResponses(query: {
@@ -465,6 +482,22 @@ export function createFormResponse(body: {
   answers?: Record<string, unknown>
 }) {
   return post<FormResponse>(`${BASE}/form-responses`, body)
+}
+
+/**
+ * «Empezar» un formulario. Si la atención a la que se iba a unir ya no está en
+ * curso (se firmó o se anuló en otra pestaña y esta pantalla aún no lo sabe), se
+ * empieza igual, sin unirlo a ella: `detached` lo dice, para avisarlo y refrescar.
+ */
+export async function startFormResponse(
+  body: Parameters<typeof createFormResponse>[0],
+): Promise<{ data: FormResponse; detached: boolean }> {
+  try {
+    return { ...(await createFormResponse(body)), detached: false }
+  } catch (error) {
+    if (!body.encounterId || !(error instanceof ApiError) || error.shape.code !== "ENCOUNTER_CLOSED") throw error
+    return { ...(await createFormResponse({ ...body, encounterId: null })), detached: true }
+  }
 }
 
 export function updateFormResponse(

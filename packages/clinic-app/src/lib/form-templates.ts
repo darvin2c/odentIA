@@ -1,4 +1,4 @@
-import type { FormFieldDef, FormSectionDef, FormTemplate } from "./clinical-forms"
+import type { FormFieldDef, FormSectionDef, FormTemplate, TemplateReach } from "./clinical-forms"
 
 /**
  * Lo que «Formularios propios» decide sin tocar el servidor: qué formularios
@@ -82,55 +82,68 @@ export function currentLine(versions: FormTemplate[], templates: readonly FormTe
 const KEEPS = "Lo ya respondido conserva su título y sus preguntas."
 const FROZEN = "Una versión publicada ya no se edita: para cambiarla se prepara la siguiente."
 
-/** Lo que pasa al publicar un borrador, dicho antes de publicarlo. */
-export function publishWords(draft: FormTemplate, templates: readonly FormTemplate[]): string {
+/**
+ * Un cambio toca lo que reciben los pacientes si la plantilla, o la versión que
+ * reemplaza, es un cuestionario «que responde el paciente». Entonces la
+ * confirmación le pide al servidor a quién le llega (`TemplateReach`) antes de decirlo.
+ */
+export function touchesPatients(template: FormTemplate, templates: readonly FormTemplate[]): boolean {
+  return (
+    template.respondent === "portal" ||
+    templates.some((other) => other.key === template.key && other.status === "publicado" && other.respondent === "portal")
+  )
+}
+
+/**
+ * Lo que pasa al publicar un borrador, dicho antes de publicarlo. Cuál reciben
+ * hoy los pacientes y cuál recibirán después lo dice el servidor (`reach`); sin
+ * ese dato (no se pudo consultar) no se nombra a ninguno.
+ */
+export function publishWords(draft: FormTemplate, templates: readonly FormTemplate[], reach: TemplateReach | null): string {
   const replaced = templates.find((template) => template.key === draft.key && template.status === "publicado")
   if (draft.respondent === "portal") {
-    const reaching = reachingPatients(templates)
+    const archived = replaced ? `La versión ${replaced.version} se archiva. ${KEEPS}` : FROZEN
+    if (!reach) return `Desde ese momento lo reciben los pacientes con cita por venir. ${archived}`
     // Otro cuestionario es el que hoy les llega: publicar este lo reemplaza, aunque el otro siga publicado.
-    if (reaching && reaching.key !== draft.key) {
-      return [
-        `Desde ese momento lo reciben los pacientes con cita por venir, en lugar de «${reaching.title}», que sigue publicado pero deja de llegarles.`,
-        replaced ? `La versión ${replaced.version} se archiva.` : "",
-        replaced ? KEEPS : FROZEN,
-      ]
-        .filter(Boolean)
-        .join(" ")
+    if (reach.now && reach.now.key !== draft.key) {
+      return `Desde ese momento lo reciben los pacientes con cita por venir, en lugar de «${reach.now.title}», que sigue publicado pero deja de llegarles. ${archived}`
     }
-    if (replaced) {
+    // Hoy les llega la versión anterior de este mismo.
+    if (reach.now && replaced) {
       return `Desde ese momento los pacientes con cita por venir reciben la versión ${draft.version}, en lugar de la ${replaced.version}, que se archiva. ${KEEPS}`
     }
-    return `Desde ese momento lo reciben los pacientes con cita por venir, para responderlo antes de venir. ${FROZEN}`
+    // Hoy no reciben ninguno: la versión anterior, si la hay, la llenaba el equipo y nunca les llegó.
+    const before = replaced ? `La versión ${replaced.version}, que llenaba el equipo, se archiva. ${KEEPS}` : FROZEN
+    return `Desde ese momento lo reciben los pacientes con cita por venir, para responderlo antes de venir. ${before}`
   }
   if (replaced) {
-    // La versión anterior la respondía el paciente y esta, el equipo: deja de llegarle.
-    const stops = replaced.reachesPatients === true ? " Como ahora lo responde el equipo, los pacientes dejan de recibirlo." : ""
-    return `La versión ${replaced.version} se archiva y los formularios nuevos usarán la ${draft.version}.${stops} ${KEEPS}`
+    const base = `La versión ${replaced.version} se archiva y los formularios nuevos usarán la ${draft.version}.`
+    if (replaced.respondent !== "portal") return `${base} ${KEEPS}`
+    // La versión anterior la respondía el paciente y esta la llena el equipo.
+    if (!reach) return `${base} Como ahora lo llena el equipo, cambia lo que reciben los pacientes antes de su cita. ${KEEPS}`
+    if (reach.now?.key !== draft.key) return `${base} ${KEEPS}`
+    const instead = reach.after
+      ? `los pacientes con cita por venir dejan de recibirlo y pasan a recibir «${reach.after.title}», que sigue publicado.`
+      : "los pacientes dejan de recibirlo y no recibirán ningún cuestionario antes de su cita."
+    return `${base} Como ahora lo llena el equipo, ${instead} ${KEEPS}`
   }
   return `Quedará disponible para responder en la ficha. ${FROZEN}`
 }
 
 /** Lo que pasa al dejar de usar un formulario en uso. */
-export function leaveWords(current: FormTemplate, templates: readonly FormTemplate[]): string {
+export function leaveWords(current: FormTemplate, reach: TemplateReach | null): string {
   const again = "Puedes volver a usarlo cuando quieras."
   if (current.respondent !== "portal") {
     return `Deja de ofrecerse en «Nuevo» › «Formulario». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
   }
   const kept = `Lo que ya respondieron sigue en cada paciente. ${again}`
-  if (publishedButNotReaching(current)) {
-    const reaching = reachingPatients(templates)
-    return `Hoy no les llega a los pacientes${reaching ? `: reciben «${reaching.title}»` : ""}, así que para ellos nada cambia. ${kept}`
+  if (!reach) return `Si es el que reciben los pacientes con cita por venir, dejarán de recibirlo. ${kept}`
+  if (reach.now?.key !== current.key) {
+    return `Hoy no les llega a los pacientes${reach.now ? `: reciben «${reach.now.title}»` : ""}, así que para ellos nada cambia. ${kept}`
   }
-  // Los otros cuestionarios del paciente que siguen publicados: con uno solo, se sabe cuál les llegará.
-  const others = templates.filter(
-    (template) => template.key !== current.key && template.status === "publicado" && template.respondent === "portal",
-  )
-  const instead =
-    others.length === 0
-      ? "y no recibirán ningún cuestionario antes de su cita."
-      : others.length === 1
-        ? `y en su lugar les llegará «${others[0]?.title}», que sigue publicado.`
-        : "y en su lugar les llegará otro de los que siguen publicados: la lista dirá cuál."
+  const instead = reach.after
+    ? `y en su lugar les llegará «${reach.after.title}», que sigue publicado.`
+    : "y no recibirán ningún cuestionario antes de su cita."
   return `Los pacientes con cita por venir dejan de recibirlo, ${instead} ${kept}`
 }
 
@@ -138,12 +151,45 @@ export function leaveWords(current: FormTemplate, templates: readonly FormTempla
  * Lo que pasa al volver a usar un cuestionario que responde el paciente: empieza a
  * llegarles, y eso se confirma. Null si lo llena el equipo: se vuelve a usar sin preguntar.
  */
-export function reuseWords(last: FormTemplate, templates: readonly FormTemplate[]): string | null {
+export function reuseWords(last: FormTemplate, reach: TemplateReach | null): string | null {
   if (last.respondent !== "portal") return null
-  const reaching = reachingPatients(templates)
-  return reaching
-    ? `Desde ese momento lo reciben los pacientes con cita por venir, en lugar de «${reaching.title}», que sigue publicado pero deja de llegarles. Tendrá las mismas preguntas.`
+  return reach?.now && reach.now.key !== last.key
+    ? `Desde ese momento lo reciben los pacientes con cita por venir, en lugar de «${reach.now.title}», que sigue publicado pero deja de llegarles. Tendrá las mismas preguntas.`
     : "Desde ese momento lo reciben los pacientes con cita por venir, con las mismas preguntas."
+}
+
+/** Sin tildes ni mayúsculas ni espacios de más: así se reconoce un título que ya está. */
+function foldTitle(title: string): string {
+  return title
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/**
+ * Otro formulario de la clínica con el mismo título que se está escribiendo,
+ * también si ya no se usa (`unused`, para ofrecer «Volver a usar»). El
+ * constructor lo avisa y deja guardar igual. `ownKey`: la plantilla que se
+ * edita no es su propio doble.
+ */
+export function sameTitleTemplate(
+  title: string,
+  templates: FormTemplate[],
+  ownKey?: string,
+): { title: string; unused: UnusedTemplate | null } | null {
+  const wanted = foldTitle(title)
+  if (!wanted) return null
+  const { listed, unused } = templateGroups(templates.filter((template) => template.key !== ownKey))
+  // Primero los que están en la lista: ese es el que se vería repetido al llenar.
+  const inList = listed.find((versions) =>
+    versions.some((version) => version.status !== "archivado" && foldTitle(version.title) === wanted),
+  )
+  const live = inList?.find((version) => version.status !== "archivado" && foldTitle(version.title) === wanted)
+  if (live) return { title: live.title, unused: null }
+  const left = unused.find((item) => foldTitle(item.last.title) === wanted)
+  return left ? { title: left.last.title, unused: left } : null
 }
 
 // ---------------------------------------------------------------------------

@@ -19,7 +19,6 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
-  createFormResponse,
   discardFormResponse,
   FORM_RESPONSE_STATUS_LABELS,
   type FormResponse,
@@ -27,6 +26,7 @@ import {
   type FormTemplate,
   fetchFormAddenda,
   finalizeFormResponse,
+  startFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
 import { useMemberName, useOrgMembers } from "../../lib/crm"
@@ -87,9 +87,11 @@ export function NewResponseDrawer({
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
   const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
+  const queryClient = useQueryClient()
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
-      createFormResponse({
+      // Si la atención ya no está en curso, se empieza igual sin unirlo a ella (`detached`).
+      startFormResponse({
         templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
@@ -106,6 +108,15 @@ export function NewResponseDrawer({
     onSubmit: async ({ value }) => {
       const result = await create.mutateAsync(value)
       form.reset()
+      if (result.detached) {
+        // La pantalla tenía un dato viejo (la atención se firmó o se anuló en otra pestaña): se
+        // dice lo que pasó y se vuelve a pedir todo, para que deje de ofrecer esa atención.
+        toast.info(
+          "La atención ya no está en curso, así que el formulario se empezó sin unirlo a ella. Queda en Documentos de la ficha.",
+          { duration: 10_000 },
+        )
+        void queryClient.invalidateQueries()
+      }
       await onCreated(result.data.id)
     },
   })

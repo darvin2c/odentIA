@@ -6,8 +6,10 @@ import {
   newField,
   publishWords,
   reuseWords,
+  sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
+  touchesPatients,
   versionStatusWords,
 } from "./form-templates"
 
@@ -79,55 +81,112 @@ it("de dos cuestionarios del paciente publicados, solo el que le llega dice «vi
   expect(currentLine([ficha], [...all, ficha])).toBe("Vigente: versión 1")
 })
 
-it("publicar un cuestionario del paciente dice a quién le llega y a cuál reemplaza, por su nombre", () => {
+it("publicar un cuestionario del paciente dice a quién le llega y a cuál reemplaza, con lo que dice el servidor", () => {
   const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal", reachesPatients: true })
   const nuevo = template({ key: "dos", title: "Cuestionario dos", respondent: "portal", status: "borrador", publishedAt: null })
-  const words = publishWords(nuevo, [previo, nuevo])
+  const previoReach = { key: "previo", title: "Cuestionario previo a la cita" }
+  const words = publishWords(nuevo, [previo, nuevo], { now: previoReach, after: { key: "dos", title: "Cuestionario dos" } })
   expect(words).toContain("lo reciben los pacientes con cita por venir")
   expect(words).toContain("en lugar de «Cuestionario previo a la cita»")
   expect(words).not.toContain("en la ficha")
   // El primero de la clínica: no reemplaza a ninguno.
-  expect(publishWords(nuevo, [nuevo])).toContain("lo reciben los pacientes con cita por venir")
-  expect(publishWords(nuevo, [nuevo])).not.toContain("en lugar de")
+  const first = publishWords(nuevo, [nuevo], { now: null, after: { key: "dos", title: "Cuestionario dos" } })
+  expect(first).toContain("lo reciben los pacientes con cita por venir")
+  expect(first).not.toContain("en lugar de")
   // La versión siguiente del mismo: reemplaza a su versión anterior.
   const v2 = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal", version: 2, status: "borrador", publishedAt: null })
-  expect(publishWords(v2, [previo, v2])).toBe(
+  expect(publishWords(v2, [previo, v2], { now: previoReach, after: previoReach })).toBe(
     "Desde ese momento los pacientes con cita por venir reciben la versión 2, en lugar de la 1, que se archiva. Lo ya respondido conserva su título y sus preguntas.",
   )
-  // Si la versión nueva pasa a llenarla el equipo, los pacientes dejan de recibirlo.
-  const alEquipo = { ...v2, respondent: "staff" as const }
-  expect(publishWords(alEquipo, [previo, alEquipo])).toContain("los pacientes dejan de recibirlo")
-  // Uno del equipo se publica con las palabras de siempre.
+  // Uno del equipo se publica con las palabras de siempre, sin consultar a quién le llega.
   const ficha = template({ key: "ficha", title: "Ficha", status: "borrador", publishedAt: null })
-  expect(publishWords(ficha, [previo, ficha])).toBe(
+  expect(touchesPatients(ficha, [previo, ficha])).toBe(false)
+  expect(publishWords(ficha, [previo, ficha], null)).toBe(
     "Quedará disponible para responder en la ficha. Una versión publicada ya no se edita: para cambiarla se prepara la siguiente.",
+  )
+  // Sin el dato del servidor (no se pudo consultar) no nombra a ninguno.
+  expect(publishWords(nuevo, [previo, nuevo], null)).not.toContain("en lugar de")
+})
+
+it("la versión anterior la llenaba el equipo y la nueva la responde el paciente: no dice «en lugar de la 1», que nunca les llegó", () => {
+  const fichaV1 = template({ key: "ficha", title: "Ficha de ingreso" })
+  const v2 = template({ key: "ficha", title: "Ficha de ingreso", respondent: "portal", version: 2, status: "borrador", publishedAt: null })
+  expect(touchesPatients(v2, [fichaV1, v2])).toBe(true)
+  const words = publishWords(v2, [fichaV1, v2], { now: null, after: { key: "ficha", title: "Ficha de ingreso" } })
+  expect(words).not.toContain("en lugar de")
+  expect(words).toBe(
+    "Desde ese momento lo reciben los pacientes con cita por venir, para responderlo antes de venir. La versión 1, que llenaba el equipo, se archiva. Lo ya respondido conserva su título y sus preguntas.",
+  )
+})
+
+it("la nueva versión pasa al equipo y hay otro cuestionario del paciente publicado: dice cuál pasan a recibir", () => {
+  const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal" })
+  const salud = template({ key: "salud", title: "Cuestionario de salud", respondent: "portal", reachesPatients: true })
+  const alEquipo = template({ key: "salud", title: "Cuestionario de salud", version: 2, status: "borrador", publishedAt: null })
+  expect(touchesPatients(alEquipo, [previo, salud, alEquipo])).toBe(true)
+  const saludReach = { key: "salud", title: "Cuestionario de salud" }
+  const previoReach = { key: "previo", title: "Cuestionario previo a la cita" }
+  const words = publishWords(alEquipo, [previo, salud, alEquipo], { now: saludReach, after: previoReach })
+  expect(words).toContain("dejan de recibirlo y pasan a recibir «Cuestionario previo a la cita»")
+  // Sin otro publicado, se quedan sin cuestionario.
+  expect(publishWords(alEquipo, [salud, alEquipo], { now: saludReach, after: null })).toContain(
+    "no recibirán ningún cuestionario antes de su cita",
+  )
+  // Si el que les llega hoy es otro, para ellos nada cambia y no se dice que dejan de recibirlo.
+  expect(publishWords(alEquipo, [previo, salud, alEquipo], { now: previoReach, after: previoReach })).not.toContain(
+    "dejan de recibirlo",
   )
 })
 
 it("dejar de usar dice qué deja de pasar y que lo ya llenado no cambia", () => {
   const ficha = template({ key: "periodontal", title: "Ficha periodontal" })
-  const staff = leaveWords(ficha, [ficha])
+  const staff = leaveWords(ficha, null)
   expect(staff).toContain("Deja de ofrecerse")
   expect(staff).toContain("Lo ya llenado sigue en cada paciente")
   expect(staff).toContain("volver a usarlo")
-  // El cuestionario que les llega: dicen qué reciben después.
+  // El cuestionario que les llega: dice qué reciben después, con lo que dice el servidor.
   const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal" })
   const salud = template({ key: "salud", title: "Cuestionario de salud", respondent: "portal", reachesPatients: true })
-  expect(leaveWords(salud, [previo, salud])).toContain("en su lugar les llegará «Cuestionario previo a la cita»")
-  expect(leaveWords(salud, [salud])).toContain("no recibirán ningún cuestionario")
+  const saludReach = { key: "salud", title: "Cuestionario de salud" }
+  const previoReach = { key: "previo", title: "Cuestionario previo a la cita" }
+  expect(leaveWords(salud, { now: saludReach, after: previoReach })).toContain(
+    "en su lugar les llegará «Cuestionario previo a la cita»",
+  )
+  expect(leaveWords(salud, { now: saludReach, after: null })).toContain("no recibirán ningún cuestionario")
   // El que ya no les llega: para los pacientes nada cambia.
-  expect(leaveWords(previo, [previo, salud])).toContain("reciben «Cuestionario de salud», así que para ellos nada cambia")
+  expect(leaveWords(previo, { now: saludReach, after: saludReach })).toContain(
+    "reciben «Cuestionario de salud», así que para ellos nada cambia",
+  )
 })
 
 it("volver a usar uno del equipo no pregunta; uno del paciente dice a cuál reemplaza", () => {
   const ficha = template({ key: "periodontal", title: "Ficha periodontal", status: "archivado" })
-  expect(reuseWords(ficha, [ficha])).toBeNull()
-  const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal", reachesPatients: true })
+  expect(reuseWords(ficha, null)).toBeNull()
   const salud = template({ key: "salud", title: "Cuestionario de salud", respondent: "portal", status: "archivado" })
-  expect(reuseWords(salud, [previo, salud])).toContain("en lugar de «Cuestionario previo a la cita»")
-  expect(reuseWords(salud, [salud])).toBe(
+  const saludReach = { key: "salud", title: "Cuestionario de salud" }
+  expect(
+    reuseWords(salud, { now: { key: "previo", title: "Cuestionario previo a la cita" }, after: saludReach }),
+  ).toContain("en lugar de «Cuestionario previo a la cita»")
+  expect(reuseWords(salud, { now: null, after: saludReach })).toBe(
     "Desde ese momento lo reciben los pacientes con cita por venir, con las mismas preguntas.",
   )
+})
+
+it("un título que ya tiene otro formulario se avisa, también si está en «Ya no se usan»", () => {
+  const endodoncia = template({ key: "endodoncia", title: "Evaluación de endodoncia" })
+  const periodontal = template({ key: "periodontal", title: "Ficha periodontal", status: "archivado" })
+  const all = [endodoncia, periodontal]
+  expect(sameTitleTemplate("Otra ficha", all)).toBeNull()
+  expect(sameTitleTemplate("", all)).toBeNull()
+  // Sin tildes, mayúsculas ni espacios de más: es el mismo título.
+  expect(sameTitleTemplate("  evaluacion de   ENDODONCIA ", all)).toEqual({ title: "Evaluación de endodoncia", unused: null })
+  // El que se dejó de usar se ofrece para volver a usarlo.
+  expect(sameTitleTemplate("Ficha periodontal", all)).toEqual({
+    title: "Ficha periodontal",
+    unused: { last: periodontal, leftAt: periodontal.updatedAt },
+  })
+  // La plantilla que se está editando no es su propio doble.
+  expect(sameTitleTemplate("Evaluación de endodoncia", all, "endodoncia")).toBeNull()
 })
 
 it("una pregunta nueva nace vacía, y su clave sale del texto completo al guardar", () => {

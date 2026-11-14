@@ -49,9 +49,11 @@ import {
   fetchFormTemplates,
   fetchSpecialties,
   publishFormTemplate,
+  fetchTemplateReach,
   reuseFormTemplate,
   updateFormTemplate,
 } from "../../lib/clinical-forms"
+import { ApiError } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import {
@@ -62,8 +64,10 @@ import {
   publishedButNotReaching,
   publishWords,
   reuseWords,
+  sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
+  touchesPatients,
   uniqueKey,
   versionStatusWords,
 } from "../../lib/form-templates"
@@ -186,15 +190,19 @@ function FormTemplatesPanel() {
       toast.success(`«${last.title}» está en uso otra vez, como versión ${result.data.version}`)
       invalidate()
     },
-    onError: (error) => {
+    onError: (error, last) => {
       setConfirm(null)
       toast.error(submitErrorMessage(error))
+      // Sus preguntas ya no se pueden publicar como quedaron: se abre para corregirlas y publicar
+      // la versión siguiente, en vez de dejar a la persona con un botón que siempre falla.
+      if (error instanceof ApiError && error.shape.code === "SCHEMA_OUTDATED") openBuilder({ ...last })
+      else invalidate()
     },
   })
   /** Uno del equipo vuelve sin preguntar; el que responde el paciente dice antes a quién le llega. */
   const reuse = (last: FormTemplate) => {
-    if (reuseWords(last, templates) === null) reuseMutation.mutate(last)
-    else setConfirm({ kind: "reuse", last })
+    if (last.respondent === "portal") setConfirm({ kind: "reuse", last })
+    else reuseMutation.mutate(last)
   }
 
   const publishMutation = useMutation({
@@ -228,6 +236,30 @@ function FormTemplatesPanel() {
   const leaving = confirm?.kind === "leave" ? confirm.current : null
   const reusing = confirm?.kind === "reuse" ? confirm.last : null
   const empty = listed.length === 0 && unused.length === 0
+
+  // A quién le llega hoy y a quién le llegará después del cambio: lo dice el servidor al abrir la
+  // confirmación, solo si el cambio toca un cuestionario del paciente. La pantalla no lo calcula.
+  const changing = publishing
+    ? { template: publishing, change: "publish" as const }
+    : leaving
+      ? { template: leaving, change: "leave" as const }
+      : reusing
+        ? { template: reusing, change: "reuse" as const }
+        : null
+  const asksReach = changing !== null && touchesPatients(changing.template, templates)
+  const reachQuery = useQuery({
+    queryKey: ["form-template-reach", changing?.template.id, changing?.change],
+    queryFn: () => fetchTemplateReach(changing?.template.id ?? "", changing?.change ?? "publish"),
+    enabled: asksReach,
+    // Siempre lo de ahora: otra persona pudo publicar otro cuestionario hace un minuto.
+    staleTime: 0,
+    gcTime: 0,
+    retry: 1,
+  })
+  const reach = asksReach ? (reachQuery.data?.data ?? null) : null
+  // Mientras llega, la confirmación espera; si no se pudo consultar, se confirma igual, sin nombrar a ninguno.
+  const reachLoading = asksReach && reachQuery.isPending
+  const CHECKING = "Comprobando qué cuestionario reciben hoy los pacientes…"
 
   return (
     <div className="flex flex-col gap-4">
@@ -365,6 +397,11 @@ function FormTemplatesPanel() {
         <TemplateBuilder
           key={builder.form.opening}
           initial={builder.form.target}
+          templates={templates}
+          onReuse={(last) => {
+            builder.close()
+            reuse(last)
+          }}
           onDirtyChange={builder.setDirty}
           onClose={builder.close}
           onDone={() => {
@@ -380,9 +417,9 @@ function FormTemplatesPanel() {
         variant="default"
         title={publishing ? `Publicar la versión ${publishing.version}` : "Publicar"}
         // Lo que de verdad pasa: el del paciente dice a quién le llega y a cuál reemplaza, por su nombre.
-        description={publishing ? publishWords(publishing, templates) : ""}
+        description={publishing ? (reachLoading ? CHECKING : publishWords(publishing, templates, reach)) : ""}
         confirmLabel="Publicar"
-        pending={publishMutation.isPending}
+        pending={publishMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "publish" && publishMutation.mutate(confirm.draft)}
       />
@@ -390,9 +427,9 @@ function FormTemplatesPanel() {
         open={confirm?.kind === "leave"}
         variant="default"
         title={leaving ? `¿Dejar de usar «${leaving.title}»?` : "Dejar de usar"}
-        description={leaving ? leaveWords(leaving, templates) : ""}
+        description={leaving ? (reachLoading ? CHECKING : leaveWords(leaving, reach)) : ""}
         confirmLabel="Dejar de usar"
-        pending={leaveMutation.isPending}
+        pending={leaveMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "leave" && leaveMutation.mutate(confirm.current)}
       />
@@ -400,9 +437,9 @@ function FormTemplatesPanel() {
         open={confirm?.kind === "reuse"}
         variant="default"
         title={reusing ? `¿Volver a usar «${reusing.title}»?` : "Volver a usar"}
-        description={reusing ? (reuseWords(reusing, templates) ?? "") : ""}
+        description={reusing ? (reachLoading ? CHECKING : (reuseWords(reusing, reach) ?? "")) : ""}
         confirmLabel="Volver a usar"
-        pending={reuseMutation.isPending}
+        pending={reuseMutation.isPending || reachLoading}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "reuse" && reuseMutation.mutate(confirm.last)}
       />
@@ -541,11 +578,17 @@ type TemplateForm = ReturnType<typeof useTemplateForm>
 
 function TemplateBuilder({
   initial,
+  templates,
+  onReuse,
   onDirtyChange,
   onClose,
   onDone,
 }: {
   initial: FormTemplate | null
+  /** Los formularios de la clínica: para avisar de uno con el mismo título. */
+  templates: FormTemplate[]
+  /** «Volver a usar» el que ya existía con ese título, en vez de crear otro. */
+  onReuse: (last: FormTemplate) => void
   onDirtyChange: (dirty: boolean) => void
   onClose: () => void
   onDone: () => void
@@ -602,6 +645,9 @@ function TemplateBuilder({
   const surface = useFormSurface(form, { fieldMap: templateFieldMap })
   useReportDirty(surface.isDirty, onDirtyChange)
   const respondent = useStore(form.store, (state) => state.values.respondent)
+  // Otro formulario con el mismo título: se avisa y se deja guardar igual.
+  const title = useStore(form.store, (state) => state.values.title)
+  const twin = useMemo(() => sameTitleTemplate(title, templates, initial?.key), [title, templates, initial?.key])
   // Cada pregunta pinta sus controles según su tipo y las anteriores: se lee la plantilla entera.
   const sections = useStore(form.store, (state) => state.values.sections)
 
@@ -623,13 +669,34 @@ function TemplateBuilder({
       <div className="flex flex-col gap-5">
         {isNewVersion && initial ? (
           <p className="rounded-xl border p-3 text-sm text-muted-foreground">
-            La versión {initial.version} está publicada y no se edita: al guardar se crea el borrador de la
-            siguiente.
+            La versión {initial.version} {initial.status === "archivado" ? "ya no se usa" : "está publicada"} y no
+            se edita: al guardar se crea el borrador de la siguiente.
           </p>
         ) : null}
         <form.AppField name="title">
           {(field) => <field.TextField label="Título" maxLength={200} disabled={!canAdmin} />}
         </form.AppField>
+        {twin ? (
+          <div role="status" className="flex flex-col items-start gap-2 rounded-xl border border-warning/50 bg-warning-soft p-3 text-sm">
+            <p>
+              <span className="font-medium">Ya tienes un formulario con ese título</span>
+              {twin.unused
+                ? ", en «Ya no se usan». Si es el mismo, vuelve a usarlo en vez de crear otro."
+                : ". Puedes guardarlo igual: al llenar uno, en «Nuevo» › «Formulario» se verán dos con el mismo nombre."}
+            </p>
+            {twin.unused && canAdmin ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={ROW_BUTTON}
+                onClick={() => twin.unused && onReuse(twin.unused.last)}
+              >
+                Volver a usar «{twin.title}»
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <form.AppField name="description">
           {(field) => (
             <field.TextareaField label="Descripción (opcional)" rows={2} maxLength={2000} disabled={!canAdmin} />
