@@ -87,5 +87,9 @@ it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", 
   enter(which)
   await new Promise((resolve) => setTimeout(resolve, 50))
   expect(onSubmit).not.toHaveBeenCalled()
-  expect(document.activeElement).not.toBe(which)
+  // El foco pasa a la pregunta siguiente (el grupo sanguíneo), nunca a «Anterior» ni a «Saltar».
+  expect((document.activeElement as HTMLElement | null)?.dataset.slot).toBe("select-trigger")
+  const stops = [...document.querySelectorAll<HTMLElement>("[data-slot=questionnaire-previous], [data-slot=questionnaire-skip]")]
+  expect(stops.length).toBeGreaterThan(0)
+  for (const stop of stops) expect(stop.hasAttribute("data-enter-skip")).toBe(true)
 })

@@ -2421,8 +2421,9 @@ function Question({
         // Cuando se envía desde aquí, «Saltar» sobra: todo es opcional y «Enviar» ya lo deja en blanco.
         className={finish ? "has-[>[data-slot=questionnaire-submit]:not([hidden])]:[&>[data-slot=questionnaire-skip]]:hidden" : undefined}
       >
-        <QuestionnairePrevious>Anterior</QuestionnairePrevious>
-        {required ? null : <QuestionnaireSkip>Saltar</QuestionnaireSkip>}
+        {/* Enter (`advanceOnEnter`) va de la última pregunta a «Siguiente» o «Enviar»: no se detiene en volver ni en saltar. */}
+        <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
+        {required ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
         {submit ?? finish ? (
           <QuestionnaireSubmit
             disabled={submit ? sending : finish?.sending}
