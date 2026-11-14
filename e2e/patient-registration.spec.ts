@@ -67,7 +67,7 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
 async function advanceTo(page: Page, target: Locator) {
   const progress = page.getByText(/^Paso \d+ de \d+$/)
   for (let step = 0; step < 12 && !(await target.isVisible()); step += 1) {
-    for (const question of [/alergia a algún/, /alguna enfermedad/, /medicamento todos los días/]) {
+    for (const question of [/alergia a algún/, /alguna de estas enfermedades/, /medicamento todos los días/]) {
       const group = page.getByRole("group", { name: question }).first()
       if ((await group.isVisible()) && (await group.locator('[aria-pressed="true"]').count()) === 0)
         await group.getByRole("button", { name: "No", exact: true }).click()
@@ -103,15 +103,20 @@ async function fillContacto(page: Page, phone: string) {
   await ownPhone(page).fill(maskedPhone(phone))
 }
 
-/** «Tu salud»: con alergia a la penicilina, «No sé» en enfermedades, «No» en medicamentos y O+. */
+/**
+ * «Tu salud»: con alergia a la penicilina, «No sé» en enfermedades y O+; después, en «Tus medicinas»
+ * (su propio paso desde la entrega 6), «No» en «¿Tomas algún otro medicamento todos los días?».
+ */
 async function fillSalud(page: Page) {
   const allergies = page.getByRole("group", { name: /alergia a algún/ }).first()
   await advanceTo(page, allergies)
   await allergies.getByRole("button", { name: "Sí", exact: true }).click()
   await page.getByLabel(/^¿A qué\?/).fill("Penicilina")
-  await page.getByRole("group", { name: /alguna enfermedad/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
-  await page.getByRole("group", { name: /medicamento todos los días/ }).first().getByRole("button", { name: "No", exact: true }).click()
+  await page.getByRole("group", { name: /alguna de estas enfermedades/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
   await chooseOption(page.getByRole("combobox", { name: "Grupo sanguíneo" }), { label: "O+" })
+  const medications = page.getByRole("group", { name: /medicamento todos los días/ }).first()
+  await advanceTo(page, medications)
+  await medications.getByRole("button", { name: "No", exact: true }).click()
   const before = await page.getByText(/^Paso \d+ de \d+$/).textContent()
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
   await expect(page.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(before ?? "")

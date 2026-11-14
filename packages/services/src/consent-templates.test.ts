@@ -347,6 +347,16 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
     expiresAt: new Date(Date.now() + 86_400_000),
     dataSubmittedAt: new Date(),
   } as typeof appointmentBookingLink.$inferInsert)
+  // Lo dejó todo en blanco: no se le insiste.
+  expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])
+  // Lo que dijo, con la lista de antes (sin las dos clases de medicina).
+  await run((tx) =>
+    recordHealthDeclaration(tx, orgId, patient.id, {
+      via: "enlace",
+      by: { kind: "patient", name: null, relation: null },
+      health: { allergies: { state: "none", items: [] } },
+    }),
+  )
   const onlyNew = await run((tx) => patientHealthQuestions(tx, orgId, patient.id))
   expect(onlyNew).toEqual(expect.arrayContaining(["anticoagulants", "boneMedicines", "dental.corazon"]))
   for (const key of ["allergies", "conditions", "medications", "bloodGroup"]) expect(onlyNew).not.toContain(key)

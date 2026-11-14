@@ -149,6 +149,17 @@ function RegistrationSettings() {
   /** «Lo revisé», para el aviso sugerido (ADR 0141). */
   const [reviewed, setReviewed] = useState(false)
   const receptionName = useReceptionName()
+  // «Nueva» sigue en cada fila mientras no salga de la página, aunque pulse «Entendido» (B10).
+  const [newSnapshot, setNewSnapshot] = useState<RegistrationFieldKey[] | null>(null)
+  useEffect(() => {
+    if (newSnapshot === null && configQuery.data) setNewSnapshot((configQuery.data.meta.newQuestions ?? []).map((item) => item.key))
+  }, [configQuery.data, newSnapshot])
+  const [seenBusy, setSeenBusy] = useState(false)
+  const [seenDone, setSeenDone] = useState(false)
+  const seenRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (seenDone) seenRef.current?.focus()
+  }, [seenDone])
 
   const form = useAppForm({
     defaultValues: draftOf(DEFAULT_REGISTRATION_CONFIG),
@@ -219,18 +230,7 @@ function RegistrationSettings() {
   const noticeSuggested = configQuery.data?.meta.noticeSuggested === true
   const noticeShown = configQuery.data?.meta.noticeShown ?? ""
   const newQuestions = configQuery.data?.meta.newQuestions ?? []
-  // «Nueva» sigue en cada fila mientras no salga de la página, aunque pulse «Entendido» (B10).
-  const [newSnapshot, setNewSnapshot] = useState<RegistrationFieldKey[] | null>(null)
-  useEffect(() => {
-    if (newSnapshot === null && configQuery.data) setNewSnapshot((configQuery.data.meta.newQuestions ?? []).map((item) => item.key))
-  }, [configQuery.data, newSnapshot])
   const newKeys = new Set<RegistrationFieldKey>(newSnapshot ?? newQuestions.map((item) => item.key))
-  const [seenBusy, setSeenBusy] = useState(false)
-  const [seenDone, setSeenDone] = useState(false)
-  const seenRef = useRef<HTMLParagraphElement>(null)
-  useEffect(() => {
-    if (seenDone) seenRef.current?.focus()
-  }, [seenDone])
   const { fields, enabled, privacyNotice, askReminders, askMessages } = values
   const published = loaded?.enabled ?? false
 
