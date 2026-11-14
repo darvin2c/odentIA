@@ -1,5 +1,5 @@
 import { declaredLactationAndTobacco } from "@odentia/clinical"
-import { dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors } from "@odentia/dental"
+import { dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems } from "@odentia/dental"
 import { fieldsError } from "../errors.js"
 import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
 
@@ -32,5 +32,23 @@ export const dentalInterview: ProductInterview = {
   record: (answers, today, reading) => [
     ...COMMON_INTERVIEW.record(answers, today, reading),
     ...dentalInterviewEntries(answers),
+    // El corazón, la anestesia, el tabaco, el alcohol y la lactancia, con la clave donde están en la
+    // entrevista: así la copia sabe quién lo dijo (QA de la entrega 6).
+    ...(answers && typeof answers === "object" && !Array.isArray(answers) ? dentalInterviewItems(answers as Record<string, unknown>) : []).map(
+      (item) => {
+        const [label, ...rest] = item.text.split(": ")
+        const day = item.saidOn ? ` (lo dijo el ${item.saidOn.split("-").reverse().join("/")})` : ""
+        return { key: DENTAL_ITEM_ENTRY_KEY[item.key], label: label ?? item.key, value: `${rest.join(": ")}${day}` }
+      },
+    ),
   ],
 }
+
+/** Dónde está cada dato en la entrevista: la clave con que la copia sabe quién lo dijo. */
+const DENTAL_ITEM_ENTRY_KEY = {
+  corazon: "antecedentesOdontologicos.corazon",
+  anestesia: "antecedentesOdontologicos.problemaAnestesia",
+  tabaco: "habitos.tabaco",
+  alcohol: "habitos.alcohol",
+  lactancia: "embarazoLactancia.lactancia",
+} as const
