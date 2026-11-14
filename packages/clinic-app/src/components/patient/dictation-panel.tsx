@@ -80,6 +80,11 @@ function openFormSuggestions(responseId: string): void {
   notice.querySelector<HTMLButtonElement>("button")?.click()
 }
 
+/** «5 listas y 1 por revisar. Nada entra…»; sin nada de la consulta, solo el aviso, sin un punto suelto. */
+export function readinessLine(counts: string): string {
+  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
+}
+
 function readiness(session: DictationSession): string {
   // La receta no se confirma con las demás: tiene su «Emitir receta». Las de ficha, en su ficha.
   const prescription = session.suggestions.some((item) => item.kind === "receta")
@@ -397,7 +402,7 @@ export function DictationPanel({
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readiness(session)}. Nada entra a la historia hasta que lo confirmes.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readinessLine(readiness(session))}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>

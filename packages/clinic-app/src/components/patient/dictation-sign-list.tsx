@@ -1,13 +1,13 @@
 import { Button, Checkbox } from "@odentia/ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { productUi } from "../../product/product-ui"
-import { inFormOrder } from "./clio-form-proposals"
+import { signOrder } from "./clio-form-proposals"
 import { confirmableAtSign, DICTATION_KIND_LABEL, type DictationSession, type DictationSuggestion, dictationErrorText, suggestionText } from "./dictation-session"
 import { AppointmentChoices, BudgetLines } from "./dictation-suggestions"
 
 /** Lo dictado que entra con la firma: lo que se puede confirmar y nadie desmarcó, en el orden de la ficha. */
 export function markedAtSign(session: DictationSession, unmarked: readonly string[]): string[] {
-  return inFormOrder(session.suggestions)
+  return signOrder(session.suggestions)
     .filter((item) => confirmableAtSign(item) && !unmarked.includes(item.id))
     .map((item) => item.id)
 }
@@ -56,7 +56,7 @@ export function DictationSignList({
   /** «Abrir la ficha»: la respuesta por revisar se elige en su pregunta. */
   onOpenForm: (responseId: string) => void
 }) {
-  const items = inFormOrder(session.suggestions)
+  const items = signOrder(session.suggestions)
   const marked = markedAtSign(session, unmarked)
   const Choices = productUi().dictation?.SuggestionChoices
   const confirmError = dictationErrorText(session.confirmMany.error, "No pude confirmar alguna. Revísala y vuelve a firmar.")

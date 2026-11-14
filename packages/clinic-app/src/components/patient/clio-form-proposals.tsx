@@ -4,6 +4,7 @@ import { formAnswerWords } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { createContext, useContext } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
+import { fetchFormResponses } from "../../lib/clinical-forms"
 import { fetchFormOffers } from "../../lib/consultation-forms"
 import type { DictationSuggestion } from "./dictation-session"
 
@@ -44,15 +45,6 @@ export function byFormOrder(a: DictationSuggestion, b: DictationSuggestion): num
   return form !== 0 ? form : Number(a.payload["order"] ?? 0) - Number(b.payload["order"] ?? 0)
 }
 
-/**
- * Las respuestas de ficha en el orden de la ficha, y lo demás donde estaba:
- * ordenar todo junto con `byFormOrder` mezclaba clases que no se comparan.
- */
-export function inFormOrder(items: readonly DictationSuggestion[]): DictationSuggestion[] {
-  const forms = items.filter((item) => item.kind === "ficha").sort(byFormOrder)
-  let next = 0
-  return items.map((item) => (item.kind === "ficha" ? (forms[next++] ?? item) : item))
-}
 
 /** La etiqueta de la lista de Clío de una ficha: la barra del dictado lleva ahí («Ficha de ortodoncia: 3 por confirmar ↓»). */
 export const formNoticeLabel = (title: string) => `Sugerencias de ${CLINICAL_NAME}: ${title}`
@@ -69,7 +61,30 @@ export function useFormsToStart(patientId: string, encounterId: string, enabled:
     enabled,
     retry: 1,
   })
-  return (offers.data?.data ?? []).filter((offer) => offer.today === null).map((offer) => offer.title)
+  // La misma lista que el resto de la atención: «Otra ficha…» también cuenta como empezada.
+  const forms = useQuery({ queryKey: ["form-responses", patientId], queryFn: () => fetchFormResponses({ patientId }), enabled })
+  return formsToStartOf(offers.data?.data ?? [], forms.data?.data ?? [], encounterId)
+}
+
+/**
+ * Las fichas que ofrecer empezar: solo si la atención no tiene ninguna empezada
+ * (verificación del 14 nov: con otra ya empezada, el aviso sobraba).
+ */
+export function formsToStartOf(
+  offers: ReadonlyArray<{ title: string; today: unknown }>,
+  forms: ReadonlyArray<{ encounterId: string | null; source?: string; status: string }>,
+  encounterId: string,
+): string[] {
+  const started = offers.some((offer) => offer.today !== null) || forms.some((form) => form.encounterId === encounterId && form.source !== "portal" && form.status === "borrador")
+  return started ? [] : offers.map((offer) => offer.title)
+}
+
+/**
+ * Lo dictado en el orden de la firma: lo de cada ficha junto y en el orden de la
+ * ficha, después lo de la consulta, en su orden (verificación del 14 nov).
+ */
+export function signOrder(items: readonly DictationSuggestion[]): DictationSuggestion[] {
+  return [...items.filter((item) => item.kind === "ficha").sort(byFormOrder), ...items.filter((item) => item.kind !== "ficha")]
 }
 
 /** «Empieza «Ficha de ortodoncia» para que Clío proponga sus respuestas mientras dictas.» */

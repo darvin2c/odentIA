@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { byFormOrder, inFormOrder } from "./clio-form-proposals"
+import { byFormOrder, signOrder } from "./clio-form-proposals"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
@@ -557,7 +557,7 @@ export function useDictationSession({
       setConfirmManyFailed(null)
       try {
         // Las de una ficha, en su orden: la pregunta de la que depende otra entra primero.
-        for (const item of inFormOrder(suggestions.filter((candidate) => ids.includes(candidate.id) && confirmableAtSign(candidate)))) {
+        for (const item of signOrder(suggestions.filter((candidate) => ids.includes(candidate.id) && confirmableAtSign(candidate)))) {
           current = item
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item, true))
           // La pregunta de la ficha que alguien respondió a mano: queda la suya y no frena la firma.
