@@ -47,7 +47,14 @@ interface SideDockState {
  * `keptInPage`, navegar sin cambiar de ruta (otra pestaña, otro filtro) no
  * pregunta: la pantalla sigue montada y lo escrito sigue ahí.
  */
-export type DraftGuardComponent = React.ComponentType<{ dirty: boolean; keptInPage?: KeptInPage | null }>
+export type DraftGuardComponent = React.ComponentType<{
+  dirty: boolean
+  keptInPage?: KeptInPage | null
+  /** Qué se pierde, cuando el contenido lo dijo (`useDraftSaved`); sin él, el texto común. */
+  lost?: string | null
+  /** Antes de salir con «Descartar y salir»: lo descartado ya no se guarda al cerrarse. */
+  onDiscard?: () => void
+}>
 
 const DraftKeptInPageContext = React.createContext<KeptInPage | null>(null)
 

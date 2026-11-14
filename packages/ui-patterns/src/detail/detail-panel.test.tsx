@@ -64,7 +64,7 @@ describe("DetailPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("con cambios, Esc pregunta; «Continuar editando» no cierra y «Descartar y salir» sí", async () => {
+  it("con cambios, Esc pregunta; «Seguir aquí» no cierra y «Descartar y salir» sí", async () => {
     const nativeConfirm = vi.spyOn(window, "confirm")
     const { onClose } = renderPanel({ isDirty: true })
 

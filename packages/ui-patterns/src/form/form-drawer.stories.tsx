@@ -91,7 +91,7 @@ export const Wizard: Story = {
 
 /**
  * Con cambios sin guardar, Cancelar, Esc o el clic fuera preguntan con la
- * confirmación propia: «Continuar editando» deja el cajón como estaba y
+ * confirmación propia: «Seguir aquí» deja el cajón como estaba y
  * «Descartar y salir» lo cierra. Sin cambios, cierra directo.
  */
 export const CambiosSinGuardar: Story = {

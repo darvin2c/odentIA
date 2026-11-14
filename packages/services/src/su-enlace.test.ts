@@ -11,7 +11,7 @@ import { consentDocument, consentEvent } from "@odentia/db/schema/clinical-forms
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
@@ -46,6 +46,7 @@ import {
   createFormTemplate,
   listConsentDocuments,
   listConsentEvents,
+  listFormResponses,
   markConsentSentByLink,
   publishConsentTemplate,
   publishFormTemplate,
@@ -65,6 +66,7 @@ import {
   bookedDataLink,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
+  getPersonalLinkQuestionnaire,
   getPersonalLinkView,
   maskedAddress,
   personalLinkForEmailToken,
@@ -1657,4 +1659,189 @@ it("«Enviarme uno nuevo»: desde un enlace vencido le llega otro a su canal, un
   } finally {
     configurePublicLinks(null)
   }
+})
+
+/** Una paciente con cita por venir, su enlace y el cuestionario de la clínica publicado. */
+async function withQuestionnaire(f: Awaited<ReturnType<typeof clinicalFixture>>) {
+  const marta = await minimal(f, { given: "Marta", surname: "Lazo" })
+  const visit = await upcomingAppointment(f, marta.patientId)
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }),
+  )
+  const form = await f.run((tx) =>
+    createFormTemplate(tx, ORG, f.actor, {
+      // Un título propio: uno que empieza igual que otro pasaría a ser su versión siguiente.
+      title: `Antes de venir ${randomUUID().slice(0, 6)}`,
+      respondent: "portal",
+      schema: { sections: [{ id: "visita", title: "Tu visita", fields: [{ id: "motivo", label: "¿Por qué vienes?", type: "texto_largo" }] }] },
+    }),
+  )
+  await f.run((tx) => publishFormTemplate(tx, ORG, f.actor, form.id))
+  return { marta, visit, link }
+}
+
+/**
+ * Envía con el reloj en `when`: la respuesta nace con esa fecha de envío. Lo enviado no se edita
+ * después (`clinical_forms_response_immutable`, también para el dueño de la base), así que una
+ * prueba que necesita algo «enviado hace una semana» lo crea así en vez de cambiarle la fecha.
+ */
+async function sentOn<T>(when: Date, send: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["Date"], now: when })
+  try {
+    return await send()
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
+// Mesa de formularios del 13 nov (F18): un segundo envío respondía «Este enlace ya no sirve» con el enlace vivo.
+it("el segundo envío del cuestionario dice «Ya lo enviaste», no que el enlace ya no sirve", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  // Otra pestaña u otro teléfono con el cuestionario abierto, y volver a abrirlo: dicen lo que pasó.
+  const again = f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Otra cosa" }, { secretsKey: KEY }))
+  await expect(again).rejects.toMatchObject({ code: "ALREADY_SUBMITTED", status: 409, message: expect.stringMatching(/^Ya lo enviaste/) })
+  await expect(f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, link.token))).rejects.toMatchObject({ code: "ALREADY_SUBMITTED" })
+  // Lo primero que envió es lo que quedó, y el enlace sigue abierto.
+  const [kept] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: marta.patientId }))
+  expect(kept?.answers).toMatchObject({ motivo: "Me duele la muela de abajo" })
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).status).toBe("abierto")
+  // A quien no decide por la paciente el enlace no le sirve para eso, como antes.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Tía", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: marta.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }))
+  await expect(f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, hers.token, { motivo: "x" }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+})
+
+// QA de la entrega 3 (14 nov): abrir un mensaje viejo con «abre=cuestionario» decía «Ya lo enviaste»
+// por las respuestas de una cita que ya pasó.
+it("lo enviado para una cita que ya pasó no es «Ya lo enviaste»: ese enlace ya no sirve para el cuestionario", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  // Lo envió hace una semana, para la cita que entonces venía.
+  const days = (n: number) => new Date(Date.now() - n * 86_400_000)
+  await sentOn(days(7), () =>
+    f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY })),
+  )
+  await expect(f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, link.token))).rejects.toMatchObject({ code: "ALREADY_SUBMITTED" })
+  // Pasa el tiempo: esa cita fue hace tres días.
+  await ownerDb.update(appointment).set({ startsAt: days(3), endsAt: new Date(days(3).getTime() + 30 * 60_000) }).where(eq(appointment.id, visit))
+  const next = await upcomingAppointment(f, marta.patientId)
+  const fresh = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: next }, { secretsKey: KEY }),
+  )
+  const opened = f.run((tx) => getPersonalLinkQuestionnaire(tx, ORG, fresh.token))
+  await expect(opened).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+})
+
+// Mesa de formularios del 13 nov (C8): después de enviar, «Tus pendientes» no decía nada de lo enviado.
+it("después de enviar, su enlace dice qué envió y cuándo, y nunca lo que respondió", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  const open = () => f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  // Antes de enviar nada no hay nada que decir.
+  expect((await open()).told).toBeNull()
+
+  const before = Date.now()
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-03-04" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  const afterData = await open()
+  expect(afterData.told?.items.map((item) => item.what)).toEqual(["datos", "salud"])
+  expect(afterData.told?.timeZone).toBeTruthy()
+  expect(new Date(afterData.told!.items[0]!.at).getTime()).toBeGreaterThanOrEqual(before - 1000)
+
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  const afterAll = await open()
+  expect(afterAll.questionnaire).toBeNull()
+  expect(afterAll.told?.items.map((item) => item.what)).toEqual(["datos", "salud", "cuestionario"])
+  // El enlace se abre sin código y se puede reenviar: nada de lo que respondió viaja en él.
+  const sentToThePage = JSON.stringify(afterAll)
+  for (const secret of ["Penicilina", "muela", "1960-03-04"]) expect(sentToThePage).not.toContain(secret)
+
+  // Solo lo ve quien lo envió: otra persona que abre su propio enlace de la misma paciente, no.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Tía", givenNames: "Rosa" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: marta.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: marta.patientId, appointmentId: visit }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).told).toBeNull()
+})
+
+// Revisión de la entrega 3: lo enviado hace meses salía en un enlace nuevo como «Lo recibimos…
+// Lo lee la Dra. X antes de atenderte». Solo cuenta lo enviado después de su última cita pasada.
+it("«Lo que nos contaste» es de la cita que viene: lo enviado antes de su última cita pasada ya no sale", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-03-04" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY }))
+  const told = async (token: string) => (await f.run((tx) => getPersonalLinkView(tx, ORG, token))).told?.items.map((item) => item.what) ?? null
+  expect(await told(link.token)).toEqual(["datos", "salud", "cuestionario"])
+
+  // Pasa el tiempo: sus datos y su salud los envió hace una semana, y esa cita fue hace tres días.
+  const days = (n: number) => new Date(Date.now() - n * 86_400_000)
+  await ownerDb
+    .update(auditEvent)
+    .set({ createdAt: days(7) })
+    .where(and(eq(auditEvent.organizationId, ORG), eq(auditEvent.action, "personal_link.data_sent"), eq(auditEvent.entityId, marta.patientId)))
+  await ownerDb.update(appointment).set({ startsAt: days(3), endsAt: new Date(days(3).getTime() + 30 * 60_000) }).where(eq(appointment.id, visit))
+  const next = await upcomingAppointment(f, marta.patientId)
+  const fresh = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: next }, { secretsKey: KEY }),
+  )
+  // El cuestionario lo envió después de esa cita: es de la que viene. Lo de antes ya no se anuncia.
+  expect(await told(fresh.token)).toEqual(["cuestionario"])
+})
+
+it("«Lo que nos contaste»: el cuestionario enviado antes de su última cita pasada tampoco sale, salvo que esa cita se cancelara", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  const days = (n: number) => new Date(Date.now() - n * 86_400_000)
+  // Todo lo envió hace una semana, para la cita que entonces venía: el cuestionario nace con esa fecha.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-03-04" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  await ownerDb
+    .update(auditEvent)
+    .set({ createdAt: days(7) })
+    .where(and(eq(auditEvent.organizationId, ORG), eq(auditEvent.action, "personal_link.data_sent"), eq(auditEvent.entityId, marta.patientId)))
+  await sentOn(days(7), () =>
+    f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY })),
+  )
+  const told = async (token: string) => (await f.run((tx) => getPersonalLinkView(tx, ORG, token))).told?.items.map((item) => item.what) ?? null
+  // Esa cita fue hace tres días: nada de lo enviado es de la que viene.
+  await ownerDb.update(appointment).set({ startsAt: days(3), endsAt: new Date(days(3).getTime() + 30 * 60_000) }).where(eq(appointment.id, visit))
+  const next = await upcomingAppointment(f, marta.patientId)
+  const fresh = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId, appointmentId: next }, { secretsKey: KEY }),
+  )
+  expect(await told(fresh.token)).toBeNull()
+  // Una cita cancelada no fue una visita: lo enviado para ella sigue siendo de la que viene.
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, visit))
+  expect(await told(fresh.token)).toEqual(["datos", "salud", "cuestionario"])
+})
+
+// QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita
+// de hoy, mientras la persona aún esperaba en la sala.
+it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit, link } = await withQuestionnaire(f)
+  // Lo envió hace una hora; la cita empezó hace diez minutos y termina en veinte: está en la sala.
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000)
+  await sentOn(minutes(-60), () =>
+    f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, link.token, { motivo: "Me duele la muela de abajo" }, { secretsKey: KEY })),
+  )
+  const told = async () => (await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).told?.items.map((item) => item.what) ?? null
+  await ownerDb.update(appointment).set({ startsAt: minutes(-10), endsAt: minutes(20) }).where(eq(appointment.id, visit))
+  expect(await told()).toEqual(["cuestionario"])
 })

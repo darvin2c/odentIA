@@ -198,7 +198,7 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
   // Un paso por pantalla: lo opcional se salta y en salud se contesta «No».
   const advanceTo = async (target: Locator) => {
     for (let step = 0; step < 8 && !(await target.isVisible()); step += 1) {
-      for (const question of [/alérgic/, /alguna enfermedad/, /algún medicamento/]) {
+      for (const question of [/alergia a algún/, /alguna enfermedad/, /algún medicamento/]) {
         const group = anon.getByRole("group", { name: question }).first()
         if (await group.isVisible()) await group.getByRole("button", { name: "No", exact: true }).click()
       }

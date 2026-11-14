@@ -1,5 +1,12 @@
 import { Badge, Button, cn, toast } from "@odentia/ui"
-import { ConfirmDialog, submitErrorMessage, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useDraftSaved,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
@@ -217,6 +224,26 @@ export function DeclaredResponse({
       toast.success("Corrección guardada: queda aparte, con tu nombre y la hora")
     },
   })
+  // Una corrección a medias se pierde al salir: su panel o cajón lo pregunta (×, Escape, el menú y
+  // «Atrás»), con lo que de verdad se pierde. Guardada, cancelada o vacía, ya no hay nada que perder.
+  const correctionText = useStore(correctionForm.store, (state) => state.values.text)
+  const correctionPending = correcting && correctionText.trim() !== ""
+  const draftSaved = useDraftSaved({
+    onDiscard: () => {
+      correctionForm.reset()
+      setCorrecting(false)
+    },
+  })
+  const toldPending = useRef(false)
+  useEffect(() => {
+    if (correctionPending) {
+      toldPending.current = true
+      draftSaved(false, "Se pierde la corrección que escribiste y no guardaste. Lo que respondió no cambia.")
+    } else if (toldPending.current) {
+      toldPending.current = false
+      draftSaved(true)
+    }
+  }, [correctionPending, draftSaved])
   // Al abrirla se escribe sin otro clic: el foco va al texto de la corrección.
   useEffect(() => {
     if (correcting) correctionRef.current?.querySelector("textarea")?.focus()

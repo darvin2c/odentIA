@@ -110,6 +110,27 @@ describe("la solo lectura por falta de pago", () => {
   })
 })
 
+// QA de la entrega 3 (14 nov): «me dice que salga sin guardar aunque ya guardé, ¿se perdió?» llevaba a cómo
+// llenar un formulario, que no lo explica, y nombraba una marca que la pantalla no muestra.
+describe("salir de un formulario que se guarda solo", () => {
+  const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null
+  const faq = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === "pacientes-formulario-salir-sin-guardar")
+
+  it("la pregunta del equipo llega a su respuesta", () => {
+    expect(firstFaq("Llené un formulario y me dice que salga sin guardar aunque ya guardé, ¿se perdió?")).toBe(
+      "pacientes-formulario-salir-sin-guardar",
+    )
+    expect(firstFaq("¿Qué significa «Guardado, menos lo marcado»?")).toBe("pacientes-formulario-salir-sin-guardar")
+  })
+
+  it("explica cada estado y qué hace «Descartar y salir», con los nombres de la pantalla", () => {
+    for (const words of ["«Guardado»", "«Guardado, menos lo marcado»", "«No se guardó»", "«¿Salir sin guardar?»", "«Seguir aquí»", "«Descartar y salir»"])
+      expect(faq?.a).toContain(words)
+    const all = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).map((item) => item.a).join(" ")
+    expect(all).not.toContain("«Declarado por el paciente»")
+  })
+})
+
 // QA del 14 nov: contado como lo vive la doctora, la Ayuda no llegaba a la recomendada.
 describe("la opción recomendada del presupuesto", () => {
   const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null

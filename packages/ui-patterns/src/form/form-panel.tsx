@@ -15,6 +15,10 @@ export interface FormPanelProps {
   /** Lo que dice «¿Salir sin guardar?» si parte ya se guardó aparte (`useCloseGuard`). */
   unsavedDescription?: string
   isSubmitting?: boolean
+  /** Qué se pierde al cerrar, si el contenido lo dijo (ver `useCloseGuard`). */
+  lost?: string | null
+  /** «Descartar y salir» (ver `useCloseGuard`). */
+  onDiscard?: () => void
   isLoading?: boolean
   error?: string | null
   submitLabel?: string
@@ -43,6 +47,8 @@ export function FormPanel({
   isDirty = false,
   unsavedDescription,
   isSubmitting = false,
+  lost,
+  onDiscard,
   className,
   title,
   description,
@@ -57,7 +63,14 @@ export function FormPanel({
   hideSubmit = false,
   secondaryAction,
 }: FormPanelProps) {
-  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, unsavedDescription, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({
+    isSubmitting,
+    isDirty,
+    lost,
+    unsavedDescription,
+    onDiscard,
+    onClose,
+  })
   const titleId = React.useId()
   const descriptionId = React.useId()
 

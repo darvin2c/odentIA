@@ -70,7 +70,13 @@ export {
   type WaterfallStep,
 } from "./charts/index.js"
 export { common } from "./common.js"
-export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"
+export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmVariant,
+  UnsavedDialog,
+  type UnsavedDialogProps,
+} from "./confirm-dialog.js"
 export {
   DataTable,
   type DataTableProps,
@@ -116,7 +122,7 @@ export {
   type MasterDetailProps,
   useDetailMode,
 } from "./master-detail.js"
-export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
+export { DockedSurface, type DockedSurfaceProps, useDockDecision, useDraftSaved } from "./docked-surface.js"
 export {
   MobileNavTrigger,
   PageHeader,
@@ -155,6 +161,7 @@ export {
 } from "./side-dock.js"
 export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"
+export { RadioChips, type RadioChipsProps } from "./radio-chips.js"
 export {
   type RowActionItem,
   RowActions,

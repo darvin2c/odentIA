@@ -25,6 +25,22 @@ function shortDay(iso: string): string {
     .replace(".", "")
 }
 
+/**
+ * «Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 3:00 p. m. · Limpieza.» La frase
+ * cierra con un solo punto: la hora «p. m.» ya trae el suyo.
+ */
+export function visitBookedWords(
+  booked: { startsAt: string; serviceName: string | null },
+  locale: string | undefined,
+  timeZone: string,
+): string {
+  const starts = new Date(booked.startsAt)
+  const day = starts.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).replace(/[.,]/g, "")
+  const time = starts.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit", timeZone })
+  const words = `Hoy vino sin cita. Ya tiene una reservada: ${day}, ${time}${booked.serviceName ? ` · ${booked.serviceName}` : ""}`
+  return words.endsWith(".") ? words : `${words}.`
+}
+
 /** «Endodoncia anterior vital · 46 · sesión 2 de 2». */
 export function visitTreatmentWords(item: VisitTreatment): string {
   return [
@@ -139,15 +155,7 @@ export function EncounterVisitStrip({
       </div>
       {visit?.booked ? (
         // Sin cita hoy, pero ya tiene una reservada: se dice, para no reservarle otra sin saberlo (QA del 9 nov).
-        <p className="text-sm text-muted-foreground">
-          {`Hoy vino sin cita. Ya tiene una reservada: ${new Date(visit.booked.startsAt)
-            .toLocaleDateString(activeOrgLocale(), { weekday: "short", day: "numeric", month: "short", timeZone: activeOrgTimeZone() })
-            .replace(/[.,]/g, "")}, ${new Date(visit.booked.startsAt).toLocaleTimeString(activeOrgLocale(), {
-            hour: "numeric",
-            minute: "2-digit",
-            timeZone: activeOrgTimeZone(),
-          })}${visit.booked.serviceName ? ` · ${visit.booked.serviceName}` : ""}.`}
-        </p>
+        <p className="text-sm text-muted-foreground">{visitBookedWords(visit.booked, activeOrgLocale(), activeOrgTimeZone())}</p>
       ) : null}
       {nothing ? (
         <p className="text-sm text-muted-foreground">

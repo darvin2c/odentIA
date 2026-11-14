@@ -627,7 +627,8 @@ export function updateFormResponse(
   id: string,
   body: { answers: Record<string, unknown>; professionalUserId?: string | null; baseAnswers?: Record<string, unknown> },
 ) {
-  return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
+  // `rejected`: las preguntas cuyo valor no valía (`answers.<id>` → por qué). No se guardaron; lo demás sí.
+  return patch<FormResponse & { rejected?: Record<string, string> }>(`${BASE}/form-responses/${id}`, body)
 }
 
 /** `encounterId`: la atención en curso desde la que se revisa; la respuesta queda ligada a ella. */
