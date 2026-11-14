@@ -5,6 +5,7 @@ import {
   type MedicationClass,
   type MedicineClassAnswer,
   medicationAlertWords,
+  medicationClassOf,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -257,10 +258,13 @@ export function PatientClinicalStrip({
       ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
           const known = health.medicineClasses?.[key]
           if (!known || known.answer === "yes") return []
+          // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
+          const unclassed =
+            known.answer === "unknown" && detail.currentMedications.some((row) => !medicationClassOf(row.atcCode))
           return [
             {
               key,
-              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}`,
+              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}${unclassed ? " · revisa sus medicinas" : ""}`,
               warn: known.answer !== "no",
             },
           ]

@@ -326,3 +326,18 @@ describe("lo que dijo de su corazón y de la anestesia", () => {
     }
   })
 })
+
+// QA del 14 nov (C2): «No sé» al anticoagulante con medicinas sin clase anotadas.
+it("«Anticoagulante: no sabe · revisa sus medicinas» si toma algo sin clase", () => {
+  const withOther: Detail = {
+    activeAllergies: [],
+    activeConditions: [],
+    currentMedications: [{ id: "m9", name: "Sintrom", dose: null, atcCode: null } as unknown as PatientFull["currentMedications"][number]],
+    allergyReview: "none",
+  }
+  const classes = {
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "no", said: true } },
+  } as Partial<PatientHealth>
+  const page = text(<PatientClinicalStrip detail={withOther} sex="F" health={health([], classes)} medicineClasses />)
+  expect(page).toContain("Anticoagulante: no sabe · revisa sus medicinas")
+})

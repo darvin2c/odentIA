@@ -2295,7 +2295,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "preguntar-anticoagulantes",
         q: "¿Cómo le pregunto a mis pacientes si toman anticoagulantes?",
-        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicinas para los huesos». Si lo escribe solo en «otro medicamento», no sale la marca: pregúntaselo en la consulta.",
+        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicina para los huesos». La aspirina y el clopidogrel salen como «Antiagregante». A quien ya tiene una medicina anotada por el equipo, su enlace no le pregunta «¿algún otro medicamento?». Si lo escribe solo en «otro medicamento» (por ejemplo, «Sintrom»), no sale la marca: en su página › Antecedentes, cámbialo por el nombre de la lista (acenocumarol) y la marca sale arriba. Recepción no lo pregunta desde Configuración: le manda su enlace o le muestra su código, y el enlace le pregunta lo que falta.",
+        forms: [
+          "un paciente toma sintrom como hago para que el sistema me avise",
+          "como hago que salga la marca del anticoagulante",
+          "como le pregunto si toma anticoagulantes",
+        ],
+      },
+      {
+        // QA del 14 nov (auditor H8): a recepción se le daban pasos de Configuración que no puede abrir.
+        id: "recepcion-preguntar-su-salud",
+        q: "Soy recepción: ¿cómo hago que el paciente me diga si toma anticoagulantes o lo de su salud?",
+        a: "Mándale su enlace desde su página (o muéstrale su código en «Mostrar su código»): le pregunta de su salud solo lo que falta, también si toma anticoagulantes, y lo que diga lo revisa quien lo atiende. Qué se pregunta lo decide quien administra la clínica en Configuración › Preguntas al paciente.",
+        forms: ["soy recepcion como le pregunto su salud", "recepcion quiere saber si toma anticoagulantes", "como le pido sus datos de salud al paciente"],
       },
       {
         id: "preguntas-nuevas",
