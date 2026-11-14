@@ -1,12 +1,12 @@
 import { canAttend } from "@odentia/auth/permissions"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
+  addSubmitErrors,
   applySubmitError,
   ConfirmDialog,
   clearSubmitErrors,
   focusFirstInvalid,
   FormDrawer,
-  setSubmitErrors,
   submitErrorMessage,
   submitForm,
   useAppForm,
@@ -153,10 +153,12 @@ export function NewResponseDrawer({
 /** `parcial`: se guardó todo menos las respuestas que no valen, que siguen marcadas en su pregunta. */
 type SaveState = "guardado" | "pendiente" | "guardando" | "error" | "parcial"
 
-/** Lo que no se guardó, en una frase para cuando la pantalla ya no está para decirlo en su pregunta. */
+/**
+ * Lo que no se guardó, para cuando la pantalla ya no está para decirlo en su pregunta. Cada
+ * motivo ya dice qué quedó guardado en su lugar (lo arma el servidor).
+ */
 function rejectedWords(rejected: Record<string, string>): string {
-  const reasons = Object.values(rejected)
-  return `${reasons.length === 1 ? "No se guardó una respuesta" : `No se guardaron ${reasons.length} respuestas`}: ${reasons.join("; ")}. Lo demás quedó guardado.`
+  return `${Object.values(rejected).join(" ")} Lo demás quedó guardado.`
 }
 
 /**
@@ -304,8 +306,9 @@ export function ResponseDetail({
     const failedBefore = saveFailed.current
     persist()
       .then((unsaved) => {
-        // Lo que no vale se marca en su pregunta; su aviso se va solo al corregirla.
-        if (Object.keys(unsaved).length > 0) setSubmitErrors(form, { fields: unsaved })
+        // Lo que no vale se marca en su pregunta, sin borrar las marcas de lo que falta responder;
+        // cada aviso se va solo al corregir su pregunta.
+        if (Object.keys(unsaved).length > 0) addSubmitErrors(form, unsaved)
         else if (failedBefore) clearSubmitErrors(form)
       })
       .catch((error: unknown) => applySubmitError(form, error))

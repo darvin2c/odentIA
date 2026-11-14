@@ -570,8 +570,22 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
     "answers.intensidad": expect.stringContaining("0 a 10"),
     "answers.pieza": expect.stringContaining("Pieza"),
   })
+  // No había nada guardado en esas preguntas, y el aviso lo dice así.
+  expect(partial.rejected["answers.intensidad"]).toContain("No se guardó: la pregunta sigue sin respuesta.")
   const stored = await run((tx) => listFormResponses(tx, "org_a", { patientId: patient.id }))
   expect(stored.find((row) => row.id === response.id)?.answers).toMatchObject({ intensidad: null, hallazgos: "Percusión positiva" })
+  // Revisión de la entrega 3: había 7, se escribe 15 y la base quedaba vacía. Lo que no vale no
+  // pisa la respuesta que ya estaba guardada, y el aviso dice qué quedó.
+  await save({ dolor: true, intensidad: 7, pieza: 36, hallazgos: "Percusión positiva" })
+  const kept = await save({ dolor: true, intensidad: 15, pieza: 19, hallazgos: "Percusión negativa" })
+  expect(kept.answers).toMatchObject({ dolor: true, intensidad: 7, pieza: 36, hallazgos: "Percusión negativa" })
+  expect(kept.rejected["answers.intensidad"]).toMatch(/0 a 10\. No se guardó: sigue guardado «7»\.$/)
+  expect(kept.rejected["answers.pieza"]).toContain("sigue guardado «36».")
+  // Lo que depende de una respuesta rechazada sigue a la que quedó guardada: con «¿Hay dolor?» mal
+  // escrito sigue valiendo el «Sí» de antes, y su intensidad no se borra por oculta.
+  const dependent = await save({ dolor: "quizá", intensidad: 9 })
+  expect(dependent.answers).toMatchObject({ dolor: true, intensidad: 9 })
+  expect(dependent.rejected["answers.dolor"]).toContain("sigue guardado «Sí».")
   // La firma sin el nombre de quien firma tampoco frena lo demás.
   const unsigned = await save({ dolor: false, firma: { strokes: [[[1, 1], [2, 2]]] } })
   expect(unsigned.answers).toMatchObject({ dolor: false, firma: null })

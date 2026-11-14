@@ -51,7 +51,7 @@ export { useFieldContext, useFormContext } from "./form-context.js"
 export { FormDrawer, type FormDrawerProps } from "./form-drawer.js"
 export { FormPanel, type FormPanelProps } from "./form-panel.js"
 export type { FormSecondaryAction } from "./form-surface.js"
-export { clearSubmitErrors, type SubmitErrors, setSubmitErrors } from "./server-errors.js"
+export { addSubmitErrors, clearSubmitErrors, type SubmitErrors, setSubmitErrors } from "./server-errors.js"
 export { SubmitButton, type SubmitButtonProps } from "./submit-button.js"
 export {
   isUnconfirmedSubmit,
