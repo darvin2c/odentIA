@@ -1,8 +1,9 @@
 import type { VisitQuestions } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { patientContact } from "@odentia/db/schema/clinical"
+import { patientContact, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq, inArray } from "drizzle-orm"
+import type { DeclaredPatientHealthInput } from "./clinical.js"
 import { ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { contactDecides } from "./responsibilities.js"
@@ -50,6 +51,48 @@ export async function getPortalVisit(tx: Db, ctx: PortalContext): Promise<Portal
     visit: ask,
     sent: decides ? await visitSentOf(tx, ctx.orgId, appointmentId, contactId) : null,
     respondent,
+  }
+}
+
+/**
+ * «Lo que nos contaste de tu salud» en su portal (entrega 10, decisión 9): lo que su enlace no
+ * muestra, porque se abre sin código, se lee aquí, donde entró con su identidad comprobada. Solo a
+ * quien decide por el paciente, y solo lo que dijo la persona o quien habla por ella (no lo que
+ * anotó el equipo): su última declaración con salud, tal como llegó, y si después dijo que nada
+ * cambió. Lo vigente, que el equipo revisa y corrige, es de la historia y no está aquí.
+ */
+export interface PortalHealthView {
+  told: { at: Date; reason: "cambio" | "correccion" | null; health: DeclaredPatientHealthInput } | null
+  unchanged: { at: Date } | null
+}
+
+export async function getPortalHealth(tx: Db, ctx: PortalContext): Promise<PortalHealthView> {
+  requireScope(ctx.session, "appointments")
+  await respondentOf(tx, ctx)
+  const { patientId, contactId } = ctx.session
+  if (!(await contactDecides(tx, ctx.orgId, patientId, contactId))) return { told: null, unchanged: null }
+  const rows = await tx
+    .select({
+      at: patientHealthDeclaration.saidAt,
+      reason: patientHealthDeclaration.reason,
+      health: patientHealthDeclaration.health,
+    })
+    .from(patientHealthDeclaration)
+    .where(
+      and(
+        eq(patientHealthDeclaration.organizationId, ctx.orgId),
+        eq(patientHealthDeclaration.patientId, patientId),
+        inArray(patientHealthDeclaration.respondent, ["patient", "representative"]),
+      ),
+    )
+    .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
+    .limit(20)
+  const told = rows.find((row) => row.reason !== "sin_cambios")
+  const unchanged = rows[0]?.reason === "sin_cambios" ? rows[0] : null
+  await logAccess(tx, ctx.orgId, ctx.session.id, "health.viewed")
+  return {
+    told: told ? { at: told.at, reason: told.reason === "cambio" || told.reason === "correccion" ? told.reason : null, health: told.health } : null,
+    unchanged: unchanged ? { at: unchanged.at } : null,
   }
 }
 

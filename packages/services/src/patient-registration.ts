@@ -413,6 +413,26 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
   )
 }
 
+/**
+ * Todo lo que la clínica pregunta de su salud y le corresponde, se sepa o no (entrega 10): lo que
+ * vuelve a responder cuando dice que algo cambió o corrige lo que envió. Vacío: la clínica no
+ * pregunta nada de su salud.
+ */
+export async function patientAllHealthQuestions(tx: Db, orgId: string, patientId: string): Promise<RegistrationFieldKey[]> {
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const person = await requirePatient(tx, orgId, patientId)
+  const today = await patientOrganizationToday(tx, orgId)
+  return healthQuestionsToAsk(
+    config,
+    {
+      countryCode: await findOrgCountry(tx, orgId),
+      product: await orgProduct(tx, orgId),
+      person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
+    },
+    new Set(),
+  )
+}
+
 /** Hay algo de su salud que preguntarle antes de su cita aunque no le falte ningún dato (`patientHealthQuestions`). */
 export async function patientHealthToAsk(tx: Db, orgId: string, patientId: string): Promise<boolean> {
   return (await patientHealthQuestions(tx, orgId, patientId)).length > 0

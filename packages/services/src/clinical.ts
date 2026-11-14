@@ -11,6 +11,7 @@ import {
   type MedicationClass,
   type MedicineClassAnswer,
   medicineClassAnswers,
+  medicationClassOf,
   type RegistrationFieldKey,
   DOSE_UNITS,
   type DoseUnit,
@@ -46,6 +47,7 @@ import {
   clinicalNote,
   encounter,
   type HEALTH_DECLARATION_VIAS,
+  type HEALTH_DECLARATION_ROW_REASONS,
   encounterProcedure,
   encounterSite,
   imagingStudy,
@@ -287,6 +289,13 @@ export interface PatientHealth {
   pregnancy: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo («Ver declaración original»). */
   declarations: HealthDeclaration[]
+  /** Lo vigente que «dijo que cambió» la última vez que volvió a responder (entrega 10); nulo si nada. */
+  changed: ChangedHealth | null
+  /**
+   * «Dijo que nada cambió en su salud ni en sus medicinas», con quién y cuándo: su última
+   * declaración, si fue esa (entrega 10). Nulo si después dijo otra cosa o nunca lo dijo.
+   */
+  unchanged: { by: HealthDeclarant; at: Date } | null
   /**
    * Anticoagulantes y medicinas para los huesos: si toma (la marca de arriba), si dijo que no, si no
    * sabe o si nadie se lo preguntó (`medicineClassAnswers`). La atención lo dice tal cual.
@@ -335,6 +344,27 @@ export interface HealthDeclaration {
   via: (typeof HEALTH_DECLARATION_VIAS)[number]
   by: HealthDeclarant
   health: DeclaredPatientHealthInput
+  /**
+   * Por qué llegó, antes de una cita (entrega 10): `cambio` (dijo que algo cambió y volvió a
+   * responder), `correccion` (corrigió lo que había enviado) o `sin_cambios` (dijo que nada cambió;
+   * sin salud). Nulo: lo primero que dijo, o un registro.
+   */
+  reason: (typeof HEALTH_DECLARATION_ROW_REASONS)[number] | null
+}
+
+/**
+ * Lo que sigue vigente en su ficha y dejó de ser lo que dice: la última vez que dijo que algo
+ * cambió (o corrigió lo enviado) volvió a responder ese grupo y no lo nombró. Queda como «dijo
+ * que cambió», no se borra: lo decide quien la atiende, y la marca se va cuando el equipo revisa
+ * su salud después de esa declaración. Las alergias, con su propia revisión.
+ */
+export interface ChangedHealth {
+  by: HealthDeclarant
+  /** Cuándo dijo que cambió. */
+  at: Date
+  allergies: string[]
+  conditions: string[]
+  medications: string[]
 }
 
 /**
@@ -718,6 +748,17 @@ export async function getPatientHealth(
     declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy, interviewLines }),
     pregnancy,
     declarations,
+    changed: changedHealthOf({
+      declarations,
+      allergies,
+      conditions,
+      medications: medications.filter((row) => !row.endDate || row.endDate >= today),
+      staffSavedAt: authorship.staffSavedAt,
+      allergiesReviewedAt: header.allergiesReviewedAt,
+    }),
+    // Lo último que dijo fue que nada cambió: se dice con su fecha.
+    unchanged:
+      declarations[0]?.reason === "sin_cambios" ? { by: declarations[0].by, at: declarations[0].at } : null,
     medicineClasses: medicineClassAnswers({
       reviewStatus: health.reviewStatus,
       declarations,
@@ -745,7 +786,8 @@ async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): P
     .select()
     .from(patientHealthDeclaration)
     .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
-    .orderBy(desc(patientHealthDeclaration.createdAt))
+    // Dos en el mismo envío (lo que faltaba y «nada cambió») entran en el mismo instante: va primero la última que dijo.
+    .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
     .limit(50)
   return rows.map((row) => ({
     at: row.saidAt,
@@ -753,7 +795,57 @@ async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): P
     via: row.via,
     by: { kind: row.respondent, name: row.declarantName, relation: row.declarantRelation },
     health: row.health,
+    reason: row.reason ?? null,
   }))
+}
+
+/**
+ * Lo vigente que «dijo que cambió» (entrega 10): de la última declaración que llegó porque algo
+ * cambió o porque corrigió lo enviado, lo que ya estaba antes en su ficha, en un grupo que esa
+ * declaración volvió a responder, y que no nombró. Un anticoagulante se compara con lo que dijo
+ * de anticoagulantes; una medicina sin clase, con lo que dijo de su medicación. Lo que el equipo
+ * revisó después ya no se marca: lo decidió quien la atiende. Sin esa declaración, nulo.
+ */
+export function changedHealthOf(input: {
+  declarations: HealthDeclaration[]
+  allergies: Array<Pick<HealthAllergyRow, "id" | "substance" | "isActive" | "verification" | "createdAt">>
+  conditions: Array<Pick<HealthConditionRow, "id" | "name" | "status" | "createdAt">>
+  /** Lo que toma hoy. */
+  medications: Array<Pick<HealthMedicationRow, "id" | "name" | "atcCode" | "createdAt">>
+  /** Cuándo el equipo guardó por última vez sus antecedentes, y cuándo revisó sus alergias. */
+  staffSavedAt: Date | null
+  allergiesReviewedAt: Date | null
+}): ChangedHealth | null {
+  const said = input.declarations.find((row) => row.reason === "cambio" || row.reason === "correccion")
+  if (!said) return null
+  const health = said.health
+  const before = (at: Date) => at.getTime() < said.enteredAt.getTime()
+  const answered = (state: string | undefined) => state === "recorded" || state === "none"
+  const after = (at: Date | null) => !!at && at.getTime() >= said.enteredAt.getTime()
+  const names = (items: Array<{ name?: string; substance?: string }> | undefined, key: "name" | "substance") =>
+    new Set((items ?? []).map((item) => normalizeDrugText(item[key] ?? "")).filter(Boolean))
+  const out: ChangedHealth = { by: said.by, at: said.at, allergies: [], conditions: [], medications: [] }
+  if (answered(health.allergies?.state) && !after(input.allergiesReviewedAt) && !after(input.staffSavedAt)) {
+    const sayNow = names(health.allergies?.items, "substance")
+    for (const row of input.allergies)
+      if (row.isActive && row.verification !== "descartada" && before(row.createdAt) && !sayNow.has(normalizeDrugText(row.substance)))
+        out.allergies.push(row.id)
+  }
+  if (!after(input.staffSavedAt)) {
+    if (answered(health.conditions?.state)) {
+      const sayNow = names(health.conditions?.items, "name")
+      for (const row of input.conditions)
+        if (row.status === "activa" && before(row.createdAt) && !sayNow.has(normalizeDrugText(row.name))) out.conditions.push(row.id)
+    }
+    // Lo que nombró ahora de cualquier medicina: si la repitió, sigue igual, en el grupo que sea.
+    const sayNow = new Set(declaredMedications(health).map((row) => normalizeDrugText(row.name)))
+    for (const row of input.medications) {
+      if (!before(row.createdAt) || sayNow.has(normalizeDrugText(row.name))) continue
+      const group = medicationClassOf(row.atcCode)
+      if (answered(group ? health[group]?.state : health.medications?.state)) out.medications.push(row.id)
+    }
+  }
+  return out.allergies.length + out.conditions.length + out.medications.length > 0 ? out : null
 }
 
 const UNKNOWN_DECLARANT: HealthDeclarant = { kind: "unknown", name: null, relation: null }
@@ -949,10 +1041,13 @@ export async function recordHealthDeclaration(
     by: HealthDeclarant
     health: DeclaredPatientHealthInput
     saidAt?: Date | null
+    /** Por qué llegó, antes de una cita (entrega 10); sin él, lo primero que dijo o un registro. */
+    reason?: (typeof HEALTH_DECLARATION_ROW_REASONS)[number] | null
   },
 ): Promise<void> {
   if (input.by.kind === "unknown") return
   await tx.insert(patientHealthDeclaration).values({
+    ...(input.reason ? { reason: input.reason } : {}),
     organizationId: orgId,
     patientId,
     via: input.via,

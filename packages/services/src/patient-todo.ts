@@ -7,6 +7,7 @@ import { schedulableItemsOf } from "./booking-links.js"
 import { type BudgetWithTotals, listBudgets } from "./budgets.js"
 import { type RemoteSignBlock, remoteSignBlock } from "./clinical-forms.js"
 import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
+import { type HealthCheck, healthCheckOf } from "./health-check.js"
 import { type VisitAsk, visitAskOf } from "./visit-answers.js"
 
 /**
@@ -32,6 +33,11 @@ export interface PatientTodo {
    * aún no lo respondió. Va en la misma tarjeta que sus datos: «Antes de tu cita».
    */
   visit: VisitAsk | null
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas?» antes de la cita a la vista, si su última
+   * declaración tiene más de un mes (entrega 10). Va en la misma tarjeta: «Antes de tu cita».
+   */
+  healthCheck: HealthCheck | null
   /** Los presupuestos que esperan su respuesta, el último enviado primero. */
   budgets: BudgetWithTotals[]
   /** «Lo que aceptaste, por agendar». */
@@ -121,6 +127,7 @@ export async function patientTodo(
     consents,
     signBlock: consents.length > 0 ? await remoteSignBlock(tx, orgId, patientId, input.contactId) : null,
     visit: await visitAskOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
+    healthCheck: await healthCheckOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
     budgets: await budgetsToAnswer(tx, orgId, patientId),
     toSchedule: await schedulableItemsOf(tx, orgId, patientId),
   }
@@ -133,6 +140,7 @@ export function hasTodo(todo: PatientTodo): boolean {
     todo.health ||
     todo.consents.length > 0 ||
     todo.visit !== null ||
+    todo.healthCheck !== null ||
     todo.budgets.length > 0 ||
     todo.toSchedule.length > 0
   )
@@ -144,12 +152,13 @@ export function hasTodo(todo: PatientTodo): boolean {
  * presupuesto y lo aceptado por agendar. Un consentimiento que solo se firma en la cita no cuenta.
  * La salud, opcional, cuenta como sus datos solo si `health`; «Tu visita» cuenta cuando se le
  * pregunta: es lo que se le pide antes de cada cita (entrega 8), y con sus datos es una sola cosa.
+ * «¿Cambió algo?» (entrega 10) va en esa misma tarjeta: no suma otra cosa.
  */
 export function remoteTodoCount(todo: PatientTodo, options: { health?: boolean } = {}): { data: boolean; total: number } {
   const data = todo.missing.length > 0 || (options.health === true && todo.health)
   const consents = todo.signBlock ? 0 : todo.consents.length
   const total =
-    (data || todo.visit ? 1 : 0) +
+    (data || todo.visit || todo.healthCheck ? 1 : 0) +
     consents +
     todo.budgets.length +
     (todo.toSchedule.length > 0 ? 1 : 0)

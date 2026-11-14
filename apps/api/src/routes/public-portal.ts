@@ -8,6 +8,7 @@ import {
   getPortalAccount,
   listPortalOrders,
   getPortalAppointmentCalendar,
+  getPortalHealth,
   getPortalVisit,
   getPortalAppointments,
   getPortalPaperFileUrl,
@@ -368,6 +369,8 @@ export function createPublicPortalRoute(deps: {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return portalCall(c, (tx, ctx) => savePortalVisit(tx, ctx, parsed.data))
   })
+  // «Lo que nos contaste de tu salud»: lo que su enlace no muestra se lee aquí, con su código (entrega 10).
+  app.get("/health", async (c) => portalCall(c, (tx, ctx) => getPortalHealth(tx, ctx)))
 
   // Si el teléfono no puede guardar la llave, la sesión se recuerda 30 días (decisión 9).
   app.post("/session/remember", async (c) => portalCall(c, (tx, ctx) => rememberPortalSession(tx, ctx)))

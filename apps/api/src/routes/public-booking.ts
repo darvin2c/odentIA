@@ -88,6 +88,9 @@ const dataBody = z.strictObject({
   acceptsReminders: z.literal(true).optional(),
   // «Tu visita», el último paso de «Antes de tu cita»: a qué viene y si le duele, todo opcional.
   visit: visitAnswerSchema.nullish(),
+  // «¿Cambió algo en tu salud o en tus medicinas?» y «Corregir mi salud» (entrega 10).
+  healthCheck: z.enum(["sin_cambios", "cambio"]).nullish(),
+  correctHealth: z.boolean().optional(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),
@@ -342,9 +345,12 @@ export function createPublicBookingRoute(deps: {
 
   // Tus datos: solo lo que falta, una sola vez.
   app.get("/:slug/data", async (c) => {
-    const query = z.strictObject({ token }).safeParse(c.req.query())
+    // `modo=corregir`: «Corregir mi salud o mis medicinas», solo su salud (entrega 10).
+    const query = z.strictObject({ token, modo: z.enum(["corregir"]).optional() }).safeParse(c.req.query())
     if (!query.success) return unavailable(c)
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => getPersonalLinkDataForm(tx, orgId, query.data.token)))
+    return answer(c, 200, () =>
+      inOrg(c, (tx, orgId) => getPersonalLinkDataForm(tx, orgId, query.data.token, query.data.modo === "corregir" ? "corregir" : "pendiente")),
+    )
   })
 
   app.post("/:slug/data", async (c) => {
