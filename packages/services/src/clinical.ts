@@ -6,8 +6,12 @@ import {
   codeAllergySubstance,
   declaredHealthAnswered,
   declaredMedicineAtc,
+  knownHealthQuestions,
   MEDICATION_CLASSES,
   type MedicationClass,
+  type MedicineClassAnswer,
+  medicineClassAnswers,
+  type RegistrationFieldKey,
   DOSE_UNITS,
   type DoseUnit,
   doseText,
@@ -283,6 +287,11 @@ export interface PatientHealth {
   pregnancy: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo («Ver declaración original»). */
   declarations: HealthDeclaration[]
+  /**
+   * Anticoagulantes y medicinas para los huesos: si toma (la marca de arriba), si dijo que no, si no
+   * sabe o si nadie se lo preguntó (`medicineClassAnswers`). La atención lo dice tal cual.
+   */
+  medicineClasses: Record<MedicationClass, MedicineClassAnswer>
   allergies: HealthAllergyRow[]
   conditions: HealthConditionRow[]
   medications: HealthMedicationRow[]
@@ -702,7 +711,25 @@ export async function getPatientHealth(
     declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy }),
     pregnancy,
     declarations,
+    medicineClasses: medicineClassAnswers({
+      reviewStatus: health.reviewStatus,
+      declarations,
+      // Lo que toma hoy: sin fin, o con un fin que aún no llega.
+      current: medications.filter((row) => !row.endDate || row.endDate >= today),
+    }),
   }
+}
+
+/** Los datos de salud del registro que ya se saben de la persona (`knownHealthQuestions`). */
+export function knownHealthQuestionsOf(health: PatientHealth): Set<RegistrationFieldKey> {
+  return knownHealthQuestions({
+    bloodGroup: health.bloodGroup,
+    reviewStatus: health.reviewStatus,
+    activeAllergies: health.allergies.filter((row) => row.isActive && row.verification !== "descartada").length,
+    medications: health.medications,
+    interview: (health.latestAnamnesis?.answers ?? null) as Record<string, unknown> | null,
+    declarations: health.declarations,
+  })
 }
 
 /** Las declaraciones de salud de la persona, de la más nueva a la más antigua. */
@@ -1226,7 +1253,7 @@ export interface DeclaredAllergy {
 export async function addDeclaredAllergies(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   patientId: string,
   declared: DeclaredAllergy[],
   origin: { entity: string; entityId: string },
@@ -1335,12 +1362,14 @@ export async function addDeclaredHealth(
   const declared = parsed.data
   await requirePatient(tx, orgId, patientId)
   const [locked] = await tx
-    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus, bloodGroup: patient.bloodGroup })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
     .for("update")
   if (!locked) throw notFound("Paciente")
+  // El grupo sanguíneo que dijo entra solo si no había ninguno: el guardado no se pisa.
+  const bloodGroup = !locked.bloodGroup && declared.bloodGroup ? declared.bloodGroup : null
   const today = await clinicToday(tx, orgId)
   const saidOn = await clinicToday(tx, orgId, origin.at)
   const note = `${origin.words ?? DECLARED_ONLINE_NOTE} el ${saidOn.split("-").reverse().join("/")}.`
@@ -1454,12 +1483,13 @@ export async function addDeclaredHealth(
   const directed = (["anticoagulants", "boneMedicines"] as const).some(
     (group) => declared[group] && declared[group].state !== "unanswered",
   )
-  if (!addedConditions && !addedMedications && !interview && saidNo.length === 0 && !directed)
+  if (!addedConditions && !addedMedications && !interview && saidNo.length === 0 && !directed && !bloodGroup)
     return { conditions: 0, medications: 0, interview: false, saidNo }
   await tx
     .update(patient)
     .set({
       healthRevision: locked.revision + 1,
+      ...(bloodGroup ? { bloodGroup } : {}),
       // Con lo que sumó, el grupo queda «registrado»: un «niega» de antes ya no es cierto.
       healthReviewStatus: {
         allergies: saidNo.includes("allergies") ? "none" : (reviewStatus.allergies ?? "unknown"),

@@ -32,7 +32,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { renderConsentPreviewPdf } from "./consent-pdf.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { addEncounterProcedure } from "./encounters.js"
-import { patientHealthToAsk } from "./patient-registration.js"
+import { patientHealthQuestions, patientHealthToAsk } from "./patient-registration.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -344,7 +344,7 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
     dataSubmittedAt: new Date(),
   } as typeof appointmentBookingLink.$inferInsert)
   expect(await run((tx) => patientHealthToAsk(tx, orgId, patient.id))).toBe(false)
-  // Y a quien ya tiene su salud registrada tampoco.
+  // A quien el equipo ya le anotó alergias, enfermedades y medicinas se le pregunta solo lo demás (entrega 6).
   const other = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Con Salud" }))
   await run((tx) =>
     savePatientHealth(tx, orgId, ACTOR, other.id, {
@@ -355,7 +355,11 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
       medications: [],
     }),
   )
-  expect(await run((tx) => patientHealthToAsk(tx, orgId, other.id))).toBe(false)
+  const left = await run((tx) => patientHealthQuestions(tx, orgId, other.id))
+  expect(left).not.toEqual(expect.arrayContaining(["allergies"]))
+  for (const key of ["allergies", "conditions", "medications", "anticoagulants", "boneMedicines"])
+    expect(left).not.toContain(key)
+  expect(left).toEqual(expect.arrayContaining(["dental.corazon", "dental.problemaAnestesia", "medical.tabaco"]))
 })
 
 it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nunca sin ninguno (M3)", async () => {

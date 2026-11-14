@@ -52,7 +52,7 @@ import {
   publishFormTemplate,
 } from "./clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { getPatientHealth } from "./clinical.js"
+import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
 import { getPatientSummary } from "./patient-history.js"
@@ -1485,6 +1485,48 @@ it("«Tus datos y tu salud»: la salud se pregunta solo si nadie la registró y 
   expect(health.allergies.map((item) => item.substance)).toContain("Penicilina")
   const notes = await ownerDb.select({ body: crmNote.body }).from(crmNote).where(eq(crmNote.contactId, lia.personId))
   expect(notes.map((note) => note.body).join(" ")).toContain("Declaró su salud")
+})
+
+it("«Tus datos y tu salud»: a quien el equipo ya le anotó un antecedente se le pregunta solo lo que falta", async () => {
+  const f = await clinicalFixture()
+  const rosa = await minimal(f, { given: "Rosa", surname: "Lima" })
+  // El equipo anotó su alergia en la clínica.
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, rosa.patientId, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
+      allergies: [{ substance: "Látex", severity: "moderada" }],
+      conditions: [],
+      medications: [],
+    }),
+  )
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: rosa.personId, patientId: rosa.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form.asksHealth).toBe(true)
+  expect(form.healthQuestions).not.toContain("allergies")
+  expect(form.healthQuestions).toEqual(expect.arrayContaining(["conditions", "anticoagulants", "boneMedicines"]))
+
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1958-02-01" },
+      health: {
+        // Lo que no se le preguntó no cambia lo anotado.
+        allergies: { state: "none", items: [] },
+        anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
+        boneMedicines: { state: "none" },
+      },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))
+  expect(health.allergies.map((row) => row.substance)).toEqual(["Látex"])
+  expect(health.reviewStatus.allergies).toBe("recorded")
+  expect(health.medications).toEqual([expect.objectContaining({ name: "warfarina 5 mg", atcCode: "B01A" })])
+  expect(health.medicineClasses).toEqual({
+    anticoagulants: { answer: "yes", said: false },
+    boneMedicines: { answer: "no", said: true },
+  })
+  // La marca de arriba la nombra a ella, no al equipo.
+  expect(health.declared.some((group) => group.by.kind === "patient" && group.medications.length === 1)).toBe(true)
 })
 
 it("al confirmar la cita del agente, a quien le faltan datos se le da su enlace; a quien no, nada", async () => {

@@ -160,3 +160,31 @@ export function medicationAlertWords(row: { name: string; dose?: string | null; 
   const { label, unnamed } = MEDICATION_CLASSES[group]
   return { label: row.name === unnamed ? unnamed : `${label}: ${what}`, group }
 }
+
+/** Lo que va junto con un dato: las semanas, con el embarazo; cuántos al día, con el tabaco. */
+const COMES_WITH: Record<string, RegistrationFieldKey> = {
+  "personal.semanasEmbarazo": "personal.embarazo",
+  "medical.cigarrillos": "medical.tabaco",
+}
+
+/**
+ * De lo que envió, solo lo que se le preguntó (`keys`): lo que ya se sabía no
+ * se le mostró, así que no puede cambiarlo desde su enlace.
+ */
+export function onlyAskedHealth(health: DeclaredHealth, keys: readonly RegistrationFieldKey[]): DeclaredHealth {
+  const asked = new Set<string>(keys)
+  const out: Rec = {}
+  for (const [key, value] of Object.entries(health)) {
+    if (key === "personal" || key === "dental" || key === "medical" || key === "optical") {
+      if (!isRec(value)) continue
+      const kept = Object.fromEntries(
+        Object.entries(value).filter(([name]) => {
+          const full = `${key}.${name}`
+          return asked.has(full) || asked.has(COMES_WITH[full] ?? "")
+        }),
+      )
+      if (Object.keys(kept).length) out[key] = kept
+    } else if (asked.has(key)) out[key] = value
+  }
+  return out as DeclaredHealth
+}

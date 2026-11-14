@@ -3,6 +3,7 @@ import {
   CONSENT_DECLARATION,
   clinicalProfileFor,
   CONSENT_SIGNATURE_NOTES,
+  declaredHealthAnswered,
   diagnosisCodeLabel,
   documentIssuerCountry,
   documentText,
@@ -12,9 +13,11 @@ import {
   isRealDate,
   type MissingPersonDatum,
   normalizePhone,
+  onlyAskedHealth,
   phoneFormatError,
   productWords,
   type RegistrationConfig,
+  type RegistrationFieldKey,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
@@ -68,6 +71,8 @@ import { serviceRecipient } from "./budget-send.js"
 import type { BudgetWithTotals } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import {
+  addDeclaredAllergies,
+  addDeclaredHealth,
   type DeclaredPatientHealthInput,
   getPatientHealth,
   declarantOfContact,
@@ -92,7 +97,7 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson } from "./patient-identity.js"
-import { getPatientMissingData, getPatientRegistrationConfig, patientHealthToAsk } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig, patientHealthQuestions } from "./patient-registration.js"
 import { consentsToSign, hasTodo, type PatientTodo, patientTodo } from "./patient-todo.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
@@ -281,17 +286,21 @@ async function missingOf(
 }
 
 /**
- * Su salud se le pregunta (opcional) solo si la clínica la pregunta, nadie la registró en su
- * ficha y nunca envió «Tus datos» (`patientHealthToAsk`, la misma regla que el recordatorio),
- * y solo a quien decide por el paciente.
+ * Lo que se le pregunta de su salud (opcional), dato por dato: lo que la clínica pregunta y nadie
+ * anotó ni respondió aún, si nunca envió «Tus datos» (`patientHealthQuestions`, la misma regla que
+ * el recordatorio), y solo a quien decide por el paciente. Vacío: nada.
  */
-async function healthPendingOf(
+async function healthQuestionsOf(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
-): Promise<boolean> {
-  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return false
-  return patientHealthToAsk(tx, orgId, link.patientId)
+): Promise<RegistrationFieldKey[]> {
+  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return []
+  return patientHealthQuestions(tx, orgId, link.patientId)
+}
+
+async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
+  return (await healthQuestionsOf(tx, orgId, link)).length > 0
 }
 
 /**
@@ -776,6 +785,8 @@ export interface PersonalLinkDataForm {
    * (lo declarado entra a revisión; lo que ya registró la clínica no se pisa).
    */
   asksHealth: boolean
+  /** Lo que se le pregunta de su salud, dato por dato: lo demás ya se sabe y no se le muestra. */
+  healthQuestions: RegistrationFieldKey[]
   /** Su primer nombre, para saludarla; nulo si no se sabe. */
   firstName: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va al final, antes de enviar. */
@@ -790,7 +801,8 @@ export async function getPersonalLinkDataForm(
 ): Promise<PersonalLinkDataForm> {
   const link = await requireLiveLink(tx, orgId, token)
   const missing = await missingOf(tx, orgId, link)
-  const health = await healthPendingOf(tx, orgId, link)
+  const healthQuestions = await healthQuestionsOf(tx, orgId, link)
+  const health = healthQuestions.length > 0
   if ((!missing && !health) || !link.patientId) throw linkExpired()
   return {
     missing: missing ?? [],
@@ -800,6 +812,7 @@ export async function getPersonalLinkDataForm(
     // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).
     registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
+    healthQuestions,
     firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
     pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
   }
@@ -990,7 +1003,10 @@ async function saveLinkData(
     const value = typeof raw === "string" ? raw.trim() : null
     if (value) patch[key] = value
   }
-  const withHealth = !!input.health && (await healthNeverRecorded(tx, orgId, patientId))
+  // De su salud, solo lo que se le preguntó: lo que ya se sabía no se le mostró y no lo cambia.
+  const asked = input.health ? await healthQuestionsOf(tx, orgId, link) : []
+  const said = input.health && asked.length > 0 ? onlyAskedHealth(input.health, asked) : null
+  const withHealth = !!said && declaredHealthAnswered(said)
   const renamed = input.name ? await correctLinkName(tx, orgId, link, patientId, input.name) : null
   const consented = await saveLinkConsents(tx, orgId, link, patientId, input, options.toldWhatsApp)
   if (Object.keys(patch).length === 0 && !withHealth && !renamed) {
@@ -1033,21 +1049,36 @@ async function saveLinkData(
     }
   }
   if (Object.keys(patch).length > 0) await updatePatient(tx, orgId, actor, patientId, patch)
-  // Su salud entra como declarada por la persona: la revisa quien atiende.
-  if (withHealth && input.health) {
-    const saved = await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
-    // Y queda aparte tal como la envió, con quién y cuándo: Antecedentes guarda lo vigente, que el
-    // equipo corrige; «Ver declaración original» muestra esto. Sin nada respondido, no hay qué guardar.
-    if (saved.revision > 0)
-      await recordHealthDeclaration(tx, orgId, patientId, {
-        via: "enlace",
-        // Quien abrió el enlace y lo envió: la persona o quien decide por ella, con su vínculo.
-        by:
-          link.row.contactId === personId
-            ? { kind: "patient", name: null, relation: null }
-            : await declarantOfContact(tx, orgId, patientId, link.row.contactId),
-        health: input.health,
-      })
+  // Su salud entra como declarada por la persona: la revisa quien atiende. Si el equipo ya había
+  // anotado algo, lo que dijo se suma a eso (`addDeclaredHealth`), sin tocar lo anotado.
+  if (withHealth && said) {
+    // Queda aparte tal como la envió, con quién y cuándo: Antecedentes guarda lo vigente, que el
+    // equipo corrige; «Ver declaración original» muestra esto. Va en la misma transacción que las
+    // filas que trae: de ahí sale quién dijo cada una.
+    await recordHealthDeclaration(tx, orgId, patientId, {
+      via: "enlace",
+      // Quien abrió el enlace y lo envió: la persona o quien decide por ella, con su vínculo.
+      by:
+        link.row.contactId === personId
+          ? { kind: "patient", name: null, relation: null }
+          : await declarantOfContact(tx, orgId, patientId, link.row.contactId),
+      health: said,
+    })
+    if (await healthNeverRecorded(tx, orgId, patientId)) {
+      await initializeDeclaredPatientHealth(tx, orgId, patientId, said, null)
+    } else {
+      const origin = { entity: "appointment_booking_link", entityId: link.row.id }
+      const allergies = said.allergies?.state === "recorded" ? said.allergies.items : []
+      await addDeclaredAllergies(
+        tx,
+        orgId,
+        null,
+        patientId,
+        allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
+        origin,
+      )
+      await addDeclaredHealth(tx, orgId, null, patientId, said, { ...origin, at: new Date(), words: "Lo dijo en su enlace" })
+    }
   }
   const person = await requirePatient(tx, orgId, patientId)
   const stillMissing = await getPatientMissingData(tx, orgId, patientId)

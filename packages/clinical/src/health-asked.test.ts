@@ -5,6 +5,7 @@ import {
   knownHealthQuestions,
   medicationAlertWords,
   medicineClassAnswers,
+  onlyAskedHealth,
 } from "./health-asked.js"
 import { DEFAULT_REGISTRATION_CONFIG } from "./patient-registration.js"
 
@@ -117,5 +118,25 @@ describe("«No se le preguntó» no es «dijo que no»", () => {
       "Anticoagulante (no dijo cuál)",
     )
     expect(medicationAlertWords({ name: "Sintrom", atcCode: null })).toEqual({ label: "Toma Sintrom", group: null })
+  })
+})
+
+describe("de lo que envió desde su enlace, solo lo que se le preguntó", () => {
+  it("lo que ya se sabía no se cambia; las semanas van con el embarazo y cuántos fuma con el tabaco", () => {
+    expect(
+      onlyAskedHealth(
+        {
+          allergies: { state: "none", items: [] },
+          anticoagulants: { state: "recorded", detail: "warfarina" },
+          personal: { embarazo: true, semanasEmbarazo: 20, cirugias: "No" },
+          medical: { tabaco: "fuma", cigarrillos: "menos_10", lactancia: false },
+        },
+        ["anticoagulants", "personal.embarazo", "medical.tabaco"],
+      ),
+    ).toEqual({
+      anticoagulants: { state: "recorded", detail: "warfarina" },
+      personal: { embarazo: true, semanasEmbarazo: 20 },
+      medical: { tabaco: "fuma", cigarrillos: "menos_10" },
+    })
   })
 })

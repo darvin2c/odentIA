@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import {
+  ageInYears,
   clinicalProfileFor,
   composeDisplayName,
   DEFAULT_REGISTRATION_CONFIG,
@@ -14,7 +15,9 @@ import {
   type MissingPersonDatum,
   missingPersonData,
   normalizePhone,
+  healthQuestionsToAsk,
   pendingRegistrationFields,
+  type RegistrationFieldKey,
   REPRESENTATIVE_DOC_GAP,
   type RegistrationAnswers,
   type RegistrationConfig,
@@ -54,6 +57,7 @@ import {
   declarantOfRegistration,
   getPatientHealth,
   initializeDeclaredPatientHealth,
+  knownHealthQuestionsOf,
   recordHealthDeclaration,
 } from "./clinical.js"
 import {
@@ -375,27 +379,12 @@ function spokespersonReachable(orgId: string) {
 }
 
 /**
- * «Faltan datos para atenderla» de una ficha (decisión 10 de la fase 3): lo
- * necesario para atender más lo que «Registro de pacientes» marca
- * obligatorio, con la regla de `missingPersonData`. Se calcula aquí, en el
- * servidor, para la página de la persona; el teléfono o el correo de quien
- * habla por ella (un vínculo activo que no es ella) cuentan como suyos. A quien
- * escribe desde un número no se le pide un teléfono: el de su WhatsApp cuenta,
- * sin pasar a ser el «Teléfono» de su ficha (`whatsappNumbersOf`).
+ * Lo que su enlace le pregunta de su salud, dato por dato (mesa del 13 nov, entrega 6): lo que la
+ * clínica pregunta, que le corresponde (el embarazo y la lactancia, a mujeres de 12 a 55 años) y que
+ * nadie anotó ni respondió aún (`healthQuestionsToAsk`). A quien ya envió «Tus datos» no se le insiste:
+ * lo que dejó en blanco era opcional. Vacío: nada que preguntarle.
  */
-export async function clinicAsksHealth(tx: Db, orgId: string): Promise<boolean> {
-  const config = await getPatientRegistrationConfig(tx, orgId)
-  return (["allergies", "conditions", "medications"] as const).some((key) => config.fields[key] !== "hidden")
-}
-
-/**
- * Hay algo que preguntarle a la persona antes de su cita aunque no le falte
- * ningún dato: su salud, si la clínica la pregunta, nadie la registró y aún no
- * envió «Tus datos» (lo dejó en blanco porque es opcional: no se le insiste).
- */
-export async function patientHealthToAsk(tx: Db, orgId: string, patientId: string): Promise<boolean> {
-  if (!(await clinicAsksHealth(tx, orgId))) return false
-  if ((await getPatientHealth(tx, orgId, patientId)).revision > 0) return false
+export async function patientHealthQuestions(tx: Db, orgId: string, patientId: string): Promise<RegistrationFieldKey[]> {
   const [sent] = await tx
     .select({ id: appointmentBookingLink.id })
     .from(appointmentBookingLink)
@@ -407,9 +396,35 @@ export async function patientHealthToAsk(tx: Db, orgId: string, patientId: strin
       ),
     )
     .limit(1)
-  return !sent
+  if (sent) return []
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const person = await requirePatient(tx, orgId, patientId)
+  const today = await patientOrganizationToday(tx, orgId)
+  return healthQuestionsToAsk(
+    config,
+    {
+      countryCode: await findOrgCountry(tx, orgId),
+      product: await orgProduct(tx, orgId),
+      person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
+    },
+    knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)),
+  )
 }
 
+/** Hay algo de su salud que preguntarle antes de su cita aunque no le falte ningún dato (`patientHealthQuestions`). */
+export async function patientHealthToAsk(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  return (await patientHealthQuestions(tx, orgId, patientId)).length > 0
+}
+
+/**
+ * «Faltan datos para atenderla» de una ficha (decisión 10 de la fase 3): lo
+ * necesario para atender más lo que «Preguntas al paciente» marca
+ * obligatorio, con la regla de `missingPersonData`. Se calcula aquí, en el
+ * servidor, para la página de la persona; el teléfono o el correo de quien
+ * habla por ella (un vínculo activo que no es ella) cuentan como suyos. A quien
+ * escribe desde un número no se le pide un teléfono: el de su WhatsApp cuenta,
+ * sin pasar a ser el «Teléfono» de su ficha (`whatsappNumbersOf`).
+ */
 export async function getPatientMissingData(
   tx: Db,
   orgId: string,
