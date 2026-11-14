@@ -4209,6 +4209,67 @@ await db.transaction((tx) =>
     },
   ),
 )
+// Marta (mesa del 13 nov, entrega 6) se registró sola y respondió «Tus medicinas»: toma warfarina y
+// alendronato. Arriba de su ficha y de la atención salen «Anticoagulante: warfarina 5 mg» y «Huesos:
+// alendronato…», con la marca de lo que dijo ella y sin revisar; el código ATC de su grupo (B01A, M05B)
+// sale de su Sí, no del nombre que escribió.
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: {
+          displayName: "Marta Ríos Salazar",
+          givenNames: "Marta",
+          familyName: "Ríos Salazar",
+          birthDate: "1960-03-12",
+          sex: "F",
+          phone: "+51987000937",
+          docType: "DNI",
+          docNumber: "70090815",
+        },
+        respondent: "patient",
+        privacyAccepted: true,
+        health: {
+          allergies: {
+            state: "recorded",
+            items: [{ substance: "Penicilina", reaction: "Me salieron ronchas", severity: "desconocida" }],
+          },
+          conditions: {
+            state: "recorded",
+            items: [{ name: "Presión alta" }, { name: "Fibrilación auricular" }, { name: "Osteoporosis" }],
+          },
+          anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
+          boneMedicines: { state: "recorded", detail: "alendronato 70 mg semanal, pastillas, desde 2023" },
+          medications: { state: "none", items: [] },
+          dental: { corazon: { riesgoEndocarditis: "no", antibioticoPrevio: "no" }, problemaAnestesia: "no" },
+          medical: { tabaco: "nunca" },
+        },
+      },
+    },
+  ),
+)
+// Julia: el equipo le anotó en la clínica su alergia al ibuprofeno y nada más. Su enlace le pregunta
+// solo lo que falta (sus enfermedades, sus medicinas, el corazón…), no la alergia que ya está.
+const julia = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Julia Paredes Rojas",
+  givenNames: "Julia",
+  familyName: "Paredes Rojas",
+  birthDate: "1972-07-04",
+  sex: "F",
+  phone: "+51987000938",
+})
+await savePatientHealth(db, ORG_A, ANA_ID, julia.id, {
+  expectedRevision: 0,
+  reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
+  allergies: [{ substance: "Ibuprofeno", severity: "moderada", reaction: "Hinchazón de labios" }],
+  conditions: [],
+  medications: [],
+})
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
 // de «Madre» espera «Confirmar» o «No es representante», tarea `confirmar_representante`)
