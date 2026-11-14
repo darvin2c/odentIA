@@ -137,7 +137,13 @@ export function UnsavedDialog({ open, lost, onStay, onDiscard, finalFocus }: Uns
           <AlertDialogDescription>{lost || words.description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <Button type="button" variant="destructive" onClick={onDiscard}>
+          <Button
+            type="button"
+            variant="destructive"
+            // En oscuro, el fondo de la variante (destructive/20) dejaba el rojo en 4,36:1, bajo el 4,5:1 de WCAG AA.
+            className="dark:bg-destructive/10 dark:hover:bg-destructive/20"
+            onClick={onDiscard}
+          >
             {words.discard}
           </Button>
           <AlertDialogCancel ref={stay} variant="default">
