@@ -103,8 +103,9 @@ describe("un formulario a medias al cerrar", () => {
     expect(openFormsWords([])).toBeNull()
     const one = openFormsWords([{ title: "Evaluación de endodoncia" }])
     expect(one?.title).toBe("Queda un formulario a medias")
+    // El camino más corto ya no es «Documentos de la ficha»: se termina en la misma atención.
     expect(one?.detail).toBe(
-      "«Evaluación de endodoncia». Puedes firmar igual: se termina después, desde Documentos de la ficha, y lleva su propia fecha.",
+      "«Evaluación de endodoncia». Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.",
     )
     const two = openFormsWords([{ title: "Evaluación de endodoncia" }, { title: "Ficha periodontal" }])
     expect(two?.title).toBe("Quedan 2 formularios a medias")
