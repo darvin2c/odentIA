@@ -1677,11 +1677,11 @@ export function EncounterEditor({
     ) : null
 
   // Una ficha abierta al lado: dictar no le pone encima «Lo dictado» (lo dictado para ella aparece en sus preguntas).
-  const formOpenRef = useRef(false)
+  const formOpenRef = useRef(new Set<string>())
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
     setDictationTyping(false)
-    if (mode === "panel" && !formOpenRef.current) setTranscriptOpen(true)
+    if (mode === "panel" && formOpenRef.current.size === 0) setTranscriptOpen(true)
   }
   const finishDictation = () => {
     dictation.finish()
@@ -1697,8 +1697,9 @@ export function EncounterEditor({
       },
       discard: (item) => dictation.act.mutate({ item, action: "discard" }),
       busy: dictation.acceptForms.isPending || dictation.act.isPending,
-      setFormOpen: (open) => {
-        formOpenRef.current = open
+      setFormOpen: (key, open) => {
+        if (open) formOpenRef.current.add(key)
+        else formOpenRef.current.delete(key)
       },
     }),
     [dictation.enabled, dictation.suggestions, dictation.acceptForms, dictation.act],

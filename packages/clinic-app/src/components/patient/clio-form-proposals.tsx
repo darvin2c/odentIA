@@ -17,8 +17,11 @@ export interface ClioFormProposals {
   accept: (items: DictationSuggestion[]) => Promise<void>
   discard: (item: DictationSuggestion) => void
   busy: boolean
-  /** El panel de una ficha se abrió o se cerró: dictar no le pone encima «Lo dictado». */
-  setFormOpen: (open: boolean) => void
+  /**
+   * El panel de una ficha se abrió o se cerró: dictar no le pone encima «Lo dictado».
+   * Cada panel avisa con su clave: en la atención hay más de uno montado.
+   */
+  setFormOpen: (key: string, open: boolean) => void
 }
 
 export const ClioFormProposalsContext = createContext<ClioFormProposals | null>(null)

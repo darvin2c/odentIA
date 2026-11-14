@@ -11,7 +11,7 @@ import { DetailDrawer, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { ApiError } from "../../lib/api"
 import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
@@ -1036,11 +1036,12 @@ export function FormDetail({
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
   // Con la ficha abierta al lado, empezar a dictar no le pone «Lo dictado» encima (entrega 11).
   const clio = useClioFormProposals()
+  const panelKey = useId()
   const shown = responseId !== null && response !== null
   useEffect(() => {
-    clio?.setFormOpen(shown)
-    return () => clio?.setFormOpen(false)
-  }, [clio, shown])
+    clio?.setFormOpen(panelKey, shown)
+    return () => clio?.setFormOpen(panelKey, false)
+  }, [clio, panelKey, shown])
   // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
   const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
   const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null
