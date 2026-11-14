@@ -89,7 +89,7 @@ describe("«Pregúntale» en la atención", () => {
     // Su «No» es de ella: no se lee «niega».
     expect(page).toContain("dijo que no")
     expect(page).not.toContain("Niega")
-    expect(render({ ...declared, reviewPending: false })).toBe("")
+    expect(render({ ...declared, reviewPending: false, declared: [] })).toBe("")
     // Dos declaraciones sin revisar, cada una con quien la dijo y su día: su madre el 1 nov, ella el 13.
     const two = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -145,6 +145,95 @@ describe("«Pregúntale» en la atención", () => {
     expect(page).toContain("Pregúntale a Lucía si sigue embarazada")
     expect(page).toContain("Embarazo por confirmar")
     expect(page).toContain("Lo dijo el 10 ene, con 30 semanas")
+  })
+
+  // QA del 14 nov: H2 y H4b de clínica, U3 de diseño.
+  const saidBy = (patch: Record<string, unknown>) => ({
+    by: { kind: "patient", name: null, relation: null },
+    at: "2026-11-13T19:27:00.000Z",
+    allergies: [],
+    conditions: [],
+    medications: [],
+    pregnancy: false,
+    saidNo: { allergies: false, conditions: false, medications: false },
+    ...patch,
+  })
+  const count = (page: string, word: string) => page.split(word).length - 1
+
+  it("Rosa: el látex que dijo después de una revisión anterior se marca, aunque la salud ya estuviera revisada", () => {
+    const rosa = {
+      ...health,
+      reviewedAt: "2026-03-01T15:00:00.000Z",
+      allergiesReviewedAt: "2026-03-01T15:00:00.000Z",
+      allergyReviewDue: true,
+      reviewPending: false,
+      reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
+      allergies: [
+        { id: "a1", substance: "Penicilinas", severity: "severa", isActive: true, source: "equipo" },
+        { id: "a2", substance: "Látex", reaction: "Ronchas con los guantes", severity: "desconocida", isActive: true, source: "paciente" },
+      ],
+      declared: [saidBy({ allergies: ["a2"] })],
+    } as unknown as PatientHealth
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Rosa Quispe" health={rosa} sex="F" />
+      </QueryClientProvider>,
+    )
+    expect(page).toContain("Revisa con Rosa lo que dijo de su salud")
+    expect(page).toContain("Lo dijo ella el 13 nov, sin revisar")
+    expect(page).toContain("Látex · Ronchas con los guantes")
+    // Una sola caja, un solo título, y el látex una sola vez.
+    expect(count(page, "<h2")).toBe(1)
+    expect(count(page, "Látex")).toBe(1)
+    // Lo que dijo no se da por visto con «Sin cambios»: se revisa a sabiendas, con lo que ya tenía a la vista.
+    expect(page).not.toContain("Sin cambios")
+    expect(page).not.toContain("alergias nuevas")
+    expect(page).toContain("Alergias revisadas")
+    expect(page).toContain("Ya tenía anotadas: Penicilinas")
+  })
+
+  it("Inés: la alergia que dijo sale una sola vez, en la caja de lo que dijo", () => {
+    const ines = {
+      ...health,
+      reviewPending: true,
+      reviewStatus: { allergies: "recorded", conditions: "none", medications: "recorded" },
+      allergies: [{ id: "a1", substance: "Látex", reaction: null, severity: "desconocida", isActive: true, source: "paciente" }],
+      medications: [{ id: "m1", name: "Ácido fólico", endDate: null }],
+      declared: [saidBy({ allergies: ["a1"], medications: ["m1"], saidNo: { allergies: false, conditions: true, medications: false } })],
+    } as unknown as PatientHealth
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Inés Salas" health={ines} sex="F" />
+      </QueryClientProvider>,
+    )
+    expect(page).toContain("Revisa con Inés lo que dijo de su salud")
+    expect(count(page, "<h2")).toBe(1)
+    expect(count(page, "Látex")).toBe(1)
+    expect(page).not.toContain("Sin cambios")
+    expect(page).not.toContain("Nadie las revisó todavía")
+  })
+
+  it("Mateo: el «No» de su madre no es una pregunta ya hecha; ni «alergias nuevas» ni «Sin cambios»", () => {
+    const mateo = {
+      ...health,
+      reviewPending: true,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+      declared: [
+        saidBy({
+          by: { kind: "representative", name: "Carla Ríos", relation: "madre" },
+          saidNo: { allergies: true, conditions: true, medications: true },
+        }),
+      ],
+    } as unknown as PatientHealth
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Mateo Ríos" health={mateo} sex="M" askTo="su madre (Carla Ríos)" />
+      </QueryClientProvider>,
+    )
+    expect(page).not.toContain("nuevas")
+    expect(page).not.toContain("Sin cambios")
+    expect(page).toContain("No tiene alergias")
+    expect(page).toContain("su madre dijo que no")
   })
 })
 
