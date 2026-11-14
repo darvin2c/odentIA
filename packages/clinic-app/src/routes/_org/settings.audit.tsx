@@ -54,6 +54,8 @@ interface ActivityItem {
   /** Lo demás que dejó la misma acción: un cobro también registra su pago y su movimiento de caja. */
   also: Array<{ what: string; count: number }>
   subject: ActivitySubject | null
+  /** Lo que nombra una acción que no trata de una persona: el formulario que se dejó de usar. */
+  about?: string | null
 }
 
 interface ActivityPage {
@@ -80,8 +82,8 @@ function alsoText(also: ActivityItem["also"]): string | null {
 const LINK = "font-medium text-primary underline-offset-2 hover:underline"
 
 /** La persona, a su página, y la cita, el ticket o el presupuesto, a donde se abren. */
-function SubjectCell({ subject }: { subject: ActivitySubject | null }) {
-  if (!subject) return <span className="text-muted-foreground">—</span>
+function SubjectCell({ subject, about }: { subject: ActivitySubject | null; about?: string | null }) {
+  if (!subject) return about ? <span>{about}</span> : <span className="text-muted-foreground">—</span>
   const { open, label } = subject
   return (
     <span className="flex min-w-0 flex-col">
@@ -194,7 +196,7 @@ function TeamActivityPage() {
         header: "Sobre qué",
         // En el teléfono también se ve: es lo que responde «¿de quién?».
         meta: { view: { primary: true } },
-        cell: ({ row }) => <SubjectCell subject={row.original.subject} />,
+        cell: ({ row }) => <SubjectCell subject={row.original.subject} about={row.original.about} />,
       },
       {
         accessorKey: "areaLabel",
