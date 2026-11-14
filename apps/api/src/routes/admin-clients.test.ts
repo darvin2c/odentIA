@@ -344,6 +344,23 @@ describe("clientes", () => {
     expect((await call("GET", "/tasks?who=nadie", SUPPORT)).status).toBe(400)
   })
 
+  it("el Embudo «Alta»: Soporte sin «Primer pago» ni «Pagó», y los filtros se validan", async () => {
+    const keys = async (who: string) => {
+      const res = await call("GET", "/pipeline/alta?owner=mio", who)
+      expect(res.status).toBe(200)
+      return (await json(res)).data.columns.map((column: { key: string }) => column.key)
+    }
+    expect(await keys(ADMIN)).toEqual([
+      "bienvenida",
+      "sus_datos",
+      "arranque",
+      "primer_pago",
+      "pago",
+    ])
+    expect(await keys(SUPPORT)).toEqual(["bienvenida", "sus_datos", "arranque"])
+    expect((await call("GET", "/pipeline/alta?origin=xyz", ADMIN)).status).toBe(400)
+  })
+
   it("los enlaces de antes encuentran su cliente por la solicitud o por la cuenta, sin crear ninguno", async () => {
     const clientId = await newClient("Huancayo Puentes Sonrientes", "enlaces@andes.test")
     const orgId = "org-enlaces-ficticia"

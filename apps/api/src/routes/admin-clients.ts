@@ -32,6 +32,7 @@ import {
   acceptedProposalOfOpenSale,
   addActivity,
   addClientContact,
+  altaBoard,
   applyProposalTerms,
   approveSaasProposal,
   archiveClient,
@@ -539,6 +540,18 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     staffRun(c, 200, (actor) => {
       const query = parse(pipelineQuery, c.req.query())
       return owner((tx) => pipeline(tx, actor, query))
+    }),
+  )
+
+  // El Embudo «Alta»: Soporte entra, pero el servicio le quita «Primer pago» y «Pagó».
+  app.get("/pipeline/alta", (c) =>
+    staffRun(c, 200, (actor) => {
+      const query = parse(pipelineQuery, c.req.query())
+      return owner((tx) =>
+        altaBoard(tx, actor, query, new Date(), {
+          metaSignupAvailable: deps.metaSignupAvailable ?? false,
+        }),
+      )
     }),
   )
 

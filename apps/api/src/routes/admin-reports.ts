@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import {
   type AdminActor,
+  altaReport,
   FUNNEL_MAX_MONTHS,
   forecastReport,
   funnelReport,
@@ -15,8 +16,8 @@ import { adminContextOf } from "../lib/admin-context.js"
 import { runService, validationError } from "./helpers.js"
 
 /**
- * Reportes del ARM (`/api/admin/reports`): el embudo de venta, los ingresos,
- * la previsión y el resumen de la semana que escribió Kairós. Solo el rol
+ * Reportes del ARM (`/api/admin/reports`): el embudo de venta, el alta, los
+ * ingresos, la previsión y el resumen de la semana que escribió Kairós. Solo el rol
  * Administración (llevan importes): el servidor lo exige aquí y en cada
  * servicio. Las cifras las pone el cálculo; Kairós solo las cita.
  */
@@ -53,6 +54,16 @@ export function createAdminReportsRoute(deps: AdminReportsDeps) {
     const { months } = parsed.data
     return runService(c, 200, () =>
       deps.ownerDb.transaction((tx) => funnelReport(tx, actor, months ? { months } : {})),
+    )
+  })
+
+  app.get("/alta", async (c) => {
+    const actor = adminOf(c)
+    const parsed = funnelQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { months } = parsed.data
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) => altaReport(tx, actor, months ? { months } : {})),
     )
   })
 

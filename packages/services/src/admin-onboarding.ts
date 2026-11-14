@@ -18,6 +18,7 @@
  */
 
 import { AGREEMENT_VERSION } from "@odentia/auth/legal"
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   SAAS_MILESTONE_NA_STEPS,
@@ -37,9 +38,11 @@ import { saasPayment, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, count, desc, eq, gte, inArray, min, ne, type SQL, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { notDemoOrg } from "./admin-reports.js"
+import { enteredAtSql, notDemoOrg } from "./admin-reports.js"
+import type { PipelineFilter } from "./admin-sales.js"
 import { listClinicLoads, listProgressReports } from "./clinic-progress-report.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
+import { limaDate } from "./peru-business-days.js"
 
 export const ONBOARDING_STEP_KEYS = [
   "entro",
@@ -206,7 +209,8 @@ const NOT_APPLICABLE_MAX = 300
 
 /* ---------- Palabras ---------- */
 
-const LABELS: Record<OnboardingStepKey, string> = {
+/** El nombre de cada paso (la ficha, el Embudo y los reportes). */
+export const ONBOARDING_STEP_LABELS: Record<OnboardingStepKey, string> = {
   entro: "Entró",
   contrato: "Contrato de encargo aceptado",
   carta: "Carta de bienvenida subida",
@@ -219,6 +223,7 @@ const LABELS: Record<OnboardingStepKey, string> = {
   primer_uso: "Primer uso",
   primer_pago: "Primer pago confirmado",
 }
+const LABELS = ONBOARDING_STEP_LABELS
 const WAITING_META_LABEL = "Espera a Meta"
 
 const ZONE = "America/Lima"
@@ -1265,4 +1270,185 @@ export async function syncOnboardingMilestones(
     })
   }
   return out
+}
+
+/* ---------- El Embudo «Alta» ---------- */
+
+/** Las columnas del Embudo «Alta», en orden. «Pagó» son los últimos `ALTA_PAID_DAYS` días. */
+export const ALTA_COLUMNS = [
+  "bienvenida",
+  "sus_datos",
+  "arranque",
+  "primer_pago",
+  "pago",
+] as const satisfies readonly OnboardingColumn[]
+
+/** Lo de cobros: Soporte no ve estas columnas ni sus tarjetas (las quita el servidor). */
+export const ALTA_ADMIN_COLUMNS: ReadonlySet<OnboardingColumn> = new Set<OnboardingColumn>([
+  "primer_pago",
+  "pago",
+])
+
+export interface AltaCard {
+  clientId: string
+  name: string
+  product: ClinicalProduct
+  column: OnboardingColumn
+  /** El primer paso que falta (en «Pagó», lo que le queda), o nulo si no falta ninguno. */
+  missing: { step: OnboardingStepKey; words: string } | null
+  /** A quién le toca ese paso; con «nosotros», la persona (nula sin responsable). */
+  who: { kind: OnboardingWaitingOn; person: { userId: string; name: string } | null } | null
+  /** Días desde que entró (en «Pagó», hasta su primer pago). */
+  daysInAlta: number
+  stuck: { days: number; words: string } | null
+  /** Su primer pago confirmado, en ISO; nulo si aún no paga. */
+  paidAt: string | null
+  /** Los pasos que faltan, sin los «No aplica». */
+  remaining: number
+  owner: { userId: string; name: string } | null
+}
+
+export interface AltaBoard {
+  columns: Array<{ key: OnboardingColumn; cards: AltaCard[] }>
+}
+
+type AltaBaseRow = {
+  id: string
+  name: string
+  product: string
+  organizationId: string
+  ownerUserId: string | null
+  ownerName: string | null
+  enteredAt: Date | string | null
+  deleteOn: string | null
+}
+
+/** Días civiles de Lima entre hoy y `isoDay`. */
+function daysUntil(isoDay: string, now: Date): number {
+  const [y1, m1, d1] = limaDate(now).split("-").map(Number)
+  const [y2, m2, d2] = isoDay.slice(0, 10).split("-").map(Number)
+  return Math.round(
+    (Date.UTC(y2 as number, (m2 as number) - 1, d2 as number) -
+      Date.UTC(y1 as number, (m1 as number) - 1, d1 as number)) /
+      DAY_MS,
+  )
+}
+
+/** Lo que falta, en palabras de la tarjeta, con el plazo de sus datos cuando importa. */
+function altaMissingWords(step: OnboardingStep, deleteOn: string | null, now: Date): string {
+  if (step.key === "archivos" && step.lost)
+    return "volver a pedir sus datos: se borraron sin cargar"
+  if (step.key === "primer_pago" && step.waitingOn === "nosotros") return "confirmar su pago"
+  const words = ALTA_MISSING_WORDS[step.key]
+  if ((step.key === "configuracion" || step.key === "pacientes") && deleteOn) {
+    const days = daysUntil(deleteOn, now)
+    const when = days <= 0 ? "hoy" : days === 1 ? "mañana" : `en ${days} días`
+    return `${words} (sus datos se borran ${when})`
+  }
+  return words
+}
+
+/**
+ * El Embudo «Alta»: una tarjeta por clínica que entró (tiene cuenta), sin archivar, sin demos ni
+ * canceladas, en la columna de su primer grupo con un paso que falta; «Pagó» cuando su primer
+ * pago está confirmado (aunque le queden pasos) y solo los últimos `ALTA_PAID_DAYS` días. Cada
+ * alta se calcula con `computeOnboarding`, la misma verdad de la ficha y de Kairós (una por
+ * clínica: con decenas alcanza). Las tarjetas no se arrastran: cambian cuando pasa el hecho.
+ * Soporte no recibe «Primer pago» ni «Pagó», ni sus tarjetas. Dentro de cada columna, primero
+ * las trabadas, después las de más días y al final por nombre.
+ */
+export async function altaBoard(
+  tx: Db,
+  actor: AdminActor | null,
+  filter: PipelineFilter = {},
+  now = new Date(),
+  options: OnboardingOptions = NO_META,
+): Promise<AltaBoard> {
+  if (!actor) throw new ServiceError("FORBIDDEN", 403, "Se requiere personal de administración")
+  const where: SQL[] = [
+    sql`c.archived_at is null`,
+    notDemoOrg(sql`c.organization_id`),
+    sql`not exists (select 1 from ${saasSubscription} cs
+      where cs.organization_id = c.organization_id and cs.status = 'cancelada')`,
+  ]
+  if (filter.product) where.push(sql`c.product = ${filter.product}`)
+  if (filter.origin) where.push(sql`c.origin = ${filter.origin}`)
+  if (filter.owner === "mio") where.push(sql`c.owner_user_id = ${actor.userId}`)
+  else if (filter.owner === "sin") where.push(sql`c.owner_user_id is null`)
+  else if (filter.owner) where.push(sql`c.owner_user_id = ${filter.owner}`)
+  // `deleteOn`: lo que llegó como la carga y aún no se carga, el día más cercano en que se borra.
+  const rows = (await tx.execute(sql`
+    select c.id, c.name, c.product, c.organization_id as "organizationId",
+      c.owner_user_id as "ownerUserId", u.name as "ownerName",
+      ${enteredAtSql("c", "org")} as "enteredAt",
+      case when ${cargaLoadedSql("c")} then null else
+        (select min(f.delete_after)::text from ${saasClientFile} f where f.client_id = c.id
+          and f.kind = 'archivo_clinica' and f.deleted_at is null) end as "deleteOn"
+    from ${saasClient} c
+    join ${organization} org on org.id = c.organization_id
+    left join ${user} u on u.id = c.owner_user_id
+    where ${and(...where)}
+    order by c.name`)) as unknown as AltaBaseRow[]
+
+  const loaders = await lastLoaderOf(
+    tx,
+    rows.map((row) => row.organizationId),
+  )
+  const admin = actor.role === "admin"
+  const paidSince = now.getTime() - ALTA_PAID_DAYS * DAY_MS
+  const columns = new Map<OnboardingColumn, AltaCard[]>(ALTA_COLUMNS.map((key) => [key, []]))
+  for (const row of rows) {
+    const computed = await computeOnboarding(
+      tx,
+      { id: row.id, organizationId: row.organizationId },
+      now,
+      options,
+    )
+    const column = computed.column
+    if (!column) continue
+    if (!admin && ALTA_ADMIN_COLUMNS.has(column)) continue
+    const paidAt = computed.steps.find((item) => item.key === "primer_pago")?.doneAt ?? null
+    if (column === "pago" && paidAt && paidAt.getTime() < paidSince) continue
+    const next = computed.steps.find((item) => item.key === computed.next) ?? null
+    const owner = row.ownerUserId ? { userId: row.ownerUserId, name: row.ownerName ?? "" } : null
+    // Lo de la carga le toca a quien hizo la última (si sigue activo); lo demás, al responsable.
+    const loader = loaders.get(row.organizationId)
+    const person =
+      next && (next.key === "configuracion" || next.key === "pacientes") && loader
+        ? { userId: loader.userId, name: loader.name }
+        : owner
+    const enteredAt = asDate(row.enteredAt) ?? computed.enteredAt ?? now
+    const until = column === "pago" && paidAt ? paidAt : now
+    const since = latest(computed.lastProgressAt, computed.trackedSince)
+    const stuckDays =
+      computed.stuck && since ? Math.floor((now.getTime() - since.getTime()) / DAY_MS) : null
+    columns.get(column)?.push({
+      clientId: row.id,
+      name: row.name,
+      product: isClinicalProduct(row.product) ? row.product : "dental",
+      column,
+      missing: next ? { step: next.key, words: altaMissingWords(next, row.deleteOn, now) } : null,
+      who: next?.waitingOn
+        ? { kind: next.waitingOn, person: next.waitingOn === "nosotros" ? person : null }
+        : null,
+      daysInAlta: Math.max(0, Math.floor((until.getTime() - enteredAt.getTime()) / DAY_MS)),
+      stuck:
+        stuckDays === null
+          ? null
+          : { days: stuckDays, words: `Lleva ${plural(stuckDays, "día", "días")} sin avanzar` },
+      paidAt: paidAt ? paidAt.toISOString() : null,
+      remaining: computed.steps.filter((item) => item.state === "falta").length,
+      owner,
+    })
+  }
+  const order = (a: AltaCard, b: AltaCard) =>
+    Number(Boolean(b.stuck)) - Number(Boolean(a.stuck)) ||
+    b.daysInAlta - a.daysInAlta ||
+    a.name.localeCompare(b.name, "es")
+  return {
+    columns: ALTA_COLUMNS.filter((key) => admin || !ALTA_ADMIN_COLUMNS.has(key)).map((key) => ({
+      key,
+      cards: (columns.get(key) ?? []).sort(order),
+    })),
+  }
 }
