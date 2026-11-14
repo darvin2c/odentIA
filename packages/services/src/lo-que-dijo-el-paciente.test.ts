@@ -743,3 +743,14 @@ it("recepción recibe la alergia que dijo la persona con quién y cuándo, y nad
   expect(Object.keys(forReception[0]!).sort()).toEqual(["allergies", "at", "by", "saidNo"])
   expect(JSON.stringify(forReception)).not.toMatch(/Presi|Losart|pregnan|conditions|medications/)
 })
+
+it("agregar una alergia del equipo no da por revisado el látex que dijo ella", async () => {
+  const f = await clinicalFixture()
+  const ines = await inesSaysLatex(f)
+  await f.run((tx) => addPatientAllergy(tx, ORG, f.actor, ines.patientId, { substance: "Penicilina", severity: "severa" }))
+  const afterAdding = await f.run((tx) => getPatientHealth(tx, ORG, ines.patientId))
+  expect(afterAdding.declared.flatMap((group) => group.allergies)).toEqual([ines.latex.id])
+  expect(afterAdding.allergiesReviewedAt).toBeNull()
+  expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toHaveLength(1)
+})
+

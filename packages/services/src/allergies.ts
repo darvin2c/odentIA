@@ -4,7 +4,8 @@
  * volver a ponerla, elegir de la lista lo escrito a mano y dejar constancia de
  * que se revisaron con el paciente. Cada operación avanza la revisión del
  * agregado de salud, así una edición abierta de Antecedentes recarga en vez de
- * pisarla, y cuenta como revisión de las alergias.
+ * pisarla, y cuenta como revisión de las alergias, salvo que queden otras que
+ * dijo la persona y nadie revisó: esas siguen sin revisar hasta «Sin cambios».
  */
 import {
   ALLERGY_REMOVAL_REASONS,
@@ -100,13 +101,36 @@ async function allergensOf(tx: Db, orgId: string): Promise<readonly AllergenEntr
 async function lockHealth(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   const [locked] = await tx
-    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .select({
+      revision: patient.healthRevision,
+      reviewStatus: patient.healthReviewStatus,
+      allergiesReviewedAt: patient.allergiesReviewedAt,
+    })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
     .for("update")
   if (!locked) throw notFound("Paciente")
   return locked
+}
+
+/**
+ * Si quedan alergias que dijo la persona y nadie revisó, fuera de la que se está
+ * tocando: agregar, quitar o codificar otra no las da por revisadas (QA del 14
+ * nov: al agregar la penicilina del equipo, el látex que dijo la paciente perdía
+ * su marca sin que nadie lo revisara). Es la regla de `declared` en `getPatientHealth`.
+ */
+async function declaredUnreviewed(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  reviewedAt: Date | null,
+  exceptId?: string,
+): Promise<boolean> {
+  return (await activeAllergies(tx, orgId, patientId, exceptId)).some(
+    (row) =>
+      row.source === "paciente" && row.verification !== "descartada" && (!reviewedAt || row.createdAt > reviewedAt),
+  )
 }
 
 export async function activeAllergies(tx: Db, orgId: string, patientId: string, exceptId?: string) {
@@ -168,11 +192,16 @@ async function touchHealth(
   orgId: string,
   patientId: string,
   actorUserId: string,
-  locked: { revision: number; reviewStatus: unknown },
+  locked: { revision: number; reviewStatus: unknown; allergiesReviewedAt: Date | null },
   allergiesState: "recorded" | "none" | "keep",
+  /** «Sin cambios» lo revisa todo; las demás acciones, solo si no queda nada declarado sin revisar fuera de `exceptId`. */
+  review: { all: true } | { exceptId?: string },
 ): Promise<void> {
   const reviewStatus = { ...((locked.reviewStatus ?? {}) as Record<string, unknown>) }
   const now = new Date()
+  const stamps =
+    "all" in review ||
+    !(await declaredUnreviewed(tx, orgId, patientId, locked.allergiesReviewedAt, review.exceptId))
   await tx
     .update(patient)
     .set({
@@ -183,8 +212,7 @@ async function touchHealth(
         conditions: reviewStatus.conditions ?? "unknown",
         medications: reviewStatus.medications ?? "unknown",
       },
-      allergiesReviewedAt: now,
-      allergiesReviewedBy: actorUserId,
+      ...(stamps ? { allergiesReviewedAt: now, allergiesReviewedBy: actorUserId } : {}),
       updatedAt: now,
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -245,7 +273,7 @@ export async function addPatientAllergy(
     })
     .returning()
   if (!row) throw new Error("No se pudo guardar la alergia")
-  await touchHealth(tx, orgId, patientId, actorUserId, locked, "recorded")
+  await touchHealth(tx, orgId, patientId, actorUserId, locked, "recorded", {})
   await audit(tx, orgId, actorUserId, "health.allergy_added", patientId, {
     allergyId: row.id,
     coded: Boolean(row.substanceCode),
@@ -289,7 +317,7 @@ export async function removePatientAllergy(
     .where(and(eq(patientAllergy.id, allergyId), eq(patientAllergy.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Alergia")
-  await touchHealth(tx, orgId, patientId, actorUserId, locked, "keep")
+  await touchHealth(tx, orgId, patientId, actorUserId, locked, "keep", { exceptId: allergyId })
   await audit(tx, orgId, actorUserId, "health.allergy_removed", patientId, {
     allergyId,
     reason,
@@ -330,7 +358,7 @@ export async function restorePatientAllergy(
     .where(and(eq(patientAllergy.id, allergyId), eq(patientAllergy.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Alergia")
-  await touchHealth(tx, orgId, patientId, actorUserId, locked, "recorded")
+  await touchHealth(tx, orgId, patientId, actorUserId, locked, "recorded", { exceptId: allergyId })
   await audit(tx, orgId, actorUserId, "health.allergy_restored", patientId, {
     allergyId,
     revision: { before: locked.revision, after: locked.revision + 1 },
@@ -378,7 +406,7 @@ export async function codePatientAllergy(
     .where(and(eq(patientAllergy.id, allergyId), eq(patientAllergy.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Alergia")
-  await touchHealth(tx, orgId, patientId, actorUserId, locked, "keep")
+  await touchHealth(tx, orgId, patientId, actorUserId, locked, "keep", { exceptId: allergyId })
   await audit(tx, orgId, actorUserId, "health.allergy_coded", patientId, {
     allergyId,
     substance: `${entry.system}:${entry.code}`,
@@ -406,6 +434,7 @@ export async function markAllergiesReviewed(
     actorUserId,
     locked,
     active.length > 0 ? "recorded" : "none",
+    { all: true },
   )
   await audit(tx, orgId, actorUserId, "health.allergies_reviewed", patientId, {
     active: active.length,
