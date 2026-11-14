@@ -20,7 +20,7 @@ vi.mock("../../lib/clinical-forms", async (original) => ({
   fetchFormAddenda: async () => ({ data: addenda.list }),
 }))
 
-const { DeclaredResponse } = await import("./declared-response")
+const { DeclaredResponse, correctionLostWords } = await import("./declared-response")
 
 beforeAll(() => {
   setOrgLocale("es-PE", "America/Lima")
@@ -100,5 +100,14 @@ describe("la corrección de lo que envió el paciente, con su motivo", () => {
     show()
     expect(await screen.findByText("Motivo: Lo confirmó en consulta")).toBeTruthy()
     expect(screen.getAllByText(/^Motivo:/)).toHaveLength(1)
+  })
+
+  it("al salir sin guardar nombra lo que se pierde: la corrección, el motivo o los dos (verificador, 14 nov)", () => {
+    expect(correctionLostWords("Es la 36", "")).toBe("Se pierde la corrección que escribiste y no guardaste.")
+    expect(correctionLostWords("  ", "Lo confirmó")).toBe("Se pierde el motivo que escribiste y no guardaste.")
+    expect(correctionLostWords("Es la 36", "Lo confirmó")).toBe(
+      "Se pierden la corrección y el motivo que escribiste y no guardaste.",
+    )
+    expect(correctionLostWords(" ", " ")).toBeNull()
   })
 })

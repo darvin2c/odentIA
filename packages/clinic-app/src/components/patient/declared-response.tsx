@@ -140,6 +140,20 @@ const correctionSchema = z.object({
   reason: z.string().trim().max(2000, "El motivo admite hasta 2000 caracteres."),
 })
 
+/**
+ * Lo que se pierde al salir sin guardar, con su nombre: la corrección, el motivo o
+ * los dos (verificador, QA de la entrega 2: decía «la corrección» con solo el motivo
+ * escrito). null si no hay nada escrito.
+ */
+export function correctionLostWords(text: string, reason: string): string | null {
+  const hasText = text.trim() !== ""
+  const hasReason = reason.trim() !== ""
+  if (hasText && hasReason) return "Se pierden la corrección y el motivo que escribiste y no guardaste."
+  if (hasText) return "Se pierde la corrección que escribiste y no guardaste."
+  if (hasReason) return "Se pierde el motivo que escribiste y no guardaste."
+  return null
+}
+
 export function DeclaredResponse({
   response,
   canWrite,
@@ -230,11 +244,10 @@ export function DeclaredResponse({
   })
   // Una corrección a medias se pierde al salir: su panel o cajón lo pregunta (×, Escape, el menú y
   // «Atrás»), con lo que de verdad se pierde. Guardada, cancelada o vacía, ya no hay nada que perder.
-  const correctionText = useStore(
-    correctionForm.store,
-    (state) => `${state.values.text}${state.values.reason}`,
+  const lost = useStore(correctionForm.store, (state) =>
+    correctionLostWords(state.values.text, state.values.reason),
   )
-  const correctionPending = correcting && correctionText.trim() !== ""
+  const correctionPending = correcting && lost !== null
   const draftSaved = useDraftSaved({
     onDiscard: () => {
       correctionForm.reset()
@@ -243,14 +256,14 @@ export function DeclaredResponse({
   })
   const toldPending = useRef(false)
   useEffect(() => {
-    if (correctionPending) {
+    if (correctionPending && lost) {
       toldPending.current = true
-      draftSaved(false, "Se pierde la corrección que escribiste y no guardaste. Lo que respondió no cambia.")
+      draftSaved(false, `${lost} Lo que respondió no cambia.`)
     } else if (toldPending.current) {
       toldPending.current = false
       draftSaved(true)
     }
-  }, [correctionPending, draftSaved])
+  }, [correctionPending, lost, draftSaved])
   // Al abrirla se escribe sin otro clic: el foco va al texto de la corrección.
   useEffect(() => {
     if (correcting) correctionRef.current?.querySelector("textarea")?.focus()
