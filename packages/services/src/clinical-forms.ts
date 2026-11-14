@@ -752,7 +752,7 @@ export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function conditionMet(condition: FieldCondition, answer: unknown): boolean {
+export function conditionMet(condition: FieldCondition, answer: unknown): boolean {
   if (Array.isArray(answer)) return answer.includes(condition.equals)
   return answer === condition.equals
 }
@@ -790,7 +790,7 @@ async function assertAttachmentAnswers(
   }
 }
 
-function isEmptyAnswer(value: unknown): boolean {
+export function isEmptyAnswer(value: unknown): boolean {
   if (value === null || value === undefined) return true
   if (typeof value === "string") return value.trim() === ""
   if (Array.isArray(value)) return value.length === 0

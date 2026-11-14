@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
-import { assertAnswers, assertFormSchema, type FieldCondition, type FormFieldDef } from "./clinical-forms.js"
+import { assertAnswers, assertFormSchema, conditionMet, type FormFieldDef, isEmptyAnswer as isEmpty } from "./clinical-forms.js"
 import { ServiceError } from "./errors.js"
 import type { ProductSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -45,12 +45,6 @@ export interface DictationFormQuestion {
   /** La pregunta de la que depende, si la tiene (`showIf`). */
   dependsOn: { fieldId: string; label: string; equals: string | boolean } | null
 }
-
-const isEmpty = (value: unknown): boolean =>
-  value === null || value === undefined || (typeof value === "string" && !value.trim()) || (Array.isArray(value) && value.length === 0)
-
-const conditionMet = (condition: FieldCondition, answer: unknown): boolean =>
-  Array.isArray(answer) ? answer.includes(condition.equals) : answer === condition.equals
 
 /**
  * Las preguntas que Clío puede proponer en esta atención: las vacías de las
