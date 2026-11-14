@@ -63,18 +63,21 @@ describe("«Pregúntale» en la atención", () => {
       conditions: [],
       medications: [{ id: "m1", name: "Sulfato ferroso", endDate: null }, { id: "m2", name: "Ácido fólico", endDate: null }],
       pregnancy: { state: "vigente", saidOn: "2026-11-13", weeksSaid: 30, weeksToday: 32 },
-      declared: {
-        at: "2026-11-13T19:27:00.000Z",
-        allergies: ["a1"],
-        conditions: [],
-        medications: ["m1", "m2"],
-        pregnancy: true,
-        saidNo: { allergies: false, conditions: true, medications: false },
-      },
+      declared: [
+        {
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: ["a1"],
+          conditions: [],
+          medications: ["m1", "m2"],
+          pregnancy: true,
+          saidNo: { allergies: false, conditions: true, medications: false },
+        },
+      ],
     } as unknown as PatientHealth
     const page = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <HealthReviewNotice patientId="p1" patientName="Lucero Vega" health={declared} saidBy={{ sex: "F" }} />
+        <HealthReviewNotice patientId="p1" patientName="Lucero Vega" health={declared} sex="F" />
       </QueryClientProvider>,
     )
     expect(page).toContain("Revisa con Lucero lo que dijo de su salud")
@@ -87,6 +90,46 @@ describe("«Pregúntale» en la atención", () => {
     expect(page).toContain("dijo que no")
     expect(page).not.toContain("Niega")
     expect(render({ ...declared, reviewPending: false })).toBe("")
+    // Dos declaraciones sin revisar, cada una con quien la dijo y su día: su madre el 1 nov, ella el 13.
+    const two = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice
+          patientId="p1"
+          patientName="Lucero Vega"
+          sex="F"
+          health={
+            {
+              ...declared,
+              pregnancy: null,
+              declared: [
+                {
+                  by: { kind: "representative", name: "Carla Vega", relation: "madre" },
+                  at: "2026-11-01T15:00:00.000Z",
+                  allergies: ["a1"],
+                  conditions: [],
+                  medications: [],
+                  pregnancy: false,
+                  saidNo: { allergies: false, conditions: false, medications: false },
+                },
+                {
+                  by: { kind: "patient", name: null, relation: null },
+                  at: "2026-11-13T19:27:00.000Z",
+                  allergies: [],
+                  conditions: [],
+                  medications: ["m1", "m2"],
+                  pregnancy: false,
+                  saidNo: { allergies: false, conditions: false, medications: false },
+                },
+              ],
+            } as unknown as PatientHealth
+          }
+        />
+      </QueryClientProvider>,
+    )
+    expect(two).toContain("Lo dijo su madre, Carla, el 1 nov, sin revisar")
+    expect(two).toContain("Lo dijo ella el 13 nov, sin revisar")
+    expect(two.indexOf("Látex")).toBeLessThan(two.indexOf("Lo dijo ella el 13 nov"))
+    expect(two.indexOf("Sulfato ferroso")).toBeGreaterThan(two.indexOf("Lo dijo ella el 13 nov"))
   })
   it("un embarazo que ya pasó su término no alarma: pide confirmarlo, sin frenar", () => {
     const past = {
@@ -96,7 +139,7 @@ describe("«Pregúntale» en la atención", () => {
       reviewedAt: "2026-11-14T15:00:00.000Z",
       reviewPending: false,
       pregnancy: { state: "por_confirmar", saidOn: "2026-01-10", weeksSaid: 30, weeksToday: null },
-      declared: { at: null, allergies: [], conditions: [], medications: [], pregnancy: false, saidNo: { allergies: false, conditions: false, medications: false } },
+      declared: [],
     } as unknown as PatientHealth
     const page = render(past)
     expect(page).toContain("Pregúntale a Lucía si sigue embarazada")

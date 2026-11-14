@@ -1,14 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import type { FormResponse } from "../../lib/clinical-forms"
 import {
-  DeclaredResponse,
-  declaredAnswerText,
+  declaredFormsOfEncounter,
+  type FormResponse,
   isDeclaredUnreviewed,
-  reviewedWords,
-  sentWords,
-} from "./declared-response"
+  teamFormsOfEncounter,
+} from "../../lib/clinical-forms"
+import { DeclaredResponse, declaredAnswerText, reviewedWords, sentWords } from "./declared-response"
 import { ResponseDetail } from "./formularios-tab"
 
 vi.mock("../../lib/crm", () => ({
@@ -47,7 +46,8 @@ const sent: FormResponse = {
   submittedAt: "2026-11-13T19:27:00.000Z",
   submittedVia: "enlace",
   finalizedBy: null,
-  respondent: { name: "Marta Ríos", relationship: "self", relationshipDetail: null, kinship: null },
+  respondent: { kind: "patient", name: "Marta Ríos", relation: null },
+  editedByTeamAt: null,
   discardedAt: null,
   discardReason: null,
   createdAt: "2026-11-13T19:20:00.000Z",
@@ -81,7 +81,7 @@ describe("lo que envió el paciente, para leer", () => {
     expect(sentWords({ ...sent, submittedAt: null })).toBe("Lo está respondiendo Marta Ríos: todavía no lo envió.")
     const byMother = render(
       <DeclaredResponse
-        response={{ ...sent, respondent: { name: "Carla Paz", relationship: "guardian", relationshipDetail: null, kinship: "MTH" } }}
+        response={{ ...sent, respondent: { kind: "representative", name: "Carla Paz", relation: "madre" } }}
         canWrite
         sex="M"
       />,
@@ -107,6 +107,44 @@ describe("lo que envió el paciente, para leer", () => {
     expect(draft).toContain("Sin enviar")
     expect(draft).not.toContain("Marcar como revisado")
     expect(draft).not.toContain("Agregar una corrección")
+  })
+
+  it("en la atención, lo revisado se ve una sola vez: arriba, y no otra vez en la lista de documentos", () => {
+    const reviewedHere = { ...sent, id: "r2", status: "finalizado", finalizedAt: "2026-11-14T15:00:00.000Z", encounterId: "e1" } as FormResponse
+    const reviewedElsewhere = { ...reviewedHere, id: "r3", encounterId: "e9" } as FormResponse
+    const teamForm = { ...sent, id: "r4", source: "staff", submittedAt: null, encounterId: "e1", respondent: null } as FormResponse
+    const all = [sent, reviewedHere, reviewedElsewhere, teamForm]
+    // Arriba: lo que sigue sin revisar y lo que se revisó en esta atención.
+    expect(declaredFormsOfEncounter(all, "e1").map((form) => form.id)).toEqual(["r1", "r2"])
+    // En la lista de documentos de la atención, solo lo que llena el equipo.
+    expect(teamFormsOfEncounter(all, "e1").map((form) => form.id)).toEqual(["r4"])
+  })
+
+  it("nada queda sin salida: lo enviado y lo que dejó a medias se descartan con su motivo", () => {
+    // Un envío repetido o de otra persona: «Descartar…» junto a revisar y corregir.
+    expect(render(<DeclaredResponse response={sent} canWrite sex="F" />)).toContain("Descartar…")
+    // Un borrador que el paciente abandonó: es su única acción.
+    expect(render(<DeclaredResponse response={{ ...sent, submittedAt: null }} canWrite sex="F" />)).toContain("Descartar…")
+    // Revisado ya no se descarta (se corrige), y sin permiso de escribir no se ofrece.
+    const reviewed = { ...sent, status: "finalizado", finalizedAt: "2026-11-14T15:00:00.000Z", finalizedBy: "u1" } as FormResponse
+    expect(render(<DeclaredResponse response={reviewed} canWrite sex="F" />)).not.toContain("Descartar…")
+    expect(render(<DeclaredResponse response={sent} canWrite={false} sex="F" />)).not.toContain("Descartar…")
+  })
+
+  it("lo que el equipo cambió antes de que se protegiera no se presenta como intacto", () => {
+    const edited = render(
+      <DeclaredResponse response={{ ...sent, editedByTeamAt: "2026-11-13T20:10:00.000Z" }} canWrite sex="F" />,
+    )
+    expect(edited).toContain("El equipo cambió estas respuestas el 13 nov")
+    expect(edited).toContain("lo que envió no se conserva")
+    // Ni «es lo que ella escribió» ni «lo dijo ella»: ya no se sabe.
+    expect(edited).not.toContain("Es lo que ella escribió y no se cambia")
+    expect(edited).not.toContain("Lo dijo ella · por revisar")
+    expect(edited).toContain("Por revisar")
+    // Lo que nadie tocó sí se dice intacto.
+    const intact = render(<DeclaredResponse response={sent} canWrite sex="F" />)
+    expect(intact).toContain("Es lo que ella escribió y no se cambia")
+    expect(intact).not.toContain("El equipo cambió estas respuestas")
   })
 
   it("el aviso dice lo que pasó de verdad, y la frase de alergias sale solo si la plantilla las pregunta", () => {

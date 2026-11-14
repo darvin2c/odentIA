@@ -20,6 +20,7 @@ import {
   FORM_RESPONSE_STATUS_LABELS,
   fetchConsents,
   fetchFormResponses,
+  teamFormsOfEncounter,
   fetchFormTemplates,
   fetchOrders,
   phoneSignBlockWords,
@@ -174,9 +175,9 @@ export function useEncounterDocuments(
   const ownPrescriptions = (prescriptions.data?.data ?? []).filter(
     (rx) => rx.encounterId === encounterId && rx.status === "emitida",
   )
-  const ownForms = (forms.data?.data ?? []).filter(
-    (form) => form.encounterId === encounterId && form.status !== "descartado",
-  )
+  // Lo que envió el paciente y se revisó en esta atención ya está arriba, entero, en su caja
+  // (`DeclaredQuestionnaireNotice`): aquí van los formularios que llena el equipo, y no se repite.
+  const ownForms = teamFormsOfEncounter(forms.data?.data ?? [], encounterId)
   const ownLeaves = (leaves.data?.data ?? []).filter(
     (leave) => leave.encounterId === encounterId && leave.status === "emitido",
   )
@@ -645,15 +646,11 @@ export function EncounterDocumentsBlock({
                 Formulario · {form.templateTitle ?? "Formulario"}
               </span>
               <span className="text-xs text-muted-foreground">
-                {form.source === "portal"
-                  ? form.status === "finalizado"
-                    ? "Lo envió el paciente · revisado"
-                    : "Lo envió el paciente · por revisar"
-                  : FORM_RESPONSE_STATUS_LABELS[form.status]}
+                {FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" && form.source !== "portal" ? "Completar" : "Ver"}
+              {form.status === "borrador" ? "Completar" : "Ver"}
             </Button>
           </li>
         ))}

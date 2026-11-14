@@ -32,7 +32,7 @@ import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { declaredMarkWords, pregnancyChip, type SaidBy } from "../../lib/declared-health"
+import { declaredMarkWords, pregnancyChip } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -41,6 +41,7 @@ import { useOrgLocale } from "../../lib/locale"
 import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import {
   ageFrom,
+  type DeclaredHealthGroup,
   fetchPatientHealth,
   hcLabel,
   isCurrentMedication,
@@ -104,16 +105,18 @@ export function clinicalAlerts(
  * Franja clínica reutilizable (cabecera y editor de atención): alergias,
  * enfermedades, lo que toma y el embarazo, sin botones. Sin alergias
  * registradas dice si niega o si no se le preguntó (`allergyReview`): no es lo
- * mismo. Lo que dijo la persona y nadie revisó va junto, bajo una sola marca
- * («Lo dijo ella el 13 nov, sin revisar»), alergias incluidas: qué entra ahí lo
- * dice el servidor (`health.declared`).
+ * mismo. Lo que se dijo y nadie revisó va junto, bajo la marca de su
+ * declaración («Lo dijo ella el 13 nov, sin revisar»), alergias incluidas.
+ * Quién lo dijo, cuándo y qué entra ahí lo dice el servidor
+ * (`health.declared`, un grupo por declaración): con dos fechas o dos personas
+ * salen dos marcas, y nada se le atribuye a quien no lo dijo.
  */
 export function PatientClinicalStrip({
   detail,
   onAntecedentes,
   medicationReview,
   health,
-  saidBy,
+  sex,
 }: {
   detail: Pick<
     PatientFull,
@@ -122,48 +125,73 @@ export function PatientClinicalStrip({
   onAntecedentes?: () => void
   /** Para quien lee la historia: si se le preguntó qué toma (sin medicación registrada). */
   medicationReview?: string | null
-  /** La salud de quien lee la historia: de aquí salen la marca de lo declarado y el embarazo. */
+  /** La salud de quien lee la historia: de aquí salen las marcas de lo declarado y el embarazo. */
   health?: PatientHealth | null
-  /** De quién se habla, para decir quién lo dijo (su sexo y quien decide por ella). */
-  saidBy?: SaidBy
+  /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
+  sex?: string | null
 }) {
-  const declared = health?.declared
-  const declaredIds = new Set([
-    ...(declared?.allergies ?? []),
-    ...(declared?.conditions ?? []),
-    ...(declared?.medications ?? []),
-  ])
-  const pregnancy = health?.pregnancy ?? null
-  const pregnancyAlert = pregnancy
-    ? {
-        id: "embarazo",
-        label: pregnancyChip(pregnancy),
-        // Pasado el término ya no es una alerta: se pide confirmarlo.
-        tone: pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
-        said: declared?.pregnancy === true,
-      }
-    : null
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
+  // Quien solo ve las alergias (recepción) recibe una sola cosa de lo declarado: su «No», con quién lo dijo.
+  const groups: DeclaredHealthGroup[] =
+    health?.declared ??
+    (detail.allergySaidNo
+      ? [
+          {
+            ...detail.allergySaidNo,
+            allergies: [],
+            conditions: [],
+            medications: [],
+            pregnancy: false,
+            saidNo: { allergies: true, conditions: false, medications: false },
+          },
+        ]
+      : [])
+  const groupIndex = (find: (group: DeclaredHealthGroup) => boolean): number | null => {
+    const index = groups.findIndex(find)
+    return index === -1 ? null : index
+  }
+  const pregnancy = health?.pregnancy ?? null
   // El «No» que marcó la persona (o quien habla por ella) no es «Niega alergias»: nadie se lo preguntó.
-  const saidNoAllergies = noAllergies && (declared?.saidNo.allergies ?? detail.allergySaidNo ?? false)
+  const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
   const alerts = [
-    ...(pregnancyAlert ? [pregnancyAlert] : []),
-    ...(saidNoAllergies ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, said: true }] : []),
-    ...clinicalAlerts(detail).map((alert) => ({ ...alert, said: declaredIds.has(alert.id) })),
+    ...(pregnancy
+      ? [
+          {
+            id: "embarazo",
+            label: pregnancyChip(pregnancy),
+            // Pasado el término ya no es una alerta: se pide confirmarlo.
+            tone: pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
+            group: groupIndex((group) => group.pregnancy),
+          },
+        ]
+      : []),
+    ...(saidNoAllergies !== null
+      ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, group: saidNoAllergies }]
+      : []),
+    ...clinicalAlerts(detail).map((alert) => ({
+      ...alert,
+      group: groupIndex(
+        (group) =>
+          group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
+      ),
+    })),
   ]
-  // Primero lo que dijo y nadie revisó, junto; después lo demás.
-  const ordered = [...alerts.filter((alert) => alert.said), ...alerts.filter((alert) => !alert.said)]
+  // Primero lo que se dijo y nadie revisó, declaración por declaración; después lo demás.
+  const ordered = [
+    ...groups.flatMap((_group, index) => alerts.filter((alert) => alert.group === index)),
+    ...alerts.filter((alert) => alert.group === null),
+  ]
   const shown = ordered.slice(0, 6)
   const hidden = ordered.length - shown.length
-  const said = shown.filter((alert) => alert.said)
-  const rest = shown.filter((alert) => !alert.said)
-  const allergyWord = saidNoAllergies
-    ? null
-    : noAllergies && detail.allergyReview === "none"
-      ? "Niega alergias"
-      : noAllergies && detail.allergyReview === "unknown"
-        ? "Alergias: no preguntado"
-        : null
+  const rest = shown.filter((alert) => alert.group === null)
+  const allergyWord =
+    saidNoAllergies !== null
+      ? null
+      : noAllergies && detail.allergyReview === "none"
+        ? "Niega alergias"
+        : noAllergies && detail.allergyReview === "unknown"
+          ? "Alergias: no preguntado"
+          : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
@@ -177,8 +205,8 @@ export function PatientClinicalStrip({
       className={cn(
         "h-auto min-h-5 max-w-full py-px text-left whitespace-normal",
         alert.tone === "warning" && "border-warning/30 bg-warning-soft text-warning",
-        // Lo que dijo y nadie revisó se distingue también por el borde, no solo por el texto que lo encabeza.
-        alert.said && "border-dashed",
+        // Lo que se dijo y nadie revisó se distingue también por el borde, no solo por el texto que lo encabeza.
+        alert.group !== null && "border-dashed",
       )}
     >
       {alert.label}
@@ -186,13 +214,17 @@ export function PatientClinicalStrip({
   )
   return (
     <div className="flex flex-wrap items-center gap-2" aria-label="Alertas clínicas">
-      {said.length > 0 ? (
-        // La marca va escrita delante de lo que encabeza: se lee igual con la vista y con el lector de pantalla.
-        <span className="flex max-w-full flex-wrap items-center gap-2">
-          <span className="text-xs font-medium">{declaredMarkWords(saidBy ?? {}, declared?.at)}:</span>
-          {said.map(chip)}
-        </span>
-      ) : null}
+      {groups.map((group, index) => {
+        const said = shown.filter((alert) => alert.group === index)
+        if (said.length === 0) return null
+        return (
+          // La marca va escrita delante de lo que encabeza: se lee igual con la vista y con el lector de pantalla.
+          <span key={`${group.by.kind}-${group.by.name ?? ""}-${group.at ?? index}`} className="flex max-w-full flex-wrap items-center gap-2">
+            <span className="text-xs font-medium">{declaredMarkWords(group.by, group.at, sex)}:</span>
+            {said.map(chip)}
+          </span>
+        )
+      })}
       {allergyWord ? (
         // «No preguntado» es el estado peligroso: se distingue de «niega» (mesa del 9 nov).
         <Badge
@@ -628,7 +660,7 @@ export function PersonHeader({
             detail={clinicalHealth ? withHealth(detail, clinicalHealth) : detail}
             medicationReview={clinicalHealth?.reviewStatus.medications ?? null}
             health={clinicalHealth}
-            saidBy={{ sex: person.sex, contacts: detail.contacts }}
+            sex={person.sex}
             onAntecedentes={canClinical && openWide ? () => openWide({ id: "antecedentes" }) : undefined}
           />
         ) : null}

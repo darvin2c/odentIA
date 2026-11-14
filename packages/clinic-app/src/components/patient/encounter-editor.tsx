@@ -2248,7 +2248,7 @@ export function EncounterEditor({
       <PatientClinicalStrip
         detail={patient}
         health={stripHealth.data?.data ?? null}
-        saidBy={{ sex: patient.patient.sex, contacts: patient.contacts }}
+        sex={patient.patient.sex}
         onAntecedentes={() => setContextOpen(true)}
       />
       {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}

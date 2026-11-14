@@ -127,7 +127,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-antecedentes-declaracion-original",
         q: "¿Dónde veo lo que declaró al registrarse y si ya se revisó?",
-        a: "En su página › Clínica › Antecedentes: «Ver declaración original» muestra lo que envió desde su enlace, tal como llegó, y el registro con que se creó su ficha, con quién y cuándo; no se edita. Arriba dice «Revisado por personal autorizado» o, si lo dijo la persona y nadie de la clínica lo revisó, «Lo dijo… sin revisar», con la fecha. Esa misma marca sale arriba de su ficha y de la atención. Un «No» que marcó la persona se lee «Dijo que no · sin revisar»: «niega» es cuando se lo preguntó alguien de la clínica. «Ver historial» abre las versiones anteriores.",
+        a: "En su página › Clínica › Antecedentes: «Ver declaración original» muestra lo que envió desde su enlace, tal como llegó, y el registro con que se creó su ficha, con quién y cuándo; no se edita. Arriba dice «Revisado por personal autorizado» o, si nadie de la clínica lo revisó, quién lo dijo y cuándo: «Lo dijo ella… sin revisar», o «Lo dijo su madre…» si respondió quien habla por ella; con dos fechas o dos personas, una marca por cada una. Esa misma marca sale arriba de su ficha y de la atención. Un «No» que marcó la persona se lee «Dijo que no · sin revisar»: «niega» es cuando se lo preguntó alguien de la clínica. «Ver historial» abre las versiones anteriores.",
         forms: ["declaracion original del registro", "que significa sin revisar en antecedentes", "quien reviso sus antecedentes", "que significa dijo que no"],
         area: "clinica",
         needs: "clinical.read",
@@ -226,11 +226,13 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-cuestionario-corregir-lo-que-puso",
         q: "El paciente puso algo mal en lo que respondió, ¿cómo lo corrijo?",
-        a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre y la hora, antes o después de «Marcar como revisado». Para que su ficha diga otra cosa, corrígelo también en sus antecedentes.",
+        a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre y la hora, antes o después de «Marcar como revisado». Para que su ficha diga otra cosa, corrígelo también en sus antecedentes. Si llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",
         forms: [
           "no puedo editar lo que respondio el paciente",
           "me dijo que no es asi lo que puso",
           "agregar una correccion al cuestionario",
+          "el paciente envio el cuestionario dos veces",
+          "como descarto un cuestionario que envio el paciente",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -238,7 +240,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-embarazo-donde-se-ve",
         q: "¿Dónde veo que está embarazada?",
-        a: "Arriba de su ficha y de la atención, junto a sus alergias: «Embarazo · 32 semanas hoy (30 el 13 nov)» dice la semana de hoy y cuántas dijo el día en que lo contó. Si lo dijo ella y nadie lo revisó, va bajo «Lo dijo ella… sin revisar». Pasadas las 42 semanas deja de mostrarse como alerta y dice «Embarazo por confirmar»: pregúntale y anótalo en sus antecedentes. Lo guardado antes sin fecha también pide confirmar. Es un aviso: no impide atender, recetar ni firmar.",
+        a: "Arriba de su ficha y de la atención, junto a sus alergias: «Embarazo · 32 semanas hoy (30 el 13 nov)» dice la semana de hoy y cuántas dijo el día en que lo contó. Si lo dijo ella y nadie lo revisó, va bajo «Lo dijo ella… sin revisar». Pasadas las 42 semanas deja de mostrarse como alerta y dice «Embarazo por confirmar»: pregúntale y anótalo en sus antecedentes. Es un aviso: no impide atender, recetar ni firmar.",
         forms: [
           "la paciente dijo que esta embarazada y no lo veo",
           "cuantas semanas de embarazo tiene hoy",

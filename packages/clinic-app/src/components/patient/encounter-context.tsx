@@ -2,15 +2,28 @@ import { diagnosisCodeLabel } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
-import { type FormResponse, fetchFormResponses } from "../../lib/clinical-forms"
+import {
+  declaredFormsOfEncounter,
+  type FormResponse,
+  fetchFormResponses,
+  isDeclaredUnreviewed,
+} from "../../lib/clinical-forms"
 import { formatDate } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
-import { askWhom, pregnancyWords, saidByWords, saidNoWords } from "../../lib/declared-health"
+import {
+  askWhom,
+  declaredGroupOf,
+  pregnancyGroupOf,
+  pregnancyWords,
+  saidByWords,
+  saidNoGroupOf,
+  saidNoWords,
+} from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import { asaLabel, type Encounter, fetchPatientHealth, isCurrentMedication, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
-import { DeclaredResponse, isDeclaredUnreviewed } from "./declared-response"
+import { DeclaredResponse } from "./declared-response"
 import { HealthReviewNotice } from "./health-review-notice"
 
 /**
@@ -37,11 +50,7 @@ export function DeclaredQuestionnaireNotice({
     queryKey: ["form-responses", patientId],
     queryFn: () => fetchFormResponses({ patientId }),
   })
-  const shown: FormResponse[] = (responses.data?.data ?? []).filter(
-    (row) =>
-      row.source === "portal" &&
-      (isDeclaredUnreviewed(row) || (row.status === "finalizado" && row.encounterId === encounterId)),
-  )
+  const shown: FormResponse[] = declaredFormsOfEncounter(responses.data?.data ?? [], encounterId)
   if (shown.length === 0) return null
   return (
     <div className="flex flex-col gap-3">
@@ -95,7 +104,7 @@ export function EncounterHealthReview({
       health={health.data.data}
       disabled={disabled}
       askTo={askWhom(patient.contacts)}
-      saidBy={{ sex: patient.patient.sex, contacts: patient.contacts }}
+      sex={patient.patient.sex}
     />
   )
 }
@@ -111,7 +120,7 @@ export function EncounterContextBody({
 }: {
   patientId: string
   encounterId: string
-  /** La ficha, para decir quién dijo lo declarado (su sexo y quien decide por ella). */
+  /** La ficha, para decir «ella» o «él» de quien declaró (su sexo registrado). */
   patient?: PatientFull
 }): React.JSX.Element {
   const memberName = useMemberName()
@@ -139,11 +148,18 @@ export function EncounterContextBody({
   const asa = asaLabel(data.asaClass)
   const showsAsa = productUi().health.showsAsa || asa !== null
   // Lo que dijo la persona y nadie revisó se dice igual que en la franja: su «No» no es un «niega».
-  const mark = data.declared
-  const saidBy = { sex: patient?.patient.sex, contacts: patient?.contacts ?? [] }
-  const saidNo = `${saidNoWords(saidBy)} · sin revisar.`
-  const unreviewed = (ids: readonly string[] | undefined, id: string) =>
-    ids?.includes(id) ? ` · ${saidByWords(saidBy)}, sin revisar` : ""
+  // Quién dijo cada cosa lo trae su declaración (`data.declared`), no quien figure hoy como su representante.
+  const groups = data.declared
+  const sex = patient?.patient.sex
+  const saidNo = (topic: "allergies" | "conditions" | "medications"): string | null => {
+    const group = saidNoGroupOf(groups, topic)
+    return group ? `${saidNoWords(group.by, sex)} · sin revisar.` : null
+  }
+  const unreviewed = (topic: "allergies" | "conditions" | "medications", id: string): string => {
+    const group = declaredGroupOf(groups, topic, id)
+    return group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""
+  }
+  const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = data.pregnancy ? pregnancyWords(data.pregnancy) : null
   return (
     <div className="flex flex-col gap-5 text-sm">
@@ -156,7 +172,7 @@ export function EncounterContextBody({
               : data.pregnancy?.weeksToday === null
                 ? `${pregnancy.detail.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}.`
                 : `${pregnancy.title.replace("Embarazo · ", "")} (${pregnancy.detail}).`}
-            {mark?.pregnancy ? ` ${saidByWords(saidBy).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}, sin revisar.` : ""}
+            {pregnancyGroup ? ` ${saidByWords(pregnancyGroup.by, sex).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}, sin revisar.` : ""}
           </p>
         </section>
       ) : null}
@@ -165,11 +181,10 @@ export function EncounterContextBody({
         {allergies.length === 0 ? (
           // «No tiene» solo si se le preguntó; si nunca se preguntó, se dice así (ADR 0035).
           <p className="text-muted-foreground">
-            {mark?.saidNo.allergies
-              ? saidNo
-              : data.reviewStatus.allergies === "none"
+            {saidNo("allergies") ??
+              (data.reviewStatus.allergies === "none"
                 ? "No tiene alergias."
-                : "Aún no se le preguntó por alergias."}
+                : "Aún no se le preguntó por alergias.")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -177,11 +192,7 @@ export function EncounterContextBody({
               <li key={allergy.id}>
                 <strong>{allergyTitle(allergy)}</strong>
                 {allergy.reaction ? ` · ${allergy.reaction}` : ""}
-                {mark?.allergies.includes(allergy.id)
-                  ? unreviewed(mark.allergies, allergy.id)
-                  : allergy.source === "paciente"
-                    ? " · la dijo el paciente"
-                    : ""}
+                {unreviewed("allergies", allergy.id) || (allergy.source === "paciente" ? " · la dijo el paciente" : "")}
               </li>
             ))}
           </ul>
@@ -192,13 +203,12 @@ export function EncounterContextBody({
         {conditions.length === 0 ? (
           // Como las alergias: «niega» solo si se le preguntó; si no, se dice que no se preguntó.
           <p className="text-muted-foreground">
-            {mark?.saidNo.conditions
-              ? saidNo
-              : data.reviewStatus.conditions === "none"
-              ? "Niega enfermedades."
-              : data.reviewStatus.conditions === "recorded"
-                ? "Sin enfermedades activas."
-                : "Aún no se le preguntó por sus enfermedades."}
+            {saidNo("conditions") ??
+              (data.reviewStatus.conditions === "none"
+                ? "Niega enfermedades."
+                : data.reviewStatus.conditions === "recorded"
+                  ? "Sin enfermedades activas."
+                  : "Aún no se le preguntó por sus enfermedades.")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -206,7 +216,7 @@ export function EncounterContextBody({
               <li key={condition.id}>
                 {condition.name}
                 {condition.diagnosisCode ? ` · ${diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode)}` : ""}
-                {unreviewed(mark?.conditions, condition.id)}
+                {unreviewed("conditions", condition.id)}
               </li>
             ))}
           </ul>
@@ -216,13 +226,12 @@ export function EncounterContextBody({
         <h3 className="font-medium">Medicación</h3>
         {medications.length === 0 ? (
           <p className="text-muted-foreground">
-            {mark?.saidNo.medications
-              ? saidNo
-              : data.reviewStatus.medications === "none"
-              ? "No toma medicación."
-              : data.reviewStatus.medications === "recorded"
-                ? "Sin medicación vigente."
-                : "Aún no se le preguntó por su medicación."}
+            {saidNo("medications") ??
+              (data.reviewStatus.medications === "none"
+                ? "No toma medicación."
+                : data.reviewStatus.medications === "recorded"
+                  ? "Sin medicación vigente."
+                  : "Aún no se le preguntó por su medicación.")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -231,7 +240,7 @@ export function EncounterContextBody({
                 {medication.name}
                 {medication.dose ? ` · ${medication.dose}` : ""}
                 {medication.frequency ? ` · ${medication.frequency}` : ""}
-                {unreviewed(mark?.medications, medication.id)}
+                {unreviewed("medications", medication.id)}
               </li>
             ))}
           </ul>

@@ -1,17 +1,27 @@
+import type { HealthDeclarant } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import {
   askWhom,
+  declaredGroupOf,
   declaredMarkWords,
   pregnancyChip,
+  pregnancyGroupOf,
   pregnancyWords,
-  saidByWho,
   saidByWords,
+  saidNoGroupOf,
   saidNoWords,
   shortDay,
+  whoWords,
 } from "./declared-health"
-import type { PatientContactLink } from "./patients"
+import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
 
-const mother: PatientContactLink = {
+const herself: HealthDeclarant = { kind: "patient", name: null, relation: null }
+const mother: HealthDeclarant = { kind: "representative", name: "Carla Paz Soto", relation: "madre" }
+const staff: HealthDeclarant = { kind: "staff", name: null, relation: null }
+const unknown: HealthDeclarant = { kind: "unknown", name: null, relation: null }
+const NOW = new Date("2026-11-27T15:00:00Z")
+
+const guardian: PatientContactLink = {
   contactId: "c1",
   displayName: "Carla Paz Soto",
   phone: null,
@@ -23,32 +33,65 @@ const mother: PatientContactLink = {
   isPreferred: true,
   isEmergency: false,
 }
-const NOW = new Date("2026-11-27T15:00:00Z")
 
 describe("las palabras de lo que dijo el paciente", () => {
-  it("una sola marca: quién lo dijo, cuándo y que nadie lo revisó", () => {
-    expect(declaredMarkWords({ sex: "F" }, "2026-11-13")).toBe("Lo dijo ella el 13 nov, sin revisar")
-    expect(declaredMarkWords({ sex: "M" }, "2026-11-13")).toBe("Lo dijo él el 13 nov, sin revisar")
+  it("la marca dice quién lo dijo, cuándo y que nadie lo revisó", () => {
+    expect(declaredMarkWords(herself, "2026-11-13", "F")).toBe("Lo dijo ella el 13 nov, sin revisar")
+    expect(declaredMarkWords(herself, "2026-11-13", "M")).toBe("Lo dijo él el 13 nov, sin revisar")
     // Sin sexo registrado no se supone ninguno.
-    expect(declaredMarkWords({ sex: null }, "2026-11-13")).toBe("Lo dijo el 13 nov, sin revisar")
-    expect(declaredMarkWords({}, null)).toBe("Lo dijo, sin revisar")
+    expect(declaredMarkWords(herself, "2026-11-13", null)).toBe("Lo dijo el 13 nov, sin revisar")
+    expect(declaredMarkWords(herself, null, undefined)).toBe("Lo dijo, sin revisar")
   })
 
-  it("cuando habla quien decide por la persona, se dice con su vínculo y su nombre", () => {
-    expect(saidByWho({ sex: "M", contacts: [mother] })).toBe("su madre, Carla")
-    expect(declaredMarkWords({ sex: "M", contacts: [mother] }, "2026-11-13")).toBe(
-      "Lo dijo su madre, Carla, el 13 nov, sin revisar",
-    )
-    expect(declaredMarkWords({ contacts: [mother] }, null)).toBe("Lo dijo su madre, Carla, sin revisar")
-    expect(saidByWords({ contacts: [mother] })).toBe("lo dijo su madre, Carla")
-    // A quién preguntar sigue diciéndose igual que en la ficha.
-    expect(askWhom([mother])).toBe("su madre (Carla Paz Soto)")
-    expect(askWhom([{ ...mother, isActive: false }])).toBeNull()
+  it("nombra a quien lo dijo según su declaración, no según quién figura como su representante", () => {
+    // Con quien habla por ella: su vínculo y su nombre, entre comas.
+    expect(whoWords(mother, "M")).toBe("su madre, Carla")
+    expect(declaredMarkWords(mother, "2026-11-13", "M")).toBe("Lo dijo su madre, Carla, el 13 nov, sin revisar")
+    expect(saidByWords(mother, "M")).toBe("lo dijo su madre, Carla")
+    // Si solo se sabe el nombre o solo el vínculo, se dice lo que se sabe.
+    expect(whoWords({ kind: "representative", name: "Rosa Vera", relation: null }, "F")).toBe("Rosa")
+    expect(whoWords({ kind: "representative", name: null, relation: "hermana" }, "F")).toBe("su hermana")
+    expect(whoWords({ kind: "representative", name: null, relation: null }, "F")).toBe("quien habla por ella")
+    expect(whoWords({ kind: "representative", name: null, relation: null }, null)).toBe("quien habla en su nombre")
+    // Lo que anotó el equipo porque se lo dijeron, y lo que no dice quién fue: no se le atribuye a la persona.
+    expect(declaredMarkWords(staff, "2026-11-13", "F")).toBe("Lo anotó el equipo el 13 nov, sin revisar")
+    expect(declaredMarkWords(unknown, "2026-11-13", "F")).toBe("Declarado el 13 nov, sin revisar")
+    expect(saidByWords(staff, "F")).toBe("lo anotó el equipo")
+    expect(saidByWords(unknown, "F")).toBe("declarado")
+    // A quién preguntar hoy sigue diciéndose como en la ficha: es otra cosa que quién lo dijo.
+    expect(askWhom([guardian])).toBe("su madre (Carla Paz Soto)")
+    expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
 
-  it("el «No» que marcó la persona no es un «niega»", () => {
-    expect(saidNoWords({ sex: "F" })).toBe("Dijo que no")
-    expect(saidNoWords({ contacts: [mother] })).toBe("Su madre dijo que no")
+  it("el «No» que marcó quien declaró no es un «niega»", () => {
+    expect(saidNoWords(herself, "F")).toBe("Dijo que no")
+    expect(saidNoWords(mother, "M")).toBe("Su madre dijo que no")
+    expect(saidNoWords({ kind: "representative", name: "Rosa Vera", relation: null }, "F")).toBe("Rosa dijo que no")
+    expect(saidNoWords(staff, "F")).toBe("El equipo anotó que no")
+  })
+
+  it("cada fila se busca en su declaración: con dos fechas o dos personas, cada cosa con la suya", () => {
+    const group = (by: HealthDeclarant, at: string, patch: Partial<DeclaredHealthGroup>): DeclaredHealthGroup => ({
+      by,
+      at,
+      allergies: [],
+      conditions: [],
+      medications: [],
+      pregnancy: false,
+      saidNo: { allergies: false, conditions: false, medications: false },
+      ...patch,
+    })
+    const groups = [
+      group(herself, "2026-11-01T15:00:00Z", { medications: ["m1"], saidNo: { allergies: false, conditions: true, medications: false } }),
+      group(mother, "2026-11-13T15:00:00Z", { allergies: ["a1"], pregnancy: true }),
+    ]
+    expect(declaredGroupOf(groups, "medications", "m1")?.by).toBe(herself)
+    expect(declaredGroupOf(groups, "allergies", "a1")?.by).toBe(mother)
+    expect(declaredGroupOf(groups, "allergies", "a2")).toBeUndefined()
+    expect(declaredGroupOf(undefined, "allergies", "a1")).toBeUndefined()
+    expect(saidNoGroupOf(groups, "conditions")?.at).toBe("2026-11-01T15:00:00Z")
+    expect(saidNoGroupOf(groups, "allergies")).toBeUndefined()
+    expect(pregnancyGroupOf(groups)?.by).toBe(mother)
   })
 
   it("el día se dice corto, y un día de calendario no se corre con la zona", () => {

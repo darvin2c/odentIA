@@ -1,20 +1,21 @@
-import { KINSHIP_LABELS } from "@odentia/clinical"
 import { Badge, Button, cn, toast } from "@odentia/ui"
-import { submitErrorMessage, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import { ConfirmDialog, submitErrorMessage, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import {
   addFormAddendum,
+  discardFormResponse,
   type FinalizedFormResponse,
   type FormFieldDef,
   type FormResponse,
   fetchFormAddenda,
   finalizeFormResponse,
+  isDeclaredUnreviewed,
 } from "../../lib/clinical-forms"
 import { useMemberName } from "../../lib/crm"
-import { shortDay } from "../../lib/declared-health"
+import { type HealthDeclarant, shortDay, whoWords } from "../../lib/declared-health"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { FirmaView } from "./firma-pad"
 import { isFieldVisible } from "./form-fields"
@@ -25,6 +26,11 @@ import { isFieldVisible } from "./form-fields"
  * agrega una corrección, que queda aparte con su nombre y la hora, antes o
  * después de «Marcar como revisado». Revisarlo dice lo que pasó de verdad con
  * sus respuestas y deja quién lo revisó; desde la atención queda ligado a ella.
+ * Quién lo envió lo dice el servidor (`response.respondent`), con las mismas
+ * palabras que la franja de la ficha. Lo que el equipo ya había cambiado antes
+ * de que se protegiera no se presenta como intacto (`editedByTeamAt`). Y nada
+ * deja al profesional sin salida: lo repetido, lo de otra persona o lo que no
+ * se puede revisar se descarta con su motivo.
  */
 
 /** «13 nov, 2:27 p. m.», en la zona de la clínica. */
@@ -40,24 +46,7 @@ function dayAndTime(value: string): string {
     .replace(/\.(?=,)/, "")
 }
 
-/** El paciente lo envió y nadie del equipo lo revisó todavía. */
-export function isDeclaredUnreviewed(response: FormResponse): boolean {
-  return response.source === "portal" && response.status === "borrador" && response.submittedAt !== null
-}
-
-/** Quién lo envió: la propia persona («ella», «él») o quien habla por ella («su madre, Carla»). */
-function senderWho(response: FormResponse, sex: string | null | undefined): string {
-  const sender = response.respondent
-  if (sender && sender.relationship !== "self" && sender.relationship !== null) {
-    const kin =
-      sender.kinship && sender.kinship in KINSHIP_LABELS
-        ? KINSHIP_LABELS[sender.kinship as keyof typeof KINSHIP_LABELS]
-        : sender.relationshipDetail?.trim()
-    const first = sender.name.trim().split(/\s+/)[0] ?? sender.name
-    return kin ? `su ${kin.toLocaleLowerCase("es")}, ${first}` : `${first}, que habla por el paciente`
-  }
-  return sex === "F" ? "ella" : sex === "M" ? "él" : ""
-}
+const NOBODY: HealthDeclarant = { kind: "unknown", name: null, relation: null }
 
 /**
  * «Lo envió Marta Ríos desde su enlace el 13 nov, 2:27 p. m.»: quién, por dónde
@@ -103,6 +92,10 @@ export function reviewedWords(response: FormResponse, passed: readonly string[])
     : "Revisado. Nada pasó a Antecedentes: sus respuestas quedan aquí y en Documentos."
 }
 
+const discardSchema = z.object({
+  reason: z.string().trim().min(1, "Indica el motivo del descarte.").max(2000, "El motivo admite hasta 2000 caracteres."),
+})
+
 const correctionSchema = z.object({
   text: z.string().trim().min(1, "Escribe la corrección.").max(5000, "La corrección admite hasta 5000 caracteres."),
 })
@@ -135,7 +128,10 @@ export function DeclaredResponse({
   const sent = response.submittedAt !== null
   const unreviewed = isDeclaredUnreviewed(response)
   const reviewed = response.status === "finalizado"
-  const who = senderWho(response, sex)
+  // Las mismas palabras que la franja de la ficha: «ella», «su madre, Carla».
+  const who = whoWords(response.respondent ?? NOBODY, sex)
+  const edited = response.editedByTeamAt ?? null
+  const [discarding, setDiscarding] = useState(false)
 
   const corrections = useQuery({
     queryKey: ["form-addenda", response.id],
@@ -173,6 +169,19 @@ export function DeclaredResponse({
   useEffect(() => {
     if (correcting) correctionRef.current?.querySelector("textarea")?.focus()
   }, [correcting])
+  const discard = useMutation({ mutationFn: (reason: string) => discardFormResponse(response.id, reason) })
+  const discardForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: discardSchema },
+    onSubmit: async ({ value }) => {
+      await discard.mutateAsync(value.reason.trim())
+      setDiscarding(false)
+      toast.success("Descartado: queda con tu motivo y ya no pide revisión")
+      await refresh()
+    },
+  })
+  const discardError = useFormSubmitError(discardForm)
+  const savingDiscard = useStore(discardForm.store, (state) => state.isSubmitting)
   const correctionError = useFormSubmitError(correctionForm)
   const savingCorrection = useStore(correctionForm.store, (state) => state.isSubmitting)
 
@@ -203,7 +212,8 @@ export function DeclaredResponse({
               variant="outline"
               className="h-auto min-h-5 max-w-full border-dashed border-warning/30 bg-warning-soft py-px text-left whitespace-normal text-warning"
             >
-              Lo dijo {who || "la persona"} · por revisar
+              {/* Lo que el equipo ya cambió no se presenta como dicho por ella. */}
+              {edited ? "Por revisar" : `Lo dijo ${who || "la persona"} · por revisar`}
             </Badge>
           ) : response.status === "descartado" ? (
             <Badge variant="outline">Descartado</Badge>
@@ -211,7 +221,13 @@ export function DeclaredResponse({
             <Badge variant="outline">Sin enviar</Badge>
           )}
         </div>
-        {sent && response.status !== "descartado" ? (
+        {sent && response.status !== "descartado" && edited ? (
+          <p role="note" className="rounded-md border border-warning/40 bg-warning-soft p-3 text-sm">
+            El equipo cambió estas respuestas el {dayAndTime(edited)}, cuando todavía se podían editar. Lo que se lee
+            aquí puede no ser lo que {author} envió, y lo que envió no se conserva. Desde ahora ya no se cambian: si
+            algo no es así, agrega una corrección.
+          </p>
+        ) : sent && response.status !== "descartado" ? (
           <p className="text-sm text-muted-foreground">
             Es lo que {author} escribió y no se cambia. Si algo no es así, agrega una corrección: queda aparte, con tu
             nombre y la hora.
@@ -315,22 +331,65 @@ export function DeclaredResponse({
         </div>
       ) : null}
       {review.error ? (
+        // Por qué no se pudo, y la salida: nada queda «Por revisar» para siempre.
         <p role="alert" className="text-sm text-destructive">
-          {submitErrorMessage(review.error)}
+          No se pudo marcar como revisado. {submitErrorMessage(review.error)} Si no tiene arreglo, puedes descartarlo
+          con su motivo.
         </p>
       ) : null}
-      {canWrite && sent && response.status !== "descartado" && !correcting ? (
-        <div className="flex flex-wrap justify-between gap-2 border-t pt-3">
-          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setCorrecting(true)}>
-            {list.length > 0 ? "Agregar otra corrección" : "Agregar una corrección"}
-          </Button>
+      {canWrite && response.status === "borrador" && !correcting ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+          <div className="flex flex-wrap gap-2">
+            {sent ? (
+              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setCorrecting(true)}>
+                {list.length > 0 ? "Agregar otra corrección" : "Agregar una corrección"}
+              </Button>
+            ) : null}
+            {/* Lo repetido, lo de otra persona o lo que dejó a medias y ya no va a enviar. */}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={disabled}
+              onClick={() => {
+                discardForm.reset()
+                setDiscarding(true)
+              }}
+            >
+              Descartar…
+            </Button>
+          </div>
           {unreviewed ? (
             <Button type="button" size="sm" disabled={disabled || review.isPending} onClick={() => review.mutate()}>
               {review.isPending ? "Marcando…" : "Marcar como revisado"}
             </Button>
           ) : null}
         </div>
+      ) : canWrite && reviewed && !correcting ? (
+        <div className="flex flex-wrap justify-between gap-2 border-t pt-3">
+          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setCorrecting(true)}>
+            {list.length > 0 ? "Agregar otra corrección" : "Agregar una corrección"}
+          </Button>
+        </div>
       ) : null}
+      <ConfirmDialog
+        open={discarding}
+        title={sent ? "Descartar lo que envió" : "Descartar lo que dejó a medias"}
+        description={
+          sent
+            ? "Para lo que llegó repetido, es de otra persona o no se puede revisar. No se borra: queda descartado, con tu motivo, y deja de pedir revisión."
+            : "Para lo que empezó a responder y ya no va a enviar. No se borra: queda descartado, con tu motivo."
+        }
+        confirmLabel="Descartar"
+        pending={savingDiscard}
+        error={discardError}
+        onClose={() => setDiscarding(false)}
+        onConfirm={() => void submitForm(discardForm)}
+      >
+        <discardForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
+        </discardForm.AppField>
+      </ConfirmDialog>
     </article>
   )
 }

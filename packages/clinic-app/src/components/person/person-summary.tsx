@@ -129,7 +129,7 @@ export function PersonSummary({
               patientId={patientId}
               patientName={person.displayName}
               health={health.data?.data ?? null}
-              saidBy={{ sex: person.sex, contacts: detail?.contacts ?? [] }}
+              sex={person.sex}
               onAntecedentes={() => openWide?.({ id: "antecedentes" })}
             />
           )}
@@ -214,7 +214,7 @@ export function PersonSummary({
               {allergies.length === 0
                 ? // El «No» que marcó la persona (o quien habla por ella) no es un «niega» de la clínica.
                   detail.allergySaidNo
-                  ? `${saidNoWords({ sex: person.sex, contacts: detail.contacts })} · sin revisar`
+                  ? `${saidNoWords(detail.allergySaidNo.by, person.sex)} · sin revisar`
                   : "Sin alergias registradas"
                 : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>

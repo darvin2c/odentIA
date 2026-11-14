@@ -5,7 +5,7 @@ import { Plus } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
-import { declaredMarkWords, pregnancyWords, type SaidBy, saidNoWords } from "../../lib/declared-health"
+import { declaredMarkWords, pregnancyWords, saidNoWords } from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import {
   isCurrentMedication,
@@ -48,7 +48,7 @@ export function HealthReviewNotice({
   health,
   disabled = false,
   askTo = null,
-  saidBy = {},
+  sex,
 }: {
   patientId: string
   patientName: string
@@ -56,8 +56,8 @@ export function HealthReviewNotice({
   disabled?: boolean
   /** Con representante, a quién se le pregunta (`askWhom`): «su padre (Luis Ríos)». */
   askTo?: string | null
-  /** De quién se habla, para decir quién lo dijo: su sexo y quien decide por ella. */
-  saidBy?: SaidBy
+  /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
+  sex?: string | null
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -97,15 +97,15 @@ export function HealthReviewNotice({
   // Lo que dijo la persona y nadie revisó todavía: qué es lo dice el servidor (`health.declared`), que
   // sabe si lo anotó un clínico o lo declaró ella. Sin ese dato no se pide revisar nada.
   const pending = health.reviewPending === true
-  const mark = health.declared
   const today = clinicToday()
   const pregnancy = health.pregnancy ?? null
-  const no = saidNoWords(saidBy).toLocaleLowerCase("es")
-  const saidRows: Array<{ label: string; value: string }> = []
-  if (mark) {
-    if (pregnancy && mark.pregnancy) {
+  // Una lista por declaración: cada cosa con quien la dijo y su día, sin juntar lo de dos fechas.
+  const saidGroups = (health.declared ?? []).map((group) => {
+    const no = saidNoWords(group.by, sex).toLocaleLowerCase("es")
+    const rows: Array<{ label: string; value: string }> = []
+    if (pregnancy && group.pregnancy) {
       const words = pregnancyWords(pregnancy)
-      saidRows.push({
+      rows.push({
         label: "Embarazo",
         value: words.confirm
           ? `${words.detail}; pregúntale si sigue embarazada`
@@ -114,28 +114,30 @@ export function HealthReviewNotice({
             : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
       })
     }
-    const saidAllergies = health.allergies.filter((row) => mark.allergies.includes(row.id))
+    const saidAllergies = health.allergies.filter((row) => group.allergies.includes(row.id))
     if (saidAllergies.length > 0)
-      saidRows.push({
+      rows.push({
         label: "Alergias",
         value: saidAllergies
           .map((row) => `${allergyTitle(row)} · ${row.reaction?.trim() || "no dijo qué le pasó"}`)
           .join("; "),
       })
-    else if (mark.saidNo.allergies) saidRows.push({ label: "Alergias", value: no })
+    else if (group.saidNo.allergies) rows.push({ label: "Alergias", value: no })
     const saidMedications = health.medications.filter(
-      (row) => mark.medications.includes(row.id) && isCurrentMedication(row, today),
+      (row) => group.medications.includes(row.id) && isCurrentMedication(row, today),
     )
     if (saidMedications.length > 0)
-      saidRows.push({ label: "Medicinas", value: saidMedications.map((row) => row.name).join(", ") })
-    else if (mark.saidNo.medications) saidRows.push({ label: "Medicinas", value: no })
-    const saidConditions = health.conditions.filter((row) => mark.conditions.includes(row.id) && row.status === "activa")
+      rows.push({ label: "Medicinas", value: saidMedications.map((row) => row.name).join(", ") })
+    else if (group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
+    const saidConditions = health.conditions.filter((row) => group.conditions.includes(row.id) && row.status === "activa")
     if (saidConditions.length > 0)
-      saidRows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
-    else if (mark.saidNo.conditions) saidRows.push({ label: "Enfermedades", value: no })
-  }
+      rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
+    else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
+    return { title: declaredMarkWords(group.by, group.at, sex), rows }
+  })
+  const pregnancyPending = (health.declared ?? []).some((group) => group.pregnancy)
   // Un embarazo que ya pasó su término (o quedó sin fecha) y que ya nadie tiene por revisar: se pide confirmarlo.
-  const confirmPregnancy = pregnancy?.state === "por_confirmar" && !(pending && mark?.pregnancy)
+  const confirmPregnancy = pregnancy?.state === "por_confirmar" && !(pending && pregnancyPending)
   if (!canWrite || (!allergiesDue && unasked.length === 0 && !pending && !confirmPregnancy)) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const asked = active.length > 0 || health.reviewStatus.allergies === "none"
@@ -228,19 +230,28 @@ export function HealthReviewNotice({
         ) : null}
         {pending ? (
           <li className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-col gap-1">
-              <h3 className="text-sm font-medium">{declaredMarkWords(saidBy, mark?.at)}</h3>
-              {saidRows.length > 0 ? (
-                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-                  {saidRows.map((row) => (
-                    <div key={row.label} className="contents">
-                      <dt className="text-muted-foreground">{row.label}</dt>
-                      <dd>{row.value}</dd>
+            <div className="flex min-w-0 flex-col gap-2">
+              {saidGroups.filter((group) => group.rows.length > 0).length > 0 ? (
+                saidGroups
+                  .filter((group) => group.rows.length > 0)
+                  .map((group) => (
+                    <div key={group.title} className="flex flex-col gap-1">
+                      <h3 className="text-sm font-medium">{group.title}</h3>
+                      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+                        {group.rows.map((row) => (
+                          <div key={row.label} className="contents">
+                            <dt className="text-muted-foreground">{row.label}</dt>
+                            <dd>{row.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
                     </div>
-                  ))}
-                </dl>
+                  ))
               ) : (
-                <p className="text-sm text-muted-foreground">Datos de su salud que nadie revisó todavía.</p>
+                <>
+                  <h3 className="text-sm font-medium">Sin revisar</h3>
+                  <p className="text-sm text-muted-foreground">Datos de su salud que nadie revisó todavía.</p>
+                </>
               )}
               <p className="text-sm text-muted-foreground">Confírmalo con {first} en sus antecedentes.</p>
             </div>

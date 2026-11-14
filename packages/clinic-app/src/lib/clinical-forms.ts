@@ -1,4 +1,4 @@
-import type { ConsentSections } from "@odentia/clinical"
+import type { ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch, apiFetchBytes } from "./api"
 
@@ -95,17 +95,41 @@ export interface FormResponse {
   submittedVia?: "portal" | "enlace" | null
   /** Quién lo finalizó: en lo que envió el paciente, quien lo revisó. */
   finalizedBy?: string | null
-  /** Quién lo envió, con su vínculo con el paciente (`self` es la propia persona). */
-  respondent?: {
-    name: string
-    relationship: string | null
-    relationshipDetail: string | null
-    kinship: string | null
-  } | null
+  /** Quién lo envió: la persona o quien habla por ella, con su nombre y su vínculo (lo dice el servidor). */
+  respondent?: (HealthDeclarant & { name: string }) | null
+  /** El equipo cambió las respuestas después del envío, antes de que quedaran protegidas: cuándo. */
+  editedByTeamAt?: string | null
   discardedAt: string | null
   discardReason: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** El paciente lo envió y nadie del equipo lo revisó todavía. */
+export function isDeclaredUnreviewed(response: FormResponse): boolean {
+  return response.source === "portal" && response.status === "borrador" && response.submittedAt !== null
+}
+
+/**
+ * Lo que envió el paciente y va arriba al abrir esta atención: lo que sigue sin
+ * revisar y lo que se revisó aquí, que no desaparece.
+ */
+export function declaredFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+  return forms.filter(
+    (form) =>
+      form.source === "portal" &&
+      (isDeclaredUnreviewed(form) || (form.status === "finalizado" && form.encounterId === encounterId)),
+  )
+}
+
+/**
+ * Los formularios de la lista de documentos de la atención: los que llena el
+ * equipo. Lo que envió el paciente ya está arriba, entero, y no se repite.
+ */
+export function teamFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+  return forms.filter(
+    (form) => form.encounterId === encounterId && form.status !== "descartado" && form.source !== "portal",
+  )
 }
 
 /** Lo que pasó al finalizar: las alergias que de verdad entraron a Antecedentes. */
