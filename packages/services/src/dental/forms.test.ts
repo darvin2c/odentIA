@@ -82,3 +82,10 @@ it("ortodoncia anota la clase molar y canina de cada lado y la línea media de c
     expect.arrayContaining(["dolor_intensidad", "tumefaccion", "fistula", "movilidad", "sondaje", "hallazgo_radiografico"]),
   )
 })
+
+// QA del 14 nov: «Cariados (c)» se veía «Cariados ©» con la fuente.
+it("ningún rótulo escribe una letra entre paréntesis, que la fuente vuelve un símbolo", () => {
+  for (const form of DENTAL_FORMS.suggestions)
+    for (const section of form.schema.sections)
+      for (const field of section.fields) expect(field.label, `${form.key}:${field.id}`).not.toMatch(/\([a-z]\)/i)
+})

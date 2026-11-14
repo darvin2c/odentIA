@@ -167,6 +167,7 @@ const ORTHODONTICS: SuggestedFormTemplate = {
 }
 
 /** Sin peso: ya está en los signos vitales de la atención. */
+// La letra del índice va delante y sin paréntesis: «(c)» se dibuja como «©» con la fuente de la app.
 const PEDIATRIC: SuggestedFormTemplate = {
   key: "ficha-de-odontopediatria",
   title: "Ficha de odontopediatría",
@@ -178,9 +179,9 @@ const PEDIATRIC: SuggestedFormTemplate = {
         id: "ceod",
         title: "Índice ceod",
         fields: [
-          { id: "ceod_c", label: "Cariados (c)", type: "numero", min: 0, max: 20 },
-          { id: "ceod_e", label: "Con extracción indicada (e)", type: "numero", min: 0, max: 20 },
-          { id: "ceod_o", label: "Obturados (o)", type: "numero", min: 0, max: 20 },
+          { id: "ceod_c", label: "c, cariados", type: "numero", min: 0, max: 20 },
+          { id: "ceod_e", label: "e, con extracción indicada", type: "numero", min: 0, max: 20 },
+          { id: "ceod_o", label: "o, obturados", type: "numero", min: 0, max: 20 },
         ],
       },
       {
@@ -218,12 +219,12 @@ const STOMATOLOGIC: SuggestedFormTemplate = {
         id: "caries",
         title: "Índice de caries",
         fields: [
-          { id: "cpod_c", label: "CPOD · cariados (C)", type: "numero", min: 0, max: 32 },
-          { id: "cpod_p", label: "CPOD · perdidos (P)", type: "numero", min: 0, max: 32 },
-          { id: "cpod_o", label: "CPOD · obturados (O)", type: "numero", min: 0, max: 32 },
-          { id: "ceod_c", label: "ceod · cariados (c)", type: "numero", min: 0, max: 20, help: "Dientes de leche." },
-          { id: "ceod_e", label: "ceod · con extracción indicada (e)", type: "numero", min: 0, max: 20 },
-          { id: "ceod_o", label: "ceod · obturados (o)", type: "numero", min: 0, max: 20 },
+          { id: "cpod_c", label: "CPOD · C, cariados", type: "numero", min: 0, max: 32 },
+          { id: "cpod_p", label: "CPOD · P, perdidos", type: "numero", min: 0, max: 32 },
+          { id: "cpod_o", label: "CPOD · O, obturados", type: "numero", min: 0, max: 32 },
+          { id: "ceod_c", label: "ceod · c, cariados", type: "numero", min: 0, max: 20, help: "Dientes de leche." },
+          { id: "ceod_e", label: "ceod · e, con extracción indicada", type: "numero", min: 0, max: 20 },
+          { id: "ceod_o", label: "ceod · o, obturados", type: "numero", min: 0, max: 20 },
         ],
       },
       {
