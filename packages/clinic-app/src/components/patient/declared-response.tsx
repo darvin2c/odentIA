@@ -14,6 +14,7 @@ import {
   finalizeFormResponse,
   isDeclaredUnreviewed,
 } from "../../lib/clinical-forms"
+import { ApiError } from "../../lib/api"
 import { useMemberName } from "../../lib/crm"
 import { type HealthDeclarant, shortDay, whoWords } from "../../lib/declared-health"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -92,6 +93,31 @@ export function reviewedWords(response: FormResponse, passed: readonly string[])
     : "Revisado. Nada pasó a Antecedentes: sus respuestas quedan aquí y en Documentos."
 }
 
+/**
+ * La línea de lo ya revisado: «Lo revisó Dra. Ana Torres, 14 nov». Si lo revisó
+ * otra persona mientras esta pestaña lo tenía abierto, lo dice así, con la hora:
+ * «Ya lo revisó Dr. Luis Prado el 14 nov, 12:11 a. m.» (QA del 14 nov, H1 de desarrollo).
+ */
+export function reviewedLine(
+  response: Pick<FormResponse, "status" | "finalizedBy" | "finalizedAt" | "discardedAt">,
+  memberName: (userId: string) => string,
+  late = false,
+): string {
+  if (response.status === "descartado")
+    return `Ya lo descartó otra persona${response.discardedAt ? ` el ${dayAndTime(response.discardedAt)}` : ""}`
+  const who = response.finalizedBy ? memberName(response.finalizedBy) : null
+  if (late)
+    return `Ya lo revisó ${who ?? "otra persona"}${response.finalizedAt ? ` el ${dayAndTime(response.finalizedAt)}` : ""}`
+  return who
+    ? `Lo revisó ${who}${response.finalizedAt ? `, ${shortDay(response.finalizedAt)}` : ""}`
+    : `Revisado${response.finalizedAt ? ` el ${shortDay(response.finalizedAt)}` : ""}`
+}
+
+/** El servidor dice que ya no está por revisar: otra pestaña u otra persona se adelantó. */
+export function alreadySettled(error: unknown): boolean {
+  return error instanceof ApiError && error.shape.code === "FINALIZED"
+}
+
 const discardSchema = z.object({
   reason: z.string().trim().min(1, "Indica el motivo del descarte.").max(2000, "El motivo admite hasta 2000 caracteres."),
 })
@@ -146,13 +172,33 @@ export function DeclaredResponse({
     )
     await onChanged?.()
   }
+  // Adónde va el foco cuando la caja cambia: la línea «Lo revisó…» o la corrección nueva (QA del 14
+  // nov, U1): el botón que lo tenía desaparece y el foco caía a la página.
+  const focusNext = useRef<"reviewed" | { correctionsBefore: number } | null>(null)
+  const reviewedRef = useRef<HTMLParagraphElement | null>(null)
+  const correctionsRef = useRef<HTMLElement | null>(null)
+  // Otra pestaña u otra persona ya lo revisó: se recarga y se dice quién, sin ofrecer descartarlo.
+  const [late, setLate] = useState(false)
   const review = useMutation({
     mutationFn: () => finalizeFormResponse(response.id, encounterId ?? null),
     onSuccess: async (result: { data: FinalizedFormResponse }) => {
       toast.success(reviewedWords(response, result.data.passedAllergies ?? []))
+      focusNext.current = "reviewed"
+      await refresh()
+    },
+    onError: async (error) => {
+      if (!alreadySettled(error)) return
+      setLate(true)
+      focusNext.current = "reviewed"
       await refresh()
     },
   })
+  useEffect(() => {
+    if (focusNext.current === "reviewed" && response.status !== "borrador") {
+      focusNext.current = null
+      reviewedRef.current?.focus()
+    }
+  }, [response.status])
   const addCorrection = useMutation({ mutationFn: (text: string) => addFormAddendum(response.id, text) })
   const correctionForm = useAppForm({
     defaultValues: { text: "" },
@@ -161,6 +207,7 @@ export function DeclaredResponse({
       await addCorrection.mutateAsync(value.text.trim())
       correctionForm.reset()
       setCorrecting(false)
+      focusNext.current = { correctionsBefore: corrections.data?.data.length ?? 0 }
       await queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
       toast.success("Corrección guardada: queda aparte, con tu nombre y la hora")
     },
@@ -190,6 +237,15 @@ export function DeclaredResponse({
     .filter((field) => isFieldVisible(field, response.answers ?? {}))
   const shown = limit === undefined ? fields : fields.slice(0, limit)
   const list = corrections.data?.data ?? []
+  // La corrección nueva es la última (van por hora): el foco va a ella, con su nombre y su hora.
+  useEffect(() => {
+    const next = focusNext.current
+    if (next && next !== "reviewed" && list.length > next.correctionsBefore) {
+      focusNext.current = null
+      const items = correctionsRef.current?.querySelectorAll<HTMLElement>("[data-correction]")
+      items?.[items.length - 1]?.focus()
+    }
+  }, [list.length])
   // Quien lo escribió, para decirlo sin suponer su sexo.
   const author = who === "ella" || who === "él" ? who : "la persona"
 
@@ -201,12 +257,12 @@ export function DeclaredResponse({
         </h3>
         <p className="text-sm text-muted-foreground">{sentWords(response)}</p>
         <div>
-          {reviewed ? (
-            <Badge variant="secondary" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
-              {response.finalizedBy
-                ? `Lo revisó ${memberName(response.finalizedBy)}${response.finalizedAt ? `, ${shortDay(response.finalizedAt)}` : ""}`
-                : `Revisado${response.finalizedAt ? ` el ${shortDay(response.finalizedAt)}` : ""}`}
-            </Badge>
+          {reviewed || (late && response.status === "descartado") ? (
+            <p ref={reviewedRef} tabIndex={-1} className="outline-none">
+              <Badge variant="secondary" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+                {reviewedLine(response, memberName, late)}
+              </Badge>
+            </p>
           ) : unreviewed ? (
             <Badge
               variant="outline"
@@ -275,9 +331,9 @@ export function DeclaredResponse({
         </p>
       ) : null}
       {list.length > 0 ? (
-        <section aria-label="Correcciones" className="flex flex-col gap-2">
+        <section ref={correctionsRef} aria-label="Correcciones" className="flex flex-col gap-2">
           {list.map((item) => (
-            <div key={item.id} className="rounded-md border bg-background p-3 text-sm">
+            <div key={item.id} data-correction tabIndex={-1} className="rounded-md border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <p className="text-xs text-muted-foreground">
                 Corrección · {item.createdBy ? memberName(item.createdBy) : "Equipo"} · {dayAndTime(item.createdAt)}
               </p>
@@ -330,11 +386,11 @@ export function DeclaredResponse({
           </div>
         </div>
       ) : null}
-      {review.error ? (
-        // Por qué no se pudo, y la salida: nada queda «Por revisar» para siempre.
+      {review.error && !alreadySettled(review.error) ? (
+        // Por qué no se pudo, y la salida: nada queda sin revisar para siempre.
         <p role="alert" className="text-sm text-destructive">
-          No se pudo marcar como revisado. {submitErrorMessage(review.error)} Si no tiene arreglo, puedes descartarlo
-          con su motivo.
+          No se pudo marcar como revisado. {submitErrorMessage(review.error).replace(/([^.])$/, "$1.")} Si no tiene
+          arreglo, puedes descartarlo con su motivo.
         </p>
       ) : null}
       {canWrite && response.status === "borrador" && !correcting ? (

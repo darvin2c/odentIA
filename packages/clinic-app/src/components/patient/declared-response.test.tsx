@@ -7,7 +7,8 @@ import {
   isDeclaredUnreviewed,
   teamFormsOfEncounter,
 } from "../../lib/clinical-forms"
-import { DeclaredResponse, declaredAnswerText, reviewedWords, sentWords } from "./declared-response"
+import { ApiError } from "../../lib/api"
+import { alreadySettled, DeclaredResponse, declaredAnswerText, reviewedLine, reviewedWords, sentWords } from "./declared-response"
 import { ResponseDetail } from "./formularios-tab"
 
 vi.mock("../../lib/crm", () => ({
@@ -179,5 +180,26 @@ describe("lo que envió el paciente, para leer", () => {
     expect(declaredAnswerText(field[1]!, 8)).toBe("8 de 10")
     expect(declaredAnswerText(field[0]!, "")).toBe("No respondió")
     expect(declaredAnswerText({ id: "x", label: "Hábitos", type: "opcion_multiple" }, ["Fuma", "Bruxismo"])).toBe("Fuma, Bruxismo")
+  })
+})
+
+// QA del 14 nov (H1 de desarrollo): una pestaña vieja decía «No se pudo… El formulario ya está
+// finalizado Si no tiene arreglo, puedes descartarlo», y el servidor no deja descartar lo revisado.
+describe("la pestaña que se quedó vieja", () => {
+  const byLuis = { status: "finalizado", finalizedBy: "u2", finalizedAt: "2026-11-14T05:11:00.000Z", discardedAt: null } as const
+  const name = () => "Dr. Luis Prado"
+  it("dice quién lo revisó mientras la tenía abierta, con la hora", () => {
+    expect(reviewedLine(byLuis, name, true)).toMatch(/^Ya lo revisó Dr\. Luis Prado el 14 nov, 12:11/)
+    expect(reviewedLine(byLuis, name)).toBe("Lo revisó Dr. Luis Prado, 14 nov")
+  })
+  it("el «ya está finalizado» del servidor se toma como «ya lo revisaron», no como un fallo con salida", () => {
+    expect(alreadySettled(new ApiError(409, { code: "FINALIZED", message: "El formulario ya está finalizado" }))).toBe(true)
+    expect(alreadySettled(new ApiError(409, { code: "NOT_SUBMITTED", message: "…" }))).toBe(false)
+    expect(alreadySettled(new Error("red"))).toBe(false)
+  })
+  it("ya revisado no ofrece «Descartar…»; la línea de quién lo revisó recibe el foco", () => {
+    const page = render(<DeclaredResponse response={{ ...sent, ...byLuis } as FormResponse} canWrite sex="F" />)
+    expect(page).not.toContain("Descartar…")
+    expect(page).toMatch(/<p tabindex="-1"[^>]*><span[^>]*>Lo revisó Dr|<p tabindex="-1"[^>]*>.*Lo revisó/)
   })
 })
