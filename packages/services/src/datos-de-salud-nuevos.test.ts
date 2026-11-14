@@ -75,6 +75,7 @@ it("la medicina para los huesos que ya no toma queda terminada, con por qué y c
     { boneMedicines: { state: "recorded", detail: "zoledronato", now: false, reason: "cancer", form: "inyeccion" } },
     "2026-11-14",
   )
-  expect(row).toMatchObject({ name: "zoledronato", declaredClass: "boneMedicines", endDate: "2026-11-14" })
+  // Terminada el día antes: con fin hoy se leería vigente hoy.
+  expect(row).toMatchObject({ name: "zoledronato", declaredClass: "boneMedicines", endDate: "2026-11-13" })
   expect(row?.notes).toBe("Por un cáncer · inyección · dijo que ya no la toma")
 })
