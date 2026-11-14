@@ -834,6 +834,13 @@
       "when": 1794634876249,
       "tag": "0118_antes_de_cada_cita_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1794639128819,
+      "tag": "0119_cambio_algo",
+      "breakpoints": true
     }
   ]
 }
