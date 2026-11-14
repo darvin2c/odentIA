@@ -22,6 +22,7 @@ import {
   discardFormResponse,
   finalizeFormResponse,
   findOrgCountry,
+  FORM_TEMPLATE_CHANGES,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
   getConsentPrint,
@@ -36,10 +37,10 @@ import {
   listLinkSignedToConfirm,
   listConsentEvents,
   listConsentTemplateServices,
+  listClinicFormTemplates,
   listConsentTemplates,
   listFormAddenda,
   listFormResponses,
-  listFormTemplates,
   listProfessionalProfiles,
   listProfessionalSpecialties,
   listSpecialties,
@@ -50,9 +51,11 @@ import {
   markConsentTemplateReviewed,
   parseConsentDraft,
   prepareEncounterConsents,
+  previewPatientQuestionnaire,
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
+  reuseFormTemplate,
   revokeConsentDocument,
   ServiceError,
   saveConsentTemplate,
@@ -425,6 +428,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/form-responses/:id", paperLock(formResponsePatientId, "Formulario no encontrado"))
   app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Formulario no encontrado"))
 
+  // Un id mal escrito no existe: se responde lo mismo que con uno que no se encuentra, en vez de
+  // dejar que la base lo rechace como un error interno.
+  const notFoundResponse = (c: Context, missing: string) => c.json(errorBody(c, "NOT_FOUND", missing), 404)
+  const knownId = (missing: string) => async (c: Context, next: Next) => {
+    if (!canonicalUuid(c.req.param("id"))) return notFoundResponse(c, missing)
+    await next()
+  }
+  // A la base va el id ya normalizado, nunca como llegó: lo que `canonicalUuid` acepta (un guion
+  // en otro sitio, un espacio de más) PostgreSQL no siempre lo lee, y sería otra vez un error interno.
+  const formId = (c: Context) => canonicalUuid(c.req.param("id")) ?? ""
+  app.use("/form-templates/:id", knownId("Plantilla no encontrada"))
+  app.use("/form-templates/:id/*", knownId("Plantilla no encontrada"))
+  app.use("/form-responses/:id", knownId("Formulario no encontrado"))
+  app.use("/form-responses/:id/*", knownId("Formulario no encontrado"))
+
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -613,10 +631,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
+    const specialtyId = query.specialtyId ? canonicalUuid(query.specialtyId) : undefined
+    if (specialtyId === null) return notFoundResponse(c, "Especialidad no encontrada")
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listFormTemplates(tx, orgId, {
-          specialtyId: query.specialtyId,
+        // Con cuál de los cuestionarios del paciente le llega, para que la lista lo diga.
+        listClinicFormTemplates(tx, orgId, {
+          specialtyId,
           status: query.status,
           q: query.q,
           // Desde la atención: primero los de las especialidades de quien atiende.
@@ -647,7 +668,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateFormTemplate(tx, orgId, userId, c.req.param("id"), parsed.data),
+        updateFormTemplate(tx, orgId, userId, formId(c), parsed.data),
       ),
     )
   })
@@ -659,7 +680,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        publishFormTemplate(tx, orgId, userId, c.req.param("id")),
+        publishFormTemplate(tx, orgId, userId, formId(c)),
       ),
     )
   })
@@ -671,8 +692,35 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        archiveFormTemplate(tx, orgId, userId, c.req.param("id")),
+        archiveFormTemplate(tx, orgId, userId, formId(c)),
       ),
+    )
+  })
+
+  // «Volver a usar»: la versión siguiente, ya publicada, con las mismas preguntas.
+  app.post("/form-templates/:id/reuse", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración vuelve a usar un formulario")
+    }
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reuseFormTemplate(tx, orgId, userId, formId(c)),
+      ),
+    )
+  })
+
+  // A quién le llega: el cuestionario que hoy reciben los pacientes y el que recibirán después de
+  // publicar, dejar de usar o volver a usar esta plantilla. La confirmación lo dice; no lo calcula.
+  app.get("/form-templates/:id/reach", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración cambia los formularios")
+    }
+    const change = z.enum(FORM_TEMPLATE_CHANGES).safeParse(c.req.query("change"))
+    if (!change.success) return missingParam(c, "change es publish, leave o reuse")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => previewPatientQuestionnaire(tx, orgId, formId(c), change.data)),
     )
   })
 
@@ -682,13 +730,18 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
     if (!query.patientId) return missingParam(c, "patientId es obligatorio")
-    const patientId = query.patientId
+    const patientId = canonicalUuid(query.patientId)
+    if (!patientId) return notFoundResponse(c, "Paciente no encontrado")
+    const encounterId = query.encounterId ? canonicalUuid(query.encounterId) : undefined
+    if (encounterId === null) return notFoundResponse(c, "Atención no encontrada")
+    const templateId = query.templateId ? canonicalUuid(query.templateId) : undefined
+    if (templateId === null) return notFoundResponse(c, "Plantilla no encontrada")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listFormResponses(tx, orgId, {
           patientId,
-          encounterId: query.encounterId,
-          templateId: query.templateId,
+          encounterId,
+          templateId,
         }),
       ),
     )
@@ -718,7 +771,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateFormResponseDraft(tx, orgId, userId, c.req.param("id"), parsed.data),
+        updateFormResponseDraft(tx, orgId, userId, formId(c), parsed.data),
       ),
     )
   })
@@ -742,7 +795,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        finalizeFormResponse(tx, orgId, userId, c.req.param("id"), { encounterId: parsed.data.encounterId ?? null }),
+        finalizeFormResponse(tx, orgId, userId, formId(c), { encounterId: parsed.data.encounterId ?? null }),
       ),
     )
   })
@@ -765,7 +818,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        discardFormResponse(tx, orgId, userId, c.req.param("id"), parsed.data.reason),
+        discardFormResponse(tx, orgId, userId, formId(c), parsed.data.reason),
       ),
     )
   })
@@ -776,8 +829,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     let patientId: string | null = null
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        patientId = await formResponsePatientId(tx, orgId, c.req.param("id"))
-        return listFormAddenda(tx, orgId, c.req.param("id"))
+        patientId = await formResponsePatientId(tx, orgId, formId(c))
+        return listFormAddenda(tx, orgId, formId(c))
       }),
     )
     if (response.status === 200 && patientId)
@@ -794,7 +847,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        addFormAddendum(tx, orgId, userId, c.req.param("id"), parsed.data.text),
+        addFormAddendum(tx, orgId, userId, formId(c), parsed.data.text),
       ),
     )
   })

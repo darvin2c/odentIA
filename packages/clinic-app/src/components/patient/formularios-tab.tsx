@@ -19,14 +19,15 @@ import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
-  createFormResponse,
   discardFormResponse,
   FORM_RESPONSE_STATUS_LABELS,
   type FormResponse,
   type FormSchemaDef,
   type FormTemplate,
   fetchFormAddenda,
+  finalizedWords,
   finalizeFormResponse,
+  startFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
 import { useMemberName, useOrgMembers } from "../../lib/crm"
@@ -40,10 +41,15 @@ import {
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
-import { activeOrgLocale } from "../../lib/locale"
+import { templateOptionLabel } from "../../lib/form-templates"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
+
+/** «13 nov 2026, 9:51 p. m.», en la hora de la clínica. */
+const whenAt = (value: string) =>
+  new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short", timeZone: activeOrgTimeZone() })
 
 function statusOf(response: FormResponse): {
   label: string
@@ -86,9 +92,11 @@ export function NewResponseDrawer({
 }) {
   // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
   const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
+  const queryClient = useQueryClient()
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
-      createFormResponse({
+      // Si la atención ya no está en curso, se empieza igual sin unirlo a ella (`detached`).
+      startFormResponse({
         templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
@@ -105,6 +113,15 @@ export function NewResponseDrawer({
     onSubmit: async ({ value }) => {
       const result = await create.mutateAsync(value)
       form.reset()
+      if (result.detached) {
+        // La pantalla tenía un dato viejo (la atención se firmó o se anuló en otra pestaña): se
+        // dice lo que pasó y se vuelve a pedir todo, para que deje de ofrecer esa atención.
+        toast.info(
+          "La atención ya no está en curso, así que el formulario se empezó sin unirlo a ella. Queda en Documentos de la ficha.",
+          { duration: 10_000 },
+        )
+        void queryClient.invalidateQueries()
+      }
       await onCreated(result.data.id)
     },
   })
@@ -127,7 +144,8 @@ export function NewResponseDrawer({
             <field.SelectField
               label="Formulario"
               placeholder="Elige el formulario"
-              options={templates.map((t) => ({ value: t.id, label: t.title }))}
+              // Dos formularios con el mismo título llevan lo que los distingue: preguntas y fecha.
+              options={templates.map((t) => ({ value: t.id, label: templateOptionLabel(t, templates, whenAt) }))}
             />
           )}
         </form.AppField>
@@ -415,9 +433,11 @@ function StaffResponseDetail({
           </h3>
           <p className="text-xs text-muted-foreground">
             {response.professionalUserId ? memberName(response.professionalUserId) : "Sin profesional asignado"}
+            {/* Quién lo finalizó, con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
             {response.finalizedAt
-              ? ` · lo finalizó ${response.finalizedBy ? `${memberName(response.finalizedBy)} el ` : "el "}${when(response.finalizedAt)}`
+              ? ` · ${finalizedWords(response, whenAt, response.finalizedBy ? memberName(response.finalizedBy) : null)}`
               : ""}
+            {response.encounterStatus === "anulada" ? " · de una atención anulada" : ""}
           </p>
         </div>
         <span className="flex items-center gap-2">

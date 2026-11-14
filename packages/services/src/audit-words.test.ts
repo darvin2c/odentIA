@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { alsoAuditWords, leadAuditCount, leadAuditIndex } from "./audit-words.js"
+import { alsoAuditWords, describeAuditEvent, leadAuditCount, leadAuditIndex } from "./audit-words.js"
 
 it("una acción con varios registros la nombra lo que se hizo, siempre el mismo, y lo demás va sin repetir y en orden", () => {
   // Un cobro: el ticket nombra la fila, venga en el orden que venga.
@@ -32,4 +32,11 @@ it("firmar o anular una atención nombra la fila, con su cargo en «También»; 
   const pagos = ["payment.created", "payment.applied", "payment.created"]
   expect(leadAuditCount(pagos, leadAuditIndex(pagos))).toBe(2)
   expect(alsoAuditWords(pagos, leadAuditIndex(pagos))).toEqual([{ what: "Aplicó un pago a un cargo", count: 1 }])
+})
+
+it("dejar de usar y volver a usar un formulario se dicen con las palabras de la pantalla", () => {
+  expect(describeAuditEvent("form_template.leave").what).toBe("Dejó de usar un formulario")
+  expect(describeAuditEvent("form_template.reuse").what).toBe("Volvió a usar un formulario")
+  // Archivar es de un borrador: no es lo mismo que dejar de usar el que estaba en uso.
+  expect(describeAuditEvent("form_template.archive").what).toBe("Archivó el borrador de una plantilla de formulario")
 })
