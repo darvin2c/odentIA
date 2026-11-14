@@ -6,6 +6,7 @@ import {
   codeAllergySubstance,
   declaredHealthAnswered,
   declaredMedicineAtc,
+  MEDICATION_CLASSES,
   type MedicationClass,
   DOSE_UNITS,
   type DoseUnit,
@@ -1000,12 +1001,6 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
 }
 export type DeclaredPatientHealthInput = NonNullable<RegistrationAnswers["health"]>
 
-/** Cómo se llama la fila cuando dijo que sí toma una medicina de esa clase y no dijo cuál. */
-const UNNAMED_MEDICINE: Record<MedicationClass, string> = {
-  anticoagulants: "Anticoagulante (no dijo cuál)",
-  boneMedicines: "Medicina para los huesos (no dijo cuál)",
-}
-
 /**
  * La medicación que declaró, como filas: primero lo que dijo al responder «Sí»
  * a anticoagulantes y a medicinas para los huesos, con su clase (de ahí sale la
@@ -1020,7 +1015,8 @@ export function declaredMedications(
   for (const group of ["anticoagulants", "boneMedicines"] as const) {
     const answer = declared[group]
     if (answer?.state !== "recorded") continue
-    const name = answer.detail?.trim() || UNNAMED_MEDICINE[group]
+    // Sin decir cuál, la fila lo dice (`MEDICATION_CLASSES[group].unnamed`).
+    const name = answer.detail?.trim() || MEDICATION_CLASSES[group].unnamed
     seen.add(normalizeDrugText(name))
     rows.push({ name, declaredClass: group })
   }
