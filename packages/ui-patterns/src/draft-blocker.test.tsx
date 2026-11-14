@@ -8,6 +8,7 @@ import { afterEach, beforeAll, expect, it } from "vitest"
 import { DetailDrawer } from "./detail/detail-drawer.js"
 import { useDraftSaved } from "./docked-surface.js"
 import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
+import { useAppForm, useFormSurface } from "./form/app-form.js"
 import { FormDrawer } from "./form/form-drawer.js"
 import { RadioChips } from "./radio-chips.js"
 import { DraftKeptInPage, SideDockProvider, SideDockSlot } from "./side-dock.js"
@@ -298,4 +299,40 @@ it("al quitarse lo que no se guardó, el panel deja de avisar por él", async ()
   await router.navigate({ href: "/agenda" })
   await screen.findByText("Agenda")
   expect(screen.queryByRole("alertdialog")).toBeNull()
+})
+
+/** Un formulario de verdad (`useAppForm`) que no pasa: falta el celular. */
+function Rejected() {
+  const form = useAppForm({
+    defaultValues: { phone: "" },
+    validators: {
+      onSubmit: ({ value }) => (value.phone ? undefined : { fields: { phone: "Escribe el celular" } }),
+    },
+    onSubmit: () => {},
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormDrawer {...surface} open title="Nuevo paciente" onClose={() => {}}>
+      <input aria-label="Nombres" />
+    </FormDrawer>
+  )
+}
+
+// QA de la entrega 3 (14 nov): en «Nuevo paciente», «Registrar» rechazado por un dato que faltaba
+// desarmaba el aviso, y salir por el menú perdía todo lo escrito sin preguntar.
+it("un envío que no pasa deja armado el aviso: salir con lo escrito pregunta igual que antes de enviar", async () => {
+  const router = appWith(
+    [
+      ["/pacientes", () => <Rejected />],
+      ["/agenda", () => <p>Agenda</p>],
+    ],
+    "/pacientes",
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.input(await screen.findByLabelText("Nombres"), { target: { value: "Ana" } })
+  fireEvent.click(screen.getByRole("button", { name: "Guardar" }))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  void router.navigate({ href: "/agenda" })
+  await screen.findByRole("alertdialog")
+  expect(router.state.location.pathname).toBe("/pacientes")
 })

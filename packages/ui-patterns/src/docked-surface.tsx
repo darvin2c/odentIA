@@ -12,6 +12,7 @@ import {
   useSideDockDraftGuard,
   useSideDockScope,
 } from "./side-dock.js"
+import { SUBMIT_REJECTED_EVENT } from "./form/submit-outcome.js"
 import { OPEN_POPUP_SELECTOR } from "./surface.js"
 
 /**
@@ -145,10 +146,25 @@ function DockedColumn({
   // Muchas pantallas no informan `isDirty` (en un cajón modal no hacía falta):
   // haber escrito algo aquí dentro ya cuenta como cambios pendientes.
   // Enviar el formulario desarma el aviso: tras guardar, la pantalla suele
-  // navegar al registro creado y eso no es «salir sin guardar». Volver a
-  // escribir lo arma otra vez (p. ej. tras un error de validación).
+  // navegar al registro creado y eso no es «salir sin guardar». Si el envío no
+  // pasa (falta un dato, el servidor lo rechaza), lo escrito sigue sin guardar y
+  // el aviso se vuelve a armar; también al escribir otra vez.
   const [touched, setTouched] = React.useState(false)
   const [armed, setArmed] = React.useState(true)
+  const content = React.useRef<HTMLDivElement | null>(null)
+  const submitted = React.useRef(false)
+  React.useEffect(() => {
+    const element = content.current
+    if (!element) return
+    const rejected = () => {
+      if (!submitted.current) return
+      submitted.current = false
+      setArmed(true)
+      setTouched(true)
+    }
+    element.addEventListener(SUBMIT_REJECTED_EVENT, rejected)
+    return () => element.removeEventListener(SUBMIT_REJECTED_EVENT, rejected)
+  }, [])
   // Lo que guarda sin `submit` lo dice la propia superficie (`useDraftSaved`).
   const [unsaved, setUnsaved] = React.useState(false)
   const draftSaved = React.useMemo<DraftSavedChannel>(
@@ -201,8 +217,12 @@ function DockedColumn({
       resizeLabel={common.sidePanel.resize}
     >
       <div
+        ref={content}
         className="flex h-full min-h-0 flex-col"
-        onSubmitCapture={() => {
+        onSubmitCapture={(event) => {
+          // Un cajón abierto desde aquí vive en un portal: su envío no habla por lo de la columna.
+          if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
+          submitted.current = true
           setArmed(false)
           setTouched(false)
         }}
