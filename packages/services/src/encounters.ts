@@ -79,6 +79,7 @@ import {
 import {
   type ConsentNeed,
   cancelDerivationTask,
+  discardVoidedEncounterForms,
   getEncounterConsentNeeds,
   listOpenEncounterForms,
 } from "./clinical-forms.js"
@@ -3808,7 +3809,8 @@ export async function voidEncounterProcedure(
 /**
  * Los papeles de una atención anulada que aún valen (ADR 0002: se anula «lo
  * ligado»): el descanso médico emitido, las órdenes pedidas o en proceso (y la
- * tarea de una derivación) y los consentimientos sin firmar. Un consentimiento
+ * tarea de una derivación), los consentimientos sin firmar y los formularios a
+ * medias, que se descartan. Un consentimiento
  * firmado, o firmado por la persona en su enlace, no se toca: es un acto suyo
  * y anular la atención no lo retira; una orden con resultado tampoco, porque
  * el resultado ya existe. Así el código del papel (`/comprobar`) dice
@@ -3883,6 +3885,9 @@ async function voidEncounterPapers(
     })
     await audit(tx, orgId, actorUserId, "consent.cancel", "consent_document", consent.id, { encounterId, reason })
   }
+  // Sus formularios a medias: descartados con el mismo motivo (lo anotado para otra persona no
+  // queda como un borrador que alguien pueda finalizar). Los finalizados no cambian.
+  await discardVoidedEncounterForms(tx, orgId, actorUserId, encounterId, reason, at)
 }
 
 /**

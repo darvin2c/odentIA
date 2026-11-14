@@ -1234,15 +1234,18 @@ export async function archiveFormTemplate(
   actorUserId: string,
   templateId: string,
 ): Promise<FormTemplateRow> {
+  // Bloqueada, como al publicar: el segundo clic de un doble clic espera aquí y encuentra la fila
+  // ya archivada. Sin esto pasaba la comprobación y chocaba con la regla de la base (error interno).
   const [current] = await tx
     .select()
     .from(clinicalFormTemplate)
     .where(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
+    .for("update")
     .limit(1)
   if (!current) throw notFound("Plantilla")
-  if (current.status === "archivado") throw conflict("ARCHIVED", "La plantilla ya está archivada")
+  if (current.status === "archivado") throw conflict("ARCHIVED", "Este formulario ya no se usa")
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
@@ -1390,6 +1393,37 @@ async function requireVisibleEncounter(
     .limit(1)
   if (!row) throw notFound("Atención")
   return row
+}
+
+/**
+ * Al anular una atención (`voidEncounter`, en su misma transacción): sus
+ * formularios a medias se descartan con el motivo de la anulación. Nada se
+ * borra: quedan con quién, cuándo y por qué. Lo ya finalizado no se toca (es
+ * inmutable); las pantallas lo dicen «de una atención anulada».
+ */
+export async function discardVoidedEncounterForms(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<void> {
+  const discarded = await tx
+    .update(clinicalFormResponse)
+    .set({ status: "descartado", discardedAt: at, discardedBy: actorUserId, discardReason: reason, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFormResponse.organizationId, orgId),
+        eq(clinicalFormResponse.encounterId, encounterId),
+        eq(clinicalFormResponse.status, "borrador"),
+        // Lo que declaró el paciente no es de la atención: lo revisa el equipo aparte.
+        eq(clinicalFormResponse.source, "staff"),
+      ),
+    )
+    .returning({ id: clinicalFormResponse.id })
+  for (const form of discarded)
+    await audit(tx, orgId, actorUserId, "form_response.discard", "clinical_form_response", form.id, { encounterId, reason })
 }
 
 /** Cuánto dura «seguidos»: un segundo «Empezar» igual dentro de estos minutos es el mismo borrador. */
