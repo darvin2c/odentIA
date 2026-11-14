@@ -142,16 +142,20 @@ export function hasTodo(todo: PatientTodo): boolean {
  * Cuántas cosas puede hacer desde su teléfono, una por tarjeta de la página: «Antes de tu cita»
  * (sus datos y su visita, una sola tarjeta), cada consentimiento que firma a distancia, cada
  * presupuesto y lo aceptado por agendar. Un consentimiento que solo se firma en la cita no cuenta.
- * La salud, opcional, cuenta como sus datos solo si `health`; «Tu visita» cuenta cuando se le
- * pregunta: es lo que se le pide antes de cada cita (entrega 8), y con sus datos es una sola cosa.
+ * La salud, opcional, cuenta como sus datos solo si `health`. «Tu visita» es opcional y no cuenta
+ * como algo por hacer (decidido el 14 nov): va en la misma tarjeta que sus datos y, si es lo único
+ * que le queda, el recordatorio de siempre lo ofrece con una línea suave (`visit`).
  */
-export function remoteTodoCount(todo: PatientTodo, options: { health?: boolean } = {}): { data: boolean; total: number } {
+export function remoteTodoCount(
+  todo: PatientTodo,
+  options: { health?: boolean } = {},
+): { data: boolean; total: number; visit: { asksReason: boolean } | null } {
   const data = todo.missing.length > 0 || (options.health === true && todo.health)
   const consents = todo.signBlock ? 0 : todo.consents.length
   const total =
-    (data || todo.visit ? 1 : 0) +
+    (data ? 1 : 0) +
     consents +
     todo.budgets.length +
     (todo.toSchedule.length > 0 ? 1 : 0)
-  return { data, total }
+  return { data, total, visit: todo.visit ? { asksReason: todo.visit.questions.reason } : null }
 }
