@@ -21,6 +21,7 @@ import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
+import { isLikelyCarga } from "./admin-client-files.js"
 import {
   clientDuplicatePairsSql,
   inboundMailboxWords,
@@ -1749,15 +1750,24 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
     subject: string | null
     received_at: string
     sender_verified: boolean
+    attachments: Array<{ filename?: string; contentType?: string }> | null
   }>(
     tx,
     sql`select id, mailbox, product, from_address, from_name, to_address, subject,
-      ${iso(sql`received_at`)} as received_at, sender_verified
+      ${iso(sql`received_at`)} as received_at, sender_verified, attachments
     from saas_inbound_email where client_id is null order by received_at asc`,
   )
   for (const email of unassigned) {
     const who = email.from_name?.trim() || email.from_address
     const to = inboundMailboxWords({ mailbox: email.mailbox, toAddress: email.to_address })
+    // Sus adjuntos se guardan hasta que se liga y se marca: si traen un Excel, CSV o Word, se dice.
+    const maybeCarga = (Array.isArray(email.attachments) ? email.attachments : []).some(
+      (attachment) =>
+        isLikelyCarga({
+          filename: attachment.filename ?? "",
+          contentType: attachment.contentType ?? "",
+        }),
+    )
     await pass.item({
       rule: "correo_sin_cliente",
       clientId: null,
@@ -1768,7 +1778,7 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
         email.sender_verified
           ? "y su correo no es el de ningún cliente"
           : "de un remitente no verificado (puede no ser quien dice)"
-      }: di de quién es`,
+      }: di de quién es${maybeCarga ? ". Trae un Excel, CSV o Word: puede ser la carga de datos" : ""}`,
       // Lo que no llegó a soporte@ es comercial: Soporte no lo ve, ni lo liga ni lo responde.
       adminOnly: email.mailbox !== "soporte",
       payload: {

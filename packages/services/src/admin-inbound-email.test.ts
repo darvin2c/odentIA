@@ -8,10 +8,11 @@ import { member, user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { clientFileDeleteAfter, inboundAttachmentKey } from "./admin-client-files.js"
+import { inboundAttachmentKey, markClientFileCarga } from "./admin-client-files.js"
 import type { AdminActor } from "./admin-core.js"
 import {
   assignInboundEmail,
+  getInboundEmail,
   type InboundEmailInput,
   ingestInboundEmail,
 } from "./admin-inbound-email.js"
@@ -122,7 +123,7 @@ beforeAll(async () => {
 })
 
 describe("ingestInboundEmail", () => {
-  it("con contacto: deja la actividad que entró y los adjuntos como documentos de Administración", async () => {
+  it("con contacto: deja la actividad que entró y los adjuntos como documentos de Administración, que se guardan", async () => {
     const receivedAt = new Date(Date.now() - 60_000)
     const key = inboundAttachmentKey("xlsx")
     const result = await ingestInboundEmail(
@@ -148,7 +149,11 @@ describe("ingestInboundEmail", () => {
       objectKey: key,
       adminOnly: true,
       source: "correo",
-      deleteAfter: clientFileDeleteAfter(receivedAt),
+      // Llegó a soporte@ con adjuntos, pero solo se borra si Administración dice que es la carga.
+      deleteAfter: null,
+      cargaAt: null,
+      receivedAt,
+      inboundEmailId: result.id,
     })
     // Sin `request_id`: un correo que llega no es un contacto nuestro ni mueve la fecha de volver.
     expect(await activities(byContact)).toEqual([
@@ -309,11 +314,19 @@ describe("assignInboundEmail", () => {
       .select()
       .from(saasClientFile)
       .where(eq(saasClientFile.objectKey, key))
+    const [email] = await ownerDb
+      .select({ receivedAt: saasInboundEmail.receivedAt })
+      .from(saasInboundEmail)
+      .where(eq(saasInboundEmail.id, id))
     expect(file).toMatchObject({
       clientId: lonely,
       adminOnly: true,
       createdBy: null,
       source: "correo",
+      kind: "correo",
+      deleteAfter: null,
+      receivedAt: email?.receivedAt,
+      inboundEmailId: id,
     })
     expect(await activities(lonely)).toEqual([
       {
@@ -333,5 +346,60 @@ describe("assignInboundEmail", () => {
     await expect(assignInboundEmail(ownerDb, null, id, lonely)).rejects.toMatchObject({
       code: "FORBIDDEN",
     })
+  })
+})
+
+describe("getInboundEmail: sus adjuntos", () => {
+  it("Administración ve cada adjunto con su estado; Soporte, la lista vacía; sin cliente, vacía", async () => {
+    const key = inboundAttachmentKey("csv")
+    const other = inboundAttachmentKey("pdf")
+    const { id, fileIds } = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        from: "rosa@contacto.test",
+        subject: "La carga",
+        attachments: [
+          { filename: "pacientes.csv", contentType: "text/csv", size: 10, fileKey: key },
+          { filename: "contrato.pdf", contentType: "application/pdf", size: 10, fileKey: other },
+        ],
+      }),
+    )
+    const [carga, contract] = fileIds
+    if (!carga || !contract) throw new Error("sin adjuntos")
+    await markClientFileCarga(ownerDb, admin, carga)
+    const forAdmin = await getInboundEmail(ownerDb, admin, id)
+    expect(forAdmin.files).toEqual([
+      expect.objectContaining({
+        fileId: carga,
+        filename: "pacientes.csv",
+        kind: "archivo_clinica",
+        deleteAfter: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        deleted: false,
+      }),
+      expect.objectContaining({
+        fileId: contract,
+        kind: "correo",
+        deleteAfter: null,
+        deleted: false,
+        cargaDeleteAfter: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        cargaDueNow: false,
+      }),
+    ])
+    expect((await getInboundEmail(ownerDb, support, id)).files).toEqual([])
+    const orphan = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        from: "desconocida@nadie.test",
+        attachments: [
+          {
+            filename: "pacientes.xlsx",
+            contentType: "text/csv",
+            size: 10,
+            fileKey: inboundAttachmentKey("xlsx"),
+          },
+        ],
+      }),
+    )
+    expect((await getInboundEmail(ownerDb, admin, orphan.id)).files).toEqual([])
   })
 })

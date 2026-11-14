@@ -40,6 +40,7 @@ import {
   CLIENT_VIEWS,
   ClientDuplicateError,
   cancelClientTask,
+  clearDueCargaNow,
   clientCreateSchema,
   clientFileKey,
   clientFileUrl,
@@ -70,6 +71,7 @@ import {
   listClients,
   listClientTasks,
   listSaasProposals,
+  markClientFileCarga,
   markInvitationSent,
   markOutreachSent,
   mergeClients,
@@ -680,11 +682,43 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     adminRun(c, 200, async (actor) => {
       const { objectKey } = await owner((tx) => deleteClientFile(tx, actor, c.req.param("fileId")))
       await deps.storage.deleteAttachment(objectKey).catch(() => {
+        // La limpieza solo vuelve a intentar la carga vencida: este objeto queda sin registro.
         console.error(
-          `ARM: no se borró el objeto de un documento (${c.req.param("fileId")}); lo borra la limpieza`,
+          `ARM: no se borró el objeto de un documento (${c.req.param("fileId")}); quedó en el almacenamiento y ninguna limpieza lo vuelve a intentar`,
         )
       })
       return { ok: true }
+    }),
+  )
+
+  /**
+   * «Es la carga de datos» (solo Administración): el adjunto se borra a los 30
+   * días de llegar. Si ya pasaron, se borra ahora, después del commit; si eso
+   * falla, lo borra la limpieza en la vuelta siguiente.
+   */
+  app.post("/files/:fileId/carga", (c) =>
+    adminRun(c, 200, async (actor) => {
+      const now = new Date()
+      const fileId = c.req.param("fileId")
+      const out = await owner((tx) => markClientFileCarga(tx, actor, fileId, now))
+      let deletedNow = false
+      if (out.dueNow)
+        deletedNow = await clearDueCargaNow(
+          deps.ownerDb,
+          deps.storage,
+          out.file.id,
+          out.objectKey,
+          now,
+        ).then(
+          () => true,
+          () => {
+            console.error(
+              `ARM: no se borró ahora la carga vencida (${fileId}); la borra la limpieza en la vuelta siguiente`,
+            )
+            return false
+          },
+        )
+      return { file: out.file, dueNow: out.dueNow, deletedNow }
     }),
   )
 

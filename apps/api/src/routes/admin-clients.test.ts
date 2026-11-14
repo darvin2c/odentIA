@@ -254,6 +254,7 @@ describe("roles", () => {
       ["POST", `/${clientId}/merge`, { dropId: someId }],
       ["POST", `/${clientId}/archive`],
       ["DELETE", `/files/${someId}`],
+      ["POST", `/files/${someId}/carga`],
       ["POST", `/contacts/${someId}/link`, { userId: ADMIN }],
     ]
     for (const [method, path, body] of forbidden) {
@@ -918,6 +919,74 @@ describe("documentos", () => {
       }),
       400,
     )
+  })
+
+  it("«Es la carga de datos»: Administración la marca; si llegó hace más de 30 días, se borra al marcarla", async () => {
+    const clientId = await newClient("Odontología Quillabamba (ficticia)", "carga@andes.test")
+    const arrive = async (messageId: string, daysAgo: number) => {
+      const fileKey = `inbound/${crypto.randomUUID()}.csv`
+      objects.set(fileKey, new TextEncoder().encode("nombre\nRosa\n"))
+      const inbound = await ownerDb.transaction((tx) =>
+        ingestInboundEmail(tx as Db, {
+          mailbox: "soporte",
+          product: "dental",
+          messageId,
+          from: "carga@andes.test",
+          to: "soporte@odentia32.com",
+          subject: "Los pacientes",
+          text: "Rosa Díaz, DNI 12345678",
+          receivedAt: new Date(Date.now() - daysAgo * DAY),
+          attachments: [{ filename: "pacientes.csv", contentType: "text/csv", size: 12, fileKey }],
+          senderVerified: true,
+        }),
+      )
+      expect(inbound.clientId).toBe(clientId)
+      return { fileId: inbound.fileIds[0] ?? "", fileKey, emailId: inbound.id }
+    }
+    const recent = await arrive("<carga-5@andes.test>", 5)
+    // Documentos dice el día de borrado con la cuenta del servidor antes de marcarlo.
+    const listed = (await json(await call("GET", `/${clientId}/files`, ADMIN))).data.items.find(
+      (item: { id: string }) => item.id === recent.fileId,
+    )
+    expect(listed).toMatchObject({ kind: "correo", deleteAfter: null, cargaDueNow: false })
+    expect(listed.cargaDeleteAfter).toBe(day(25))
+
+    expect((await call("POST", `/files/${recent.fileId}/carga`, SUPPORT)).status).toBe(403)
+    const marked = await call("POST", `/files/${recent.fileId}/carga`, ADMIN)
+    await expectStatus(marked, 200)
+    expect((await json(marked)).data).toMatchObject({
+      file: { id: recent.fileId, kind: "archivo_clinica", deleteAfter: day(25) },
+      dueNow: false,
+      deletedNow: false,
+    })
+    expect(objects.has(recent.fileKey)).toBe(true)
+    // Dos veces es lo mismo.
+    await expectStatus(await call("POST", `/files/${recent.fileId}/carga`, ADMIN), 200)
+
+    const old = await arrive("<carga-31@andes.test>", 31)
+    const due = await call("POST", `/files/${old.fileId}/carga`, ADMIN)
+    await expectStatus(due, 200)
+    expect((await json(due)).data).toMatchObject({ dueNow: true, deletedNow: true })
+    expect(objects.has(old.fileKey)).toBe(false)
+    const [row] = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, old.fileId))
+    expect(row?.deletedAt).not.toBeNull()
+    const email = (await json(await call("GET", `/inbound/${old.emailId}`, ADMIN))).data
+    expect(email.text).toBeNull()
+    expect(email.files).toEqual([
+      expect.objectContaining({ fileId: old.fileId, kind: "archivo_clinica", deleted: true }),
+    ])
+    // Soporte no recibe la lista de adjuntos.
+    expect((await json(await call("GET", `/inbound/${old.emailId}`, SUPPORT))).data.files).toEqual(
+      [],
+    )
+    // Lo ya borrado, o lo que no existe, no está.
+    expect((await call("POST", `/files/${old.fileId}/carga`, ADMIN)).status).toBe(404)
+    expect(
+      (await call("POST", "/files/8b1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f/carga", ADMIN)).status,
+    ).toBe(404)
   })
 
   it("un archivo que no es lo que dice, uno muy grande o uno sin cliente no queda guardado", async () => {

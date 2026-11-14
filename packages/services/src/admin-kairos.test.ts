@@ -503,6 +503,8 @@ beforeAll(async () => {
       toAddress: "ana.torres@odentia32.com",
       subject: "Para Ana",
       receivedAt: ago(1),
+      // Trae un Excel: la sugerencia dice que puede ser la carga.
+      attachments: [{ filename: "pacientes.xlsx", contentType: "text/csv", size: 3, fileId: null }],
     })
     .returning({ id: saasInboundEmail.id })
   ids.personEmail = toPerson?.id ?? ""
@@ -693,6 +695,8 @@ describe("la pasada de Kairós", () => {
     // La dirección real de la persona, no «persona@».
     const toPerson = orphans.find((item) => item.payload.emailId === ids.personEmail)
     expect(toPerson?.reason).toContain("Llegó a ana.torres@ de odentIA")
+    expect(toPerson?.reason).toContain("puede ser la carga de datos")
+    expect(orphan?.reason).not.toContain("carga")
     ids.orphanItem = orphan?.id ?? ""
   })
 
