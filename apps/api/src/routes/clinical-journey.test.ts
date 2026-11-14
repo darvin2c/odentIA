@@ -1316,6 +1316,38 @@ it("formularios: un id mal escrito responde «no existe» (404), no un error int
   expect((await post(app, `/clinical-forms/form-responses/${crypto.randomUUID()}/finalize`)).status).toBe(404)
 })
 
+it("formularios: un id con un guion fuera de sitio o un espacio de más llega a la base ya normalizado", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Plantilla con el id escrito raro",
+    schema: { sections: [{ id: "s", title: "S", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] },
+  })
+  const { id } = (await json<{ data: { id: string } }>(draft)).data
+  expect((await post(app, `/clinical-forms/form-templates/${id}/publish`)).status).toBe(201)
+  // El primer guion un lugar antes: la guarda lo acepta y PostgreSQL, tal cual, no lo lee.
+  const moved = `${id.slice(0, 7)}-${id.slice(7, 8)}${id.slice(9)}`
+  expect(moved).not.toBe(id)
+  expect(moved.replaceAll("-", "")).toBe(id.replaceAll("-", ""))
+  // Es la misma plantilla, ya publicada: 409, no un error interno ni «no existe».
+  const publishedAgain = await post(app, `/clinical-forms/form-templates/${moved}/publish`)
+  expect(publishedAgain.status).toBe(409)
+  expect((await post(app, `/clinical-forms/form-templates/${id}%20/publish`)).status).toBe(409)
+  // Lo mismo en las respuestas y en la lista por paciente.
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/form-responses", { templateId: id, patientId, answers: {} })
+  const responseId = (await json<{ data: { id: string } }>(created)).data.id
+  const movedResponse = `${responseId.slice(0, 7)}-${responseId.slice(7, 8)}${responseId.slice(9)}`
+  expect((await patch(app, `/clinical-forms/form-responses/${movedResponse}`, { answers: { motivo: "Dolor" } })).status).toBe(200)
+  expect((await app.request(`/clinical-forms/form-responses/${responseId}%20/addenda`)).status).toBe(200)
+  const movedPatient = `${patientId.slice(0, 7)}-${patientId.slice(7, 8)}${patientId.slice(9)}`
+  const listed = await app.request(`/clinical-forms/form-responses?patientId=${movedPatient}&templateId=${moved}`)
+  expect(listed.status).toBe(200)
+  expect((await json<{ data: Array<{ id: string }> }>(listed)).data.map((row) => row.id)).toEqual([responseId])
+  // Uno que no existe, escrito así, sigue siendo «no existe».
+  const unknown = crypto.randomUUID()
+  expect((await post(app, `/clinical-forms/form-responses/${unknown.slice(0, 7)}-${unknown.slice(7, 8)}${unknown.slice(9)}/finalize`)).status).toBe(404)
+  expect((await post(app, `/clinical-forms/form-templates/${id}/archive`)).status).toBe(200)
+})
+
 it("formularios: dejar de usar y volver a usar desde Configuración; la lista dice cuál le llega al paciente", async () => {
   const schema = { sections: [{ id: "s", title: "Preguntas", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] }
   const publish = async (title: string, respondent: "staff" | "portal") => {
@@ -1337,6 +1369,18 @@ it("formularios: dejar de usar y volver a usar desde Configuración; la lista di
   const reception = buildApp("reception")
   expect((await post(reception, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(403)
   expect((await post(reception, `/clinical-forms/form-templates/${second}/reuse`)).status).toBe(403)
+
+  // Antes de dejar de usarlo, el servidor dice qué reciben hoy los pacientes y qué recibirán después.
+  const reachOf = async (id: string, change: string, from = app) => from.request(`/clinical-forms/form-templates/${id}/reach?change=${change}`)
+  const leaving = await reachOf(second, "leave")
+  expect(leaving.status).toBe(200)
+  expect((await json<{ data: unknown }>(leaving)).data).toEqual({
+    now: { key: expect.any(String), title: "Cuestionario nuevo (ruta)" },
+    after: { key: expect.any(String), title: "Cuestionario de la clínica (ruta)" },
+  })
+  expect((await reachOf(second, "otra-cosa")).status).toBe(400)
+  expect((await reachOf("abc", "leave")).status).toBe(404)
+  expect((await reachOf(second, "leave", reception)).status).toBe(403)
 
   expect((await post(app, `/clinical-forms/form-templates/${second}/archive`)).status).toBe(200)
   rows = await list()
