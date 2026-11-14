@@ -4,7 +4,15 @@ import {
   type SubFieldError,
   subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
-import { DENTAL_BRUSHINGS_MAX, DENTAL_HABITS_MAX, dentalInterviewErrors } from "@odentia/dental"
+import {
+  DENTAL_BRUSHINGS_MAX,
+  DENTAL_HABITS_MAX,
+  dentalHabitsErrors,
+  dentalInterviewErrors,
+  dentalInterviewLines,
+} from "@odentia/dental"
+import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS } from "@odentia/clinical"
+import { regionToday } from "@odentia/ui-patterns"
 import {
   Checkbox,
   Collapsible,
@@ -259,11 +267,193 @@ function DentalInterviewSections({
   )
 }
 
-/** odentIA en Antecedentes: el embarazo en «Personales» y sus antecedentes odontológicos. */
+const ANSWER_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No", no_sabe: "No sabe" }
+const TOBACCO_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  nunca: "Nunca fumó",
+  fuma: "Fuma",
+  dejo: "Lo dejó",
+}
+const CIGARETTE_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  ...Object.fromEntries(CIGARETTE_BANDS.map((band) => [band, CIGARETTE_BAND_LABELS[band]])),
+}
+const LACTATION_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No" }
+
+/** Una lista corta con «Sin indicar» primero; elegirlo quita el dato. */
+function Pick({
+  id,
+  label,
+  items,
+  value,
+  onChange,
+  disabled,
+  error,
+}: {
+  id: string
+  label: string
+  items: Record<string, string>
+  value: string
+  onChange: (value: string | undefined) => void
+  disabled: boolean
+  error: SubFieldError
+}) {
+  return (
+    <Field data-invalid={error.invalid}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Select
+        items={items}
+        value={value === "" ? "sin-indicar" : value}
+        onValueChange={(v) => onChange(!v || v === "sin-indicar" ? undefined : String(v))}
+        disabled={disabled}
+      >
+        <SelectTrigger id={id} aria-invalid={error.invalid} aria-describedby={error.describedBy}>
+          <SelectValue placeholder="Sin indicar" />
+        </SelectTrigger>
+        <SelectContent>
+          {Object.entries(items).map(([key, text]) => (
+            <SelectItem key={key} value={key}>
+              {text}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error.message ? <FieldError id={error.errorId}>{error.message}</FieldError> : null}
+    </Field>
+  )
+}
+
+/**
+ * Lo que cambia lo que se hace en la cita (mesa del 13 nov): el corazón (antibiótico antes de
+ * atender), la anestesia, si fuma y cuánto, y la lactancia, con la forma de latidIA
+ * (`habitos`, `embarazoLactancia.lactancia` con el día en que se dijo).
+ */
+function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }: InterviewSectionsProps) {
+  const [open, setOpen] = useState(true)
+  const fid = (name: string): string => `${idPrefix}-${name}`
+  const group = (key: string): Rec => {
+    const raw = answers[key]
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : {}
+  }
+  const odontologicos = group("antecedentesOdontologicos")
+  const heart = (odontologicos["corazon"] ?? {}) as Rec
+  const habits = group("habitos")
+  const lactation = (group("embarazoLactancia")["lactancia"] ?? {}) as Rec
+  const setHeart = (key: string, value: string | undefined) => {
+    const next = { ...heart, [key]: value }
+    if (value === undefined) delete next[key]
+    update("antecedentesOdontologicos", "corazon", Object.keys(next).length ? next : undefined)
+  }
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="text-sm font-medium">
+        <span className="flex items-center gap-1">
+          Corazón, anestesia y tabaco <ChevronDown aria-hidden className="size-4" />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid gap-4 pt-2 sm:grid-cols-2">
+          <Pick
+            id={fid("od-corazon")}
+            label="Válvula operada, problema del corazón de nacimiento o endocarditis"
+            items={ANSWER_ITEMS}
+            value={strOf(heart["riesgoEndocarditis"])}
+            onChange={(v) => setHeart("riesgoEndocarditis", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "antecedentesOdontologicos.corazon", fid("od-corazon"))}
+          />
+          <Pick
+            id={fid("od-antibiotico")}
+            label="Su médico le indicó antibiótico antes del dentista"
+            items={ANSWER_ITEMS}
+            value={strOf(heart["antibioticoPrevio"])}
+            onChange={(v) => setHeart("antibioticoPrevio", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "antecedentesOdontologicos.corazon.antibioticoPrevio", fid("od-antibiotico"))}
+          />
+          <Pick
+            id={fid("od-anestesia")}
+            label="Problema con la anestesia o sangrado largo tras una extracción"
+            items={ANSWER_ITEMS}
+            value={strOf(odontologicos["problemaAnestesia"])}
+            onChange={(v) => update("antecedentesOdontologicos", "problemaAnestesia", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia", fid("od-anestesia"))}
+          />
+          <Pick
+            id={fid("od-tabaco")}
+            label="Tabaco"
+            items={TOBACCO_ITEMS}
+            value={strOf(habits["tabaco"])}
+            onChange={(v) => {
+              update("habitos", "tabaco", v)
+              // Cuántos al día se dice solo de quien fuma.
+              if (v !== "fuma") update("habitos", "cigarrillos", undefined)
+            }}
+            disabled={disabled}
+            error={subFieldError(errors, "habitos.tabaco", fid("od-tabaco"))}
+          />
+          {habits["tabaco"] === "fuma" ? (
+            <Pick
+              id={fid("od-cigarrillos")}
+              label="Cigarrillos al día"
+              items={CIGARETTE_ITEMS}
+              value={strOf(habits["cigarrillos"])}
+              onChange={(v) => update("habitos", "cigarrillos", v)}
+              disabled={disabled}
+              error={subFieldError(errors, "habitos.cigarrillos", fid("od-cigarrillos"))}
+            />
+          ) : null}
+          {sex === "M" ? null : (
+            <Pick
+              id={fid("od-lactancia")}
+              label="Lactancia"
+              items={LACTATION_ITEMS}
+              value={strOf(lactation["estado"])}
+              // Con el día en que se dijo, como el embarazo: hoy, si cambia la respuesta.
+              onChange={(v) =>
+                update(
+                  "embarazoLactancia",
+                  "lactancia",
+                  v ? { estado: v, fecha: v === lactation["estado"] && strOf(lactation["fecha"]) ? lactation["fecha"] : regionToday() } : undefined,
+                )
+              }
+              disabled={disabled}
+              error={subFieldError(errors, "embarazoLactancia.lactancia", fid("od-lactancia"))}
+            />
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** Lo guardado del corazón, la anestesia, el tabaco y la lactancia, debajo del resumen de antecedentes. */
+function DentalHistorySummary({ answers }: { answers: Rec }) {
+  const lines = dentalInterviewLines(answers)
+  if (lines.length === 0) return null
+  return (
+    <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+      <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
+      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** odentIA en Antecedentes: el embarazo en «Personales», sus antecedentes odontológicos y lo que cambia la cita. */
 export const dentalHealth: ProductHealthUi = {
   asksPregnancy: true,
   showsAsa: true,
-  InterviewSections: (props) => <DentalInterviewSections {...props} />,
-  validate: (answers) => dentalInterviewErrors(answers),
-  Summary: () => null,
+  InterviewSections: (props) => (
+    <>
+      <DentalRiskSections {...props} />
+      <DentalInterviewSections {...props} />
+    </>
+  ),
+  validate: (answers) => ({ ...dentalInterviewErrors(answers), ...dentalHabitsErrors(answers) }),
+  Summary: (props) => <DentalHistorySummary {...props} />,
 }

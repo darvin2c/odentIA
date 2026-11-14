@@ -1323,6 +1323,21 @@ const RESPONDENT_LABELS: Record<string, string> = {
   staff: "Personal",
 }
 
+/** «Anticoagulantes · Sí: warfarina 5 mg», como lo respondió en «Tus medicinas». */
+function DirectedLine({ title, answer }: { title: string; answer: unknown }): React.JSX.Element | null {
+  if (!answer || typeof answer !== "object") return null
+  const state = (answer as Rec)["state"]
+  const detail = (answer as Rec)["detail"]
+  if (typeof state !== "string" || state === "unanswered") return null
+  return (
+    <p>
+      <span className="font-medium">{title} · </span>
+      {state in DECLARATION_STATE_LABELS ? DECLARATION_STATE_LABELS[state as keyof typeof DECLARATION_STATE_LABELS] : state}
+      {state === "recorded" && typeof detail === "string" && detail ? `: ${detail}` : ""}
+    </p>
+  )
+}
+
 function SnapshotGroup({
   title,
   group,
@@ -1430,7 +1445,13 @@ function RegistrationSnapshotDialog({
               </div>
               <SnapshotGroup title="Alergias" group={sent["allergies"]} nameKey="substance" />
               <SnapshotGroup title="Enfermedades" group={sent["conditions"]} nameKey="name" />
-              <SnapshotGroup title="Medicación" group={sent["medications"]} nameKey="name" />
+              <DirectedLine title="Anticoagulantes" answer={sent["anticoagulants"]} />
+              <DirectedLine title="Medicinas para los huesos" answer={sent["boneMedicines"]} />
+              <SnapshotGroup
+                title={sent["anticoagulants"] || sent["boneMedicines"] ? "Otros medicamentos" : "Medicación"}
+                group={sent["medications"]}
+                nameKey="name"
+              />
               {pregnancy ? (
                 <p>
                   <span className="font-medium">Embarazo · </span>
