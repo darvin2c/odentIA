@@ -61,6 +61,7 @@ import {
   getPatientHealth,
   initializeDeclaredPatientHealth,
   knownHealthQuestionsOf,
+  type PatientHealth,
   recordHealthDeclaration,
 } from "./clinical.js"
 import {
@@ -372,10 +373,30 @@ function spokespersonReachable(orgId: string) {
 /**
  * Lo que su enlace le pregunta de su salud, dato por dato (mesa del 13 nov, entrega 6): lo que la
  * clínica pregunta, que le corresponde (el embarazo y la lactancia, a mujeres de 12 a 55 años) y que
- * nadie anotó ni respondió aún (`healthQuestionsToAsk`). A quien ya envió «Tus datos» no se le insiste:
- * lo que dejó en blanco era opcional. Vacío: nada que preguntarle.
+ * nadie anotó ni respondió aún (`healthQuestionsToAsk`). A quien ya envió «Tus datos» no se le insiste
+ * con lo que dejó en blanco, que era opcional; pero si lo envió con la lista de antes, se le preguntan
+ * las preguntas que la lista sumó después y que nunca vio (`newRegistrationQuestions`), como promete
+ * «Preguntas al paciente». Vacío: nada que preguntarle.
  */
 export async function patientHealthQuestions(tx: Db, orgId: string, patientId: string): Promise<RegistrationFieldKey[]> {
+  return (await patientHealthQuestionsWith(tx, orgId, patientId)).ask
+}
+
+/**
+ * `patientHealthQuestions` con la salud que leyó para decidirlo, para que quien guarda lo que envió
+ * no la vuelva a cargar.
+ */
+export async function patientHealthQuestionsWith(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{
+  ask: RegistrationFieldKey[]
+  /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
+  onlyNew: boolean
+  health: PatientHealth
+  known: Set<RegistrationFieldKey>
+}> {
   const [sent] = await tx
     .select({ id: appointmentBookingLink.id })
     .from(appointmentBookingLink)
@@ -387,19 +408,27 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
       ),
     )
     .limit(1)
-  if (sent) return []
+  const health = await getPatientHealth(tx, orgId, patientId)
+  const known = knownHealthQuestionsOf(health)
+  const product = await orgProduct(tx, orgId)
+  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
+  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
+  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  if (sent && sawToday) return { ask: [], onlyNew: false, health, known }
+  const onlyNew = sent ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)
-  return healthQuestionsToAsk(
+  const ask = healthQuestionsToAsk(
     config,
     {
       countryCode: await findOrgCountry(tx, orgId),
-      product: await orgProduct(tx, orgId),
+      product,
       person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
     },
-    knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)),
-  )
+    known,
+  ).filter((key) => !onlyNew || onlyNew.has(key))
+  return { ask, onlyNew: !!onlyNew, health, known }
 }
 
 /** Hay algo de su salud que preguntarle antes de su cita aunque no le falte ningún dato (`patientHealthQuestions`). */

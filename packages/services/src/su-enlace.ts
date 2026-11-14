@@ -77,7 +77,6 @@ import {
   type DeclaredPatientHealthInput,
   getPatientHealth,
   declarantOfContact,
-  knownHealthQuestionsOf,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
 } from "./clinical.js"
@@ -99,7 +98,7 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson } from "./patient-identity.js"
-import { getPatientMissingData, getPatientRegistrationConfig, patientHealthQuestions } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig, patientHealthQuestionsWith } from "./patient-registration.js"
 import { consentsToSign, hasTodo, type PatientTodo, patientTodo } from "./patient-todo.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
@@ -289,7 +288,7 @@ async function missingOf(
 
 /**
  * Lo que se le pregunta de su salud (opcional), dato por dato: lo que la clínica pregunta y nadie
- * anotó ni respondió aún, si nunca envió «Tus datos» (`patientHealthQuestions`, la misma regla que
+ * anotó ni respondió aún, con la regla de `patientHealthQuestions` (la misma que
  * el recordatorio), y solo a quien decide por el paciente. Vacío: nada.
  */
 async function healthQuestionsOf(
@@ -297,8 +296,13 @@ async function healthQuestionsOf(
   orgId: string,
   link: ResolvedPersonalLink,
 ): Promise<RegistrationFieldKey[]> {
-  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return []
-  return patientHealthQuestions(tx, orgId, link.patientId)
+  return (await healthQuestionsWithOf(tx, orgId, link))?.ask ?? []
+}
+
+/** `healthQuestionsOf` con la salud y lo ya sabido que leyó para decidirlo; nulo si este enlace no pregunta su salud. */
+async function healthQuestionsWithOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
+  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return null
+  return patientHealthQuestionsWith(tx, orgId, link.patientId)
 }
 
 async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
@@ -1008,8 +1012,8 @@ async function saveLinkData(
     if (value) patch[key] = value
   }
   // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
-  const asked = input.health ? await healthQuestionsOf(tx, orgId, link) : []
-  const known = asked.length > 0 ? knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)) : null
+  const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link) : null
+  const known = questions && questions.ask.length > 0 ? questions.known : null
   const said =
     input.health && known
       ? onlyAskedHealth(

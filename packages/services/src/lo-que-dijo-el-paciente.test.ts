@@ -790,3 +790,33 @@ it("un registro con todo sin responder no es una declaración, aunque lo haya co
   expect(health.declarations).toEqual([])
   expect(health.declared).toEqual([])
 })
+
+// Revisión de la entrega 6 (14 nov): el «cuántos al día» que anotó el equipo se quedaba junto a un
+// «Lo dejé» y la entrevista entera no pasaba: se perdían también el corazón y la anestesia.
+it("si dice que dejó de fumar, el «cuántos al día» de antes se quita y lo demás que dijo se guarda", async () => {
+  const f = await clinicalFixture()
+  const ana = await person(f, "Ana", "Fumadora")
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, ana.patientId, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { habitos: { tabaco: "fuma", cigarrillos: "10_o_mas" } } },
+    }),
+  )
+  await f.run((tx) =>
+    addDeclaredHealth(
+      tx,
+      ORG,
+      null,
+      ana.patientId,
+      { medical: { tabaco: "dejo" }, dental: { problemaAnestesia: "si" } },
+      { entity: "registration_hold", entityId: ana.patientId, at: new Date() },
+    ),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, ana.patientId))
+  const answers = health.latestAnamnesis?.answers as Record<string, Record<string, unknown>>
+  expect(answers["habitos"]).toEqual({ tabaco: "dejo" })
+  expect(answers["antecedentesOdontologicos"]).toMatchObject({ problemaAnestesia: "si" })
+})

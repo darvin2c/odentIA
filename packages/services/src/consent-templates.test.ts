@@ -33,6 +33,7 @@ import { renderConsentPreviewPdf } from "./consent-pdf.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { addEncounterProcedure } from "./encounters.js"
 import { patientHealthQuestions, patientHealthToAsk } from "./patient-registration.js"
+import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -334,7 +335,9 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
   const { orgId, run } = await newClinic()
   const patient = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Sin Salud" }))
   expect(await run((tx) => patientHealthToAsk(tx, orgId, patient.id))).toBe(true)
-  // Envió sus datos dejando la salud en blanco, que es opcional: no se le insiste.
+  // Envió sus datos dejando la salud en blanco, que es opcional: no se le insiste con eso. Lo envió
+  // con la lista de antes: de las preguntas que la lista sumó después (que nunca vio), sí; se le
+  // muestran al abrir su enlace, pero el aviso al reservar no sale solo por ellas (revisión de la 6).
   await ownerDb.insert(appointmentBookingLink).values({
     organizationId: orgId,
     patientId: patient.id,
@@ -343,7 +346,15 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
     expiresAt: new Date(Date.now() + 86_400_000),
     dataSubmittedAt: new Date(),
   } as typeof appointmentBookingLink.$inferInsert)
-  expect(await run((tx) => patientHealthToAsk(tx, orgId, patient.id))).toBe(false)
+  const onlyNew = await run((tx) => patientHealthQuestions(tx, orgId, patient.id))
+  expect(onlyNew).toEqual(expect.arrayContaining(["anticoagulants", "boneMedicines", "dental.corazon"]))
+  for (const key of ["allergies", "conditions", "medications", "bloodGroup"]) expect(onlyNew).not.toContain(key)
+  const todo = await run((tx) =>
+    patientTodo(tx, orgId, { patientId: patient.id, contactId: patient.personId, withAppointment: false }),
+  )
+  expect(todo).toMatchObject({ health: true, healthOnlyNew: true })
+  // Sin otro dato que le falte, el aviso al reservar no cuenta «sus datos» solo por esas preguntas.
+  expect(remoteTodoCount({ ...todo, missing: [] }, { health: true }).data).toBe(false)
   // A quien el equipo ya le anotó alergias, enfermedades y medicinas se le pregunta solo lo demás (entrega 6).
   const other = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Con Salud" }))
   await run((tx) =>
