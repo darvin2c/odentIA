@@ -2046,9 +2046,9 @@ export async function pendingBeforeAppointment(
   patientId: string,
   contactId: string,
   options: { health?: boolean; appointmentId?: string | null } = {},
-): Promise<{ data: boolean; total: number }> {
+): Promise<{ data: boolean; total: number; visit: { asksReason: boolean } | null; healthCheck: boolean }> {
   // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella. «Tu
-  // visita» es de la cita del aviso: con sus datos, una sola cosa («Antes de tu cita»).
+  // visita» (de la cita del aviso) tampoco cuenta como algo por hacer: es opcional.
   const todo = await patientTodo(tx, orgId, { patientId, contactId, appointmentId: options.appointmentId ?? null })
   return remoteTodoCount(todo, options)
 }
@@ -2063,6 +2063,26 @@ interface LinkedNotice {
   link: { token: string; url: string }
   /** Lo que el mensaje dice y no sale de los trabajos (`pendientes`). */
   extra: Partial<Record<MessageVariable, string>>
+  /**
+   * Solo le queda contar lo de su visita, que es opcional: sale el recordatorio de siempre con una
+   * línea suave y su enlace (`title`), nunca «tienes 1 cosa por hacer». Como plantilla no lleva la
+   * línea: la plantilla aprobada no la tiene y no se pide otra.
+   */
+  soft?: { title: string }
+}
+
+/** La línea suave del recordatorio cuando solo le queda contar lo de su visita (decidido el 14 nov). */
+export function visitInviteLine(asksReason: boolean): { title: string } {
+  return { title: asksReason ? "Si quieres, cuéntanos a qué vienes" : "Si quieres, cuéntanos si te duele algo" }
+}
+
+/**
+ * La línea suave cuando le queda «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10, la
+ * misma regla que su visita): no es «tienes 1 cosa por hacer». Va antes que la de su visita: lo de
+ * su salud pesa más, y las dos se responden en la misma tarjeta.
+ */
+export function healthCheckInviteLine(): { title: string } {
+  return { title: "Si algo cambió en tu salud, cuéntanos" }
 }
 
 /**
@@ -2096,7 +2116,9 @@ async function pendingNoticesFor(
   })
   // Un aviso por cita: solo el recordatorio los cuenta (los envíos del equipo salen al momento).
   const many = key === REMINDER_DATA_KEY && pending.total > (pending.data ? 1 : 0)
-  if (!pending.data && !many) return []
+  // Solo le queda lo de su visita o «¿Cambió algo?» (entrega 10): el recordatorio de siempre, con la línea suave.
+  const softVisit = key === REMINDER_DATA_KEY && !pending.data && !many && (pending.visit !== null || pending.healthCheck)
+  if (!pending.data && !many && !softVisit) return []
   const issued = await issuePersonalLink(
     tx,
     orgId,
@@ -2114,6 +2136,17 @@ async function pendingNoticesFor(
       pendientes: thingsWords(pending.total),
     })
   if (pending.data) await add(await currentAutomationMessage(tx, orgId, key))
+  if (softVisit) {
+    // Abre «Antes de tu cita» con lo que le queda: «¿Cambió algo?» y «Tu visita».
+    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId, "datos")
+    if (url)
+      notices.push({
+        spec: await currentAutomationMessage(tx, orgId, "recordatorio_cita"),
+        link: { token: personalLinkRef(issued.linkId), url },
+        extra: {},
+        soft: pending.healthCheck ? healthCheckInviteLine() : visitInviteLine(pending.visit?.asksReason ?? true),
+      })
+  }
   return notices
 }
 
@@ -2949,6 +2982,8 @@ export async function deliverJob(
   for (const candidate of candidates) {
     const candidateRoute = await previewMessageRoute(tx, orgId, contactId, candidate.spec)
     if ("cause" in candidateRoute) continue
+    // La línea suave de su visita no cabe en la plantilla aprobada: como plantilla sale el de siempre, sin ella.
+    if (candidate.soft && candidateRoute.via === "plantilla") break
     withData = { ...candidate, via: candidateRoute.via }
     break
   }
@@ -2957,7 +2992,10 @@ export async function deliverJob(
   let linkTitle: { title: string } | undefined
   let extra: LinkedNotice["extra"] = {}
   if (spec && withData) {
-    if (job.kind === "recordatorio_cita" && withData.via !== "plantilla") {
+    if (withData.soft) {
+      // El recordatorio de siempre (respuesta o correo), con «Si quieres, cuéntanos a qué vienes: …».
+      linkTitle = withData.soft
+    } else if (job.kind === "recordatorio_cita" && withData.via !== "plantilla") {
       // El botón es de la plantilla: por respuesta o correo sale el recordatorio con el
       // texto de la clínica y una línea más con su enlace.
       linkTitle = withData.spec.link

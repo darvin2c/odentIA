@@ -118,10 +118,10 @@ it("C6: si pasó más de un mes se le pregunta «¿Cambió algo?», sin listar l
   expect(form.healthCheck?.questions).toEqual(expect.arrayContaining(["allergies", "anticoagulants", "medications"]))
   expect(form.missing).toEqual([])
   expect(JSON.stringify(form)).not.toContain("Warfarina")
-  // Va en la misma tarjeta que su visita: el recordatorio la cuenta como una sola cosa.
+  // No es algo por hacer (decidido el 14 nov): el recordatorio de siempre lleva una línea suave.
   const todo = await f.run((tx) => patientTodo(tx, ORG, { patientId: marta.patientId, contactId: marta.personId, appointmentId: marta.visit }))
   expect(todo.healthCheck).not.toBeNull()
-  expect(remoteTodoCount(todo).total).toBe(1)
+  expect(remoteTodoCount(todo)).toMatchObject({ total: 0, healthCheck: true })
 
   // «No, sigue igual»: un toque.
   await f.run((tx) => submitPersonalLinkData(tx, ORG, marta.link.token, { data: {}, healthCheck: "sin_cambios" }))
