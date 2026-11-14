@@ -441,15 +441,6 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, errors }
   )
 }
 
-/** Quién dijo cada dato: el del corazón lo dicen dos preguntas (la válvula y el antibiótico). */
-const ITEM_KEYS: Record<DentalInterviewItem["key"], DeclaredInterviewKey[]> = {
-  corazon: ["corazon", "antibiotico"],
-  anestesia: ["anestesia"],
-  tabaco: ["tabaco"],
-  alcohol: ["alcohol"],
-  lactancia: ["lactancia"],
-}
-
 /** La lactancia con el día en que se dijo, como el embarazo. */
 const withDay = (item: DentalInterviewItem, text: string): string => {
   const day = item.saidOn ? shortDay(item.saidOn) : ""
@@ -469,7 +460,7 @@ function DentalHistorySummary({ answers, marks }: { answers: Rec; marks?: Partia
       <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
       <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
         {items.map((item) => {
-          const mark = ITEM_KEYS[item.key].map((key) => marks?.[key]).find(Boolean)
+          const mark = item.said.map((key) => marks?.[key]).find(Boolean)
           return (
             <li key={item.key}>
               {withDay(item, item.text)}
@@ -496,12 +487,12 @@ export const dentalHealth: ProductHealthUi = {
   Summary: (props) => <DentalHistorySummary {...props} />,
   alerts: (answers) =>
     dentalInterviewItems(answers).flatMap((item) =>
-      item.alert ? [{ keys: ITEM_KEYS[item.key], label: withDay(item, item.alert) }] : [],
+      item.alert ? [{ keys: item.said, label: withDay(item, item.alert) }] : [],
     ),
   saidRows: (answers) =>
     dentalInterviewItems(answers).map((item) => {
       // «Corazón: válvula…: sí» → «Corazón» y lo que dijo.
       const [label, ...rest] = withDay(item, item.text).split(": ")
-      return { keys: ITEM_KEYS[item.key], label: label ?? item.key, value: rest.join(": ") }
+      return { keys: item.said, label: label ?? item.key, value: rest.join(": ") }
     }),
 }

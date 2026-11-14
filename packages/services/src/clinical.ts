@@ -41,6 +41,7 @@ import {
   isImageDocumentCategory,
   type PregnancyToday,
   pregnancyToday,
+  upperFirst,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -1209,7 +1210,7 @@ export function declaredMedications(
     rows.push({
       name,
       declaredClass: group,
-      ...(notes.length ? { notes: capitalFirst(notes.join(" · ")) } : {}),
+      ...(notes.length ? { notes: upperFirst(notes.join(" · ")) } : {}),
       ...(answer.now === false && saidOn ? { endDate: saidOn } : {}),
     })
   }
@@ -1224,8 +1225,6 @@ export function declaredMedications(
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
 }
-
-const capitalFirst = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
 
 /** La fila de «algún otro medicamento» dicho sin decir cuál. */
 export const OTHER_MEDICINE_UNNAMED = "Otro medicamento (no dijo cuál)"

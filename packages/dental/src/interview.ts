@@ -116,6 +116,10 @@ const ALCOHOL_WORDS: Record<string, string> = { no: "no toma", ocasional: "de ve
 /** Un dato de lo que odentIA suma a la entrevista, con la clave de quién lo dijo (`DECLARED_INTERVIEW`). */
 export interface DentalInterviewItem {
   key: "corazon" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
+  /** Dónde está en la entrevista («habitos.tabaco»): la clave con que la copia sabe quién lo dijo. */
+  path: string
+  /** De qué preguntas de la persona sale (las claves de quién lo dijo): el corazón son dos. */
+  said: Array<"corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia">
   text: string
   /**
    * Lo que va arriba de la ficha y de la atención: el corazón, el antibiótico y la anestesia solo
@@ -148,11 +152,13 @@ export function dentalInterviewItems(answers: Record<string, unknown>): DentalIn
     antibiotic === "si" ? "su médico le indicó antibiótico antes" : antibiotic === "no_sabe" ? "no sabe si debe tomar antibiótico antes" : "",
   ].filter(Boolean)
   if (heartParts.length)
-    items.push({ key: "corazon", text: `Corazón: ${heartParts.join(" · ")}`, alert: heartAlert.length ? `Corazón: ${heartAlert.join(" · ")}` : null })
+    items.push({ key: "corazon", path: "antecedentesOdontologicos.corazon", said: ["corazon", "antibiotico"], text: `Corazón: ${heartParts.join(" · ")}`, alert: heartAlert.length ? `Corazón: ${heartAlert.join(" · ")}` : null })
   if (typeof dental.problemaAnestesia === "string") {
     const answer = dental.problemaAnestesia
     items.push({
       key: "anestesia",
+      path: "antecedentesOdontologicos.problemaAnestesia",
+      said: ["anestesia"],
       text: `Problemas con la anestesia o sangrado tras una extracción: ${ANSWER_WORDS[answer] ?? answer}`,
       alert:
         answer === "si"
@@ -165,15 +171,17 @@ export function dentalInterviewItems(answers: Record<string, unknown>): DentalIn
   const habits = rec(answers.habitos)
   if (typeof habits.tabaco === "string") {
     const band = typeof habits.cigarrillos === "string" ? CIGARETTE_BAND_LABELS[habits.cigarrillos as CigaretteBand] : ""
-    items.push({ key: "tabaco", text: `Tabaco: ${TOBACCO_WORDS[habits.tabaco] ?? habits.tabaco}${band ? `, ${band}` : ""}`, alert: null })
+    items.push({ key: "tabaco", path: "habitos.tabaco", said: ["tabaco"], text: `Tabaco: ${TOBACCO_WORDS[habits.tabaco] ?? habits.tabaco}${band ? `, ${band}` : ""}`, alert: null })
   }
   if (typeof habits.alcohol === "string")
-    items.push({ key: "alcohol", text: `Alcohol: ${ALCOHOL_WORDS[habits.alcohol] ?? habits.alcohol}`, alert: null })
+    items.push({ key: "alcohol", path: "habitos.alcohol", said: ["alcohol"], text: `Alcohol: ${ALCOHOL_WORDS[habits.alcohol] ?? habits.alcohol}`, alert: null })
   const lactation = rec(rec(answers.embarazoLactancia).lactancia)
   if (lactation.estado === "si" || lactation.estado === "no") {
     const saidOn = typeof lactation.fecha === "string" ? lactation.fecha : undefined
     items.push({
       key: "lactancia",
+      path: "embarazoLactancia.lactancia",
+      said: ["lactancia"],
       text: `Lactancia: ${lactation.estado === "si" ? "sí" : "no"}`,
       alert: lactation.estado === "si" ? "Lactancia" : null,
       ...(saidOn ? { saidOn } : {}),
