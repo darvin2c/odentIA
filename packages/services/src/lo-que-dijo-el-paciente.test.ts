@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { encounter, patientAnamnesis } from "@odentia/db/schema/clinical"
+import { encounter, patientAnamnesis, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -763,4 +763,29 @@ it("revisar sus alergias con ella confirma lo que dijo (FHIR verificationStatus)
   expect(reviewed.declared.flatMap((group) => group.allergies)).toEqual([])
   expect(reviewed.allergies.find((row) => row.id === ines.latex.id)?.verification).toBe("confirmada")
   expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toEqual([])
+})
+
+// QA del 14 nov (H9 de desarrollo): la copia de 0114 trajo como declaración un registro con todo
+// «sin responder», que el código nunca guarda. Se lee con la misma regla: no es una declaración.
+it("un registro con todo sin responder no es una declaración, aunque lo haya copiado la migración", async () => {
+  const f = await clinicalFixture()
+  const thiago = await person(f, "Thiago", "Huanca")
+  const unanswered = {
+    allergies: { state: "unanswered", items: [] },
+    conditions: { state: "unanswered", items: [] },
+    medications: { state: "unanswered", items: [] },
+  }
+  await ownerDb.insert(patientHealthDeclaration).values({
+    organizationId: ORG,
+    patientId: thiago.patientId,
+    via: "registro",
+    respondent: "representative",
+    declarantName: "Valeria Quispe",
+    declarantRelation: "madre",
+    health: unanswered,
+    saidAt: new Date("2026-11-13T15:00:00.000Z"),
+  })
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(health.declarations).toEqual([])
+  expect(health.declared).toEqual([])
 })

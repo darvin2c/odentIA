@@ -689,7 +689,26 @@ export async function getPatientHealth(
   }
 }
 
-/** Las declaraciones de salud de la persona, de la más nueva a la más antigua. */
+/**
+ * Si una salud declarada dice algo: un grupo respondido, el grupo sanguíneo o
+ * algo de la entrevista. Es la regla con que el registro decide si deja
+ * declaración, y la misma con que se leen: la copia de 0114 trajo también los
+ * registros con todo «sin responder», y esos no son una declaración (QA del 14
+ * nov, H9 de desarrollo; la migración no se cambia porque otras ramas ya la tienen).
+ */
+export function hasMeaningfulHealth(health: Partial<NonNullable<RegistrationAnswers["health"]>> | null | undefined): boolean {
+  if (!health || typeof health !== "object") return false
+  if (health.bloodGroup != null) return true
+  for (const group of [health.allergies, health.conditions, health.medications]) {
+    if (group && group.state !== "unanswered") return true
+  }
+  // Lo de la entrevista también cuenta: un registro que solo dice el embarazo no se pierde.
+  return [health.personal, health.dental, health.medical].some((group) =>
+    Object.values(group ?? {}).some((v) => v !== undefined && v !== ""),
+  )
+}
+
+/** Las declaraciones de salud de la persona que dicen algo, de la más nueva a la más antigua. */
 async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): Promise<HealthDeclaration[]> {
   const rows = await tx
     .select()
@@ -697,7 +716,7 @@ async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): P
     .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
     .orderBy(desc(patientHealthDeclaration.createdAt))
     .limit(50)
-  return rows.map((row) => ({
+  return rows.filter((row) => hasMeaningfulHealth(row.health as Parameters<typeof hasMeaningfulHealth>[0])).map((row) => ({
     at: row.saidAt,
     enteredAt: row.createdAt,
     via: row.via,
