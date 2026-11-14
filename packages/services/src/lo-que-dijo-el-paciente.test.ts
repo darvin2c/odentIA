@@ -312,7 +312,8 @@ it("«Marcar como revisado» dice lo que pasó de verdad, guarda quién lo revis
   expect(history.data).toHaveLength(1)
   expect(history.data[0]).toMatchObject({
     type: "form",
-    title: "Se completó el formulario: Cuestionario con alergias",
+    // Lo que llenó el paciente se dice como lo que es; «ficha de consulta» es lo del equipo.
+    title: "Lo que respondió el paciente: Cuestionario con alergias",
     detail: "Lo respondió la persona y lo revisó Clínico",
   })
   expect((await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))).allergies.map((row) => row.substance)).toEqual([
