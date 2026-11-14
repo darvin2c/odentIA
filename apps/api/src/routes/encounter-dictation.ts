@@ -5,6 +5,7 @@ import {
   clioListenBlock,
   confirmDictationSuggestion,
   countConfirmedDictation,
+  dictationFormQuestions,
   dictationModelLabel,
   dictationTeeth,
   dictationSegmentSeen,
@@ -115,6 +116,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const list = [...pending, ...confirmed]
           return {
             list,
+            // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
+            forms: await dictationFormQuestions(tx, orgId, at.data.encounterId),
             pendingCount: pending.length,
             labels: [
               ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
@@ -130,7 +133,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           extractDictation(
             deps.db,
             { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context, pending: ready.labels },
+            { orgId, transcript, context, pending: ready.labels, forms: ready.forms },
           ),
           { encounterId: at.data.encounterId },
         )
@@ -143,13 +146,14 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             drafts: extracted.drafts,
             corrections: extracted.corrections.flatMap((item) => {
               const suggestionId = item.index < ready.pendingCount ? target(item.index) : undefined
-              return suggestionId ? [{ suggestionId, changes: item.changes }] : []
+              return suggestionId ? [{ suggestionId, changes: item.changes, said: item.sourceText }] : []
             }),
             removals: extracted.removals.flatMap((item) => {
               const suggestionId = target(item.index)
               return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
             }),
             segmentId,
+            formQuestions: ready.forms,
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.

@@ -6,6 +6,7 @@ import {
   DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
   type DictationDraft,
+  type DictationFormQuestion,
   operationAgentSchema,
 } from "@odentia/services"
 import { z } from "zod"
@@ -104,6 +105,18 @@ export function dictationEdits(example: string) {
 }
 
 export const DICTATION_TOOL = "registrar_dictado"
+
+/**
+ * Las respuestas a las fichas empezadas, igual en todo producto que dicta
+ * (entrega 11). Va siempre en el esquema, que es fijo por la caché; las
+ * preguntas y sus reglas llegan en el mensaje de la pausa solo si hay alguna.
+ */
+export function dictationFormAnswers() {
+  return dictationList(
+    "ficha.respuesta",
+    "Respuestas a las preguntas de las fichas abiertas que se listan con lo dictado, una por pregunta. Vacío si no hay fichas abiertas o lo dictado no responde ninguna.",
+  )
+}
 
 /**
  * La próxima cita y el presupuesto a pedido (issue 109, paso 2), igual en todo
@@ -210,6 +223,60 @@ export interface DictationAsk {
   /** Lo último ya ordenado de este dictado: ayuda a entender lo nuevo y no se registra otra vez. */
   context: string
   pending: DictationPending[]
+  /**
+   * Las preguntas vacías de las fichas empezadas en la atención (entrega 11):
+   * van en el mensaje de la pausa, con sus reglas, solo si hay alguna. Sin
+   * fichas, la pausa es la de siempre.
+   */
+  forms?: readonly DictationFormQuestion[] | undefined
+}
+
+/** Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo. */
+function formQuestionWords(question: DictationFormQuestion): string {
+  const range =
+    question.min !== null && question.max !== null
+      ? `, de ${question.min} a ${question.max}`
+      : question.min !== null
+        ? `, desde ${question.min}`
+        : question.max !== null
+          ? `, hasta ${question.max}`
+          : ""
+  const how =
+    question.type === "booleano"
+      ? "sí o no"
+      : question.type === "opcion_unica"
+        ? `una opción: ${(question.options ?? []).join(" | ")}`
+        : question.type === "opcion_multiple"
+          ? `varias opciones: ${(question.options ?? []).join(" | ")}`
+          : question.type === "escala"
+            ? `escala de ${question.min ?? 0} a ${question.max ?? 10}`
+            : question.type === "pieza"
+              ? "pieza dental en numeración FDI"
+              : `número${question.unit ? ` en ${question.unit}` : ""}${range}`
+  const equals = question.dependsOn?.equals
+  const depends = question.dependsOn
+    ? ` (solo si «${question.dependsOn.label}» es «${equals === true ? "Sí" : equals === false ? "No" : String(equals)}»)`
+    : ""
+  return `${question.number}. ${question.label} · ${how}${depends}`
+}
+
+/**
+ * Las fichas empezadas con sus preguntas vacías y cómo se responden. Va en el
+ * mensaje de la pausa y no en las instrucciones fijas: sin ficha empezada el
+ * modelo no lee nada nuevo y lo de siempre no cambia.
+ */
+export function dictationFormsText(forms: readonly DictationFormQuestion[]): string {
+  if (!forms.length) return ""
+  const byForm = new Map<string, DictationFormQuestion[]>()
+  for (const question of forms) byForm.set(question.responseId, [...(byForm.get(question.responseId) ?? []), question])
+  return [
+    "Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.",
+    "- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).",
+    "- Una opción: una de la lista, tal cual está escrita. Si lo dicho no alcanza para elegir una sola (falta el lado, la división o el grado), no la respondas.",
+    "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad que la de la pregunta, no la respondas.",
+    "- Lo que respondes en una ficha no lo repitas en el texto de la consulta.",
+    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
+  ].join("\n")
 }
 
 /**
@@ -241,6 +308,7 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
       : "",
+    dictationFormsText(input.forms ?? []),
     `Lo nuevo que dictó:\n«${input.transcript}»`,
   ]
     .filter(Boolean)
@@ -302,6 +370,8 @@ export function readDictation(
   transcript: string,
   pendingCount: number,
   parts: DictationProfile["parts"],
+  /** Cuántas preguntas de ficha se le dieron: una respuesta a otra no existe y se avisa. */
+  formCount = 0,
 ): Omit<DictationExtraction, "model"> | null {
   if (!isRecord(args)) return null
   let omitted = 0
@@ -355,7 +425,11 @@ export function readDictation(
     const value = args[part.key]
     for (const item of part.single && isRecord(value) ? [value] : items(value)) {
       const payload = isRecord(item) ? fields(part.kind, item) : {}
-      if (!isRecord(item) || Object.keys(payload).length === 0) skip(item)
+      // Una respuesta de ficha a una pregunta que no se le dio: no se adivina a cuál se refería.
+      const question = payload["question"]
+      const unknownQuestion =
+        part.kind === "ficha" && !(typeof question === "number" && Number.isInteger(question) && question >= 1 && question <= formCount)
+      if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion) skip(item)
       else drafts.push({ kind: part.kind, payload, sourceText: quote(item) })
     }
   }
@@ -579,7 +653,7 @@ export async function askDictationModel(
   const parsed = raw === null ? null : parseToolArguments(raw)
   return {
     read: call
-      ? readDictation(parsed ? parsed.value : call.args, ask.transcript, ask.pending.length, profile.parts)
+      ? readDictation(parsed ? parsed.value : call.args, ask.transcript, ask.pending.length, profile.parts, ask.forms?.length ?? 0)
       : null,
     reply,
     repeated: parsed?.repeated ?? [],
