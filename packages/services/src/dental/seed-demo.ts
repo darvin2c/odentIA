@@ -64,6 +64,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
+  appointmentVisitAnswer,
   consentDocument,
   consentTemplate,
   issuedPaper,
@@ -589,6 +590,8 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   // El periodontograma apunta a su atención (ADR 0054): va antes que ella.
   await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, orgs))
   await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, orgs))
+  // Lo que contaron antes de sus citas apunta a la atención en que se vio: va antes que ella.
+  await db.delete(appointmentVisitAnswer).where(inArray(appointmentVisitAnswer.organizationId, orgs))
   await db.delete(encounter).where(inArray(encounter.organizationId, orgs))
   // «Mi calendario» apunta a la persona: va antes que el equipo.
   await db.delete(calendarFeedUse).where(inArray(calendarFeedUse.organizationId, orgs))
@@ -4798,6 +4801,64 @@ const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
 if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
+
+// «Antes de tu cita» (mesa del 13 nov, entrega 8, caso C2): Marta tiene cita hoy con la Dra. Ana, y
+// recepción anotó «Dolor en muela de abajo». Ayer contó desde su enlace a qué viene y cuánto le duele:
+// al atenderla, «Hoy viene a…» lo trae con «Usar como motivo», sin teclear. Su próxima cita, en tres
+// meses, aún no tiene lo de esa visita: su enlace se lo vuelve a preguntar (C6).
+{
+  const [martaRow] = await db
+    .select({ patientId: patient.id, personId: patient.personId })
+    .from(patient)
+    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
+    .where(and(eq(patient.organizationId, ORG_A), eq(contact.docNumber, "70090815")))
+    .limit(1)
+  if (!martaRow) throw new Error("Falta Marta en la semilla")
+  const martaToday = await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: martaRow.patientId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    startsAt: lima(0, "16:00"),
+    endsAt: lima(0, "16:45"),
+    status: "confirmada",
+    reason: "Dolor en muela de abajo",
+    notice: false,
+  })
+  await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: martaRow.patientId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: lima(90, "10:00"),
+    endsAt: lima(90, "10:45"),
+    notice: false,
+    outsideSchedule: true,
+  })
+  const yesterday = new Date(lima(-1, "14:27"))
+  const [told] = await db.insert(appointmentVisitAnswer).values({
+    organizationId: ORG_A,
+    patientId: martaRow.patientId,
+    appointmentId: martaToday.id,
+    reason: "Me duele la muela de abajo a la derecha hace 3 días, sobre todo de noche",
+    pain: "si",
+    painLevel: 8,
+    more: "Que me avisen antes de la inyección",
+    respondentContactId: martaRow.personId,
+    submittedVia: "enlace",
+    submittedAt: yesterday,
+  }).returning({ id: appointmentVisitAnswer.id })
+  await db.insert(auditEvent).values({
+    organizationId: ORG_A,
+    actorUserId: `contact:${martaRow.personId}`,
+    entity: "appointment_visit_answer",
+    entityId: told!.id,
+    action: "visit_answer.sent",
+    metadata: { patientId: martaRow.patientId, appointmentId: martaToday.id, via: "enlace" },
+    createdAt: yesterday,
+  })
+}
 
 // El control se cumple con la visita que toca (ADR 0152).
 // - Sofía Ramírez: su control de mantenimiento de 6 meses, indicado hace 5, ya
