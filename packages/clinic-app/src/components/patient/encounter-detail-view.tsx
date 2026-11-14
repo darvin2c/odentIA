@@ -134,6 +134,32 @@ function listWords(items: string[]): string {
 }
 
 /**
+ * Lo que la atención no registró, para decirlo en una sola línea: así nadie cree
+ * que está escondido. Una receta emitida en ella es una indicación y un documento
+ * registrados (E9); un formulario finalizado también es un documento suyo (QA de
+ * formularios del 13 nov: decía «Sin registrar: … documentos» teniendo uno).
+ */
+export function unrecordedParts(input: {
+  diagnoses: number
+  procedures: number
+  evolution: boolean
+  indications: boolean
+  issuedPrescription: boolean
+  /** La página de la atención lista sus documentos aparte: ahí no se dice que faltan. */
+  showDocuments: boolean
+  documents: number
+  forms: number
+}): string[] {
+  return [
+    input.diagnoses === 0 ? "diagnóstico" : "",
+    input.procedures === 0 ? "procedimientos" : "",
+    input.evolution ? "" : "evolución",
+    input.indications || input.issuedPrescription ? "" : "indicaciones",
+    input.showDocuments && input.documents === 0 && !input.issuedPrescription && input.forms === 0 ? "documentos" : "",
+  ].filter(Boolean)
+}
+
+/**
  * Vista de lectura del detalle de una atención: encuentro, procedimientos,
  * tratamientos vinculados, notas, odontograma, documentos y adendas.
  * Reutilizable desde la atención y la historia del paciente.
@@ -186,16 +212,16 @@ export function EncounterDetailView({
   const indicatedOnly = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && !isRetiredPlanStatus(item.status))
   const indicatedRetired = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && isRetiredPlanStatus(item.status))
   const liveBudgets = (detail.budgets ?? []).filter((budget) => budget.status !== "cancelado")
-  // Lo que no se registró, en una sola línea: así nadie cree que está escondido.
-  // Una receta emitida en ella es una indicación y un documento registrados (E9); un formulario
-  // finalizado también es un documento suyo (QA de formularios del 13 nov).
-  const unrecorded = [
-    diagnoses.length === 0 ? "diagnóstico" : "",
-    procedures.length === 0 ? "procedimientos" : "",
-    encounter.evolution ? "" : "evolución",
-    encounter.indications || issuedPrescription ? "" : "indicaciones",
-    showDocuments && documents.length === 0 && !issuedPrescription && forms.length === 0 ? "documentos" : "",
-  ].filter(Boolean)
+  const unrecorded = unrecordedParts({
+    diagnoses: diagnoses.length,
+    procedures: procedures.length,
+    evolution: Boolean(encounter.evolution),
+    indications: Boolean(encounter.indications),
+    issuedPrescription,
+    showDocuments,
+    documents: documents.length,
+    forms: forms.length,
+  })
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
