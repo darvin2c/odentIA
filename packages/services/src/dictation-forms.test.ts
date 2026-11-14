@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { listFormResponses } from "./clinical-forms.js"
-import { type DictationFormQuestion, dictationFormQuestions, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
+import { type DictationFormQuestion, dictationFormQuestions, formQuestionsOf, prepareFormAnswer, saidNumbers } from "./dictation-forms.js"
 import { confirmDictationSuggestion, listDictationSuggestions, saveDictationSegment } from "./encounter-dictation.js"
 import type { ProductSite } from "./product-hooks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -106,7 +106,83 @@ describe("lo que propone Clío se comprueba contra lo que se dijo", () => {
     expect(propose({ question: 5, answer: "19" }, "la diecinueve")).toMatchObject({ status: "por_revisar" })
   })
   it("varias opciones: solo las que están en la lista", () => {
-    expect(propose({ question: 6, answers: ["Onicofagia", "Bruxismo"] }, "se come las uñas")).toMatchObject({ status: "lista", payload: { value: ["Onicofagia"] } })
+    expect(propose({ question: 6, answers: ["Onicofagia", "Bruxismo"] }, "hábitos: onicofagia")).toMatchObject({ status: "lista", payload: { value: ["Onicofagia"] } })
+    // La opción exige su palabra: «se come las uñas» no dice «Onicofagia» (decidido el 14 nov).
+    expect(propose({ question: 6, answers: ["Onicofagia"] }, "se come las uñas")).toBeNull()
+  })
+})
+
+describe("lo que el servidor dejaba pasar (QA del 14 nov)", () => {
+  const ORTHO = {
+    sections: [
+      {
+        id: "o",
+        title: "Oclusión",
+        fields: [
+          { id: "clase_molar_derecha", label: "Clase molar derecha (Angle)", type: "opcion_unica", options: ANGLE },
+          { id: "clase_canina_derecha", label: "Clase canina derecha", type: "opcion_unica", options: ["Clase I", "Clase II", "Clase III"] },
+          { id: "clase_canina_izquierda", label: "Clase canina izquierda", type: "opcion_unica", options: ["Clase I", "Clase II", "Clase III"] },
+          { id: "mordida_cruzada", label: "Mordida cruzada", type: "opcion_multiple", options: ["No tiene", "Anterior", "Posterior derecha", "Posterior izquierda"] },
+          { id: "apinamiento", label: "Apiñamiento", type: "opcion_unica", options: ["No", "Leve", "Moderado", "Severo"] },
+          { id: "linea_media_superior", label: "Línea media superior", type: "opcion_unica", options: ["Centrada", "Desviada a la derecha", "Desviada a la izquierda"] },
+          { id: "linea_media_inferior", label: "Línea media inferior", type: "opcion_unica", options: ["Centrada", "Desviada a la derecha", "Desviada a la izquierda"] },
+        ],
+      },
+    ],
+  }
+  const ENDO = {
+    sections: [
+      {
+        id: "e",
+        title: "Pieza y pruebas",
+        fields: [
+          { id: "pieza", label: "Pieza", type: "pieza" },
+          { id: "tumefaccion", label: "Tumefacción", type: "opcion_unica", options: ["No tiene", "Intraoral", "Extraoral"] },
+          { id: "fistula", label: "Fístula (tracto sinusal)", type: "booleano" },
+          { id: "movilidad", label: "Movilidad", type: "opcion_unica", options: ["Grado 0 (fisiológica)", "Grado 1", "Grado 2", "Grado 3"] },
+          { id: "percusion", label: "Percusión", type: "opcion_unica", options: ["Negativa", "Positiva"] },
+          { id: "palpacion", label: "Palpación", type: "opcion_unica", options: ["Negativa", "Positiva"] },
+        ],
+      },
+    ],
+  }
+  const forms = formQuestionsOf([
+    { id: "orto", title: "Ficha de ortodoncia", snapshot: ORTHO, answers: {} },
+    { id: "endo", title: "Evaluación de endodoncia", snapshot: ENDO, answers: {} },
+  ])
+  const ask = (fieldId: string, answer: string | string[], said: string) => {
+    const number = forms.find((item) => item.fieldId === fieldId)?.number
+    const payload = Array.isArray(answer) ? { question: number, answers: answer } : { question: number, answer }
+    return prepareFormAnswer({ payload, sourceText: said }, forms, FDI)
+  }
+
+  it("una opción sin número exige su palabra; «No», «No tiene» o «Negativa», una negación y la pregunta nombrada", () => {
+    expect(ask("mordida_cruzada", ["Anterior"], "mordida abierta anterior")).toBeNull()
+    expect(ask("palpacion", "Negativa", "percusión positiva")).toBeNull()
+    expect(ask("apinamiento", "No", "buena higiene, sin caries")).toBeNull()
+    expect(ask("tumefaccion", "No tiene", "dolor provocado al masticar")).toBeNull()
+    expect(ask("apinamiento", "No", "no hay apiñamiento")).toMatchObject({ status: "lista", payload: { value: "No" } })
+    expect(ask("tumefaccion", "No tiene", "sin tumefacción")).toMatchObject({ status: "lista", payload: { value: "No tiene" } })
+    expect(ask("mordida_cruzada", ["Anterior"], "mordida cruzada anterior")).toMatchObject({ status: "lista", payload: { value: ["Anterior"] } })
+  })
+  it("la frase tiene que hablar de esa pregunta: el lado y superior o inferior", () => {
+    expect(ask("clase_canina_izquierda", "Clase I", "clase canina derecha clase uno")).toBeNull()
+    expect(ask("clase_canina_derecha", "Clase I", "clase canina derecha clase uno")).toMatchObject({ status: "lista" })
+    expect(ask("linea_media_inferior", "Centrada", "línea media superior centrada")).toBeNull()
+  })
+  it("«un» y «una» no cuentan como 1 al elegir una opción", () => {
+    expect(ask("clase_molar_derecha", "Clase II división 1", "una clase dos molar derecha")).not.toMatchObject({ status: "lista" })
+    expect(ask("movilidad", "Grado 1", "un diente con movilidad grado dos")).not.toMatchObject({ status: "lista" })
+  })
+  it("un «Sí» con una negación queda por revisar; «sin embargo» no niega", () => {
+    expect(ask("fistula", "Sí", "no hay fístula")).toMatchObject({ status: "por_revisar" })
+    expect(ask("fistula", "Sí", "sin embargo hay fístula")).toMatchObject({ status: "lista", payload: { value: true } })
+  })
+  it("«al menos dos» no es menos dos, y la pieza se dice dígito a dígito", () => {
+    expect(saidNumbers("al menos dos")).toEqual([2])
+    expect(saidNumbers("por lo menos dos")).toEqual([2])
+    expect(saidNumbers("menos dos")).toEqual([-2])
+    expect(ask("pieza", "46", "en la cuatro seis")).toMatchObject({ status: "lista", payload: { value: 46 } })
   })
 })
 

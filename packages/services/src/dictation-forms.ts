@@ -44,6 +44,12 @@ export interface DictationFormQuestion {
   order: number
   /** La pregunta de la que depende, si la tiene (`showIf`). */
   dependsOn: { fieldId: string; label: string; equals: string | boolean } | null
+  /**
+   * Las etiquetas de las otras preguntas de la ficha: lo que distingue a esta de
+   * una parecida (el lado, canina o molar, superior o inferior) tiene que estar
+   * en la frase.
+   */
+  siblings?: Array<{ label: string; type: string; options: string[] | null }>
 }
 
 /**
@@ -115,6 +121,7 @@ export function formQuestionsOf(
         max: field.max ?? null,
         order,
         dependsOn: field.showIf && parent ? { fieldId: parent.id, label: parent.label, equals: field.showIf.equals } : null,
+        siblings: fields.filter((item) => item.id !== field.id).map((item) => ({ label: item.label, type: item.type, options: item.options ?? null })),
       })
     })
   }
@@ -149,7 +156,7 @@ const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6,
  * sueltos («Clase II»: así se escriben las opciones; «largos», solo los de dos
  * letras o más, para lo dictado).
  */
-export function saidNumbers(text: string, options: { roman?: "todos" | "largos" } = {}): number[] {
+export function saidNumbers(text: string, options: { roman?: "todos" | "largos"; articles?: boolean } = {}): number[] {
   const found: number[] = []
   if (options.roman) {
     // En lo dictado o escrito, una «I» suelta es casi siempre otra cosa: ahí solo los de dos letras o más («clase II»).
@@ -167,7 +174,10 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos" 
     .filter(Boolean)
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] ?? ""
-    const negative = word === "menos"
+    // «una clase dos», «un diente»: el artículo no es el número 1 cuando se elige una opción.
+    if (options.articles === false && (word === "un" || word === "una")) continue
+    // «al menos dos», «por lo menos dos»: no es un número negativo.
+    const negative = word === "menos" && words[index - 1] !== "al" && words[index - 1] !== "lo"
     const at = negative ? index + 1 : index
     const read = readNumber(words, at)
     if (!read) continue
@@ -186,6 +196,22 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos" 
     }
     found.push(negative ? -value : value)
     index = next - 1
+  }
+  return found
+}
+
+/**
+ * Las piezas dichas dígito a dígito, como en el odontograma: «la cuatro seis»
+ * es la 46, además de un 4 y un 6.
+ */
+function toothNumbersIn(text: string): number[] {
+  const words = plain(text).split(/[^a-z0-9]+/).filter(Boolean)
+  const digit = (word: string | undefined) => (word !== undefined && /^[1-9]$/.test(word) ? Number(word) : word !== undefined && word !== "un" && word !== "una" && word in UNITS ? (UNITS[word] ?? 0) : 0)
+  const found = saidNumbers(text)
+  for (let index = 0; index + 1 < words.length; index += 1) {
+    const tens = digit(words[index])
+    const unit = digit(words[index + 1])
+    if (tens >= 1 && tens <= 8 && unit >= 1 && unit <= 8) found.push(tens * 10 + unit)
   }
   return found
 }
@@ -229,6 +255,48 @@ const optionNumbers = (option: string) => saidNumbers(option, { roman: "todos" }
 
 /** «No», «sin», «niega»…: un «No» solo se propone si se negó en voz alta. El silencio no es «No». */
 const NEGATION = /\b(no|sin|niega|niegan|negativ[oa]s?|ausente|ausencia|ningun[oa]?|nunca|tampoco|descarta)\b/
+/** ¿Se negó algo en la frase? «sin embargo» no niega nada. */
+const denies = (said: string) => NEGATION.test(plain(said).replace(/\bsin embargo\b/g, ""))
+/** Una opción que dice que no hay nada: «No», «No tiene», «Negativa», «Ninguno», «Ausente». */
+const isNegativeOption = (option: string) => /^(no|sin|ningun[oa]?|nada|negativ[oa]|ausente)\b/.test(plain(option))
+
+/** Palabras que no distinguen una pregunta ni una opción. */
+const FILLER = new Set(["del", "las", "los", "con", "por", "para", "que", "una", "uno", "angle", "mas"])
+/** Las raíces de las palabras de un texto (sus 5 primeras letras): «molares» y «molar», «desviada» y «desviación». */
+const stemsOf = (text: string) => [
+  ...new Set(
+    plain(text)
+      .split(/[^a-z]+/)
+      .filter((word) => word.length >= 3 && !FILLER.has(word))
+      .map((word) => word.slice(0, 5)),
+  ),
+]
+
+/** Las raíces de una etiqueta sin lo que va entre paréntesis («(Angle)», «(tracto sinusal)», «(mm)»). */
+const labelStems = (label: string) => stemsOf(label.replace(/\([^)]*\)/g, " "))
+
+/**
+ * ¿La frase habla de esta pregunta? Lo que la distingue de una hermana del
+ * mismo tipo (el lado, canina o molar, superior o inferior, CPOD o ceod) tiene
+ * que estar dicho, y si se nombra su primera palabra («mordida») sin ninguna
+ * de las otras («cruzada»), habla de otra cosa («mordida abierta»).
+ */
+function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean {
+  const own = labelStems(question.label)
+  // Solo las hermanas del mismo tipo y con las mismas opciones: a las demás ya las distingue el valor.
+  const twins = (question.siblings ?? []).filter(
+    (item) => item.type === question.type && JSON.stringify(item.options ?? null) === JSON.stringify(question.options ?? null),
+  )
+  for (const twin of twins) {
+    const theirs = labelStems(twin.label)
+    const shared = own.filter((stem) => theirs.includes(stem))
+    const diff = own.filter((stem) => !theirs.includes(stem))
+    if (shared.length >= 1 && diff.length >= 1 && diff.length <= 2 && !diff.some((stem) => said.has(stem))) return false
+  }
+  const [head, ...rest] = own
+  if (head && rest.length && said.has(head) && !rest.some((stem) => said.has(stem))) return false
+  return true
+}
 
 /** Otra unidad de la misma magnitud dicha en la frase: no se convierte, no se propone. */
 const OTHER_UNITS: Record<string, RegExp> = {
@@ -280,49 +348,77 @@ export function prepareFormAnswer(
     ...(question.unit ? { unit: question.unit } : {}),
     ...(question.dependsOn ? { dependsOn: question.dependsOn } : {}),
   }
+  // Para un número, «un milímetro» es 1; para elegir una opción, «una clase dos» no dice «1».
   const heard = saidNumbers(said, { roman: "largos" })
+  const heardForOptions = saidNumbers(said, { roman: "largos", articles: false })
+  const spoken = new Set(stemsOf(said))
+  // La frase tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
+  if (!talksAbout(question, spoken)) return null
+  const labelSaid = labelStems(question.label).some((stem) => spoken.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
-  const option = (spoken: string) => (question.options ?? []).find((item) => plain(item) === plain(spoken)) ?? null
-  /** La opción, si lo que la distingue de las otras (su clase, su grado, su división) se dijo. */
-  const spoken = new Set(plain(said).split(/[^a-z]+/).filter((word) => word.length >= 3))
-  /** Las palabras de una opción, sin sus números («1 · Definitivamente negativa»: definitivamente, negativa). */
-  const wordsOf = (option: string) => plain(option).split(/[^a-z]+/).filter((word) => word.length >= 3)
-  const wordsSaid = (option: string) => wordsOf(option).length > 0 && wordsOf(option).every((word) => spoken.has(word))
-  const chosen = (value: string): { ok: true } | { ok: false; note: string } => {
+  const option = (text: string) => (question.options ?? []).find((item) => plain(item) === plain(text)) ?? null
+  const options = question.options ?? []
+  const ownStems = (item: string) => stemsOf(item)
+  const fullySaid = (item: string) => ownStems(item).length > 0 && ownStems(item).every((stem) => spoken.has(stem))
+  const score = (item: string) => ownStems(item).filter((stem) => spoken.has(stem)).length
+  const listNumbers = options.flatMap(optionNumbers)
+  const elige = (between: string[]) =>
+    `Dijiste «${shortSaid(said)}»: ${between.length >= 2 ? `no alcanza para elegir entre ${between.map((item) => `«${item}»`).join(" y ")}` : "elige tú la opción"}. Elige tú.`
+  /**
+   * ¿Lo dicho elige esta opción? `null`: no la dijo (no se propone). Una opción
+   * que dice que no hay nada exige una negación dicha y que se nombre la
+   * pregunta. Una con número, ese número dicho (sin contar «un» ni «una»); su
+   * número es solo un rótulo («1 · Definitivamente negativa») si se dijeron sus
+   * palabras, ninguna otra calza con más de lo dicho y no se dijo un número de
+   * la lista. Las demás, por sus palabras: en una sola, la que más calza, sin
+   * empate; en varias, la que tiene dicha una palabra que es solo suya.
+   */
+  const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string } | null => {
+    if (isNegativeOption(value)) return denies(said) && labelSaid ? { ok: true } : null
     const numbers = optionNumbers(value)
-    if (containsAll(heard, numbers)) return { ok: true }
-    // Su número es solo un rótulo («1 · Definitivamente negativa») si se dijeron sus palabras, alguna la
-    // distingue de las otras, ninguna otra calza con más de lo dicho y no se dijo un número de la lista.
-    const others = (question.options ?? []).filter((item) => item !== value)
-    const listNumbers = (question.options ?? []).flatMap(optionNumbers)
-    const distinct = wordsOf(value).some((word) => others.some((item) => !wordsOf(item).includes(word)))
-    const better = others.some((item) => wordsSaid(item) && wordsOf(item).length > wordsOf(value).length)
-    if (wordsSaid(value) && distinct && !better && !heard.some((number) => listNumbers.includes(number))) return { ok: true }
-    const known = numbers.filter((number) => containsAll(heard, [number]))
-    const close = (question.options ?? []).filter((item) => containsAll(optionNumbers(item), known))
-    const between = close.length >= 2 ? `no alcanza para elegir entre ${close.map((item) => `«${item}»`).join(" y ")}` : "elige tú la opción"
-    return { ok: false, note: `Dijiste «${shortSaid(said)}»: ${between}. Elige tú.` }
+    if (numbers.length) {
+      if (containsAll(heardForOptions, numbers)) return { ok: true }
+      const better = options.some((item) => item !== value && fullySaid(item) && ownStems(item).length > ownStems(value).length)
+      if (fullySaid(value) && !better && !heardForOptions.some((number) => listNumbers.includes(number))) return { ok: true }
+      const known = numbers.filter((number) => containsAll(heardForOptions, [number]))
+      if (!known.length && !score(value)) return null
+      return { ok: false, note: elige(options.filter((item) => containsAll(optionNumbers(item), known))) }
+    }
+    if (single) {
+      const mine = score(value)
+      if (!mine) return null
+      const best = Math.max(...options.map(score))
+      const tied = options.filter((item) => score(item) === best)
+      if (mine < best) return null
+      return tied.length === 1 ? { ok: true } : { ok: false, note: elige(tied) }
+    }
+    const unique = ownStems(value).filter((stem) => !options.some((item) => item !== value && ownStems(item).includes(stem)))
+    return (unique.length ? unique.some((stem) => spoken.has(stem)) : fullySaid(value)) ? { ok: true } : null
   }
 
   switch (question.type) {
     case "booleano": {
       const word = plain(raw)
-      if (TRUE_WORDS.has(word)) return ready(true)
-      if (FALSE_WORDS.has(word)) return NEGATION.test(plain(said)) ? ready(false) : null
+      // Sí o no, de esta pregunta: si no se la nombra, no se sabe a qué responde.
+      if (!labelSaid) return null
+      if (TRUE_WORDS.has(word)) return denies(said) ? review(null, `Dijiste «${shortSaid(said)}»: ¿es sí o no? Elige tú.`) : ready(true)
+      if (FALSE_WORDS.has(word)) return denies(said) ? ready(false) : null
       return null
     }
     case "opcion_unica": {
       const value = option(raw)
       if (!value) return null
-      const check = chosen(value)
+      const check = chosen(value, true)
+      if (!check) return null
       return check.ok ? ready(value) : review(null, check.note)
     }
     case "opcion_multiple": {
       const values = [...new Set((list.length ? list : raw ? [raw] : []).map(option).filter((item): item is string => item !== null))]
-      const kept = values.filter((value) => chosen(value).ok)
+      const checks = values.map((value) => ({ value, check: chosen(value, false) }))
+      const kept = checks.filter((item) => item.check?.ok).map((item) => item.value)
       if (kept.length) return ready(kept)
-      const failed = values.map(chosen).find((check) => !check.ok)
+      const failed = checks.find((item) => item.check && !item.check.ok)?.check
       return failed && !failed.ok ? review(null, failed.note) : null
     }
     case "numero":
@@ -331,7 +427,8 @@ export function prepareFormAnswer(
       const number = Number(raw.replace(",", "."))
       if (!raw || !Number.isFinite(number)) return null
       // El número tiene que estar en lo dicho: nunca uno que el modelo dedujo o convirtió.
-      if (!containsAll(heard, [number])) return null
+      // La pieza también se dice dígito a dígito («la cuatro seis»), como en el odontograma.
+      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : heard, [number])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       if (question.type === "pieza") {
