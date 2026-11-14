@@ -782,13 +782,55 @@ function isEmptyAnswer(value: unknown): boolean {
   return false
 }
 
-/** Qué quedó guardado en una pregunta cuyo valor nuevo no se aceptó: su aviso no promete de más ni de menos. */
-function keptWords(stored: unknown): string {
-  if (isEmptyAnswer(stored)) return "No se guardó: la pregunta sigue sin respuesta."
-  if (typeof stored === "boolean") return `No se guardó: sigue guardado «${stored ? "Sí" : "No"}».`
-  if (typeof stored === "number" || (typeof stored === "string" && stored.length <= 60))
-    return `No se guardó: sigue guardado «${stored}».`
-  return "No se guardó: sigue guardada la respuesta de antes."
+/**
+ * Lo que dice el problema de una pregunta debajo de ella, donde ya se ve cuál es: sin su etiqueta
+ * entre comillas ni signos de sistema («Va de 0 a 10.»). Fuera de ella se usa `message`.
+ */
+const localWords = new WeakMap<ServiceError, string>()
+
+/** Un problema de una pregunta: `"Intensidad" va de 0 a 10` fuera de ella, y `local` bajo ella. */
+function fieldIssue(field: FormFieldDef, words: string, local = `${words.charAt(0).toUpperCase()}${words.slice(1)}.`): ServiceError {
+  const error = validation(`"${field.label}" ${words}`)
+  localWords.set(error, local)
+  return error
+}
+
+/** El rango de un número, con palabras: «va de 0 a 10», «es de 1 o más». */
+function rangeWords(min: number | null | undefined, max: number | null | undefined): string {
+  if (min != null && max != null) return `va de ${min} a ${max}`
+  if (min != null) return `es de ${min} o más`
+  return `es de ${max} o menos`
+}
+
+/** Una fecha civil (`AAAA-MM-DD`) en el formato de la clínica; lo demás, tal cual. */
+function answerWords(value: unknown, locale: string): string {
+  if (typeof value === "boolean") return value ? "Sí" : "No"
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00Z`)
+    if (!Number.isNaN(date.getTime()))
+      return new Intl.DateTimeFormat(locale, { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" }).format(date)
+  }
+  return String(value)
+}
+
+/**
+ * El aviso de una pregunta cuyo valor nuevo no se aceptó, dicho bajo ella: qué pide, qué no se
+ * guardó y qué quedó guardado, sin prometer de más ni de menos. «Va de 0 a 10. El 15 no se
+ * guardó; sigue «8».»
+ */
+function rejectedWords(problem: string, sent: unknown, stored: unknown, locale: string): string {
+  const what =
+    typeof sent === "number"
+      ? `El ${sent} no se guardó`
+      : typeof sent === "string" && sent.trim() && sent.trim().length <= 40
+        ? `«${sent.trim()}» no se guardó`
+        : "No se guardó"
+  const kept = isEmptyAnswer(stored)
+    ? "la pregunta sigue sin respuesta"
+    : typeof stored === "boolean" || typeof stored === "number" || (typeof stored === "string" && stored.length <= 60)
+      ? `sigue «${answerWords(stored, locale)}»`
+      : "sigue la respuesta de antes"
+  return `${problem} ${what}; ${kept}.`
 }
 
 
@@ -811,6 +853,8 @@ export function assertAnswers(
     site?: ProductSite
     rejected?: Record<string, string>
     stored?: Record<string, unknown> | null
+    /** El idioma de la clínica, para decir una fecha guardada en su formato (`rejected`). */
+    locale?: string
   } = {},
 ): Record<string, unknown> {
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
@@ -836,7 +880,13 @@ export function assertAnswers(
       } catch (error) {
         if (!(error instanceof ServiceError) || error.code !== "VALIDATION") throw error
         const kept = options.rejected ? (options.stored?.[field.id] ?? null) : null
-        if (options.rejected) options.rejected[`answers.${field.id}`] = `${error.message}. ${keptWords(kept)}`
+        if (options.rejected)
+          options.rejected[`answers.${field.id}`] = rejectedWords(
+            localWords.get(error) ?? `${error.message}.`,
+            value,
+            kept,
+            options.locale ?? "es",
+          )
         else errors[`answers.${field.id}`] = error.message
         out[field.id] = kept
       }
@@ -877,12 +927,9 @@ function assertAnswer(
     }
     case "numero": {
       const num = typeof value === "number" ? value : Number(value)
-      if (!Number.isFinite(num)) throw validation(`"${field.label}" debe ser un número`)
-      if (field.min != null && num < field.min) {
-        throw validation(`"${field.label}" debe ser ≥ ${field.min}`)
-      }
-      if (field.max != null && num > field.max) {
-        throw validation(`"${field.label}" debe ser ≤ ${field.max}`)
+      if (!Number.isFinite(num)) throw fieldIssue(field, "debe ser un número", "Escribe un número.")
+      if ((field.min != null && num < field.min) || (field.max != null && num > field.max)) {
+        throw fieldIssue(field, rangeWords(field.min, field.max))
       }
       return num
     }
@@ -912,10 +959,10 @@ function assertAnswer(
     }
     case "fecha": {
       if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        throw validation(`"${field.label}" debe ser una fecha (AAAA-MM-DD)`)
+        throw fieldIssue(field, "debe ser una fecha completa", "Escribe la fecha completa: día, mes y año.")
       }
       const date = new Date(`${value}T00:00:00Z`)
-      if (Number.isNaN(date.getTime())) throw validation(`"${field.label}" no es una fecha válida`)
+      if (Number.isNaN(date.getTime())) throw fieldIssue(field, "no es una fecha que exista", "Esa fecha no existe.")
       return value
     }
     case "firma": {
@@ -941,7 +988,7 @@ function assertAnswer(
     case "escala": {
       const num = typeof value === "number" ? value : Number(value)
       if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
-        throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
+        throw fieldIssue(field, `${rangeWords(field.min ?? 0, field.max ?? 10)}${Number.isInteger(num) ? "" : ", en números enteros"}`)
       return num
     }
     case "adjunto": {
@@ -1372,6 +1419,7 @@ export async function updateFormResponseDraft(
     site: await siteOf(tx, orgId),
     rejected,
     stored: current.answers as Record<string, unknown> | null,
+    locale: (await findOrgLocale(tx, orgId)).locale,
   })
   // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas. Si lo
   // guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
