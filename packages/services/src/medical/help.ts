@@ -116,7 +116,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: «Antes de enviar» te recuerda cuál es. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer" && form !== "dos caminos") } : {}),
           },
         ]
