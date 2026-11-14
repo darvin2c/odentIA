@@ -87,6 +87,7 @@ import { listPlanItems } from "./plan.js"
 import type { ExamObservation, RecordSection, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { listDecisionRecipients } from "./responsibilities.js"
+import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 
 /** La pieza y las caras de un diagnóstico o procedimiento, sacadas de su sitio. */
 /** El sitio dicho por el producto: en palabras para el PDF y como `bodySite` para FHIR. */
@@ -139,6 +140,12 @@ export interface PatientRecord {
   consents: Array<typeof consentDocument.$inferSelect>
   documents: Array<typeof patientDocument.$inferSelect>
   appointments: Array<typeof appointment.$inferSelect>
+  /**
+   * Lo que contó antes de cada cita (mesa del 13 nov, entrega 8), con su cita, cuándo y por dónde lo
+   * envió, quién lo contó y quién lo vio al atender. Está para la copia; el PDF y el archivo para
+   * otro sistema aún no lo escriben (es de la entrega que arma la copia completa).
+   */
+  visitAnswers: Array<VisitAnswerView & { encounterId: string | null }>
 }
 
 /** Todo lo de la persona, de su clínica, en orden cronológico. */
@@ -329,6 +336,7 @@ export async function loadPatientRecord(
     consents,
     documents,
     appointments,
+    visitAnswers: await patientVisitAnswers(tx, orgId, patientId),
   }
 }
 
