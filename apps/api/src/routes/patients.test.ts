@@ -480,7 +480,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
       activeAllergies: { substance: string }[]
       activeConditions: unknown[]
       allergyReview: string | null
-      allergySaidNo: boolean | null
+      allergySaidNo: { by: { kind: string }; at: string | null } | null
     }
   }
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
@@ -493,8 +493,8 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(receptionBody.data.activeConditions).toEqual([])
   // Si se le preguntó por alergias, sí (la cabecera distingue «niega» de «no preguntado»).
   expect(receptionBody.data.allergyReview).toBe("recorded")
-  // Y si un «No» lo dijo la persona o lo anotó el equipo: aquí las registró el equipo.
-  expect(receptionBody.data.allergySaidNo).toBe(false)
+  // Y si un «No» lo dijo la persona, con quién fue: aquí las registró el equipo, así que no hay ninguno.
+  expect(receptionBody.data.allergySaidNo).toBeNull()
   const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
     method: "GET",
   })

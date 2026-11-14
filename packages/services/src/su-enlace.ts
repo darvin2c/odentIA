@@ -23,7 +23,6 @@ import {
   appointmentPlanItem,
   patient,
   patientDataConsent,
-  patientHealthDeclaration,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
@@ -71,7 +70,9 @@ import { currentCatalogMessage } from "./clinic-messages.js"
 import {
   type DeclaredPatientHealthInput,
   getPatientHealth,
+  declarantOfContact,
   initializeDeclaredPatientHealth,
+  recordHealthDeclaration,
 } from "./clinical.js"
 import {
   CONSENT_SIGNATURE_WORDS,
@@ -970,11 +971,13 @@ async function saveLinkData(
     // Y queda aparte tal como la envió, con quién y cuándo: Antecedentes guarda lo vigente, que el
     // equipo corrige; «Ver declaración original» muestra esto. Sin nada respondido, no hay qué guardar.
     if (saved.revision > 0)
-      await tx.insert(patientHealthDeclaration).values({
-        organizationId: orgId,
-        patientId,
+      await recordHealthDeclaration(tx, orgId, patientId, {
         via: "enlace",
-        respondent: link.row.contactId === personId ? "patient" : "representative",
+        // Quien abrió el enlace y lo envió: la persona o quien decide por ella, con su vínculo.
+        by:
+          link.row.contactId === personId
+            ? { kind: "patient", name: null, relation: null }
+            : await declarantOfContact(tx, orgId, patientId, link.row.contactId),
         health: input.health,
       })
   }

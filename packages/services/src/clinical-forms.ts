@@ -8,6 +8,7 @@ import {
   BUDGET_SIGNATURE_NOTE,
   CONSENT_SIGNATURE_NOTES,
   documentText,
+  type HealthDeclarant,
   isLeftOut,
   LEFT_OUT_DECISIONS,
   normalizeDrugText,
@@ -49,7 +50,13 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { findOrgLocale } from "./locale.js"
 import { requireCanAttend } from "./attending.js"
-import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
+import {
+  addDeclaredAllergies,
+  type DeclaredAllergy,
+  declarantOfContact,
+  declarantOfLink,
+  recordHealthDeclaration,
+} from "./clinical.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -1460,6 +1467,23 @@ export async function finalizeFormResponse(
     declaredAllergiesOf(schema, answers),
     { entity: "clinical_form_response", entityId: row.id },
   )
+  // Esas alergias las dijo quien respondió, el día en que lo envió: no quien lo revisa ni hoy. Con eso
+  // las nombra la ficha mientras nadie las confirme. En un formulario del equipo, las anotó el equipo.
+  if (passedAllergies.length > 0)
+    await recordHealthDeclaration(tx, orgId, row.patientId, {
+      via: "formulario",
+      by:
+        row.source === "portal"
+          ? await declarantOfContact(tx, orgId, row.patientId, row.respondentContactId)
+          : { kind: "staff", name: null, relation: null },
+      health: {
+        allergies: {
+          state: "recorded",
+          items: passedAllergies.map((substance) => ({ substance, severity: "desconocida" as const })),
+        },
+      },
+      saidAt: row.source === "portal" ? row.submittedAt : null,
+    })
   return { ...row, passedAllergies }
 }
 
@@ -1568,15 +1592,19 @@ export async function addFormAddendum(
   return row
 }
 
-/** Una respuesta con quien la envió, si fue el paciente o quien habla por él. */
+/**
+ * Una respuesta con quien la envió, si fue el paciente o quien habla por él: la
+ * misma forma con que la ficha nombra a quien dijo algo (`declarantOfLink`), para
+ * que el detalle del cuestionario y la franja digan la misma persona.
+ */
 export type ListedFormResponse = FormResponseRow & {
-  respondent: {
-    name: string
-    /** El vínculo con el paciente (`self` es la propia persona). */
-    relationship: string | null
-    relationshipDetail: string | null
-    kinship: string | null
-  } | null
+  respondent: (HealthDeclarant & { name: string }) | null
+  /**
+   * El equipo cambió estas respuestas después de que el paciente las envió,
+   * cuando aún se podía (antes de protegerlas): la última vez. Lo que se ve ya
+   * no es lo que él envió, y el original no se conserva. null si nadie las tocó.
+   */
+  editedByTeamAt: Date | null
 }
 
 export async function listFormResponses(
@@ -1617,17 +1645,49 @@ export async function listFormResponses(
     )
     .where(and(...conditions))
     .orderBy(desc(clinicalFormResponse.createdAt))
+  // Lo que el equipo guardó encima de lo ya enviado queda en la auditoría (`form_response.update`):
+  // el paciente, al responder, no la escribe.
+  const sent = rows.filter((row) => row.response.source === "portal" && row.response.submittedAt)
+  const edits = sent.length
+    ? await tx
+        .select({ entityId: auditEvent.entityId, at: auditEvent.createdAt })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.entity, "clinical_form_response"),
+            eq(auditEvent.action, "form_response.update"),
+            inArray(
+              auditEvent.entityId,
+              sent.map((row) => row.response.id),
+            ),
+          ),
+        )
+    : []
+  const editedAt = (response: FormResponseRow): Date | null => {
+    const submittedAt = response.submittedAt
+    if (response.source !== "portal" || !submittedAt) return null
+    return edits.reduce<Date | null>(
+      (last, edit) =>
+        edit.entityId === response.id && edit.at > submittedAt && (!last || edit.at > last) ? edit.at : last,
+      null,
+    )
+  }
   return rows.map((row) => ({
     ...row.response,
     respondent:
       row.name === null
         ? null
         : {
+            ...declarantOfLink({
+              name: row.name,
+              relationship: row.relationship,
+              relationshipDetail: row.relationshipDetail,
+              kinship: row.kinship,
+            }),
             name: row.name,
-            relationship: row.relationship,
-            relationshipDetail: row.relationshipDetail,
-            kinship: row.kinship,
           },
+    editedByTeamAt: editedAt(row.response),
   }))
 }
 

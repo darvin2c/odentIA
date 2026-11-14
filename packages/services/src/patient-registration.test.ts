@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import type { RegistrationAnswers } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -1755,6 +1756,78 @@ it("su entrevista declarada se suma campo por campo: lo que anotó el profesiona
   expect(after.medications.map((row) => row.name)).toEqual(["Losartán"])
   expect(after).toMatchObject({ reviewPending: true, reviewStatus: { medications: "recorded", conditions: "none" } })
   await publishAsking("org_a", { "personal.embarazo": "hidden" })
+})
+
+it("un registro retenido fecha lo que dijo con el día en que lo dijo, no con el día en que recepción lo resuelve", async () => {
+  await seedActor()
+  await publishAsking("org_a", { "personal.embarazo": "optional" })
+  // Ya estaba como contacto, con su celular: su registro en línea queda para «¿Es la misma persona?».
+  const [luz] = await ownerDb
+    .insert(contact)
+    .values({ organizationId: "org_a", displayName: "Luz Campos", givenNames: "Luz", familyName: "Campos", phone: "+51987650291" })
+    .returning({ id: contact.id })
+  const result = await registerOnline({
+    demographics: { displayName: "Luz Campos", givenNames: "Luz", familyName: "Campos", docType: "DNI", docNumber: "44044291", birthDate: ADULT_BIRTH, sex: "F", phone: "+51987650291" },
+    respondent: "patient",
+    health: { ...emptyClinical(), allergies: { state: "none", items: [] }, personal: { embarazo: true, semanasEmbarazo: 30 } },
+    privacyAccepted: true,
+  })
+  expect(result.held).not.toBeNull()
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", result.held!.hold))
+  const [task] = await ownerDb.select().from(crmTask).where(and(eq(crmTask.contactId, luz!.id), eq(crmTask.kind, "registro_con_documento")))
+  // Dijo 30 semanas hace dos semanas; recepción lo resuelve hoy.
+  const saidAt = new Date(Date.now() - 14 * 86_400_000)
+  await ownerDb.execute(sql`update registration_hold set created_at = ${saidAt.toISOString()}::timestamptz where task_id = ${task!.id}`)
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  const resolved = await withOrgContext(appDb, "org_a", (tx) =>
+    resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, revision: view.revision }),
+  )
+  const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", resolved.patientId))
+  const saidOn = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(saidAt)
+  // Hoy son 32, no 30: la fecha del embarazo es la del día en que lo dijo.
+  expect(health.pregnancy).toEqual({ state: "vigente", saidOn, weeksSaid: 30, weeksToday: 32 })
+  // Y la ficha lo nombra con ese día y con quien lo dijo.
+  expect(health.declared).toHaveLength(1)
+  expect(health.declared[0]).toMatchObject({ by: { kind: "patient" }, pregnancy: true, saidNo: { allergies: true } })
+  expect(health.declared[0]!.at?.getTime()).toBe(saidAt.getTime())
+  expect(health.declarations[0]).toMatchObject({ via: "registro", by: { kind: "patient" } })
+  await publishAsking("org_a", { "personal.embarazo": "hidden" })
+})
+
+it("lo que declaró quien registró a otra persona lleva su nombre y su vínculo, también en los registros de antes", async () => {
+  await seedActor()
+  await publish("org_a")
+  // Una adulta registrada por su hermana: no lo dijo ella.
+  const result = await registerOnline({
+    demographics: { displayName: "Nora Vera", givenNames: "Nora", familyName: "Vera", docType: "DNI", docNumber: "44044295", birthDate: ADULT_BIRTH, sex: "F", phone: "+51987650295" },
+    respondent: "representative",
+    representative: { displayName: "Rosa Vera", relationship: "family", relationshipDetail: "Hermana", phone: "+51987650296" },
+    health: { ...emptyClinical(), medications: { state: "recorded", items: [{ name: "Losartán" }] } },
+    privacyAccepted: true,
+  })
+  const patientId = result.patient!.id
+  const sister = { kind: "representative", name: "Rosa Vera", relation: "hermana" }
+  const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", patientId))
+  expect(health.declared).toHaveLength(1)
+  expect(health.declared[0]).toMatchObject({ by: sister, medications: health.medications.map((row) => row.id) })
+
+  // Un registro de antes de guardarse quién lo dijo: sin su declaración, la ficha no afirma un autor…
+  await ownerDb.execute(sql`delete from patient_health_declaration where patient_id = ${patientId}::uuid`)
+  const before = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", patientId))
+  expect(before.declared[0]?.by).toEqual({ kind: "unknown", name: null, relation: null })
+  // …y la migración la copia de lo que el registro ya guardaba, tal como está escrita.
+  const migration = readFileSync(new URL("../../db/drizzle/0114_quien_y_cuando_lo_dijo_reglas.sql", import.meta.url), "utf8")
+  for (const statement of migration.split("--> statement-breakpoint")) await ownerDb.execute(sql.raw(statement))
+  const after = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", patientId))
+  expect(after.declared).toHaveLength(1)
+  expect(after.declared[0]).toMatchObject({ by: sister, medications: health.medications.map((row) => row.id) })
+  expect(after.declared[0]!.at?.getTime()).toBe(health.declared[0]!.at?.getTime())
+  // Repetirla no duplica nada.
+  for (const statement of migration.split("--> statement-breakpoint")) await ownerDb.execute(sql.raw(statement))
+  const [{ rows }] = await ownerDb.execute<{ rows: number }>(
+    sql`select count(*)::int as rows from patient_health_declaration where patient_id = ${patientId}::uuid`,
+  )
+  expect(rows).toBe(1)
 })
 
 it("quien registra a otra persona no da su consentimiento por ella, y un permiso que cambió después del registro no se pisa", async () => {

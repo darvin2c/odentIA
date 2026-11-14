@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { encounter, patientAnamnesis } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { contact } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { markAllergiesReviewed } from "./allergies.js"
@@ -10,6 +12,7 @@ import {
   addFormAddendum,
   createFormResponse,
   createFormTemplate,
+  discardFormResponse,
   finalizeFormResponse,
   listFormAddenda,
   listFormResponses,
@@ -27,8 +30,9 @@ import {
 import { ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
-import { createPatient, patientPersonId } from "./patients.js"
+import { createPatient, patientPersonId, setPatientContact } from "./patients.js"
 import { submitQuestionnaireFromLink } from "./portal-questionnaire.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { submitPersonalLinkData } from "./su-enlace.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -96,6 +100,23 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
   return "OK"
 }
 
+/**
+ * El código de Postgres con que la base rechaza algo: `25001` es el disparador que cuida lo que
+ * envió el paciente y lo finalizado; `42501`, que la aplicación no tiene permiso para esa escritura.
+ */
+async function pgCodeOf(promise: PromiseLike<unknown>): Promise<string> {
+  try {
+    await promise
+  } catch (error) {
+    for (let cause: unknown = error; cause && typeof cause === "object"; cause = (cause as { cause?: unknown }).cause) {
+      const code = (cause as { code?: unknown }).code
+      if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code
+    }
+    throw error
+  }
+  return "OK"
+}
+
 const stored = async (id: string) =>
   (await ownerDb.select().from(clinicalFormResponse).where(eq(clinicalFormResponse.id, id)))[0]!
 
@@ -123,20 +144,30 @@ it("lo que envió el paciente no se edita: lo rechaza el servicio y lo rechaza l
     ),
   ).toBe("DECLARED_READ_ONLY")
   // La base, aunque el servicio no mirara: con el rol de la aplicación y con el dueño.
-  await expect(
-    f.run((tx) =>
-      tx
+  expect(
+    await pgCodeOf(
+      f.run((tx) =>
+        tx
+          .update(clinicalFormResponse)
+          .set({ answers: { motivo: "Otra cosa", anticoagulantes: false } })
+          .where(eq(clinicalFormResponse.id, response.id)),
+      ),
+    ),
+  ).toBe("25001")
+  expect(
+    await pgCodeOf(
+      ownerDb
         .update(clinicalFormResponse)
-        .set({ answers: { motivo: "Otra cosa", anticoagulantes: false } })
+        .set({ submittedAt: new Date(), respondentContactId: null })
         .where(eq(clinicalFormResponse.id, response.id)),
     ),
-  ).rejects.toThrow()
-  await expect(
-    ownerDb
-      .update(clinicalFormResponse)
-      .set({ submittedAt: new Date(), respondentContactId: null })
-      .where(eq(clinicalFormResponse.id, response.id)),
-  ).rejects.toThrow()
+  ).toBe("25001")
+  // Lo que hace el equipo al revisarlo sí pasa: la base cuida las respuestas, no traba la revisión.
+  expect(
+    await pgCodeOf(
+      ownerDb.update(clinicalFormResponse).set({ updatedAt: new Date() }).where(eq(clinicalFormResponse.id, response.id)),
+    ),
+  ).toBe("OK")
   expect((await stored(response.id)).answers).toEqual({ motivo: "Me duele la muela de abajo", anticoagulantes: true })
 })
 
@@ -172,6 +203,19 @@ it("un borrador del paciente a medias tampoco lo edita el equipo, y no se finali
   expect(await codeOf(f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, draft!.id)))).toBe("NOT_SUBMITTED")
   expect(await codeOf(f.run((tx) => addFormAddendum(tx, ORG, f.actor, draft!.id, "No aplica")))).not.toBe("OK")
   expect(await stored(draft!.id)).toMatchObject({ status: "borrador", answers: { motivo: "Me du" } })
+
+  // Nada queda sin salida: lo que dejó a medias, o lo que envió repetido, se descarta con su motivo
+  // (el servicio y la base lo permiten), y lo que dijo queda como estaba.
+  await f.run((tx) => discardFormResponse(tx, ORG, f.actor, draft!.id, "Lo dejó a medias y ya vino a la consulta"))
+  expect(await stored(draft!.id)).toMatchObject({ status: "descartado", discardedBy: f.actor, answers: { motivo: "Me du" } })
+  const repeated = await sent(f, marta, { motivo: "Dolor de muela", anticoagulantes: false })
+  expect(await codeOf(f.run((tx) => discardFormResponse(tx, ORG, f.actor, repeated.id, "")))).not.toBe("OK")
+  await f.run((tx) => discardFormResponse(tx, ORG, f.actor, repeated.id, "Lo envió dos veces"))
+  expect(await stored(repeated.id)).toMatchObject({
+    status: "descartado",
+    discardReason: "Lo envió dos veces",
+    answers: { motivo: "Dolor de muela", anticoagulantes: false },
+  })
 })
 
 it("la corrección se agrega antes y después de revisar, queda aparte con quién y cuándo, y lo que dijo no cambia", async () => {
@@ -200,9 +244,11 @@ it("la corrección se agrega antes y después de revisar, queda aparte con quié
   ])
   expect((await stored(response.id)).answers).toEqual({ motivo: "Dolor al masticar", anticoagulantes: true })
   // Las correcciones solo se agregan: la aplicación no las cambia.
-  await expect(
-    f.run((tx) => tx.update(clinicalFormAddendum).set({ text: "Otra" }).where(eq(clinicalFormAddendum.id, before.id))),
-  ).rejects.toThrow()
+  expect(
+    await pgCodeOf(
+      f.run((tx) => tx.update(clinicalFormAddendum).set({ text: "Otra" }).where(eq(clinicalFormAddendum.id, before.id))),
+    ),
+  ).toBe("42501")
 
   // Un borrador del equipo sigue como antes: se edita, y la adenda es para lo finalizado.
   const [staffTemplate] = await f.run(async (tx) => {
@@ -247,7 +293,8 @@ it("«Marcar como revisado» dice lo que pasó de verdad, guarda quién lo revis
   expect(inAttention).toHaveLength(1)
   expect(inAttention[0]).toMatchObject({ id: plain.id, finalizedBy: f.actor, submittedVia: "enlace" })
   expect(inAttention[0]!.finalizedAt).toBeInstanceOf(Date)
-  expect(inAttention[0]!.respondent).toMatchObject({ name: "Marta Luna", relationship: "self" })
+  expect(inAttention[0]!.respondent).toEqual({ kind: "patient", name: "Marta Luna", relation: null })
+  expect(inAttention[0]!.editedByTeamAt).toBeNull()
 
   // Con una pregunta de alergia, lo que escribió pasa y el servicio dice qué pasó.
   const rosa = await person(f, "Rosa", "Luna")
@@ -287,23 +334,30 @@ it("lo que la persona envió desde su enlace es su declaración original, y su �
 
   const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   // «Ver declaración original»: lo que envió, como llegó, con cuándo y quién.
-  expect(health.linkDeclaration).toMatchObject({ via: "enlace", respondent: "patient", health: said })
-  expect(health.linkDeclaration?.at).toBeInstanceOf(Date)
+  expect(health.declarations).toHaveLength(1)
+  expect(health.declarations[0]).toMatchObject({ via: "enlace", by: { kind: "patient" }, health: said })
+  expect(health.declarations[0]!.at).toBeInstanceOf(Date)
   // Una sola marca: lo dijo la persona y nadie lo revisó, con su fecha.
   expect(health.reviewPending).toBe(true)
-  expect(health.declared.at).toBeInstanceOf(Date)
-  expect(health.declared.medications).toEqual(health.medications.map((row) => row.id))
-  // El «No» lo dijo la persona: no es «niega · se le preguntó».
+  expect(health.declared).toHaveLength(1)
+  expect(health.declared[0]).toMatchObject({
+    by: { kind: "patient", name: null, relation: null },
+    medications: health.medications.map((row) => row.id),
+    // El «No» lo dijo la persona: no es «niega · se le preguntó».
+    saidNo: { allergies: true, conditions: true, medications: false },
+  })
+  expect(health.declared[0]!.at?.getTime()).toBe(health.declarations[0]!.at.getTime())
   expect(health.reviewStatus).toMatchObject({ allergies: "none", conditions: "none" })
-  expect(health.declared.saidNo).toEqual({ allergies: true, conditions: true, medications: false })
-  // Recepción ve solo la alergia: también para ella es «dijo que no», no «niega».
-  expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, thiago.patientId))).toBe(true)
+  // Recepción ve solo la alergia: también para ella es «dijo que no», no «niega», y de quién.
+  expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, thiago.patientId))).toMatchObject({
+    by: { kind: "patient" },
+  })
 
   // Cuando el equipo lo pregunta y lo revisa, pasa a ser su «niega».
   await f.run((tx) => markAllergiesReviewed(tx, ORG, f.actor, thiago.patientId))
   const afterAllergies = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
-  expect(afterAllergies.declared.saidNo.allergies).toBe(false)
-  expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, thiago.patientId))).toBe(false)
+  expect(afterAllergies.declared[0]?.saidNo).toEqual({ allergies: false, conditions: true, medications: false })
+  expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, thiago.patientId))).toBeNull()
   await f.run((tx) =>
     savePatientHealth(tx, ORG, f.actor, thiago.patientId, {
       expectedRevision: afterAllergies.revision,
@@ -314,20 +368,187 @@ it("lo que la persona envió desde su enlace es su declaración original, y su �
   )
   const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   expect(reviewed.reviewPending).toBe(false)
-  expect(reviewed.declared).toMatchObject({
-    medications: [],
-    saidNo: { allergies: false, conditions: false, medications: false },
-  })
+  expect(reviewed.declared).toEqual([])
   // La declaración original no cambia aunque el equipo corrija lo vigente.
-  expect(reviewed.linkDeclaration?.health).toEqual(said)
+  expect(reviewed.declarations[0]?.health).toEqual(said)
 
   // «Niega enfermedades» que anota el clínico en la atención nunca fue un «dijo que no».
   const lia = await person(f, "Lía", "Paz")
   await f.run((tx) => markHealthDenied(tx, ORG, f.actor, lia.patientId, ["conditions"]))
   const denied = await f.run((tx) => getPatientHealth(tx, ORG, lia.patientId))
   expect(denied.reviewStatus.conditions).toBe("none")
-  expect(denied.declared.saidNo.conditions).toBe(false)
-  expect(denied.linkDeclaration).toBeNull()
+  expect(denied.declared).toEqual([])
+  expect(denied.declarations).toEqual([])
+})
+
+it("la marca nombra a quien lo dijo, no a quien figura como representante ni al preferido", async () => {
+  const f = await clinicalFixture()
+  // Una paciente de 19 años cuya madre sigue como su representante: lo envía ella.
+  const camila = await person(f, "Camila", "Soto")
+  const [suMadre] = await ownerDb
+    .insert(contact)
+    .values({ organizationId: ORG, displayName: "Elsa Soto" })
+    .returning({ id: contact.id })
+  await f.run((tx) =>
+    setPatientContact(tx, ORG, f.actor, camila.patientId, {
+      contactId: suMadre!.id,
+      relationship: "guardian",
+      kinship: "MTH",
+      isPreferred: true,
+    }),
+  )
+  const own = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: camila.personId, patientId: camila.patientId }, { secretsKey: KEY }),
+  )
+  const nineteen = `${new Date().getUTCFullYear() - 19}-01-15`
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, own.token, {
+      data: { birthDate: nineteen },
+      health: { medications: { state: "recorded", items: [{ name: "Isotretinoína" }] } },
+    }),
+  )
+  const hers = await f.run((tx) => getPatientHealth(tx, ORG, camila.patientId))
+  expect(hers.declared).toHaveLength(1)
+  expect(hers.declared[0]?.by).toEqual({ kind: "patient", name: null, relation: null })
+
+  // Un niño con padre (el preferido) y madre: lo llenó la madre desde su enlace.
+  const nino = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, {
+      displayName: "Thiago Paz",
+      givenNames: "Thiago",
+      familyName: "Paz",
+      birthDate: `${new Date().getUTCFullYear() - 6}-03-02`,
+    }),
+  )
+  const [padre, madre] = await ownerDb
+    .insert(contact)
+    .values([
+      { organizationId: ORG, displayName: "Luis Paz", phone: "+51987111301" },
+      { organizationId: ORG, displayName: "Carla Paz Soto", phone: "+51987111302" },
+    ])
+    .returning({ id: contact.id })
+  for (const [who, kinship, isPreferred] of [
+    [padre!, "FTH", true],
+    [madre!, "MTH", false],
+  ] as const) {
+    await f.run((tx) =>
+      setPatientContact(tx, ORG, f.actor, nino.id, { contactId: who.id, relationship: "guardian", kinship, isPreferred }),
+    )
+    await f.run((tx) =>
+      grantResponsibility(tx, ORG, f.actor, nino.id, { contactId: who.id, kind: "representante_legal", startsAt: "2020-01-01" }),
+    )
+  }
+  const mothers = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: madre!.id, patientId: nino.id }, { secretsKey: KEY }),
+  )
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, mothers.token, {
+      data: {},
+      health: {
+        allergies: { state: "none", items: [] },
+        conditions: { state: "recorded", items: [{ name: "Asma" }] },
+      },
+    }),
+  )
+  const his = await f.run((tx) => getPatientHealth(tx, ORG, nino.id))
+  expect(his.declared).toHaveLength(1)
+  expect(his.declared[0]).toMatchObject({
+    by: { kind: "representative", name: "Carla Paz Soto", relation: "madre" },
+    conditions: his.conditions.map((row) => row.id),
+    saidNo: { allergies: true },
+  })
+  expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, nino.id))).toMatchObject({
+    by: { kind: "representative", name: "Carla Paz Soto", relation: "madre" },
+  })
+  // Lo que se sabía ese día queda escrito: no cambia si después se corrige su vínculo.
+  await f.run((tx) =>
+    setPatientContact(tx, ORG, f.actor, nino.id, { contactId: madre!.id, relationship: "family", isPreferred: false }),
+  )
+  expect((await f.run((tx) => getPatientHealth(tx, ORG, nino.id))).declared[0]?.by).toEqual({
+    kind: "representative",
+    name: "Carla Paz Soto",
+    relation: "madre",
+  })
+})
+
+it("cada cosa conserva el día en que se dijo: las alergias de un cuestionario son del día en que lo envió, no del día en que se revisó", async () => {
+  const f = await clinicalFixture()
+  const marta = await person(f, "Marta", "Campos")
+  // El 13 envió el cuestionario con su alergia (hace una semana); hoy completa su salud en su enlace.
+  await questionnaire(f, "Cuestionario con su alergia", [
+    ...WHY,
+    { id: "alergias", label: "¿A qué eres alérgica?", type: "texto_largo", definition: "AllergyIntolerance.code" },
+  ])
+  const [template] = await ownerDb
+    .select()
+    .from(clinicalFormTemplate)
+    .where(and(eq(clinicalFormTemplate.organizationId, ORG), eq(clinicalFormTemplate.status, "publicado"), eq(clinicalFormTemplate.respondent, "portal")))
+  const sentAt = new Date(Date.now() - 7 * 86_400_000)
+  const [response] = await ownerDb
+    .insert(clinicalFormResponse)
+    .values({
+      organizationId: ORG,
+      templateId: template!.id,
+      templateVersion: template!.version,
+      templateTitle: template!.title,
+      templateSnapshot: template!.schema as Record<string, unknown>,
+      patientId: marta.patientId,
+      status: "borrador",
+      answers: { motivo: "Control", alergias: "Penicilina" },
+      source: "portal",
+      respondentContactId: marta.personId,
+      submittedAt: sentAt,
+      submittedVia: "enlace",
+      createdAt: sentAt,
+    })
+    .returning()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1960-06-01" },
+      health: { medications: { state: "recorded", items: [{ name: "Warfarina" }] } },
+    }),
+  )
+  // La doctora lo marca como revisado hoy: la alergia entra hoy, pero ella la dijo el 13.
+  await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, response!.id))
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
+  expect(health.allergies.map((row) => row.substance)).toEqual(["Penicilina"])
+  // Dos fechas, dos grupos: lo de hace una semana no sale como dicho hoy, ni lo de hoy como de entonces.
+  expect(health.declared).toHaveLength(2)
+  const [first, second] = health.declared
+  expect(first).toMatchObject({ by: { kind: "patient" }, allergies: [health.allergies[0]!.id], medications: [] })
+  expect(first!.at?.getTime()).toBe(sentAt.getTime())
+  expect(second).toMatchObject({ by: { kind: "patient" }, allergies: [], medications: [health.medications[0]!.id] })
+  expect(Date.now() - (second!.at?.getTime() ?? 0)).toBeLessThan(60_000)
+  // El detalle del cuestionario nombra a la misma persona que la marca.
+  const [listed] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: marta.patientId }))
+  expect(listed?.respondent).toMatchObject({ kind: first!.by.kind, name: "Marta Campos" })
+})
+
+it("lo que el equipo cambió antes de este cambio no se presenta como intacto", async () => {
+  const f = await clinicalFixture()
+  const marta = await person(f, "Marta", "Quiroz")
+  const otra = await person(f, "Rosa", "Quiroz")
+  await questionnaire(f, "Cuestionario ya editado", WHY)
+  const touched = await sent(f, marta, { motivo: "Dolor", anticoagulantes: true })
+  const intact = await sent(f, otra, { motivo: "Control", anticoagulantes: false })
+  // Como quedó en la auditoría cuando aún se podía editar: un guardado del equipo después del envío.
+  const editedAt = new Date(touched.submittedAt!.getTime() + 120_000)
+  await ownerDb.insert(auditEvent).values({
+    organizationId: ORG,
+    actorUserId: f.actor,
+    action: "form_response.update",
+    entity: "clinical_form_response",
+    entityId: touched.id,
+    metadata: {},
+    createdAt: editedAt,
+  })
+  const [after] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: marta.patientId }))
+  expect(after?.editedByTeamAt?.getTime()).toBe(editedAt.getTime())
+  const [clean] = await f.run((tx) => listFormResponses(tx, ORG, { patientId: otra.patientId }))
+  expect(clean).toMatchObject({ id: intact.id, editedByTeamAt: null })
 })
 
 it("el embarazo declarado se guarda con el día en que se dijo, dice la semana de hoy y la fecha no cambia al editar otro dato", async () => {
@@ -352,8 +573,12 @@ it("el embarazo declarado se guarda con el día en que se dijo, dice la semana d
     embarazoLactancia: { embarazo: { estado: "si", fecha: today, semanas: 30 } },
   })
   expect(health.pregnancy).toEqual({ state: "vigente", saidOn: today, weeksSaid: 30, weeksToday: 30 })
-  expect(health.declared.pregnancy).toBe(true)
-  expect(health.declared.allergies).toEqual(health.allergies.map((row) => row.id))
+  expect(health.declared).toHaveLength(1)
+  expect(health.declared[0]).toMatchObject({
+    by: { kind: "patient" },
+    pregnancy: true,
+    allergies: health.allergies.map((row) => row.id),
+  })
 
   // Lo dijo hace cuatro semanas (la que ya tenía ficha y se registró otra vez en línea): hoy son 34.
   const luz = await person(f, "Luz", "Vega")
@@ -393,8 +618,8 @@ it("el embarazo declarado se guarda con el día en que se dijo, dice la semana d
   })
   expect(edited.pregnancy).toEqual({ state: "vigente", saidOn, weeksSaid: 30, weeksToday: 34 })
   // Revisado por el equipo: ya no es «lo dijo ella, sin revisar», pero el embarazo sigue arriba.
-  expect(later.declared.pregnancy).toBe(true)
-  expect(edited.declared.pregnancy).toBe(false)
+  expect(later.declared.some((group) => group.pregnancy)).toBe(true)
+  expect(edited.declared).toEqual([])
 
   // Sin la fecha no se guarda: no habría semana de hoy que decir.
   await expect(
@@ -412,23 +637,41 @@ it("el embarazo declarado se guarda con el día en que se dijo, dice la semana d
     ),
   ).rejects.toThrow(/fecha/)
 
-  // Lo guardado antes, sin fecha: se sigue leyendo y pide confirmar.
+  // Lo guardado antes, sin fecha: toma la del día en que se anotó ese «sí» (su primera versión con él) y
+  // no pierde la alerta; las versiones guardadas no se reescriben.
   const ana = await person(f, "Ana", "Vega")
-  await ownerDb.insert(patientAnamnesis).values({
-    organizationId: ORG,
-    patientId: ana.patientId,
-    version: 1,
-    answers: { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12 } },
-    createdBy: f.actor,
-  })
+  const noted = new Date(Date.now() - 14 * 86_400_000)
+  const notedOn = await f.run((tx) => clinicToday(tx, ORG, noted))
+  await ownerDb.insert(patientAnamnesis).values([
+    {
+      organizationId: ORG,
+      patientId: ana.patientId,
+      version: 1,
+      answers: { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12 } },
+      createdBy: f.actor,
+      createdAt: noted,
+    },
+    {
+      // Después alguien anotó otra cosa: el «sí» y sus semanas siguen siendo los de la primera.
+      organizationId: ORG,
+      patientId: ana.patientId,
+      version: 2,
+      answers: { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12, cirugias: "Apendicectomía" } },
+      createdBy: f.actor,
+      createdAt: new Date(Date.now() - 86_400_000),
+    },
+  ])
   const before = await f.run((tx) => getPatientHealth(tx, ORG, ana.patientId))
-  expect(before.pregnancy).toEqual({ state: "por_confirmar", saidOn: null, weeksSaid: 12, weeksToday: null })
-  const [kept] = await ownerDb
-    .select()
+  expect(before.pregnancy).toEqual({ state: "vigente", saidOn: notedOn, weeksSaid: 12, weeksToday: 14 })
+  const kept = await ownerDb
+    .select({ answers: patientAnamnesis.answers })
     .from(patientAnamnesis)
     .where(eq(patientAnamnesis.patientId, ana.patientId))
     .orderBy(desc(patientAnamnesis.version))
-  expect(kept?.answers).toEqual({ antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12 } })
+  expect(kept.map((row) => row.answers)).toEqual([
+    { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12, cirugias: "Apendicectomía" } },
+    { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 12 } },
+  ])
 })
 
 it("lo finalizado antes de este cambio recibe quién lo finalizó y por dónde llegó, desde la auditoría", async () => {
@@ -461,7 +704,9 @@ it("lo finalizado antes de este cambio recibe quién lo finalizó y por dónde l
 
   expect(await stored(response.id)).toMatchObject({ finalizedBy: f.actor, submittedVia: "enlace", status: "finalizado" })
   // Y lo finalizado vuelve a quedar cerrado.
-  await expect(
-    ownerDb.update(clinicalFormResponse).set({ finalizedBy: null }).where(eq(clinicalFormResponse.id, response.id)),
-  ).rejects.toThrow()
+  expect(
+    await pgCodeOf(
+      ownerDb.update(clinicalFormResponse).set({ finalizedBy: null }).where(eq(clinicalFormResponse.id, response.id)),
+    ),
+  ).toBe("25001")
 })

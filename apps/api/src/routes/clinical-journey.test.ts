@@ -1320,9 +1320,9 @@ it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Ma
       { motivo: "Me duele la muela", alergias: "Penicilina: ronchas" },
     )
   })
-  type Listed = { id: string; source: string; submittedVia: string | null; finalizedBy: string | null; encounterId: string | null; respondent: { relationship: string | null } | null }
+  type Listed = { id: string; source: string; submittedVia: string | null; finalizedBy: string | null; encounterId: string | null; respondent: { kind: string; name: string } | null; editedByTeamAt: string | null }
   const list = await json<{ data: Listed[] }>(await app.request(`/clinical-forms/form-responses?patientId=${patientId}`))
-  expect(list.data[0]).toMatchObject({ source: "portal", submittedVia: "enlace", respondent: { relationship: "self" } })
+  expect(list.data[0]).toMatchObject({ source: "portal", submittedVia: "enlace", respondent: { kind: "patient" }, editedByTeamAt: null })
   const responseId = list.data[0]!.id
 
   // No se edita: el servidor lo rechaza.

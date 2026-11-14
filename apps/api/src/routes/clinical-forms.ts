@@ -737,7 +737,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
         body = null
       }
     }
-    const parsed = z.object({ encounterId: z.string().uuid().nullish() }).strict().safeParse(body)
+    const parsed = z.object({ encounterId: z.uuid().nullish() }).strict().safeParse(body)
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>

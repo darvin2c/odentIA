@@ -882,7 +882,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           missingData: canEdit ? await getStaffMissingData(tx, orgId, c.req.param("id")) : null,
         }
         // Con lo clínico va también si se le preguntó por alergias: la atención lo dice (revisión del 9 nov).
-        // Si el «No» a las alergias lo dijo la persona y nadie lo revisó: no es un «niega» del equipo.
+        // Si el «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó, con
+        // quién lo dijo y cuándo: no es un «niega» del equipo. null si no es un «No» declarado.
         const seesAllergies = clinicalRead || canAccess(memberRole, "clinical.alerts")
         const allergySaidNo = seesAllergies ? await allergiesSaidNoByPatient(tx, orgId, c.req.param("id")) : null
         if (clinical)

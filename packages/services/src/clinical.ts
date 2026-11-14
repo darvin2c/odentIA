@@ -23,7 +23,11 @@ import {
   DIAGNOSIS_VERIFICATION,
   FAMILY_KINSHIP,
   type HealthAuthorship,
+  type HealthDeclarant,
   healthReviewPending,
+  KINSHIP_LABELS,
+  legacyPregnancySaidOn,
+  pregnancyRecordOf,
   isImageDocumentCategory,
   type PregnancyToday,
   pregnancyToday,
@@ -42,6 +46,7 @@ import {
   patientAllergy,
   patientAnamnesis,
   patientCondition,
+  patientContact,
   patientFamilyHistory,
   patientHealthDeclaration,
   patientDocument,
@@ -54,6 +59,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
+import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { allergyReviewDue } from "./allergies.js"
@@ -261,12 +267,12 @@ export interface PatientHealth {
    * en la atención) no lo deja pendiente.
    */
   reviewPending: boolean
-  /** Lo que dijo la persona y nadie revisó: una sola marca para la ficha y la atención. */
-  declared: DeclaredHealthMark
+  /** Lo que se dijo de su salud y nadie revisó, por declaración: quién, cuándo y qué. */
+  declared: DeclaredHealthGroup[]
   /** El embarazo a hoy, con el día en que se dijo y la semana calculada; null si no hay. */
   pregnancy: PregnancyToday | null
-  /** Lo último que envió de su salud desde su enlace, tal como llegó («Ver declaración original»). */
-  linkDeclaration: HealthDeclaration | null
+  /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo («Ver declaración original»). */
+  declarations: HealthDeclaration[]
   allergies: HealthAllergyRow[]
   conditions: HealthConditionRow[]
   medications: HealthMedicationRow[]
@@ -274,29 +280,36 @@ export interface PatientHealth {
 }
 
 /**
- * Lo que la persona (o quien habla por ella) dijo de su salud y ningún
- * profesional revisó todavía. Lo decide el servidor, que sabe quién escribió
- * cada cosa: la pantalla solo lo marca, igual en la franja, Antecedentes y la
- * atención. Las alergias tienen su propia revisión (`allergiesReviewedAt`).
+ * Lo que alguien dijo de la salud de la persona en una misma declaración y
+ * ningún profesional revisó todavía: quién lo dijo, cuándo y qué. Lo decide el
+ * servidor, que sabe de qué declaración es cada cosa: la pantalla solo lo
+ * escribe, igual en la franja, Antecedentes y la atención. Con más de una
+ * declaración sin revisar hay un grupo por cada una: nada se le atribuye a
+ * quien no lo dijo ni a otro día. Las alergias tienen su propia revisión
+ * (`allergiesReviewedAt`).
  */
-export interface DeclaredHealthMark {
-  /** Cuándo lo dijo por última vez; null si nunca declaró nada. */
+export interface DeclaredHealthGroup {
+  by: HealthDeclarant
+  /** Cuándo lo dijo; null si no consta. */
   at: Date | null
   /** Las alergias, enfermedades y medicinas que dijo y siguen sin revisar (ids). */
   allergies: string[]
   conditions: string[]
   medications: string[]
-  /** El embarazo de la entrevista lo dijo ella y sigue sin revisar. */
+  /** El embarazo de la entrevista lo dijo en esta declaración y sigue sin revisar. */
   pregnancy: boolean
-  /** Su «No» a un grupo: lo dijo la persona, no lo preguntó ni lo anotó un profesional. */
+  /** Su «No» a un grupo: lo dijo quien declaró, no lo preguntó ni lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
 
 /** Una declaración de salud como llegó: no cambia aunque el equipo corrija lo vigente. */
 export interface HealthDeclaration {
+  /** Cuándo lo dijo. */
   at: Date
+  /** Cuándo entró a su ficha (el instante de su registro, si vino con él). */
+  enteredAt: Date
   via: (typeof HEALTH_DECLARATION_VIAS)[number]
-  respondent: "patient" | "representative"
+  by: HealthDeclarant
   health: DeclaredPatientHealthInput
 }
 
@@ -649,50 +662,121 @@ export async function getPatientHealth(
   }
   const authorship = await healthAuthorshipOf(tx, orgId, patientId)
   const reviewPending = healthReviewPending(health, authorship)
-  // Lo que entró después del último guardado del equipo, con la salud aún por revisar, lo dijo la persona.
-  const sinceStaff = (at: Date) => !authorship.staffSavedAt || at > authorship.staffSavedAt
-  const allergiesReviewed = header.allergiesReviewedAt
-  const [linkDeclaration] = await tx
-    .select({
-      at: patientHealthDeclaration.createdAt,
-      via: patientHealthDeclaration.via,
-      respondent: patientHealthDeclaration.respondent,
-      health: patientHealthDeclaration.health,
-    })
-    .from(patientHealthDeclaration)
-    .where(
-      and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)),
-    )
-    .orderBy(desc(patientHealthDeclaration.createdAt))
-    .limit(1)
+  const declarations = await healthDeclarationsOf(tx, orgId, patientId)
+  const today = await clinicToday(tx, orgId)
+  // Lo guardado antes sin fecha toma la del día en que se anotó ese «sí»: sale de las versiones de la
+  // entrevista, al leer, sin reescribir ninguna.
+  let legacySaidOn: string | null = null
+  const record = pregnancyRecordOf(latest?.answers)
+  if (record?.estado === "si" && !record.fecha) {
+    const versions = await tx
+      .select({ answers: patientAnamnesis.answers, createdAt: patientAnamnesis.createdAt })
+      .from(patientAnamnesis)
+      .where(and(eq(patientAnamnesis.patientId, patientId), eq(patientAnamnesis.organizationId, orgId)))
+      .orderBy(desc(patientAnamnesis.version))
+    const days: Array<{ answers: unknown; day: string }> = []
+    for (const version of versions)
+      days.push({ answers: version.answers, day: await clinicToday(tx, orgId, version.createdAt) })
+    legacySaidOn = legacyPregnancySaidOn(days)
+  }
+  const pregnancy = pregnancyToday(latest?.answers, today, { legacySaidOn })
   return {
     ...health,
     reviewPending,
-    declared: {
-      at: authorship.declaredAt,
-      allergies: allergies
-        .filter(
-          (row) =>
-            row.isActive &&
-            row.source === "paciente" &&
-            row.verification !== "descartada" &&
-            (!allergiesReviewed || row.createdAt > allergiesReviewed),
-        )
-        .map((row) => row.id),
-      conditions: reviewPending ? conditions.filter((row) => sinceStaff(row.createdAt)).map((row) => row.id) : [],
-      medications: reviewPending ? medications.filter((row) => sinceStaff(row.createdAt)).map((row) => row.id) : [],
-      pregnancy: reviewPending && !!latest && sinceStaff(latest.createdAt),
-      saidNo: {
-        allergies: allergiesSaidNo(health.reviewStatus.allergies, allergiesReviewed, authorship),
-        conditions:
-          reviewPending && health.reviewStatus.conditions === "none" && !authorship.deniedGroups.includes("conditions"),
-        medications:
-          reviewPending && health.reviewStatus.medications === "none" && !authorship.deniedGroups.includes("medications"),
-      },
-    },
-    pregnancy: pregnancyToday(latest?.answers, await clinicToday(tx, orgId)),
-    linkDeclaration: linkDeclaration ?? null,
+    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy }),
+    pregnancy,
+    declarations,
   }
+}
+
+/** Las declaraciones de salud de la persona, de la más nueva a la más antigua. */
+async function healthDeclarationsOf(tx: Db, orgId: string, patientId: string): Promise<HealthDeclaration[]> {
+  const rows = await tx
+    .select()
+    .from(patientHealthDeclaration)
+    .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
+    .orderBy(desc(patientHealthDeclaration.createdAt))
+    .limit(50)
+  return rows.map((row) => ({
+    at: row.saidAt,
+    enteredAt: row.createdAt,
+    via: row.via,
+    by: { kind: row.respondent, name: row.declarantName, relation: row.declarantRelation },
+    health: row.health,
+  }))
+}
+
+const UNKNOWN_DECLARANT: HealthDeclarant = { kind: "unknown", name: null, relation: null }
+
+/**
+ * Lo que sigue sin revisar, agrupado por la declaración que lo trajo. Cada fila
+ * de Antecedentes entró en la misma transacción que su declaración
+ * (`recordHealthDeclaration`), así que comparten el instante: de ahí salen
+ * quién lo dijo y cuándo. Lo que no tiene declaración (lo anterior a guardarla)
+ * queda en un grupo sin autor, con la fecha en que entró: no se afirma quién.
+ */
+function declaredGroupsOf(input: {
+  health: Pick<PatientHealth, "allergies" | "conditions" | "medications" | "reviewStatus" | "allergiesReviewedAt">
+  reviewPending: boolean
+  authorship: HealthAuthorshipDetail
+  declarations: HealthDeclaration[]
+  latest: AnamnesisRow | null
+  pregnancy: PregnancyToday | null
+}): DeclaredHealthGroup[] {
+  const { health, reviewPending, authorship, declarations, latest } = input
+  const groups = new Map<string, DeclaredHealthGroup>()
+  const groupOf = (declaration: HealthDeclaration | undefined, fallbackAt: Date | null): DeclaredHealthGroup => {
+    // Sin declaración, un grupo por día en que entró: lo de dos días no se junta bajo una fecha.
+    const key = declaration ? `d:${declaration.enteredAt.getTime()}` : `?:${fallbackAt?.toISOString().slice(0, 10) ?? ""}`
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        by: declaration?.by ?? UNKNOWN_DECLARANT,
+        at: declaration?.at ?? fallbackAt,
+        allergies: [],
+        conditions: [],
+        medications: [],
+        pregnancy: false,
+        saidNo: { allergies: false, conditions: false, medications: false },
+      }
+      groups.set(key, group)
+    }
+    return group
+  }
+  const enteredWith = (at: Date) => declarations.find((row) => row.enteredAt.getTime() === at.getTime())
+  // Lo que entró después del último guardado del equipo, con la salud aún por revisar, lo dijo la persona.
+  const sinceStaff = (at: Date) => !authorship.staffSavedAt || at > authorship.staffSavedAt
+  const allergiesReviewed = health.allergiesReviewedAt
+  for (const row of health.allergies) {
+    if (!row.isActive || row.source !== "paciente" || row.verification === "descartada") continue
+    if (allergiesReviewed && row.createdAt <= allergiesReviewed) continue
+    groupOf(enteredWith(row.createdAt), row.createdAt).allergies.push(row.id)
+  }
+  if (reviewPending) {
+    for (const row of health.conditions)
+      if (sinceStaff(row.createdAt)) groupOf(enteredWith(row.createdAt), row.createdAt).conditions.push(row.id)
+    for (const row of health.medications)
+      if (sinceStaff(row.createdAt)) groupOf(enteredWith(row.createdAt), row.createdAt).medications.push(row.id)
+    if (input.pregnancy && latest && sinceStaff(latest.createdAt)) {
+      // El embarazo vigente lo dijo la última declaración que lo respondió.
+      const said = declarations.find((row) => typeof row.health.personal?.embarazo === "boolean")
+      groupOf(said, latest.createdAt).pregnancy = true
+    }
+  }
+  // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
+  const saidNo = {
+    allergies: allergiesSaidNo(health.reviewStatus.allergies, allergiesReviewed, authorship),
+    conditions:
+      reviewPending && health.reviewStatus.conditions === "none" && !authorship.deniedGroups.includes("conditions"),
+    medications:
+      reviewPending && health.reviewStatus.medications === "none" && !authorship.deniedGroups.includes("medications"),
+  }
+  for (const topic of ["allergies", "conditions", "medications"] as const) {
+    if (!saidNo[topic]) continue
+    const said = declarations.find((row) => row.health[topic]?.state === "none")
+    groupOf(said, authorship.declaredAt).saidNo[topic] = true
+  }
+  return [...groups.values()].sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))
 }
 
 /**
@@ -705,9 +789,14 @@ function allergiesSaidNo(state: string, reviewedAt: Date | null, authorship: Hea
 
 /**
  * Lo mismo para quien solo ve las alergias (recepción, `clinical.alerts`): si el
- * «No» de la ficha lo dijo la persona y sigue sin revisar. Nada más de su salud.
+ * «No» de la ficha lo dijo la persona y sigue sin revisar, quién lo dijo y
+ * cuándo. Nada más de su salud. null si no es un «No» declarado.
  */
-export async function allergiesSaidNoByPatient(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+export async function allergiesSaidNoByPatient(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ by: HealthDeclarant; at: Date | null } | null> {
   const [header] = await tx
     .select({ reviewStatus: patient.healthReviewStatus, allergiesReviewedAt: patient.allergiesReviewedAt })
     .from(patient)
@@ -715,8 +804,107 @@ export async function allergiesSaidNoByPatient(tx: Db, orgId: string, patientId:
     .limit(1)
   if (!header) throw notFound("Paciente")
   const state = (header.reviewStatus as { allergies?: unknown } | null)?.allergies
-  if (state !== "none" || header.allergiesReviewedAt) return false
-  return allergiesSaidNo("none", null, await healthAuthorshipOf(tx, orgId, patientId))
+  if (state !== "none" || header.allergiesReviewedAt) return null
+  const authorship = await healthAuthorshipOf(tx, orgId, patientId)
+  if (!allergiesSaidNo("none", null, authorship)) return null
+  const said = (await healthDeclarationsOf(tx, orgId, patientId)).find((row) => row.health.allergies?.state === "none")
+  return said ? { by: said.by, at: said.at } : { by: UNKNOWN_DECLARANT, at: authorship.declaredAt }
+}
+
+/**
+ * Quien respondió, visto desde su contacto: la propia persona o quien habla
+ * por ella, con su nombre y su vínculo en palabras (el parentesco de HL7 si se
+ * conoce, o el escrito al vincularlo). Es la misma forma para la franja de la
+ * ficha y para el detalle de un cuestionario: nombran a la misma persona.
+ */
+export async function declarantOfContact(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  contactId: string | null,
+): Promise<HealthDeclarant> {
+  if (!contactId) return UNKNOWN_DECLARANT
+  const [row] = await tx
+    .select({
+      name: contact.displayName,
+      relationship: patientContact.relationship,
+      relationshipDetail: patientContact.relationshipDetail,
+      kinship: patientContact.kinship,
+    })
+    .from(contact)
+    .leftJoin(
+      patientContact,
+      and(
+        eq(patientContact.organizationId, contact.organizationId),
+        eq(patientContact.contactId, contact.id),
+        eq(patientContact.patientId, patientId),
+      ),
+    )
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  if (!row) return UNKNOWN_DECLARANT
+  return declarantOfLink(row)
+}
+
+/** Lo mismo, con el vínculo ya leído. */
+export function declarantOfLink(link: {
+  name: string
+  relationship: string | null
+  relationshipDetail: string | null
+  kinship: string | null
+}): HealthDeclarant {
+  if (link.relationship === "self") return { kind: "patient", name: link.name, relation: null }
+  const kin =
+    link.kinship && link.kinship in KINSHIP_LABELS
+      ? KINSHIP_LABELS[link.kinship as keyof typeof KINSHIP_LABELS]
+      : link.relationshipDetail?.trim()
+  return { kind: "representative", name: link.name, relation: kin ? kin.toLocaleLowerCase("es") : null }
+}
+
+/**
+ * Quien respondió un registro: la persona, quien la registró (con el nombre y
+ * el parentesco que escribió) o el equipo, que anotó lo que le dijeron.
+ */
+export function declarantOfRegistration(answers: Pick<RegistrationAnswers, "respondent" | "representative">): HealthDeclarant {
+  if (answers.respondent === "staff") return { kind: "staff", name: null, relation: null }
+  if (answers.respondent === "patient") return { kind: "patient", name: null, relation: null }
+  return {
+    kind: "representative",
+    name: answers.representative?.displayName?.trim() || null,
+    relation: answers.representative?.relationshipDetail?.trim().toLocaleLowerCase("es") || null,
+  }
+}
+
+/**
+ * Deja constancia de una declaración de salud: lo que se dijo tal como llegó,
+ * quién lo dijo y cuándo. Va en la misma transacción que las filas de
+ * Antecedentes que trae (comparten el instante en que entraron): así cada cosa
+ * sin revisar dice de quién es y de cuándo. `saidAt`: cuándo lo dijo, si fue
+ * antes de entrar a su ficha (un registro resuelto después, un cuestionario
+ * revisado otro día).
+ */
+export async function recordHealthDeclaration(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: {
+    via: (typeof HEALTH_DECLARATION_VIAS)[number]
+    by: HealthDeclarant
+    health: DeclaredPatientHealthInput
+    saidAt?: Date | null
+  },
+): Promise<void> {
+  if (input.by.kind === "unknown") return
+  await tx.insert(patientHealthDeclaration).values({
+    organizationId: orgId,
+    patientId,
+    via: input.via,
+    respondent: input.by.kind,
+    declarantName: input.by.kind === "representative" ? (input.by.name?.slice(0, 200) ?? null) : null,
+    declarantRelation: input.by.kind === "representative" ? (input.by.relation?.slice(0, 80) ?? null) : null,
+    health: input.health,
+    ...(input.saidAt ? { saidAt: input.saidAt } : {}),
+  })
 }
 
 /** Lo que el servidor sabe, además, de quién escribió los antecedentes y cuándo. */
@@ -803,6 +991,8 @@ export async function initializeDeclaredPatientHealth(
   patientId: string,
   input: DeclaredPatientHealthInput,
   actorUserId: string | null,
+  /** Cuándo lo dijo, si fue antes de hoy (un registro que recepción resolvió después): fecha el embarazo. */
+  saidAt?: Date | null,
 ): Promise<PatientHealth> {
   const parsed = registrationAnswersSchema.shape.health.safeParse(input)
   if (!parsed.success || !parsed.data) throw validation("Declaración de salud inválida")
@@ -819,7 +1009,10 @@ export async function initializeDeclaredPatientHealth(
   const state = (value: string | undefined) =>
     value === "none" || value === "recorded" ? value : "unknown"
   // Lo que declaró entra a la entrevista de la ficha como la arma su producto (odentIA: su boca; latidIA: el embarazo con fecha).
-  const interview = (await productHooks(tx, orgId)).interview.declared(declared, await clinicToday(tx, orgId))
+  const interview = (await productHooks(tx, orgId)).interview.declared(
+    declared,
+    await clinicToday(tx, orgId, saidAt ?? undefined),
+  )
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,

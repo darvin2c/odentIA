@@ -121,6 +121,7 @@ import {
   addClinicalNote,
   addDeclaredAllergies,
   correctDocumentContext,
+  recordHealthDeclaration,
   registerPatientDocument,
   retirePatientDocument,
   savePatientHealth,
@@ -2135,17 +2136,30 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
 // (sin codificar, para «Elegir de la lista»); el ibuprofeno se quitó porque
 // «era otra cosa». La última revisión fue hace 8 meses: la atención pide
 // preguntarle por alergias nuevas.
-await addDeclaredAllergies(
-  db,
-  ORG_A,
-  ANA_ID,
-  rosaPatientId,
-  [{ substance: "Látex", reaction: "Ronchas con los guantes" }],
-  {
-    entity: "seed",
-    entityId: "seed-rosa-alergias",
-  },
-)
+// En una transacción con su declaración: así la ficha dice que lo dijo ella, y cuándo.
+await db.transaction(async (tx) => {
+  await addDeclaredAllergies(
+    tx,
+    ORG_A,
+    ANA_ID,
+    rosaPatientId,
+    [{ substance: "Látex", reaction: "Ronchas con los guantes" }],
+    {
+      entity: "seed",
+      entityId: "seed-rosa-alergias",
+    },
+  )
+  await recordHealthDeclaration(tx, ORG_A, rosaPatientId, {
+    via: "formulario",
+    by: { kind: "patient", name: null, relation: null },
+    health: {
+      allergies: {
+        state: "recorded",
+        items: [{ substance: "Látex", reaction: "Ronchas con los guantes", severity: "desconocida" }],
+      },
+    },
+  })
+})
 await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
   substance: "amoxi",
   severity: "moderada",
