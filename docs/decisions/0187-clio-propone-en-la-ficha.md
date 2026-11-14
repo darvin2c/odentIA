@@ -34,7 +34,7 @@ El profesional tiene la ficha de ortodoncia abierta al lado y dicta «overjet de
 
 - El esquema de Clío cambia en odentIA y latidIA: se vuelven a medir sus bancos y el nuevo `eval/dictado-fichas.json`. vistIA no dicta.
 - Una ficha solo ofrecida no recibe propuestas: lo dicho para ella sigue como hoy. Se revisa si en el uso real se dicta antes de empezarla.
-- El micrófono no distingue quién habla: la frase siempre se ve junto a la propuesta, y la acepta el profesional.
+- El micrófono no distingue quién habla: la frase siempre se ve junto a la propuesta, y la confirma el profesional.
 
 ## Referencias
 

@@ -413,7 +413,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Lo que no puede hacer (examen, signos vitales) lo dice.
 - [ ] Al reservar y armar el presupuesto (ADR 0102) distingue «cítalo el jueves» (una cita) de «control en 6 meses» (un control); la hora sale de la agenda, no del modelo, y «envíaselo» dicho por voz no envía nada sin confirmar.
 
-- [ ] Con una ficha empezada, lo dictado para ella aparece en su pregunta («Clío: 6 mm · dijiste…»), con su frase y sin repetirse en la consulta; sin ficha empezada no aparece nada. Se acepta en la ficha y queda «Lo propuso Clío · lo aceptó…».
+- [ ] Con una ficha empezada, lo dictado para ella aparece en su pregunta («Clío: 6 mm · dijiste…»), con su frase y sin repetirse en la consulta; sin ficha empezada no aparece nada. Se confirma en la ficha («Confirmar», «Confirmar las N») y queda «Clío · confirmó…» en la ficha, la Historia y la copia; la barra del dictado no confirma lo de la ficha.
 - [ ] En la ficha, el silencio no es «No»; el número o la pieza tienen que estar en la frase; la clase de Angle sin división o sin lado no se llena y lo dice; lo escrito a mano no se cambia.
 - [ ] «Dictar» con la ficha abierta no la tapa; al firmar, lo propuesto para la ficha viene marcado y la ficha sigue a medias.
 
