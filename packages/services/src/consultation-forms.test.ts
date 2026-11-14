@@ -294,18 +294,18 @@ it("a un menor de 12 años se le ofrecen las de odontopediatría por su edad, y 
   expect(offers[0]).toMatchObject({ underYears: 12, specialtyName: "Odontopediatría" })
   expect(offers[1]).toMatchObject({ underYears: null, specialtyName: "Endodoncia" })
 
+  // El día que cumple 12 deja de ofrecerse por edad; la víspera todavía.
+  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12) })
+  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["profesional"])
+  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12, true) })
+  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["edad", "profesional"])
+
   // Con una cita de ortodoncia: la de la cita primero, la de su edad después, y ya no la de quien atiende.
   const orthodontic = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
   expect((await c.offers(orthodontic.id)).map((offer) => [offer.key, offer.why])).toEqual([
     ["ficha-de-ortodoncia", "cita"],
     ["ficha-de-odontopediatria", "edad"],
   ])
-
-  // El día que cumple 12 deja de ofrecerse por edad; la víspera todavía.
-  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12) })
-  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["profesional"])
-  await setTestPatientIdentity(ownerDb, c.patient.id, { birthDate: bornYearsAgo(12, true) })
-  expect((await c.offers(session.id)).map((offer) => offer.why)).toEqual(["edad", "profesional"])
 })
 
 it("sin fecha de nacimiento, sin cita y sin especialidades de quien atiende no se ofrece ninguna; y otra clínica no ve esta atención", async () => {
@@ -435,8 +435,8 @@ it("nada traba la atención: con una ficha ofrecida y sin tocarla, la atención 
   await c.ready(c.encounter.id)
   const closed = await c.run((tx) => finalizeEncounter(tx, c.orgId, c.actor, c.patient.id, c.encounter.id))
   expect(closed.encounter.status).toBe("finalizada")
-  // Firmada, la oferta sigue ahí y sigue sin haberse empezado: ofrecer no es pedir.
-  expect(await c.offers(c.encounter.id)).toMatchObject([{ key: "evaluacion-de-endodoncia", today: null }])
+  // Se firmó sin empezarla: ofrecer no es pedir. Firmada, ya no ofrece nada.
+  expect(await c.offers(c.encounter.id)).toEqual([])
 })
 
 it("un solo nombre: desactivar una especialidad nombra la ficha de consulta que la traba, y la Historia dice «ficha de consulta»", async () => {
@@ -517,3 +517,4 @@ it("una atención firmada o anulada no ofrece ninguna ficha, ni una especialidad
   await c.run((tx) => voidEncounter(tx, c.orgId, c.actor, c.patient.id, open.id, { reason: "Paciente equivocado" }))
   expect(await c.offers(open.id)).toEqual([])
 })
+
