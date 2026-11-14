@@ -1,9 +1,17 @@
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-link"
+import { draftUntilWords, personalLinkDraftKey, readDeviceDraft, sweepDeviceDrafts, writeDeviceDraft } from "../../lib/device-draft"
 import { setOrgLocale } from "../../lib/locale"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
-import { beforeVisitCard, pendingItems, toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
+import {
+  beforeVisitCard,
+  type DraftOnDevice,
+  pendingItems,
+  toldWords,
+  validatePersonalLinkSearch,
+  whatFollows,
+} from "./personal-link-page"
 
 declareProduct(bareProduct("dental"))
 
@@ -208,5 +216,100 @@ describe("mientras dura la entrega", () => {
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()
     expect(() => whatFollows(old as PersonalLinkView, { key: "datos", at: THURSDAY })).toThrow()
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 9 (C8): si la interrumpen, lo escrito sigue en su celular.
+describe("si la interrumpen, lo escrito sigue en su celular", () => {
+  const questions = { reason: true, pain: true, more: true }
+  const marta = () =>
+    view({
+      firstName: "Marta",
+      consents: [],
+      data: { missing: [], health: true },
+      visit: { purpose: null, questions },
+    })
+  /** El almacenamiento de su celular, en memoria. */
+  const phone = () => {
+    const items = new Map<string, string>()
+    return {
+      get length() {
+        return items.size
+      },
+      clear: () => items.clear(),
+      getItem: (key: string) => items.get(key) ?? null,
+      key: (index: number) => [...items.keys()][index] ?? null,
+      removeItem: (key: string) => void items.delete(key),
+      setItem: (key: string, value: string) => void items.set(key, value),
+    } as Storage
+  }
+  const token = "token-de-marta"
+  const key = personalLinkDraftKey("dental-smile", token, THURSDAY)
+  /** Lo que la tarjeta lee de su celular al abrir el enlace, como la página. */
+  const onDevice = (): DraftOnDevice | null => {
+    sweepDeviceDrafts()
+    const saved = readDeviceDraft(key)
+    return saved ? { step: saved.step, until: draftUntilWords(saved.expiresAt, Date.now(), "es-PE", "America/Lima") } : null
+  }
+  const CALL = new Date("2026-11-11T14:15:00-05:00").getTime()
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(CALL)
+    vi.stubGlobal("window", { localStorage: phone(), sessionStorage: phone() })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it("C8: cierra en el paso 3 y vuelve una hora después: la tarjeta dice dónde iba y un toque sigue", () => {
+    writeDeviceDraft(key, { medicationsText: "warfarina 5 mg" }, { item: "medicines", current: 3, total: 6 })
+    vi.setSystemTime(CALL + 60 * 60 * 1000)
+    const [card] = pendingItems(marta(), "odontólogo", onDevice())
+    expect(card).toMatchObject({
+      abre: "datos",
+      title: "Antes de tu cita",
+      badge: "Sin enviar",
+      text: "Vas en el paso 3 de 6",
+      action: "Seguir donde ibas",
+      resume: true,
+    })
+    expect(card?.detail?.replace(/\s/g, " ")).toBe(
+      "Lo que escribiste sigue guardado en este celular hasta mañana, 2:15 p. m. Todavía no lo enviaste.",
+    )
+    // Nunca lo que escribió.
+    expect(JSON.stringify(card)).not.toContain("warfarina")
+    // «Seguir donde ibas» abre el recorrido con lo escrito y su paso, sin volver a preguntar.
+    expect(validatePersonalLinkSearch({ token, abre: "datos", sigue: 1 })).toMatchObject({ abre: "datos", sigue: true })
+  })
+
+  it("dos días después ya no está, y la tarjeta no promete otra cosa", () => {
+    writeDeviceDraft(key, { medicationsText: "warfarina 5 mg" }, { item: "medicines", current: 3, total: 6 })
+    vi.setSystemTime(CALL + 2 * 24 * 60 * 60 * 1000)
+    const [card] = pendingItems(marta(), "odontólogo", onDevice())
+    expect(card).toMatchObject({ title: "Antes de tu cita", action: "Empezar" })
+    expect(card?.resume).toBeUndefined()
+    expect(JSON.stringify(card)).not.toMatch(/guardado|paso 3/)
+    // Y ya no está en su celular.
+    expect(window.localStorage.length).toBe(0)
+  })
+
+  it("desde el celular de su hija (sin nada guardado), empieza en blanco", () => {
+    expect(pendingItems(marta(), "odontólogo", onDevice())[0]).toMatchObject({ action: "Empezar" })
+  })
+
+  it("al terminar otra cosa, lo que sigue también dice «seguir donde ibas»", () => {
+    const after = whatFollows(
+      view({ data: { missing: [], health: true }, visit: { purpose: null, questions } }),
+      { key: "firma:c1", at: THURSDAY },
+      { step: { item: "medicines", current: 3, total: 6 }, until: "hasta mañana, 2:15 p. m." },
+    )
+    expect(after.next.find((item) => item.key === "datos")).toMatchObject({ next: "Antes de tu cita: seguir donde ibas", resume: true })
+  })
+
+  it("una dirección sin «sigue» no repone sola", () => {
+    expect(validatePersonalLinkSearch({ token, abre: "datos" }).sigue).toBeUndefined()
+    expect(validatePersonalLinkSearch({ token, abre: "datos", sigue: "no" }).sigue).toBeUndefined()
   })
 })
