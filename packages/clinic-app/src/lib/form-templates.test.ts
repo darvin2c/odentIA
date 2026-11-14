@@ -4,12 +4,15 @@ import {
   currentLine,
   leaveWords,
   newField,
+  oneAtATime,
   publishWords,
   reuseWords,
   sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
+  templateOptionLabel,
   touchesPatients,
+  twinDetail,
   versionStatusWords,
 } from "./form-templates"
 
@@ -220,4 +223,38 @@ it("una pregunta nueva nace vacía, y su clave sale del texto completo al guarda
   // Lo que ya estaba guardado conserva su clave, aunque parezca provisional.
   const saved: FormSectionDef[] = [{ id: "s", title: "S", fields: [{ id: "campo_1", label: "Motivo de consulta", type: "texto" }] }]
   expect(settleFieldKeys(saved, new Set())).toBe(saved)
+})
+
+it("dos formularios con el mismo título se distinguen por cuántas preguntas tienen y cuándo se crearon", () => {
+  const when = (iso: string) => iso.slice(0, 16).replace("T", " ")
+  const fields = (n: number) => ({
+    sections: [{ id: "s", title: "S", fields: Array.from({ length: n }, (_, i) => ({ id: `p${i}`, label: `P${i}`, type: "texto" as const })) }],
+  })
+  const a = template({ key: "orto", title: "Ficha de ortodoncia inicial A", schema: fields(4), createdAt: "2026-11-13T21:43:00.000Z" })
+  const b = template({ key: "orto-2", title: "ficha de ortodoncia  inicial a", schema: fields(1), createdAt: "2026-11-13T21:47:00.000Z" })
+  const other = template({ key: "endo", title: "Evaluación de endodoncia", schema: fields(5) })
+  const all = [a, b, other]
+  expect(twinDetail(a, all, when)).toBe("4 preguntas · creado el 2026-11-13 21:43")
+  expect(twinDetail(b, all, when)).toBe("1 pregunta · creado el 2026-11-13 21:47")
+  // El que no se repite no lleva nada de más.
+  expect(twinDetail(other, all, when)).toBeNull()
+  // Las versiones de un mismo formulario no son dos formularios.
+  const aV2 = template({ key: "orto", title: "Ficha de ortodoncia inicial A", version: 2, schema: fields(5) })
+  expect(twinDetail(a, [a, aV2, other], when)).toBeNull()
+  // En el desplegable de «Nuevo» › «Formulario», el detalle va junto al título.
+  expect(templateOptionLabel(a, all, when)).toBe("Ficha de ortodoncia inicial A · 4 preguntas · creado el 2026-11-13 21:43")
+  expect(templateOptionLabel(other, all, when)).toBe("Evaluación de endodoncia")
+})
+
+it("un clic a la vez: el segundo clic de un doble clic no se envía", () => {
+  const guard = oneAtATime()
+  const sent: number[] = []
+  expect(guard.run(() => sent.push(1))).toBe(true)
+  // El botón aún no se apagó en pantalla y llega el segundo clic.
+  expect(guard.run(() => sent.push(2))).toBe(false)
+  expect(sent).toEqual([1])
+  // Terminado el envío (bien o mal), se puede volver a intentar.
+  guard.done()
+  expect(guard.run(() => sent.push(3))).toBe(true)
+  expect(sent).toEqual([1, 3])
 })

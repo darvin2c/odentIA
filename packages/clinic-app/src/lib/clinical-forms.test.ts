@@ -14,7 +14,13 @@ vi.mock("./api", async () => {
 })
 
 import { ApiError, apiFetch } from "./api"
-import { startFormResponse } from "./clinical-forms"
+import {
+  canFillFormInAttention,
+  finalizedWords,
+  formStateWords,
+  startFormResponse,
+  unfinishedAfterSigning,
+} from "./clinical-forms"
 
 const fetchMock = vi.mocked(apiFetch)
 const sent = () => fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { encounterId: string | null })
@@ -41,4 +47,49 @@ it("con la atención en curso se une a ella, y cualquier otro rechazo se dice ta
   fetchMock.mockRejectedValueOnce(new ApiError(409, { code: "ENCOUNTER_CLOSED" }))
   await expect(startFormResponse({ ...body, encounterId: null })).rejects.toBeInstanceOf(ApiError)
   expect(fetchMock).toHaveBeenCalledTimes(3)
+})
+
+it("en la atención ya firmada, el formulario a medias se abre para terminarlo", () => {
+  // En curso y la lleva quien mira: se llena.
+  expect(canFillFormInAttention(true, false, "borrador")).toBe(true)
+  // En curso, pero no se puede trabajar en ella (la lleva otra persona): no.
+  expect(canFillFormInAttention(true, true, "borrador")).toBe(false)
+  // Firmada: la atención ya no se trabaja, pero su formulario a medias se termina igual.
+  expect(canFillFormInAttention(true, true, "finalizada")).toBe(true)
+  // Sin permiso de escribir en la historia, nunca.
+  expect(canFillFormInAttention(false, true, "finalizada")).toBe(false)
+})
+
+it("la atención firmada dice qué formularios le quedaron a medias", () => {
+  const forms = [
+    { id: "a", status: "borrador" as const, source: "staff" as const },
+    { id: "b", status: "finalizado" as const, source: "staff" as const },
+    { id: "c", status: "descartado" as const, source: "staff" as const },
+  ]
+  expect(unfinishedAfterSigning(forms, "finalizada").map((form) => form.id)).toEqual(["a"])
+  // Mientras sigue en curso no es un pendiente aparte: se está llenando.
+  expect(unfinishedAfterSigning(forms, "borrador")).toEqual([])
+})
+
+it("lo finalizado se dice con fecha y hora, y si fue después de firmar su atención", () => {
+  const at = (iso: string) => `[${iso.slice(11, 16)}]`
+  expect(finalizedWords({ finalizedAt: null, encounterFinalizedAt: null }, at)).toBeNull()
+  expect(finalizedWords({ finalizedAt: "2026-11-14T02:51:00.000Z", encounterFinalizedAt: null }, at)).toBe("finalizado [02:51]")
+  // La atención se firmó a las 02:48 y el formulario se terminó a las 02:51.
+  expect(
+    finalizedWords({ finalizedAt: "2026-11-14T02:51:00.000Z", encounterFinalizedAt: "2026-11-14T02:48:00.000Z" }, at),
+  ).toBe("finalizado [02:51] · después de firmar la atención")
+  // Terminado antes de firmar: no se dice.
+  expect(
+    finalizedWords({ finalizedAt: "2026-11-14T02:40:00.000Z", encounterFinalizedAt: "2026-11-14T02:48:00.000Z" }, at),
+  ).toBe("finalizado [02:40]")
+})
+
+it("el estado de un formulario en la lista dice si quedó a medias al firmar o si es de una atención anulada", () => {
+  const row = { status: "borrador" as const, submittedAt: null, encounterStatus: null }
+  expect(formStateWords(row)).toBe("Sin finalizar")
+  expect(formStateWords({ ...row, encounterStatus: "finalizada" })).toBe("Quedó a medias al firmar la atención: falta terminarlo")
+  expect(formStateWords({ ...row, submittedAt: "2026-11-13T10:00:00.000Z" })).toBe("Lo declaró la persona · por revisar")
+  expect(formStateWords({ ...row, status: "finalizado" })).toBe("Finalizado")
+  expect(formStateWords({ ...row, status: "finalizado", encounterStatus: "anulada" })).toBe("Finalizado · de una atención anulada")
 })

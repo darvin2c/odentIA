@@ -100,6 +100,9 @@ export interface FormResponse {
   discardReason: string | null
   createdAt: string
   updatedAt: string
+  /** Lo de su atención, si tiene: firmada («finalizada», y desde cuándo) o anulada. Viene en la lista. */
+  encounterStatus?: "borrador" | "finalizada" | "anulada" | null
+  encounterFinalizedAt?: string | null
 }
 
 export interface FormAddendum {
@@ -498,6 +501,50 @@ export async function startFormResponse(
     if (!body.encounterId || !(error instanceof ApiError) || error.shape.code !== "ENCOUNTER_CLOSED") throw error
     return { ...(await createFormResponse({ ...body, encounterId: null })), detached: true }
   }
+}
+
+/**
+ * En la atención, un formulario se llena mientras se pueda trabajar en ella. Ya
+ * firmada, la atención no se trabaja, pero el formulario que quedó a medias se
+ * termina igual: la firma de la atención no cierra sus formularios.
+ */
+export function canFillFormInAttention(canWrite: boolean, attentionLocked: boolean, attentionStatus: string): boolean {
+  return canWrite && (!attentionLocked || attentionStatus === "finalizada")
+}
+
+/** Los formularios del equipo que una atención ya firmada dejó a medias: los dice arriba, con «Completar». */
+export function unfinishedAfterSigning<T extends Pick<FormResponse, "status" | "source">>(
+  forms: readonly T[],
+  attentionStatus: string,
+): T[] {
+  return attentionStatus === "finalizada"
+    ? forms.filter((form) => form.status === "borrador" && form.source === "staff")
+    : []
+}
+
+/**
+ * Cuándo se finalizó, con fecha y hora (`at` la escribe), y si fue después de
+ * firmar su atención: un formulario terminado después lleva su propia fecha, y se ve.
+ */
+export function finalizedWords(
+  response: Pick<FormResponse, "finalizedAt" | "encounterFinalizedAt">,
+  at: (iso: string) => string,
+): string | null {
+  if (!response.finalizedAt) return null
+  const after =
+    !!response.encounterFinalizedAt && Date.parse(response.finalizedAt) > Date.parse(response.encounterFinalizedAt)
+  return `finalizado ${at(response.finalizedAt)}${after ? " · después de firmar la atención" : ""}`
+}
+
+/** El estado de un formulario en una lista, dicho entero: a medias, declarado, finalizado, y lo de su atención. */
+export function formStateWords(response: Pick<FormResponse, "status" | "submittedAt" | "encounterStatus">): string {
+  if (response.status === "finalizado")
+    return response.encounterStatus === "anulada" ? "Finalizado · de una atención anulada" : "Finalizado"
+  if (response.status === "descartado") return "Descartado"
+  if (response.submittedAt) return "Lo declaró la persona · por revisar"
+  return response.encounterStatus === "finalizada"
+    ? "Quedó a medias al firmar la atención: falta terminarlo"
+    : "Sin finalizar"
 }
 
 export function updateFormResponse(

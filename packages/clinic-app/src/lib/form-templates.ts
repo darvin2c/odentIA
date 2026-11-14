@@ -192,6 +192,50 @@ export function sameTitleTemplate(
   return left ? { title: left.last.title, unused: left } : null
 }
 
+/** «4 preguntas»: cuántas tiene un formulario, entre todas sus secciones. */
+function questionWords(template: FormTemplate): string {
+  const count = template.schema.sections.reduce((total, section) => total + section.fields.length, 0)
+  return `${count} ${count === 1 ? "pregunta" : "preguntas"}`
+}
+
+/**
+ * Lo que distingue a un formulario de otro con su mismo título, entre los que
+ * se muestran juntos (`shown`): cuántas preguntas tiene y cuándo se creó (`when`
+ * lo escribe). Null si su título no se repite: entonces no hace falta decir más.
+ * Dos versiones de un mismo formulario no son dos formularios.
+ */
+export function twinDetail(template: FormTemplate, shown: readonly FormTemplate[], when: (iso: string) => string): string | null {
+  const wanted = foldTitle(template.title)
+  const repeated = shown.some((other) => other.key !== template.key && foldTitle(other.title) === wanted)
+  return repeated ? `${questionWords(template)} · creado el ${when(template.createdAt)}` : null
+}
+
+/** El nombre de un formulario en un desplegable: su título y, si otro se llama igual, lo que los distingue. */
+export function templateOptionLabel(template: FormTemplate, shown: readonly FormTemplate[], when: (iso: string) => string): string {
+  const detail = twinDetail(template, shown, when)
+  return detail ? `${template.title} · ${detail}` : template.title
+}
+
+/**
+ * Un envío a la vez. El segundo clic de un doble clic llega antes de que la
+ * pantalla alcance a apagar el botón: `run` lo ignora hasta que `done` avisa
+ * que el primero terminó (bien o mal).
+ */
+export function oneAtATime(): { run: (send: () => void) => boolean; done: () => void } {
+  let busy = false
+  return {
+    run(send) {
+      if (busy) return false
+      busy = true
+      send()
+      return true
+    },
+    done() {
+      busy = false
+    },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // El constructor: preguntas nuevas y sus claves
 // ---------------------------------------------------------------------------
