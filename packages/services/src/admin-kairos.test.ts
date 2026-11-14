@@ -1913,3 +1913,341 @@ describe("Kairós vigila el alta", () => {
     expect(await pass()).toMatchObject({ tasks: 0, items: 0, signals: 0 })
   })
 })
+
+describe("Kairós cierra lo que ya se resolvió y vigila cada carga que se puede borrar", () => {
+  const keyed = async (clientId: string, rule: string) =>
+    (await tasksOf(clientId)).filter((task) => task.kairosKey?.startsWith(`${rule}:`))
+  const open = async (clientId: string, rule: string) =>
+    (await keyed(clientId, rule)).filter((task) => task.status === "abierta")
+  const payment = (org: string, key: string) =>
+    ownerDb.insert(saasPayment).values({
+      organizationId: org,
+      amountCents: 2900,
+      currency: "USD",
+      methodCode: "transferencia",
+      status: "confirmado",
+      idempotencyKey: key,
+      confirmedAt: NOW,
+      confirmedBy: admin.userId,
+    })
+
+  it("el primer pago revertido se cierra cuando vuelve a haber un pago confirmado", async () => {
+    const revertido = ids["alta-revertido"] as string
+    expect(await open(revertido, "primer_pago_revertido")).toHaveLength(1)
+    await payment("kz-alta-revertido", "kz-rev-pago-ok")
+    await pass()
+    const [task] = await keyed(revertido, "primer_pago_revertido")
+    expect(task).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: ya hay un pago confirmado",
+    })
+  })
+
+  it("la prueba por terminar se cierra al pagar o cuando ya no está en prueba", async () => {
+    const prueba = ids["alta-prueba"] as string
+    expect(await open(prueba, "prueba_por_terminar")).toHaveLength(1)
+    await payment("kz-alta-prueba", "kz-rev-pago-prueba")
+    const fin = await altaClient("pruebafin", { owner: LOADER })
+    await ownerDb
+      .update(saasSubscription)
+      .set({ status: "prueba", trialEndsAt: new Date(NOW.getTime() + 3 * DAY) })
+      .where(eq(saasSubscription.organizationId, "kz-alta-pruebafin"))
+    await pass()
+    expect((await keyed(prueba, "prueba_por_terminar"))[0]).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: ya hay un pago confirmado",
+    })
+    expect(await open(fin, "prueba_por_terminar")).toHaveLength(1)
+    await ownerDb
+      .update(saasSubscription)
+      .set({ status: "activa" })
+      .where(eq(saasSubscription.organizationId, "kz-alta-pruebafin"))
+    await pass()
+    expect((await keyed(fin, "prueba_por_terminar"))[0]).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: ya no está en prueba",
+    })
+  })
+
+  it("el alta trabada: cuando avanza a otro paso, la de antes se cierra y queda una sola abierta", async () => {
+    const meta = ids["alta-meta"] as string
+    const [before] = await open(meta, "alta_trabada")
+    expect(before?.title).toBe("El alta espera a Meta: falta que conecte su WhatsApp")
+    // Se conectó hace 15 días: sigue trabada, ahora en «Primer uso».
+    await milestone(meta, "whatsapp", ago(15))
+    await pass()
+    const [closed] = (await keyed(meta, "alta_trabada")).filter((task) => task.id === before?.id)
+    expect(closed).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: el alta avanzó a otro paso",
+    })
+    // Ahora le toca a la clínica: un mensaje, y ninguna tarea abierta de antes.
+    expect(await open(meta, "alta_trabada")).toHaveLength(0)
+    const stuck = async () =>
+      (await itemsOf(meta, "mensaje")).filter((item) =>
+        item.idempotencyKey.includes(`alta_trabada:${meta}:`),
+      )
+    expect((await stuck()).map((item) => [item.title, item.status])).toEqual([
+      ["El alta no avanza: falta que alguien de la clínica entre", "espera"],
+    ])
+    // Alguien entra hoy: ya no está trabada y el mensaje se retira.
+    await milestone(meta, "primer_uso", NOW)
+    await pass()
+    expect((await stuck()).map((item) => [item.status, item.error])).toEqual([
+      ["vencida", "Ya no hace falta: el alta ya no está trabada"],
+    ])
+  })
+
+  it("el alta trabada en un paso que solo hace Administración (la carta) no es para Soporte", async () => {
+    const carta = await altaClient("cartatrab", { owner: support.userId, ownerMember: ago(10) })
+    await milestone(carta, "entro", ago(10))
+    await milestone(carta, "contrato", ago(10))
+    await pass()
+    const [task] = await open(carta, "alta_trabada")
+    expect(task).toMatchObject({
+      title: "El alta no avanza: falta subir la carta de bienvenida",
+      adminOnly: true,
+      assigneeUserId: null,
+    })
+  })
+
+  it("dos cargas sin cargar: avisa por la que se borra primero; borrada a mano, sigue la otra; sin nada vivo, se cierra", async () => {
+    const dos = await altaClient("dosarch", { owner: LOADER })
+    const older = await clientFile(dos, "archivo_clinica", "primera.xlsx", XLSX, {
+      receivedAt: ago(27),
+    })
+    const newer = await clientFile(dos, "archivo_clinica", "segunda.xlsx", XLSX, {
+      receivedAt: ago(3),
+    })
+    await pass()
+    const [urgent] = await open(dos, "carga_por_borrarse")
+    expect(urgent?.kairosKey).toContain(`:${older}:`)
+    expect(urgent?.title).toMatch(/: se borran en [23] días$/)
+    expect(await open(dos, "carga_pendiente")).toHaveLength(0)
+    // La primera se borra a mano: la urgente se cierra y sigue la segunda (marcada hace 3 días).
+    await ownerDb.update(saasClientFile).set({ deletedAt: NOW }).where(eq(saasClientFile.id, older))
+    await pass()
+    expect((await keyed(dos, "carga_por_borrarse"))[0]).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: ese archivo ya no está; sigue el que se borra antes",
+    })
+    const stillOpen = [
+      ...(await open(dos, "carga_pendiente")),
+      ...(await open(dos, "carga_por_borrarse")),
+    ]
+    expect(stillOpen).toHaveLength(1)
+    expect(stillOpen[0]?.kairosKey).toContain(`carga_pendiente:${dos}:${newer}:`)
+    // La segunda también se borra a mano: no queda nada por cargar.
+    await ownerDb.update(saasClientFile).set({ deletedAt: NOW }).where(eq(saasClientFile.id, newer))
+    await pass()
+    expect((await keyed(dos, "carga_pendiente"))[0]).toMatchObject({
+      status: "hecha",
+      doneNote: "Kairós la cerró: el archivo ya no está y no queda nada por cargar",
+    })
+  })
+
+  it("la urgente dice en cada pasada los días que quedan, en la misma tarea", async () => {
+    const dias = await altaClient("dias", { owner: LOADER })
+    await clientFile(dias, "archivo_clinica", "carga.xlsx", XLSX, { receivedAt: ago(26) })
+    await pass()
+    const [task] = await open(dias, "carga_por_borrarse")
+    // Lo que dijo hace unos días.
+    await ownerDb
+      .update(saasTask)
+      .set({ title: "Cargar los datos de Clínica Alta dias (ficticia): se borran en 9 días" })
+      .where(eq(saasTask.id, task?.id as string))
+    await pass()
+    const after = await keyed(dias, "carga_por_borrarse")
+    expect(after).toHaveLength(1)
+    expect(after[0]?.title).toMatch(/: se borran en [34] días$/)
+  })
+
+  it("los que no entraron: la carga más nueva con errores reemplaza la tarea de la anterior", async () => {
+    const otra = await altaClient("errores2", { owner: LOADER })
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-errores2",
+      metadata: { nueva: 5, error: 3, planSha256: "5".repeat(64) },
+      createdAt: ago(1),
+    })
+    await pass()
+    expect((await open(otra, "carga_con_errores")).map((task) => task.title)).toEqual([
+      "Revisar los 3 que no entraron en la configuración",
+    ])
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-errores2",
+      metadata: { nueva: 5, error: 2, planSha256: "6".repeat(64) },
+      createdAt: new Date(NOW.getTime() - 20 * 60_000),
+    })
+    await pass()
+    expect((await open(otra, "carga_con_errores")).map((task) => task.title)).toEqual([
+      "Revisar los 2 que no entraron en la configuración",
+    ])
+    const old = (await keyed(otra, "carga_con_errores")).find((task) => task.status === "hecha")
+    expect(old?.doneNote).toBe(
+      "Kairós la cerró: la reemplaza la de la carga más nueva de la configuración",
+    )
+  })
+
+  it("se borró sin cargar y después se cargó: el pedido se retira y no se vuelve a preparar", async () => {
+    const borrado = ids["alta-borrado"] as string
+    const asked = async () =>
+      (await itemsOf(borrado, "mensaje")).filter(
+        (item) => item.payload.goal === "pedir_archivos_otra_vez",
+      )
+    expect((await asked()).filter((item) => item.status === "espera")).toHaveLength(1)
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: LOADER,
+      actorRole: "admin",
+      action: "org.setup_import",
+      organizationId: "kz-alta-borrado",
+      metadata: { nueva: 2, planSha256: "7".repeat(64) },
+      createdAt: new Date(NOW.getTime() - 20 * 60_000),
+    })
+    await pass()
+    const after = await asked()
+    expect(after.filter((item) => item.status === "espera")).toHaveLength(0)
+    expect(after.map((item) => item.error)).toContain("Ya no hace falta: se cargaron sus datos")
+    await pass()
+    expect((await asked()).filter((item) => item.status === "espera")).toHaveLength(0)
+  })
+
+  it("«¿Es la carga?» dice al leerla si se borra al marcarla, aunque se haya preparado antes", async () => {
+    const tarde = await client("alta-tarde", "Clínica Alta Tarde (ficticia)", { open: false })
+    const file = await clientFile(tarde, "correo", "pacientes.xlsx", XLSX, { receivedAt: ago(20) })
+    await pass()
+    const [item] = await itemsOf(tarde, "posible_carga")
+    expect(item?.payload).toMatchObject({ dueNow: false })
+    // Pasaron los días sin otra pasada: ya llegó hace 31 (lo guardado dice lo de antes).
+    await ownerDb.execute(
+      sql`update admin.kairos_item set payload = payload || ${JSON.stringify({ receivedAt: ago(31).toISOString() })}::jsonb where id = ${item?.id}::uuid`,
+    )
+    const listed = await listKairosItems(
+      ownerDb,
+      admin,
+      { status: "espera", clientId: tarde, limit: 10 },
+      NOW,
+    )
+    const [view] = listed.items.filter((row) => row.payload.fileId === file)
+    expect(view?.payload).toMatchObject({ dueNow: true, urgent: true })
+    expect(view?.reason).toMatch(/Si es la carga, se borra al marcarlo$/)
+  })
+
+  it("lo que el código anterior programó para borrarse mientras se desplegaba deja de estarlo y se liga a su correo", async () => {
+    const posible = ids["alta-posible"] as string
+    const [row] = await ownerDb
+      .insert(saasClientFile)
+      .values({
+        clientId: posible,
+        kind: "correo",
+        filename: "despliegue.pdf",
+        objectKey: `clients/${posible}/kz-alta-despliegue`,
+        contentType: "application/pdf",
+        sizeBytes: 10,
+        receivedAt: NOW,
+        createdAt: NOW,
+        deleteAfter: plusDays(30),
+      })
+      .returning({ id: saasClientFile.id })
+    const fileId = row?.id as string
+    const [email] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        clientId: posible,
+        mailbox: "soporte",
+        product: "dental",
+        messageId: "<kz-alta-despliegue@kairos.test>",
+        fromAddress: "alta-posible@kairos.test",
+        toAddress: "soporte@odentia32.com",
+        subject: "Lo de la clínica",
+        receivedAt: ago(1),
+        attachments: [
+          { filename: "despliegue.pdf", contentType: "application/pdf", size: 10, fileId },
+        ],
+      })
+      .returning({ id: saasInboundEmail.id })
+    const liftedAudits = () =>
+      ownerDb
+        .select()
+        .from(adminAudit)
+        .where(
+          and(
+            eq(adminAudit.action, "client_file.retention_lifted"),
+            eq(adminAudit.entityId, fileId),
+          ),
+        )
+    await pass()
+    const [lifted] = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, fileId))
+    expect(lifted).toMatchObject({ deleteAfter: null, inboundEmailId: email?.id })
+    expect(lifted?.receivedAt.getTime()).toBe(ago(1).getTime())
+    expect((await liftedAudits()).map((audit) => audit.metadata)).toEqual([
+      { clientId: posible, deleteAfter: plusDays(30) },
+    ])
+    // Kairós lo pregunta una vez, como lo de antes del cambio.
+    expect(
+      (await itemsOf(posible, "posible_carga")).filter((item) => item.payload.fileId === fileId),
+    ).toHaveLength(1)
+    await pass()
+    expect(await liftedAudits()).toHaveLength(1)
+  })
+
+  it("en Hoy, de las posibles cargas que no son urgentes caben dos; las demás siguen en Kairós", async () => {
+    const muchas = await client("alta-muchas", "Clínica Alta Muchas (ficticia)", { open: false })
+    for (const days of [1, 2, 3, 4])
+      await clientFile(muchas, "correo", `pacientes-${days}.xlsx`, XLSX, {
+        receivedAt: ago(days),
+      })
+    await pass()
+    const today = await ownerDb.transaction((tx) => todayForStaff(tx, admin, { who: "todas" }, NOW))
+    const calm = today.kairosReady.items.filter(
+      (item) => item.kind === "posible_carga" && item.payload.urgent !== true,
+    )
+    expect(calm.length).toBeGreaterThan(0)
+    expect(calm.length).toBeLessThanOrEqual(2)
+    const all = await listKairosItems(
+      ownerDb,
+      admin,
+      { status: "espera", clientId: muchas, limit: 100 },
+      NOW,
+    )
+    expect(all.items.filter((item) => item.kind === "posible_carga")).toHaveLength(4)
+  })
+
+  it("la propietaria que ya no tiene invitación pendiente: el recordatorio se retira en la pasada", async () => {
+    const duena = await altaClient("duena2", { owner: support.userId })
+    await ownerDb.insert(invitation).values({
+      id: "kz-alta-inv-duena2",
+      organizationId: "kz-alta-duena2",
+      email: "duena2@alta.test",
+      role: "owner",
+      status: "pending",
+      expiresAt: new Date(NOW.getTime() + 2 * DAY),
+      createdAt: ago(3),
+      inviterId: admin.userId,
+    })
+    await pass()
+    const reminder = async () =>
+      (await itemsOf(duena, "mensaje")).filter(
+        (item) => item.payload.goal === "recordar_propietaria",
+      )
+    expect((await reminder()).map((item) => item.status)).toEqual(["espera"])
+    await ownerDb
+      .update(invitation)
+      .set({ status: "accepted" })
+      .where(eq(invitation.id, "kz-alta-inv-duena2"))
+    await pass()
+    const [after] = await reminder()
+    expect(after).toMatchObject({
+      status: "vencida",
+      error: "Ya no hace falta: ya no tiene una invitación pendiente",
+    })
+  })
+})

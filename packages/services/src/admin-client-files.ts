@@ -657,6 +657,57 @@ export async function confirmClientFileDeletions(
 }
 
 /**
+ * Lo que el código anterior todavía programó para borrarse mientras se desplegaba (un adjunto
+ * de `soporte@` registrado con `delete_after`, `received_at` de ahora y sin su correo, después
+ * de que corrió la 0118): deja de estarlo, con la misma auditoría que el relleno
+ * (`client_file.retention_lifted`, con el día que tenía), y se liga a su correo con la hora del
+ * correo, como hizo la 0118. Idempotente y barata (lo normal es que no encuentre nada): la
+ * corre cada pasada de Kairós antes de mirar el alta. Devuelve cuántos levantó.
+ */
+export async function liftLeftoverCorreoRetention(tx: Db): Promise<number> {
+  const leftovers = (await tx.execute(sql`
+    select f.id, f.client_id as "clientId", f.delete_after::text as "deleteAfter",
+      c.organization_id as "organizationId", e.id as "emailId",
+      case when e.id is null then null else least(e.received_at, f.created_at) end as "receivedAt"
+    from ${saasClientFile} f
+    join ${saasClient} c on c.id = f.client_id
+    left join lateral (
+      select m.id, m.received_at from ${saasInboundEmail} m
+      cross join lateral jsonb_array_elements(m.attachments) a
+      where a ->> 'fileId' = f.id::text
+      order by m.received_at asc, m.id asc limit 1
+    ) e on f.inbound_email_id is null
+    where f.kind = 'correo' and f.deleted_at is null and f.delete_after is not null
+    order by f.id
+    for update of f`)) as unknown as Array<{
+    id: string
+    clientId: string
+    deleteAfter: string
+    organizationId: string | null
+    emailId: string | null
+    receivedAt: Date | string | null
+  }>
+  for (const file of leftovers) {
+    await tx
+      .update(saasClientFile)
+      .set({
+        deleteAfter: null,
+        ...(file.emailId && file.receivedAt
+          ? { inboundEmailId: file.emailId, receivedAt: new Date(file.receivedAt) }
+          : {}),
+      })
+      .where(eq(saasClientFile.id, file.id))
+    await writeAdminAudit(tx, null, {
+      action: "client_file.retention_lifted",
+      entityId: file.id,
+      organizationId: file.organizationId,
+      metadata: { clientId: file.clientId, deleteAfter: file.deleteAfter },
+    })
+  }
+  return leftovers.length
+}
+
+/**
  * La pasada del worker: busca lo vencido, borra cada objeto (fuera de toda
  * transacción) y anota lo que sí se borró. Un objeto que no se pudo borrar
  * queda para la próxima pasada. Devuelve cuántos se borraron, cuántos no y
