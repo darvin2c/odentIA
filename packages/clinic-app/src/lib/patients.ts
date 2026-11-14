@@ -246,6 +246,20 @@ export interface HealthDeclarationView {
   via: "enlace" | "registro" | "formulario"
   by: HealthDeclarant
   health: Record<string, unknown>
+  /**
+   * Por qué llegó, antes de una cita (entrega 10): dijo que algo cambió, lo corrigió o dijo que
+   * nada cambió (sin salud). Nulo u omitido: lo primero que dijo, o un registro.
+   */
+  reason?: "cambio" | "correccion" | "sin_cambios" | null
+}
+
+/** Lo vigente que «dijo que cambió» la última vez que volvió a responder (lo decide el servidor). */
+export interface ChangedHealth {
+  by: HealthDeclarant
+  at: string
+  allergies: string[]
+  conditions: string[]
+  medications: string[]
 }
 
 export interface PatientHealth {
@@ -271,6 +285,10 @@ export interface PatientHealth {
   pregnancy?: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo. */
   declarations?: HealthDeclarationView[]
+  /** Lo vigente que «dijo que cambió» (entrega 10); nulo si nada. Opcional: un servidor anterior no lo manda. */
+  changed?: ChangedHealth | null
+  /** «Dijo que nada cambió en su salud ni en sus medicinas», si fue lo último que dijo (entrega 10). */
+  unchanged?: { by: HealthDeclarant; at: string } | null
   /** Anticoagulantes y medicinas para los huesos: si toma, si dijo que no, si no sabe o si nadie se lo preguntó. */
   medicineClasses?: Record<MedicationClass, MedicineClassAnswer>
   latestAnamnesis: {

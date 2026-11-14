@@ -13,12 +13,14 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
 import {
   askWhom,
+  changedMarkWords,
   declaredGroupOf,
   pregnancyGroupOf,
   pregnancyWords,
   saidByWords,
   saidNoGroupOf,
   saidNoWords,
+  unchangedWords,
 } from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import { asaLabel, type Encounter, fetchPatientHealth, isCurrentMedication, type PatientFull } from "../../lib/patients"
@@ -156,6 +158,8 @@ export function EncounterContextBody({
     return group ? `${saidNoWords(group.by, sex)} · sin revisar.` : null
   }
   const unreviewed = (topic: "allergies" | "conditions" | "medications", id: string): string => {
+    // Lo vigente que volvió a responder sin nombrarlo (entrega 10): sigue ahí, con esa marca.
+    if (data.changed?.[topic].includes(id)) return ` · ${changedMarkWords(data.changed.by, data.changed.at, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))}`
     const group = declaredGroupOf(groups, topic, id)
     return group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""
   }
@@ -163,6 +167,10 @@ export function EncounterContextBody({
   const pregnancy = data.pregnancy ? pregnancyWords(data.pregnancy) : null
   return (
     <div className="flex flex-col gap-5 text-sm">
+      {data.unchanged ? (
+        // «¿Cambió algo?» con «No» (entrega 10): lo dijo antes de esta cita, con su fecha.
+        <p>{unchangedWords(data.unchanged.by, data.unchanged.at, sex)}.</p>
+      ) : null}
       {pregnancy ? (
         <section className="flex flex-col gap-1">
           <h3 className="font-medium">Embarazo</h3>

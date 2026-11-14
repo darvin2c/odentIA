@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { personalDataSentWords } from "./personal-data-form"
+import { healthAnswerWords, healthCheckQuestion, personalDataSentWords } from "./personal-data-form"
 
 const adult = { firstName: "Marta", age: 66, respondentFirstName: null, missing: [] }
 const thiago = { firstName: "Thiago", age: 6, respondentFirstName: "Carla", missing: [] }
@@ -42,5 +42,28 @@ describe("lo que dice «Su enlace» al terminar", () => {
     expect(personalDataSentWords(thiago, "Dental Smile", "sin-salud", { reader: null, askedReason: true }).text).toBe(
       "Dental Smile ya tiene a qué viene Thiago.",
     )
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 10 (C6): la pregunta no lista lo que dijo antes (decisión 9).
+describe("¿Cambió algo?", () => {
+  it("pregunta desde su última visita, con el día, y a quien cuida a un niño por el niño", () => {
+    expect(healthCheckQuestion(adult, "2026-11-13T19:27:00.000Z")).toBe(
+      "¿Cambió algo en tu salud o en tus medicinas desde tu última visita (13 nov)?",
+    )
+    expect(healthCheckQuestion(thiago, "2026-11-13T19:27:00.000Z")).toBe(
+      "¿Cambió algo en la salud o en las medicinas de Thiago desde su última visita (13 nov)?",
+    )
+  })
+
+  it("con «No» dice que ya lo sabe; al corregir, que lo de antes no se borra", () => {
+    expect(healthAnswerWords(adult, "Dental Smile", "sin_cambios")).toEqual({
+      title: "Listo, Marta",
+      text: "Dental Smile ya sabe que nada cambió en tu salud ni en tus medicinas.",
+    })
+    expect(healthAnswerWords(thiago, "Dental Smile", "correccion")).toEqual({
+      title: "Listo, Carla",
+      text: "Dental Smile recibió tu corrección. Lo revisa quien atiende a Thiago; lo de antes no se borra.",
+    })
   })
 })

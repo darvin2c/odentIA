@@ -82,6 +82,8 @@ export interface PersonalLinkSearch {
   sede?: string
   con?: string
   hora?: string
+  /** Con `abre=datos`: «Corregir mi salud o mis medicinas» (entrega 10). */
+  corregir?: boolean
 }
 
 const text = (value: unknown) =>
@@ -100,6 +102,7 @@ export function validatePersonalLinkSearch(search: Record<string, unknown>): Per
     sede: text(search.sede),
     con: text(search.con),
     hora: text(search.hora),
+    ...(search.corregir === "1" || search.corregir === 1 || search.corregir === true ? { corregir: true } : {}),
   }
 }
 
@@ -240,12 +243,18 @@ function readerOf(view: PersonalLinkView, clinician: string): string {
  */
 export function beforeVisitCard(view: PersonalLinkView, clinician: string): PendingItem | null {
   const appointment = view.appointment && !view.appointment.cancelled ? view.appointment : null
-  if (!appointment || (!view.data && !view.visit)) return null
+  if (!appointment || (!view.data && !view.visit && !view.healthCheck)) return null
   const name = view.patientFirstName
   const missing = view.data?.missing.length ?? 0
   const parts = [
     missing > 0 ? (name ? `los datos de ${name}` : "tus datos") : null,
     view.data?.health ? (name ? "su salud, sus medicinas" : "tu salud, tus medicinas") : null,
+    // «¿Cambió algo?» (entrega 10): solo la pregunta, nunca lo que dijo entonces.
+    view.healthCheck && !view.data?.health
+      ? name
+        ? `si cambió algo en la salud o en las medicinas de ${name}`
+        : "si cambió algo en tu salud o en tus medicinas"
+      : null,
     view.visit
       ? view.visit.questions.reason
         ? name
@@ -375,9 +384,15 @@ export function toldWords(view: PersonalLinkView, clinician: string): { sent: st
     return name ? `lo de la visita de ${name}` : "lo de tu visita"
   }
   const moments = [...new Set(told.items.map((item) => item.at))]
+  // «¿Cambió algo?» con «No» (entrega 10): no envió su salud, dijo que nada cambió.
+  const unchanged = name ? `que nada cambió en la salud ni en las medicinas de ${name}` : "que nada cambió en tu salud ni en tus medicinas"
   const sent = moments.map((at) => {
-    const parts = told.items.filter((item) => item.at === at).map((item, index) => said(item.what, index === 0))
-    return withPeriod(`Enviaste ${listed(parts)} el ${whenText({ startsAt: at, timeZone: told.timeZone })}`)
+    const here = told.items.filter((item) => item.at === at)
+    const parts = here.filter((item) => item.what !== "sin_cambios").map((item, index) => said(item.what, index === 0))
+    const when = whenText({ startsAt: at, timeZone: told.timeZone })
+    const saidUnchanged = here.some((item) => item.what === "sin_cambios")
+    if (parts.length === 0) return withPeriod(`Nos dijiste ${unchanged} el ${when}`)
+    return withPeriod(`Enviaste ${listed(parts)}${saidUnchanged ? ` y nos dijiste ${unchanged}` : ""} el ${when}`)
   })
   if (!view.appointment || view.appointment.cancelled) return { sent, reader: null }
   const professional = view.appointment.professionalName?.trim()
@@ -407,11 +422,11 @@ function messagesSummary(view: PersonalLinkView, messages: PersonalLinkMessages)
 }
 
 /** Un enlace a otra pantalla de la misma página: con el mismo token, y «atrás» del teléfono sirve. */
-function screenLink(token: string, to: { abre?: PersonalLinkOpens; id?: string } = {}) {
+function screenLink(token: string, to: { abre?: PersonalLinkOpens; id?: string; corregir?: boolean } = {}) {
   return (
     <Link
       to="/pendientes"
-      search={{ token, ...(to.abre ? { abre: to.abre } : {}), ...(to.id ? { id: to.id } : {}) }}
+      search={{ token, ...(to.abre ? { abre: to.abre } : {}), ...(to.id ? { id: to.id } : {}), ...(to.corregir ? { corregir: true } : {}) }}
     />
   )
 }
@@ -928,6 +943,30 @@ export function PersonalLinkPage({
     )
   }
 
+  // «Corregir mi salud o mis medicinas» (entrega 10): vuelve a responder su salud, sin ver lo guardado.
+  if (abre === "datos" && search.corregir && view.correctHealth) {
+    const title = name ? `Corregir la salud de ${name}` : "Corregir tu salud o tus medicinas"
+    return one(
+      title,
+      <>
+        <p className="text-sm text-muted-foreground">
+          Vuelves a responder las preguntas de {name ? `la salud de ${name}` : "tu salud y tus medicinas"}. La clínica recibe
+          lo nuevo para revisarlo {name ? "con ustedes" : "contigo"}; lo de antes no se borra.
+        </p>
+        <PersonalDataForm
+          slug={slug}
+          token={token}
+          clinicName={view.clinicName}
+          mode="corregir"
+          onSent={(words) => {
+            refresh()
+            setDone({ key: "datos", screen: title, ...words, at: activeAppointment?.startsAt ?? null })
+          }}
+        />
+      </>,
+    )
+  }
+
   if (abre === "datos") {
     const missing = view.data?.missing ?? []
     const healthOnly = missing.length === 0 && !!view.data?.health
@@ -945,7 +984,7 @@ export function PersonalLinkPage({
           : withHealth
             ? "Tus datos y tu salud"
             : "Tus datos"
-    if (!view.data && !view.visit) {
+    if (!view.data && !view.visit && !view.healthCheck) {
       // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
       const sentAt = view.told?.items.at(-1)?.at
       return one(
@@ -1203,6 +1242,27 @@ export function PersonalLinkPage({
               ))}
               {told.reader ? <p className="text-muted-foreground">{told.reader}</p> : null}
             </div>
+            {view.correctHealth ? (
+              // Entrega 10 (C8): sabe qué envió y cuándo, y cómo corregirlo, sin ver lo guardado (decisión 9).
+              <div className="flex flex-col gap-2 border-t pt-3 text-sm">
+                <p className="font-medium">¿Te equivocaste en algo, como la dosis de una medicina?</p>
+                <Button
+                  variant="outline"
+                  className="min-h-11 self-start"
+                  render={screenLink(token, { abre: "datos", corregir: true })}
+                >
+                  Corregir mi salud o mis medicinas
+                </Button>
+                <p className="text-muted-foreground">
+                  Vuelves a responder esas preguntas. La clínica recibe lo nuevo para revisarlo {name ? "con ustedes" : "contigo"}; lo
+                  de antes no se borra.
+                </p>
+                <p className="text-muted-foreground">
+                  Lo que respondiste no se muestra aquí, porque este enlace se abre sin código. Lo ves en tu portal del paciente,
+                  con tu código, si la clínica te dio acceso.
+                </p>
+              </div>
+            ) : null}
           </section>
         ) : null}
         {view.messages ? (

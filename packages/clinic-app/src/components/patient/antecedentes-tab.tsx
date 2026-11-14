@@ -1434,7 +1434,17 @@ function RegistrationSnapshotDialog({
           const sent = declaration.health as Rec
           const pregnancy = declaredPregnancyText(sent)
           const blood = sent["bloodGroup"]
-          const title = declaration.via === "enlace" ? "Lo que envió desde su enlace" : "Lo que envió en su registro en línea"
+          // Antes de una cita (entrega 10): si llegó porque algo cambió, porque lo corrigió, o si dijo que nada cambió.
+          const title =
+            declaration.reason === "sin_cambios"
+              ? "Dijo que nada cambió en su salud ni en sus medicinas"
+              : declaration.reason === "cambio"
+                ? "Dijo que algo cambió, desde su enlace"
+                : declaration.reason === "correccion"
+                  ? "Lo corrigió desde su enlace"
+                  : declaration.via === "enlace"
+                    ? "Lo que envió desde su enlace"
+                    : "Lo que envió en su registro en línea"
           return (
             <section key={declaration.enteredAt} aria-label={title} className="flex flex-col gap-3 text-sm">
               <div className="flex flex-col gap-0.5">

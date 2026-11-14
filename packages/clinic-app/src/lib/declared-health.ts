@@ -93,6 +93,27 @@ export function declaredMarkWords(by: HealthDeclarant, at: string | null | undef
   return `Lo dijo${subject}${when}, sin revisar`
 }
 
+/**
+ * La marca de lo vigente que la persona volvió a responder sin nombrarlo (entrega 10): «Dijo que
+ * cambió el 14 may», «Su madre, Carla, dijo que cambió el 14 may». No se borra: lo decide quien
+ * la atiende.
+ */
+export function changedMarkWords(by: HealthDeclarant, at: string | null | undefined, sex: Sex): string {
+  const day = at ? shortDay(at) : ""
+  const when = day ? ` el ${day}` : ""
+  if (by.kind !== "representative") return `Dijo que cambió${when}`
+  const who = whoWords(by, sex)
+  return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+}
+
+/** «Dijo el 14 may que nada cambió en su salud ni en sus medicinas» (entrega 10). */
+export function unchangedWords(by: HealthDeclarant, at: string, sex: Sex): string {
+  const day = shortDay(at)
+  const who = by.kind === "representative" ? whoWords(by, sex) : ""
+  const subject = who ? `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo` : "Dijo"
+  return `${subject}${day ? ` el ${day}` : ""} que nada cambió en su salud ni en sus medicinas`
+}
+
 /** «lo dijo ella», para una fila: «lo dijo ella · por revisar». */
 export function saidByWords(by: HealthDeclarant, sex: Sex): string {
   if (by.kind === "staff") return "lo anotó el equipo"

@@ -47,6 +47,8 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
     ],
     visit: null,
     told: null,
+    healthCheck: null,
+    correctHealth: false,
     toSchedule: [],
     another: null,
     confirmVia: null,
@@ -208,5 +210,36 @@ describe("mientras dura la entrega", () => {
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()
     expect(() => whatFollows(old as PersonalLinkView, { key: "datos", at: THURSDAY })).toThrow()
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 10 (C6 y C8): «¿Cambió algo?» y lo que dice después.
+describe("¿cambió algo?", () => {
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const SENT = "2026-11-13T19:27:00.000Z"
+  beforeAll(() => void setOrgLocale("es-PE", "America/Lima", "PE"))
+
+  it("va en la tarjeta «Antes de tu cita», sin decir lo que dijo antes", () => {
+    const card = beforeVisitCard(view({ data: null, healthCheck: { since: "2026-09-13T15:00:00.000Z" } }), "odontólogo")
+    expect(card?.text).toBe("Si cambió algo en tu salud o en tus medicinas.")
+    expect(card?.title).toBe("Antes de tu cita")
+    expect(pendingItems(view({ data: null, healthCheck: null }))).not.toContainEqual(expect.objectContaining({ key: "datos" }))
+  })
+
+  it("con «No» dice que nos dijo que nada cambió y cuándo", () => {
+    const words = toldWords(view({ told: { timeZone: "America/Lima", items: [{ what: "sin_cambios", at: SENT }] } }), "odontólogo")
+    expect(words?.sent.map(plain)).toEqual(["Nos dijiste que nada cambió en tu salud ni en tus medicinas el viernes, 13 de noviembre, 2:27 p. m."])
+    const both = toldWords(
+      view({ told: { timeZone: "America/Lima", items: [{ what: "visita", at: SENT }, { what: "sin_cambios", at: SENT }] } }),
+      "odontólogo",
+    )
+    expect(both?.sent.map(plain)).toEqual([
+      "Enviaste lo de tu visita y nos dijiste que nada cambió en tu salud ni en tus medicinas el viernes, 13 de noviembre, 2:27 p. m.",
+    ])
+  })
+
+  it("«Corregir» se abre con su dirección, y una dirección rara no lo abre", () => {
+    expect(validatePersonalLinkSearch({ token: "t", abre: "datos", corregir: "1" })).toMatchObject({ abre: "datos", corregir: true })
+    expect(validatePersonalLinkSearch({ token: "t", abre: "datos", corregir: "sí" }).corregir).toBeUndefined()
   })
 })

@@ -66,7 +66,9 @@ import {
   fetchPortalPaperFileUrl,
   fetchPortalPaperPdf,
   fetchPortalPapers,
+  fetchPortalHealth,
   fetchPortalVisit,
+  portalHealthLines,
   fetchPortalRescheduleSlots,
   fetchPortalSession,
   fetchPublicPortalPolicyApi,
@@ -591,6 +593,7 @@ function PortalDashboard({
         <GrantSwitcher sessionToken={sessionToken} currentPatientId={info.session.patientId} onSessionToken={onSessionToken} />
         {scope.appointments ? <NextAppointment sessionToken={sessionToken} /> : null}
         {scope.appointments ? <VisitBlock sessionToken={sessionToken} /> : null}
+        {scope.appointments ? <HealthBlock sessionToken={sessionToken} /> : null}
         {scope.budgets ? <BudgetsBlock sessionToken={sessionToken} /> : null}
         {scope.papers ? <DocumentsBlock sessionToken={sessionToken} /> : null}
         {/* Sus pedidos van con «Tu cuenta» (ADR 0172), donde la clínica trabaja con pedidos. */}
@@ -1002,6 +1005,51 @@ function VisitBlock({ sessionToken }: { sessionToken: string }) {
         Enviar
       </SubmitButton>
     </form>
+  )
+}
+
+/**
+ * «Lo que nos contaste de tu salud» (mesa del 13 nov, entrega 10, C8): su enlace dice qué envió y
+ * cuándo, sin los valores, porque se abre sin código (decisión 9); aquí, donde entró con su
+ * código, los lee tal como los envió. Lo vigente lo revisa y lo corrige su clínica. Sin nada que
+ * decir no se muestra.
+ */
+function HealthBlock({ sessionToken }: { sessionToken: string }) {
+  const query = useQuery({
+    queryKey: ["portal-health", sessionToken],
+    queryFn: () => fetchPortalHealth(sessionToken),
+    retry: false,
+  })
+  if (query.isPending || query.isError || (!query.data.told && !query.data.unchanged)) return null
+  const { told, unchanged } = query.data
+  const lines = told ? portalHealthLines(told.health) : []
+  const title = "Lo que nos contaste de tu salud"
+  return (
+    <section aria-label={title} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+      <div>
+        <h2 className="font-semibold">{title}</h2>
+        {told ? (
+          <p className="text-sm text-muted-foreground">
+            {told.reason === "correccion" ? "Lo corregiste" : told.reason === "cambio" ? "Nos dijiste que cambió" : "Lo enviaste"} el{" "}
+            {formatPortalDay(told.at)}. Tu {appWords().clinician.one} lo revisa contigo; si algo está mal, corrígelo desde tu enlace o
+            díselo en la cita.
+          </p>
+        ) : null}
+      </div>
+      {lines.length > 0 ? (
+        <dl className="grid gap-1 text-sm">
+          {lines.map((line) => (
+            <div key={line.label} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-2">
+              <dt className="text-muted-foreground">{line.label}</dt>
+              <dd className="break-words">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {unchanged ? (
+        <p className="text-sm">Después nos dijiste que nada cambió, el {formatPortalDay(unchanged.at)}.</p>
+      ) : null}
+    </section>
   )
 }
 
