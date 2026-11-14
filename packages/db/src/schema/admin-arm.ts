@@ -558,6 +558,8 @@ export const saasOutreach = adminSchema.table(
     messageId: text("message_id"),
     /** La cabecera `References` con que salió: la del correo que responde más su Message-ID. */
     references: text("references"),
+    /** Documentos del cliente que van adjuntos (`saas_client_file`), hasta 5; sin clave foránea, como un arreglo. */
+    fileIds: uuid("file_ids").array().notNull().default(sql`'{}'::uuid[]`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -583,6 +585,10 @@ export const saasOutreach = adminSchema.table(
         AND (${table.messageId} IS NULL OR length(${table.messageId}) BETWEEN 3 AND 998)
         AND (${table.references} IS NULL OR length(${table.references}) <= 8000)
         AND (${table.inReplyToEmailId} IS NULL OR ${table.channel} = 'correo')`,
+    ),
+    check(
+      "saas_outreach_files_check",
+      sql`cardinality(${table.fileIds}) <= 5 AND (cardinality(${table.fileIds}) = 0 OR ${table.channel} = 'correo')`,
     ),
   ],
 )

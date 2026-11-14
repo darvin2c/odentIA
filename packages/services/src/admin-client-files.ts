@@ -6,9 +6,11 @@
  * en `inbound/<uuid>.<ext>`, porque llegan antes de saber de qué cliente son).
  *
  * Lo que manda la clínica (`archivo_clinica`) y lo que llega por correo
- * (`correo`) es solo de Administración y se borra a los 30 días
- * (`delete_after`, el contrato de encargo lo promete): lo borra el worker con
- * `purgeDueClientFiles`. Soporte nunca ve lo `admin_only`. El almacenamiento
+ * (`correo`) es solo de Administración. Se borra a los 30 días (`delete_after`)
+ * solo lo de la carga, que es lo que promete el contrato de encargo: los
+ * archivos que se suben como «Lo que mandó la clínica» y lo que llega a
+ * soporte@ con adjuntos (`isCargaEmail`), con su texto. Lo demás se guarda.
+ * Lo borra el worker con `purgeDueClientFiles`. Soporte nunca ve lo `admin_only`. El almacenamiento
  * lo toca quien llama, fuera de la transacción: primero se sube y después se
  * registra (si el registro falla, se borra lo subido); al borrar, primero se
  * marca y después se borra el objeto.
@@ -35,14 +37,31 @@ import { invalidField, isUniqueViolation, notFound, ServiceError } from "./error
 import { limaDate } from "./peru-business-days.js"
 import type { Storage } from "./storage.js"
 
-/** Días que se guarda lo que manda la clínica o llega por correo (contrato de encargo). */
+/** Días que se guarda lo de la carga de datos (contrato de encargo). */
 export const CLIENT_FILE_RETENTION_DAYS = 30
 
-/** Tipos que la clínica nos manda: solo de Administración y con borrado a los 30 días. */
-export const CLINIC_SENT_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set([
-  "archivo_clinica",
-  "correo",
-])
+/**
+ * Lo de la carga que se sube a mano: solo de Administración y con borrado a
+ * los 30 días. Un adjunto de correo (`correo`) lleva su plazo según dónde
+ * llegó (`isCargaEmail`).
+ */
+export const CLINIC_SENT_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set(["archivo_clinica"])
+
+/**
+ * Un correo que puede ser de la carga de datos: llegó a soporte@ (donde la
+ * clínica la manda, ADR 0104) con adjuntos, guardados o no. Su texto y sus
+ * adjuntos se borran a los 30 días; lo demás que llega se guarda.
+ */
+export function isCargaEmail(email: {
+  mailbox: string
+  attachments: number
+  notice?: string | null
+}): boolean {
+  return email.mailbox === "soporte" && (email.attachments > 0 || Boolean(email.notice))
+}
+
+/** Lo mismo en SQL, sobre `saas_inbound_email`. */
+const CARGA_EMAIL = sql`(${saasInboundEmail.mailbox} = 'soporte' and (jsonb_array_length(${saasInboundEmail.attachments}) > 0 or ${saasInboundEmail.notice} is not null))`
 
 /** Tipos que solo maneja Administración (lo que trae datos de la clínica). */
 const ADMIN_FILE_KINDS: ReadonlySet<SaasClientFileKind> = new Set(["archivo_clinica", "correo"])
@@ -111,6 +130,33 @@ export function cleanFilename(name: string): string {
   return (clean || "archivo").slice(0, 255)
 }
 
+/** La extensión de cada tipo que se guarda (lo que entra por correo y lo que se sube). */
+const EXT_OF_TYPE: Record<string, readonly string[]> = {
+  "application/pdf": ["pdf"],
+  "image/jpeg": ["jpg", "jpeg"],
+  "image/png": ["png"],
+  "image/webp": ["webp"],
+  "image/gif": ["gif"],
+  "text/csv": ["csv"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ["xlsx"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ["docx"],
+}
+
+/**
+ * El nombre con que sale un documento adjunto: con la extensión de su tipo
+ * real, porque los programas de correo lo abren por ella («factura.html» que es
+ * un PDF sale «factura.pdf»). Un tipo que no está en la lista no se toca.
+ */
+export function filenameForType(name: string, contentType: string): string {
+  const exts = EXT_OF_TYPE[contentType.trim().toLowerCase()]
+  const clean = cleanFilename(name)
+  if (!exts) return clean
+  const match = /\.([A-Za-z0-9]{1,8})$/.exec(clean)
+  if (match && exts.includes((match[1] ?? "").toLowerCase())) return clean
+  const base = (match ? clean.slice(0, match.index) : clean).trim() || "archivo"
+  return `${base.slice(0, 250)}.${exts[0]}`
+}
+
 async function clientExists(tx: Db, clientId: string): Promise<void> {
   const [row] = await tx
     .select({ id: saasClient.id })
@@ -127,9 +173,9 @@ export interface RegisterClientFileInput {
   objectKey: string
   contentType: string
   sizeBytes: number
-  /** Por defecto, sí; lo de la clínica y del correo siempre. */
+  /** Por defecto, sí; lo de la clínica y del correo, siempre. */
   adminOnly?: boolean
-  /** Por defecto: lo de la clínica y del correo, a los 30 días; lo demás, nunca. */
+  /** Por defecto: lo de la carga (`archivo_clinica`), a los 30 días; lo demás, nunca. */
   deleteAfter?: string | null
   /** Por defecto: `persona` con actor, `kairos` sin él. */
   source?: SaasClientFileSource
@@ -166,7 +212,7 @@ export async function registerClientFile(
   if (input.source && !SAAS_CLIENT_FILE_SOURCES.includes(input.source))
     throw invalidField("source", "Origen no válido")
   const clinicSent = CLINIC_SENT_FILE_KINDS.has(input.kind)
-  const adminOnly = clinicSent ? true : (input.adminOnly ?? true)
+  const adminOnly = ADMIN_FILE_KINDS.has(input.kind) ? true : (input.adminOnly ?? true)
   if (actor?.role === "support" && (ADMIN_FILE_KINDS.has(input.kind) || adminOnly))
     throw forbidden("Ese documento es solo de Administración")
   if (
@@ -408,7 +454,7 @@ export async function dueClientFileDeletions(
     objectKey: row.objectKey,
   }))
   if (out.length >= limit) return out
-  // Un correo sin cliente: sus adjuntos no son documentos de nadie, pero igual se borran a los 30 días.
+  // Un correo de la carga sin cliente: sus adjuntos no son documentos de nadie, pero igual se borran a los 30 días.
   const cutoff = addDays(today, -CLIENT_FILE_RETENTION_DAYS)
   const emails = await tx
     .select({ id: saasInboundEmail.id, attachments: saasInboundEmail.attachments })
@@ -416,6 +462,7 @@ export async function dueClientFileDeletions(
     .where(
       and(
         isNull(saasInboundEmail.clientId),
+        CARGA_EMAIL,
         sql`(${saasInboundEmail.receivedAt} at time zone 'America/Lima')::date <= ${cutoff}::date`,
         sql`exists (select 1 from jsonb_array_elements(${saasInboundEmail.attachments}) a where a ? 'objectKey')`,
       ),
@@ -501,9 +548,10 @@ export async function purgeDueClientFiles(
 }
 
 /**
- * El texto de un correo que llegó (con o sin cliente) se borra a los 30 días,
- * con sus adjuntos: puede traer lo que la clínica pegó, como una lista de
- * pacientes. Quedan el asunto, el remitente y los adjuntos que hubo.
+ * El texto de un correo de la carga (`isCargaEmail`, con o sin cliente) se
+ * borra a los 30 días, con sus adjuntos: el contrato promete borrar el correo
+ * en que llegó la carga. Quedan el asunto, el remitente y los adjuntos que
+ * hubo. Los demás correos se guardan con su texto.
  */
 export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> {
   const cutoff = addDays(limaDate(now), -CLIENT_FILE_RETENTION_DAYS)
@@ -514,6 +562,7 @@ export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> 
     .where(
       and(
         or(isNotNull(saasInboundEmail.textBody), isNotNull(saasInboundEmail.notice)),
+        CARGA_EMAIL,
         sql`(${saasInboundEmail.receivedAt} at time zone 'America/Lima')::date <= ${cutoff}::date`,
       ),
     )

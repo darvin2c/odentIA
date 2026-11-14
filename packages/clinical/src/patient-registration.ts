@@ -132,8 +132,8 @@ export const REGISTRATION_FIELDS = [
   { key: "conditions", label: "Enfermedades", step: "salud", group: "health" },
   { key: "dental.corazon", label: "Corazón", step: "salud", group: "health", products: ["dental"] },
   { key: "dental.problemaAnestesia", label: "Problemas con la anestesia", step: "salud", group: "health", products: ["dental"] },
-  { key: "anticoagulants", label: "Anticoagulantes", step: "medicinas", group: "health" },
-  { key: "boneMedicines", label: "Medicinas para los huesos", step: "medicinas", group: "health" },
+  { key: "anticoagulants", label: "Anticoagulantes", step: "medicinas", group: "health", products: ["dental", "medical"] },
+  { key: "boneMedicines", label: "Medicinas para los huesos", step: "medicinas", group: "health", products: ["dental", "medical"] },
   { key: "medications", label: "Otros medicamentos", step: "medicinas", group: "health" },
   { key: "personal.embarazo", label: "Embarazo", step: "personales", group: "health" },
   { key: "personal.cirugias", label: "Operaciones", step: "personales", group: "health" },
@@ -141,7 +141,7 @@ export const REGISTRATION_FIELDS = [
   { key: "personal.transfusiones", label: "Transfusiones", step: "personales", group: "health" },
   { key: "medical.lactancia", label: "Lactancia", step: "personales", group: "health", products: ["medical", "dental"] },
   { key: "medical.tabaco", label: "Si fuma y cuánto", step: "habitos", group: "health", products: ["medical", "dental"] },
-  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", products: ["medical"] },
+  { key: "medical.alcohol", label: "Alcohol", step: "habitos", group: "health", products: ["dental", "medical"] },
   { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health", products: ["dental"] },
   { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health", products: ["dental"] },
@@ -175,6 +175,7 @@ const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Rec
   boneMedicines: 2,
   "medical.lactancia": { dental: 2 },
   "medical.tabaco": { dental: 2 },
+  "medical.alcohol": { dental: 2 },
   // Lo de un niño, para quien lo cuida (mesa del 13 nov, entrega 7).
   "dental.biberon": 3,
   "dental.chupon": 3,
@@ -245,7 +246,7 @@ const optionalDefaults: Record<string, true> = {
   docType: true, docNumber: true, email: true, sex: true, address: true, bloodGroup: true,
   allergies: true, conditions: true, medications: true,
   anticoagulants: true, boneMedicines: true, "dental.corazon": true, "dental.problemaAnestesia": true,
-  "medical.lactancia": true, "medical.tabaco": true,
+  "medical.lactancia": true, "medical.tabaco": true, "medical.alcohol": true,
   "dental.biberon": true, "dental.chupon": true, "dental.dulcesEntreComidas": true, "dental.pastaConFluor": true,
   "dental.quienCepilla": true,
 }
@@ -291,9 +292,19 @@ export const healthMedicationDeclarationSchema = z.strictObject({
 export type HealthAllergyDeclaration = z.infer<typeof healthAllergyDeclarationSchema>
 export type HealthConditionDeclaration = z.infer<typeof healthConditionDeclarationSchema>
 export type HealthMedicationDeclaration = z.infer<typeof healthMedicationDeclarationSchema>
-const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
+/** `emptyYes`: un Sí sin decir cuál vale (los medicamentos, QA del 14 nov, B15). */
+const declaration = <T extends z.ZodType>(item: T, options: { emptyYes?: boolean } = {}) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
-}).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+}).refine(v => v.state === "recorded" ? options.emptyYes === true || v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+/** Por qué toma la medicina para los huesos, y cómo: cambian el riesgo antes de una extracción. */
+export const BONE_MEDICINE_REASONS = ["osteoporosis", "cancer", "no_sabe"] as const
+export const BONE_MEDICINE_FORMS = ["pastillas", "inyeccion"] as const
+export const BONE_MEDICINE_REASON_LABELS: Record<(typeof BONE_MEDICINE_REASONS)[number], string> = {
+  osteoporosis: "por osteoporosis",
+  cancer: "por un cáncer",
+  no_sabe: "no sabe por qué",
+}
+export const BONE_MEDICINE_FORM_LABELS: Record<(typeof BONE_MEDICINE_FORMS)[number], string> = { pastillas: "pastillas", inyeccion: "inyección" }
 /**
  * Una medicina que se pregunta por su clase («¿Tomas algún anticoagulante?»):
  * Sí (`recorded`), No (`none`) o No sé (`unknown`), con los mismos estados de
@@ -302,7 +313,12 @@ const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
  */
 export const directedMedicineSchema = z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), detail: text(200).optional(),
-}).refine(v => v.state === "recorded" || !v.detail, "Indica cuál solo cuando la respuesta sea Sí")
+  /**
+   * De las medicinas para los huesos, con el Sí y opcional (QA del 14 nov, B3 y C3; AAOMS 2022):
+   * si la toma hoy (`false`: ya no), por qué (osteoporosis o un cáncer) y cómo (pastillas o inyección).
+   */
+  now: z.boolean().optional(), reason: z.enum(BONE_MEDICINE_REASONS).optional(), form: z.enum(BONE_MEDICINE_FORMS).optional(),
+}).refine(v => v.state === "recorded" || (!v.detail && v.now === undefined && !v.reason && !v.form), "Indica cuál solo cuando la respuesta sea Sí")
 export type DirectedMedicineDeclaration = z.infer<typeof directedMedicineSchema>
 /** Sí, No o No sé de una pregunta de la entrevista, como lo dice quien responde. */
 export const INTERVIEW_ANSWERS = ["si", "no", "no_sabe"] as const
@@ -360,7 +376,8 @@ export const DECLARED_CHILD_CONDITION_OPTIONS = ["Asma", "Epilepsia o convulsion
  * cabeza o cuello» cambian una extracción (historia de salud de la ADA).
  */
 export const DECLARED_CONDITION_OPTIONS = [
-  "Diabetes", "Presión alta", "Asma", "Epilepsia", "Hepatitis", "Problemas de sangrado", "Radioterapia en cabeza o cuello",
+  "Diabetes", "Presión alta", "Problema del corazón (infarto, angina, arritmia, marcapasos)", "Asma", "Epilepsia", "Hepatitis",
+  "Problemas de sangrado", "Radioterapia en cabeza o cuello",
 ] as const
 export const registrationContactInputSchema = z.strictObject({
   contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(),
@@ -384,7 +401,7 @@ export const registrationAnswersSchema = z.strictObject({
     allergies: declaration(healthAllergyDeclarationSchema).optional(),
     conditions: declaration(healthConditionDeclarationSchema).optional(),
     /** «¿Algún otro medicamento todos los días?»: lo que no es anticoagulante ni para los huesos. */
-    medications: declaration(healthMedicationDeclarationSchema).optional(),
+    medications: declaration(healthMedicationDeclarationSchema, { emptyYes: true }).optional(),
     /** Anticoagulantes o aspirina diaria (grupo ATC B01A) y medicinas para los huesos (M05B), ahora o antes. */
     anticoagulants: directedMedicineSchema.optional(),
     boneMedicines: directedMedicineSchema.optional(),
@@ -641,6 +658,8 @@ export function declaredLactationAndTobacco(
       tabaco: medical.tabaco,
       ...(medical.tabaco === "fuma" && medical.cigarrillos ? { cigarrillos: medical.cigarrillos } : {}),
     }
+  // El alcohol, con la misma clave en los dos productos (QA del 14 nov, C4: también en odentIA).
+  if (medical?.alcohol) out.habitos = { ...(out.habitos ?? {}), alcohol: medical.alcohol }
   return out
 }
 

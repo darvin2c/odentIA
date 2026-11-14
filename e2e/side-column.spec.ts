@@ -25,7 +25,7 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).click()
   const leave = page.getByRole("alertdialog")
   await expect(leave).toContainText("Salir sin guardar")
-  await leave.getByRole("button", { name: "Continuar editando" }).click()
+  await leave.getByRole("button", { name: "Seguir aquí" }).click()
   await expect(name).toHaveValue("COL-1")
   await expect(page).toHaveURL(/\/inventory/)
 

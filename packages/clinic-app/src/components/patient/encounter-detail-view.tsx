@@ -15,6 +15,7 @@ import { formatTakenAt, takenAt } from "./document-labels"
 import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
+import { FormRecordView } from "./form-record"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -133,6 +134,32 @@ function listWords(items: string[]): string {
 }
 
 /**
+ * Lo que la atención no registró, para decirlo en una sola línea: así nadie cree
+ * que está escondido. Una receta emitida en ella es una indicación y un documento
+ * registrados (E9); un formulario finalizado también es un documento suyo (QA de
+ * formularios del 13 nov: decía «Sin registrar: … documentos» teniendo uno).
+ */
+export function unrecordedParts(input: {
+  diagnoses: number
+  procedures: number
+  evolution: boolean
+  indications: boolean
+  issuedPrescription: boolean
+  /** La página de la atención lista sus documentos aparte: ahí no se dice que faltan. */
+  showDocuments: boolean
+  documents: number
+  forms: number
+}): string[] {
+  return [
+    input.diagnoses === 0 ? "diagnóstico" : "",
+    input.procedures === 0 ? "procedimientos" : "",
+    input.evolution ? "" : "evolución",
+    input.indications || input.issuedPrescription ? "" : "indicaciones",
+    input.showDocuments && input.documents === 0 && !input.issuedPrescription && input.forms === 0 ? "documentos" : "",
+  ].filter(Boolean)
+}
+
+/**
  * Vista de lectura del detalle de una atención: encuentro, procedimientos,
  * tratamientos vinculados, notas, odontograma, documentos y adendas.
  * Reutilizable desde la atención y la historia del paciente.
@@ -153,6 +180,15 @@ export function EncounterDetailView({
   const canRead = usePermission("clinical.read")
   const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, documents, addenda } = detail
+  // Las fichas finalizadas en ella son algo que se anotó: van con sus respuestas. Lo agregado a una
+  // después de firmar no es parte de lo firmado: va después de la firma.
+  const forms = detail.forms ?? []
+  const signedAt = encounter.status === "finalizada" ? (encounter.finalizedAt ?? null) : null
+  const formAddendaAfterSigning = signedAt
+    ? forms.flatMap((form) =>
+        form.addenda.filter((addendum) => addendum.createdAt > signedAt).map((addendum) => ({ form, addendum })),
+      )
+    : []
   // La misma consulta (y caché) que el bloque «Documentos» de la atención: sus recetas.
   const prescriptions = useQuery({
     queryKey: ["prescriptions", patientId],
@@ -183,15 +219,16 @@ export function EncounterDetailView({
   const indicatedOnly = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && !isRetiredPlanStatus(item.status))
   const indicatedRetired = detail.indicatedItems.filter((item) => !doneHere.has(item.id) && isRetiredPlanStatus(item.status))
   const liveBudgets = (detail.budgets ?? []).filter((budget) => budget.status !== "cancelado")
-  // Lo que no se registró, en una sola línea: así nadie cree que está escondido.
-  // Una receta emitida en ella es una indicación y un documento registrados (E9).
-  const unrecorded = [
-    diagnoses.length === 0 ? "diagnóstico" : "",
-    procedures.length === 0 ? "procedimientos" : "",
-    encounter.evolution ? "" : "evolución",
-    encounter.indications || issuedPrescription ? "" : "indicaciones",
-    showDocuments && documents.length === 0 && !issuedPrescription ? "documentos" : "",
-  ].filter(Boolean)
+  const unrecorded = unrecordedParts({
+    diagnoses: diagnoses.length,
+    procedures: procedures.length,
+    evolution: Boolean(encounter.evolution),
+    indications: Boolean(encounter.indications),
+    issuedPrescription,
+    showDocuments,
+    documents: documents.length,
+    forms: forms.length,
+  })
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -441,6 +478,17 @@ export function EncounterDetailView({
 
       <ProductDetail patientId={patientId} detail={detail} slot="recorded" />
 
+      {forms.length > 0 ? (
+        <section aria-label={forms.length === 1 ? "Ficha" : "Fichas"}>
+          <h4 className="mb-2 text-sm font-medium">{forms.length === 1 ? "Ficha" : "Fichas"}</h4>
+          <div className="flex flex-col gap-3">
+            {forms.map((form) => (
+              <FormRecordView key={form.id} form={form} addendaUntil={signedAt} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {showDocuments && documents.length > 0 ? (
       <section aria-label="Documentos vinculados">
         <h4 className="mb-2 text-sm font-medium">Documentos</h4>
@@ -477,6 +525,30 @@ export function EncounterDetailView({
             {(encounter.finalizedAt ?? encounter.endedAt) ? ` · ${formatDateTime((encounter.finalizedAt ?? encounter.endedAt)!)}` : ""}
           </span>
         </p>
+      ) : null}
+
+      {/* Lo agregado a sus fichas después de firmar va después de la firma, con su hora (QA de la entrega 2). */}
+      {formAddendaAfterSigning.length > 0 ? (
+        <section aria-label="Agregado a sus fichas después de firmar">
+          <h4 className="mb-2 text-sm font-medium">Agregado a sus fichas después de firmar</h4>
+          <ul className="flex flex-col gap-2">
+            {formAddendaAfterSigning.map(({ form, addendum }) => (
+              <li key={addendum.id} className="border-b pb-2 text-sm last:border-0">
+                <p className="text-xs text-muted-foreground">{form.title}</p>
+                <p className="whitespace-pre-wrap break-words">{addendum.text}</p>
+                {addendum.reason ? (
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                    Motivo: {addendum.reason}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {addendum.authorName ? `${addendum.authorName} · ` : ""}
+                  <time dateTime={addendum.createdAt}>{formatDateTime(addendum.createdAt)}</time>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {encounter.status === "finalizada" ? (

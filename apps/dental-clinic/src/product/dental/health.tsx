@@ -10,9 +10,12 @@ import {
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
+  type DentalInterviewItem,
   dentalInterviewErrors,
-  dentalInterviewLines,
+  dentalInterviewItems,
 } from "@odentia/dental"
+import { shortDay } from "@odentia/clinic-app/lib/declared-health"
+import type { DeclaredInterviewKey } from "@odentia/clinic-app/lib/patients"
 import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS, EARLY_CHILDHOOD_MAX_AGE, isChildAge } from "@odentia/clinical"
 import { regionToday } from "@odentia/ui-patterns"
 import {
@@ -281,6 +284,7 @@ const CIGARETTE_ITEMS: Record<string, string> = {
   ...Object.fromEntries(CIGARETTE_BANDS.map((band) => [band, CIGARETTE_BAND_LABELS[band]])),
 }
 const LACTATION_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No" }
+const ALCOHOL_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", no: "No toma", ocasional: "De vez en cuando", frecuente: "Con frecuencia" }
 
 /** Una lista corta con «Sin indicar» primero; elegirlo quita el dato. */
 function Pick({
@@ -352,7 +356,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          Corazón, anestesia y tabaco <ChevronDown aria-hidden className="size-4" />
+          Corazón, anestesia, tabaco y alcohol <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -410,6 +414,17 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
               error={subFieldError(errors, "habitos.cigarrillos", fid("od-cigarrillos"))}
             />
           ) : null}
+          {child && strOf(habits["alcohol"]) === "" ? null : (
+            <Pick
+              id={fid("od-alcohol")}
+              label="Alcohol"
+              items={ALCOHOL_ITEMS}
+              value={strOf(habits["alcohol"])}
+              onChange={(v) => update("habitos", "alcohol", v)}
+              disabled={disabled}
+              error={subFieldError(errors, "habitos.alcohol", fid("od-alcohol"))}
+            />
+          )}
           {sex === "M" || (child && strOf(lactation["estado"]) === "") ? null : (
             <Pick
               id={fid("od-lactancia")}
@@ -491,21 +506,37 @@ function ChildhoodSections({ answers, update, disabled, idPrefix, age, errors }:
   )
 }
 
-/** Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de pequeño, debajo del resumen de antecedentes. */
-function DentalHistorySummary({ answers }: { answers: Rec }) {
-  const lines = dentalInterviewLines(answers)
+/** La lactancia con el día en que se dijo, como el embarazo. */
+const withDay = (item: DentalInterviewItem, text: string): string => {
+  const day = item.saidOn ? shortDay(item.saidOn) : ""
+  return day ? `${text} (lo dijo el ${day})` : text
+}
+
+/**
+ * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de pequeño, debajo del
+ * resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato: lo
+ * del equipo queda sin ella (QA del 14 nov, causa raíz).
+ */
+function DentalHistorySummary({ answers, marks }: { answers: Rec; marks?: Partial<Record<DeclaredInterviewKey, string>> }) {
+  const items = dentalInterviewItems(answers)
   const raw = answers.antecedentesOdontologicos
   const childhood = childhoodLines(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
-  if (lines.length === 0 && childhood.length === 0) return null
+  if (items.length === 0 && childhood.length === 0) return null
   return (
     <>
-      {lines.length > 0 ? (
+      {items.length > 0 ? (
         <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
           <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
           <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-            {lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
+            {items.map((item) => {
+              const mark = item.said.map((key) => marks?.[key]).find(Boolean)
+              return (
+                <li key={item.key}>
+                  {withDay(item, item.text)}
+                  {mark ? <span className="text-warning"> · {mark}</span> : null}
+                </li>
+              )
+            })}
           </ul>
         </section>
       ) : null}
@@ -539,4 +570,14 @@ export const dentalHealth: ProductHealthUi = {
   ),
   validate: (answers) => ({ ...dentalInterviewErrors(answers), ...dentalHabitsErrors(answers) }),
   Summary: (props) => <DentalHistorySummary {...props} />,
+  alerts: (answers) =>
+    dentalInterviewItems(answers).flatMap((item) =>
+      item.alert ? [{ keys: item.said, label: withDay(item, item.alert) }] : [],
+    ),
+  saidRows: (answers) =>
+    dentalInterviewItems(answers).map((item) => {
+      // «Corazón: válvula…: sí» → «Corazón» y lo que dijo.
+      const [label, ...rest] = withDay(item, item.text).split(": ")
+      return { keys: item.said, label: label ?? item.key, value: rest.join(": ") }
+    }),
 }

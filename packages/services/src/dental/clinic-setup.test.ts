@@ -10,6 +10,7 @@ import { scheduleBlock } from "@odentia/db/schema/availability"
 import { agentKnowledgeEntry } from "@odentia/db/schema/agent"
 import { invitation, member, user } from "@odentia/db/schema/auth"
 import { orgSpecialty, serviceCatalog } from "@odentia/db/schema/clinical"
+import { clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -152,5 +153,32 @@ describe("carga de la configuración de una clínica", () => {
     // Volver a cargar no la repite.
     const again = await run("carga")
     expect(again.items.filter((item) => item.area === "Profesionales").at(-1)?.status).toBe("igual")
+  })
+
+  it("dos formularios de la clínica cuyo título empieza igual se cargan como dos, y volver a cargar no los repite", async () => {
+    const schema = { sections: [{ id: "general", title: "General", fields: [{ id: "motivo", label: "Motivo", type: "texto" }] }] }
+    // Los primeros 40 caracteres son los mismos: antes el segundo chocaba con el borrador del primero.
+    const titles = [
+      "Ficha de evaluación de ortodoncia inicial para niños",
+      "Ficha de evaluación de ortodoncia inicial para adultos",
+    ]
+    const withForms = clinicSetupPlanSchema.parse({
+      ...raw,
+      // El mismo título escrito dos veces en el plan es un solo formulario.
+      forms: [...titles, titles[0]!].map((title) => ({ title, schema })),
+    })
+    const load = () => withOrgContext(ownerDb, ORG, (tx: Db) => runClinicSetup(tx, ORG, admin, withForms, {}, "carga"))
+    const formItems = (result: Awaited<ReturnType<typeof load>>) =>
+      result.items.filter((item) => item.label.startsWith("Formulario:")).map((item) => item.status)
+    expect(formItems(await load())).toEqual(["nueva", "nueva", "igual"])
+    const saved = await ownerDb.select().from(clinicalFormTemplate).where(eq(clinicalFormTemplate.organizationId, ORG))
+    expect(saved.map((row) => row.title).sort()).toEqual([...titles].sort())
+    expect(saved.map((row) => ({ version: row.version, status: row.status }))).toEqual([
+      { version: 1, status: "borrador" },
+      { version: 1, status: "borrador" },
+    ])
+    expect(new Set(saved.map((row) => row.key)).size).toBe(2)
+    expect(formItems(await load())).toEqual(["igual", "igual", "igual"])
+    expect(await ownerDb.select().from(clinicalFormTemplate).where(eq(clinicalFormTemplate.organizationId, ORG))).toHaveLength(2)
   })
 })

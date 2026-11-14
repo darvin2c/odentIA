@@ -269,6 +269,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     sessions: { finishing: [], continuing: [], notRegistered: [], accepted: [] },
     // Sin tratamiento terminado hoy, no hay diagnóstico que resolver.
     resolvable: [],
+    // Sin formularios a medias, el cierre no avisa ninguno.
+    openForms: [],
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
     controls: { recallMonths: 6, byAppointment: [], shortcuts: expect.any(Object), due: [], next: null, finishing: [], open: [], returnsTo: [] },
   })

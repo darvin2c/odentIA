@@ -49,7 +49,7 @@ const HEALTH_FIRST: PickerItem[] = [
   {
     keys: ["conditions"],
     label: "Enfermedades",
-    hint: "Se marcan de una lista: diabetes, presión alta, asma, epilepsia, hepatitis, problemas de sangrado, radioterapia en cabeza o cuello… y «Otra».",
+    hint: "Se marcan de una lista: diabetes, presión alta, problema del corazón, asma, epilepsia, hepatitis, problemas de sangrado, radioterapia en cabeza o cuello… y «Otra».",
   },
 ]
 const HEALTH_MEDICINES: PickerItem[] = [
@@ -86,7 +86,7 @@ const DENTAL: PickerItem[] = [
   {
     keys: ["dental.habitos"],
     label: "Hábitos",
-    hint: "Fumar, morderse las uñas, respirar por la boca…",
+    hint: "Morderse las uñas, respirar por la boca, morder lápices…",
   },
 ]
 /**
@@ -97,12 +97,11 @@ const LACTATION: PickerItem = { keys: ["medical.lactancia"], label: "Lactancia",
 const TOBACCO: PickerItem = {
   keys: ["medical.tabaco"],
   label: "Fuma y cuántos cigarrillos al día",
-  hint: "No fumo · Fumo (menos de 10 o 10 o más) · Lo dejé. No se pregunta a menores de 12.",
+  // Las mismas palabras que ve el paciente (B14).
+  hint: "Nunca fumé · Fumo (menos de 10 o 10 o más) · Lo dejé. No se pregunta a menores de 12.",
 }
-const MEDICAL_HABITS: PickerItem[] = [
-  TOBACCO,
-  { keys: ["medical.alcohol"], label: "Si toma alcohol", hint: "No se pregunta a menores de 12." },
-]
+const ALCOHOL: PickerItem = { keys: ["medical.alcohol"], label: "Si toma alcohol", hint: "No se pregunta a menores de 12." }
+const MEDICAL_HABITS: PickerItem[] = [TOBACCO, ALCOHOL]
 /** Lo de un niño, para quien lo cuida (odentIA): lo que decide el riesgo de caries. */
 const CHILD: PickerItem[] = [
   { keys: ["dental.biberon"], label: "Biberón o pecho para dormir", hint: "Hasta los 6 años" },
@@ -120,6 +119,8 @@ const PRODUCT_FIELDS: Record<
   ClinicalProduct,
   {
     health: PickerItem[]
+    /** Pregunta por las dos medicinas (anticoagulantes y huesos): vistIA no (QA del 14 nov, C5). */
+    medicines: boolean
     personal: PickerItem[]
     own: { title: string; help: string; items: PickerItem[] } | null
     /** Lo que se le pregunta a quien cuida a un menor de 12; null si el producto no pregunta nada propio. */
@@ -128,7 +129,9 @@ const PRODUCT_FIELDS: Record<
 > = {
   dental: {
     health: DENTAL_HEALTH,
-    personal: [LACTATION, TOBACCO],
+    medicines: true,
+    // El alcohol, también en odentIA (QA del 14 nov, C4).
+    personal: [LACTATION, TOBACCO, ALCOHOL],
     own: { title: "Su historia dental", help: "Ayuda a preparar la primera visita.", items: DENTAL },
     child: {
       title: "Si se atiende un niño",
@@ -138,11 +141,12 @@ const PRODUCT_FIELDS: Record<
   },
   medical: {
     health: [],
+    medicines: true,
     personal: [LACTATION],
     own: { title: "Sus hábitos", help: "Llegan a sus antecedentes. Nunca son obligatorios.", items: MEDICAL_HABITS },
     child: null,
   },
-  optical: { health: [], personal: [], own: null, child: null },
+  optical: { health: [], medicines: false, personal: [], own: null, child: null },
 }
 const CENSUS: PickerItem[] = [
   { keys: ["maritalStatus"], label: "Estado civil" },
@@ -342,8 +346,8 @@ export function RegistrationFieldsPicker({
       />
       <Group
         title="Su salud"
-        help="Sale arriba de su ficha y de la atención; quien atiende la revisa con él."
-        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...HEALTH_MEDICINES]}
+        help="Todo queda en sus Antecedentes; lo que cambia la cita sale arriba de su ficha y de la atención, y quien atiende lo revisa con él."
+        items={[...HEALTH_FIRST, ...PRODUCT_FIELDS[product].health, ...(PRODUCT_FIELDS[product].medicines ? HEALTH_MEDICINES : [])]}
         newKeys={newKeys}
         fields={fields}
         options={THREE}

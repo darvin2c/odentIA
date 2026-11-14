@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { encounter, patientAnamnesis } from "@odentia/db/schema/clinical"
+import { encounter, patientAnamnesis, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { markAllergiesReviewed } from "./allergies.js"
+import { addPatientAllergy, markAllergiesReviewed } from "./allergies.js"
 import { issuePersonalLink } from "./booking-links.js"
 import {
   addFormAddendum,
@@ -23,8 +23,10 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   addDeclaredHealth,
   allergiesSaidNoByPatient,
+  declaredAllergiesByPatient,
   getPatientHealth,
   markHealthDenied,
+  recordHealthDeclaration,
   savePatientHealth,
 } from "./clinical.js"
 import { ServiceError } from "./errors.js"
@@ -305,14 +307,17 @@ it("«Marcar como revisado» dice lo que pasó de verdad, guarda quién lo revis
   const withAllergy = await sent(f, rosa, { motivo: "Control", alergias: "Penicilina: ronchas\nNinguna" })
   const passed = await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, withAllergy.id))
   expect(passed.passedAllergies).toEqual(["Penicilina"])
-  // Revisado fuera de una atención: no se inventa una, y la Historia lo trae con quién lo revisó.
+  // Revisado fuera de una atención: no se inventa una, y la Historia lo trae con su título, lo
+  // respondido en una línea y quién lo respondió y quién lo revisó.
   expect(passed.encounterId).toBeNull()
   const history = await f.run((tx) => getTimeline(tx, ORG, rosa.patientId, { types: ["form"] }))
   expect(history.data).toHaveLength(1)
   expect(history.data[0]).toMatchObject({
     type: "form",
-    title: "Se completó el formulario: Cuestionario con alergias",
-    detail: "Lo respondió la persona y lo revisó Clínico",
+    // Lo que llenó el paciente se dice como lo que es; «ficha de consulta» es lo del equipo.
+    title: "Lo que respondió el paciente: Cuestionario con alergias",
+    // Quién lo respondió, con las palabras de la ficha: sin su sexo registrado, «el paciente».
+    byText: "Lo respondió el paciente · lo revisó Clínico",
   })
   expect((await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))).allergies.map((row) => row.substance)).toEqual([
     "Penicilina",
@@ -709,4 +714,159 @@ it("lo finalizado antes de este cambio recibe quién lo finalizó y por dónde l
       ownerDb.update(clinicalFormResponse).set({ finalizedBy: null }).where(eq(clinicalFormResponse.id, response.id)),
     ),
   ).toBe("25001")
+})
+
+/** Inés dice por su enlace que es alérgica al látex, que tiene presión alta y que toma losartán. */
+async function inesSaysLatex(f: Fixture) {
+  const ines = await person(f, "Inés", "Salas")
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: ines.personId, patientId: ines.patientId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1990-06-01" },
+      health: {
+        allergies: { state: "recorded" as const, items: [{ substance: "Látex", severity: "desconocida" as const }] },
+        conditions: { state: "recorded" as const, items: [{ name: "Presión alta" }] },
+        medications: { state: "recorded" as const, items: [{ name: "Losartán" }] },
+      },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, ines.patientId))
+  return { ...ines, latex: health.allergies.find((row) => row.substance === "Látex")! }
+}
+
+it("recepción recibe la alergia que dijo la persona con quién y cuándo, y nada más de su salud", async () => {
+  const f = await clinicalFixture()
+  const ines = await inesSaysLatex(f)
+  const forReception = await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))
+  expect(forReception).toEqual([
+    { by: { kind: "patient", name: null, relation: null }, at: expect.any(Date), allergies: [ines.latex.id], saidNo: false },
+  ])
+  // Solo esos cuatro datos: ni enfermedades, ni medicinas, ni embarazo.
+  expect(Object.keys(forReception[0]!).sort()).toEqual(["allergies", "at", "by", "saidNo"])
+  expect(JSON.stringify(forReception)).not.toMatch(/Presi|Losart|pregnan|conditions|medications/)
+})
+
+it("agregar una alergia del equipo no da por revisado el látex que dijo ella", async () => {
+  const f = await clinicalFixture()
+  const ines = await inesSaysLatex(f)
+  await f.run((tx) => addPatientAllergy(tx, ORG, f.actor, ines.patientId, { substance: "Penicilina", severity: "severa" }))
+  const afterAdding = await f.run((tx) => getPatientHealth(tx, ORG, ines.patientId))
+  expect(afterAdding.declared.flatMap((group) => group.allergies)).toEqual([ines.latex.id])
+  expect(afterAdding.allergiesReviewedAt).toBeNull()
+  expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toHaveLength(1)
+})
+
+it("revisar sus alergias con ella confirma lo que dijo (FHIR verificationStatus) y le quita la marca", async () => {
+  const f = await clinicalFixture()
+  const ines = await inesSaysLatex(f)
+  expect(ines.latex.verification).toBe("no_confirmada")
+  await f.run((tx) => markAllergiesReviewed(tx, ORG, f.actor, ines.patientId))
+  const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, ines.patientId))
+  expect(reviewed.declared.flatMap((group) => group.allergies)).toEqual([])
+  expect(reviewed.allergies.find((row) => row.id === ines.latex.id)?.verification).toBe("confirmada")
+  expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toEqual([])
+})
+
+// QA del 14 nov (H9 de desarrollo): la copia de 0114 trajo como declaración un registro con todo
+// «sin responder», que el código nunca guarda. Se lee con la misma regla: no es una declaración.
+it("un registro con todo sin responder no es una declaración, aunque lo haya copiado la migración", async () => {
+  const f = await clinicalFixture()
+  const thiago = await person(f, "Thiago", "Huanca")
+  const unanswered: (typeof patientHealthDeclaration.$inferInsert)["health"] = {
+    allergies: { state: "unanswered", items: [] },
+    conditions: { state: "unanswered", items: [] },
+    medications: { state: "unanswered", items: [] },
+  }
+  await ownerDb.insert(patientHealthDeclaration).values({
+    organizationId: ORG,
+    patientId: thiago.patientId,
+    via: "registro",
+    respondent: "representative",
+    declarantName: "Valeria Quispe",
+    declarantRelation: "madre",
+    health: unanswered,
+    saidAt: new Date("2026-11-13T15:00:00.000Z"),
+  })
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(health.declarations).toEqual([])
+  expect(health.declared).toEqual([])
+})
+
+// Revisión de la entrega 6 (14 nov): el «cuántos al día» que anotó el equipo se quedaba junto a un
+// «Lo dejé» y la entrevista entera no pasaba: se perdían también el corazón y la anestesia. Y desde la
+// QA (B2): lo que dijo no pisa lo que anotó el equipo; llena lo que falta, y la versión es de ella.
+it("si dice que dejó de fumar, lo que anotó el equipo se queda, lo que faltaba se guarda y la versión es suya", async () => {
+  const f = await clinicalFixture()
+  const ana = await person(f, "Ana", "Fumadora")
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, ana.patientId, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { habitos: { tabaco: "fuma", cigarrillos: "10_o_mas" } } },
+    }),
+  )
+  await f.run((tx) =>
+    addDeclaredHealth(
+      tx,
+      ORG,
+      null,
+      ana.patientId,
+      { medical: { tabaco: "dejo" }, dental: { problemaAnestesia: "si" } },
+      { entity: "registration_hold", entityId: ana.patientId, at: new Date() },
+    ),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, ana.patientId))
+  const answers = health.latestAnamnesis?.answers as Record<string, Record<string, unknown>>
+  expect(answers["habitos"]).toEqual({ tabaco: "fuma", cigarrillos: "10_o_mas" })
+  expect(answers["antecedentesOdontologicos"]).toMatchObject({ problemaAnestesia: "si" })
+  const [version] = await ownerDb
+    .select({ createdBy: patientAnamnesis.createdBy })
+    .from(patientAnamnesis)
+    .where(eq(patientAnamnesis.patientId, ana.patientId))
+    .orderBy(desc(patientAnamnesis.version))
+    .limit(1)
+  expect(version?.createdBy).toBeNull()
+})
+
+// QA del 14 nov (causa raíz): el corazón, la anestesia, el tabaco y la lactancia que dijo iban a la
+// entrevista sin quién lo dijo. Ahora llevan su declaración, como el embarazo, hasta que el equipo revisa.
+it("lo que dijo del corazón, la anestesia y la lactancia queda como dicho por ella hasta que el equipo revisa", async () => {
+  const f = await clinicalFixture()
+  const berta = await person(f, "Berta", "Válvula")
+  const declared = {
+    dental: { corazon: { riesgoEndocarditis: "si" as const, antibioticoPrevio: "si" as const }, problemaAnestesia: "no_sabe" as const },
+    medical: { lactancia: true },
+  }
+  await f.run(async (tx) => {
+    await addDeclaredHealth(tx, ORG, null, berta.patientId, declared, {
+      entity: "registration_hold",
+      entityId: berta.patientId,
+      at: new Date(),
+    })
+    await recordHealthDeclaration(tx, ORG, berta.patientId, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  const said = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(said.declared).toHaveLength(1)
+  expect(said.declared[0]?.by).toMatchObject({ kind: "patient" })
+  expect([...(said.declared[0]?.interview ?? [])].sort()).toEqual(["anestesia", "antibiotico", "corazon", "lactancia"])
+  // El equipo lo revisa y guarda: ya no es «lo dijo ella, sin revisar».
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, berta.patientId, {
+      expectedRevision: said.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: said.latestAnamnesis!.version, answers: said.latestAnamnesis!.answers as Record<string, unknown> },
+    }),
+  )
+  const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(reviewed.declared.flatMap((group) => group.interview)).toEqual([])
 })

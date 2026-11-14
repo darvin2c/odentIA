@@ -1,5 +1,5 @@
 {
-  "id": "55869427-6f35-411e-923d-a9f3019512e9",
+  "id": "0e27be24-2eff-47b5-99c6-070af7334e63",
   "prevId": "985456a7-dbc0-4334-8d2b-914ae4830a6f",
   "version": "7",
   "dialect": "postgresql",
@@ -1678,6 +1678,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "file_ids": {
+          "name": "file_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1884,6 +1891,10 @@
         "saas_outreach_mail_check": {
           "name": "saas_outreach_mail_check",
           "value": "(\"admin\".\"saas_outreach\".\"from_address\" IS NULL OR (\"admin\".\"saas_outreach\".\"from_address\" = lower(\"admin\".\"saas_outreach\".\"from_address\") AND length(\"admin\".\"saas_outreach\".\"from_address\") BETWEEN 3 AND 254))\n        AND (\"admin\".\"saas_outreach\".\"message_id\" IS NULL OR length(\"admin\".\"saas_outreach\".\"message_id\") BETWEEN 3 AND 998)\n        AND (\"admin\".\"saas_outreach\".\"references\" IS NULL OR length(\"admin\".\"saas_outreach\".\"references\") <= 8000)\n        AND (\"admin\".\"saas_outreach\".\"in_reply_to_email_id\" IS NULL OR \"admin\".\"saas_outreach\".\"channel\" = 'correo')"
+        },
+        "saas_outreach_files_check": {
+          "name": "saas_outreach_files_check",
+          "value": "cardinality(\"admin\".\"saas_outreach\".\"file_ids\") <= 5 AND (cardinality(\"admin\".\"saas_outreach\".\"file_ids\") = 0 OR \"admin\".\"saas_outreach\".\"channel\" = 'correo')"
         }
       },
       "isRLSEnabled": false
@@ -36170,13 +36181,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "questions_version": {
-          "name": "questions_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
         },
         "created_at": {
           "name": "created_at",

@@ -141,6 +141,12 @@ export const clinicalFormTemplate = pgTable(
     schema: jsonb("schema").notNull(),
     /** Quién lo responde: el equipo o el paciente desde el portal (cuestionario previo). */
     respondent: text("respondent").notNull().default("staff"),
+    /**
+     * «En uso» o «Sin usar» (ADR 0117), aparte del estado de la versión: apagar una ficha no la
+     * archiva ni crea otra versión, y encenderla de nuevo vuelve a usar la misma. Solo cuenta en
+     * la publicada; la base deja cambiarlo en ella sin tocar nada más.
+     */
+    inUse: boolean("in_use").notNull().default(true),
     createdBy: text("created_by").references(() => user.id),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     ...timestamps,
@@ -235,10 +241,22 @@ export const clinicalFormAddendum = pgTable(
       .notNull()
       .references(() => clinicalFormResponse.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
+    /**
+     * Por qué se corrige, si quien corrige lo dijo: la norma de historia clínica pide el motivo de
+     * una corrección, pero dejarlo vacío no traba nada (decisión del 14 nov). Nulo: no se dijo.
+     */
+    reason: text("reason"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("clinical_form_addendum_response_idx").on(table.responseId)],
+  (table) => [
+    index("clinical_form_addendum_response_idx").on(table.responseId),
+    // Como `discard_reason` y `cancel_reason`: si se dice, no vacío y con tope.
+    check(
+      "clinical_form_addendum_reason_check",
+      sql`${table.reason} IS NULL OR char_length(${table.reason}) BETWEEN 1 AND 2000`,
+    ),
+  ],
 )
 
 export const CONSENT_TEMPLATE_STATUSES = ["borrador", "publicado", "archivado"] as const

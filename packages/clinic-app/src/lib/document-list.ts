@@ -121,7 +121,7 @@ const NOUNS: Record<string, readonly [string, string]> = {
   descansos: ["descanso médico", "descansos médicos"],
   ordenes: ["orden", "órdenes"],
   consentimientos: ["consentimiento", "consentimientos"],
-  formularios: ["formulario", "formularios"],
+  formularios: ["ficha", "fichas"],
   imagenes: ["imagen", "imágenes"],
   otros: ["archivo", "archivos"],
 }

@@ -438,7 +438,7 @@ export function findHabitualMedication(
  */
 export const MEDICATION_CLASSES = {
   anticoagulants: { atc: "B01A", label: "Anticoagulante", unnamed: "Anticoagulante (no dijo cuál)" },
-  boneMedicines: { atc: "M05B", label: "Huesos", unnamed: "Medicina para los huesos (no dijo cuál)" },
+  boneMedicines: { atc: "M05B", label: "Medicina para los huesos", unnamed: "Medicina para los huesos (no dijo cuál)" },
 } as const
 export type MedicationClass = keyof typeof MEDICATION_CLASSES
 

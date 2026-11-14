@@ -1066,16 +1066,19 @@ export function healthGapWords(gaps: readonly HealthGap[]): string {
 export function AnesthesiaHealthLine({
   anesthetics,
   gaps,
+  risks = [],
   onComplete,
   disabled = false,
 }: {
   anesthetics: readonly string[]
   gaps: readonly HealthGap[]
+  /** Lo que dijo del corazón y de la anestesia que cambia una anestesia (QA del 14 nov, causa raíz). */
+  risks?: readonly string[]
   /** «Completar en Antecedentes»: los abre encima de la atención. */
   onComplete?: () => void
   disabled?: boolean
 }): React.JSX.Element | null {
-  if (anesthetics.length === 0 || gaps.length === 0) return null
+  if (anesthetics.length === 0 || (gaps.length === 0 && risks.length === 0)) return null
   const asked = healthGapWords(gaps)
   const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
     .filter(Boolean)
@@ -1083,15 +1086,81 @@ export function AnesthesiaHealthLine({
   return (
     <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">Anestesia con su salud por completar</span>
+        <span className="font-medium">{missing ? "Anestesia con su salud por completar" : "Anestesia: revisa lo que dijo"}</span>
         <span className="text-xs text-muted-foreground">
-          Se usa {listWords(anesthetics)}. Falta {missing}. Puedes firmar igual: queda anotado lo que faltaba.
+          Se usa {listWords(anesthetics)}.{risks.length > 0 ? ` Dijo que ${listWords([...risks])}.` : ""}
+          {missing ? ` Falta ${missing}.` : ""} Puedes firmar igual{missing ? ": queda anotado lo que faltaba" : ""}.
         </span>
       </div>
       {onComplete ? (
         <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
           Completar en Antecedentes
         </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** Los formularios de la atención que siguen a medias, dichos al cerrar: título y cuáles. */
+export function openFormsWords(forms: ReadonlyArray<{ title: string }>): { title: string; detail: string } | null {
+  if (forms.length === 0) return null
+  const names = listWords(forms.map((form) => `«${form.title}»`))
+  return forms.length === 1
+    ? {
+        title: "Queda una ficha a medias",
+        detail: `${names}. Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.`,
+      }
+    : {
+        title: `Quedan ${forms.length} fichas a medias`,
+        detail: `${names}. Puedes firmar igual: se terminan después, aquí mismo en la atención, y llevan su propia fecha y hora.`,
+      }
+}
+
+/**
+ * Un formulario a medias no frena la firma: el cierre lo avisa con el mismo
+ * tono y la misma forma que el de la anestesia, y da su salida («Completar
+ * ahora» abre ese formulario ahí mismo). `id`: el diálogo lo anuncia al abrirse.
+ */
+export function OpenFormsLine({
+  forms,
+  onComplete,
+  disabled = false,
+  id,
+}: {
+  forms: ReadonlyArray<{ id: string; title: string }>
+  /** «Completar ahora»: cierra el cierre y abre ese formulario. */
+  onComplete?: (formId: string) => void
+  disabled?: boolean
+  id?: string
+}): React.JSX.Element | null {
+  const words = openFormsWords(forms)
+  if (!words) return null
+  return (
+    <div
+      id={id}
+      role="note"
+      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3"
+    >
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">{words.title}</span>
+        <span className="text-xs text-muted-foreground">{words.detail}</span>
+      </div>
+      {onComplete ? (
+        <span className="flex flex-wrap gap-2">
+          {forms.map((form) => (
+            <Button
+              key={form.id}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              aria-label={`Completar ahora ${form.title}`}
+              onClick={() => onComplete(form.id)}
+            >
+              {forms.length === 1 ? "Completar ahora" : `Completar «${form.title}»`}
+            </Button>
+          ))}
+        </span>
       ) : null}
     </div>
   )
@@ -1129,6 +1198,7 @@ export function EncounterClosingDialog({
   mayCharge = true,
   healthGaps = [],
   onCompleteHealth,
+  onCompleteForm,
 }: {
   open: boolean
   form: ClosingForm
@@ -1188,6 +1258,8 @@ export function EncounterClosingDialog({
   healthGaps?: HealthGap[]
   /** «Completar en Antecedentes» desde la línea de anestesia. */
   onCompleteHealth?: () => void
+  /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
+  onCompleteForm?: (formId: string) => void
 }): React.JSX.Element {
   const ids = useId()
   // Quien no ve la caja no recibe lo que debe en «Atención finalizada»: no se le promete (QA antes de entregar).
@@ -1208,7 +1280,12 @@ export function EncounterClosingDialog({
       }}
     >
       {/* Lo de en medio se desplaza; el título y «Finalizar y firmar» quedan siempre a la vista, también en un teléfono. */}
-      <DialogContent aria-describedby={`${ids}-desc`} className="flex max-h-[90dvh] flex-col sm:max-w-lg" initialFocus={initialFocus}>
+      {/* El aviso del formulario a medias también describe el diálogo: el lector lo dice al abrirlo. */}
+      <DialogContent
+        aria-describedby={(closing?.openForms?.length ?? 0) > 0 ? `${ids}-desc ${ids}-forms` : `${ids}-desc`}
+        className="flex max-h-[90dvh] flex-col sm:max-w-lg"
+        initialFocus={initialFocus}
+      >
         <form noValidate onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Finalizar y firmar</DialogTitle>
@@ -1270,7 +1347,14 @@ export function EncounterClosingDialog({
               <AnesthesiaHealthLine
                 anesthetics={closing?.health?.anesthetics ?? []}
                 gaps={healthGaps}
+                risks={closing?.health?.risks ?? []}
                 onComplete={onCompleteHealth}
+                disabled={busy}
+              />
+              <OpenFormsLine
+                id={`${ids}-forms`}
+                forms={closing?.openForms ?? []}
+                onComplete={onCompleteForm}
                 disabled={busy}
               />
               {consents.map((need) => {

@@ -47,13 +47,13 @@ export const common = {
     /** Pregunta para un `window.confirm` (Aceptar/Cancelar); las superficies usan `unsaved`. */
     unsavedMessage: "Tienes cambios sin guardar. ¿Deseas descartarlos?",
     /**
-     * Cerrar un formulario o detalle con cambios sin guardar. Los botones dicen
-     * lo mismo que el aviso de salir de la página con borrador.
+     * «Salir sin guardar» (`UnsavedDialog`): cerrar un formulario o detalle y salir de la
+     * pantalla con algo sin guardar preguntan con las mismas palabras. Quedarse es lo principal.
      */
     unsaved: {
       title: "¿Salir sin guardar?",
-      description: "Se pierden los cambios que hiciste en este formulario.",
-      keepEditing: "Continuar editando",
+      description: "Lo que cambiaste aquí aún no se guardó. Si sales, se pierde.",
+      keepEditing: "Seguir aquí",
       discard: "Descartar y salir",
     },
   },

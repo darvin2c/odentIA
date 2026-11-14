@@ -76,7 +76,7 @@ describe("FormPanel", () => {
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
   })
 
-  it("«Continuar editando» no cierra y devuelve el foco al campo", async () => {
+  it("«Seguir aquí» no cierra y devuelve el foco al campo", async () => {
     const { onClose } = renderPanel({ isDirty: true, children: <input aria-label="Nombre" /> })
     const field = screen.getByLabelText("Nombre")
     field.focus()

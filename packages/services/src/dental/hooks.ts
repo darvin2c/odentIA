@@ -37,6 +37,7 @@ import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
 import type { TimelineItem } from "../patient-history.js"
 import { DENTAL_PRESCRIBING, type DiagnosisCandidate, type ProductHooks } from "../product-hooks.js"
+import { DENTAL_FORMS } from "./forms.js"
 import { dentalCatalog } from "./catalog.js"
 import { DENTAL_DICTATION } from "./dictation.js"
 import { dentalExamination } from "./examination.js"
@@ -195,6 +196,7 @@ export const dentalHooks: ProductHooks = {
   imaging: DENTAL_IMAGING_TYPES,
   imagingStudy: "tomografia",
   consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
+  forms: DENTAL_FORMS,
   interview: dentalInterview,
   examination: dentalExamination,
   vitals: CORE_VITAL_KEYS,

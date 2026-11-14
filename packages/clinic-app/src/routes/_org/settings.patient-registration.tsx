@@ -29,7 +29,7 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { QrCode } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { RegistrationQuestionnaire } from "../../components/patient/registration-questionnaire"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
@@ -219,7 +219,18 @@ function RegistrationSettings() {
   const noticeSuggested = configQuery.data?.meta.noticeSuggested === true
   const noticeShown = configQuery.data?.meta.noticeShown ?? ""
   const newQuestions = configQuery.data?.meta.newQuestions ?? []
-  const newKeys = new Set(newQuestions.map((item) => item.key))
+  // «Nueva» sigue en cada fila mientras no salga de la página, aunque pulse «Entendido» (B10).
+  const [newSnapshot, setNewSnapshot] = useState<RegistrationFieldKey[] | null>(null)
+  useEffect(() => {
+    if (newSnapshot === null && configQuery.data) setNewSnapshot((configQuery.data.meta.newQuestions ?? []).map((item) => item.key))
+  }, [configQuery.data, newSnapshot])
+  const newKeys = new Set<RegistrationFieldKey>(newSnapshot ?? newQuestions.map((item) => item.key))
+  const [seenBusy, setSeenBusy] = useState(false)
+  const [seenDone, setSeenDone] = useState(false)
+  const seenRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (seenDone) seenRef.current?.focus()
+  }, [seenDone])
   const { fields, enabled, privacyNotice, askReminders, askMessages } = values
   const published = loaded?.enabled ?? false
 
@@ -237,11 +248,21 @@ function RegistrationSettings() {
   }
 
   async function handleQuestionsSeen() {
+    // Una sola vez mientras guarda (B10).
+    if (seenBusy) return
+    setSeenBusy(true)
     try {
       await markRegistrationQuestionsSeen()
-      void queryClient.invalidateQueries({ queryKey: ["patient-registration-config"] })
+      // Sin configuración guardada, «Entendido» guarda la de siempre y su versión sube: el borrador
+      // sigue sobre esa, para que el próximo «Guardar» no diga que otra persona guardó antes.
+      const fresh = await configQuery.refetch()
+      if (fresh.data) setExpectedVersion(fresh.data.data.version)
+      // El aviso se va: el foco pasa a lo que dice que quedó, no al cuerpo de la página.
+      setSeenDone(true)
     } catch {
       toast.error("No pudimos guardarlo. Vuelve a intentarlo.")
+    } finally {
+      setSeenBusy(false)
     }
   }
 
@@ -285,11 +306,13 @@ function RegistrationSettings() {
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
       {canWrite ? (
         // «Guardar» arriba, a la vista mientras se baja: lo marcado se pregunta desde que se guarda.
-        <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-2xl border bg-card/95 p-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
+        // Debajo de un aviso de arriba (el de soporte), como los paneles (`side-dock`), y compacta a 390 (B12).
+        <div className="sticky top-[var(--notice-strip-h,0px)] z-10 flex flex-row items-center justify-between gap-2 rounded-2xl border bg-card/95 p-2 backdrop-blur sm:p-3">
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Lo que marques «Opcional» u «Obligatorio» se le pregunta desde que guardes. A quien ya respondió
             solo se le pregunta lo que le falta.
           </p>
+          <p className="text-xs text-muted-foreground sm:hidden">Se pregunta desde que guardes.</p>
           <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
             <SubmitButton
               type="button"
@@ -302,6 +325,12 @@ function RegistrationSettings() {
             {submitError ? (
               <p role="alert" className="text-sm text-destructive">
                 {submitError}
+              </p>
+            ) : null}
+            {/* Junto al botón que se pulsó, no al pie de la página (B12). */}
+            {conflict ? (
+              <p role="alert" className="max-w-sm text-sm text-warning">
+                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y vuelve a guardar.
               </p>
             ) : null}
           </div>
@@ -320,12 +349,17 @@ function RegistrationSettings() {
               variant="outline"
               size="sm"
               className="min-h-11 self-start sm:min-h-8"
+              disabled={seenBusy}
               onClick={() => void handleQuestionsSeen()}
             >
               Entendido
             </Button>
           </AlertDescription>
         </Alert>
+      ) : seenDone ? (
+        <p ref={seenRef} tabIndex={-1} role="status" className="text-sm text-muted-foreground outline-none">
+          Listo: las preguntas nuevas siguen en «Opcional». Las marcadas «Nueva» son esas.
+        </p>
       ) : null}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-6">
@@ -550,21 +584,13 @@ function RegistrationSettings() {
             )}
           </section>
 
-          {conflict ? (
-            <Alert>
-              <AlertDescription>
-                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y
-                vuelve a guardar.
-              </AlertDescription>
-            </Alert>
-          ) : null}
           <section className={CARD} aria-labelledby="registro-falta">
             <h2 id="registro-falta" className="font-heading text-base font-medium">
               ¿Te falta una pregunta?
             </h2>
             <p className="text-sm text-muted-foreground">
               Lo que tu clínica pregunta y no está aquí, pregúntalo en la consulta y anótalo en una{" "}
-              <Link to="/settings/forms" className="underline underline-offset-4">
+              <Link to="/settings/consultation-forms" className="underline underline-offset-4">
                 ficha de consulta
               </Link>
               . Si crees que toda clínica debería preguntarlo, cuéntanoslo desde Ayuda.

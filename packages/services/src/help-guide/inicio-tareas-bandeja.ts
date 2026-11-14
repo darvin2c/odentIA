@@ -173,7 +173,7 @@ export const INICIO_TAREAS_BANDEJA: readonly HelpMore[] = [
       {
         id: "inicio-activar-consentimiento",
         q: "¿Por qué Inicio me pide activar un consentimiento?",
-        a: "Es un consentimiento que alguien pidió desde una atención; la fila dice quién. «Activar» te lleva a Configuración › Formularios, a los consentimientos.",
+        a: "Es un consentimiento que alguien pidió desde una atención; la fila dice quién. «Activar» te lleva a Configuración › Consentimientos.",
         forms: ["que es activar el consentimiento en inicio", "me aparece un consentimiento por activar"],
       },
       {

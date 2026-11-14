@@ -301,19 +301,6 @@ export function ConsentTemplatesList() {
         </>
       )}
 
-      {canAdmin ? (
-        <p className="text-sm text-muted-foreground">
-          ¿Quieres hacerles a tus pacientes una pregunta propia?{" "}
-          <Link
-            to="/settings/forms"
-            search={{ tab: "formularios" }}
-            className="font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Crear un formulario
-          </Link>
-        </p>
-      ) : null}
-
       {preview ? <ConsentPreviewDrawer draft={preview} onClose={() => setPreview(null)} /> : null}
       <ConfirmDialog
         open={turningOff !== null}
