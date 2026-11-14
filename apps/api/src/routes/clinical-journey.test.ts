@@ -3,7 +3,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { branch } from "@odentia/db/schema/org"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
-import { createRoom, secretsKeyFromEnv, setProfessionalSchedule } from "@odentia/services"
+import { createRoom, patientPersonId, secretsKeyFromEnv, setProfessionalSchedule, submitQuestionnaireFromLink } from "@odentia/services"
 import { createHash } from "node:crypto"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
@@ -1287,6 +1287,69 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
     reason: "Paciente equivocado",
   })
   expect(discarded.status).toBe(200)
+})
+
+it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Marcar como revisado» dice qué pasó y en qué atención", async () => {
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Antes de tu cita por la API",
+    respondent: "portal",
+    schema: {
+      sections: [
+        {
+          id: "antes",
+          title: "Antes de tu cita",
+          fields: [
+            { id: "motivo", label: "¿Por qué vienes?", type: "texto_largo", required: true },
+            { id: "alergias", label: "¿A qué eres alérgica?", type: "texto_largo", definition: "AllergyIntolerance.code" },
+          ],
+        },
+      ],
+    },
+  })
+  expect(draft.status).toBe(201)
+  const published = await post(app, `/clinical-forms/form-templates/${(await json<{ data: { id: string } }>(draft)).data.id}/publish`)
+  expect(published.ok).toBe(true)
+  const patientId = await createPatient()
+  const encounterId = await createEncounter(patientId, "Dolor")
+  // La persona lo envía desde su enlace.
+  await withOrgContext(appDb, "org_a", async (tx) => {
+    const personId = await patientPersonId(tx, "org_a", patientId)
+    await submitQuestionnaireFromLink(
+      tx,
+      { orgId: "org_a", patientId, contactId: personId! },
+      { motivo: "Me duele la muela", alergias: "Penicilina: ronchas" },
+    )
+  })
+  type Listed = { id: string; source: string; submittedVia: string | null; finalizedBy: string | null; encounterId: string | null; respondent: { kind: string; name: string } | null; editedByTeamAt: string | null }
+  const list = await json<{ data: Listed[] }>(await app.request(`/clinical-forms/form-responses?patientId=${patientId}`))
+  expect(list.data[0]).toMatchObject({ source: "portal", submittedVia: "enlace", respondent: { kind: "patient" }, editedByTeamAt: null })
+  const responseId = list.data[0]!.id
+
+  // No se edita: el servidor lo rechaza.
+  const edited = await patch(app, `/clinical-forms/form-responses/${responseId}`, {
+    answers: { motivo: "Otra cosa", alergias: "" },
+  })
+  expect(edited.status).toBe(409)
+  expect((await json<ErrorBody>(edited)).error.code).toBe("DECLARED_READ_ONLY")
+  // La corrección va aparte, antes de revisar.
+  const correction = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, {
+    text: "Dice que fue con amoxicilina, hace años.",
+  })
+  expect(correction.status).toBe(201)
+  // Recepción no lo revisa ni lo lee.
+  expect((await post(buildApp("reception"), `/clinical-forms/form-responses/${responseId}/finalize`)).status).toBe(403)
+  // «Marcar como revisado» desde la atención: dice lo que pasó y queda ligado a ella.
+  const reviewed = await post(app, `/clinical-forms/form-responses/${responseId}/finalize`, { encounterId })
+  expect(reviewed.status).toBe(200)
+  const body = await json<{ data: Listed & { status: string; passedAllergies: string[] } }>(reviewed)
+  expect(body.data).toMatchObject({ status: "finalizado", encounterId, passedAllergies: ["Penicilina"] })
+  expect(body.data.finalizedBy).toBeTruthy()
+  const inAttention = await json<{ data: Listed[] }>(
+    await app.request(`/clinical-forms/form-responses?patientId=${patientId}&encounterId=${encounterId}`),
+  )
+  expect(inAttention.data.map((row) => row.id)).toEqual([responseId])
+  // Un id de atención mal escrito se dice; no se guarda nada a medias.
+  expect((await post(app, `/clinical-forms/form-responses/${responseId}/finalize`, { encounterId: "no-es-un-id" })).status).toBe(400)
 })
 
 it("órdenes: imagen con diagnóstico y hoja para imprimir; cancelar pide motivo; recepción no lee lo que pide la atención", async () => {

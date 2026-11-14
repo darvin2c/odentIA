@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   medicalHistoryLines,
   parseMedicalHistory,
+  pregnancyLines,
   pregnancyWeeks,
   readMedicalHistory,
 } from "./history.js"
@@ -57,6 +58,16 @@ describe("antecedentes médicos (issue 229, decisión 13)", () => {
     )
     expect(pregnancyWeeks(byFur, TODAY)).toBe(12)
     expect(pregnancyWeeks({}, TODAY)).toBeNull()
+    // Pasado su término ya no se afirma, con la misma regla de la franja de la ficha.
+    const past = readMedicalHistory(
+      { embarazoLactancia: { embarazo: { estado: "si", fecha: "2025-09-01", semanas: 20 } } },
+      TODAY,
+    )
+    expect(pregnancyWeeks(past, TODAY)).toBeNull()
+    expect(pregnancyLines(past, TODAY)).toEqual([
+      "Embarazo por confirmar (registrado el 01/09/2025): ya pasó el tiempo de un embarazo",
+    ])
+    expect(pregnancyLines(told, TODAY)).toEqual(["Embarazada, 12 semanas (registrado el 10/10/2026)"])
   })
 
   it("los partos y las cesáreas no pasan de los embarazos; los cigarrillos, solo si fuma", () => {

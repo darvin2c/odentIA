@@ -10,6 +10,7 @@ import {
   isMinor,
   isRealDate,
   kinshipFromWords,
+  type HealthDeclarant,
   type MissingPersonDatum,
   missingPersonData,
   normalizePhone,
@@ -46,7 +47,15 @@ import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, eq, gt, gte, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
-import { addDeclaredAllergies, addDeclaredHealth, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
+import {
+  addDeclaredAllergies,
+  addDeclaredHealth,
+  declarantOfContact,
+  declarantOfRegistration,
+  getPatientHealth,
+  initializeDeclaredPatientHealth,
+  recordHealthDeclaration,
+} from "./clinical.js"
 import {
   claimWhatsAppNumber,
   hasWhatsappNumber,
@@ -1300,6 +1309,13 @@ export async function registerPatient(
   // 6. Salud declarada solo con contenido significativo; nunca firma revisión.
   if (answers.health && hasMeaningfulHealth(answers.health)) {
     await initializeDeclaredPatientHealth(tx, orgId, created.id, answers.health, actorUserId)
+    // Y queda quién lo dijo y cuándo, con lo que dijo tal como llegó: la ficha lo nombra a él, no a
+    // quien hoy figure como su representante.
+    await recordHealthDeclaration(tx, orgId, created.id, {
+      via: "registro",
+      by: await registrationDeclarant(tx, orgId, created.id, answers, contextContactId),
+      health: answers.health,
+    })
   }
 
   // 6b. Representante del menor (o de quien declara por otro): persona con su
@@ -1465,6 +1481,24 @@ export async function attachLegalRepresentative(
     today: input.today,
   })
   return representativeId
+}
+
+/**
+ * Quién declaró la salud de un registro: la persona, el equipo que lo anotó o quien la registró. De
+ * este último, el nombre y el parentesco que escribió; si no los escribió (vino por el enlace de su
+ * conversación), los de su contacto.
+ */
+async function registrationDeclarant(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  answers: Pick<RegistrationAnswers, "respondent" | "representative">,
+  contextContactId: string | null,
+): Promise<HealthDeclarant> {
+  const written = declarantOfRegistration(answers)
+  if (written.kind !== "representative" || written.name || !contextContactId) return written
+  const known = await declarantOfContact(tx, orgId, patientId, contextContactId)
+  return known.kind === "representative" ? known : written
 }
 
 /**
@@ -1875,8 +1909,17 @@ export async function resolveRegistrationHold(
   // su nota de dónde vino y la salud pendiente de revisión del profesional.
   const personRow = await requirePatient(tx, orgId, patientId)
   const personId = (personRow as unknown as { personId?: string }).personId ?? ownerId
+  // Lo dijo el día en que se registró, no el día en que recepción lo resuelve: con esa fecha entra su
+  // embarazo y con esa fecha lo nombra la ficha.
+  if (answers.health && hasMeaningfulHealth(answers.health))
+    await recordHealthDeclaration(tx, orgId, patientId, {
+      via: "registro",
+      by: declarantOfRegistration(answers),
+      health: answers.health,
+      saidAt: hold.createdAt,
+    })
   if (answers.health && (await getPatientHealth(tx, orgId, patientId)).revision === 0) {
-    await initializeDeclaredPatientHealth(tx, orgId, patientId, answers.health, actorUserId)
+    await initializeDeclaredPatientHealth(tx, orgId, patientId, answers.health, actorUserId, hold.createdAt)
   } else if (answers.health) {
     const allergies = answers.health.allergies?.state === "recorded" ? answers.health.allergies.items : []
     await addDeclaredAllergies(

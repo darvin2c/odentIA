@@ -7,6 +7,7 @@ import { demoSignatureStrokes } from "./demo-signature.js"
 import { clinicToday } from "./inventory-stock.js"
 import { and, asc, eq, ilike, sql } from "drizzle-orm"
 import {
+  addFormAddendum,
   advanceClinicalOrder,
   archiveSpecialty,
   createClinicalOrder,
@@ -254,26 +255,39 @@ export async function seedClinicalForms(
   })
   const declared = await listFormResponses(tx, orgId, { patientId, templateId: previo.id })
   if (declared.length === 0) {
-    await tx.insert(clinicalFormResponse).values({
-      organizationId: orgId,
-      templateId: previo.id,
-      templateVersion: previo.version,
-      templateTitle: previo.title,
-      templateSnapshot: previo.schema,
-      patientId,
-      status: "borrador",
-      source: "portal",
-      respondentContactId: input.contactId,
-      submittedAt: new Date(),
-      answers: {
-        motivo: "Me duele una muela de abajo al tomar frío.",
-        dolor: true,
-        intensidad: 6,
-        nervios: true,
-        nervios_que: "Que me expliquen antes cada paso",
-        antes: "Trabajo de noche: prefiero las citas por la tarde.",
-      },
-    })
+    const [sent] = await tx
+      .insert(clinicalFormResponse)
+      .values({
+        organizationId: orgId,
+        templateId: previo.id,
+        templateVersion: previo.version,
+        templateTitle: previo.title,
+        templateSnapshot: previo.schema,
+        patientId,
+        status: "borrador",
+        source: "portal",
+        respondentContactId: input.contactId,
+        submittedAt: new Date(),
+        // Lo envió desde su enlace: la pantalla dice por dónde llegó.
+        submittedVia: "enlace",
+        answers: {
+          motivo: "Me duele una muela de abajo al tomar frío.",
+          dolor: true,
+          intensidad: 6,
+          nervios: true,
+          nervios_que: "Que me expliquen antes cada paso",
+          antes: "Trabajo de noche: prefiero las citas por la tarde.",
+        },
+      })
+      .returning({ id: clinicalFormResponse.id })
+    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo.
+    await addFormAddendum(
+      tx,
+      orgId,
+      ownerUserId,
+      sent!.id,
+      "Al llegar dice que el dolor es en la muela de arriba, no en la de abajo, y que empezó hace una semana.",
+    )
   }
 
   const consents = await listConsentDocuments(tx, orgId, { patientId })
