@@ -305,14 +305,15 @@ it("«Marcar como revisado» dice lo que pasó de verdad, guarda quién lo revis
   const withAllergy = await sent(f, rosa, { motivo: "Control", alergias: "Penicilina: ronchas\nNinguna" })
   const passed = await f.run((tx) => finalizeFormResponse(tx, ORG, f.actor, withAllergy.id))
   expect(passed.passedAllergies).toEqual(["Penicilina"])
-  // Revisado fuera de una atención: no se inventa una, y la Historia lo trae con quién lo revisó.
+  // Revisado fuera de una atención: no se inventa una, y la Historia lo trae con su título, lo
+  // respondido en una línea y quién lo respondió y quién lo revisó.
   expect(passed.encounterId).toBeNull()
   const history = await f.run((tx) => getTimeline(tx, ORG, rosa.patientId, { types: ["form"] }))
   expect(history.data).toHaveLength(1)
   expect(history.data[0]).toMatchObject({
     type: "form",
-    title: "Se completó el formulario: Cuestionario con alergias",
-    detail: "Lo respondió la persona y lo revisó Clínico",
+    title: "Cuestionario con alergias",
+    byText: "Lo respondió Rosa Luna (paciente) · lo revisó Clínico",
   })
   expect((await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))).allergies.map((row) => row.substance)).toEqual([
     "Penicilina",
