@@ -1032,7 +1032,7 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
   recordatorio_cita_datos: () =>
     "Antes de la cita, a quien aún le faltan datos para atenderla: en lugar del recordatorio, con el botón «Completar mis datos».",
   recordatorio_cita_pendientes: () =>
-    "Antes de la cita, a quien decide por el paciente y tiene más de una cosa por hacer (sus datos, un consentimiento por firmar, el cuestionario o un presupuesto por responder): en lugar del recordatorio, dice cuántas son y abre «Tus pendientes».",
+    "Antes de la cita, a quien decide por el paciente y tiene algo por hacer además de sus datos (contar a qué viene, un consentimiento por firmar o un presupuesto por responder): en lugar del recordatorio, dice cuántas cosas son y abre «Tus pendientes». Sus datos y lo de su visita son una sola: «Antes de tu cita».",
   recordatorio_cita_confirmada: () =>
     "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
   cita_sin_llegar: () =>

@@ -53,7 +53,7 @@ import { attendingRule } from "./specialties.js"
  * «Su enlace» (fase 3, decisión 8; ADR 0037, que amplía el 0014): la página
  * personal de cada persona, `/reserva?token=…`. Muestra solo lo que tiene
  * pendiente —su cita, sus datos por completar, el presupuesto que se le
- * envió, el consentimiento por firmar y el cuestionario— y nunca lo guardado.
+ * envió, el consentimiento por firmar y lo de su visita antes de la cita— y nunca lo guardado.
  *
  * - **Uno por persona y paciente.** Quien abre es la persona o quien habla por
  *   ella (su representante); lo pendiente es del paciente. Enviarlo otra vez
