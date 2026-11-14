@@ -111,7 +111,10 @@ export function HealthReviewNotice({
           ? `${words.detail}; pregúntale si sigue embarazada`
           : pregnancy.weeksToday === null
             ? words.detail
-            : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
+            : pregnancy.weeksSaid === pregnancy.weeksToday
+              ? // Sin una semana de diferencia, el dato se dice una vez: «20 semanas (lo dijo el 14 nov)».
+                `${words.title.replace("Embarazo · ", "")} (${words.detail})`
+              : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
       })
     }
     const saidAllergies = health.allergies.filter((row) => group.allergies.includes(row.id))

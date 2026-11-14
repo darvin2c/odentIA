@@ -176,6 +176,9 @@ export function pregnancyWords(pregnancy: PregnancyToday): { title: string; deta
   }
   if (pregnancy.weeksToday === null)
     return { title: "Embarazo", detail: `lo dijo el ${day}, sin las semanas`, confirm: false }
+  // Sin una semana de diferencia, «20 semanas hoy (20 el 14 nov)» repite el dato: se dice una vez y el día.
+  if (pregnancy.weeksSaid === pregnancy.weeksToday)
+    return { title: `Embarazo · ${weeksWords(pregnancy.weeksToday)}`, detail: `lo dijo el ${day}`, confirm: false }
   return {
     title: `Embarazo · ${weeksWords(pregnancy.weeksToday)} hoy`,
     detail: `${pregnancy.weeksSaid} el ${day}`,

@@ -118,6 +118,10 @@ describe("las palabras de lo que dijo el paciente", () => {
     const current = { state: "vigente", saidOn: "2026-11-13", weeksSaid: 30, weeksToday: 32 } as const
     expect(pregnancyWords(current)).toEqual({ title: "Embarazo · 32 semanas hoy", detail: "30 el 13 nov", confirm: false })
     expect(pregnancyChip(current)).toBe("Embarazo · 32 semanas hoy (30 el 13 nov)")
+    // Dicho esta misma semana: el dato una sola vez.
+    expect(pregnancyChip({ state: "vigente", saidOn: "2026-11-14", weeksSaid: 20, weeksToday: 20 })).toBe(
+      "Embarazo · 20 semanas (lo dijo el 14 nov)",
+    )
     expect(pregnancyChip({ state: "vigente", saidOn: "2026-11-13", weeksSaid: 0, weeksToday: 1 })).toBe(
       "Embarazo · 1 semana hoy (0 el 13 nov)",
     )

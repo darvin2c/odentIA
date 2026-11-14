@@ -185,7 +185,7 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(box?.inside).not.toContain("Embarazo")
     expect(box?.inside).not.toContain("Sulfato ferroso")
     const page = markup.replace(/<[^>]+>/g, "|")
-    expect(page).toContain("Embarazo · 30 semanas hoy")
+    expect(page).toContain("Embarazo · 30 semanas (lo dijo el 13 nov)")
     expect(page).toContain("Toma Sulfato ferroso")
   })
 
