@@ -193,7 +193,9 @@ export function FormOffersBox({
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {offerWhyWords(offer)}
-                  {offer.previous ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}, se ve debajo de cada pregunta` : ""}
+                  {offer.previous
+                    ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}${offer.previous.unfinished ? ", que quedó a medias" : ""}, se ve debajo de cada pregunta`
+                    : ""}
                 </span>
               </div>
               {allowed ? (

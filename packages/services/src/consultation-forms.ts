@@ -7,7 +7,7 @@ import {
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm"
+import { and, desc, eq, inArray } from "drizzle-orm"
 import {
   assertFormSchema,
   type ListedFormResponse,
@@ -245,7 +245,8 @@ export interface FormOffer {
   /** La de esta atención, si ya se empezó. */
   today: { responseId: string; status: "borrador" | "finalizado" } | null
   /** La anterior del mismo tipo que ya está en su historia, para verla al lado. */
-  previous: { responseId: string; finalizedAt: Date; professionalUserId: string | null } | null
+  /** La anterior del mismo tipo; `unfinished`: quedó a medias en una atención ya firmada. */
+  previous: { responseId: string; finalizedAt: Date; professionalUserId: string | null; unfinished: boolean } | null
 }
 
 /** Las especialidades activas de la clínica que reciben un tipo de la biblioteca del producto; no crea ninguna. */
@@ -285,11 +286,19 @@ interface FinalizedForm {
   id: string
   key: string
   encounterId: string | null
+  /** Cuándo se finalizó; la que quedó a medias, cuándo se firmó su atención. */
   finalizedAt: Date
   professionalUserId: string | null
+  /** Quedó a medias en una atención ya firmada: también es la anterior, y se dice (QA del 14 nov, E25). */
+  unfinished: boolean
 }
 
-/** Las fichas del equipo ya finalizadas de un paciente, de la más reciente a la más antigua; las de una atención anulada no cuentan. */
+/**
+ * Las fichas del equipo de un paciente que cuentan como anteriores, de la más
+ * reciente a la más antigua: las finalizadas y las que quedaron a medias en una
+ * atención ya firmada (con la hora de su firma). Las de una atención anulada no
+ * cuentan.
+ */
 async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise<FinalizedForm[]> {
   const rows = await tx
     .select({
@@ -297,8 +306,10 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
       key: clinicalFormTemplate.key,
       encounterId: clinicalFormResponse.encounterId,
       finalizedAt: clinicalFormResponse.finalizedAt,
+      status: clinicalFormResponse.status,
       professionalUserId: clinicalFormResponse.professionalUserId,
       encounterStatus: encounter.status,
+      encounterFinalizedAt: encounter.finalizedAt,
     })
     .from(clinicalFormResponse)
     .innerJoin(clinicalFormTemplate, eq(clinicalFormTemplate.id, clinicalFormResponse.templateId))
@@ -310,23 +321,30 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
       and(
         eq(clinicalFormResponse.organizationId, orgId),
         eq(clinicalFormResponse.patientId, patientId),
-        eq(clinicalFormResponse.status, "finalizado"),
+        inArray(clinicalFormResponse.status, ["finalizado", "borrador"]),
         eq(clinicalFormResponse.source, "staff"),
-        isNotNull(clinicalFormResponse.finalizedAt),
       ),
     )
-    .orderBy(desc(clinicalFormResponse.finalizedAt))
-  return rows.flatMap((row) =>
-    row.finalizedAt && row.encounterStatus !== "anulada"
-      ? [{ id: row.id, key: row.key, encounterId: row.encounterId, finalizedAt: row.finalizedAt, professionalUserId: row.professionalUserId }]
-      : [],
-  )
+  return rows
+    .flatMap((row) => {
+      if (row.encounterStatus === "anulada") return []
+      if (row.status === "finalizado" && row.finalizedAt) return [{ ...base(row), finalizedAt: row.finalizedAt, unfinished: false }]
+      // A medias en una atención ya firmada: lo respondido también es la vez anterior.
+      if (row.status === "borrador" && row.encounterStatus === "finalizada" && row.encounterFinalizedAt)
+        return [{ ...base(row), finalizedAt: row.encounterFinalizedAt, unfinished: true }]
+      return []
+    })
+    .sort((a, b) => b.finalizedAt.getTime() - a.finalizedAt.getTime())
 }
 
 /**
  * La anterior del mismo tipo: la última ficha finalizada con la misma clave
  * (cualquier versión), de otra atención y terminada antes que `before`.
  */
+function base(row: { id: string; key: string; encounterId: string | null; professionalUserId: string | null }) {
+  return { id: row.id, key: row.key, encounterId: row.encounterId, professionalUserId: row.professionalUserId }
+}
+
 function previousOf(
   finals: readonly FinalizedForm[],
   form: { id: string | null; key: string; encounterId: string | null; before: Date | null },
@@ -509,7 +527,7 @@ export async function getEncounterFormOffers(
       underYears: template.why === "edad" ? (byAge?.underYears ?? null) : null,
       today: today ? { responseId: today.id, status: today.status === "finalizado" ? "finalizado" : "borrador" } : null,
       previous: previous
-        ? { responseId: previous.id, finalizedAt: previous.finalizedAt, professionalUserId: previous.professionalUserId }
+        ? { responseId: previous.id, finalizedAt: previous.finalizedAt, professionalUserId: previous.professionalUserId, unfinished: previous.unfinished }
         : null,
     }
   })

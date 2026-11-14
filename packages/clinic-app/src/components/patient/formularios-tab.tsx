@@ -59,6 +59,10 @@ const when = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
 
 /** «13 nov 2026, 9:51 p. m.», en la hora de la clínica. */
+/** Cuándo fue la anterior: la que quedó a medias, el día que se firmó su atención, y se dice. */
+const previousWhen = (form: Pick<FormResponse, "status" | "finalizedAt" | "encounterFinalizedAt" | "updatedAt">) =>
+  form.status === "finalizado" ? when(form.finalizedAt) : `${when(form.encounterFinalizedAt ?? form.updatedAt)}, a medias`
+
 const whenAt = (value: string) =>
   new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short", timeZone: activeOrgTimeZone() })
 
@@ -805,7 +809,7 @@ function StaffResponseDetail({
       {previous ? (
         <p className="rounded-md bg-muted p-3 text-sm">
           Debajo de cada pregunta, {against === "inicio" && first ? "lo de la de inicio" : "lo de la anterior"}:{" "}
-          {when(previous.finalizedAt)}
+          {previousWhen(previous)}
           {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
         </p>
       ) : null}
@@ -922,7 +926,7 @@ function StaffResponseDetail({
                         {previous && before ? (
                           <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                             <span id={beforeId}>
-                              {when(previous.finalizedAt)}: {answerWords(before, earlier)}
+                              {previousWhen(previous)}: {answerWords(before, earlier)}
                             </span>
                             {reusable !== undefined ? (
                               <Button
