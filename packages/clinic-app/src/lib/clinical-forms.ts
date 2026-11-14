@@ -78,6 +78,8 @@ export interface FormTemplate {
    * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
    */
   reachesPatients?: boolean
+  /** Cuándo se creó el formulario (su primera versión): no cambia al volver a usarlo. Viene en la lista. */
+  formCreatedAt?: string
 }
 
 export interface FormResponse {
@@ -545,6 +547,32 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
   return response.encounterStatus === "finalizada"
     ? "Quedó a medias al firmar la atención: falta terminarlo"
     : "Sin finalizar"
+}
+
+/**
+ * Un formulario de una atención anulada, dicho en su línea de la Historia: el
+ * que quedó sin terminar (la anulación lo descartó, con su mismo motivo), el
+ * que se descartó antes (con el motivo de entonces) y el que ya estaba
+ * finalizado, que se conserva. `at` escribe la fecha y la hora.
+ */
+export function voidedAttentionFormWords(
+  form: {
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    discardReason: string | null
+    discardedWithAttention: boolean
+  },
+  at: (iso: string) => string,
+): string {
+  const name = `Formulario: ${form.title}`
+  if (form.state === "finalizado")
+    return `${name} · finalizado${form.finalizedAt ? ` ${at(form.finalizedAt)}` : ""} · se conserva, marcado como de una atención anulada`
+  if (form.state === "descartado")
+    return form.discardedWithAttention
+      ? `${name} · quedó sin terminar y se descartó al anular la atención, con ese motivo`
+      : `${name} · descartado antes de anular${form.discardReason ? ` · Motivo: ${form.discardReason}` : ""}`
+  return `${name} · sin terminar`
 }
 
 export function updateFormResponse(

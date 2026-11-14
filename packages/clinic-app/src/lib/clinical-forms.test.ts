@@ -20,6 +20,7 @@ import {
   formStateWords,
   startFormResponse,
   unfinishedAfterSigning,
+  voidedAttentionFormWords,
 } from "./clinical-forms"
 
 const fetchMock = vi.mocked(apiFetch)
@@ -92,4 +93,24 @@ it("el estado de un formulario en la lista dice si quedó a medias al firmar o s
   expect(formStateWords({ ...row, submittedAt: "2026-11-13T10:00:00.000Z" })).toBe("Lo declaró la persona · por revisar")
   expect(formStateWords({ ...row, status: "finalizado" })).toBe("Finalizado")
   expect(formStateWords({ ...row, status: "finalizado", encounterStatus: "anulada" })).toBe("Finalizado · de una atención anulada")
+})
+
+it("la atención anulada dice qué pasó con cada formulario que tenía", () => {
+  const at = (iso: string) => `[${iso.slice(11, 16)}]`
+  const base = { title: "Evaluación de endodoncia", finalizedAt: null, discardReason: null, discardedWithAttention: false }
+  // El que quedó sin terminar: la anulación lo descartó, con su mismo motivo.
+  expect(
+    voidedAttentionFormWords(
+      { ...base, state: "descartado", discardedWithAttention: true, discardReason: "Atención anulada: Se abrió por error" },
+      at,
+    ),
+  ).toBe("Formulario: Evaluación de endodoncia · quedó sin terminar y se descartó al anular la atención, con ese motivo")
+  // El que se descartó antes, a mano: con el motivo que se dio entonces.
+  expect(voidedAttentionFormWords({ ...base, state: "descartado", discardReason: "No era este formulario" }, at)).toBe(
+    "Formulario: Evaluación de endodoncia · descartado antes de anular · Motivo: No era este formulario",
+  )
+  // El finalizado se conserva, y se dice de dónde es.
+  expect(voidedAttentionFormWords({ ...base, state: "finalizado", finalizedAt: "2026-11-14T04:03:00.000Z" }, at)).toBe(
+    "Formulario: Evaluación de endodoncia · finalizado [04:03] · se conserva, marcado como de una atención anulada",
+  )
 })

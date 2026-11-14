@@ -792,14 +792,20 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  /** Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una atención anulada. */
+  /**
+   * Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una
+   * atención anulada, que trae también los descartados con su motivo (`discardedWithAttention`: lo
+   * descartó la propia anulación).
+   */
   forms: Array<{
     id: string
     title: string
-    state: "a_medias" | "finalizado"
+    state: "a_medias" | "finalizado" | "descartado"
     finalizedAt: string | null
     afterSigning: boolean
     retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
