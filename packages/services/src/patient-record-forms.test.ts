@@ -29,7 +29,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { demoSignatureStrokes } from "./demo-signature.js"
 import { DocumentKit, dayWords } from "./document-kit.js"
-import { finalizeEncounter, getEncounterDetail } from "./encounters.js"
+import { finalizeEncounter, getEncounterDetail, voidEncounter } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
 import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
@@ -122,7 +122,8 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   const response = await finalizedForm(f, f.encounter.id)
   await run((tx) => addFormAddendum(tx, "org_a", f.actor, response.id, "La prueba al frío se repitió a los 10 minutos."))
 
-  // Lo que la persona envió desde su enlace y nadie revisó todavía no es registro: no sale.
+  // Lo que la persona envió desde su enlace y nadie revisó todavía no es registro clínico, pero es
+  // suyo: sale marcado «sin revisar», como lo que declaró de su salud (QA de la entrega 2, 14 nov).
   const previo = await publishTemplate(
     f,
     "Cuestionario previo",
@@ -142,7 +143,10 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     submittedAt: new Date(),
     submittedVia: "enlace",
   }
-  await ownerDb.insert(clinicalFormResponse).values({ ...declaredRow, answers: { motivo: "Respuesta que nadie revisó" } })
+  const [unreviewed] = await ownerDb
+    .insert(clinicalFormResponse)
+    .values({ ...declaredRow, answers: { motivo: "Respuesta que nadie revisó" } })
+    .returning()
   // El que sí se revisó y se finalizó entra, dicho como respondido por ella.
   const [reviewed] = await ownerDb
     .insert(clinicalFormResponse)
@@ -184,8 +188,14 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
 
   // El formulario, con cada pregunta que se hizo y su respuesta en palabras.
-  expect(record.forms.map((form) => form.title)).toEqual(["Evaluación de endodoncia", "Cuestionario previo"])
-  const [form, fromPerson] = record.forms
+  expect(record.forms.map((form) => form.title)).toEqual([
+    "Evaluación de endodoncia",
+    "Cuestionario previo",
+    "Cuestionario previo",
+  ])
+  const [form, sentOnly, fromPerson] = record.forms
+  expect(sentOnly).toMatchObject({ id: unreviewed!.id, source: "portal", finalizedAt: null, finalizedBy: null })
+  expect(sentOnly!.byWords).toMatch(/^Lo respondió Paciente de prueba \(paciente\) desde su enlace el .+ · sin revisar$/)
   expect(form).toMatchObject({
     version: 1,
     encounterId: f.encounter.id,
@@ -219,7 +229,8 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   // La entrevista, como la cuenta odentIA, con lo que ella declaró dicho como suyo. El embarazo se
   // guarda con el día en que lo dijo: la copia dice la semana a su fecha y la que dijo ese día.
   const said = (await run((tx) => clinicToday(tx, "org_a"))).split("-").reverse().join("/")
-  const pregnancy = `Sí · 30 semanas a la fecha de esta copia (30 el ${said})`
+  // Dicho hoy: la semana se dice una vez, con su día (QA de la entrega 2).
+  const pregnancy = `Sí · 30 semanas (lo dijo el ${said})`
   expect(record.interview).toMatchObject({ version: 2, said: { kind: "recorded", by: "Clínico" } })
   expect(record.interview!.entries.map((entry) => [entry.label, entry.value, entry.since?.kind ?? null])).toEqual([
     ["Cirugías", "Apendicectomía en 2010", null],
@@ -231,9 +242,13 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
 
   const text = await printedText(record)
   for (const said of [
-    "Formularios (2)",
+    // Lo del equipo y lo de la persona, cada uno en su apartado, con los nombres de la Historia.
+    "Fichas de consulta (1)",
+    "Lo que respondió el paciente (2)",
     "Evaluación de endodoncia · versión 1",
-    "Lo llenó Clínico · lo finalizó Clínico el",
+    // Quien lo llenó y lo finalizó se nombra una vez.
+    "Lo llenó y lo finalizó Clínico el",
+    "Respuesta que nadie revisó",
     "Pruebas de vitalidad",
     "Frío +, Percusión +",
     "Pieza 46",
@@ -250,17 +265,20 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     "Madre: Diabetes tipo 2",
   ])
     expect(text).toContain(said)
-  expect(text).not.toContain("Respuesta que nadie revisó")
+  expect(text).not.toContain("Lo llenó Clínico · lo finalizó Clínico")
   expect(text).not.toContain("¿Desde cuándo no le duele?")
-  // El equipo ya guardó sus antecedentes después de lo que ella dijo: nada queda «sin revisar».
-  expect(text).not.toContain("sin revisar")
+  // El equipo ya guardó sus antecedentes después de lo que ella dijo: de su salud nada queda «sin
+  // revisar», y dice quién los revisó. Lo único sin revisar es el cuestionario que nadie miró.
+  expect(text).toContain(`Antecedentes revisados por Clínico el ${dayWords(new Date(), ZONE)}`)
+  expect(text.match(/sin revisar/g)).toHaveLength(1)
 
   // El archivo para otro sistema: cada formulario como QuestionnaireResponse de FHIR R4.
   const resources = resourcesOf(record)
   const answered = resources.find((resource) => resource.id === response.id)
   expect(answered).toMatchObject({
     resourceType: "QuestionnaireResponse",
-    status: "completed",
+    // Tiene una adenda posterior: en R4 eso es `amended`.
+    status: "amended",
     questionnaire: "#cuestionario",
     subject: { reference: `Patient/${f.patient.id}` },
     encounter: { reference: `Encounter/${f.encounter.id}` },
@@ -298,12 +316,27 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   // La adenda no cambia las respuestas: viaja en el texto del recurso, con quién y cuándo.
   expect((answered!.text as { status: string; div: string }).status).toBe("additional")
   expect((answered!.text as { div: string }).div).toContain("La prueba al frío se repitió a los 10 minutos.")
-  // El que respondió ella: la fuente es la paciente.
+  // Quién agregó la adenda y cuándo, en el recurso de R4 para eso.
+  expect(resources.find((resource) => resource.resourceType === "Provenance" && resource.id === form!.addenda[0]!.id)).toMatchObject({
+    target: [{ reference: `QuestionnaireResponse/${response.id}` }],
+    activity: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-DataOperation", code: "APPEND" }] },
+    agent: [{ type: { coding: [{ code: "author" }] }, who: { display: "Clínico" } }],
+  })
+  // El que respondió ella: la fuente es la paciente, y sus respuestas son de cuando las envió, no de
+  // cuando el equipo las revisó (R4: `authored` es cuándo se dieron).
+  const [sent] = await ownerDb
+    .select({ submittedAt: clinicalFormResponse.submittedAt })
+    .from(clinicalFormResponse)
+    .where(eq(clinicalFormResponse.id, reviewed!.id))
   expect(resources.find((resource) => resource.id === reviewed!.id)).toMatchObject({
     resourceType: "QuestionnaireResponse",
     source: { reference: `Patient/${f.patient.id}` },
+    authored: sent!.submittedAt!.toISOString(),
   })
-  expect(JSON.stringify(resources)).not.toContain("Respuesta que nadie revisó")
+  // Lo que envió y nadie revisó viaja también, dicho así en su texto.
+  const notReviewed = resources.find((resource) => resource.id === unreviewed!.id)
+  expect(notReviewed).toMatchObject({ resourceType: "QuestionnaireResponse", status: "completed" })
+  expect((notReviewed!.text as { div: string }).div).toContain("sin revisar")
 
   // La entrevista y los antecedentes familiares.
   const interview = resources.find((resource) => resource.id === `${f.patient.id}-entrevista`)
@@ -328,7 +361,8 @@ it("sin formularios ni entrevista, la copia lo dice y no trae recursos vacíos",
   expect(record.interview).toBeNull()
   expect(record.declarations).toEqual([])
   const text = await printedText(record)
-  expect(text).toContain("Sin formularios finalizados.")
+  expect(text).toContain("Sin fichas de consulta finalizadas.")
+  expect(text).toContain("No respondió ningún cuestionario.")
   expect(text).toContain("Sin entrevista de salud registrada.")
   // Sin nada declarado no se anuncia una sección vacía.
   expect(text).not.toContain("Lo que declaró de su salud")
@@ -364,13 +398,14 @@ it("latidIA: su entrevista va en la copia con el embarazo y su fecha, por el gan
     expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
       ["antecedentesPersonales.hospitalizaciones", "Hospitalizaciones", "Neumonía en 2019"],
       // Una sola vez, y con las palabras comunes: latidIA no lo vuelve a decir en su grupo.
-      ["embarazoLactancia.embarazo", "Embarazo", `Sí · 12 semanas a la fecha de esta copia (12 el ${day}/${month}/${year})`],
+      // Dicho hoy: la semana va una vez, con su día.
+      ["embarazoLactancia.embarazo", "Embarazo", `Sí · 12 semanas (lo dijo el ${day}/${month}/${year})`],
       ["habitos", "Hábitos", "tabaco: nunca fumó"],
     ])
     // Una sola vez: ya no va además en una sección aparte del producto.
     expect(record.productSections).toEqual([])
     const interview = resourcesOf(record).find((resource) => resource.id === `${f.patient.id}-entrevista`)
-    expect(JSON.stringify(interview)).toContain("Sí · 12 semanas a la fecha de esta copia")
+    expect(JSON.stringify(interview)).toContain("Sí · 12 semanas (lo dijo el")
     expect(JSON.stringify(interview)).not.toContain("Embarazada")
   } finally {
     await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, "org_a"))
@@ -407,12 +442,13 @@ it("la atención firmada muestra sus formularios, y la Historia los lleva con su
       retired: false,
       discardReason: null,
       discardedWithAttention: false,
+      fromPerson: false,
     },
   ])
   // El que se llenó fuera de una atención es un hecho suelto, también con su resumen.
   expect(timeline.data.find((item) => item.type === "form")).toMatchObject({
     refId: loose.id,
-    title: "Evaluación periodontal",
+    title: "Se completó la ficha de consulta: Evaluación periodontal",
     detail: summary,
     byText: "Lo llenó Clínico",
   })
@@ -616,7 +652,7 @@ it("un embarazo guardado antes, sin fecha, sale con el día en que se anotó y l
   const day = (await run((tx) => clinicToday(tx, "org_a", twoWeeksAgo))).split("-").reverse().join("/")
   const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
   expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
-    ["embarazoLactancia.embarazo", "Embarazo", `Sí · 32 semanas a la fecha de esta copia (30 el ${day})`],
+    ["embarazoLactancia.embarazo", "Embarazo", `Sí · 32 semanas a la fecha de esta copia (30 semanas el ${day})`],
   ])
 })
 
@@ -747,4 +783,212 @@ it("un «no» que dijo la persona y nadie revisó se dice como suyo, no como alg
     { key: "conditions", label: "Enfermedades", value: "No" },
     { key: "medications", label: "Medicación", value: "No" },
   ])
+})
+
+/** Lo que la persona envió desde su enlace, tal como llegó (la respuesta del portal). */
+async function sentForm(f: Fixture, title: string, schema: FormSchemaDef, answers: Record<string, unknown>, sentAt = new Date()) {
+  const template = await publishTemplate(f, title, schema, "portal")
+  const [row] = await ownerDb
+    .insert(clinicalFormResponse)
+    .values({
+      organizationId: "org_a",
+      templateId: template.id,
+      templateVersion: template.version,
+      templateTitle: template.title,
+      templateSnapshot: template.schema,
+      patientId: f.patient.id,
+      status: "borrador",
+      source: "portal",
+      respondentContactId: f.patient.personId,
+      submittedAt: sentAt,
+      submittedVia: "enlace",
+      answers,
+    })
+    .returning()
+  return row!
+}
+
+it("QA de la entrega 2: la ficha de una atención anulada sale marcada, y en FHIR ya no vale", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const response = await finalizedForm(f, f.encounter.id)
+  // «Abierta por error: era de otra paciente»: se anula con su ficha ya finalizada.
+  await run((tx) => voidEncounter(tx, "org_a", f.actor, f.patient.id, f.encounter.id, { reason: "Era de otra paciente" }))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.forms[0]).toMatchObject({ id: response.id, voidedAttention: { reason: "Era de otra paciente" } })
+  const text = await printedText(record)
+  expect(text).toContain("Se conserva, pero ya no vale: es de una atención anulada el")
+  expect(text).toContain("motivo: Era de otra paciente")
+  // En el archivo para otro sistema, como lo observado de esa atención: ya no vale.
+  const resources = resourcesOf(record)
+  expect(resources.find((resource) => resource.id === response.id)).toMatchObject({
+    resourceType: "QuestionnaireResponse",
+    status: "entered-in-error",
+  })
+  expect(resources.find((resource) => resource.id === f.encounter.id)).toMatchObject({ status: "entered-in-error" })
+})
+
+it("QA de la entrega 2: la medicina que ya no toma no se lee como vigente, en el PDF ni en FHIR", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const health = await run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [
+        {
+          name: "Sulfato ferroso",
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          notes: "Suspendida por indicación médica",
+        },
+        { name: "Aspirina 100 mg", frequency: "Cada 24 horas" },
+        { name: "Amoxicilina 500 mg", startDate: "2026-01-01", endDate: "2099-12-31" },
+      ],
+    }),
+  )
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const text = await printedText(record)
+  expect(text).toContain("Ya no lo toma: Sulfato ferroso · hasta el 31/01/2026 · Suspendida por indicación médica")
+  expect(text).toContain("Medicamento: Aspirina 100 mg · Cada 24 horas")
+  // Con un fin por venir todavía la toma: dice hasta cuándo.
+  expect(text).toContain("Medicamento: Amoxicilina 500 mg · hasta el 31/12/2099")
+  expect(text).not.toContain("Medicamento: Sulfato ferroso")
+  const statements = resourcesOf(record).filter((resource) => resource.resourceType === "MedicationStatement")
+  const byName = (name: string) =>
+    statements.find((resource) => (resource.medicationCodeableConcept as { text: string }).text === name)
+  expect(byName("Sulfato ferroso")).toMatchObject({
+    status: "completed",
+    effectivePeriod: { start: "2026-01-01", end: "2026-01-31" },
+    note: [{ text: "Suspendida por indicación médica" }],
+  })
+  expect(byName("Aspirina 100 mg")).toMatchObject({ status: "active" })
+  expect(byName("Amoxicilina 500 mg")).toMatchObject({ status: "active", effectivePeriod: { end: "2099-12-31" } })
+})
+
+it("QA de la entrega 2: la copia dice quién revisó los antecedentes, y el «no» que ella dijo no se pierde", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  await ownerDb
+    .insert(patientRegistration)
+    .values({ organizationId: "org_a", patientId: f.patient.id, entryPoint: "public_link", respondent: "patient", answers: {} })
+  const declared = {
+    allergies: { state: "none" as const, items: [] },
+    conditions: { state: "none" as const, items: [] },
+    medications: { state: "none" as const, items: [] },
+  }
+  await run(async (tx) => {
+    await initializeDeclaredPatientHealth(tx, "org_a", f.patient.id, declared, null)
+    await recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  // «Revisar antecedentes»: la doctora niega alergias, anota una medicina y deja enfermedades sin tocar.
+  const health = await run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "none", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "Ácido fólico", dose: "0,4 mg" }],
+    }),
+  )
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.reviews.history).toMatchObject({ by: "Clínico" })
+  const text = await printedText(record)
+  const day = dayWords(new Date(), ZONE)
+  expect(text).toContain(`Antecedentes revisados por Clínico el ${day}`)
+  // Las alergias tienen su propia revisión: su «no» sigue sin revisar, como suyo.
+  expect(text).toContain(`Alergias: Dijo que no el ${day}, sin revisar`)
+  // En la clínica nadie le preguntó por sus enfermedades, pero ella dijo que no: se dicen las dos cosas.
+  expect(text).toContain(`Enfermedades: no se le preguntó en la clínica; dijo que no el ${day}`)
+  expect(text).toContain("Medicamento: Ácido fólico · 0,4 mg")
+  // En FHIR, quién verificó lo revisado y cuándo (`Provenance`, `verifier`).
+  const provenance = resourcesOf(record).find((resource) => resource.id === `${f.patient.id}-antecedentes-revisados`)
+  expect(provenance).toMatchObject({
+    resourceType: "Provenance",
+    agent: [
+      {
+        type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/provenance-participant-type", code: "verifier" }] },
+        who: { display: "Clínico" },
+      },
+    ],
+  })
+  expect((provenance!.target as Array<{ reference: string }>)[0]!.reference).toMatch(/^MedicationStatement\//)
+})
+
+it("QA de la entrega 2: la corrección lleva su motivo, si se dijo, en la ficha, el PDF y FHIR", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const sent = await sentForm(
+    f,
+    "Cuestionario previo",
+    { sections: [{ id: "motivo", title: "Motivo", fields: [{ id: "motivo", label: "¿Por qué vienes?", type: "texto" }] }] },
+    { motivo: "Me duele la muela de la derecha" },
+  )
+  const withReason = await run((tx) =>
+    addFormAddendum(tx, "org_a", f.actor, sent.id, "Es la izquierda, la 36.", "  Lo confirmó en consulta  "),
+  )
+  expect(withReason.reason).toBe("Lo confirmó en consulta")
+  // Vacío no traba: la corrección se guarda sin motivo.
+  const without = await run((tx) => addFormAddendum(tx, "org_a", f.actor, sent.id, "Toma aspirina.", "   "))
+  expect(without.reason).toBeNull()
+  // Con tope, como todo texto.
+  await expect(run((tx) => addFormAddendum(tx, "org_a", f.actor, sent.id, "Otra", "x".repeat(2001)))).rejects.toThrow(
+    /motivo/i,
+  )
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.forms[0]!.addenda.map((addendum) => [addendum.text, addendum.reason])).toEqual([
+    ["Es la izquierda, la 36.", "Lo confirmó en consulta"],
+    ["Toma aspirina.", null],
+  ])
+  const text = await printedText(record)
+  expect(text).toContain("Es la izquierda, la 36. · Motivo: Lo confirmó en consulta (Clínico,")
+  expect(text).toContain("Toma aspirina. (Clínico,")
+  const resources = resourcesOf(record)
+  expect(resources.find((resource) => resource.id === withReason.id)).toMatchObject({
+    resourceType: "Provenance",
+    target: [{ reference: `QuestionnaireResponse/${sent.id}` }],
+    reason: [{ text: "Lo confirmó en consulta" }],
+  })
+  expect(resources.find((resource) => resource.id === without.id)).not.toHaveProperty("reason")
+  // Sin revisar todavía: lo que envió es de cuando lo envió, y con correcciones queda enmendado.
+  expect(resources.find((resource) => resource.id === sent.id)).toMatchObject({
+    status: "amended",
+    authored: sent.submittedAt!.toISOString(),
+  })
+})
+
+it("QA de la entrega 2: en la Historia, lo que respondió va el día en que lo envió, sin signos sueltos y con su corrección", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const sentAt = new Date(Date.now() - 3 * 60 * 60 * 1000)
+  const sent = await sentForm(
+    f,
+    "Antes de tu cita",
+    {
+      sections: [
+        {
+          id: "dolor",
+          title: "Dolor",
+          fields: [{ id: "dolor", label: "¿Cuánto te duele? (0 sin dolor, 10 el peor dolor)", type: "escala", min: 0, max: 10 }],
+        },
+      ],
+    },
+    { dolor: 7 },
+    sentAt,
+  )
+  await run((tx) => addFormAddendum(tx, "org_a", f.actor, sent.id, "En consulta dice 5."))
+  await run((tx) => finalizeFormResponse(tx, "org_a", f.actor, sent.id))
+  const history = await run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["form"] }))
+  expect(history.data).toHaveLength(1)
+  const [item] = history.data
+  // El día en que lo envió, no el de su revisión (auditor: «hace 11 min» cuando era de hace 15).
+  expect(new Date(item!.createdAt).getTime()).toBe(sentAt.getTime())
+  expect(item!.detail).toBe("Cuánto te duele (0 sin dolor, 10 el peor dolor): 7 de 10 · con 1 corrección")
+  expect(item!.byText).toBe("Lo respondió Paciente de prueba (paciente) · lo revisó Clínico")
 })

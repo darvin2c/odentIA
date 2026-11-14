@@ -685,13 +685,16 @@ export interface FormRecord {
   byWords: string
   /** «Correcciones» en lo que envió el paciente, «Adendas» en lo del equipo. */
   addendaTitle: string
+  /** Lo llenó el equipo o lo respondió la persona. */
+  source?: "staff" | "portal"
   sections: Array<{
     id: string
     title: string
     /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
     items: Array<{ id: string; label: string; words: string | null }>
   }>
-  addenda: Array<{ id: string; text: string; authorName: string | null; createdAt: string }>
+  /** `reason`: por qué se corrigió, si quien corrigió lo dijo. */
+  addenda: Array<{ id: string; text: string; reason?: string | null; authorName: string | null; createdAt: string }>
 }
 
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
@@ -867,6 +870,8 @@ export interface EncounterBorn {
     discardReason: string | null
     discardedWithAttention: boolean
     summary: string
+    /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
+    fromPerson?: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }

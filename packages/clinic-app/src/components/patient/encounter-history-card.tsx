@@ -117,7 +117,8 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
                     {row.state === "a_medias"
                       ? " · falta terminarlo"
                       : row.finalizedAt
-                        ? ` · finalizado ${formatDateTime(row.finalizedAt)}${row.afterSigning ? ", después de firmar la atención" : ""}`
+                        ? // Lo que envió la persona el equipo lo revisa, no lo finaliza (QA de la entrega 2).
+                          ` · ${row.fromPerson ? "revisado" : "finalizado"} ${formatDateTime(row.finalizedAt)}${row.afterSigning ? ", después de firmar la atención" : ""}`
                         : ""}
                   </span>
                 </span>

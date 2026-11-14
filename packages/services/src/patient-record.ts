@@ -25,9 +25,11 @@ import {
   FHIR_CONSENT_CATEGORY,
   FHIR_CONSENT_SCOPE,
   FHIR_DATA_ABSENT_REASON_SYSTEM,
+  FHIR_DATA_OPERATION_SYSTEM,
   FHIR_LOINC_SYSTEM,
   FHIR_OBSERVATION_CATEGORY_SYSTEM,
   FHIR_OBSERVATION_INTERPRETATION_SYSTEM,
+  FHIR_PROVENANCE_PARTICIPANT_SYSTEM,
   FHIR_ROLE_CODE_SYSTEM,
   FHIR_UCUM_SYSTEM,
   FHIR_VERSION,
@@ -177,6 +179,25 @@ export interface PatientRecord {
   allergies: Array<typeof patientAllergy.$inferSelect>
   conditions: Array<typeof patientCondition.$inferSelect>
   medications: Array<typeof patientMedication.$inferSelect>
+  /** El día de la clínica de la copia: una medicina con fin anterior ya no la toma. */
+  today: string
+  /**
+   * Quién revisó con ella sus antecedentes y cuándo, como lo dice la ficha; las
+   * alergias tienen su propia revisión. null si nadie los revisó.
+   */
+  reviews: {
+    history: { at: Date; by: string | null } | null
+    allergies: { at: Date; by: string | null } | null
+  }
+  /**
+   * Cómo quedó cada grupo en la revisión: «none» (niega), «recorded» (lo que hay
+   * anotado) o «unknown» (no se le preguntó), y el «no» que ella dijo en su última
+   * declaración de ese grupo, para no perderlo cuando nadie de la clínica lo preguntó.
+   */
+  groups: Record<
+    "allergies" | "conditions" | "medications",
+    { state: string; saidNo: { by: HealthDeclarant; at: Date } | null }
+  >
   /**
    * Lo que alguien dijo de su salud y ningún profesional revisó todavía, por
    * declaración: quién, cuándo y qué. Lo decide el servidor (`PatientHealth.declared`),
@@ -208,7 +229,10 @@ export interface PatientRecord {
     items: Array<typeof prescriptionItem.$inferSelect>
   }>
   consents: Array<typeof consentDocument.$inferSelect>
-  /** Los formularios finalizados, con cada pregunta, su respuesta y sus adendas. */
+  /**
+   * Las fichas finalizadas y lo que respondió la persona, revisado o no, con cada
+   * pregunta, su respuesta y sus adendas o correcciones.
+   */
   forms: FormRecord[]
   documents: Array<typeof patientDocument.$inferSelect>
   appointments: Array<typeof appointment.$inferSelect>
@@ -451,12 +475,33 @@ export async function loadPatientRecord(
     .from(appointment)
     .where(byPatient(appointment))
     .orderBy(asc(appointment.startsAt))
-  const forms = await loadFormRecords(tx, orgId, patientId)
+  // Lo que la persona envió y nadie revisó también es suyo: va marcado «sin revisar», como lo
+  // que declaró de su salud (QA de la entrega 2).
+  const forms = await loadFormRecords(tx, orgId, patientId, { unreviewed: true })
   const hooks = await productHooks(tx, orgId)
   const productSections = await hooks.recordSections(tx, { orgId, patientId })
   const today = await clinicToday(tx, orgId)
   // Quién dijo cada cosa y qué sigue sin revisar lo decide el servidor, igual que para la ficha.
   const health = await getPatientHealth(tx, orgId, patientId)
+  // Quién revisó los antecedentes y las alergias, con su nombre, como lo dice la ficha.
+  const reviewerIds = [health.reviewedBy, health.allergiesReviewedBy].filter((id): id is string => !!id)
+  const reviewers = new Map(
+    reviewerIds.length
+      ? (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, reviewerIds))).map(
+          (row) => [row.id, row.name] as const,
+        )
+      : [],
+  )
+  const reviewOf = (at: Date | null, by: string | null) =>
+    at ? { at, by: by ? (reviewers.get(by) ?? null) : null } : null
+  // Su último «no» a un grupo (las declaraciones vienen de la más nueva a la más antigua).
+  const saidNoOf = (topic: "allergies" | "conditions" | "medications") => {
+    const last = health.declarations.find((declaration) => {
+      const state = declaration.health[topic]?.state
+      return state !== undefined && state !== "unanswered"
+    })
+    return last && last.health[topic]?.state === "none" ? { by: last.by, at: last.at } : null
+  }
   // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: sale de las
   // versiones de la entrevista (de la más nueva a la más antigua), como en la ficha.
   const legacySaidOn = legacyPregnancySaidOn(
@@ -499,6 +544,16 @@ export async function loadPatientRecord(
     allergies,
     conditions,
     medications,
+    today,
+    reviews: {
+      history: reviewOf(health.reviewedAt, health.reviewedBy),
+      allergies: reviewOf(health.allergiesReviewedAt, health.allergiesReviewedBy),
+    },
+    groups: {
+      allergies: { state: health.reviewStatus.allergies, saidNo: saidNoOf("allergies") },
+      conditions: { state: health.reviewStatus.conditions, saidNo: saidNoOf("conditions") },
+      medications: { state: health.reviewStatus.medications, saidNo: saidNoOf("medications") },
+    },
     // Cada producto cuenta su entrevista (odentIA: lo de la boca; latidIA: embarazo y lactancia con fecha).
     declared: health.declared,
     declarations: health.declarations
@@ -654,6 +709,15 @@ function asserterOf(by: HealthDeclarant, patientRef: { reference: string }): Rec
   return display ? { display } : null
 }
 
+/**
+ * El apartado de cada cosa llenada: lo del equipo es una ficha de consulta y lo de la
+ * persona, lo que respondió (los nombres de la Historia).
+ */
+const FORM_SECTION_WORDS: Record<FormRecord["source"], string> = {
+  staff: "Fichas de consulta",
+  portal: "Lo que respondió el paciente",
+}
+
 /** Por dónde llegó una declaración, como título. */
 const DECLARATION_VIA_WORDS: Record<RecordDeclaration["via"], string> = {
   registro: "En su registro",
@@ -671,10 +735,29 @@ function familyWords(row: PatientRecord["familyHistory"][number]): string {
   return `${who}: ${row.condition}${code}${row.notes ? ` · ${row.notes}` : ""}`
 }
 
-/** «La prueba se repitió (Ana Torres, 13 de noviembre de 2026, 15:20)»: la adenda con quién y cuándo. */
+/**
+ * «La prueba se repitió · Motivo: lo confirmó en consulta (Ana Torres, 13 de noviembre de
+ * 2026, 15:20)»: la adenda o la corrección con su motivo, si lo dijo, y quién y cuándo.
+ */
 function addendumWords(addendum: FormRecord["addenda"][number], zone: Zone): string {
-  return `${addendum.text} (${[addendum.authorName, dayTimeWords(addendum.createdAt, zone)].filter(Boolean).join(", ")})`
+  const why = addendum.reason ? ` · Motivo: ${addendum.reason}` : ""
+  return `${addendum.text}${why} (${[addendum.authorName, dayTimeWords(addendum.createdAt, zone)].filter(Boolean).join(", ")})`
 }
+
+/** «De una atención anulada el 14 de noviembre de 2026 · motivo: …»: la misma marca que la Historia. */
+function voidedFormWords(form: FormRecord, zone: Zone): string | null {
+  if (!form.voidedAttention) return null
+  const why = form.voidedAttention.reason ? ` · motivo: ${form.voidedAttention.reason}` : ""
+  return `Se conserva, pero ya no vale: es de una atención anulada el ${dayTimeWords(form.voidedAttention.at, zone)}${why}`
+}
+
+/** «Ya no lo toma (hasta el 10/11/2026)»: una medicina con fin anterior a la copia ya no es vigente. */
+function medicationEnded(row: { endDate: string | null }, today: string): boolean {
+  return !!row.endDate && row.endDate < today
+}
+
+/** «13/11/2026»: un día de calendario, igual en cualquier zona. */
+const civilDayWords = (day: string): string => day.split("-").reverse().join("/")
 
 /** El PDF para leer: todo lo de la persona, en el estilo de sus recetas y consentimientos. */
 export async function renderPatientRecordPdf(
@@ -691,8 +774,10 @@ export async function renderPatientRecordPdf(
     legalNote: `Copia entregada por ${clinic.tradeName || "la clínica"} a pedido de la persona.`,
     createdAt: record.generatedAt,
   })
+  // El título lleva consigo el comienzo de lo suyo: lo primero de una atención o una ficha pide
+  // 50 puntos, y un título solo al pie de una página no dice nada (QA de la entrega 2).
   const section = (title: string) =>
-    kit.heading(title, { size: SIZE.h2small, before: 18, after: 5 })
+    kit.heading(title, { size: SIZE.h2small, before: 18, after: 5, keep: 60 })
   /**
    * Motivo, Diagnóstico, Examen…: el nombre a un lado y su texto al otro; de una
    * lista, cada elemento en su línea. Una pregunta de un formulario es más larga
@@ -769,9 +854,45 @@ export async function renderPatientRecordPdf(
           `${label}: ${saidNoWords(group.by, p.sex)}${group.at ? ` el ${dayWords(group.at, zone)}` : ""}, sin revisar`,
       ),
   )
-  if (!record.allergies.length && !record.conditions.length && !record.medications.length && !saidNo.length)
+  // Quién los revisó con ella y cuándo, como lo dice la ficha: lo que ya no lleva «sin revisar» no
+  // queda sin dueño (QA de la entrega 2).
+  const reviewed = [
+    record.reviews.history
+      ? `Antecedentes revisados${record.reviews.history.by ? ` por ${record.reviews.history.by}` : ""} el ${dayWords(record.reviews.history.at, zone)}`
+      : null,
+    record.reviews.allergies
+      ? `Alergias revisadas${record.reviews.allergies.by ? ` por ${record.reviews.allergies.by}` : ""} el ${dayWords(record.reviews.allergies.at, zone)}`
+      : null,
+  ].filter((line): line is string => !!line)
+  if (reviewed.length) kit.text(reviewed.join(" · "), { size: SIZE.second, tone: "gray" })
+  // Un grupo sin nada anotado dice cómo quedó: «niega» si el equipo lo preguntó; tras una revisión,
+  // «no se le preguntó», con el «no» que ella dijo, que no se pierde (auditor, QA de la entrega 2).
+  const groupLines = (
+    [
+      ["allergies", "Alergias", record.allergies.length],
+      ["conditions", "Enfermedades", record.conditions.length],
+      ["medications", "Medicación", record.medications.length],
+    ] as const
+  ).flatMap(([topic, label, rows]) => {
+    if (rows > 0 || record.declared.some((group) => group.saidNo[topic])) return []
+    const group = record.groups[topic]
+    if (group.state === "none") return [`${label}: niega`]
+    if (group.state !== "unknown" || !record.reviews.history) return []
+    const said = group.saidNo
+      ? `; ${saidNoWords(group.saidNo.by, p.sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))} el ${dayWords(group.saidNo.at, zone)}`
+      : ""
+    return [`${label}: no se le preguntó en la clínica${said}`]
+  })
+  if (
+    !record.allergies.length &&
+    !record.conditions.length &&
+    !record.medications.length &&
+    !saidNo.length &&
+    !groupLines.length
+  )
     kit.text("Sin registros.")
   if (saidNo.length) kit.bullets(saidNo)
+  if (groupLines.length) kit.bullets(groupLines)
   if (record.allergies.length)
     kit.table({
       columns: [{ label: "" }, { label: "", align: "right" }],
@@ -804,12 +925,16 @@ export async function renderPatientRecordPdf(
           `Antecedente: ${c.name} · ${c.status}${c.diagnosisCode ? ` · ${c.diagnosisCode}` : ""}${markOf("conditions", c.id) ? ` · ${markOf("conditions", c.id)}` : ""}`,
       ),
     )
+  // La que ya no toma no se lee como vigente: dice hasta cuándo y su nota, como el FHIR
+  // (`completed`) y la franja de la ficha, que ya no la muestra (QA de la entrega 2).
   if (record.medications.length)
     kit.bullets(
-      record.medications.map(
-        (m) =>
-          `Medicamento: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${markOf("medications", m.id) ? ` · ${markOf("medications", m.id)}` : ""}`,
-      ),
+      record.medications.map((m) => {
+        const ended = medicationEnded(m, record.today)
+        const until = m.endDate ? ` · hasta el ${civilDayWords(m.endDate)}` : ""
+        const mark = markOf("medications", m.id)
+        return `${ended ? "Ya no lo toma" : "Medicamento"}: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${until}${m.notes ? ` · ${m.notes}` : ""}${mark ? ` · ${mark}` : ""}`
+      }),
     )
 
   section("Entrevista de salud")
@@ -883,16 +1008,20 @@ export async function renderPatientRecordPdf(
       ["Examen", exam.lines],
       ["Diagnóstico", diagnoses.map((d) => `${diagnosisText(d)}${siteText(d)}`)],
       ["Se hizo", procedures.map((pr) => `${pr.description}${siteText(pr)}`)],
-      // Lo que se anotó en un formulario durante la atención; sus respuestas van en «Formularios».
+      // Lo que se anotó en una ficha durante la atención, o lo que respondió para ella; sus
+      // respuestas van en su apartado.
       [
-        "Formularios",
-        record.forms.filter((form) => form.encounterId === row.id).map((form) => `${form.title} (ver «Formularios»)`),
+        "Fichas",
+        record.forms
+          .filter((form) => form.encounterId === row.id)
+          .map((form) => `${form.title} (ver «${FORM_SECTION_WORDS[form.source]}»)`),
       ],
       ["Evolución", row.evolution],
       ["Plan", row.indications],
       ["Anulada", row.status === "anulada" ? row.voidReason : null],
+      // Con el nombre de la pantalla: «Correcciones después del cierre» (QA de la entrega 2).
       [
-        "Adendas",
+        "Correcciones después del cierre",
         addenda.map((a) => `${a.note} (${[a.authorName, dayTimeWords(a.createdAt, zone)].filter(Boolean).join(", ")})`),
       ],
     ])
@@ -946,31 +1075,40 @@ export async function renderPatientRecordPdf(
       ),
     )
 
-  section(`Formularios (${record.forms.length})`)
-  if (!record.forms.length) kit.text("Sin formularios finalizados.")
-  for (const form of record.forms) {
-    kit.ensure(50)
-    kit.gap(5)
-    kit.rule()
-    kit.gap(7)
-    kit.text(`${form.title} · versión ${form.version}`, { face: "sansBold", size: SIZE.read })
-    const visit = record.encounters.find((entry) => entry.row.id === form.encounterId)
-    kit.text(
-      `${form.byWords}${visit ? ` · en la atención del ${dayTimeWords(visit.row.startedAt, zone)}` : ""}`,
-      { size: SIZE.second, tone: "gray" },
-    )
-    for (const group of form.sections) {
-      if (group.title) kit.subheading(group.title)
-      dataRows(
-        group.items.map((item) => [item.label, item.words ?? "Sin respuesta"]),
-        190,
+  // Las fichas del equipo y lo que respondió la persona, cada uno con su nombre, como en la Historia.
+  for (const source of ["staff", "portal"] as const) {
+    const forms = record.forms.filter((form) => form.source === source)
+    section(`${FORM_SECTION_WORDS[source]} (${forms.length})`)
+    if (!forms.length)
+      kit.text(source === "staff" ? "Sin fichas de consulta finalizadas." : "No respondió ningún cuestionario.")
+    for (const form of forms) {
+      kit.ensure(50)
+      kit.gap(5)
+      kit.rule()
+      kit.gap(7)
+      kit.text(`${form.title} · versión ${form.version}`, { face: "sansBold", size: SIZE.read })
+      const visit = record.encounters.find((entry) => entry.row.id === form.encounterId)
+      kit.text(
+        `${form.byWords}${visit ? ` · en la atención del ${dayTimeWords(visit.row.startedAt, zone)}` : ""}`,
+        { size: SIZE.second, tone: "gray" },
       )
-    }
-    // Lo que el equipo agregó no cambia las respuestas: va aparte, con quién y cuándo. En lo que envió
-    // la persona se llama «Correcciones» y puede ser anterior a la revisión.
-    if (form.addenda.length) {
-      kit.subheading(form.addendaTitle)
-      kit.bullets(form.addenda.map((addendum) => addendumWords(addendum, zone)))
+      // De una atención anulada: se conserva, con la misma marca que la Historia (QA de la entrega 2).
+      const voided = voidedFormWords(form, zone)
+      if (voided) kit.text(voided, { face: "sansSemi", size: SIZE.second })
+      for (const group of form.sections) {
+        if (group.title) kit.subheading(group.title)
+        dataRows(
+          // Lo que dejó sin contestar la persona se dice como en su revisión: «No respondió».
+          group.items.map((item) => [item.label, item.words ?? (source === "portal" ? "No respondió" : "Sin respuesta")]),
+          190,
+        )
+      }
+      // Lo que el equipo agregó no cambia las respuestas: va aparte, con quién, cuándo y su motivo. En
+      // lo que envió la persona se llama «Correcciones» y puede ser anterior a la revisión.
+      if (form.addenda.length) {
+        kit.subheading(form.addendaTitle)
+        kit.bullets(form.addenda.map((addendum) => addendumWords(addendum, zone)))
+      }
     }
   }
 
@@ -1037,6 +1175,12 @@ function questionnaireResponse(input: {
   source?: Record<string, unknown> | null
   groups: Array<{ linkId: string; text: string; items: AskedItem[] }>
   notes: string[]
+  /**
+   * `QuestionnaireResponse.status` de R4: `completed` por omisión; `amended` si se le
+   * agregó algo después (una adenda, una corrección) y `entered-in-error` si era de
+   * una atención anulada.
+   */
+  status?: "completed" | "amended" | "entered-in-error"
 }): Resource {
   const lines = [input.version === undefined ? input.title : `${input.title} · versión ${input.version}`, ...input.notes]
   // FHIR no admite textos vacíos: una sección sin título va sin `text`.
@@ -1075,7 +1219,7 @@ function questionnaireResponse(input: {
       },
     ],
     questionnaire: "#cuestionario",
-    status: "completed",
+    status: input.status ?? "completed",
     subject: input.patientRef,
     ...(input.encounterId ? { encounter: { reference: `Encounter/${input.encounterId}` } } : {}),
     authored: input.authored.toISOString(),
@@ -1245,23 +1389,74 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           },
         ],
       },
+      // Lo que dijo y nadie revisó no está confirmado, como su alergia (QA de la entrega 2).
+      ...(declaredGroupOf(record, "conditions", c.id)
+        ? { verificationStatus: { coding: [{ system: FHIR_CONDITION_VERIFICATION_SYSTEM, code: "unconfirmed" }] } }
+        : {}),
       category: [{ text: "Antecedente" }],
       code: diagnosisCodeable(c.diagnosisSystem, c.diagnosisCode, c.name),
       ...(c.startDate ? { onsetDateTime: c.startDate } : {}),
       ...statedBy("conditions", c.id, "asserter"),
     })
-  for (const m of record.medications)
+  for (const m of record.medications) {
+    // Terminada si su fin ya pasó; con un fin por venir sigue en curso, hasta esa fecha (como el PDF).
+    const stated = statedBy("medications", m.id, "informationSource")
+    const notes = [...((stated.note as Array<{ text: string }> | undefined) ?? []), ...(m.notes ? [{ text: m.notes }] : [])]
     resources.push({
       resourceType: "MedicationStatement",
       id: m.id,
       subject: patientRef,
-      status: m.endDate ? "completed" : "active",
+      status: medicationEnded(m, record.today) ? "completed" : "active",
       medicationCodeableConcept: { text: m.name },
-      ...statedBy("medications", m.id, "informationSource"),
+      ...(m.startDate || m.endDate
+        ? { effectivePeriod: { ...(m.startDate ? { start: m.startDate } : {}), ...(m.endDate ? { end: m.endDate } : {}) } }
+        : {}),
+      ...stated,
+      ...(notes.length ? { note: notes } : {}),
       ...(m.dose || m.frequency
         ? { dosage: [{ text: [m.dose, m.frequency].filter(Boolean).join(" · ") }] }
         : {}),
     })
+  }
+  // Quién revisó los antecedentes y las alergias: en R4, una `Provenance` con quien verificó
+  // (`verifier`), sobre lo que ya no está «sin revisar» (QA de la entrega 2: la ficha lo decía y la
+  // copia no).
+  const reviewProvenance = (
+    id: string,
+    review: { at: Date; by: string | null } | null,
+    targets: Array<{ reference: string }>,
+  ) => {
+    if (!review || targets.length === 0) return
+    resources.push({
+      resourceType: "Provenance",
+      id,
+      target: targets,
+      recorded: review.at.toISOString(),
+      agent: [
+        {
+          type: { coding: [{ system: FHIR_PROVENANCE_PARTICIPANT_SYSTEM, code: "verifier" }] },
+          who: { display: review.by ?? "El equipo de la clínica" },
+        },
+      ],
+    })
+  }
+  reviewProvenance(
+    `${p.patientId}-antecedentes-revisados`,
+    record.reviews.history,
+    [
+      ...record.conditions.filter((c) => !declaredGroupOf(record, "conditions", c.id)).map((c) => ({ reference: `Condition/${c.id}` })),
+      ...record.medications
+        .filter((m) => !declaredGroupOf(record, "medications", m.id))
+        .map((m) => ({ reference: `MedicationStatement/${m.id}` })),
+    ],
+  )
+  reviewProvenance(
+    `${p.patientId}-alergias-revisadas`,
+    record.reviews.allergies,
+    record.allergies
+      .filter((a) => !declaredGroupOf(record, "allergies", a.id))
+      .map((a) => ({ reference: `AllergyIntolerance/${a.id}` })),
+  )
   for (const { row, diagnoses, procedures, exam } of record.encounters) {
     const encounterRef = { reference: `Encounter/${row.id}` }
     // Lo observado vale como la atención: definitivo solo si se firmó, en curso si no, y
@@ -1457,7 +1652,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       ...(c.signedAt ? { dateTime: c.signedAt.toISOString() } : {}),
       policyRule: { text: c.titleSnapshot },
     })
-  // Los formularios finalizados: lo que anotó el equipo y lo que respondió la persona y se revisó.
+  // Las fichas finalizadas y lo que respondió la persona, revisado o no.
   const exportedDocuments = new Set(record.documents.map((d) => d.id))
   for (const form of record.forms) {
     // Sin ninguna pregunta que leer (una plantilla antigua mal guardada) no hay qué exportar: FHIR no admite listas vacías.
@@ -1474,12 +1669,18 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
             : form.filledBy
               ? { display: form.filledBy }
               : null
+    // R4: `authored` es cuándo se dieron las respuestas. Lo que respondió la persona es de cuando lo
+    // envió, no de cuando el equipo lo revisó (auditor, QA de la entrega 2); la revisión va en el texto.
+    const authored =
+      (form.source === "portal" ? form.submittedAt : null) ?? form.finalizedAt ?? form.submittedAt ?? record.generatedAt
     resources.push(
       questionnaireResponse({
         id: form.id,
         title: form.title,
         version: form.version,
-        authored: form.finalizedAt,
+        authored,
+        // De una atención anulada ya no vale; con algo agregado después, enmendado.
+        status: form.voidedAttention ? "entered-in-error" : form.addenda.length ? "amended" : "completed",
         patientRef,
         encounterId: form.encounterId,
         author: respondent ?? (form.filledBy ? { display: form.filledBy } : null),
@@ -1499,6 +1700,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         })),
         notes: [
           form.byWords,
+          ...(form.voidedAttention ? [voidedFormWords(form, record.clinic) as string] : []),
           ...form.addenda.map(
             (addendum) =>
               `${form.addendaTitle === "Correcciones" ? "Corrección" : "Adenda"}: ${addendumWords(addendum, record.clinic)}`,
@@ -1506,6 +1708,23 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ],
       }),
     )
+    // Cada adenda o corrección: quién la agregó, cuándo y por qué, en los campos de R4 para eso
+    // (`Provenance`, con `reason`); su texto va en el del recurso.
+    for (const addendum of form.addenda)
+      resources.push({
+        resourceType: "Provenance",
+        id: addendum.id,
+        target: [{ reference: `QuestionnaireResponse/${form.id}` }],
+        recorded: addendum.createdAt.toISOString(),
+        activity: { coding: [{ system: FHIR_DATA_OPERATION_SYSTEM, code: "APPEND" }] },
+        ...(addendum.reason ? { reason: [{ text: addendum.reason }] } : {}),
+        agent: [
+          {
+            type: { coding: [{ system: FHIR_PROVENANCE_PARTICIPANT_SYSTEM, code: "author" }] },
+            who: { display: addendum.authorName ?? "El equipo de la clínica" },
+          },
+        ],
+      })
   }
   // La entrevista de salud vigente, como la cuenta el producto: cada dato en palabras.
   if (record.interview)

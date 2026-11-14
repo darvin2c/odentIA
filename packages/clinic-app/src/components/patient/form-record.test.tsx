@@ -53,4 +53,30 @@ describe("un formulario finalizado dentro de su atención", () => {
     expect(page).toContain("Correcciones")
     expect(page).not.toContain("Adendas")
   })
+
+  // QA de la entrega 2 (14 nov).
+  it("la corrección dice su motivo, si lo tiene; lo que dejó sin responder el paciente dice «No respondió»", () => {
+    const page = renderToStaticMarkup(
+      <FormRecordView
+        form={{
+          ...form,
+          source: "portal",
+          addendaTitle: "Correcciones",
+          addenda: [{ ...form.addenda[0]!, reason: "Lo confirmó en consulta" }],
+        }}
+      />,
+    )
+    expect(page).toContain("Motivo: Lo confirmó en consulta")
+    expect(page).toContain("No respondió")
+    expect(page).not.toContain("Sin respuesta")
+  })
+
+  it("en la atención firmada solo lleva lo agregado hasta la firma: lo de después va tras «Firmó…»", () => {
+    const later = { id: "a2", text: "Agregado después de firmar.", authorName: "Dra. Ana Torres", createdAt: "2026-11-13T21:00:00.000Z" }
+    const page = renderToStaticMarkup(
+      <FormRecordView form={{ ...form, addenda: [...form.addenda, later] }} addendaUntil="2026-11-13T20:30:00.000Z" />,
+    )
+    expect(page).toContain("La prueba al frío se repitió.")
+    expect(page).not.toContain("Agregado después de firmar.")
+  })
 })

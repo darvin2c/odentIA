@@ -38,7 +38,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
-import { loadFormRecords } from "./form-record.js"
+import { addedWords, loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -750,6 +750,8 @@ export interface EncounterBorn {
     discardReason: string | null
     discardedWithAttention: boolean
     summary: string
+    /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
+    fromPerson: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
@@ -822,6 +824,7 @@ async function loadBornForEncounters(
         encounterId: clinicalFormResponse.encounterId,
         templateTitle: clinicalFormResponse.templateTitle,
         status: clinicalFormResponse.status,
+        source: clinicalFormResponse.source,
         finalizedAt: clinicalFormResponse.finalizedAt,
         discardedAt: clinicalFormResponse.discardedAt,
         discardReason: clinicalFormResponse.discardReason,
@@ -976,7 +979,9 @@ async function loadBornForEncounters(
       state: row.status === "completado" ? "con resultado" : row.status === "cancelado" ? "cancelada" : "sin resultado",
     })
   }
-  const summaries = new Map(records.map((form) => [form.id, form.summary]))
+  // La línea dice también que se le agregó algo después: lo plegado no se lee como si nadie lo
+  // hubiera corregido (QA de la entrega 2).
+  const summaries = new Map(records.map((form) => [form.id, [form.summary, addedWords(form)].filter(Boolean).join(" · ")]))
   for (const row of forms) {
     if (!row.encounterId) continue
     const finalized = row.status === "finalizado"
@@ -994,6 +999,7 @@ async function loadBornForEncounters(
       discardedWithAttention:
         discarded && !!row.discardedAt && !!row.attentionVoidedAt && row.discardedAt.getTime() === row.attentionVoidedAt.getTime(),
       summary: summaries.get(row.id) ?? "",
+      fromPerson: row.source === "portal",
     })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
@@ -1088,7 +1094,8 @@ export async function getTimeline(
     )
   if (types.includes("form") && tooth == null)
     branches.push(
-      sql`select id, 'form'::text as kind, finalized_at as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
+      // Lo que respondió la persona, a la hora en que lo envió; lo del equipo, a la que se finalizó.
+      sql`select id, 'form'::text as kind, coalesce(case when source = 'portal' then submitted_at end, finalized_at) as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null ${outside(sql`clinical_form_response.encounter_id`)}`,
     )
   if (types.includes("note") && tooth == null)
     branches.push(
@@ -1581,12 +1588,14 @@ export async function getTimeline(
       id: form.id,
       refId: form.id,
       type: "form",
-      createdAt: form.finalizedAt,
+      // Lo que respondió la persona va el día en que lo envió, no el de su revisión (auditor, QA de
+      // la entrega 2); lo dice `byText`. Es la misma hora con la que se ordena (`getTimeline`).
+      createdAt: (form.source === "portal" ? form.submittedAt : null) ?? form.finalizedAt ?? new Date(0),
       title:
         form.source === "portal"
           ? `Lo que respondió el paciente: ${form.title}`
           : `Se completó la ficha de consulta: ${form.title}`,
-      detail: form.summary || null,
+      detail: [form.summary, addedWords(form)].filter(Boolean).join(" · ") || null,
       byText: form.whoWords,
       status: "finalizado",
       toothNumbers: [],

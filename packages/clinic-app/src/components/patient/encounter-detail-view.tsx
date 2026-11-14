@@ -180,8 +180,15 @@ export function EncounterDetailView({
   const canRead = usePermission("clinical.read")
   const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, documents, addenda } = detail
-  // Los formularios finalizados en ella son algo que se anotó: van con sus respuestas.
+  // Las fichas finalizadas en ella son algo que se anotó: van con sus respuestas. Lo agregado a una
+  // después de firmar no es parte de lo firmado: va después de la firma.
   const forms = detail.forms ?? []
+  const signedAt = encounter.status === "finalizada" ? (encounter.finalizedAt ?? null) : null
+  const formAddendaAfterSigning = signedAt
+    ? forms.flatMap((form) =>
+        form.addenda.filter((addendum) => addendum.createdAt > signedAt).map((addendum) => ({ form, addendum })),
+      )
+    : []
   // La misma consulta (y caché) que el bloque «Documentos» de la atención: sus recetas.
   const prescriptions = useQuery({
     queryKey: ["prescriptions", patientId],
@@ -472,11 +479,11 @@ export function EncounterDetailView({
       <ProductDetail patientId={patientId} detail={detail} slot="recorded" />
 
       {forms.length > 0 ? (
-        <section aria-label="Formularios">
-          <h4 className="mb-2 text-sm font-medium">Formularios</h4>
+        <section aria-label={forms.length === 1 ? "Ficha" : "Fichas"}>
+          <h4 className="mb-2 text-sm font-medium">{forms.length === 1 ? "Ficha" : "Fichas"}</h4>
           <div className="flex flex-col gap-3">
             {forms.map((form) => (
-              <FormRecordView key={form.id} form={form} />
+              <FormRecordView key={form.id} form={form} addendaUntil={signedAt} />
             ))}
           </div>
         </section>
@@ -518,6 +525,30 @@ export function EncounterDetailView({
             {(encounter.finalizedAt ?? encounter.endedAt) ? ` · ${formatDateTime((encounter.finalizedAt ?? encounter.endedAt)!)}` : ""}
           </span>
         </p>
+      ) : null}
+
+      {/* Lo agregado a sus fichas después de firmar va después de la firma, con su hora (QA de la entrega 2). */}
+      {formAddendaAfterSigning.length > 0 ? (
+        <section aria-label="Agregado a sus fichas después de firmar">
+          <h4 className="mb-2 text-sm font-medium">Agregado a sus fichas después de firmar</h4>
+          <ul className="flex flex-col gap-2">
+            {formAddendaAfterSigning.map(({ form, addendum }) => (
+              <li key={addendum.id} className="border-b pb-2 text-sm last:border-0">
+                <p className="text-xs text-muted-foreground">{form.title}</p>
+                <p className="whitespace-pre-wrap break-words">{addendum.text}</p>
+                {addendum.reason ? (
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                    Motivo: {addendum.reason}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {addendum.authorName ? `${addendum.authorName} · ` : ""}
+                  <time dateTime={addendum.createdAt}>{formatDateTime(addendum.createdAt)}</time>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {encounter.status === "finalizada" ? (

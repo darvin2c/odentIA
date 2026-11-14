@@ -4,15 +4,16 @@
  * (el PDF y el `QuestionnaireResponse` de FHIR), la atención firmada y la
  * Historia: una sola regla para decir una respuesta, no una por pantalla.
  *
- * Solo lo finalizado es registro clínico. Un borrador, también el que la persona
- * envió y el equipo aún no revisó, no entra aquí.
+ * Solo lo finalizado es registro clínico. Un borrador no entra aquí; lo que la
+ * persona envió y el equipo aún no revisó, solo si se pide (`unreviewed`): la copia
+ * de la historia lo trae marcado «sin revisar», como lo que declaró de su salud.
  */
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientDocument } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientDocument } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
 import { dayTimeWords, type Zone } from "./document-kit.js"
@@ -64,9 +65,18 @@ export interface FormRecord {
   professionalName: string | null
   /** Cuándo lo envió la persona, si lo respondió ella. */
   submittedAt: Date | null
-  finalizedAt: Date
+  /**
+   * Cuándo se finalizó; en lo que envió la persona, cuándo se revisó. null: lo envió y el
+   * equipo aún no lo revisó (solo se lee con `unreviewed`).
+   */
+  finalizedAt: Date | null
   /** Quién lo finalizó: en lo que envió la persona, quien lo revisó. null si no quedó guardado (lo de antes). */
   finalizedBy: string | null
+  /**
+   * Se llenó en una atención que después se anuló: se conserva, pero ya no vale como
+   * registro de esa atención. La Historia lo marca igual («de una atención anulada»).
+   */
+  voidedAttention: { at: Date; reason: string } | null
   /**
    * Quién lo llenó y, si fue otra persona, quién lo cerró, sin fechas: «Lo llenó Ana
    * Torres», «Lo respondió Marta Ríos (paciente) · lo revisó Ana Torres». Es la frase
@@ -83,7 +93,14 @@ export interface FormRecord {
    * Lo que el equipo agregó sin cambiar las respuestas, en orden. En lo que envió la
    * persona puede ser anterior a la revisión: lo que escribió no se edita ni antes.
    */
-  addenda: Array<{ id: string; text: string; authorName: string | null; createdAt: Date }>
+  addenda: Array<{
+    id: string
+    text: string
+    /** Por qué se corrigió, si quien corrigió lo dijo. */
+    reason: string | null
+    authorName: string | null
+    createdAt: Date
+  }>
   /** Cómo se llaman: «Correcciones» en lo que envió la persona, «Adendas» en lo del equipo. */
   addendaTitle: "Adendas" | "Correcciones"
   /** Lo respondido en una línea, para verlo sin abrirlo. */
@@ -183,30 +200,51 @@ function filledWordsOf(form: FormHead): string {
  * finaliza. Sin quién (lo de antes de guardarlo) no se afirma un nombre.
  */
 function closedWordsOf(form: FormHead): string {
-  if (form.source === "portal") return form.finalizedBy ? `lo revisó ${form.finalizedBy}` : "el equipo lo revisó"
+  if (form.source === "portal") {
+    if (!form.finalizedAt) return "sin revisar"
+    return form.finalizedBy ? `lo revisó ${form.finalizedBy}` : "el equipo lo revisó"
+  }
   return form.finalizedBy ? `lo finalizó ${form.finalizedBy}` : "finalizado"
+}
+
+/** La misma persona lo llenó y lo finalizó: se nombra una vez. */
+function sameHandOf(form: FormHead): boolean {
+  return form.source !== "portal" && (!form.finalizedBy || form.finalizedBy === form.filledBy)
 }
 
 /** Quién lo llenó y quién lo cerró, sin fechas. En lo del equipo, quien lo finalizó solo si fue otra persona. */
 function whoWordsOf(form: FormHead): string {
-  const sameHand = form.source !== "portal" && (!form.finalizedBy || form.finalizedBy === form.filledBy)
-  return sameHand ? filledWordsOf(form) : `${filledWordsOf(form)} · ${closedWordsOf(form)}`
+  return sameHandOf(form) ? filledWordsOf(form) : `${filledWordsOf(form)} · ${closedWordsOf(form)}`
 }
 
 /**
- * «Lo llenó Ana Torres · lo finalizó Ana Torres el 13 de noviembre de 2026, 15:02»,
- * «Lo respondió Marta Ríos (paciente) desde su enlace el … · lo revisó Ana Torres el …».
+ * «Lo llenó y lo finalizó Ana Torres el 13 de noviembre de 2026, 15:02», «Lo respondió
+ * Marta Ríos (paciente) desde su enlace el … · lo revisó Ana Torres el …», o «… · sin
+ * revisar» si nadie del equipo lo revisó todavía.
  */
 function byWordsOf(form: FormHead, zone: Zone): string {
-  const closed = `${closedWordsOf(form)} el ${dayTimeWords(form.finalizedAt, zone)}`
+  const closedAt = form.finalizedAt ? ` el ${dayTimeWords(form.finalizedAt, zone)}` : ""
   if (form.source === "portal") {
     const via = form.via === "enlace" ? " desde su enlace" : form.via === "portal" ? " desde el portal" : ""
     const sent = form.submittedAt ? ` el ${dayTimeWords(form.submittedAt, zone)}` : ""
-    return `${filledWordsOf(form)}${via}${sent} · ${closed}`
+    return `${filledWordsOf(form)}${via}${sent} · ${closedWordsOf(form)}${closedAt}`
   }
   const charge =
     form.professionalName && form.professionalName !== form.filledBy ? ` · a cargo de ${form.professionalName}` : ""
-  return `${filledWordsOf(form)}${charge} · ${closed}`
+  // Quien lo llenó y lo finalizó se nombra una vez (QA de la entrega 2: «Lo llenó Ana · lo finalizó Ana»).
+  if (sameHandOf(form) && form.filledBy) return `Lo llenó y lo finalizó ${form.filledBy}${closedAt}${charge}`
+  return `${filledWordsOf(form)}${charge} · ${closedWordsOf(form)}${closedAt}`
+}
+
+/**
+ * «con 1 corrección», «con 2 adendas»: lo agregado después, para que una línea
+ * plegada no se lea como si nadie lo hubiera precisado. Vacío si no tiene.
+ */
+export function addedWords(form: Pick<FormRecord, "addenda" | "source">): string {
+  const count = form.addenda.length
+  if (count === 0) return ""
+  const [one, many] = form.source === "portal" ? ["corrección", "correcciones"] : ["adenda", "adendas"]
+  return `con ${count} ${count === 1 ? one : many}`
 }
 
 /** Lo que cabe en una línea de la Historia. */
@@ -225,7 +263,8 @@ function summaryOf(sections: FormRecordSection[]): string {
     .map((item) =>
       (item.type === "texto" || item.type === "texto_largo" || item.type === "pieza"
         ? (item.words as string)
-        : `${item.label.replace(/^¿\s*/, "").replace(/\s*[?:]$/, "")}: ${item.words}`
+        : // La pregunta sin sus signos: «¿Cuánto te duele? (0 a 10)» se lee «Cuánto te duele (0 a 10): 7 de 10».
+          `${item.label.replace(/[¿?]/g, "").replace(/\s+/g, " ").trim().replace(/\s*:$/, "")}: ${item.words}`
       ).replace(/\s+/g, " "),
     )
   let line = ""
@@ -239,13 +278,14 @@ function summaryOf(sections: FormRecordSection[]): string {
 
 /**
  * Los formularios finalizados de la persona, del más antiguo al más nuevo. Con
- * `encounterIds`, solo los que se llenaron en esas atenciones; con `ids`, solo esos.
+ * `encounterIds`, solo los que se llenaron en esas atenciones; con `ids`, solo esos;
+ * con `unreviewed`, también lo que la persona envió y el equipo aún no revisó.
  */
 export async function loadFormRecords(
   tx: Db,
   orgId: string,
   patientId: string,
-  scope: { encounterIds?: readonly string[]; ids?: readonly string[] } = {},
+  scope: { encounterIds?: readonly string[]; ids?: readonly string[]; unreviewed?: boolean } = {},
 ): Promise<FormRecord[]> {
   if (scope.encounterIds?.length === 0 || scope.ids?.length === 0) return []
   const author = alias(user, "form_author")
@@ -258,6 +298,9 @@ export async function loadFormRecords(
       professionalName: professional.name,
       finalizerName: finalizer.name,
       respondentName: contact.displayName,
+      encounterStatus: encounter.status,
+      encounterVoidedAt: encounter.voidedAt,
+      encounterVoidReason: encounter.voidReason,
     })
     .from(clinicalFormResponse)
     .leftJoin(author, eq(author.id, clinicalFormResponse.authorUserId))
@@ -267,16 +310,31 @@ export async function loadFormRecords(
       contact,
       and(eq(contact.id, clinicalFormResponse.respondentContactId), eq(contact.organizationId, orgId)),
     )
+    .leftJoin(encounter, and(eq(encounter.id, clinicalFormResponse.encounterId), eq(encounter.organizationId, orgId)))
     .where(
       and(
         eq(clinicalFormResponse.organizationId, orgId),
         eq(clinicalFormResponse.patientId, patientId),
-        eq(clinicalFormResponse.status, "finalizado"),
+        scope.unreviewed
+          ? or(
+              eq(clinicalFormResponse.status, "finalizado"),
+              // Lo que envió y nadie revisó: es lo que dijo, aunque todavía no sea registro clínico.
+              and(
+                eq(clinicalFormResponse.status, "borrador"),
+                eq(clinicalFormResponse.source, "portal"),
+                isNotNull(clinicalFormResponse.submittedAt),
+              ),
+            )
+          : eq(clinicalFormResponse.status, "finalizado"),
         ...(scope.encounterIds ? [inArray(clinicalFormResponse.encounterId, [...scope.encounterIds])] : []),
         ...(scope.ids ? [inArray(clinicalFormResponse.id, [...scope.ids])] : []),
       ),
     )
-    .orderBy(asc(clinicalFormResponse.finalizedAt), asc(clinicalFormResponse.id))
+    // Lo que envió sin revisar va en el momento en que lo envió.
+    .orderBy(
+      asc(sql`coalesce(${clinicalFormResponse.finalizedAt}, ${clinicalFormResponse.submittedAt})`),
+      asc(clinicalFormResponse.id),
+    )
   if (rows.length === 0) return []
   const responseIds = rows.map(({ row }) => row.id)
   const addenda = await tx
@@ -284,6 +342,7 @@ export async function loadFormRecords(
       id: clinicalFormAddendum.id,
       responseId: clinicalFormAddendum.responseId,
       text: clinicalFormAddendum.text,
+      reason: clinicalFormAddendum.reason,
       authorName: user.name,
       createdAt: clinicalFormAddendum.createdAt,
     })
@@ -324,7 +383,8 @@ export async function loadFormRecords(
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
-  return rows.map(({ row, authorName, professionalName, finalizerName, respondentName }) => {
+  return rows.map((joined) => {
+    const { row, authorName, professionalName, finalizerName, respondentName } = joined
     const answers = (row.answers ?? {}) as Record<string, unknown>
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({
@@ -357,9 +417,14 @@ export async function loadFormRecords(
       respondentContactId: fromPerson ? row.respondentContactId : null,
       professionalName,
       submittedAt: row.submittedAt,
-      // Un finalizado siempre tiene su hora; la de creación solo cubre una fila antigua sin ella.
-      finalizedAt: row.finalizedAt ?? row.createdAt,
-      finalizedBy: finalizerName,
+      // Un finalizado siempre tiene su hora; la de creación solo cubre una fila antigua sin ella. Lo
+      // enviado y sin revisar no tiene ninguna.
+      finalizedAt: row.status === "finalizado" ? (row.finalizedAt ?? row.createdAt) : null,
+      finalizedBy: row.status === "finalizado" ? finalizerName : null,
+      voidedAttention:
+        joined.encounterStatus === "anulada" && joined.encounterVoidedAt
+          ? { at: joined.encounterVoidedAt, reason: joined.encounterVoidReason ?? "" }
+          : null,
     }
     return {
       ...head,
@@ -368,7 +433,13 @@ export async function loadFormRecords(
       sections,
       addenda: addenda
         .filter((addendum) => addendum.responseId === row.id)
-        .map(({ id, text, authorName: addendumAuthor, createdAt }) => ({ id, text, authorName: addendumAuthor, createdAt })),
+        .map(({ id, text, reason, authorName: addendumAuthor, createdAt }) => ({
+          id,
+          text,
+          reason: reason?.trim() || null,
+          authorName: addendumAuthor,
+          createdAt,
+        })),
       addendaTitle: fromPerson ? ("Correcciones" as const) : ("Adendas" as const),
       summary: summaryOf(sections),
     }

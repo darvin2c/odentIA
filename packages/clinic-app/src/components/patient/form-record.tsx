@@ -21,9 +21,20 @@ function whenWords(iso: string): string {
  * se hizo con su respuesta, quién y cuándo, y sus adendas. Las palabras las dice
  * el servidor, las mismas de la copia de la historia.
  */
-export function FormRecordView({ form }: { form: FormRecord }) {
+export function FormRecordView({
+  form,
+  addendaUntil,
+}: {
+  form: FormRecord
+  /**
+   * En la atención firmada: solo las adendas de hasta la firma. Lo agregado después va
+   * después de «Firmó…», para que no se lea como parte de lo firmado (QA de la entrega 2).
+   */
+  addendaUntil?: string | null
+}) {
+  const shownAddenda = addendaUntil ? form.addenda.filter((addendum) => addendum.createdAt <= addendaUntil) : form.addenda
   return (
-    <article aria-label={`Formulario: ${form.title}`} className="flex min-w-0 flex-col gap-3 rounded-lg border p-4">
+    <article aria-label={form.title} className="flex min-w-0 flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-col gap-0.5">
         <h5 className="text-sm font-medium">
           {form.title}
@@ -39,20 +50,26 @@ export function FormRecordView({ form }: { form: FormRecord }) {
               <div key={item.id} className="min-w-0">
                 <dt className="text-xs font-medium text-muted-foreground">{item.label}</dt>
                 <dd className={cn("whitespace-pre-wrap break-words text-sm", item.words === null && "text-muted-foreground")}>
-                  {item.words ?? "Sin respuesta"}
+                  {/* Lo que dejó sin contestar la persona se dice como en su revisión: «No respondió». */}
+                  {item.words ?? (form.source === "portal" ? "No respondió" : "Sin respuesta")}
                 </dd>
               </div>
             ))}
           </dl>
         </div>
       ))}
-      {form.addenda.length > 0 ? (
+      {shownAddenda.length > 0 ? (
         <div className="flex flex-col gap-2 border-t pt-3">
           <h6 className="text-sm font-medium">{form.addendaTitle}</h6>
           <ul className="flex flex-col gap-2">
-            {form.addenda.map((addendum) => (
+            {shownAddenda.map((addendum) => (
               <li key={addendum.id} className="text-sm">
                 <p className="whitespace-pre-wrap break-words">{addendum.text}</p>
+                {addendum.reason ? (
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                    Motivo: {addendum.reason}
+                  </p>
+                ) : null}
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {addendum.authorName ? `${addendum.authorName} · ` : ""}
                   <time dateTime={addendum.createdAt}>{whenWords(addendum.createdAt)}</time>
@@ -88,7 +105,7 @@ export function FormViewButton({ patientId, formId, title }: { patientId: string
   }
   return (
     <>
-      <Button type="button" variant="outline" size="sm" aria-label={`Ver el formulario ${title}`} onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" size="sm" aria-label={`Ver ${title}`} onClick={() => setOpen(true)}>
         Ver
       </Button>
       {open ? (
@@ -98,7 +115,7 @@ export function FormViewButton({ patientId, formId, title }: { patientId: string
               {responses.error.message}
             </p>
           ) : response ? (
-            <Suspense fallback={<LoadingState message="Cargando el formulario…" />}>
+            <Suspense fallback={<LoadingState message="Cargando…" />}>
               <ResponseDetail
                 key={response.id}
                 response={response}
@@ -109,9 +126,9 @@ export function FormViewButton({ patientId, formId, title }: { patientId: string
               />
             </Suspense>
           ) : responses.isPending ? (
-            <LoadingState message="Cargando el formulario…" />
+            <LoadingState message="Cargando…" />
           ) : (
-            <p className="text-sm text-muted-foreground">Este formulario ya no está disponible.</p>
+            <p className="text-sm text-muted-foreground">Ya no está disponible.</p>
           )}
         </DetailDrawer>
       ) : null}
