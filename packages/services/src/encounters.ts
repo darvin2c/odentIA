@@ -72,6 +72,7 @@ import {
 } from "./budgets.js"
 import {
   type HealthGap,
+  anesthesiaRisksOf,
   healthGapsOf,
   listEncounterDocuments,
   type PatientDocumentWithContext,
@@ -2183,7 +2184,8 @@ export interface ClosingCheckBase {
    * anestesia y algo por saber, el cierre lo avisa junto a los materiales. No
    * bloquea; la firma deja constancia de que se firmó así.
    */
-  health: { gaps: HealthGap[]; anesthetics: string[] }
+  /** `risks`: lo que dijo del corazón y la anestesia que cambia una anestesia (`anesthesiaRisksOf`). */
+  health: { gaps: HealthGap[]; anesthetics: string[]; risks: string[] }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
   controls: ClosingControls
   /**
@@ -2645,6 +2647,7 @@ export async function checkEncounterClosing(
   const health = {
     gaps: await healthGapsOf(tx, orgId, row.patientId),
     anesthetics: (materials?.items ?? []).filter((item) => isLocalAnestheticName(item.name)).map((item) => item.name),
+    risks: await anesthesiaRisksOf(tx, orgId, row.patientId),
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)

@@ -1269,6 +1269,39 @@ export async function savePatientHealth(
 export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
 
 /**
+ * Lo que dijo y cambia una anestesia (QA del 14 nov, causa raíz): el corazón (válvula, problema de
+ * nacimiento o endocarditis, antibiótico indicado antes) y un problema con la anestesia o un sangrado
+ * tras una extracción, con «Sí» o «No sabe». El cierre lo dice junto a la anestesia; nunca frena.
+ */
+export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
+  const [latest] = await tx
+    .select({ answers: patientAnamnesis.answers })
+    .from(patientAnamnesis)
+    .where(and(eq(patientAnamnesis.patientId, patientId), eq(patientAnamnesis.organizationId, orgId)))
+    .orderBy(desc(patientAnamnesis.version))
+    .limit(1)
+  const answers = latest?.answers
+  const say = (value: unknown, yes: string, unknown: string) => (value === "si" ? [yes] : value === "no_sabe" ? [unknown] : [])
+  return [
+    ...say(
+      atPath(answers, ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"]),
+      "tiene una válvula, un problema del corazón de nacimiento o tuvo endocarditis",
+      "no sabe si tiene una válvula o tuvo endocarditis",
+    ),
+    ...say(
+      atPath(answers, ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"]),
+      "su médico le indicó antibiótico antes del dentista",
+      "no sabe si debe tomar antibiótico antes",
+    ),
+    ...say(
+      atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]),
+      "tuvo problemas con la anestesia o sangró tras una extracción",
+      "no sabe si tuvo problemas con la anestesia",
+    ),
+  ]
+}
+
+/**
  * Lo que falta saber de su salud antes de atenderla, en especial antes de una
  * anestesia: un grupo falta si sigue «no preguntado» y no tiene filas vigentes
  * (con una fila ya se sabe algo; las alergias, además, si nadie las revisó con
