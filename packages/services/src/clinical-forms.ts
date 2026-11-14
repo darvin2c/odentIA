@@ -1909,12 +1909,20 @@ export async function discardFormResponse(
   return row!
 }
 
+/** Hasta cuánto se escribe el motivo de una corrección. */
+export const ADDENDUM_REASON_MAX = 2000
+
+/**
+ * Agrega una adenda o una corrección. `reason`, por qué se corrige, es opcional: la
+ * norma de historia clínica pide el motivo, pero vacío no traba (decisión del 14 nov).
+ */
 export async function addFormAddendum(
   tx: Db,
   orgId: string,
   actorUserId: string,
   responseId: string,
   text: string,
+  reason?: string | null,
 ): Promise<typeof clinicalFormAddendum.$inferSelect> {
   const [current] = await tx
     .select({
@@ -1938,9 +1946,12 @@ export async function addFormAddendum(
   const clean = (text ?? "").trim()
   if (!clean) throw invalidField("text", "Escribe la corrección")
   if (clean.length > 5000) throw invalidField("text", "La corrección admite hasta 5000 caracteres")
+  const why = (reason ?? "").trim()
+  if (why.length > ADDENDUM_REASON_MAX)
+    throw invalidField("reason", `El motivo admite hasta ${ADDENDUM_REASON_MAX} caracteres`)
   const [row] = await tx
     .insert(clinicalFormAddendum)
-    .values({ organizationId: orgId, responseId, text: clean, createdBy: actorUserId })
+    .values({ organizationId: orgId, responseId, text: clean, reason: why || null, createdBy: actorUserId })
     .returning()
   await audit(tx, orgId, actorUserId, "form_response.addendum", "clinical_form_response", responseId, {})
   return row

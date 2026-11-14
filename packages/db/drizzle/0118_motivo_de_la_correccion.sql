@@ -1,0 +1,1 @@
+ALTER TABLE "clinical_form_addendum" ADD COLUMN "reason" text;

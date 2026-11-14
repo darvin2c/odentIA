@@ -1450,6 +1450,19 @@ it("formularios: lo que envió el paciente no se edita, se corrige aparte y «Ma
     text: "Dice que fue con amoxicilina, hace años.",
   })
   expect(correction.status).toBe(201)
+  // Con su motivo, si se dice (opcional, decisión del 14 nov); demasiado largo, el servidor lo dice.
+  const withReason = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, {
+    text: "Toma aspirina.",
+    reason: "Lo confirmó en consulta",
+  })
+  expect(withReason.status).toBe(201)
+  expect((await json<{ data: { reason: string | null } }>(withReason)).data.reason).toBe("Lo confirmó en consulta")
+  const tooLong = await post(app, `/clinical-forms/form-responses/${responseId}/addenda`, {
+    text: "Otra",
+    reason: "x".repeat(2001),
+  })
+  expect(tooLong.status).toBe(400)
+  expect(JSON.stringify(await json<ErrorBody>(tooLong))).toContain("El motivo admite hasta 2000 caracteres.")
   // Recepción no lo revisa ni lo lee.
   expect((await post(buildApp("reception"), `/clinical-forms/form-responses/${responseId}/finalize`)).status).toBe(403)
   // «Marcar como revisado» desde la atención: dice lo que pasó y queda ligado a ella.

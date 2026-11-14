@@ -260,13 +260,15 @@ export async function seedClinicalForms(
         },
       })
       .returning({ id: clinicalFormResponse.id })
-    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo.
+    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo, con
+    // su motivo, que es opcional.
     await addFormAddendum(
       tx,
       orgId,
       ownerUserId,
       sent!.id,
       "Al llegar dice que el dolor es en la muela de arriba, no en la de abajo, y que empezó hace una semana.",
+      "Lo confirmó en consulta, al señalar la muela",
     )
   }
 

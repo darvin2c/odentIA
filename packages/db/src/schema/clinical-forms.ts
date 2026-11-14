@@ -241,6 +241,11 @@ export const clinicalFormAddendum = pgTable(
       .notNull()
       .references(() => clinicalFormResponse.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
+    /**
+     * Por qué se corrige, si quien corrige lo dijo: la norma de historia clínica pide el motivo de
+     * una corrección, pero dejarlo vacío no traba nada (decisión del 14 nov). Nulo: no se dijo.
+     */
+    reason: text("reason"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
