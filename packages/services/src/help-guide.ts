@@ -2240,7 +2240,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-trabada-obligatoria",
         q: "Una pregunta obligatoria no me deja finalizar la ficha, ¿qué hago?",
-        a: "Respóndela: si el paciente no tiene nada, elige «No tiene» o «Ninguno», que las fichas que vienen con el producto ya traen. Si la pregunta no tiene esa opción, la ficha puede quedar a medias: firmar y cobrar la atención no la necesita, y se termina después. Para salir de ella, «Descartar borrador…» con su motivo y empieza otra. Quien administra puede agregar «No tiene» en Configuración › Fichas de consulta («Ver y cambiar»); la ficha ya empezada sigue con sus preguntas.",
+        a: "Respóndela: si el paciente no tiene nada, elige «No tiene» o «Ninguno». Las fichas que vienen con el producto ya traen esa opción en sus casillas. Si es una ficha de tu clínica y la pregunta no la tiene, quien administra se la agrega, o le quita lo obligatorio, en Configuración › Fichas de consulta («Ver y cambiar»); la ficha ya empezada sigue con sus preguntas. Mientras tanto puede quedar a medias: firmar y cobrar la atención no la necesita, y se termina después. Para salir de ella, «Descartar borrador…» con su motivo y empieza otra.",
         forms: [
           "no puedo finalizar la ficha porque pide una pregunta",
           "la ficha me obliga a marcar algo que no tiene",
