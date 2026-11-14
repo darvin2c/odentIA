@@ -1145,7 +1145,11 @@ export async function renderPatientRecordPdf(
         if (group.title) kit.subheading(group.title)
         dataRows(
           // Lo que dejó sin contestar la persona se dice como en su revisión: «No respondió».
-          group.items.map((item) => [item.label, item.words ?? (source === "portal" ? "No respondió" : "Sin respuesta")]),
+          // Lo que propuso Clío y confirmó una persona lo dice, como en la Historia (entrega 11, C8).
+          group.items.map((item) => [
+            item.label,
+            `${item.words ?? (source === "portal" ? "No respondió" : "Sin respuesta")}${item.clio ? ` (${item.clio})` : ""}`,
+          ]),
           190,
         )
       }

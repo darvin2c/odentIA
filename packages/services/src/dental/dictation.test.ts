@@ -688,7 +688,7 @@ describe("dictado en la atención", () => {
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
-    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], repeated: true })
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], repeated: true })
     expect(await list()).toHaveLength(2)
 
     // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.

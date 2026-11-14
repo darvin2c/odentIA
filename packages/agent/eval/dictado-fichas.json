@@ -1,0 +1,452 @@
+{
+  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0187), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. Los usa eval:dictado-fichas.",
+  "servicios": ["Consulta", "Control de ortodoncia", "Endodoncia multirradicular", "Profilaxis", "Aplicación de flúor barniz"],
+  "fichasPropias": {
+    "control-nino-sano": {
+      "title": "Control de niño sano",
+      "schema": {
+        "sections": [
+          {
+            "id": "control",
+            "title": "Control",
+            "fields": [
+              { "id": "peso", "label": "Peso", "type": "numero", "unit": "kg", "min": 0, "max": 200 },
+              { "id": "talla", "label": "Talla", "type": "numero", "unit": "cm", "min": 0, "max": 250 },
+              { "id": "fiebre", "label": "¿Tuvo fiebre en casa?", "type": "booleano" },
+              { "id": "vacunas", "label": "Vacunas al día", "type": "booleano" },
+              { "id": "alimentacion", "label": "Alimentación", "type": "opcion_unica", "options": ["Lactancia exclusiva", "Mixta", "Fórmula", "Ablactancia"] },
+              { "id": "dolor", "label": "Dolor (0–10)", "type": "escala", "min": 0, "max": 10 },
+              { "id": "observaciones", "label": "Observaciones", "type": "texto_largo" }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "dictados": [
+    {
+      "id": "orto-1",
+      "texto": "Control de ortodoncia. Overjet de seis milímetros, overbite de tres. Clase uno molar izquierda.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 6, "ficha-de-ortodoncia.overbite": 3, "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I" } }
+    },
+    {
+      "id": "orto-2",
+      "texto": "Molares: derecha clase dos división uno, izquierda clase uno. Caninos: derecho clase dos, izquierdo clase uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {
+        "fichas": {
+          "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1",
+          "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I",
+          "ficha-de-ortodoncia.clase_canina_derecha": "Clase II",
+          "ficha-de-ortodoncia.clase_canina_izquierda": "Clase I"
+        }
+      }
+    },
+    {
+      "id": "orto-3-sin-lado-ni-division",
+      "texto": "Sigue en clase dos molar. Overjet de cinco.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {
+        "fichas": { "ficha-de-ortodoncia.overjet": 5 },
+        "revisar": ["ficha-de-ortodoncia.clase_molar_derecha", "ficha-de-ortodoncia.clase_molar_izquierda"]
+      }
+    },
+    {
+      "id": "orto-4-linea-media",
+      "texto": "Línea media superior centrada, la inferior desviada a la izquierda dos milímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {
+        "fichas": {
+          "ficha-de-ortodoncia.linea_media_superior": "Centrada",
+          "ficha-de-ortodoncia.linea_media_inferior": "Desviada a la izquierda",
+          "ficha-de-ortodoncia.linea_media_inferior_mm": 2
+        }
+      }
+    },
+    {
+      "id": "orto-5-varias",
+      "texto": "Tiene mordida cruzada posterior derecha y también anterior. Apiñamiento moderado.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {
+        "fichas": {
+          "ficha-de-ortodoncia.mordida_cruzada": ["Anterior", "Posterior derecha"],
+          "ficha-de-ortodoncia.apinamiento": "Moderado"
+        }
+      }
+    },
+    {
+      "id": "orto-6-habitos",
+      "texto": "La mamá cuenta que se come las uñas y que duerme respirando por la boca.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.habitos": ["Onicofagia", "Respiración bucal"] } }
+    },
+    {
+      "id": "orto-7-otra-unidad",
+      "texto": "Overjet de medio centímetro más o menos.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "revisar": ["ficha-de-ortodoncia.overjet"] }
+    },
+    {
+      "id": "orto-8-ya-respondida",
+      "texto": "Overjet de seis, overbite de cuatro.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "overjet": 5 } }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 4 } }
+    },
+    {
+      "id": "orto-9-nada-de-la-ficha",
+      "texto": "Buena higiene, sin caries. Seguimos con el arco de acero, control en un mes.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {}
+    },
+    {
+      "id": "orto-10-negaciones",
+      "texto": "No hay apiñamiento y no tiene mordida cruzada.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.apinamiento": "No", "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"] } }
+    },
+    {
+      "id": "orto-11-se-corrige",
+      "texto": "Overjet de cuatro… no, perdón, de cinco milímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 5 } }
+    },
+    {
+      "id": "orto-12-negativo",
+      "texto": "Overjet de menos dos milímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": -2 } }
+    },
+    {
+      "id": "orto-13-charla",
+      "texto": "¿Cómo te fue en el colegio? Bien, doctor. Ya, abre grande. Overbite de dos. Muy bien, ciérrala.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2 } }
+    },
+    {
+      "id": "orto-14-lo-de-antes-no-cuenta",
+      "texto": "Igual que la vez pasada, sin cambios en la oclusión.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {}
+    },
+    {
+      "id": "endo-1",
+      "texto": "Pieza cuarenta y seis, dolor espontáneo, intensidad ocho de diez.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.pieza": 46,
+          "evaluacion-de-endodoncia.dolor": "Espontáneo",
+          "evaluacion-de-endodoncia.dolor_intensidad": 8
+        }
+      }
+    },
+    {
+      "id": "endo-2-pruebas",
+      "texto": "Percusión positiva, palpación negativa. Al frío, aumentada y persiste.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.percusion": "Positiva",
+          "evaluacion-de-endodoncia.palpacion": "Negativa",
+          "evaluacion-de-endodoncia.frio": "Aumentada, persiste"
+        }
+      }
+    },
+    {
+      "id": "endo-3-silencio",
+      "texto": "Dolor provocado al masticar en la treinta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.dolor": "Provocado" } }
+    },
+    {
+      "id": "endo-4-negaciones",
+      "texto": "No hay fístula, sin tumefacción, movilidad grado uno.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.fistula": false,
+          "evaluacion-de-endodoncia.tumefaccion": "No tiene",
+          "evaluacion-de-endodoncia.movilidad": "Grado 1"
+        }
+      }
+    },
+    {
+      "id": "endo-5-radiografia",
+      "texto": "Sondaje más profundo de cuatro milímetros. En la radiografía hay radiolucidez periapical y ensanchamiento del ligamento.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.sondaje": 4,
+          "evaluacion-de-endodoncia.hallazgo_radiografico": ["Ensanchamiento del ligamento periodontal", "Radiolucidez periapical"]
+        }
+      }
+    },
+    {
+      "id": "endo-6-diagnostico",
+      "texto": "Diagnóstico: pulpitis irreversible sintomática con periodontitis apical sintomática.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática",
+          "evaluacion-de-endodoncia.diagnostico_apical": "Periodontitis apical sintomática"
+        }
+      }
+    },
+    {
+      "id": "endo-7-fuera-de-rango",
+      "texto": "Refiere un dolor de quince sobre diez.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "revisar": ["evaluacion-de-endodoncia.dolor_intensidad"] }
+    },
+    {
+      "id": "endo-8-lo-dice-el-paciente",
+      "texto": "El paciente dice que le duele como un nueve. Percusión positiva.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.dolor_intensidad": 9, "evaluacion-de-endodoncia.percusion": "Positiva" } }
+    },
+    {
+      "id": "endo-9-pieza-que-no-existe",
+      "texto": "Pieza diecinueve con dolor provocado.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.dolor": "Provocado" }, "revisar": ["evaluacion-de-endodoncia.pieza"] }
+    },
+    {
+      "id": "endo-10-solo-lo-hecho",
+      "texto": "Le hice la apertura cameral y la conductometría de la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia", "respondidas": { "pieza": 46 } }],
+      "espera": {}
+    },
+    {
+      "id": "ped-1-ceod",
+      "texto": "Ceod: cuatro cariados, uno con extracción indicada y dos obturados. Riesgo de caries alto.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": {
+        "fichas": {
+          "ficha-de-odontopediatria.ceod_c": 4,
+          "ficha-de-odontopediatria.ceod_e": 1,
+          "ficha-de-odontopediatria.ceod_o": 2,
+          "ficha-de-odontopediatria.riesgo_caries": "Alto"
+        }
+      }
+    },
+    {
+      "id": "ped-2-frankl",
+      "texto": "Frankl tres, colaboró bien.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.conducta": "3 · Positiva" } }
+    },
+    {
+      "id": "ped-3-conducta-dicha",
+      "texto": "Conducta definitivamente negativa, lloró toda la consulta.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.conducta": "1 · Definitivamente negativa" } }
+    },
+    {
+      "id": "ped-4-nada-de-la-ficha",
+      "texto": "Viene con su mamá por control. Aplicamos flúor barniz.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": {}
+    },
+    {
+      "id": "ped-5-cero",
+      "texto": "Riesgo de caries bajo, cero obturados.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.riesgo_caries": "Bajo", "ficha-de-odontopediatria.ceod_o": 0 } }
+    },
+    {
+      "id": "norma-1-cpod",
+      "texto": "CPOD: cinco cariados, dos perdidos y tres obturados. Higiene regular.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": {
+        "fichas": {
+          "ficha-odontoestomatologica.cpod_c": 5,
+          "ficha-odontoestomatologica.cpod_p": 2,
+          "ficha-odontoestomatologica.cpod_o": 3,
+          "ficha-odontoestomatologica.higiene": "Regular"
+        }
+      }
+    },
+    {
+      "id": "norma-2-ihos",
+      "texto": "IHO-S de uno coma dos. Riesgo estomatológico moderado.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.2, "ficha-odontoestomatologica.riesgo": "Moderado" } }
+    },
+    {
+      "id": "norma-3-alta",
+      "texto": "Hoy le damos el alta básica odontológica.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.alta_basica": true } }
+    },
+    {
+      "id": "norma-4-sin-alta",
+      "texto": "Todavía no tiene el alta básica, le falta la resina de la dieciséis.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.alta_basica": false } }
+    },
+    {
+      "id": "norma-5-nada",
+      "texto": "Profilaxis y fluorización, sin novedades.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": {}
+    },
+    {
+      "id": "dos-fichas-1",
+      "texto": "Frankl cuatro, muy tranquilo. Overjet de tres.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }, { "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.conducta": "4 · Definitivamente positiva", "ficha-de-ortodoncia.overjet": 3 } }
+    },
+    {
+      "id": "dos-fichas-2",
+      "texto": "Pieza veintiséis, percusión positiva. Higiene buena.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }, { "ficha": "ficha-odontoestomatologica" }],
+      "espera": {
+        "fichas": {
+          "evaluacion-de-endodoncia.pieza": 26,
+          "evaluacion-de-endodoncia.percusion": "Positiva",
+          "ficha-odontoestomatologica.higiene": "Buena"
+        }
+      }
+    },
+    {
+      "id": "sin-ficha-1",
+      "texto": "Overjet de seis milímetros, clase uno molar izquierda.",
+      "fichas": [],
+      "espera": {}
+    },
+    {
+      "id": "sin-ficha-2",
+      "texto": "Dolor espontáneo en la cuarenta y seis, percusión positiva, ocho de diez.",
+      "fichas": [],
+      "espera": {}
+    },
+    {
+      "id": "lat-1",
+      "producto": "latidia",
+      "texto": "Pesa veintidós kilos y mide ciento quince centímetros.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": { "fichas": { "control-nino-sano.peso": 22, "control-nino-sano.talla": 115 } }
+    },
+    {
+      "id": "lat-2-negacion",
+      "producto": "latidia",
+      "texto": "La mamá dice que no tuvo fiebre en casa. Vacunas completas.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": { "fichas": { "control-nino-sano.fiebre": false, "control-nino-sano.vacunas": true } }
+    },
+    {
+      "id": "lat-3-opcion",
+      "producto": "latidia",
+      "texto": "Sigue con lactancia materna exclusiva.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": { "fichas": { "control-nino-sano.alimentacion": "Lactancia exclusiva" } }
+    },
+    {
+      "id": "lat-4-otra-unidad",
+      "producto": "latidia",
+      "texto": "Pesa veintidós mil gramos.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": { "revisar": ["control-nino-sano.peso"] }
+    },
+    {
+      "id": "lat-5-nada",
+      "producto": "latidia",
+      "texto": "Viene a control, todo bien, examen normal.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": {}
+    },
+    {
+      "id": "lat-6-escala",
+      "producto": "latidia",
+      "texto": "Dolor de oído de tres sobre diez.",
+      "fichas": [{ "ficha": "control-nino-sano" }],
+      "espera": { "fichas": { "control-nino-sano.dolor": 3 } }
+    },
+    {
+      "id": "lat-7-sin-ficha",
+      "producto": "latidia",
+      "texto": "Pesa veinte kilos, temperatura treinta y siete.",
+      "fichas": [],
+      "espera": {}
+    },
+    {
+      "id": "orto-15-mordida-abierta",
+      "texto": "Presenta mordida abierta anterior de dos milímetros. Overjet de tres.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 3 } }
+    },
+    {
+      "id": "orto-16-una-clase-dos",
+      "texto": "Clase molar derecha, una clase dos, la división la veo en el modelo.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha"] }
+    },
+    {
+      "id": "orto-17-lado",
+      "texto": "Clase canina derecha clase uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase I" } }
+    },
+    {
+      "id": "orto-18-al-menos",
+      "texto": "Overbite de al menos dos milímetros, hay que medirlo bien.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.overbite"] }
+    },
+    {
+      "id": "orto-19-dos-en-una-pausa",
+      "texto": "Overjet de seis, perdón, de cuatro milímetros.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4 } }
+    },
+    {
+      "id": "orto-20-corrige-respondida",
+      "texto": "Corrijo: la clase molar derecha es clase dos división uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "clase_molar_derecha": "Clase II división 2" } }],
+      "espera": { "fichas": {}, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha"] }
+    },
+    {
+      "id": "orto-21-c15b",
+      "texto": "Control de ortodoncia. Overbite de tres, no, perdón, de dos y medio. La derecha en clase dos. Mordida abierta anterior.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2.5 }, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha", "ficha-de-ortodoncia.clase_canina_derecha"] }
+    },
+    {
+      "id": "endo-11-negativa-sin-negacion",
+      "texto": "Percusión positiva en la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.pieza": 46 } }
+    },
+    {
+      "id": "endo-12-fistula-no",
+      "texto": "Pieza treinta y seis. No se observa fístula.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.fistula": false } }
+    },
+    {
+      "id": "endo-13-cuatro-seis",
+      "texto": "Dolor a la percusión en la cuatro seis, ocho de diez.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.dolor_intensidad": 8 } }
+    },
+    {
+      "id": "endo-14-c15c-igual-que-antes",
+      "texto": "Control de la cuarenta y seis. Percusión igual que la vez pasada.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46 } }
+    },
+    {
+      "id": "endo-15-movilidad-un-diente",
+      "texto": "Un diente con movilidad grado dos, la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.movilidad": "Grado 2" } }
+    },
+    {
+      "id": "dos-fichas-3-ceod",
+      "texto": "ceod: tres cariados, uno con extracción indicada y dos obturados.",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }, { "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.ceod_c": 3, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-odontoestomatologica.ceod_c": 3, "ficha-odontoestomatologica.ceod_e": 1, "ficha-odontoestomatologica.ceod_o": 2 } }
+    }
+  ]
+}

@@ -17,7 +17,7 @@ import { contact } from "@odentia/db/schema/crm"
 import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { declarantOfLink } from "./clinical.js"
-import { conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
+import { clioMarksFor, conditionMet, type FieldType, type FormFieldDef, type FormSchemaDef } from "./clinical-forms.js"
 import { dayTimeWords, type Zone } from "./document-kit.js"
 import { findOrgLocale } from "./locale.js"
 import type { ProductSite } from "./product-hooks.js"
@@ -38,6 +38,11 @@ export interface FormRecordItem {
   value: FormAnswerValue
   /** Solo en una pieza: el sitio como lo dice el producto para FHIR (`ProductSite.bodySite`). */
   bodySite?: { text: string } | null
+  /**
+   * Lo propuso Clío al dictar y una persona lo confirmó, mientras siga siendo eso:
+   * «Clío · confirmó Ana Torres el 14/11/2026 14:06» (entrega 11, criterio C8).
+   */
+  clio?: string | null
 }
 
 export interface FormRecordSection {
@@ -380,6 +385,8 @@ export async function loadFormRecords(
     .leftJoin(user, eq(user.id, clinicalFormAddendum.createdBy))
     .where(and(eq(clinicalFormAddendum.organizationId, orgId), inArray(clinicalFormAddendum.responseId, responseIds)))
     .orderBy(asc(clinicalFormAddendum.createdAt), asc(clinicalFormAddendum.id))
+  // Lo que propuso Clío y confirmó una persona: la marca va en su pregunta, en la Historia y en la copia.
+  const marksOf = await clioMarksFor(tx, orgId, patientId)
   const schemas = new Map(rows.map(({ row }) => [row.id, schemaOf(row.templateSnapshot)]))
   // Un adjunto se nombra por su papel, aunque después se haya retirado.
   const attachmentIds = rows.flatMap(({ row }) =>
@@ -434,6 +441,11 @@ export async function loadFormRecords(
             patientRow?.sex ?? null,
           ) || (byPatient ? "el paciente" : null)
     const answers = (row.answers ?? {}) as Record<string, unknown>
+    const marks = marksOf(row)
+    const clioOf = (fieldId: string): string | null => {
+      const mark = marks[fieldId]
+      return mark ? `Clío · ${mark.atSign ? "confirmó al firmar" : "confirmó"} ${mark.byName ?? "alguien del equipo"} el ${dayTimeWords(mark.at, zone)}` : null
+    }
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({
         id: section.id,
@@ -447,6 +459,7 @@ export async function loadFormRecords(
             options: field.options ?? null,
             unit: field.unit ?? null,
             ...answerOf(field, answers[field.id], context),
+            clio: clioOf(field.id),
           })),
       }))
       .filter((section) => section.items.length > 0)

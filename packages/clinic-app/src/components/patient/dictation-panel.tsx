@@ -20,6 +20,7 @@ import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
+import { formsToStartWords, useFormsToStart } from "./clio-form-proposals"
 import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -71,10 +72,18 @@ function goToSuggestions(label: string): void {
   list.scrollIntoView({ block: "center" })
 }
 
+/** Abre la ficha desde su aviso en la atención: ahí se confirma cada respuesta. */
+function openFormSuggestions(responseId: string): void {
+  const notice = document.querySelector<HTMLElement>(`[data-clio-form="${CSS.escape(responseId)}"]`)
+  if (!notice) return
+  notice.scrollIntoView({ block: "center" })
+  notice.querySelector<HTMLButtonElement>("button")?.click()
+}
+
 function readiness(session: DictationSession): string {
-  // La receta no se confirma con las demás: tiene su «Emitir receta».
+  // La receta no se confirma con las demás: tiene su «Emitir receta». Las de ficha, en su ficha.
   const prescription = session.suggestions.some((item) => item.kind === "receta")
-  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.status !== "lista").length
+  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
   const counts = [
     session.ready > 0 ? plural(session.ready, "lista", "listas") : "",
     review > 0 ? `${review} por revisar` : "",
@@ -241,13 +250,28 @@ export function DictationPanel({
   })
   const role = useMyRole()
   const { mode, pending, ready } = session
+  // Sin ficha empezada, Clío no propone en ella: se dice dónde se decide dictar.
+  const startForms = formsToStartWords(useFormsToStart(session.patientId, session.encounterId, session.enabled))
   // Los bloques con sugerencias por revisar, con el nombre de su lista («Receta», «Plan de tratamiento»).
   const suggestionKinds = [
     ...new Set(
       session.suggestions
-        .filter((item) => item.status === "lista" || item.status === "por_revisar")
+        .filter((item) => item.kind !== "ficha" && (item.status === "lista" || item.status === "por_revisar"))
         .map((item) => DICTATION_KIND_LABEL[item.kind]),
     ),
+  ]
+  // Lo de una ficha se confirma en la ficha: un enlace por ficha que la abre (forma B, ADR 0187).
+  const formLinks = [
+    ...session.suggestions
+      .filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))
+      .reduce((forms, item) => {
+        const id = String(item.payload["responseId"])
+        const form = forms.get(id) ?? { id, title: String(item.payload["formTitle"] ?? "Ficha"), ready: 0, review: 0 }
+        if (item.status === "lista") form.ready += 1
+        else form.review += 1
+        return forms.set(id, form)
+      }, new Map<string, { id: string; title: string; ready: number; review: number }>())
+      .values(),
   ]
   // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085, tablero C4).
   const blocked = session.blocked
@@ -405,8 +429,9 @@ export function DictationPanel({
               </>
             )}
           </p>
+          {startForms && (session.dictating || pending > 0) ? <p className="mt-1 text-sm text-muted-foreground">{startForms}</p> : null}
           {/* A dónde quedó cada sugerencia: un toque lleva a su bloque. */}
-          {pending > 0 && suggestionKinds.length > 0 ? (
+          {pending > 0 && suggestionKinds.length + formLinks.length > 0 ? (
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
               {suggestionKinds.map((label) => (
                 <Button
@@ -417,6 +442,11 @@ export function DictationPanel({
                   onClick={() => goToSuggestions(label)}
                 >
                   {label} ↓
+                </Button>
+              ))}
+              {formLinks.map((form) => (
+                <Button key={form.id} type="button" variant="link" className="h-auto p-0" onClick={() => openFormSuggestions(form.id)}>
+                  {form.title}: {[form.ready > 0 ? `${form.ready} por confirmar` : "", form.review > 0 ? `${form.review} por revisar` : ""].filter(Boolean).join(" y ")} ↓
                 </Button>
               ))}
             </p>
@@ -527,7 +557,7 @@ function UnusedNotice({ session }: { session: DictationSession }) {
           </p>
           {phrases.slice(0, UNUSED_SHOWN).map((phrase) => (
             <p key={phrase} className="[overflow-wrap:anywhere]">
-              «{phrase}»
+              «{phrase}»{session.unused.why[phrase] ? <span className="text-muted-foreground"> · {session.unused.why[phrase]}</span> : null}
             </p>
           ))}
           {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
@@ -573,6 +603,7 @@ function FailedSegmentCard({ session, segment }: { session: DictationSession; se
  * sugerencia y lo subrayado no se pudo usar.
  */
 export function DictationTranscript({ session }: { session: DictationSession }) {
+  const startForms = formsToStartWords(useFormsToStart(session.patientId, session.encounterId, session.enabled))
   const parts = highlightTranscript(session.transcript, session.highlights, session.unused.phrases)
   const marked = parts.some((part) => part.mark === "used")
   const unusedShown = parts.some((part) => part.mark === "unused")
@@ -621,6 +652,10 @@ export function DictationTranscript({ session }: { session: DictationSession }) 
           «{upperFirst(productUi().dictation?.corrections.change ?? "")}» cambia la última sugerencia y «
           {upperFirst(productUi().dictation?.corrections.remove ?? "")}» la quita; las dos se deshacen. También puedes tocar cualquier sugerencia y
           editarla a mano.
+        </p>
+        <p className="text-muted-foreground">
+          Lo de una ficha entra si ya la empezaste: {CLINICAL_NAME} lo propone en sus preguntas y lo confirmas ahí. Lee las dos fichas que
+          tocaste último y la que tengas abierta.{startForms ? ` ${startForms}` : ""}
         </p>
         <p className="text-muted-foreground">Más adelante: consentimientos, imágenes y preguntas sobre la historia.</p>
       </div>

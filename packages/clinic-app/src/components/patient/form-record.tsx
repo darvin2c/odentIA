@@ -53,6 +53,7 @@ export function FormRecordView({
                   {/* Lo que dejó sin contestar la persona se dice como en su revisión: «No respondió». */}
                   {item.words ?? (form.source === "portal" ? "No respondió" : "Sin respuesta")}
                 </dd>
+                {item.clio ? <dd className="text-xs text-muted-foreground">{item.clio}</dd> : null}
               </div>
             ))}
           </dl>

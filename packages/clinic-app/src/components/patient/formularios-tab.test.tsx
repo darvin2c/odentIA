@@ -165,6 +165,32 @@ describe("salir de un formulario que se guarda solo", () => {
   })
 })
 
+// QA de la entrega 11 (14 nov): tras confirmar lo que propuso Clío, la respuesta siguiente a mano daba
+// 409 «Otra pestaña guardó…» y no se guardaba: la base del guardado no tenía lo confirmado.
+describe("lo que entra a la ficha desde fuera del panel", () => {
+  it("lo confirmado de Clío pasa a la base del guardado: lo siguiente a mano se guarda sin chocar", async () => {
+    update.mockImplementation(async (_id: string, body: { answers: Record<string, unknown> }) => ({ data: { ...response, answers: body.answers, rejected: {} } }))
+    const empty = { ...response, answers: { intensidad: null, hallazgos: null } }
+    const { rerender } = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResponseDetail response={empty} canWrite onChanged={async () => {}} />
+      </QueryClientProvider>,
+    )
+    await screen.findByLabelText(/Intensidad del dolor/)
+    // Clío propuso 6 y se confirmó: la lista trae la ficha con el 6.
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResponseDetail response={{ ...empty, answers: { intensidad: 6, hallazgos: null } }} canWrite onChanged={async () => {}} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect((screen.getByLabelText(/Intensidad del dolor/) as HTMLInputElement).value).toBe("6"))
+    fireEvent.change(screen.getByLabelText("Hallazgos"), { target: { value: "Percusión positiva" } })
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    expect(update.mock.calls[0]?.[1].baseAnswers).toMatchObject({ intensidad: 6 })
+    expect(update.mock.calls[0]?.[1].answers).toMatchObject({ intensidad: 6, hallazgos: "Percusión positiva" })
+  })
+})
+
 // La mezcla de la entrega 1 con la 3: «Agregar una corrección» a lo que envió el paciente le dice a su
 // panel que hay algo escrito sin guardar, así que salir con la corrección a medias pregunta.
 describe("una corrección a medias de lo que envió el paciente", () => {

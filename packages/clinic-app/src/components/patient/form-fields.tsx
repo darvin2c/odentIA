@@ -30,7 +30,8 @@ export function isFieldVisible(field: FormFieldDef, answers: Record<string, unkn
   return answer === field.showIf.equals
 }
 
-function isEmpty(value: unknown): boolean {
+/** Sin respuesta: vacía, en blanco, sin opciones o una firma sin trazos. */
+export function isEmptyAnswer(value: unknown): boolean {
   if (value === null || value === undefined) return true
   if (typeof value === "object" && !Array.isArray(value) && "strokes" in value)
     return !isStrokes(value.strokes) || value.strokes.length === 0
@@ -68,7 +69,7 @@ export function missingRequired(
   return schema.sections
     .flatMap((section) => section.fields)
     .filter(
-      (field) => field.required && isFieldVisible(field, answers) && isEmpty(answers[field.id]),
+      (field) => field.required && isFieldVisible(field, answers) && isEmptyAnswer(answers[field.id]),
     )
 }
 

@@ -443,6 +443,30 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       ),
     },
   ],
+  // Lo que Clío propone en la ficha (entrega 11): sin piezas ni la clase de Angle; el ejemplo es de consultorio.
+  "pacientes-dictado-ficha": (faq) => [
+    {
+      ...faq,
+      a: swaps(
+        faq.a,
+        ["(«overjet de seis milímetros, clase uno molar izquierda»)", "(«Pesa veintidós kilos», «Sin fiebre en casa»)"],
+        ["de una o varias opciones, de número, de escala o de pieza", "de una o varias opciones, de número o de escala"],
+        ["un dato que preguntan dos fichas (el ceod)", "un dato que preguntan dos fichas (el peso)"],
+      ),
+      forms: ["clio puede llenar la ficha", "llenar la ficha con el dictado", "que significa clio propone en la ficha", "dictar el peso en la ficha"],
+    },
+  ],
+  "pacientes-dictado-ficha-no-lleno": (faq) => [
+    {
+      ...faq,
+      a: swaps(
+        faq.a,
+        ["(«clase dos» cuando la ficha separa división 1 y división 2)", "(dijiste tos y la ficha separa tos seca y tos con flema)"],
+        ["si la pregunta es en milímetros y dijiste centímetros", "si la pregunta es en kilos y dijiste gramos"],
+      ),
+      forms: ["clio no lleno la ficha", "por que clio no puso el peso", "clio no la lleno", "la ficha quedo vacia despues de dictar"],
+    },
+  ],
   // Sin presupuesto que aceptar, el embudo va de venir a pagar (`funnelStepsOf`).
   "caen-pacientes": (faq) => [
     {

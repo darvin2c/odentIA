@@ -5,10 +5,12 @@ import {
   clioListenBlock,
   confirmDictationSuggestion,
   countConfirmedDictation,
+  dictationFormQuestions,
   dictationModelLabel,
   dictationTeeth,
   dictationSegmentSeen,
   discardDictationSuggestion,
+  restoreDictationSuggestion,
   discardPendingDictation,
   getAgentConfig,
   issueDictationPrescription,
@@ -42,9 +44,18 @@ const dictateInput = z
     transcript: z.string().trim().min(3).max(12_000),
     context: z.string().max(2_000).optional(),
     segmentId: z.uuid().optional(),
+    /** Las fichas abiertas en pantalla: Clío las lee además de las dos últimas tocadas. */
+    openForms: z.array(z.uuid()).max(5).optional(),
   })
   .strict()
 // Lo que el odontólogo puede corregir de una sugerencia; el servicio vuelve a validarla contra su operación.
+/** Al confirmar una respuesta de ficha: el valor que se veía. */
+const confirmInput = z
+  .object({
+    expectedValue: z.union([z.string().max(500), z.number(), z.boolean(), z.array(z.string().max(200)).max(40), z.null()]).optional(),
+    atSign: z.boolean().optional(),
+  })
+  .strict()
 const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000), z.number(), z.array(z.string().max(20)).max(5), z.null()]))
 
 export interface EncounterDictationDeps extends CrmDeps {
@@ -100,7 +111,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     const parsed = dictateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { transcript, context, segmentId } = parsed.data
+    const { transcript, context, segmentId, openForms } = parsed.data
     try {
       return await runService(c, 201, async () => {
         // Antes de gastar una llamada al modelo: encendido, atención propia en borrador y tramo nuevo.
@@ -115,6 +126,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const list = [...pending, ...confirmed]
           return {
             list,
+            // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
+            forms: await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] }),
             pendingCount: pending.length,
             labels: [
               ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
@@ -122,7 +135,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             ],
           }
         })
-        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
@@ -130,7 +143,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           extractDictation(
             deps.db,
             { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context, pending: ready.labels },
+            { orgId, transcript, context, pending: ready.labels, forms: ready.forms },
           ),
           { encounterId: at.data.encounterId },
         )
@@ -143,20 +156,30 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             drafts: extracted.drafts,
             corrections: extracted.corrections.flatMap((item) => {
               const suggestionId = item.index < ready.pendingCount ? target(item.index) : undefined
-              return suggestionId ? [{ suggestionId, changes: item.changes }] : []
+              return suggestionId ? [{ suggestionId, changes: item.changes, said: item.sourceText }] : []
             }),
             removals: extracted.removals.flatMap((item) => {
               const suggestionId = target(item.index)
               return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
             }),
             segmentId,
+            transcript,
+            formQuestions: ready.forms,
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
-        const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
+        // Lo de una ficha que el servidor no dejó pasar no dio nada: no se resalta (QA del 14 nov, D20).
+        const dropped = new Set(saved.droppedForms.map((item) => item.said))
+        const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals]
+          .map((item) => item.sourceText ?? "")
+          .filter((said) => said && !dropped.has(said.trim()))
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
-        const unused = [...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said) => said && !extracted.unused.includes(said))]
-        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length, unused, model: extracted.model }
+        const unused = [
+          ...new Set([...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said), ...dropped]),
+        ]
+        // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor.
+        const unusedWhy = Object.fromEntries(saved.droppedForms.map((item) => [item.said, item.why]))
+        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
@@ -181,9 +204,12 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const { orgId, userId } = orgContextOf(c)
     const at = suggestionParams.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
+    // Sin cuerpo, como siempre; una respuesta de ficha manda el valor que se veía (409 si Clío lo cambió).
+    const parsed = confirmInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+        confirmDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId, parsed.data),
       ),
     )
   })
@@ -219,6 +245,18 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     if (!at.success) return validationError(c, at.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => keepConfirmedDictation(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId)),
+    )
+  })
+
+  /** «Deshacer» de la × en la ficha: la respuesta descartada a mano vuelve a como estaba. */
+  app.post(`${base}/:suggestionId/restore`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        restoreDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+      ),
     )
   })
 

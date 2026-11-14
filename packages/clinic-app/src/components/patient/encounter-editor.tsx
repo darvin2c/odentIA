@@ -23,6 +23,7 @@ import {
   FieldLabel,
   Input,
   Textarea,
+  toast,
 } from "@odentia/ui"
 import {
   addDays,
@@ -43,7 +44,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
 import {
@@ -51,6 +52,7 @@ import {
   canFillFormInAttention,
   confirmLinkSignedConsent,
   fetchConsents,
+  finalizeFormResponse,
   unfinishedAfterSigning,
 } from "../../lib/clinical-forms"
 import {
@@ -111,7 +113,7 @@ import {
   type DictationSuggestion,
   useDictationSession,
 } from "./dictation-session"
-import { DictationSignDialog } from "./dictation-sign-dialog"
+import { DictationSignList, markedAtSign, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
@@ -141,6 +143,7 @@ import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, UnfinishedFormsBox, useEncounterDocuments } from "./encounter-documents"
 import { FormOffersBox } from "./form-offers"
+import { type ClioFormProposals, ClioFormProposalsContext } from "./clio-form-proposals"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -622,8 +625,12 @@ export function EncounterEditor({
   const [finishingForm, setFinishingForm] = useState<string | null>(null)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
-  // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
+  // Lo dictado en el cierre se decide al abrirlo: firmar descarta las sugerencias y la lista no cambia a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
+  // Lo dictado que quien firma desmarcó: no entra. Lo demás que se puede confirmar entra con la firma.
+  const [signUnmarked, setSignUnmarked] = useState<string[]>([])
+  // Las fichas a medias que se finalizan con la firma, como quedaron («Finalizarla al firmar»).
+  const [finishFormsAtSign, setFinishFormsAtSign] = useState<string[]>([])
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [voidOpen, setVoidOpen] = useState(false)
@@ -711,8 +718,8 @@ export function EncounterEditor({
     return item && typeof dueAt === "string" ? { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) } : null
   }
   const closingForm = useClosingForm({
-    // Firmar con lo dictado no lo pide: con consentimientos por firmar, sigue al cierre (`finalizeWith`).
-    needsReason: () => unsignedConsents.length > 0 && signIdsRef.current === null,
+    // Lo dictado va en el mismo cierre: el motivo para seguir sin el consentimiento se pide igual.
+    needsReason: () => unsignedConsents.length > 0,
     needsRegistration,
     needsNextDay: (value) =>
       needsNextControlDay(
@@ -1128,6 +1135,11 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
     }
+    // La respuesta de una ficha aceptada: la ficha abierta la adopta al leerla otra vez.
+    if (item.kind === "ficha") {
+      void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
+    }
     // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
     if (item.kind === "alergia") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
@@ -1152,9 +1164,12 @@ export function EncounterEditor({
     active: canWrite && attending,
     onApplied: applyDictation,
     noteText: (key) => String(draftForm.getFieldValue(key as DraftTextKey) ?? ""),
+    openForms: () => [...new Set([...formOpenRef.current.values()].filter((id): id is string => !!id))],
   })
   // Sugerencias que el odontólogo aún no confirmó ni descartó.
   const dictationPending = dictation.enabled ? dictation.pending : 0
+  // Lo marcado en el cierre: viaja con el envío de la firma (`finalizeWith`).
+  signIdsRef.current = confirmOpen && confirmWithDictation ? markedAtSign(dictation, signUnmarked) : null
   /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
   const dictationOf = (key: SectionKey) =>
     SECTION_DICTATION[key as CommonSectionKey] ?? product.blocks.find((block) => block.key === key)?.dictation
@@ -1287,16 +1302,23 @@ export function EncounterEditor({
         })
         askedSessions = fresh.data.sessions
         const newlyFinishing = (fresh.data.sessions?.finishing ?? []).some((session) => !shown.has(session.planItemId))
-        // Con consentimientos por firmar, o algo que la firma terminaría sin haberlo
-        // mostrado, sigue al cierre: ahí se firman o se dice por qué no, y «¿Terminaste?»
-        // viene en «Sí, terminar» con «Falta otra sesión» a un toque.
-        if (unsignedConsents.length > 0 || newlyFinishing) {
+        // Algo que la firma terminaría sin haberlo mostrado: el cierre sigue abierto con ello,
+        // y «¿Terminaste?» viene en «Sí, terminar» con «Falta otra sesión» a un toque.
+        if (newlyFinishing) {
           setConfirmWithDictation(false)
           return
         }
       }
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
+      // «Finalizarla al firmar»: la ficha a medias queda como está. Si le falta algo que pide,
+      // no frena la firma: se dice y sigue a medias.
+      for (const formId of finishFormsAtSign) {
+        const title = docs.forms.find((item) => item.id === formId)?.templateTitle ?? "La ficha"
+        await finalizeFormResponse(formId, encounterId).catch((cause: unknown) =>
+          toast.warning(`«${title}» sigue a medias`, { description: cause instanceof ApiError ? cause.message : "No se pudo finalizar." }),
+        )
+      }
       const endedAt = endedAtIso(value.endTime)
       const result = await apiFetch<{
         data: {
@@ -1670,16 +1692,36 @@ export function EncounterEditor({
       </ul>
     ) : null
 
+  // Una ficha abierta al lado: dictar no le pone encima «Lo dictado» (lo dictado para ella aparece en sus preguntas).
+  // Qué ficha muestra cada panel abierto: Clío la lee siempre, además de las dos últimas tocadas.
+  const formOpenRef = useRef(new Map<string, string | null>())
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
     setDictationTyping(false)
-    if (mode === "panel") setTranscriptOpen(true)
+    if (mode === "panel" && formOpenRef.current.size === 0) setTranscriptOpen(true)
   }
   const finishDictation = () => {
     dictation.finish()
     setTranscriptOpen(false)
   }
   const showTranscript = () => setTranscriptOpen(true)
+  // Lo que propuso Clío para las fichas empezadas: se acepta en cada pregunta, en el panel de la ficha (forma B).
+  const clioForms = useMemo<ClioFormProposals>(
+    () => ({
+      items: dictation.enabled ? dictation.suggestions.filter((item) => item.kind === "ficha") : [],
+      accept: async (items) => {
+        await dictation.acceptForms.mutateAsync(items)
+      },
+      discard: (item) => dictation.act.mutate({ item, action: "discard" }),
+      restore: (item) => dictation.act.mutate({ item, action: "restore" }),
+      busy: dictation.acceptForms.isPending || dictation.act.isPending,
+      setFormOpen: (key, open, responseId) => {
+        if (open) formOpenRef.current.set(key, responseId ?? null)
+        else formOpenRef.current.delete(key)
+      },
+    }),
+    [dictation.enabled, dictation.suggestions, dictation.acceptForms, dictation.act],
+  )
   const contextSurface = {
     title: "Antecedentes y última atención",
     description: "Solo lectura: se editan en Antecedentes, en su página.",
@@ -1717,7 +1759,8 @@ export function EncounterEditor({
             ? "Guardando lo último que registraste…"
             : null
   const openSign = () => {
-    signIdsRef.current = null
+    setSignUnmarked([])
+    setFinishFormsAtSign([])
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
     // viene con lo que ya tiene el perfil y, si falta, lo que propone el país (COP, CMP).
     const current = closingForm.state.values
@@ -2210,15 +2253,6 @@ export function EncounterEditor({
       }}
     />
   ) : null
-  // Con quién se firma: lo mismo con o sin sugerencias pendientes (la hora de fin va en el cierre).
-  const signFields = registrationFields ?? (
-    <div className="text-sm">
-      <p>
-        Firmarás como <strong>{signAs.text ?? "—"}</strong>
-      </p>
-      {signatureHint}
-    </div>
-  )
   const age = ageFrom(patient.patient.birthDate)
   // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
   const saveChip =
@@ -2254,6 +2288,7 @@ export function EncounterEditor({
             : "Listo para firmar"
 
   return (
+    <ClioFormProposalsContext.Provider value={clioForms}>
     <div
       className={cn(
         "flex flex-col gap-4 pb-20",
@@ -2889,7 +2924,7 @@ export function EncounterEditor({
         />
       )}
       <EncounterClosingDialog
-        open={confirmOpen && !confirmWithDictation && signingDocs === null}
+        open={confirmOpen && signingDocs === null}
         form={closingForm}
         signAs={signAs.text}
         who={signer}
@@ -2930,7 +2965,26 @@ export function EncounterEditor({
         canSign={canSign}
         blockedReason={signBlockedReason}
         registration={registrationFields}
-        confirmLabel={needsRegistration ? "Guardar y firmar" : null}
+        confirmLabel={needsRegistration ? "Guardar y firmar" : signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
+        dictated={
+          confirmWithDictation ? (
+            <DictationSignList
+              session={dictation}
+              busy={finalizing || dictation.confirmMany.isPending}
+              unmarked={signUnmarked}
+              onUnmarkedChange={setSignUnmarked}
+              onComplete={(id) => openSuggestion(id)}
+              onOpenForm={(formId) => {
+                setConfirmOpen(false)
+                setFinishingForm(formId)
+              }}
+            />
+          ) : null
+        }
+        finishingForms={finishFormsAtSign}
+        onFinishFormToggle={(formId, finish) =>
+          setFinishFormsAtSign((current) => (finish ? [...new Set([...current, formId])] : current.filter((id) => id !== formId)))
+        }
         initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
         onPaper={(need) => void openPaper(need)}
@@ -2947,6 +3001,7 @@ export function EncounterEditor({
           <ClosingNextVisit
             form={closingForm}
             controls={closingControls}
+            dictated={dictatedControl(signIdsRef.current)}
             busy={finalizing}
             continuing={continuingVisits}
             canBook={canBook}
@@ -2982,46 +3037,6 @@ export function EncounterEditor({
           await onChanged()
         }}
       />
-      <DictationSignDialog
-        open={confirmOpen && confirmWithDictation}
-        session={dictation}
-        signing={finalizing}
-        error={closingError}
-        onClose={() => setConfirmOpen(false)}
-        onComplete={(id) => openSuggestion(id)}
-        nextVisit={(marked) => (
-          <ClosingNextVisit
-            form={closingForm}
-            controls={closingControls}
-            dictated={dictatedControl(marked)}
-            busy={finalizing}
-            continuing={continuingVisits}
-            canBook={canBook}
-          />
-        )}
-        onSign={(ids) => {
-          // Un solo envío: la colegiatura se valida en su campo, luego se confirma lo marcado y se firma.
-          signIdsRef.current = ids
-          void submitForm(closingForm, {
-            fieldMap: CLOSING_FIELD_MAP,
-            root: document.querySelector('[role="alertdialog"]'),
-          })
-        }}
-      >
-        {signFields}
-        {closingQuery.data?.data.sessions ? (
-          <ClosingSessions
-            sessions={closingQuery.data.data.sessions}
-            labelOf={sessionLabelOf}
-            answers={sessionAnswers}
-            onAnswer={answerSession}
-            disabled={finalizing}
-            resolvable={closingQuery.data.data.resolvable}
-            keepDiagnoses={keepDiagnoses}
-            onKeepDiagnosis={keepDiagnosis}
-          />
-        ) : null}
-      </DictationSignDialog>
 
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
       <Dialog
@@ -3385,5 +3400,6 @@ export function EncounterEditor({
       ) : null}
       {unsavedGuard.dialog}
     </div>
+    </ClioFormProposalsContext.Provider>
   )
 }

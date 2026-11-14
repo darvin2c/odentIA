@@ -449,6 +449,17 @@ export const OPERATIONS = {
       show: { kind: "flag", label: "Para mostrárselo", description: "true si pidió armarlo para enseñárselo o explicárselo al paciente ahora; false si solo pidió armarlo o enviarlo.", body: "optional", agent: "requires" },
     },
   },
+  // La respuesta a una pregunta de una ficha de consulta empezada en la atención (entrega 11 de la
+  // mesa de formularios): el número es el de la lista que se le da en la pausa; el valor lo tipa el
+  // servicio con la pregunta y se escribe, al confirmarlo, con la validación de la ficha.
+  "ficha.respuesta": {
+    label: "Respuesta de la ficha",
+    fields: {
+      question: { kind: "int", min: 1, max: 40, label: "Pregunta", description: "El número de la pregunta en la lista de fichas abiertas que se te da con lo dictado.", body: "none", agent: "requires" },
+      answer: { kind: "text", max: 200, label: "Respuesta", description: "La respuesta que dijo: «Sí» o «No», una de las opciones tal como está en la lista, o el número en cifras («6», «7.5», «46»). Vacío si la pregunta admite varias opciones.", body: "none", agent: "fills" },
+      answers: { kind: "textList", maxItems: 20, maxLength: 200, label: "Respuestas", description: "Solo si la pregunta admite varias opciones: las que nombró, cada una tal como está en la lista.", body: "none", agent: "fills" },
+    },
+  },
   "control.crear": {
     label: "Control",
     fields: {

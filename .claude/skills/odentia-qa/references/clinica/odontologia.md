@@ -403,7 +403,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 
 ## P-ODO-19 Clío: el dictado
 
-**Dónde:** `CA/dictation-panel.tsx`, `S/encounter-dictation.ts` y `S/dental/dictation.ts`.
+**Dónde:** `CA/dictation-panel.tsx`, `S/encounter-dictation.ts`, `S/dictation-forms.ts`, `CA/formularios-tab.tsx` y `S/dental/dictation.ts`.
 
 - [ ] Lo dictado entra como propuesta y el odontólogo lo confirma. Nada se guarda solo.
 - [ ] Lo dictado se suma al texto y no lo borra. Deshacer una corrección por voz no borra un aviso de alergia ya dictado.
@@ -413,8 +413,12 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] Lo que no puede hacer (examen, signos vitales) lo dice.
 - [ ] Al reservar y armar el presupuesto (ADR 0102) distingue «cítalo el jueves» (una cita) de «control en 6 meses» (un control); la hora sale de la agenda, no del modelo, y «envíaselo» dicho por voz no envía nada sin confirmar.
 
-**Ya falló:** la nota dictada borraba lo escrito (PR 418); la cantidad de la receta dictada (PR 416); Clío sin pulpitis (8 nov).
-**Fuentes:** ADR 0012, 0099, 0100 y 0102.
+- [ ] Con una ficha empezada, lo dictado para ella aparece en su pregunta («Clío: 6 mm · dijiste…»), con su frase y sin repetirse en la consulta; sin ficha empezada no aparece nada. Se confirma en la ficha («Confirmar», «Confirmar las N») y queda «Clío · confirmó…» en la ficha, la Historia y la copia; la barra del dictado no confirma lo de la ficha.
+- [ ] En la ficha, el silencio no es «No»; el número o la pieza tienen que estar en la frase; la clase de Angle sin división o sin lado no se llena y lo dice; lo escrito a mano no se cambia.
+- [ ] «Dictar» con la ficha abierta no la tapa; al firmar, lo propuesto para la ficha viene marcado y la ficha sigue a medias.
+
+**Ya falló:** la nota dictada borraba lo escrito (PR 418); la cantidad de la receta dictada (PR 416); Clío sin pulpitis (8 nov); lo dictado para la ficha abierta no iba a ningún lado y «Lo dictado» lo resaltaba como usado (mesa del 14 nov, entrega 11).
+**Fuentes:** ADR 0012, 0099, 0100, 0102 y 0187.
 
 ## P-ODO-20 Quién ve lo clínico
 

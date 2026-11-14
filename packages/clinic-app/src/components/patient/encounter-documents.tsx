@@ -11,7 +11,7 @@ import { DetailDrawer, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { ApiError } from "../../lib/api"
 import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
@@ -57,6 +57,7 @@ import {
   PrescriptionPaper,
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
+import { ClioFormNotice, useClioFormProposals } from "./clio-form-proposals"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
@@ -692,6 +693,9 @@ export function EncounterDocumentsBlock({
                 </Button>
               )
             })()}
+            {form.status === "borrador" ? (
+              <ClioFormNotice responseId={form.id} title={formRowTitle(form)} onOpen={() => setOpenForm(form.id)} />
+            ) : null}
           </li>
         ))}
         {docs.files.map((file) => (
@@ -977,7 +981,9 @@ export function UnfinishedFormsBox({
           {forms.length === 1 ? "Falta terminar una ficha" : `Falta terminar ${forms.length} fichas`}
         </span>
         <span className="text-xs text-muted-foreground">
-          Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora.
+          {forms.length === 1
+            ? "Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora."
+            : "Quedaron a medias al firmar la atención. Al terminarlas, cada una lleva su propia fecha y hora."}
         </span>
       </div>
       <ul className="flex flex-col gap-2">
@@ -1030,6 +1036,14 @@ export function FormDetail({
     enabled: responseId !== null,
   })
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
+  // Con la ficha abierta al lado, empezar a dictar no le pone «Lo dictado» encima (entrega 11).
+  const clio = useClioFormProposals()
+  const panelKey = useId()
+  const shown = responseId !== null && response !== null
+  useEffect(() => {
+    clio?.setFormOpen(panelKey, shown, responseId)
+    return () => clio?.setFormOpen(panelKey, false)
+  }, [clio, panelKey, shown, responseId])
   // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
   const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
   const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null
