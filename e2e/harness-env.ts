@@ -155,6 +155,9 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     SMTP_PASS: "",
     SMTP_FROM: `odentIA <no-reply@${runtime.baseDomain}>`,
     SUPPORT_INBOX_EMAIL: `soporte@${runtime.baseDomain}`,
+    // El correo entrante (soporte@ y los demás buzones) llega firmado como lo firma el worker de
+    // Cloudflare; con una clave solo de pruebas, el recorrido lo manda igual.
+    INBOUND_EMAIL_SECRET: "e2e-only-inbound-email-secret-0123456789abcdef",
     S3_ENDPOINT: s3Endpoint,
     S3_REGION: "auto",
     S3_ACCESS_KEY: STORAGE_ACCESS_KEY,
