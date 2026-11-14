@@ -1,5 +1,12 @@
 import { Badge, Button, cn, toast } from "@odentia/ui"
-import { ConfirmDialog, submitErrorMessage, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useDraftSaved,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
@@ -100,6 +107,16 @@ const correctionSchema = z.object({
   text: z.string().trim().min(1, "Escribe la corrección.").max(5000, "La corrección admite hasta 5000 caracteres."),
 })
 
+/**
+ * Si la corrección no deja nada sin guardar: cerrada (guardada o cancelada) o
+ * abierta sin texto. Se guarda con su botón, sin `submit` del panel, así que el
+ * panel lateral se entera por aquí (`useDraftSaved`): con el texto a medias,
+ * salir pregunta; ya guardada o cancelada, no.
+ */
+export function correctionSaved(correcting: boolean, text: string): boolean {
+  return !correcting || text.trim() === ""
+}
+
 export function DeclaredResponse({
   response,
   canWrite,
@@ -184,6 +201,10 @@ export function DeclaredResponse({
   const savingDiscard = useStore(discardForm.store, (state) => state.isSubmitting)
   const correctionError = useFormSubmitError(correctionForm)
   const savingCorrection = useStore(correctionForm.store, (state) => state.isSubmitting)
+  const correctionText = useStore(correctionForm.store, (state) => state.values.text)
+  // En el panel lateral, el aviso de «salir sin guardar» sigue a la corrección, como en los demás paneles.
+  const draftSaved = useDraftSaved()
+  useEffect(() => draftSaved(correctionSaved(correcting, correctionText)), [draftSaved, correcting, correctionText])
 
   const fields = (response.templateSnapshot?.sections ?? [])
     .flatMap((section) => section.fields)

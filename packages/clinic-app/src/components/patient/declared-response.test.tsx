@@ -7,7 +7,7 @@ import {
   isDeclaredUnreviewed,
   teamFormsOfEncounter,
 } from "../../lib/clinical-forms"
-import { DeclaredResponse, declaredAnswerText, reviewedWords, sentWords } from "./declared-response"
+import { correctionSaved, DeclaredResponse, declaredAnswerText, reviewedWords, sentWords } from "./declared-response"
 import { ResponseDetail } from "./formularios-tab"
 
 vi.mock("../../lib/crm", () => ({
@@ -71,6 +71,16 @@ describe("lo que envió el paciente, para leer", () => {
     // Ya no se «completa» ni se «pasa a Antecedentes».
     expect(page).not.toContain("Pasar a Antecedentes")
     expect(page).not.toContain("Finalizar")
+  })
+
+  // La corrección se guarda con su botón, sin el `submit` del panel: el panel lateral sabe por
+  // `useDraftSaved` si quedó algo a medias, y solo entonces pregunta al salir.
+  it("la corrección a medias avisa al salir del panel; guardada, cancelada o sin texto, no", () => {
+    expect(correctionSaved(true, "La alergia es a la amoxicilina")).toBe(false)
+    expect(correctionSaved(true, "")).toBe(true)
+    expect(correctionSaved(true, "   ")).toBe(true)
+    // Al guardar o cancelar, la caja se cierra y su texto se limpia.
+    expect(correctionSaved(false, "")).toBe(true)
   })
 
   it("dice quién lo envió y por dónde, solo con lo que quedó guardado", () => {
