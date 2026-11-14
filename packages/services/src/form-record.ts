@@ -33,6 +33,8 @@ export interface FormRecordItem {
   /** La respuesta en palabras; null si quedó sin responder. */
   words: string | null
   value: FormAnswerValue
+  /** Solo en una pieza: el sitio como lo dice el producto para FHIR (`ProductSite.bodySite`). */
+  bodySite?: { text: string } | null
 }
 
 export interface FormRecordSection {
@@ -63,6 +65,8 @@ export interface FormRecord {
   finalizedAt: Date
   /** Quién lo finalizó; null mientras la respuesta no lo guarde (ver `loadFormRecords`). */
   finalizedBy: string | null
+  /** «Lo llenó Ana Torres», «Lo respondió Marta Ríos (paciente)»: quién lo llenó, dicho igual en todas partes. */
+  filledWords: string
   /**
    * Quién lo llenó y cuándo se finalizó, en una frase con las fechas de la clínica:
    * la misma en la copia, en la atención firmada y en el texto de FHIR.
@@ -102,7 +106,7 @@ function answerOf(
   field: FormFieldDef,
   raw: unknown,
   context: { site: ProductSite; documentLabels: Map<string, string> },
-): Pick<FormRecordItem, "words" | "value"> {
+): Pick<FormRecordItem, "words" | "value" | "bodySite"> {
   const empty = { words: null, value: null }
   if (raw === null || raw === undefined || raw === "") return empty
   switch (field.type) {
@@ -129,8 +133,8 @@ function answerOf(
       if (typeof raw !== "number") return empty
       // El «dónde» lo dice el producto (odentIA: «Pieza 46»).
       const { site } = context
-      const words = site.words({ siteSystem: site.system, siteCode: site.code(raw), siteQualifiers: [] }, "full")
-      return { words: words ?? String(raw), value: raw }
+      const place = { siteSystem: site.system, siteCode: site.code(raw), siteQualifiers: [] }
+      return { words: site.words(place, "full") ?? String(raw), value: raw, bodySite: site.bodySite(place) }
     }
     case "firma": {
       // El trazo se queda en el formulario: aquí consta quién firmó.
@@ -148,18 +152,30 @@ function answerOf(
   }
 }
 
+type FormHead = Omit<FormRecord, "filledWords" | "byWords" | "summary" | "sections" | "addenda">
+
+/**
+ * Quién lo llenó: alguien del equipo, o la persona que lo respondió, que puede ser
+ * el paciente o quien habla por él. La única frase para decirlo: la usan la copia,
+ * la atención firmada y la Historia.
+ */
+function filledWordsOf(form: FormHead): string {
+  if (form.source !== "portal") return `Lo llenó ${form.filledBy ?? "el equipo"}`
+  const role =
+    form.filledByPatient === true ? " (paciente)" : form.filledByPatient === false ? " (en nombre del paciente)" : ""
+  return `Lo respondió ${form.filledBy ?? "la persona"}${role}`
+}
+
 /** «Lo llenó Ana Torres · finalizado el 13 de noviembre de 2026, 15:02». */
-function byWordsOf(form: Omit<FormRecord, "byWords" | "summary" | "sections" | "addenda">, zone: Zone): string {
+function byWordsOf(form: FormHead, zone: Zone): string {
   const finalized = `el ${dayTimeWords(form.finalizedAt, zone)}${form.finalizedBy ? ` por ${form.finalizedBy}` : ""}`
   if (form.source === "portal") {
-    const role =
-      form.filledByPatient === true ? " (paciente)" : form.filledByPatient === false ? " (en nombre del paciente)" : ""
     const sent = form.submittedAt ? ` el ${dayTimeWords(form.submittedAt, zone)}` : ""
-    return `Lo respondió ${form.filledBy ?? "la persona"}${role}${sent} · el equipo lo revisó y lo finalizó ${finalized}`
+    return `${filledWordsOf(form)}${sent} · el equipo lo revisó y lo finalizó ${finalized}`
   }
   const charge =
     form.professionalName && form.professionalName !== form.filledBy ? ` · a cargo de ${form.professionalName}` : ""
-  return `Lo llenó ${form.filledBy ?? "el equipo"}${charge} · finalizado ${finalized}`
+  return `${filledWordsOf(form)}${charge} · finalizado ${finalized}`
 }
 
 /** Lo que cabe en una línea de la Historia. */
@@ -313,6 +329,7 @@ export async function loadFormRecords(
     }
     return {
       ...head,
+      filledWords: filledWordsOf(head),
       byWords: byWordsOf(head, zone),
       sections,
       addenda: addenda

@@ -145,7 +145,7 @@ export interface PatientRecord {
   allergies: Array<typeof patientAllergy.$inferSelect>
   conditions: Array<typeof patientCondition.$inferSelect>
   medications: Array<typeof patientMedication.$inferSelect>
-  /** null si nunca se guardó una entrevista. */
+  /** null si no hay nada que contar: nunca se guardó una entrevista, o la vigente quedó sin datos. */
   interview: RecordInterview | null
   familyHistory: Array<typeof patientFamilyHistory.$inferSelect>
   encounters: Array<{
@@ -177,14 +177,16 @@ function interviewOf(
   entriesOf: (answers: unknown) => InterviewEntry[],
 ): RecordInterview | null {
   const latest = versions.at(-1)
-  if (!latest) return null
+  const current = latest ? entriesOf(latest.answers) : []
+  // Sin ningún dato vigente no hay entrevista que mostrar: un encabezado solo, con quién y cuándo, no dice nada.
+  if (!latest || current.length === 0) return null
   const told = versions.map((row) => new Map(entriesOf(row.answers).map((entry) => [entry.key, entry.value])))
   return {
     version: latest.version,
     recordedAt: latest.createdAt,
     recordedBy: latest.authorName,
     declared: latest.createdBy === null,
-    entries: entriesOf(latest.answers).map((entry) => {
+    entries: current.map((entry) => {
       let first = versions.length - 1
       while (first > 0 && told[first - 1]?.get(entry.key) === entry.value) first -= 1
       const from = versions[first]
@@ -837,7 +839,7 @@ function questionnaireResponse(input: {
             type: item.type,
             ...(item.repeats ? { repeats: true } : {}),
             ...(item.options?.length
-              ? { answerOption: item.options.map((display) => ({ valueCoding: { display } })) }
+              ? { answerOption: item.options.map((valueString) => ({ valueString })) }
               : {}),
           })),
         })),
@@ -870,14 +872,15 @@ function formAnswers(item: FormRecordItem, exported: ReadonlySet<string>): Array
     case "numero":
       return [{ valueDecimal: item.value }]
     case "escala":
-    case "pieza":
       return [{ valueInteger: item.value }]
     case "fecha":
       return [{ valueDate: item.value }]
-    case "opcion_unica":
-      return [{ valueCoding: { display: item.value } }]
     case "opcion_multiple":
-      return (item.value as string[]).map((display) => ({ valueCoding: { display } }))
+      // Las opciones de la clínica no tienen código: cada una va como texto.
+      return (item.value as string[]).map((valueString) => ({ valueString }))
+    case "pieza":
+      // El sitio como lo dice el producto, igual que el `bodySite` de un diagnóstico (odentIA: «Pieza 46 (FDI)»).
+      return [{ valueString: item.bodySite?.text ?? item.words }]
     case "adjunto":
       // El archivo va en el ZIP si sigue vigente; uno retirado solo se nombra.
       return [
@@ -889,7 +892,7 @@ function formAnswers(item: FormRecordItem, exported: ReadonlySet<string>): Array
         },
       ]
     default:
-      // Lo escrito, y la firma: quién firmó.
+      // Lo escrito, la opción elegida y la firma (quién firmó).
       return [{ valueString: item.words }]
   }
 }
@@ -945,7 +948,9 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
   for (const c of record.contacts)
     resources.push({
       resourceType: "RelatedPerson",
-      id: `${p.patientId}-${c.contactId}`,
+      // El id de la persona vinculada: en la copia de un paciente es única, y cabe en los 64
+      // caracteres de un id de FHIR (con el del paciente delante eran 73).
+      id: c.contactId,
       patient: patientRef,
       name: [{ text: c.displayName }],
       relationship: [{ text: c.detail ?? c.relationship }],
@@ -1221,7 +1226,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         : form.filledByPatient
           ? patientRef
           : related
-            ? { reference: `RelatedPerson/${p.patientId}-${related.contactId}`, display: related.displayName }
+            ? { reference: `RelatedPerson/${related.contactId}`, display: related.displayName }
             : form.filledBy
               ? { display: form.filledBy }
               : null
@@ -1256,7 +1261,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     )
   }
   // La entrevista de salud vigente, como la cuenta el producto: cada dato en palabras.
-  if (record.interview?.entries.length)
+  if (record.interview)
     resources.push(
       questionnaireResponse({
         id: `${p.patientId}-entrevista`,

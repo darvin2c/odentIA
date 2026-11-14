@@ -1517,8 +1517,7 @@ export async function getTimeline(
       createdAt: form.finalizedAt,
       title: form.title,
       detail: form.summary || null,
-      byText:
-        form.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : form.filledBy ? `Lo llenó ${form.filledBy}` : null,
+      byText: form.filledWords,
       status: "finalizado",
       toothNumbers: [],
       encounterId: form.encounterId,

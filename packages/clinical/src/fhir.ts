@@ -93,21 +93,23 @@ export const FHIR_OBSERVATION_INTERPRETATION_SYSTEM =
 export const FHIR_ROLE_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
 
 /**
- * `Questionnaire.item.type` (R4) desde el tipo de pregunta de un formulario. Una
- * opción elegida es un `Coding` solo con su texto: las opciones de la clínica no
- * tienen código. La firma viaja como texto (quién firmó; R4 no tiene respuesta de
- * firma) y la pieza como su número (ISO 3950), que la pregunta nombra.
+ * `Questionnaire.item.type` (R4) desde el tipo de pregunta de un formulario. Las
+ * opciones de la clínica no tienen código: la pregunta es de texto, con sus
+ * opciones en `answerOption.valueString` (un `Coding` solo con `display` no dice
+ * nada a quien lo recibe). La firma viaja como texto (quién firmó; R4 no tiene
+ * respuesta de firma) y la pieza, como la dice el producto para un sitio
+ * (`ProductSite.bodySite`: en odentIA, con su sistema).
  */
 export const FORM_FIELD_TYPE_FHIR = {
   texto: "string",
   texto_largo: "text",
   numero: "decimal",
   booleano: "boolean",
-  opcion_unica: "choice",
-  opcion_multiple: "choice",
+  opcion_unica: "string",
+  opcion_multiple: "string",
   fecha: "date",
   firma: "string",
-  pieza: "integer",
+  pieza: "string",
   escala: "integer",
   adjunto: "reference",
 } as const
