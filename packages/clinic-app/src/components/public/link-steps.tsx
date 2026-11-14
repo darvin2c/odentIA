@@ -314,7 +314,7 @@ export function LinkQuestionnaireStep({
             .filter((field) => isFieldVisible(field, answers))
             .map((field) => (
               <form.AppField key={field.id} name={`answers.${field.id}`}>
-                {() => <AnswerAppField field={field} />}
+                {() => <AnswerAppField field={field} enterKeyHint="next" />}
               </form.AppField>
             ))}
         </fieldset>

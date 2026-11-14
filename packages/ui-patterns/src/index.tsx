@@ -155,6 +155,7 @@ export {
 } from "./side-dock.js"
 export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"
+export { RadioChips, type RadioChipsProps } from "./radio-chips.js"
 export {
   type RowActionItem,
   RowActions,

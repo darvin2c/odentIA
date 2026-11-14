@@ -15,10 +15,9 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { DatePickerButton, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
+import { DatePickerButton, RadioChips, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
-import { ChoiceButtons } from "../choice-buttons"
 import { FirmaPad, FirmaView } from "./firma-pad"
 import { productUi } from "../../product/product-ui"
 import { PlacesField } from "../../product/site-fields"
@@ -95,8 +94,7 @@ export interface AttachmentOption {
  * Las opciones de una escala o de un Sí/No: en el teléfono (ancho de teléfono o
  * puntero de dedo) cada una mide al menos 44 px; con ratón, lo de siempre.
  */
-const ANSWER_CHOICES =
-  "[&_[data-slot=toggle-group-item]]:min-w-9 max-sm:[&_[data-slot=toggle-group-item]]:min-h-11 max-sm:[&_[data-slot=toggle-group-item]]:min-w-11 pointer-coarse:[&_[data-slot=toggle-group-item]]:min-h-11 pointer-coarse:[&_[data-slot=toggle-group-item]]:min-w-11"
+const ANSWER_CHOICES = "max-sm:[&_label]:min-h-11 max-sm:[&_label]:min-w-11 pointer-coarse:[&_label]:min-h-11 pointer-coarse:[&_label]:min-w-11"
 
 /**
  * ¿La respuesta se da con varios controles (opciones, casillas, piezas,
@@ -214,10 +212,13 @@ export function AnswerAppField({
   field,
   disabled = false,
   attachments,
+  enterKeyHint,
 }: {
   field: FormFieldDef
   disabled?: boolean
   attachments?: AttachmentOption[]
+  /** En un cuestionario donde Enter pasa de pregunta (`advanceOnEnter`): la tecla del teléfono dice «Siguiente», no «Ir». */
+  enterKeyHint?: "next"
 }): React.JSX.Element | null {
   const formField = useFieldContext<unknown>()
   const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!field.help })
@@ -238,6 +239,7 @@ export function AnswerAppField({
           value={formField.state.value}
           disabled={disabled}
           attachments={attachments}
+          enterKeyHint={enterKeyHint}
           onChange={(next) => formField.handleChange(next)}
           id={control.id}
           invalid={control.invalid}
@@ -267,6 +269,7 @@ export function AnswerInput({
   id: givenId,
   invalid = false,
   onBlur,
+  enterKeyHint,
   ...aria
 }: {
   field: FormFieldDef
@@ -274,6 +277,8 @@ export function AnswerInput({
   disabled?: boolean
   onChange: (value: unknown) => void
   attachments?: AttachmentOption[]
+  /** La tecla Enter del teclado del teléfono en las respuestas de una línea. */
+  enterKeyHint?: "next"
   id?: string
   invalid?: boolean
   onBlur?: () => void
@@ -306,6 +311,7 @@ export function AnswerInput({
       return (
         <Input
           {...common}
+          enterKeyHint={enterKeyHint}
           value={typeof value === "string" ? value : ""}
           maxLength={500}
           onChange={(event) => onChange(event.target.value)}
@@ -327,6 +333,7 @@ export function AnswerInput({
           {...common}
           type="number"
           inputMode="decimal"
+          enterKeyHint={enterKeyHint}
           value={typeof value === "number" ? value : ""}
           min={field.min ?? undefined}
           max={field.max ?? undefined}
@@ -337,8 +344,9 @@ export function AnswerInput({
       )
     case "booleano":
     case "escala": {
-      // El grupo de opciones del sistema: una sola parada de Tab y las flechas entre opciones
-      // (antes cada número era una parada: 10 para llegar al 8). Tocar lo marcado lo desmarca.
+      // El grupo de radios del sistema: una sola parada de Tab, en la opción elegida; las flechas
+      // mueven y eligen, Espacio elige y Enter no marca. Lo que no es obligatorio se deja sin
+      // responder con «Quitar respuesta».
       const options: Array<{ value: boolean | number; text: string }> =
         field.type === "booleano"
           ? [
@@ -351,18 +359,17 @@ export function AnswerInput({
             })
       const chosen = options.find((option) => option.value === value)
       return (
-        <ChoiceButtons
+        <RadioChips
           id={id}
           aria-labelledby={labelledBy}
           aria-describedby={describedBy}
           invalid={invalid}
           onBlur={onBlur}
           disabled={disabled}
-          tone="primary"
           value={chosen ? String(chosen.value) : null}
           options={options.map((option) => ({ value: String(option.value), label: option.text }))}
           onChange={(picked) => onChange(options.find((option) => String(option.value) === picked)?.value ?? null)}
-          onClear={() => onChange(null)}
+          onClear={field.required ? undefined : () => onChange(null)}
           className={ANSWER_CHOICES}
         />
       )

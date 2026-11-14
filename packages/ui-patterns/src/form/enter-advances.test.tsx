@@ -1,15 +1,23 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import * as React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { RadioChips } from "../radio-chips.js"
 import { advanceOnEnter } from "./enter-advances.js"
 
 afterEach(cleanup)
 
-/** Un cuestionario de una sola página, como el que responde el paciente en su teléfono. */
+const YES_NO = [
+  { value: "si", label: "Sí" },
+  { value: "no", label: "No" },
+]
+
+/** Un cuestionario de una sola página, como el que responde el paciente en su teléfono, con el grupo de opciones de verdad. */
 function Questionnaire({ onSubmit, guarded = true }: { onSubmit: () => void; guarded?: boolean }) {
+  const [pain, setPain] = React.useState<string | null>(null)
   return (
     <form
       onKeyDown={guarded ? advanceOnEnter : undefined}
@@ -22,15 +30,9 @@ function Questionnaire({ onSubmit, guarded = true }: { onSubmit: () => void; gua
         ¿Por qué vienes?
         <input />
       </label>
-      {/* Un grupo de opciones: una sola parada, la opción activa. */}
-      <fieldset aria-label="¿Tienes dolor?">
-        <button type="button" tabIndex={0}>
-          Sí
-        </button>
-        <button type="button" tabIndex={-1}>
-          No
-        </button>
-      </fieldset>
+      <p id="pain">¿Tienes dolor?</p>
+      <RadioChips aria-labelledby="pain" value={pain} options={YES_NO} onChange={setPain} />
+      <output data-testid="pain">{pain ?? "sin responder"}</output>
       <div hidden>
         <label>
           Pregunta de otro paso
@@ -68,14 +70,18 @@ describe("advanceOnEnter", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
-  it("Enter en una respuesta corta pasa a la pregunta siguiente y no envía", async () => {
+  it("Enter en una respuesta corta pasa a la pregunta siguiente y no envía ni responde", async () => {
     const onSubmit = vi.fn()
     render(<Questionnaire onSubmit={onSubmit} />)
     await userEvent.type(screen.getByLabelText("¿Por qué vienes?"), "Dolor de muela{Enter}")
     expect(onSubmit).not.toHaveBeenCalled()
-    // La siguiente parada: la opción activa del grupo, no cada opción ni lo que está oculto.
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí" }))
-    await userEvent.type(screen.getByLabelText("¿Qué te ayudaría a estar más tranquila?"), "Música{Enter}")
+    // La siguiente parada es el grupo de opciones (su primera opción, sin nada elegido), no lo oculto.
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Sí" }))
+    // Otro Enter ahí no la marca: sigue a la pregunta que viene.
+    await userEvent.keyboard("{Enter}")
+    expect(screen.getByTestId("pain").textContent).toBe("sin responder")
+    expect(document.activeElement).toBe(screen.getByLabelText("¿Qué te ayudaría a estar más tranquila?"))
+    await userEvent.keyboard("Música{Enter}")
     expect(document.activeElement).toBe(screen.getByLabelText("¿Algo que quieras que sepamos?"))
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -91,19 +97,13 @@ describe("advanceOnEnter", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
-  it("en un texto largo Enter sigue siendo un salto de línea, y en una opción la marca", async () => {
+  it("en un texto largo Enter sigue siendo un salto de línea", async () => {
     const onSubmit = vi.fn()
     render(<Questionnaire onSubmit={onSubmit} />)
     const long = screen.getByLabelText("¿Algo que quieras que sepamos?") as HTMLTextAreaElement
     await userEvent.type(long, "Uno{Enter}dos")
     expect(long.value).toBe("Uno\ndos")
     expect(document.activeElement).toBe(long)
-    const yes = screen.getByRole("button", { name: "Sí" })
-    const clicked = vi.fn()
-    yes.addEventListener("click", clicked)
-    yes.focus()
-    await userEvent.keyboard("{Enter}")
-    expect(clicked).toHaveBeenCalledTimes(1)
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -114,5 +114,18 @@ describe("advanceOnEnter", () => {
     await userEvent.type(country, "Per{Enter}")
     expect(onSubmit).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(country)
+  })
+
+  // El teclado del teléfono, mientras compone una palabra: ese Enter la confirma. No envía (el
+  // navegador enviaría el formulario si no se cancela) y el foco se queda donde está.
+  it("mientras el teclado compone una palabra, Enter tampoco envía y no cambia de pregunta", () => {
+    render(<Questionnaire onSubmit={() => {}} />)
+    const reason = screen.getByLabelText("¿Por qué vienes?")
+    reason.focus()
+    const allowed = fireEvent.keyDown(reason, { key: "Enter", isComposing: true })
+    expect(allowed).toBe(false)
+    expect(document.activeElement).toBe(reason)
+    // Sin composición, el mismo Enter tampoco deja pasar el envío.
+    expect(fireEvent.keyDown(reason, { key: "Enter" })).toBe(false)
   })
 })
