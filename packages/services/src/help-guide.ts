@@ -2164,7 +2164,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     parent: SETTINGS,
     purpose:
       "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno.",
-    terms: ["consentimiento informado", "firma del paciente", "documentos para firmar", "hoja para firmar"],
+    terms: ["consentimiento informado", "firma del paciente", "documentos para firmar", "hoja para firmar", "documento que firman", "texto que firman"],
     writePermission: "settings.write",
     faqs: [
       {

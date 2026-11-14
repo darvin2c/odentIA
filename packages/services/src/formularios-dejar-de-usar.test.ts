@@ -644,20 +644,27 @@ it("la atención anulada dice en la Historia qué formularios tenía: el que se 
   expect(live?.born?.forms ?? []).toEqual([])
 })
 
-it("la fecha en que se creó un formulario es la de su primera versión, y no cambia al volver a usarlo", async () => {
+it("la fecha en que se creó un formulario es la de su primera versión, y no cambia al volver a usarlo ni al publicar otra", async () => {
   const f = await clinicalFixture()
   const first = await inUse(f, "Ficha con fecha estable")
+  // Apagarla y encenderla es la misma versión: su fecha no cambia.
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, first.id))
   const back = await f.run((tx) => reuseFormTemplate(tx, ORG, f.actor, first.id))
-  expect(back.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime())
+  expect(back.id).toBe(first.id)
+  // Una versión nueva sí nace después, y dice la fecha de la primera.
+  const next = await f.run(async (tx) => {
+    const draft = await createFormTemplate(tx, ORG, f.actor, { key: first.key, title: first.title, schema })
+    return publishFormTemplate(tx, ORG, f.actor, draft.id)
+  })
+  expect(next.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime())
   const rows = (await f.run((tx) => listClinicFormTemplates(tx, ORG))).filter((row) => row.key === first.key)
   expect(rows).toHaveLength(2)
   // Las dos versiones dicen la misma fecha: la de la primera. Es lo que distingue a dos con el mismo título.
   for (const row of rows) expect(row.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
-  // También en lo que ofrece «Nuevo» › «Formulario», que solo trae la versión en uso.
+  // También en lo que ofrece «Nuevo» › «Ficha», que solo trae la versión en uso.
   const [offered] = (await f.run((tx) => listClinicFormTemplates(tx, ORG, { status: "publicado" }))).filter(
     (row) => row.key === first.key,
   )
-  expect(offered).toMatchObject({ id: back.id, version: 2 })
+  expect(offered).toMatchObject({ id: next.id, version: 2 })
   expect(offered?.formCreatedAt.getTime()).toBe(first.createdAt.getTime())
 })
