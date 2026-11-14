@@ -405,3 +405,27 @@ it("con todo guardado, × cierra sin preguntar", async () => {
   expect(closed).toBe(1)
   expect(screen.queryByRole("alertdialog")).toBeNull()
 })
+
+// Verificación de la entrega 3 (14 nov): a 390, con un valor que no se guardó en la hoja, «Atrás» del
+// navegador salía sin preguntar (la hoja no es la columna, que es la que vigila la navegación).
+it("en el cajón del teléfono, salir de la pantalla con algo que no se guardó también pregunta", async () => {
+  const wide = window.matchMedia
+  window.matchMedia = ((query: string) => ({ ...wide(query), matches: false })) as typeof window.matchMedia
+  try {
+    const router = appWith(
+      [
+        ["/ficha", () => <AutosavedClosable onClose={() => {}} />],
+        ["/agenda", () => <p>Agenda</p>],
+      ],
+      "/ficha",
+    )
+    render(<RouterProvider router={router} />)
+    fireEvent.click(await screen.findByRole("button", { name: "El servidor lo rechaza" }))
+    await screen.findByText("error")
+    void router.navigate({ href: "/agenda" })
+    expect((await screen.findByRole("alertdialog", { hidden: true })).textContent).toContain(LOST)
+    expect(router.state.location.pathname).toBe("/ficha")
+  } finally {
+    window.matchMedia = wide
+  }
+})

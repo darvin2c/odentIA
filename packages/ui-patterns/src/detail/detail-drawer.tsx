@@ -1,6 +1,6 @@
 import { Drawer, DrawerContent, cn, useIsMobile } from "@odentia/ui"
 import * as React from "react"
-import { SideDockScopeProvider } from "../side-dock.js"
+import { SideDockScopeProvider, useSideDockDraftGuard } from "../side-dock.js"
 import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
 import { DOCK_SIZES, type DetailPanelSize } from "../master-detail.js"
 import { useCloseGuard } from "../surface.js"
@@ -52,6 +52,7 @@ export function DetailDrawer({
     discardGiven?.()
   }
   const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty: dirty, lost, onDiscard, onClose })
+  const DraftGuard = useSideDockDraftGuard()
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { bounds: DOCK_SIZES[size] })
@@ -84,6 +85,8 @@ export function DetailDrawer({
             <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
           </DraftSavedProvider>
           {confirmDialog}
+          {/* En el cajón (el teléfono), «Atrás» del navegador también pregunta por lo que no se guardó. */}
+          {DraftGuard && draft.unsaved ? <DraftGuard dirty lost={lost} onDiscard={onDiscard} /> : null}
         </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>

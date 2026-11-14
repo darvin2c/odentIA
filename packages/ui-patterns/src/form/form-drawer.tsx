@@ -1,6 +1,6 @@
 import { cn, Drawer, DrawerContent, useIsMobile } from "@odentia/ui"
 import * as React from "react"
-import { SideDockScopeProvider } from "../side-dock.js"
+import { SideDockScopeProvider, useSideDockDraftGuard } from "../side-dock.js"
 import { DockedSurface, DraftSavedProvider, useDockDecision, useDraftSavedScope } from "../docked-surface.js"
 import { useCloseGuard } from "../surface.js"
 import { FormPanel } from "./form-panel.js"
@@ -97,6 +97,7 @@ export function FormDrawer({
     onDiscard: draft.discard,
     onClose,
   })
+  const DraftGuard = useSideDockDraftGuard()
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
@@ -146,6 +147,8 @@ export function FormDrawer({
             </FormSurface>
           </DraftSavedProvider>
           {confirmDialog}
+          {/* En el cajón (el teléfono), «Atrás» del navegador también pregunta por lo que no se guardó. */}
+          {DraftGuard && draft.unsaved ? <DraftGuard dirty lost={lost} onDiscard={draft.discard} /> : null}
         </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>
