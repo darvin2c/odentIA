@@ -131,11 +131,11 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
   return `Quedará disponible para responder en la ficha. ${FROZEN}`
 }
 
-/** Lo que pasa al dejar de usar un formulario en uso. */
+/** Lo que pasa al apagar una ficha en uso: lo que deja de pasar, lo que se queda y cómo volver. */
 export function leaveWords(current: FormTemplate, reach: TemplateReach | null): string {
-  const again = "Puedes volver a usarlo cuando quieras."
+  const again = "Para volver a usarla, enciende su interruptor «En uso»: vuelve la misma, con sus preguntas."
   if (current.respondent !== "portal") {
-    return `Deja de ofrecerse en «Nuevo» › «Ficha». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
+    return `Deja de aparecer sola en la atención y en «Nuevo» › «Ficha». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
   }
   const kept = `Lo que ya respondieron sigue en cada paciente. ${again}`
   if (!reach) return `Si es el que reciben los pacientes con cita por venir, dejarán de recibirlo. ${kept}`

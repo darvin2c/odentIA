@@ -147,9 +147,11 @@ it("la nueva versión pasa al equipo y hay otro cuestionario del paciente public
 it("dejar de usar dice qué deja de pasar y que lo ya llenado no cambia", () => {
   const ficha = template({ key: "periodontal", title: "Ficha periodontal" })
   const staff = leaveWords(ficha, null)
-  expect(staff).toContain("Deja de ofrecerse")
+  // QA del 14 nov: decía «Deja de ofrecerse… volver a usarlo» y no que deja de aparecer sola en la atención.
+  expect(staff).toContain("Deja de aparecer sola en la atención")
   expect(staff).toContain("Lo ya llenado sigue en cada paciente")
-  expect(staff).toContain("volver a usarlo")
+  expect(staff).toContain("volver a usarla, enciende su interruptor «En uso»")
+  expect(staff).not.toContain("usarlo")
   // El cuestionario que les llega: dice qué reciben después, con lo que dice el servidor.
   const previo = template({ key: "previo", title: "Cuestionario previo a la cita", respondent: "portal" })
   const salud = template({ key: "salud", title: "Cuestionario de salud", respondent: "portal", reachesPatients: true })
