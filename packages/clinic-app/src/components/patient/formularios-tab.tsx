@@ -306,7 +306,10 @@ export function ResponseDetail({
         : lostAnswers.length > 0
           ? lostWords(lostAnswers, pendingElse && (saveState === "pendiente" || saveState === "guardando"))
           : null
-  useEffect(() => draftSaved(lost === null, lost), [draftSaved, lost])
+  // Se dice en cada cambio, no solo cuando cambia lo que se pierde: así la columna no cuenta como
+  // «sin guardar» las teclas de lo que se guardará solo al cerrarse.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `answers` y `saveState` marcan cada cambio.
+  useEffect(() => draftSaved(lost === null, lost), [draftSaved, lost, answers, saveState])
 
   const documentsQuery = useQuery({
     queryKey: ["patient-documents", response.patientId, "activos"],
