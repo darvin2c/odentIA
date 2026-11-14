@@ -1,4 +1,6 @@
 import {
+  BONE_MEDICINE_FORMS,
+  BONE_MEDICINE_REASONS,
   CIGARETTE_BAND_LABELS,
   CIGARETTE_BANDS,
   type CigaretteBand,
@@ -150,6 +152,10 @@ interface Draft {
   anticoagulantsText: string
   boneMedicines: Declared
   boneMedicinesText: string
+  /** De la medicina para los huesos, con el Sí: si la toma hoy, por qué y cómo (B3, C3). */
+  boneNow: "" | "si" | "no"
+  boneReason: "" | (typeof BONE_MEDICINE_REASONS)[number]
+  boneForm: "" | (typeof BONE_MEDICINE_FORMS)[number]
   medications: Declared
   medicationsText: string
   /** odentIA: el corazón (antibiótico antes de atender) y la anestesia. */
@@ -228,6 +234,9 @@ const EMPTY: Draft = {
   anticoagulantsText: "",
   boneMedicines: "",
   boneMedicinesText: "",
+  boneNow: "",
+  boneReason: "",
+  boneForm: "",
   medications: "",
   medicationsText: "",
   heartRisk: "",
@@ -548,6 +557,29 @@ export function declaredAllergyItems(substances: string[], reaction: string) {
     severity: "desconocida" as const,
     ...(reaction && index === 0 ? { reaction } : {}),
   }))
+}
+
+/** Una pregunta opcional de la medicina para los huesos, con su etiqueta como grupo. */
+function BoneChoice({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  onChange: (value: string) => void
+}): React.JSX.Element {
+  const id = useId()
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span id={id} className="text-sm">
+        {label} <span className="text-muted-foreground">(opcional)</span>
+      </span>
+      <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
+    </div>
+  )
 }
 
 /** Sin repetir lo mismo escrito dos veces, sin importar mayúsculas ni tildes. */
@@ -881,7 +913,13 @@ export function RegistrationQuestionnaire({
       ...(state === "recorded" && text.trim() ? { detail: text.trim() } : {}),
     })
     if (asked("anticoagulants")) health.anticoagulants = directed(d.anticoagulants, d.anticoagulantsText)
-    if (asked("boneMedicines")) health.boneMedicines = directed(d.boneMedicines, d.boneMedicinesText)
+    if (asked("boneMedicines"))
+      health.boneMedicines = {
+        ...directed(d.boneMedicines, d.boneMedicinesText),
+        ...(d.boneMedicines === "recorded" && d.boneNow ? { now: d.boneNow === "si" } : {}),
+        ...(d.boneMedicines === "recorded" && d.boneReason ? { reason: d.boneReason } : {}),
+        ...(d.boneMedicines === "recorded" && d.boneForm ? { form: d.boneForm } : {}),
+      }
     if (asked("medications"))
       health.medications = {
         state: stateOf(d.medications),
@@ -1974,6 +2012,9 @@ export function RegistrationQuestionnaire({
               anticoagulantsText: "",
               boneMedicines: "",
               boneMedicinesText: "",
+  boneNow: "",
+  boneReason: "",
+  boneForm: "",
               medications: "",
               medicationsText: "",
             })
@@ -2034,9 +2075,41 @@ export function RegistrationQuestionnaire({
               detailMax={200}
               state={draft.boneMedicines}
               text={draft.boneMedicinesText}
-              onState={(value) => set({ boneMedicines: value })}
+              onState={(value) => set({ boneMedicines: value, ...(value === "recorded" ? {} : { boneNow: "", boneReason: "", boneForm: "" }) })}
               onText={(value) => set({ boneMedicinesText: value })}
-            />
+            >
+              {/* Opcional: cambian el riesgo antes de una extracción (AAOMS 2022). */}
+              <div className="grid gap-3">
+                <BoneChoice
+                  label={you("¿La tomas ahora?", "¿La toma ahora?")}
+                  value={draft.boneNow}
+                  options={[
+                    { value: "si", label: "Sí" },
+                    { value: "no", label: "Ya no" },
+                  ]}
+                  onChange={(value) => set({ boneNow: value as Draft["boneNow"] })}
+                />
+                <BoneChoice
+                  label="¿Por qué?"
+                  value={draft.boneReason}
+                  options={[
+                    { value: "osteoporosis", label: "Osteoporosis" },
+                    { value: "cancer", label: "Un cáncer" },
+                    { value: "no_sabe", label: "No sé" },
+                  ]}
+                  onChange={(value) => set({ boneReason: value as Draft["boneReason"] })}
+                />
+                <BoneChoice
+                  label="¿Cómo?"
+                  value={draft.boneForm}
+                  options={[
+                    { value: "pastillas", label: "Pastillas" },
+                    { value: "inyeccion", label: "Inyección" },
+                  ]}
+                  onChange={(value) => set({ boneForm: value as Draft["boneForm"] })}
+                />
+              </div>
+            </DeclaredField>
           ) : null}
           {asked("medications") ? (
             <DeclaredField

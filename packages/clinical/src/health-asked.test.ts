@@ -198,3 +198,18 @@ it("«Antiagregante» para el grupo B01AC y «Anticoagulante» para el resto", (
   expect(medicationAlertWords({ name: "clopidogrel", dose: "75 mg", atcCode: "B01AC04" }).label).toBe("Antiagregante: clopidogrel 75 mg")
   expect(medicationAlertWords({ name: "apixabán", dose: null, atcCode: "B01AF02" }).label).toBe("Anticoagulante: apixabán")
 })
+
+// QA del 14 nov (B3): la medicina para los huesos que tomó y ya no toma sigue contando.
+it("de los huesos, la que tomó y ya no toma es «la tomó antes»; del anticoagulante, «no toma»", () => {
+  const declarations = [
+    { health: { boneMedicines: { state: "recorded" as const }, anticoagulants: { state: "recorded" as const } } },
+  ]
+  const answers = medicineClassAnswers({
+    ...nothing,
+    declarations,
+    current: [],
+    ended: [{ atcCode: "M05BA08" }, { atcCode: "B01AA03" }],
+  })
+  expect(answers.boneMedicines).toEqual({ answer: "took", said: true })
+  expect(answers.anticoagulants).toEqual({ answer: "no", said: false })
+})

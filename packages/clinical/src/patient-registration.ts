@@ -277,6 +277,15 @@ export type HealthMedicationDeclaration = z.infer<typeof healthMedicationDeclara
 const declaration = <T extends z.ZodType>(item: T, options: { emptyYes?: boolean } = {}) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
 }).refine(v => v.state === "recorded" ? options.emptyYes === true || v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
+/** Por qué toma la medicina para los huesos, y cómo: cambian el riesgo antes de una extracción. */
+export const BONE_MEDICINE_REASONS = ["osteoporosis", "cancer", "no_sabe"] as const
+export const BONE_MEDICINE_FORMS = ["pastillas", "inyeccion"] as const
+export const BONE_MEDICINE_REASON_LABELS: Record<(typeof BONE_MEDICINE_REASONS)[number], string> = {
+  osteoporosis: "por osteoporosis",
+  cancer: "por un cáncer",
+  no_sabe: "no sabe por qué",
+}
+export const BONE_MEDICINE_FORM_LABELS: Record<(typeof BONE_MEDICINE_FORMS)[number], string> = { pastillas: "pastillas", inyeccion: "inyección" }
 /**
  * Una medicina que se pregunta por su clase («¿Tomas algún anticoagulante?»):
  * Sí (`recorded`), No (`none`) o No sé (`unknown`), con los mismos estados de
@@ -285,7 +294,12 @@ const declaration = <T extends z.ZodType>(item: T, options: { emptyYes?: boolean
  */
 export const directedMedicineSchema = z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), detail: text(200).optional(),
-}).refine(v => v.state === "recorded" || !v.detail, "Indica cuál solo cuando la respuesta sea Sí")
+  /**
+   * De las medicinas para los huesos, con el Sí y opcional (QA del 14 nov, B3 y C3; AAOMS 2022):
+   * si la toma hoy (`false`: ya no), por qué (osteoporosis o un cáncer) y cómo (pastillas o inyección).
+   */
+  now: z.boolean().optional(), reason: z.enum(BONE_MEDICINE_REASONS).optional(), form: z.enum(BONE_MEDICINE_FORMS).optional(),
+}).refine(v => v.state === "recorded" || (!v.detail && v.now === undefined && !v.reason && !v.form), "Indica cuál solo cuando la respuesta sea Sí")
 export type DirectedMedicineDeclaration = z.infer<typeof directedMedicineSchema>
 /** Sí, No o No sé de una pregunta de la entrevista, como lo dice quien responde. */
 export const INTERVIEW_ANSWERS = ["si", "no", "no_sabe"] as const

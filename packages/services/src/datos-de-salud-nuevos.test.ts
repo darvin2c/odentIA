@@ -68,3 +68,13 @@ it("«Sí» a «algún otro medicamento» sin decir cuál deja «Otro medicament
     { name: "Otro medicamento (no dijo cuál)", declaredClass: null },
   ])
 })
+
+// QA del 14 nov (B3, C3): «zoledronato, una inyección hace 3 años, ya no» quedaba como medicina vigente.
+it("la medicina para los huesos que ya no toma queda terminada, con por qué y cómo", () => {
+  const [row] = declaredMedications(
+    { boneMedicines: { state: "recorded", detail: "zoledronato", now: false, reason: "cancer", form: "inyeccion" } },
+    "2026-11-14",
+  )
+  expect(row).toMatchObject({ name: "zoledronato", declaredClass: "boneMedicines", endDate: "2026-11-14" })
+  expect(row?.notes).toBe("Por un cáncer · inyección · dijo que ya no la toma")
+})

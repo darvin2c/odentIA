@@ -120,7 +120,7 @@ it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", 
   answer(/coágulos/, "No")
   answer(/medicinas para los huesos/, "No")
   answer(/algún otro medicamento todos los días/, "Sí")
-  const which = (await screen.findAllByLabelText(/¿Cuál\? Si son varios/)).at(-1) as HTMLInputElement
+  const which = (await screen.findAllByLabelText(/¿Cuál\? \(si lo sabes\) Si son varios/)).at(-1) as HTMLInputElement
   fireEvent.change(which, { target: { value: "Losartán" } })
   enter(which)
   await new Promise((resolve) => setTimeout(resolve, 50))

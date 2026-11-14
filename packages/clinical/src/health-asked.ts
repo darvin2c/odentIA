@@ -140,7 +140,8 @@ export function healthQuestionsToAsk(
  * el equipo.
  */
 export interface MedicineClassAnswer {
-  answer: "yes" | "saidYes" | "no" | "unknown" | "unasked"
+  /** `took`: de los huesos, la tomó y ya no; el riesgo de una extracción sigue (AAOMS 2022). */
+  answer: "yes" | "saidYes" | "took" | "no" | "unknown" | "unasked"
   said: boolean
 }
 
@@ -162,7 +163,8 @@ export function medicineClassAnswers(
     if (said === "recorded") {
       // Dijo que sí y el equipo la terminó: hoy no la toma. Si no figura con su clase (la escribieron
       // a mano, o le cambiaron el nombre), nunca «no toma»: dijo que sí y falta anotar cuál.
-      return (input.ended ?? []).some(isOf) ? { answer: "no", said: false } : { answer: "saidYes", said: true }
+      if (!(input.ended ?? []).some(isOf)) return { answer: "saidYes", said: true }
+      return group === "boneMedicines" ? { answer: "took", said: true } : { answer: "no", said: false }
     }
     if (said === "none") return { answer: "no", said: true }
     if (said === "unknown") return { answer: "unknown", said: true }

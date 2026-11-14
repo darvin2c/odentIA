@@ -7,6 +7,8 @@ import {
   declaredHealthAnswered,
   declaredMedicineAtc,
   knownHealthQuestions,
+  BONE_MEDICINE_FORM_LABELS,
+  BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
   type MedicationClass,
   type MedicineClassAnswer,
@@ -1173,6 +1175,8 @@ export type DeclaredPatientHealthInput = NonNullable<RegistrationAnswers["health
  */
 export function declaredMedications(
   declared: DeclaredPatientHealthInput,
+  /** El día en que lo dijo: lo que dijo que ya no toma queda terminado ese día. */
+  saidOn?: string,
 ): Array<HealthMedicationInput & { declaredClass: MedicationClass | null }> {
   const rows: Array<HealthMedicationInput & { declaredClass: MedicationClass | null }> = []
   const seen = new Set<string>()
@@ -1182,7 +1186,18 @@ export function declaredMedications(
     // Sin decir cuál, la fila lo dice (`MEDICATION_CLASSES[group].unnamed`).
     const name = answer.detail?.trim() || MEDICATION_CLASSES[group].unnamed
     seen.add(normalizeDrugText(name))
-    rows.push({ name, declaredClass: group })
+    // Los huesos: por qué y cómo, y si ya no la toma, terminada (B3): sigue contando, no está vigente.
+    const notes = [
+      answer.reason ? BONE_MEDICINE_REASON_LABELS[answer.reason] : "",
+      answer.form ? BONE_MEDICINE_FORM_LABELS[answer.form] : "",
+      answer.now === false ? "dijo que ya no la toma" : "",
+    ].filter(Boolean)
+    rows.push({
+      name,
+      declaredClass: group,
+      ...(notes.length ? { notes: capitalFirst(notes.join(" · ")) } : {}),
+      ...(answer.now === false && saidOn ? { endDate: saidOn } : {}),
+    })
   }
   for (const item of declared.medications?.state === "recorded" ? declared.medications.items : []) {
     const key = normalizeDrugText(item.name)
@@ -1195,6 +1210,8 @@ export function declaredMedications(
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
 }
+
+const capitalFirst = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
 
 /** La fila de «algún otro medicamento» dicho sin decir cuál. */
 export const OTHER_MEDICINE_UNNAMED = "Otro medicamento (no dijo cuál)"
@@ -1215,11 +1232,9 @@ export async function initializeDeclaredPatientHealth(
   const state = (value: string | undefined) =>
     value === "none" || value === "recorded" ? value : "unknown"
   // Lo que declaró entra a la entrevista de la ficha como la arma su producto (odentIA: su boca; latidIA: el embarazo con fecha).
-  const interview = (await productHooks(tx, orgId)).interview.declared(
-    declared,
-    await clinicToday(tx, orgId, saidAt ?? undefined),
-  )
-  const medications = declaredMedications(declared)
+  const saidOn = await clinicToday(tx, orgId, saidAt ?? undefined)
+  const interview = (await productHooks(tx, orgId)).interview.declared(declared, saidOn)
+  const medications = declaredMedications(declared, saidOn)
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,
@@ -1558,7 +1573,7 @@ export async function addDeclaredHealth(
   const hooks = await productHooks(tx, orgId)
   const habitual = hooks.prescribing.catalog.habitual
   let addedMedications = 0
-  for (const item of declaredMedications(declared)) {
+  for (const item of declaredMedications(declared, saidOn)) {
     const key = normalizeDrugText(item.name)
     if (!key || currentMedications.has(key)) continue
     currentMedications.add(key)
@@ -1572,6 +1587,7 @@ export async function addDeclaredHealth(
         : (findHabitualMedication(name, habitual)?.atc ?? null),
       dose: item.dose?.trim() || null,
       frequency: item.frequency?.trim() || null,
+      endDate: item.endDate ?? null,
       notes: withNote(item.notes ?? undefined),
       createdBy: actorUserId,
     })

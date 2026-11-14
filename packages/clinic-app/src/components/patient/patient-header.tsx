@@ -115,6 +115,7 @@ export function clinicalAlerts(
 const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, (said: boolean) => string> = {
   unasked: () => "no se le preguntó",
   saidYes: () => "dijo que toma, falta anotar cuál",
+  took: () => "la tomó antes, hoy no",
   no: (said) => (said ? "dijo que no" : "no toma"),
   unknown: () => "no sabe",
 }
@@ -252,12 +253,12 @@ export function PatientClinicalStrip({
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
-  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca.
-  const classWords =
-    medicineClasses && health?.medicineClasses
-      ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
+  // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
+  const classWords = health?.medicineClasses
+    ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
           const known = health.medicineClasses?.[key]
-          if (!known || known.answer === "yes") return []
+          if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
           // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
           const unclassed =
             known.answer === "unknown" && detail.currentMedications.some((row) => !medicationClassOf(row.atcCode))
