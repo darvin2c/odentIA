@@ -1,4 +1,5 @@
 import { LOGOS } from "./logos.js"
+import { type MarkdownInline, markdownText, parseMarkdown } from "./markdown.js"
 
 /**
  * Un solo molde para todo correo que envía odentIA (issue 163, lienzo «Correos
@@ -42,6 +43,11 @@ export interface EmailContent {
   internal?: string
   /** Banda bajo la cabecera: ámbar mientras corre un plazo, roja cuando ya pasó. */
   band?: { tone: "plazo" | "vencido"; text: string }
+  /**
+   * Lo que escribió una persona del equipo, con el formato básico de
+   * `markdown.ts` (negrita, cursiva, enlaces y listas); va antes de `paragraphs`.
+   */
+  formatted?: string
   /** Párrafos de texto plano; un salto de línea se respeta. */
   paragraphs: readonly string[]
   list?: readonly string[]
@@ -371,6 +377,31 @@ function sectionsHtml(sections: readonly EmailSection[]): string {
     .join("")
 }
 
+/** Una línea con formato: todo texto escapado; solo <strong>, <em> y enlaces https/mailto ya revisados. */
+function inlineHtml(nodes: readonly MarkdownInline[], color: string): string {
+  return nodes
+    .map((node) => {
+      if (node.kind === "text") return escapeHtml(node.text)
+      if (node.kind === "strong") return `<strong>${inlineHtml(node.children, color)}</strong>`
+      if (node.kind === "em") return `<em>${inlineHtml(node.children, color)}</em>`
+      return `<a class="enlace" href="${escapeHtml(node.href)}" target="_blank" style="color:${color};text-decoration:underline;word-break:break-word;">${escapeHtml(node.text)}</a>`
+    })
+    .join("")
+}
+
+/** Lo que escribió una persona (`formatted`): párrafos y listas con el estilo del cuerpo. */
+function formattedHtml(markdown: string, color: string): string {
+  const text = `${FONT}font-size:15px;line-height:24px;color:${C.cuerpo};`
+  return parseMarkdown(markdown)
+    .map((block) => {
+      if (block.kind === "paragraph")
+        return `<p class="t2 cuerpo" style="margin:16px 0 0 0;${text}">${block.lines.map((line) => inlineHtml(line, color)).join("<br>")}</p>`
+      const tag = block.ordered ? "ol" : "ul"
+      return `<${tag} class="t2 cuerpo" style="margin:12px 0 0 0;padding:0 0 0 22px;${text}">${block.items.map((item) => `<li style="margin:0 0 4px 0;">${inlineHtml(item, color)}</li>`).join("")}</${tag}>`
+    })
+    .join("")
+}
+
 /** El correo en HTML y en texto plano, de las mismas piezas: nunca dicen cosas distintas. */
 export function renderEmail(content: EmailContent): MailTemplate {
   const brand = content.brand ?? BASE_MAIL_BRAND
@@ -406,6 +437,7 @@ export function renderEmail(content: EmailContent): MailTemplate {
       ? `<p${A ? ' class="ceja"' : ""} style="margin:0 0 4px 0;${FONT}font-size:13px;line-height:18px;font-weight:600;color:${A?.enlace ?? B.marcaTinta};">${escapeHtml(content.eyebrow)}</p>`
       : "") +
     `<h1 class="t1" style="margin:0;${FONT}font-size:22px;line-height:28px;font-weight:bold;color:${C.tinta};">${escapeHtml(content.title)}</h1>` +
+    (content.formatted ? formattedHtml(content.formatted, A?.enlace ?? B.marca) : "") +
     content.paragraphs
       .map((text) => `<p class="t2 cuerpo" style="margin:16px 0 0 0;${FONT}font-size:15px;line-height:24px;color:${C.cuerpo};">${lines(text)}</p>`)
       .join("") +
@@ -519,6 +551,7 @@ ${body.join("\n")}
 
   const text: string[] = [content.title, ""]
   if (content.band) text.push(content.band.text, "")
+  if (content.formatted) text.push(markdownText(parseMarkdown(content.formatted)), "")
   for (const paragraph of content.paragraphs) text.push(paragraph, "")
   if (content.list?.length) text.push(...content.list.map((item) => `- ${item}`), "")
   if (content.quote) {

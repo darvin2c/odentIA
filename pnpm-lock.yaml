@@ -55,6 +55,9 @@ importers:
       '@odentia/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
+      '@odentia/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       '@odentia/ui':
         specifier: workspace:*
         version: link:../../packages/ui
