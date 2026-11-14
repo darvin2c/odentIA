@@ -164,7 +164,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
         expectedVersion: health.latestAnamnesis?.version ?? 0,
         answers: {
           ...(health.latestAnamnesis?.answers as Record<string, unknown>),
-          antecedentesPersonales: { embarazo: true, semanasEmbarazo: 30, cirugias: "Apendicectomía en 2010" },
+          antecedentesPersonales: { cirugias: "Apendicectomía en 2010" },
         },
       },
       familyHistory: [{ relationship: "MTH", condition: "Diabetes tipo 2" }],
@@ -189,11 +189,14 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
   expect(form!.addenda).toMatchObject([{ text: "La prueba al frío se repitió a los 10 minutos.", authorName: "Clínico" }])
   expect(fromPerson).toMatchObject({ source: "portal", filledBy: "Paciente de prueba", filledByPatient: true })
 
-  // La entrevista, como la cuenta odentIA, con lo que ella declaró dicho como suyo.
+  // La entrevista, como la cuenta odentIA, con lo que ella declaró dicho como suyo. El embarazo se
+  // guarda con el día en que lo dijo: la copia dice la semana a su fecha y la que dijo ese día.
+  const said = (await run((tx) => clinicToday(tx, "org_a"))).split("-").reverse().join("/")
+  const pregnancy = `Sí · 30 semanas a la fecha de esta copia (30 el ${said})`
   expect(record.interview).toMatchObject({ version: 2, declared: false, recordedBy: "Clínico" })
   expect(record.interview!.entries.map((entry) => [entry.label, entry.value, entry.since?.declared ?? null])).toEqual([
     ["Cirugías", "Apendicectomía en 2010", null],
-    ["Embarazo", "Sí, 30 semanas al registrarlo", true],
+    ["Embarazo", pregnancy, null],
     ["Bruxismo", "Sí", true],
   ])
   expect(record.familyHistory.map((row) => [row.relationship, row.condition])).toEqual([["MTH", "Diabetes tipo 2"]])
@@ -211,7 +214,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     "Lo respondió Paciente de prueba (paciente)",
     "Me duele la muela de abajo",
     "Entrevista de salud",
-    "Sí, 30 semanas al registrarlo",
+    pregnancy,
     "Lo declaró el paciente o su responsable el",
     "Apendicectomía en 2010",
     "Madre: Diabetes tipo 2",
@@ -277,7 +280,7 @@ it("la copia trae el formulario finalizado y la entrevista de salud, en el PDF y
     status: "completed",
     contained: [{ resourceType: "Questionnaire", title: "Entrevista de salud", version: "2" }],
   })
-  expect(JSON.stringify(interview)).toContain("Sí, 30 semanas al registrarlo")
+  expect(JSON.stringify(interview)).toContain(pregnancy)
   expect((interview!.text as { div: string }).div).toContain("Lo declaró el paciente o su responsable el")
   expect(resources.find((resource) => resource.resourceType === "FamilyMemberHistory")).toMatchObject({
     patient: { reference: `Patient/${f.patient.id}` },
@@ -325,13 +328,15 @@ it("latidIA: su entrevista va en la copia con el embarazo y su fecha, por el gan
     const [day, month, year] = [today.slice(8, 10), today.slice(5, 7), today.slice(0, 4)]
     expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
       ["antecedentesPersonales.hospitalizaciones", "Hospitalizaciones", "Neumonía en 2019"],
-      ["embarazoLactancia.embarazo", "Embarazo", `Embarazada, 12 semanas (registrado el ${day}/${month}/${year})`],
+      // Una sola vez, y con las palabras comunes: latidIA no lo vuelve a decir en su grupo.
+      ["embarazoLactancia.embarazo", "Embarazo", `Sí · 12 semanas a la fecha de esta copia (12 el ${day}/${month}/${year})`],
       ["habitos", "Hábitos", "tabaco: nunca fumó"],
     ])
     // Una sola vez: ya no va además en una sección aparte del producto.
     expect(record.productSections).toEqual([])
     const interview = resourcesOf(record).find((resource) => resource.id === `${f.patient.id}-entrevista`)
-    expect(JSON.stringify(interview)).toContain("Embarazada, 12 semanas")
+    expect(JSON.stringify(interview)).toContain("Sí · 12 semanas a la fecha de esta copia")
+    expect(JSON.stringify(interview)).not.toContain("Embarazada")
   } finally {
     await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, "org_a"))
   }
@@ -526,4 +531,24 @@ it("lo que respondió quien habla por el paciente lo dice así, y en FHIR apunta
     resourceType: "QuestionnaireResponse",
     source: { reference: `RelatedPerson/${mother.id}`, display: "Marta Tutora" },
   })
+})
+
+it("un embarazo guardado antes, sin fecha, sale con el día en que se anotó y la semana a la fecha de la copia", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  // La forma de antes de odentIA: un sí con sus semanas en «Personales», anotado hace dos semanas.
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000)
+  await ownerDb.insert(patientAnamnesis).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    version: 1,
+    answers: { antecedentesPersonales: { embarazo: true, semanasEmbarazo: 30 } },
+    createdBy: f.actor,
+    createdAt: twoWeeksAgo,
+  })
+  const day = (await run((tx) => clinicToday(tx, "org_a", twoWeeksAgo))).split("-").reverse().join("/")
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.interview!.entries.map((entry) => [entry.key, entry.label, entry.value])).toEqual([
+    ["embarazoLactancia.embarazo", "Embarazo", `Sí · 32 semanas a la fecha de esta copia (30 el ${day})`],
+  ])
 })

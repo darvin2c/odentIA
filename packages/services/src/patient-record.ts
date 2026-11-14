@@ -39,6 +39,8 @@ import {
   isDiagnosisSystem,
   isImageDocumentCategory,
   KINSHIP_LABELS,
+  legacyPregnancySaidOn,
+  PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
   SEX_LABELS,
   SEX_TO_FHIR_GENDER,
@@ -174,13 +176,14 @@ export interface PatientRecord {
 /** La entrevista vigente y, de cada dato, desde qué versión consta igual. */
 function interviewOf(
   versions: Array<{ version: number; answers: unknown; createdAt: Date; createdBy: string | null; authorName: string | null }>,
-  entriesOf: (answers: unknown) => InterviewEntry[],
+  /** `current`: es la versión vigente (lo que se sabe de un embarazo sin fecha solo vale para ella). */
+  entriesOf: (answers: unknown, current: boolean) => InterviewEntry[],
 ): RecordInterview | null {
   const latest = versions.at(-1)
-  const current = latest ? entriesOf(latest.answers) : []
+  const current = latest ? entriesOf(latest.answers, true) : []
   // Sin ningún dato vigente no hay entrevista que mostrar: un encabezado solo, con quién y cuándo, no dice nada.
   if (!latest || current.length === 0) return null
-  const told = versions.map((row) => new Map(entriesOf(row.answers).map((entry) => [entry.key, entry.value])))
+  const told = versions.map((row) => new Map(entriesOf(row.answers, false).map((entry) => [entry.key, entry.value])))
   return {
     version: latest.version,
     recordedAt: latest.createdAt,
@@ -188,7 +191,9 @@ function interviewOf(
     declared: latest.createdBy === null,
     entries: current.map((entry) => {
       let first = versions.length - 1
-      while (first > 0 && told[first - 1]?.get(entry.key) === entry.value) first -= 1
+      // El embarazo trae su propio día (el que se dijo): no se le busca otro en las versiones.
+      if (entry.key !== PREGNANCY_ENTRY_KEY)
+        while (first > 0 && told[first - 1]?.get(entry.key) === entry.value) first -= 1
       const from = versions[first]
       return {
         ...entry,
@@ -337,6 +342,13 @@ export async function loadPatientRecord(
   const hooks = await productHooks(tx, orgId)
   const productSections = await hooks.recordSections(tx, { orgId, patientId })
   const today = await clinicToday(tx, orgId)
+  // Un embarazo guardado antes, sin fecha, toma la del día en que se anotó ese «sí»: sale de las
+  // versiones de la entrevista (de la más nueva a la más antigua), como en la ficha.
+  const legacySaidOn = legacyPregnancySaidOn(
+    interviewVersions
+      .map((row) => ({ answers: row.answers, day: clinicDay(row.createdAt, establishmentRow?.timezone || "UTC") }))
+      .reverse(),
+  )
   const planItems = await listPlanItems(tx, orgId, patientId)
   const site = hooks.site
   const recordSite = (row: SiteColumns): RecordSite => ({
@@ -373,7 +385,9 @@ export async function loadPatientRecord(
     conditions,
     medications,
     // Cada producto cuenta su entrevista (odentIA: lo de la boca; latidIA: embarazo y lactancia con fecha).
-    interview: interviewOf(interviewVersions, (answers) => hooks.interview.record(answers, today)),
+    interview: interviewOf(interviewVersions, (answers, current) =>
+      hooks.interview.record(answers, today, current ? { legacySaidOn } : {}),
+    ),
     familyHistory,
     encounters: encounters.map((row) => ({
       row,

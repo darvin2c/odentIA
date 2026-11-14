@@ -1,4 +1,4 @@
-import { declaredPregnancy } from "@odentia/clinical"
+import { declaredPregnancy, PREGNANCY_ENTRY_KEY } from "@odentia/clinical"
 import { medicalHistoryEntries, parseMedicalHistory, readMedicalHistory } from "@odentia/medical"
 import { invalidField, validation } from "../errors.js"
 import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
@@ -33,8 +33,11 @@ export const medicalInterview: ProductInterview = {
       ...(Object.keys(habits).length ? { habitos: habits } : {}),
     }
   },
-  record: (answers, today) => [
-    ...COMMON_INTERVIEW.record(answers, today),
-    ...medicalHistoryEntries(readMedicalHistory(answers, today), today),
+  record: (answers, today, reading) => [
+    ...COMMON_INTERVIEW.record(answers, today, reading),
+    // El embarazo ya lo dijo lo común, con la misma regla: aquí va lo demás (lactancia, hábitos, vacunas).
+    ...medicalHistoryEntries(readMedicalHistory(answers, today), today).filter(
+      (entry) => entry.key !== PREGNANCY_ENTRY_KEY,
+    ),
   ],
 }

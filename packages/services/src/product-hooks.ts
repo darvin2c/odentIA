@@ -9,6 +9,7 @@ import {
   type ImagingType,
   type InterviewEntry,
   type MedicationCatalog,
+  type PregnancyReading,
   type RegistrationAnswers,
   SUGGESTED_CONSENT_TEMPLATES,
   type SuggestedConsentTemplate,
@@ -245,9 +246,11 @@ export interface ProductInterview {
   declared(health: DeclaredHealth, today: string): Record<string, unknown>
   /**
    * La entrevista guardada en la copia de la historia, dato por dato y en el
-   * orden de la pantalla: lo común y lo del producto. Vacío si nada se respondió.
+   * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
+   * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un
+   * embarazo guardado sin fecha. Vacío si nada se respondió.
    */
-  record(answers: unknown, today: string): InterviewEntry[]
+  record(answers: unknown, today: string, reading?: PregnancyReading): InterviewEntry[]
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
@@ -283,7 +286,7 @@ export const COMMON_INTERVIEW: ProductInterview = {
       ...(statement ? { embarazoLactancia: { embarazo: statement } } : {}),
     }
   },
-  record: (answers) => commonInterviewEntries(answers),
+  record: commonInterviewEntries,
 }
 
 /** Lo que el producto revisa al emitir una receta, además de las alergias. */

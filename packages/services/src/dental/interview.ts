@@ -21,5 +21,8 @@ export const dentalInterview: ProductInterview = {
       ...(Object.keys(dental).length ? { antecedentesOdontologicos: dental } : {}),
     }
   },
-  record: (answers, today) => [...COMMON_INTERVIEW.record(answers, today), ...dentalInterviewEntries(answers)],
+  record: (answers, today, reading) => [
+    ...COMMON_INTERVIEW.record(answers, today, reading),
+    ...dentalInterviewEntries(answers),
+  ],
 }
