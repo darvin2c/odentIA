@@ -1,4 +1,5 @@
 import { canAccess, canAccessAny, canAttend } from "@odentia/auth/permissions"
+import { REGISTRATION_QUESTIONS_VERSION } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { encounter, patient } from "@odentia/db/schema/clinical"
@@ -31,7 +32,7 @@ import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import { windowOpen } from "./message-window.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { registrationHoldDifferences } from "./patient-registration.js"
+import { newRegistrationQuestionsOf, registrationHoldDifferences } from "./patient-registration.js"
 import { productDictation, productHooks } from "./products.js"
 import { upcomingWork } from "./report-finance.js"
 import { patientsToSchedule } from "./to-schedule.js"
@@ -170,6 +171,7 @@ export const NOTICE_SUBJECTS = [
   "vence-clave-meta",
   "meta-desconecto",
   "clave-propia",
+  "preguntas-nuevas",
 ] as const
 
 /**
@@ -284,6 +286,8 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'clave-propia:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("clave-propia")}
             and c.status = 'active' and c.own_app->>'tokenRejectedAt' is not null))
+        or (n.subject = 'preguntas-nuevas' and exists (select 1 from patient_registration_config c
+          where c.organization_id = n.organization_id and c.questions_version >= ${REGISTRATION_QUESTIONS_VERSION}))
       )`)
 }
 
@@ -293,6 +297,21 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
  */
 export async function listWorkspaceNotifications(tx: Db, orgId: string, userId: string, permissions: string[]) {
   if (permissions.length === 0) return { items: [], unread: 0 }
+  // «Hay preguntas nuevas» llega también a la campana de quien administra: un día normal no entra a
+  // Configuración (QA del 14 nov, B10). Se va al guardar o al pulsar «Entendido».
+  if (permissions.includes("settings.write")) {
+    const fresh = await newRegistrationQuestionsOf(tx, orgId)
+    if (fresh.length > 0)
+      await upsertWorkspaceNotification(tx, orgId, {
+        userId,
+        dedupeKey: `preguntas-nuevas:${REGISTRATION_QUESTIONS_VERSION}`,
+        title: "Hay preguntas nuevas para tus pacientes",
+        body: `Ya se les preguntan como «Opcional»: ${fresh.map((item) => item.label).join(", ")}. Míralas en Preguntas al paciente.`,
+        href: "/settings/patient-registration",
+        permission: "settings.write",
+        subject: "preguntas-nuevas",
+      })
+  }
   await settleWorkspaceNotifications(tx, orgId, { userId })
   const scope = and(eq(workspaceNotification.organizationId, orgId), eq(workspaceNotification.userId, userId),
     inArray(workspaceNotification.permission, permissions), isNull(workspaceNotification.resolvedAt))

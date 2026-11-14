@@ -32,10 +32,11 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { renderConsentPreviewPdf } from "./consent-pdf.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { addEncounterProcedure } from "./encounters.js"
-import { patientHealthQuestions, patientHealthToAsk } from "./patient-registration.js"
+import { markRegistrationQuestionsSeen, patientHealthQuestions, patientHealthToAsk } from "./patient-registration.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { createPatient } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { listWorkspaceNotifications } from "./workspace.js"
 
 setupTestDb()
 
@@ -405,4 +406,22 @@ it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en bl
     }),
   )
   expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])
+})
+
+// QA del 14 nov (B10): «Hay preguntas nuevas» llega a la campana de quien administra y se va con
+// «Entendido», que deja en la actividad que vio las preguntas, aunque la clínica no tuviera configuración.
+it("«Hay preguntas nuevas» llega a la campana de quien administra y se va con «Entendido»", async () => {
+  const { orgId, run } = await newClinic()
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${randomUUID()}, ${orgId}, ${ACTOR}, 'owner', now())`,
+  )
+  const before = await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))
+  expect(before.items.map((item) => item.title)).toContain("Hay preguntas nuevas para tus pacientes")
+  await run((tx) => markRegistrationQuestionsSeen(tx, orgId, ACTOR))
+  const after = await run((tx) => listWorkspaceNotifications(tx, orgId, ACTOR, ["settings.write"]))
+  expect(after.items.map((item) => item.title)).not.toContain("Hay preguntas nuevas para tus pacientes")
+  const seen = await ownerDb.execute(
+    sql`select metadata from audit_event where organization_id = ${orgId} and action = 'patient-registration.questions_seen'`,
+  )
+  expect(seen.rows ?? seen).toHaveLength(1)
 })

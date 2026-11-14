@@ -676,6 +676,8 @@ export async function newRegistrationQuestionsOf(
 
 /** «Entendido»: quien administra ya vio las preguntas nuevas, aunque no cambie nada. */
 export async function markRegistrationQuestionsSeen(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+  // Qué preguntas vio: la actividad lo dice (QA del 14 nov, B10).
+  const seen = (await newRegistrationQuestionsOf(tx, orgId)).map((item) => item.label)
   const updated = await tx
     .update(patientRegistrationConfig)
     .set({ questionsVersion: REGISTRATION_QUESTIONS_VERSION })
@@ -690,15 +692,15 @@ export async function markRegistrationQuestionsSeen(tx: Db, orgId: string, actor
       fields: current.fields,
       privacyNotice: current.privacyNotice,
     })
-    return
   }
+  // También sin configuración guardada: «Entendido» es «vio las preguntas nuevas», no «guardó» (B10).
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
     action: "patient-registration.questions_seen",
     entity: "patient_registration_config",
     entityId: orgId,
-    metadata: { version: REGISTRATION_QUESTIONS_VERSION },
+    metadata: { version: REGISTRATION_QUESTIONS_VERSION, questions: seen },
   })
 }
 
