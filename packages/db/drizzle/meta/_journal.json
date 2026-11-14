@@ -827,6 +827,20 @@
       "when": 1794666241982,
       "tag": "0117_fichas_en_uso_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1794675608409,
+      "tag": "0118_kairos_vigila_el_alta",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1794675732371,
+      "tag": "0119_kairos_vigila_el_alta_reglas",
+      "breakpoints": true
     }
   ]
 }

@@ -109,6 +109,12 @@ export const adminAudit = adminSchema.table(
   (table) => [
     index("admin_audit_created_idx").on(table.createdAt),
     index("admin_audit_actor_idx").on(table.actorUserId),
+    // Lo último de una clínica por acción: quién cargó, si ya se cargó, el relleno del alta.
+    index("admin_audit_org_action_idx").on(
+      table.organizationId,
+      table.action,
+      table.createdAt.desc(),
+    ),
   ],
 )
 

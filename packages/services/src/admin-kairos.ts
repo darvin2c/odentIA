@@ -127,6 +127,7 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   presentacion_hecha: "la pregunta de una presentación",
   correo_sin_cliente: "un correo sin cliente",
   responder_correo: "la respuesta a un correo",
+  posible_carga: "una posible carga de datos",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -924,6 +925,7 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   presentacion_hecha: ["outcome", "body", "nextDueOn"],
   correo_sin_cliente: ["clientId"],
   responder_correo: ["body"],
+  posible_carga: [],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -1102,6 +1104,9 @@ async function executeItem<O extends KairosOutreachPrepared>(
     case "guion":
       // El guion se lee; aprobarlo es «listo», no ejecuta nada.
       return { status: "ejecutada", result: { taskId: str(payload.taskId) } }
+    case "posible_carga":
+      // Ninguna regla la prepara todavía: marcar la carga llega con su operación.
+      throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Esto aún no se puede aprobar aquí")
   }
 }
 
