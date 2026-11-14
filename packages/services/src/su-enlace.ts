@@ -16,6 +16,7 @@ import {
   onlyAskedHealth,
   phoneFormatError,
   productWords,
+  REGISTRATION_FIELDS,
   type RegistrationConfig,
   type RegistrationFieldKey,
 } from "@odentia/clinical"
@@ -76,6 +77,7 @@ import {
   type DeclaredPatientHealthInput,
   getPatientHealth,
   declarantOfContact,
+  knownHealthQuestionsOf,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
 } from "./clinical.js"
@@ -1003,9 +1005,16 @@ async function saveLinkData(
     const value = typeof raw === "string" ? raw.trim() : null
     if (value) patch[key] = value
   }
-  // De su salud, solo lo que se le preguntó: lo que ya se sabía no se le mostró y no lo cambia.
+  // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
   const asked = input.health ? await healthQuestionsOf(tx, orgId, link) : []
-  const said = input.health && asked.length > 0 ? onlyAskedHealth(input.health, asked) : null
+  const known = asked.length > 0 ? knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)) : null
+  const said =
+    input.health && known
+      ? onlyAskedHealth(
+          input.health,
+          REGISTRATION_FIELDS.filter((field) => field.group === "health" && !known.has(field.key)).map((field) => field.key),
+        )
+      : null
   const withHealth = !!said && declaredHealthAnswered(said)
   const renamed = input.name ? await correctLinkName(tx, orgId, link, patientId, input.name) : null
   const consented = await saveLinkConsents(tx, orgId, link, patientId, input, options.toldWhatsApp)
