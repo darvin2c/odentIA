@@ -54,7 +54,7 @@ function retiredWords(born: EncounterBorn): string {
       count(born.indicated.filter((row) => row.retired).length, "tratamiento", "tratamientos"),
       count(born.followUps.filter((row) => row.retired).length, "control", "controles"),
       count(born.consents.filter((row) => row.status === "anulado").length, "consentimiento", "consentimientos"),
-      count(born.forms.filter((row) => row.retired).length, "formulario", "formularios"),
+      count(born.forms.filter((row) => row.retired).length, "ficha", "fichas"),
     ].filter((part): part is string => part !== null),
   )
 }
@@ -153,7 +153,7 @@ function BornParts({ born, retired = false }: { born: EncounterBorn; retired?: b
             ))}
             {forms.map((row) => (
               <li key={row.id}>
-                {row.state === "a_medias" ? "Formulario a medias" : "Formulario"}: {row.title}
+                {row.state === "a_medias" ? "Ficha a medias" : "Ficha"}: {row.title}
                 <span className="text-muted-foreground">
                   {retired
                     ? " · de una atención anulada"

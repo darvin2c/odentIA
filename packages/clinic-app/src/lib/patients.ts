@@ -1115,7 +1115,7 @@ export function timelineTypeLabel(type: string): string {
     case "order":
       return "Orden"
     case "form":
-      return "Formulario"
+      return "Ficha"
     case "odontogram_signed":
       return "Odontograma firmado"
     default:

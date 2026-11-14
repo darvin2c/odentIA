@@ -98,6 +98,7 @@ import {
 } from "./document-viewer"
 import { type NewDocumentKind, newDocumentOptions } from "./encounter-documents"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
+import { formRowTitle } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderResultDrawer } from "./ordenes-tab"
 import { budgetStatusTone } from "./plan/budget-parts"
@@ -580,7 +581,7 @@ export function DocumentosSection({
           filter: FILTER_OF_KIND.formulario,
           teeth: [],
           retired: false,
-          title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
+          title: formRowTitle(response),
           // Dice lo de su atención: quedó a medias al firmarla, o es de una que se anuló.
           detail: `${formatDate(date)} · ${formStateWords(response)}`,
           date,
@@ -928,7 +929,7 @@ export function DocumentosSection({
             <EmptyState
               icon={FileStack}
               title="Todavía no tiene documentos"
-              description="Recetas, órdenes, consentimientos, formularios e imágenes de esta persona."
+              description="Recetas, órdenes, consentimientos, fichas e imágenes de esta persona."
               actionLabel={canWrite ? "Nuevo" : undefined}
               onAction={canWrite ? () => setMenuOpen(true) : undefined}
             />
@@ -1093,6 +1094,7 @@ export function DocumentosSection({
           patientId={patientId}
           encounterId={encounterId}
           templates={(templates.data?.data ?? []).filter((t) => t.respondent !== "portal")}
+          loading={!templates.isSuccess}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
             setCreating(null)
@@ -1374,12 +1376,18 @@ function OpenedDocument({
       )
     case "formulario":
       return (
-        <DetailDrawer open title={opened.response.templateTitle ?? "Formulario"} onClose={onClose}>
+        <DetailDrawer open title={opened.response.templateTitle ?? "Ficha"} onClose={onClose}>
           <ResponseDetail
             key={opened.response.id}
             response={
               (forms.data?.data ?? []).find((row) => row.id === opened.response.id) ??
               opened.response
+            }
+            // La anterior del mismo tipo, al lado: la misma regla que en la atención.
+            previous={
+              opened.response.previousId
+                ? ((forms.data?.data ?? []).find((row) => row.id === opened.response.previousId) ?? null)
+                : null
             }
             canWrite={canWrite}
             onChanged={onChanged}

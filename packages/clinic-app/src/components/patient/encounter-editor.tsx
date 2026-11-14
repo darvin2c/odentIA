@@ -1589,7 +1589,7 @@ export function EncounterEditor({
     {
       key: "documentos",
       title: "Documentos",
-      description: "Receta, consentimiento, orden, formulario, imagen o archivo de esta atención.",
+      description: "Receta, consentimiento, orden, ficha, imagen o archivo de esta atención.",
       summary:
         [
           docs.total === 0 ? "Sin documentos" : counted(docs.total, "documento", "documentos"),

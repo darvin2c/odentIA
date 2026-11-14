@@ -56,7 +56,9 @@ import {
   PrescriptionPaper,
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
+import { FormOffersBox } from "./form-offers"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
+import { formRowTitle } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 
@@ -75,7 +77,7 @@ const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
   { kind: "receta", label: "Receta" },
   { kind: "consentimiento", label: "Consentimiento" },
   { kind: "orden", label: "Orden" },
-  { kind: "formulario", label: "Formulario" },
+  { kind: "formulario", label: "Ficha" },
   { kind: "archivo", label: "Imagen o archivo" },
 ]
 
@@ -291,6 +293,7 @@ export function EncounterDocumentsBlock({
         ["prescriptions", patientId],
         ["medical-leaves", patientId],
         ["form-responses", patientId],
+        ["form-offers", patientId, encounterId],
         ["encounter-closing", patientId, encounterId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     )
@@ -364,7 +367,7 @@ export function EncounterDocumentsBlock({
               .
             </>
           ) : (
-            "Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención."
+            "Receta, consentimiento, orden, ficha o imagen, llenos con lo de esta atención."
           )}
         </p>
         {canWrite && !signed ? (
@@ -393,6 +396,20 @@ export function EncounterDocumentsBlock({
         canComplete={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
         onOpen={setOpenForm}
       />
+
+      {/* Las fichas que aparecen solas: por la cita, por la edad o por quien atiende. Ninguna se exige. */}
+      {signed ? null : (
+        <FormOffersBox
+          patientId={patientId}
+          encounterId={encounterId}
+          professionalUserId={detail.encounter.professionalUserId}
+          canStart={canWrite && !disabled}
+          beforeWrite={beforeWrite}
+          onStarted={refresh}
+          onOpen={setOpenForm}
+          onOther={() => startNew("formulario")}
+        />
+      )}
 
       {docs.toPrepare.length > 0 ? (
         <section
@@ -656,7 +673,7 @@ export function EncounterDocumentsBlock({
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">
-                Formulario · {form.templateTitle ?? "Formulario"}
+                {formRowTitle(form)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {signed && form.status === "borrador"
@@ -760,6 +777,7 @@ export function EncounterDocumentsBlock({
           encounterId={encounterId}
           defaultProfessionalUserId={detail.encounter.professionalUserId}
           templates={(formTemplates.data?.data ?? []).filter((t) => t.respondent !== "portal")}
+          loading={!formTemplates.isSuccess}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
             setCreating(null)
@@ -926,20 +944,20 @@ export function UnfinishedFormsBox({
   if (forms.length === 0) return null
   return (
     <section
-      aria-label="Formularios a medias"
+      aria-label="Fichas a medias"
       className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3"
     >
       <div className="flex min-w-0 flex-col">
         <span className="text-sm font-medium">
-          {forms.length === 1 ? "Falta terminar un formulario" : `Falta terminar ${forms.length} formularios`}
+          {forms.length === 1 ? "Falta terminar una ficha" : `Falta terminar ${forms.length} fichas`}
         </span>
         <span className="text-xs text-muted-foreground">
-          Quedó a medias al firmar la atención. Al terminarlo lleva su propia fecha y hora.
+          Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora.
         </span>
       </div>
       <ul className="flex flex-col gap-2">
         {forms.map((form) => {
-          const title = form.templateTitle ?? "Formulario"
+          const title = form.templateTitle ?? "Ficha"
           return (
             <li key={form.id} className="flex flex-wrap items-center justify-between gap-2">
               <span className="min-w-0 break-words text-sm">{title}</span>
@@ -983,10 +1001,12 @@ export function FormDetail({
     enabled: responseId !== null,
   })
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
+  // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
+  const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
   return (
     <DetailDrawer
       open={responseId !== null && response !== null}
-      title={response?.templateTitle ?? "Formulario"}
+      title={response?.templateTitle ?? "Ficha"}
       description="Se guarda solo mientras lo completas."
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
@@ -995,6 +1015,7 @@ export function FormDetail({
         <ResponseDetail
           key={response.id}
           response={response}
+          previous={previous}
           canWrite={canWrite}
           onChanged={onChanged}
         />

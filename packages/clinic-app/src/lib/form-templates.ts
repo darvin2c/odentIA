@@ -117,7 +117,7 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
     return `Desde ese momento lo reciben los pacientes con cita por venir, para responderlo antes de venir. ${before}`
   }
   if (replaced) {
-    const base = `La versión ${replaced.version} se archiva y los formularios nuevos usarán la ${draft.version}.`
+    const base = `La versión ${replaced.version} se archiva y las fichas nuevas usarán la ${draft.version}.`
     if (replaced.respondent !== "portal") return `${base} ${KEEPS}`
     // La versión anterior la respondía el paciente y esta la llena el equipo.
     if (!reach) return `${base} Como ahora lo llena el equipo, cambia lo que reciben los pacientes antes de su cita. ${KEEPS}`
@@ -134,7 +134,7 @@ export function publishWords(draft: FormTemplate, templates: readonly FormTempla
 export function leaveWords(current: FormTemplate, reach: TemplateReach | null): string {
   const again = "Puedes volver a usarlo cuando quieras."
   if (current.respondent !== "portal") {
-    return `Deja de ofrecerse en «Nuevo» › «Formulario». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
+    return `Deja de ofrecerse en «Nuevo» › «Ficha». Lo ya llenado sigue en cada paciente, con sus preguntas. ${again}`
   }
   const kept = `Lo que ya respondieron sigue en cada paciente. ${again}`
   if (!reach) return `Si es el que reciben los pacientes con cita por venir, dejarán de recibirlo. ${kept}`
