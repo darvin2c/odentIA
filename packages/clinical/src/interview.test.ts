@@ -19,7 +19,7 @@ describe("la entrevista de salud en palabras (copia de la historia)", () => {
       { key: "antecedentesPersonales.hospitalizaciones", label: "Hospitalizaciones", value: "Neumonía en 2019" },
       { key: "antecedentesPersonales.transfusiones", label: "Transfusiones", value: "Ninguna" },
       // La semana de hoy y, entre paréntesis, la que se dijo el día en que se dijo.
-      { key: PREGNANCY_ENTRY_KEY, label: "Embarazo", value: "Sí · 32 semanas a la fecha de esta copia (30 el 13/11/2026)" },
+      { key: PREGNANCY_ENTRY_KEY, label: "Embarazo", value: "Sí · 32 semanas a la fecha de esta copia (30 semanas el 13/11/2026)" },
     ])
   })
 
@@ -29,7 +29,7 @@ describe("la entrevista de salud en palabras (copia de la historia)", () => {
     expect(pregnancyOf(old, "2026-11-13")).toEqual({
       key: PREGNANCY_ENTRY_KEY,
       label: "Embarazo",
-      value: "Sí · 32 semanas a la fecha de esta copia (30 el 13/11/2026)",
+      value: "Sí · 32 semanas a la fecha de esta copia (30 semanas el 13/11/2026)",
     })
     // Sin fecha de verdad ya no se afirma.
     expect(pregnancyOf(old)?.value).toBe("Por confirmar: anotado sin fecha")
@@ -47,7 +47,11 @@ describe("la entrevista de salud en palabras (copia de la historia)", () => {
       "No · lo dijo el 13/11/2026",
     )
     expect(pregnancyOf({ embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-11-20", semanas: 1 } } })?.value).toBe(
-      "Sí · 2 semanas a la fecha de esta copia (1 el 20/11/2026)",
+      "Sí · 2 semanas a la fecha de esta copia (1 semana el 20/11/2026)",
+    )
+    // Dicho el mismo día de la copia, la semana se dice una vez y con su día.
+    expect(pregnancyOf({ embarazoLactancia: { embarazo: { estado: "si", fecha: TODAY, semanas: 30 } } })?.value).toBe(
+      "Sí · 30 semanas (lo dijo el 27/11/2026)",
     )
   })
 

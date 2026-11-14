@@ -68,7 +68,10 @@ function pregnancyWords(answers: unknown, today: string, reading: PregnancyReadi
   if (view.state === "por_confirmar")
     return `Por confirmar: lo dijo el ${day}${view.weeksSaid === null ? "" : `, con ${weeksWords(view.weeksSaid)},`} y ya pasó el tiempo de un embarazo`
   if (view.weeksToday === null) return `Sí · lo dijo el ${day}, sin las semanas`
-  return `Sí · ${weeksWords(view.weeksToday)} a la fecha de esta copia (${view.weeksSaid} el ${day})`
+  // La misma semana que dijo no se repite: «30 semanas a la fecha de esta copia (30 el …)» decía
+  // dos veces lo mismo (QA de la entrega 2, como en la ficha).
+  if (view.weeksSaid === view.weeksToday) return `Sí · ${weeksWords(view.weeksToday)} (lo dijo el ${day})`
+  return `Sí · ${weeksWords(view.weeksToday)} a la fecha de esta copia (${view.weeksSaid === null ? "lo dijo" : weeksWords(view.weeksSaid)} el ${day})`
 }
 
 /**

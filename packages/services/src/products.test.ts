@@ -236,7 +236,8 @@ it("los antecedentes médicos van en la entrevista de latidIA y en su copia de l
     const [day, month, year] = [today.slice(8, 10), today.slice(5, 7), today.slice(0, 4)]
     // Van en «Entrevista de salud» de la copia, como en la ficha, cada dato con su nombre.
     expect(record.interview?.entries.map((entry) => `${entry.label}: ${entry.value}`)).toEqual([
-      `Embarazo: Sí · 12 semanas a la fecha de esta copia (12 el ${day}/${month}/${year})`,
+      // Dicho hoy: la semana va una vez, con su día.
+      `Embarazo: Sí · 12 semanas (lo dijo el ${day}/${month}/${year})`,
       "Hábitos: tabaco: lo dejó",
       `Vacunas: Influenza (${day}/${month}/${year})`,
     ])
