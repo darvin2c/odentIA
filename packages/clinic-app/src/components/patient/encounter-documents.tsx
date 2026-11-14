@@ -17,7 +17,10 @@ import type { ClinicalOrder } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
   consentSignatureWords,
+  canFillFormInAttention,
   FORM_RESPONSE_STATUS_LABELS,
+  formStateWords,
+  unfinishedAfterSigning,
   fetchConsents,
   fetchFormResponses,
   fetchFormTemplates,
@@ -340,6 +343,7 @@ export function EncounterDocumentsBlock({
 
   const pendingTitles = docs.toSign.map((doc) => doc.titleSnapshot)
   const signed = detail.encounter.status === "finalizada"
+  const unfinished = unfinishedAfterSigning(docs.forms, detail.encounter.status)
 
   return (
     <div className="flex flex-col gap-4">
@@ -382,6 +386,33 @@ export function EncounterDocumentsBlock({
           </DropdownMenu>
         ) : null}
       </div>
+
+      {/* Firmada con un formulario a medias: sigue a la vista como pendiente, y se termina desde aquí. */}
+      {unfinished.length > 0 ? (
+        <section
+          aria-label="Formularios a medias"
+          className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3"
+        >
+          <div className="flex min-w-0 flex-col">
+            <span className="text-sm font-medium">
+              {unfinished.length === 1 ? "Falta terminar un formulario" : `Falta terminar ${unfinished.length} formularios`}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Quedó a medias al firmar la atención. Al terminarlo lleva su propia fecha y hora.
+            </span>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {unfinished.map((form) => (
+              <li key={form.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 break-words text-sm">{form.templateTitle ?? "Formulario"}</span>
+                <Button type="button" size="sm" onClick={() => setOpenForm(form.id)}>
+                  {canFillFormInAttention(canWrite, disabled, detail.encounter.status) ? "Completar" : "Ver"}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {docs.toPrepare.length > 0 ? (
         <section
@@ -645,11 +676,15 @@ export function EncounterDocumentsBlock({
                 Formulario · {form.templateTitle ?? "Formulario"}
               </span>
               <span className="text-xs text-muted-foreground">
-                {FORM_RESPONSE_STATUS_LABELS[form.status]}
+                {signed && form.status === "borrador"
+                  ? formStateWords({ ...form, encounterStatus: "finalizada" })
+                  : FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" ? "Completar" : "Ver"}
+              {form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
+                ? "Completar"
+                : "Ver"}
             </Button>
           </li>
         ))}
@@ -837,7 +872,8 @@ export function EncounterDocumentsBlock({
       <FormDetail
         patientId={patientId}
         responseId={openForm}
-        canWrite={canWrite && !disabled}
+        // Firmada la atención, su formulario a medias se termina igual desde aquí.
+        canWrite={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
         onClose={() => setOpenForm(null)}
         onChanged={refresh}
       />
