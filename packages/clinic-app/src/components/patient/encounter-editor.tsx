@@ -1,5 +1,6 @@
 import {
   appendDictated,
+  type ClinicalProduct,
   formatMoney,
   formatVitals,
   gapWords,
@@ -86,6 +87,12 @@ import {
 import type { HealthGap } from "../../lib/encounters"
 import { groupFindings } from "../../lib/site-findings"
 import { productUi } from "../../product/product-ui"
+
+/**
+ * Si la atención dice lo que no se sabe de anticoagulantes y medicinas para los huesos: cambian lo
+ * que se hace en odentIA (extracciones, anestesia) y lo que receta latidIA; vistIA no lo usa.
+ */
+const ASKS_MEDICINE_CLASSES: Record<ClinicalProduct, boolean> = { dental: true, medical: true, optical: false }
 import { AttendingForNotice } from "../agenda/attending-for-notice"
 import { BookingHere } from "../agenda/schedule-host"
 import { useNoticesColumnDockBlocker } from "../notices-column"
@@ -2251,7 +2258,7 @@ export function EncounterEditor({
         sex={patient.patient.sex}
         onAntecedentes={() => setContextOpen(true)}
         // En la atención se dice también lo que nadie le preguntó de anticoagulantes y huesos.
-        medicineClasses={productUi().product !== "optical"}
+        medicineClasses={ASKS_MEDICINE_CLASSES[productUi().product]}
       />
       {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}
       <PageHeader

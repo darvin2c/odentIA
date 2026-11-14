@@ -175,8 +175,8 @@ export function onlyAskedHealth(health: DeclaredHealth, keys: readonly Registrat
   const asked = new Set<string>(keys)
   const out: Rec = {}
   for (const [key, value] of Object.entries(health)) {
-    if (key === "personal" || key === "dental" || key === "medical" || key === "optical") {
-      if (!isRec(value)) continue
+    // Un grupo de la entrevista (`personal`, el de cada producto) no lleva `state`: se filtra dato por dato.
+    if (key !== "bloodGroup" && isRec(value) && !("state" in value)) {
       const kept = Object.fromEntries(
         Object.entries(value).filter(([name]) => {
           const full = `${key}.${name}`
