@@ -8,9 +8,13 @@
  *
  * Cuidados, porque son datos de salud en un teléfono que puede ser compartido
  * (auditor, segunda vuelta; lo legal queda pendiente):
- * - la clave es de esa clínica y de ese enlace (o de esa entrada pública): otro
- *   enlace en el mismo navegador no ve lo de otra persona. El token no se escribe tal
- *   cual en el almacenamiento, solo su huella;
+ * - el día en el celular es solo de lo que llega con un enlace personal (C8). El
+ *   registro sin enlace (QR o web) no sabe de quién es: puede ser la tablet que presta
+ *   la clínica. Lo suyo queda en la pestaña (`sessionStorage`), se va al cerrarla y
+ *   nunca se le ofrece a otra visita (`deviceDraftPlace`);
+ * - la clave es de esa clínica y de ese enlace: otro enlace en el mismo navegador no
+ *   ve lo de otra persona. El token no se escribe tal cual en el almacenamiento, solo
+ *   su huella;
  * - lo vencido se borra al leerlo y cada vez que se abre una de estas páginas;
  * - se guarda solo lo escrito del formulario (texto, opciones): nunca un archivo;
  * - sin almacenamiento (ventana privada, bloqueado, lleno) todo funciona igual y
@@ -77,9 +81,22 @@ function deviceDraftLinkPrefix(clinic: string, flow: string, who: string): strin
   return `${PREFIX}${clinic}.${flow}.${who}.`
 }
 
-function storage(): Storage | null {
+/** Lo del registro sin enlace (QR o web): no es de nadie en particular. */
+const ANONYMOUS = ".registro.e-"
+
+/**
+ * Dónde vive lo escrito con esa clave: «celular» (un día, `localStorage`) si llega con
+ * un enlace personal; «pestaña» (`sessionStorage`, se va al cerrarla) si es el registro
+ * sin enlace, que puede llenarse en un equipo prestado por la clínica.
+ */
+export function deviceDraftPlace(key: string): "celular" | "pestaña" {
+  return key.includes(ANONYMOUS) ? "pestaña" : "celular"
+}
+
+function storage(key?: string): Storage | null {
   try {
-    return typeof window === "undefined" ? null : window.localStorage
+    if (typeof window === "undefined") return null
+    return key && deviceDraftPlace(key) === "pestaña" ? window.sessionStorage : window.localStorage
   } catch {
     return null
   }
@@ -143,7 +160,7 @@ function parse<T>(text: string | null, now: number): DeviceDraft<T> | "vencido" 
 
 /** Lo guardado con esa clave, si sigue vigente. Lo vencido o dañado se borra aquí mismo. */
 export function readDeviceDraft<T>(key: string, now = Date.now()): DeviceDraft<T> | null {
-  const store = storage()
+  const store = storage(key)
   if (!store) return null
   let text: string | null
   try {
@@ -170,7 +187,7 @@ export function writeDeviceDraft<T>(
   step: DeviceDraftStep | null,
   now = Date.now(),
 ): void {
-  const store = storage()
+  const store = storage(key)
   if (!store) return
   const startedAt = readDeviceDraft<T>(key, now)?.startedAt ?? now
   const draft: DeviceDraft<T> = { values, step, startedAt, expiresAt: startedAt + DEVICE_DRAFT_TTL_MS }
@@ -187,19 +204,26 @@ export function personalLinkDraftKey(clinic: string, token: string, appointmentS
 }
 
 export function clearDeviceDraft(key: string): void {
-  const store = storage()
+  const store = storage(key)
   if (store) remove(store, key)
 }
 
 /**
  * Borra todo lo de ese enlace en esta clínica (todas sus citas): el enlace ya no
- * sirve, o ya lo envió desde otra pestaña u otro celular.
+ * sirve, o ya lo envió desde otra pestaña u otro celular. Devuelve cuántos borró: la
+ * pantalla dice que lo escrito sin enviar se borró, en vez de «No perdiste nada».
  */
-export function clearDeviceDraftsOfLink(clinic: string, token: string): void {
+export function clearDeviceDraftsOfLink(clinic: string, token: string): number {
   const store = storage()
-  if (!store) return
+  if (!store) return 0
   const prefix = deviceDraftLinkPrefix(clinic, "enlace", `t-${tokenPrint(token)}`)
-  for (const key of keysOf(store)) if (key.startsWith(prefix)) remove(store, key)
+  let removed = 0
+  for (const key of keysOf(store)) {
+    if (!key.startsWith(prefix)) continue
+    remove(store, key)
+    removed++
+  }
+  return removed
 }
 
 function keysOf(store: Storage): string[] {
@@ -217,13 +241,18 @@ function keysOf(store: Storage): string[] {
 
 /**
  * Al abrir una de estas páginas: borra lo vencido de cualquier enlace o clínica
- * de este navegador, y lo que el registro dejaba en la pestaña antes de la entrega 9.
+ * de este navegador, lo del registro sin enlace que hubiera quedado en el celular (nunca
+ * debe: es de la pestaña) y lo que el registro dejaba en la pestaña antes de la entrega 9.
  */
 export function sweepDeviceDrafts(now = Date.now()): void {
   const store = storage()
   if (store) {
     for (const key of keysOf(store)) {
       if (!key.startsWith(PREFIX)) continue
+      if (key.includes(ANONYMOUS)) {
+        remove(store, key)
+        continue
+      }
       let text: string | null = null
       try {
         text = store.getItem(key)

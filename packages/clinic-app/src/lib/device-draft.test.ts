@@ -5,6 +5,7 @@ import {
   clearDeviceDraftsOfLink,
   DEVICE_DRAFT_TTL_MS,
   deviceDraftKey,
+  deviceDraftPlace,
   deviceDraftsWork,
   draftResumeWords,
   draftUntilWords,
@@ -172,8 +173,10 @@ describe("la clave es de esa clínica y de ese enlace", () => {
     writeDeviceDraft(marta, { givenNames: "Marta" }, step3)
     writeDeviceDraft(otherAppointment, { givenNames: "Marta" }, step3)
     writeDeviceDraft(rosa, { givenNames: "Rosa" }, step3)
-    clearDeviceDraftsOfLink("dental-smile", "token-de-marta-abc123")
+    expect(clearDeviceDraftsOfLink("dental-smile", "token-de-marta-abc123")).toBe(2)
     expect(local.keys()).toEqual([rosa])
+    // Sin nada que borrar, la pantalla no tiene nada que decir.
+    expect(clearDeviceDraftsOfLink("dental-smile", "token-de-marta-abc123")).toBe(0)
   })
 })
 
@@ -238,5 +241,42 @@ describe("lo que dice la pantalla", () => {
   it("si vence el mismo día, dice «hasta hoy»", () => {
     const now = new Date("2026-11-14T00:30:00-05:00").getTime()
     expect(draftUntilWords(now + 20 * HOUR, now, "es-PE", "America/Lima")).toMatch(/^hasta hoy, 8:30\sp\.\sm\.$/)
+  })
+})
+
+// La tablet que presta la clínica: el registro sin enlace no guarda la salud de quien vino antes.
+describe("el registro sin enlace (QR o web) vive solo en la pestaña", () => {
+  const qr = deviceDraftKey({ clinic: "dental-smile", flow: "registro", entry: "qr" })
+  const web = deviceDraftKey({ clinic: "dental-smile", flow: "registro", entry: "public_link" })
+  const withLink = deviceDraftKey({ clinic: "dental-smile", flow: "registro", token: "token-de-marta-abc123" })
+
+  it("con enlace personal, un día en el celular; sin enlace, la pestaña", () => {
+    expect(deviceDraftPlace(qr)).toBe("pestaña")
+    expect(deviceDraftPlace(web)).toBe("pestaña")
+    expect(deviceDraftPlace(withLink)).toBe("celular")
+    expect(deviceDraftPlace(marta)).toBe("celular")
+  })
+
+  it("sin enlace se escribe en la pestaña y nada en el celular; al cerrarla, no queda", () => {
+    writeDeviceDraft(qr, { allergiesText: "penicilina" }, step3)
+    expect(local.keys()).toEqual([])
+    expect(session.keys()).toEqual([qr])
+    expect(readDeviceDraft<{ allergiesText: string }>(qr)?.values.allergiesText).toBe("penicilina")
+    // Cerrar la pestaña.
+    session.clear()
+    expect(readDeviceDraft(qr)).toBeNull()
+    clearDeviceDraft(qr)
+  })
+
+  it("con enlace personal, sigue tras cerrar la pestaña", () => {
+    writeDeviceDraft(withLink, { allergiesText: "penicilina" }, step3)
+    session.clear()
+    expect(readDeviceDraft(withLink)).not.toBeNull()
+  })
+
+  it("si algo del registro sin enlace quedó en el celular, se borra al abrir", () => {
+    local.setItem(qr, JSON.stringify({ values: { a: "b" }, step: null, startedAt: START.getTime(), expiresAt: START.getTime() + HOUR }))
+    sweepDeviceDrafts()
+    expect(local.getItem(qr)).toBeNull()
   })
 })

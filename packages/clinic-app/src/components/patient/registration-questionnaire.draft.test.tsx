@@ -11,7 +11,10 @@ import { type RegistrationFill, RegistrationQuestionnaire } from "./registration
 // de prueba, escribe en el celular, se cierra y se vuelve a abrir.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const config = { ...DEFAULT_REGISTRATION_CONFIG, enabled: true, privacyNotice: "Aviso de demostración" }
-const key = deviceDraftKey({ clinic: "dental-smile", flow: "registro", entry: "qr" })
+// Con un enlace personal (el registro que le mandó la clínica a ella): lo escrito queda un día en el celular.
+const key = deviceDraftKey({ clinic: "dental-smile", flow: "registro", token: "token-de-marta" })
+// Sin enlace (QR en recepción o la web): puede ser la tablet de la clínica, solo en la pestaña.
+const anonymous = deviceDraftKey({ clinic: "dental-smile", flow: "registro", entry: "qr" })
 const PROMISE = "Lo que escribas se guarda en este celular hasta que lo envíes, por un día."
 const mounted: Array<{ host: HTMLElement; root: Root }> = []
 
@@ -19,6 +22,7 @@ async function open(
   props: {
     resume?: boolean
     fill?: RegistrationFill
+    draftKey?: string
     /** Recibe lo que contó de su visita. */
     onSubmit?: (visitReason: string | undefined) => Promise<void>
   } = {},
@@ -33,7 +37,7 @@ async function open(
         config={config}
         today="2026-11-13"
         countryCode="PE"
-        draftKey={key}
+        draftKey={props.draftKey ?? key}
         resume={props.resume}
         fill={props.fill}
         submitLabel="Enviar"
@@ -46,8 +50,17 @@ async function open(
   return host
 }
 
-/** Cerrar el navegador: la página se va, el celular se queda con lo suyo. */
+/** Cerrar la pestaña: la página y lo de la pestaña se van; el celular se queda con lo suyo. */
 async function closeAll() {
+  for (const { host, root } of mounted.splice(0)) {
+    await act(async () => root.unmount())
+    host.remove()
+  }
+  sessionStorage.clear()
+}
+
+/** Recargar: la página se va, la pestaña sigue. */
+async function reload() {
   for (const { host, root } of mounted.splice(0)) {
     await act(async () => root.unmount())
     host.remove()
@@ -208,5 +221,40 @@ describe("si la interrumpen, lo escrito sigue en su celular", () => {
     expect(givenNames(host)?.value).toBe("Marta")
     expect(localStorage.length).toBe(0)
     expect(errors).not.toHaveBeenCalled()
+  })
+
+  it("con su enlace, lo escrito sobrevive a cerrar la pestaña", async () => {
+    await writeName(await open(), "Marta")
+    await closeAll()
+    expect((await open()).textContent).toContain("Seguir donde ibas")
+  })
+})
+
+// Pedido del coordinador: la tablet que presta la clínica no guarda la salud de quien vino antes.
+describe("el registro sin enlace (QR o web) es solo de la pestaña", () => {
+  it("no promete guardar un día y no deja nada en el celular", async () => {
+    const host = await open({ draftKey: anonymous })
+    expect(host.textContent).not.toContain(PROMISE)
+    await writeName(host, "Marta")
+    expect(localStorage.length).toBe(0)
+    expect(readDeviceDraft<{ givenNames: string }>(anonymous)?.values.givenNames).toBe("Marta")
+  })
+
+  it("al recargar en la misma pestaña vuelve solo, sin «Seguir donde ibas»", async () => {
+    await writeName(await open({ draftKey: anonymous }), "Marta")
+    await reload()
+    const host = await open({ draftKey: anonymous })
+    expect(host.textContent).not.toContain("Seguir donde ibas")
+    expect(givenNames(host)?.value).toBe("Marta")
+  })
+
+  it("tras cerrar la pestaña, la siguiente persona no ve nada de la anterior", async () => {
+    await writeName(await open({ draftKey: anonymous }), "Marta")
+    await closeAll()
+    const host = await open({ draftKey: anonymous })
+    expect(host.textContent).not.toContain("Seguir donde ibas")
+    expect(host.textContent).not.toContain("Vas en el paso")
+    expect(givenNames(host)?.value ?? "").toBe("")
+    expect(readDeviceDraft(anonymous)).toBeNull()
   })
 })

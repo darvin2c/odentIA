@@ -91,6 +91,7 @@ import {
   DEVICE_DRAFT_PROMISE,
   type DeviceDraft,
   type DeviceDraftStep,
+  deviceDraftPlace,
   deviceDraftsWork,
   draftResumeWords,
   draftUntilWords,
@@ -783,10 +784,13 @@ export function RegistrationQuestionnaire({
     if (!draftKey) return
     // Lo vencido de cualquier enlace se borra al abrir; lo de este, si venció, también.
     sweepDeviceDrafts()
-    setKeeps(deviceDraftsWork())
+    // El registro sin enlace (QR o web) puede ser la tablet de la clínica: lo suyo vive en la
+    // pestaña, no se promete un día en el celular y, al recargar, vuelve solo, sin ofrecérselo a nadie.
+    const inTab = deviceDraftPlace(draftKey) === "pestaña"
+    setKeeps(!inTab && deviceDraftsWork())
     const saved = readDeviceDraft<Draft>(draftKey)
     if (!saved || !draftHasWriting(draftKeptOnDevice(saved.values))) return
-    if (resume) takeBack(saved)
+    if (resume || inTab) takeBack(saved)
     else setOffered(saved)
   }, [])
   useEffect(() => {
