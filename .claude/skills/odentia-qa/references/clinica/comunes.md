@@ -74,6 +74,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 **Ya falló:** la declaración no se veía en el enlace y faltaba la pieza (PR 479); un documento mandado por enlace en vez del PDF (PR 501).
 **Fuentes:** ADR 0037, 0101, 0116, 0148 y 0156; Ley 27337, Título Preliminar, art. I (niño hasta cumplir 12 años; por verificar); política sobre chupones de la AAPD (dejar la succión no nutritiva hacia los 36 meses; por verificar).
 
+**Sumado por la QA de la entrega 6 (14 nov 2026):**
+- [ ] Quien responde por otra persona lee también las respuestas en tercera persona («Nunca fumó», «Fuma», «Lo dejó»).
+- [ ] A un menor de 12 no se le pregunta si fuma ni si toma alcohol. Caso: «Mateo, 7 años, registrado por su mamá».
+
 ## P-COM-05 Papeles emitidos y su comprobación
 
 **Dónde:** las rutas de impresión (`R/_org/patients.$patientId.*.print.tsx`: consentimiento, receta, orden y descanso; el odontograma en `apps/dental-clinic`), la tabla `issued_paper` y `R/public/comprobar.$token.tsx`.
