@@ -564,6 +564,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   // Sin dictado no hay sugerencias que corregir ni página de Clío donde probarlo.
   "pacientes-dictado-corregir-pausar": () => [],
+  "pacientes-dictado-ficha": () => [],
+  "pacientes-dictado-ficha-no-lleno": () => [],
   "agente-clio-probar-dictado": () => [],
   "elijo-tratamientos-trae-cita": (faq) => [
     {
