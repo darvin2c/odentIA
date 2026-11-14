@@ -1,3 +1,4 @@
+import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -126,9 +127,19 @@ export function HealthReviewNotice({
     const saidMedications = health.medications.filter(
       (row) => group.medications.includes(row.id) && isCurrentMedication(row, today),
     )
-    if (saidMedications.length > 0)
-      rows.push({ label: "Medicinas", value: saidMedications.map((row) => row.name).join(", ") })
-    else if (group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
+    // Lo que tiene marca (anticoagulante, huesos) va en su propia fila, como arriba de la ficha.
+    for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
+      const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
+      if (inClass.length > 0)
+        rows.push({
+          label: key === "anticoagulants" ? "Anticoagulante" : "Medicinas para los huesos",
+          value: inClass.map((row) => [row.name, row.dose].filter(Boolean).join(" ")).join(", "),
+        })
+    }
+    const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
+    if (otherMedications.length > 0)
+      rows.push({ label: "Medicinas", value: otherMedications.map((row) => row.name).join(", ") })
+    else if (saidMedications.length === 0 && group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
     const saidConditions = health.conditions.filter((row) => group.conditions.includes(row.id) && row.status === "activa")
     if (saidConditions.length > 0)
       rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })

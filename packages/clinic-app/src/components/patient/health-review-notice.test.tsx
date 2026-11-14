@@ -187,4 +187,37 @@ describe("«Pregúntale» con representante", () => {
     expect(askWhom([{ ...guardian, relationship: "family" }])).toBeNull()
     expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
+
+  it("Marta: el anticoagulante y la medicina para los huesos van cada uno en su fila", () => {
+    const marta = {
+      ...health,
+      allergyReviewDue: false,
+      reviewPending: true,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "recorded" },
+      medications: [
+        { id: "m1", name: "warfarina 5 mg", atcCode: "B01A", endDate: null },
+        { id: "m2", name: "alendronato", atcCode: "M05B", endDate: null },
+        { id: "m3", name: "Losartán", atcCode: null, endDate: null },
+      ],
+      declared: [
+        {
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: [],
+          conditions: [],
+          medications: ["m1", "m2", "m3"],
+          pregnancy: false,
+          saidNo: { allergies: false, conditions: false, medications: false },
+        },
+      ],
+    } as unknown as PatientHealth
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Marta Ríos" health={marta} sex="F" />
+      </QueryClientProvider>,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toMatch(/Anticoagulante\|+[^|]*warfarina 5 mg/)
+    expect(page).toMatch(/Medicinas para los huesos\|+[^|]*alendronato/)
+    expect(page).toMatch(/Medicinas\|+[^|]*Losartán/)
+  })
 })
