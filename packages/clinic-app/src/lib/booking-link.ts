@@ -1,4 +1,4 @@
-import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
+import type { RegistrationAnswers, RegistrationConfig, RegistrationFieldKey } from "@odentia/clinical"
 import type { ConsentLetterhead } from "./clinical-forms"
 import { ApiError, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
@@ -360,8 +360,10 @@ export interface PersonalDataForm {
   hasRepresentative: boolean
   /** El registro de la clínica: el cuestionario pregunta lo que falta con sus mismas pantallas. */
   registration: RegistrationConfig
-  /** Si se le pregunta su salud (nadie la registró aún en su ficha). */
+  /** Si se le pregunta algo de su salud. */
   asksHealth: boolean
+  /** De su salud, solo lo que falta, dato por dato (lo demás ya se sabe). */
+  healthQuestions?: RegistrationFieldKey[]
   firstName: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }

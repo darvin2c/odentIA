@@ -1,4 +1,4 @@
-import type { RegistrationAnswers } from "@odentia/clinical"
+import { declaredHealthAnswered, type RegistrationAnswers } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
@@ -32,13 +32,6 @@ const DATA_KEYS = [
   "affiliationNumber",
 ] as const
 
-/** Si respondió algo de su salud (saltarla no declara nada). */
-function declaresHealth(health: RegistrationAnswers["health"]): boolean {
-  if (!health) return false
-  if (health.bloodGroup) return true
-  if ([health.allergies, health.conditions, health.medications].some((group) => group && group.state !== "unanswered")) return true
-  return [health.personal, health.dental].some((group) => Object.keys(group ?? {}).length > 0)
-}
 
 /** Las respuestas del cuestionario, como las guarda «Tus datos», con lo que aún no aceptó o respondió. */
 function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pending"]): PersonalDataInput {
@@ -60,7 +53,7 @@ function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pe
           ...(rep.relationshipDetail ? { relationshipDetail: rep.relationshipDetail } : {}),
         }
       : null,
-    health: declaresHealth(answers.health) ? (answers.health ?? null) : null,
+    health: declaredHealthAnswered(answers.health) ? (answers.health ?? null) : null,
     ...(pending.privacy ? { privacyAccepted: answers.privacyAccepted } : {}),
     ...(pending.promotions && answers.acceptsMessages !== undefined ? { acceptsPromotions: answers.acceptsMessages } : {}),
     ...(answers.acceptsReminders && data.phone ? { acceptsReminders: true } : {}),
@@ -120,6 +113,8 @@ export function PersonalDataForm({
         fill={{
           missing: new Set(form.missing.map((item) => item.key)),
           health: form.asksHealth,
+          // De su salud, solo lo que falta: lo que ya se sabe no se le muestra.
+          healthKeys: new Set(form.healthQuestions ?? []),
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
           privacy: form.pending.privacy,
