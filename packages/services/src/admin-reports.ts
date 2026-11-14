@@ -318,7 +318,7 @@ function requireReportsAdmin(actor: AdminActor | null): AdminActor {
 }
 
 /** Una organización que no es demo para presentar (ni marcada en su suscripción). */
-function notDemoOrg(orgId: SQL): SQL {
+export function notDemoOrg(orgId: SQL): SQL {
   return sql`(not exists (select 1 from ${saasDemo} d where d.organization_id = ${orgId})
     and not exists (select 1 from ${saasSubscription} ds where ds.organization_id = ${orgId} and ds.is_demo))`
 }

@@ -3,6 +3,7 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasClientMilestone,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -663,6 +664,18 @@ describe("fusionar", () => {
       contentType: "application/pdf",
       sizeBytes: 1,
     })
+    // Los pasos del alta guardados viajan con la cuenta (también «No aplica» y lo perdido).
+    const reachedAt = new Date("2026-10-01T15:00:00Z")
+    await ownerDb.insert(saasClientMilestone).values([
+      { clientId: drop, step: "entro", reachedAt, source: "hecho" },
+      {
+        clientId: drop,
+        step: "equipo",
+        naReason: "Trabaja sola",
+        naBy: admin.userId,
+        naAt: reachedAt,
+      },
+    ])
     await expect(mergeClients(ownerDb, support, keep, drop)).rejects.toMatchObject({
       code: "FORBIDDEN",
     })
@@ -674,7 +687,17 @@ describe("fusionar", () => {
       proposals: 1,
       outreach: 1,
       files: 1,
+      milestones: 2,
     })
+    const milestones = await ownerDb
+      .select()
+      .from(saasClientMilestone)
+      .where(eq(saasClientMilestone.clientId, keep))
+      .orderBy(saasClientMilestone.step)
+    expect(milestones).toMatchObject([
+      { step: "entro", reachedAt, source: "hecho" },
+      { step: "equipo", reachedAt: null, naReason: "Trabaja sola" },
+    ])
     expect(await ownerDb.select().from(saasClient).where(eq(saasClient.id, drop))).toEqual([])
     const [kept] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, keep))
     expect(kept).toMatchObject({ organizationId: orgId, city: "Piura" })

@@ -540,6 +540,7 @@ export function createApp(deps: AppDeps) {
       ...(deps.kairos ? { kairos: deps.kairos } : {}),
       getBillingSummary: getOrganizationBillingSummary,
       startTrial: startSaasTrial,
+      metaSignupAvailable: Boolean(deps.metaSignup),
     }),
   )
   app.route(

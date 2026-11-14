@@ -41,6 +41,7 @@ import {
   ClientDuplicateError,
   cancelClientTask,
   clearDueCargaNow,
+  clearStepNotApplicable,
   clientCreateSchema,
   clientFileKey,
   clientFileUrl,
@@ -74,6 +75,7 @@ import {
   markClientFileCarga,
   markInvitationSent,
   markOutreachSent,
+  markStepNotApplicable,
   mergeClients,
   moveClientTask,
   type OrganizationBillingLoaders,
@@ -144,6 +146,8 @@ export interface AdminClientsDeps {
   /** Lo mismo que usa «Alta asistida» en Organizaciones. */
   startTrial?: OrganizationBillingLoaders["startTrial"]
   getBillingSummary?: OrganizationBillingLoaders["getBillingSummary"]
+  /** «Conectar con Facebook» está configurado; sin él, el paso de WhatsApp dice «Espera a Meta». */
+  metaSignupAvailable?: boolean
 }
 
 /** Un documento subido a mano: como los adjuntos de Soporte. */
@@ -423,6 +427,14 @@ const annotateBody = z.strictObject({
       currentTool: z.enum(SAAS_CLIENT_TOOLS, "Elige qué usan hoy").optional(),
     })
     .default({}),
+})
+
+const notApplicableBody = z.strictObject({
+  reason: z
+    .string("Escribe por qué no aplica")
+    .trim()
+    .min(1, "Escribe por qué no aplica")
+    .max(300, "Usa como máximo 300 caracteres"),
 })
 
 /* ---------- Ayudas ---------- */
@@ -1283,8 +1295,42 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
 
   /* ----- Alta, documentos, borradores ----- */
 
+  const onboardingOptions = { metaSignupAvailable: deps.metaSignupAvailable ?? false }
   app.get(`/${ID}/onboarding`, (c) =>
-    staffRun(c, 200, (actor) => owner((tx) => onboardingSteps(tx, actor, c.req.param("id")))),
+    staffRun(c, 200, (actor) =>
+      owner((tx) => onboardingSteps(tx, actor, c.req.param("id"), new Date(), onboardingOptions)),
+    ),
+  )
+
+  // «No aplica» en un paso del alta, con su motivo. Quién puede en cada paso lo decide el
+  // servicio (pacientes, solo Administración); responde con los pasos ya recalculados.
+  app.post(`/${ID}/onboarding/:step/not-applicable`, async (c) => {
+    const raw = await bodyOf(c)
+    return staffRun(c, 200, (actor) => {
+      const body = parse(notApplicableBody, raw)
+      return owner(async (tx) => {
+        const now = new Date()
+        await markStepNotApplicable(
+          tx,
+          actor,
+          c.req.param("id"),
+          c.req.param("step"),
+          body.reason,
+          now,
+        )
+        return onboardingSteps(tx, actor, c.req.param("id"), now, onboardingOptions)
+      })
+    })
+  })
+
+  app.delete(`/${ID}/onboarding/:step/not-applicable`, (c) =>
+    staffRun(c, 200, (actor) =>
+      owner(async (tx) => {
+        const now = new Date()
+        await clearStepNotApplicable(tx, actor, c.req.param("id"), c.req.param("step"), now)
+        return onboardingSteps(tx, actor, c.req.param("id"), now, onboardingOptions)
+      }),
+    ),
   )
 
   app.get(`/${ID}/files`, (c) =>

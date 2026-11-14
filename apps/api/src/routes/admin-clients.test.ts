@@ -1015,3 +1015,126 @@ describe("documentos", () => {
     expect(objects.size).toBe(count)
   })
 })
+
+describe("«No aplica» en los pasos del alta", () => {
+  async function clientWithAccount(slug: string) {
+    const orgId = `org-${slug}-ficticia`
+    await ownerDb
+      .insert(organization)
+      .values({
+        id: orgId,
+        name: `Alta ${slug} (ficticia)`,
+        slug: `${slug}-ficticia`,
+        createdAt: new Date(),
+      })
+    const [row] = await ownerDb
+      .insert(saasClient)
+      .values({ name: `Alta ${slug} (ficticia)`, product: "dental", organizationId: orgId })
+      .returning({ id: saasClient.id })
+    if (!row) throw new Error("sin cliente")
+    return row.id
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: los pasos se leen sin tipo
+  const stepOf = (body: any, key: string) =>
+    body.data.steps.find((item: { key: string }) => item.key === key)
+
+  it("Soporte marca equipo; pacientes es de Administración; quitarlo responde con los pasos", async () => {
+    const clientId = await clientWithAccount("na-alta")
+    const marked = await call("POST", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT, {
+      reason: "Trabaja sola",
+    })
+    await expectStatus(marked, 200)
+    const body = await json(marked)
+    expect(stepOf(body, "equipo")).toMatchObject({
+      state: "no_aplica",
+      detail: "No aplica: Trabaja sola",
+    })
+    expect(body.data).toMatchObject({ total: 10, notApplicable: 1 })
+
+    await expectStatus(
+      await call("POST", `/${clientId}/onboarding/pacientes/not-applicable`, SUPPORT, {
+        reason: "No tenía lista de pacientes",
+      }),
+      403,
+    )
+    await expectStatus(
+      await call("POST", `/${clientId}/onboarding/pacientes/not-applicable`, ADMIN, {
+        reason: "No tenía lista de pacientes",
+      }),
+      200,
+    )
+    const cleared = await call("DELETE", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT)
+    await expectStatus(cleared, 200)
+    expect(stepOf(await json(cleared), "equipo").state).toBe("falta")
+
+    const empty = await call("POST", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT, {})
+    await expectStatus(empty, 400)
+    expect((await json(empty)).error.fields.reason).toBe("Escribe por qué no aplica")
+    const wrong = await call("POST", `/${clientId}/onboarding/carta/not-applicable`, ADMIN, {
+      reason: "Ya la tiene",
+    })
+    await expectStatus(wrong, 400)
+    expect((await json(wrong)).error.fields.step).toBeTruthy()
+  })
+
+  it("un rol que no es del equipo da 403 antes de leer el cuerpo", async () => {
+    const clientId = await clientWithAccount("na-ajeno")
+    const outsider = new Hono<{ Variables: { adminActor: AdminActor } }>()
+    outsider.use("*", async (c, next) => {
+      c.set("adminActor", { userId: "arm-ajeno", role: "vendedor" } as unknown as AdminActor)
+      await next()
+    })
+    outsider.route(
+      BASE,
+      createAdminClientsRoute({
+        ownerDb,
+        storage,
+        panelUrlOf: () => "https://app.odentia.localhost",
+        mailer: { send: async () => {} },
+      }),
+    )
+    outsider.onError((err, c) =>
+      err instanceof ServiceError
+        ? c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+        : c.json(errorBody(c, "INTERNAL", "Error interno"), 500),
+    )
+    const response = await outsider.request(
+      `${BASE}/${clientId}/onboarding/equipo/not-applicable`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "esto no es json",
+      },
+    )
+    await expectStatus(response, 403)
+  })
+
+  it("sin «Conectar con Facebook», WhatsApp dice «Espera a Meta»; con él, le toca a la clínica", async () => {
+    const clientId = await clientWithAccount("na-meta")
+    const waiting = stepOf(
+      await json(await call("GET", `/${clientId}/onboarding`, SUPPORT)),
+      "whatsapp",
+    )
+    expect(waiting).toMatchObject({ label: "Espera a Meta", waitingOn: "meta" })
+    const withMeta = new Hono<{ Variables: { adminActor: AdminActor } }>()
+    withMeta.use("*", async (c, next) => {
+      c.set("adminActor", { userId: SUPPORT, role: "support" })
+      await next()
+    })
+    withMeta.route(
+      BASE,
+      createAdminClientsRoute({
+        ownerDb,
+        storage,
+        panelUrlOf: () => "https://app.odentia.localhost",
+        mailer: { send: async () => {} },
+        metaSignupAvailable: true,
+      }),
+    )
+    const ready = stepOf(
+      await json(await withMeta.request(`${BASE}/${clientId}/onboarding`)),
+      "whatsapp",
+    )
+    expect(ready).toMatchObject({ label: "WhatsApp conectado", waitingOn: "clinica" })
+  })
+})

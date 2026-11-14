@@ -20,6 +20,7 @@ import {
   saasClient,
   saasClientContact,
   saasClientFile,
+  saasClientMilestone,
   saasInboundEmail,
   saasOpportunity,
   saasOutreach,
@@ -1958,6 +1959,18 @@ export async function mergeClients(
       updatedAt: now,
     })
     .where(eq(saasClient.id, keepId))
+  // Los pasos del alta guardados son de la cuenta: pasan con ella al que se queda (el absorbido
+  // los pierde por la cascada). Solo uno de los dos tiene cuenta, así que el que se queda no
+  // tiene hitos propios; si tuviera, gana el suyo (ON CONFLICT DO NOTHING).
+  if (drop.organizationId) {
+    const copied = await tx.execute(sql`insert into ${saasClientMilestone}
+        (client_id, step, reached_at, source, lost_at, lost_reason, na_reason, na_by, na_at, created_at, updated_at)
+      select ${keepId}, step, reached_at, source, lost_at, lost_reason, na_reason, na_by, na_at, created_at, ${now.toISOString()}::timestamptz
+      from ${saasClientMilestone} where client_id = ${dropId}
+      on conflict do nothing
+      returning step`)
+    count("milestones", copied as unknown as unknown[])
+  }
   await tx.delete(saasClient).where(eq(saasClient.id, dropId))
   await writeAdminAudit(tx, staff, {
     action: "client.merged",
