@@ -1,3 +1,4 @@
+import { declaredPregnancy } from "@odentia/clinical"
 import { parseMedicalHistory } from "@odentia/medical"
 import { invalidField, validation } from "../errors.js"
 import { answeredOf, type ProductInterview } from "../product-hooks.js"
@@ -15,21 +16,12 @@ export const medicalInterview: ProductInterview = {
     return parsed.value
   },
   declared(health, today) {
-    // El embarazo del registro va con la fecha en que se dijo, para que la receta sepa si sigue vigente.
-    const { embarazo, semanasEmbarazo, ...personal } = answeredOf(health.personal)
+    // El embarazo del registro va con la fecha en que se dijo, para que la receta sepa si sigue vigente
+    // (la forma común, `declaredPregnancy`).
+    const { statement, rest: personal } = declaredPregnancy(answeredOf(health.personal), today)
     const medical = health.medical ?? {}
     const pregnancy = {
-      ...(typeof embarazo === "boolean"
-        ? {
-            embarazo: {
-              estado: embarazo ? "si" : "no",
-              fecha: today,
-              ...(embarazo && typeof semanasEmbarazo === "number"
-                ? { semanas: semanasEmbarazo }
-                : {}),
-            },
-          }
-        : {}),
+      ...(statement ? { embarazo: statement } : {}),
       ...(typeof medical.lactancia === "boolean"
         ? { lactancia: { estado: medical.lactancia ? "si" : "no", fecha: today } }
         : {}),

@@ -58,6 +58,7 @@ import {
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
+import { unreviewedWords } from "../../lib/declared-health"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
@@ -85,6 +86,7 @@ import {
   ageFrom,
   type Encounter,
   type EncounterDetail,
+  fetchPatientHealth,
   hcLabel,
   type PatientFull,
 } from "../../lib/patients"
@@ -672,6 +674,12 @@ export function EncounterEditor({
   const keepOpen = Object.entries(sessionAnswers)
     .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
     .sort()
+  // La salud para la franja de arriba (lo que dijo y nadie revisó, el embarazo): la misma lectura
+  // y la misma caché que el aviso «Pregúntale a…».
+  const stripHealth = useQuery({
+    queryKey: ["patient-health", patientId],
+    queryFn: () => fetchPatientHealth(patientId),
+  })
   const closingQuery = useQuery({
     queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
     queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
@@ -1646,8 +1654,10 @@ export function EncounterEditor({
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   // En pocas líneas, una por bloque: el párrafo de todo junto no se leía (producción, 10 nov).
+  // Lo que dijo de su salud y nadie revisó: se dice al firmar, sin frenar la firma (QA del 14 nov, H6).
+  const unreviewed = unreviewedWords(stripHealth.data?.data.declared, patient.patient.sex)
   const finalizeDescription =
-    recorded.length > 0 || unrecordedAll.length > 0 ? (
+    recorded.length > 0 || unrecordedAll.length > 0 || unreviewed ? (
       <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
         {recorded.map((section) => (
           <li key={section.key}>
@@ -1655,6 +1665,7 @@ export function EncounterEditor({
           </li>
         ))}
         {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
+        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual.</li> : null}
       </ul>
     ) : null
 
@@ -1672,7 +1683,7 @@ export function EncounterEditor({
     title: "Antecedentes y última atención",
     description: "Solo lectura: se editan en Antecedentes de su ficha.",
     onClose: () => setContextOpen(false),
-    children: <EncounterContextBody patientId={patientId} encounterId={encounterId} />,
+    children: <EncounterContextBody patientId={patientId} encounterId={encounterId} patient={patient} />,
   }
   const transcriptSurface = {
     title: "Lo dictado",
@@ -2248,7 +2259,12 @@ export function EncounterEditor({
         dictationMobileBarVisible(dictation) && "max-sm:pb-20",
       )}
     >
-      <PatientClinicalStrip detail={patient} onAntecedentes={() => setContextOpen(true)} />
+      <PatientClinicalStrip
+        detail={patient}
+        health={stripHealth.data?.data ?? null}
+        sex={patient.patient.sex}
+        onAntecedentes={() => setContextOpen(true)}
+      />
       {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}
       <PageHeader
         title={patient.patient.displayName}
@@ -2299,7 +2315,7 @@ export function EncounterEditor({
         encounterProfessionalUserId={encounter.professionalUserId}
       />
 
-      <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
+      <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} encounterId={encounterId} disabled={locked} />
 
       {/* Lo que firmó en su enlace se confirma aquí, delante de la persona: arriba al abrir, sin frenar nada. */}
       <LinkSignedNotice
@@ -2850,6 +2866,8 @@ export function EncounterEditor({
       {finalizedBilling ? null : (
         <FormDetail
           patientId={patientId}
+          encounterId={encounterId}
+          sex={patient.patient.sex ?? null}
           responseId={finishingForm}
           canWrite={canFillFormInAttention(canWrite, !attending, detail.encounter.status)}
           onClose={() => setFinishingForm(null)}
@@ -3021,6 +3039,8 @@ export function EncounterEditor({
           {finalizedBilling ? (
             <FormDetail
               patientId={patientId}
+              encounterId={encounterId}
+              sex={patient.patient.sex ?? null}
               responseId={finishingForm}
               canWrite={canWrite}
               dock={false}

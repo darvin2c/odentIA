@@ -180,6 +180,20 @@ describe("FormDrawer", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  // QA del 14 nov: la recomendada del presupuesto se guarda al marcarla, y la
+  // pregunta decía que se perdían todos los cambios.
+  it("si algo ya se guardó aparte, la pregunta de salir dice lo que de verdad se pierde", async () => {
+    renderDrawer({
+      isDirty: true,
+      unsavedDescription: "Se pierde lo que escribiste. La recomendada ya quedó guardada.",
+    })
+    await screen.findByText("Editar mesa")
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(dialog.textContent).toContain("La recomendada ya quedó guardada.")
+    expect(dialog.textContent).not.toContain(unsaved.description)
+  })
+
   it("sin cambios, Cancelar cierra directo sin preguntar", async () => {
     const onClose = vi.fn()
     renderDrawer({ isDirty: false, onClose })

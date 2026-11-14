@@ -8,6 +8,7 @@ import {
   BUDGET_SIGNATURE_NOTE,
   CONSENT_SIGNATURE_NOTES,
   documentText,
+  type HealthDeclarant,
   isLeftOut,
   LEFT_OUT_DECISIONS,
   normalizeDrugText,
@@ -24,6 +25,7 @@ import {
   encounterProcedure,
   imagingStudy,
   patient,
+  patientContact,
   patientDocument,
   serviceCatalog,
   treatmentBudget,
@@ -43,12 +45,18 @@ import {
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { appointment } from "@odentia/db/schema/agenda"
-import { crmTask } from "@odentia/db/schema/crm"
+import { contact, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { findOrgLocale } from "./locale.js"
 import { requireCanAttend } from "./attending.js"
-import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
+import {
+  addDeclaredAllergies,
+  type DeclaredAllergy,
+  declarantOfContact,
+  declarantOfLink,
+  recordHealthDeclaration,
+} from "./clinical.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -1594,6 +1602,16 @@ export async function updateFormResponseDraft(
         : "El formulario está finalizado: usa una adenda",
     )
   }
+  // Lo que respondió el paciente es suyo: enviado, queda como llegó y se corrige aparte
+  // (`addFormAddendum`); a medias, lo sigue escribiendo él. La base cuida lo enviado.
+  if (current.source === "portal") {
+    throw conflict(
+      "DECLARED_READ_ONLY",
+      current.submittedAt
+        ? "Lo envió el paciente y no se cambia: agrega una corrección, que queda aparte con tu nombre y la hora"
+        : "Lo está respondiendo el paciente y todavía no lo envió",
+    )
+  }
   const schema = assertFormSchema(current.templateSnapshot)
   const answers = assertAnswers(schema, input.answers, { requireAll: false, site: await siteOf(tx, orgId) })
   // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas. Si lo
@@ -1633,12 +1651,25 @@ export async function updateFormResponseDraft(
   return row
 }
 
+/** Lo que pasó al finalizar: la respuesta y las alergias que de verdad entraron a Antecedentes. */
+export type FinalizedFormResponse = FormResponseRow & {
+  /** Las sustancias que pasaron a su lista de alergias; vacío si nada pasó. */
+  passedAllergies: string[]
+}
+
+/**
+ * Finaliza una respuesta. En lo que envió el paciente es «Marcar como revisado»:
+ * guarda quién lo revisó y, si se revisa dentro de una atención en curso
+ * (`encounterId`), la respuesta queda ligada a ella y sigue a la vista ahí.
+ * Devuelve lo que pasó de verdad a Antecedentes, para que el aviso no prometa más.
+ */
 export async function finalizeFormResponse(
   tx: Db,
   orgId: string,
   actorUserId: string,
   responseId: string,
-): Promise<FormResponseRow> {
+  options: { encounterId?: string | null } = {},
+): Promise<FinalizedFormResponse> {
   const [current] = await tx
     .select()
     .from(clinicalFormResponse)
@@ -1653,13 +1684,22 @@ export async function finalizeFormResponse(
       "FINALIZED",
       current.status === "descartado" ? "El formulario está descartado" : "El formulario ya está finalizado",
     )
+  // Lo que el paciente aún no envió no se da por revisado: lo sigue respondiendo.
+  if (current.source === "portal" && !current.submittedAt)
+    throw conflict("NOT_SUBMITTED", "El paciente todavía no lo envió: se revisa cuando lo envíe")
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
   const answers = assertAnswers(schema, current.answers, { requireAll: true, site: await siteOf(tx, orgId) })
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
+  // La atención en que se revisó: solo una en curso de este paciente, y sin cambiar la que ya tenía.
+  let encounterId = current.encounterId
+  if (!encounterId && options.encounterId) {
+    const attention = await requireVisibleEncounter(tx, orgId, current.patientId, options.encounterId)
+    if (attention.status === "borrador") encounterId = attention.id
+  }
   const [row] = await tx
     .update(clinicalFormResponse)
-    .set({ status: "finalizado", finalizedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "finalizado", finalizedAt: new Date(), finalizedBy: actorUserId, encounterId, updatedAt: new Date() })
     .where(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
@@ -1668,11 +1708,32 @@ export async function finalizeFormResponse(
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
   // Lo declarado sobre alergias pasa a los antecedentes sin confirmar, para que
   // la receta avise; la misma transacción: si no se puede, no se finaliza.
-  await addDeclaredAllergies(tx, orgId, actorUserId, row.patientId, declaredAllergiesOf(schema, answers), {
-    entity: "clinical_form_response",
-    entityId: row.id,
-  })
-  return row
+  const passedAllergies = await addDeclaredAllergies(
+    tx,
+    orgId,
+    actorUserId,
+    row.patientId,
+    declaredAllergiesOf(schema, answers),
+    { entity: "clinical_form_response", entityId: row.id },
+  )
+  // Esas alergias las dijo quien respondió, el día en que lo envió: no quien lo revisa ni hoy. Con eso
+  // las nombra la ficha mientras nadie las confirme. En un formulario del equipo, las anotó el equipo.
+  if (passedAllergies.length > 0)
+    await recordHealthDeclaration(tx, orgId, row.patientId, {
+      via: "formulario",
+      by:
+        row.source === "portal"
+          ? await declarantOfContact(tx, orgId, row.patientId, row.respondentContactId)
+          : { kind: "staff", name: null, relation: null },
+      health: {
+        allergies: {
+          state: "recorded",
+          items: passedAllergies.map((substance) => ({ substance, severity: "desconocida" as const })),
+        },
+      },
+      saidAt: row.source === "portal" ? row.submittedAt : null,
+    })
+  return { ...row, passedAllergies }
 }
 
 /**
@@ -1751,19 +1812,27 @@ export async function addFormAddendum(
   text: string,
 ): Promise<typeof clinicalFormAddendum.$inferSelect> {
   const [current] = await tx
-    .select({ id: clinicalFormResponse.id, status: clinicalFormResponse.status })
+    .select({
+      id: clinicalFormResponse.id,
+      status: clinicalFormResponse.status,
+      source: clinicalFormResponse.source,
+      submittedAt: clinicalFormResponse.submittedAt,
+    })
     .from(clinicalFormResponse)
     .where(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
   if (!current) throw notFound("Formulario")
-  if (current.status !== "finalizado") {
-    throw validation("La adenda solo aplica a formularios finalizados")
+  // Lo finalizado y lo que el paciente ya envió, esté o no revisado: ninguno se edita, así
+  // que la corrección va aparte. Un borrador del equipo se corrige en el mismo formulario.
+  const declared = current.status === "borrador" && current.source === "portal" && current.submittedAt !== null
+  if (current.status !== "finalizado" && !declared) {
+    throw validation("La corrección se agrega a un formulario finalizado o a lo que ya envió el paciente")
   }
   const clean = (text ?? "").trim()
-  if (!clean) throw invalidField("text", "La adenda no puede estar vacía")
-  if (clean.length > 5000) throw invalidField("text", "La adenda supera 5000 caracteres")
+  if (!clean) throw invalidField("text", "Escribe la corrección")
+  if (clean.length > 5000) throw invalidField("text", "La corrección admite hasta 5000 caracteres")
   const [row] = await tx
     .insert(clinicalFormAddendum)
     .values({ organizationId: orgId, responseId, text: clean, createdBy: actorUserId })
@@ -1773,11 +1842,21 @@ export async function addFormAddendum(
 }
 
 /**
- * Un formulario con lo de su atención que la pantalla necesita decir: si está
- * firmada (y desde cuándo: «finalizado después de firmar») o anulada («de una
- * atención anulada»). Sin atención, las dos vienen nulas.
+ * Una respuesta con lo que la pantalla necesita decir de ella:
+ * - quien la envió, si fue el paciente o quien habla por él: la misma forma con
+ *   que la ficha nombra a quien dijo algo (`declarantOfLink`), para que el
+ *   detalle del cuestionario y la franja digan la misma persona;
+ * - lo de su atención: si está firmada (y desde cuándo: «finalizado después de
+ *   firmar») o anulada («de una atención anulada»). Sin atención, vienen nulas.
  */
-export type FormResponseListed = FormResponseRow & {
+export type ListedFormResponse = FormResponseRow & {
+  respondent: (HealthDeclarant & { name: string }) | null
+  /**
+   * El equipo cambió estas respuestas después de que el paciente las envió,
+   * cuando aún se podía (antes de protegerlas): la última vez. Lo que se ve ya
+   * no es lo que él envió, y el original no se conserva. null si nadie las tocó.
+   */
+  editedByTeamAt: Date | null
   encounterStatus: string | null
   encounterFinalizedAt: Date | null
 }
@@ -1786,7 +1865,7 @@ export async function listFormResponses(
   tx: Db,
   orgId: string,
   query: { patientId: string; encounterId?: string; templateId?: string },
-): Promise<FormResponseListed[]> {
+): Promise<ListedFormResponse[]> {
   await requirePatient(tx, orgId, query.patientId)
   const conditions = [
     eq(clinicalFormResponse.organizationId, orgId),
@@ -1797,6 +1876,10 @@ export async function listFormResponses(
   const rows = await tx
     .select({
       response: clinicalFormResponse,
+      name: contact.displayName,
+      relationship: patientContact.relationship,
+      relationshipDetail: patientContact.relationshipDetail,
+      kinship: patientContact.kinship,
       encounterStatus: encounter.status,
       encounterFinalizedAt: encounter.finalizedAt,
     })
@@ -1805,10 +1888,66 @@ export async function listFormResponses(
       encounter,
       and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
     )
+    .leftJoin(
+      contact,
+      and(
+        eq(contact.organizationId, clinicalFormResponse.organizationId),
+        eq(contact.id, clinicalFormResponse.respondentContactId),
+      ),
+    )
+    .leftJoin(
+      patientContact,
+      and(
+        eq(patientContact.organizationId, clinicalFormResponse.organizationId),
+        eq(patientContact.patientId, clinicalFormResponse.patientId),
+        eq(patientContact.contactId, clinicalFormResponse.respondentContactId),
+      ),
+    )
     .where(and(...conditions))
     .orderBy(desc(clinicalFormResponse.createdAt))
+  // Lo que el equipo guardó encima de lo ya enviado queda en la auditoría (`form_response.update`):
+  // el paciente, al responder, no la escribe.
+  const sent = rows.filter((row) => row.response.source === "portal" && row.response.submittedAt)
+  const edits = sent.length
+    ? await tx
+        .select({ entityId: auditEvent.entityId, at: auditEvent.createdAt })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.entity, "clinical_form_response"),
+            eq(auditEvent.action, "form_response.update"),
+            inArray(
+              auditEvent.entityId,
+              sent.map((row) => row.response.id),
+            ),
+          ),
+        )
+    : []
+  const editedAt = (response: FormResponseRow): Date | null => {
+    const submittedAt = response.submittedAt
+    if (response.source !== "portal" || !submittedAt) return null
+    return edits.reduce<Date | null>(
+      (last, edit) =>
+        edit.entityId === response.id && edit.at > submittedAt && (!last || edit.at > last) ? edit.at : last,
+      null,
+    )
+  }
   return rows.map((row) => ({
     ...row.response,
+    respondent:
+      row.name === null
+        ? null
+        : {
+            ...declarantOfLink({
+              name: row.name,
+              relationship: row.relationship,
+              relationshipDetail: row.relationshipDetail,
+              kinship: row.kinship,
+            }),
+            name: row.name,
+          },
+    editedByTeamAt: editedAt(row.response),
     encounterStatus: row.encounterStatus,
     encounterFinalizedAt: row.encounterFinalizedAt,
   }))

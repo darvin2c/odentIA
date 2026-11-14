@@ -1567,9 +1567,10 @@ export async function getTimeline(
     }
   const formIds = ids("form")
   if (formIds.length)
-    for (const row of await tx
-      .select()
+    for (const { row, reviewer } of await tx
+      .select({ row: clinicalFormResponse, reviewer: user.name })
       .from(clinicalFormResponse)
+      .leftJoin(user, eq(user.id, clinicalFormResponse.finalizedBy))
       .where(and(eq(clinicalFormResponse.organizationId, orgId), inArray(clinicalFormResponse.id, formIds)))) {
       hydrated.set(row.id, {
         id: row.id,
@@ -1577,7 +1578,13 @@ export async function getTimeline(
         type: "form",
         createdAt: row.finalizedAt ?? row.createdAt,
         title: `Se completó el formulario: ${row.templateTitle ?? "Formulario clínico"}`,
-        detail: row.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : null,
+        // Lo que envió el paciente: quién lo revisó, si quedó guardado; nunca se afirma sin saberlo.
+        detail:
+          row.source === "portal"
+            ? reviewer
+              ? `Lo respondió la persona y lo revisó ${reviewer}`
+              : "Lo respondió la persona y el equipo lo revisó"
+            : null,
         status: row.status,
         toothNumbers: [],
         authorId: row.authorUserId,

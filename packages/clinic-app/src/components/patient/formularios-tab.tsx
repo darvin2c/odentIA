@@ -31,6 +31,7 @@ import {
   updateFormResponse,
 } from "../../lib/clinical-forms"
 import { useMemberName, useOrgMembers } from "../../lib/crm"
+import { DeclaredResponse } from "./declared-response"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
@@ -54,8 +55,6 @@ function statusOf(response: FormResponse): {
   label: string
   tone: "default" | "secondary" | "outline"
 } {
-  if (response.status === "borrador" && response.submittedAt)
-    return { label: "Declarado por el paciente", tone: "secondary" }
   return {
     label: FORM_RESPONSE_STATUS_LABELS[response.status],
     tone:
@@ -196,7 +195,33 @@ const addendumSchema = z.object({
   text: z.string().trim().min(1, "Escribe la adenda.").max(5000, "La adenda admite hasta 5000 caracteres."),
 })
 
+/**
+ * El detalle de una respuesta. Lo que respondió el paciente se lee y se corrige
+ * aparte (`DeclaredResponse`): nunca se edita; lo del equipo se llena aquí.
+ */
 export function ResponseDetail({
+  response,
+  canWrite,
+  sex,
+  encounterId,
+  onChanged,
+}: {
+  response: FormResponse
+  canWrite: boolean
+  /** El sexo registrado del paciente, para decir quién lo dijo. */
+  sex?: string | null
+  /** La atención en curso desde la que se abre: lo que se revise ahí queda ligado a ella. */
+  encounterId?: string
+  onChanged: () => Promise<void>
+}) {
+  if (response.source === "portal")
+    return (
+      <DeclaredResponse response={response} canWrite={canWrite} sex={sex} encounterId={encounterId} onChanged={onChanged} />
+    )
+  return <StaffResponseDetail response={response} canWrite={canWrite} onChanged={onChanged} />
+}
+
+function StaffResponseDetail({
   response,
   canWrite,
   onChanged,
@@ -407,13 +432,11 @@ export function ResponseDetail({
             {response.templateTitle ?? "Formulario"} · versión {response.templateVersion}
           </h3>
           <p className="text-xs text-muted-foreground">
-            {response.source === "portal"
-              ? `Respondido por el paciente desde el portal${response.submittedAt ? ` el ${when(response.submittedAt)}` : " (en curso)"}`
-              : response.professionalUserId
-                ? memberName(response.professionalUserId)
-                : "Sin profesional asignado"}
-            {/* Con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
-            {response.finalizedAt ? ` · ${finalizedWords(response, whenAt)}` : ""}
+            {response.professionalUserId ? memberName(response.professionalUserId) : "Sin profesional asignado"}
+            {/* Quién lo finalizó, con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
+            {response.finalizedAt
+              ? ` · ${finalizedWords(response, whenAt, response.finalizedBy ? memberName(response.finalizedBy) : null)}`
+              : ""}
             {response.encounterStatus === "anulada" ? " · de una atención anulada" : ""}
           </p>
         </div>
@@ -432,12 +455,6 @@ export function ResponseDetail({
           ) : null}
         </span>
       </header>
-      {response.source === "portal" && response.status === "borrador" && response.submittedAt ? (
-        <p role="status" className="rounded-md bg-muted p-3 text-sm">
-          Respuestas declaradas por el paciente. Revísalas con él en la consulta y finaliza para
-          incorporarlas a la historia.
-        </p>
-      ) : null}
       {response.status === "descartado" ? (
         <p className="rounded-md bg-muted p-3 text-sm">
           Descartado {when(response.discardedAt)} · {response.discardReason}

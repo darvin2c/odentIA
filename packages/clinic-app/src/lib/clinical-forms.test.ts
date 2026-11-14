@@ -84,6 +84,10 @@ it("lo finalizado se dice con fecha y hora, y si fue después de firmar su atenc
   expect(
     finalizedWords({ finalizedAt: "2026-11-14T02:40:00.000Z", encounterFinalizedAt: "2026-11-14T02:48:00.000Z" }, at),
   ).toBe("finalizado [02:40]")
+  // Con quién lo finalizó, se nombra.
+  expect(
+    finalizedWords({ finalizedAt: "2026-11-14T02:51:00.000Z", encounterFinalizedAt: "2026-11-14T02:48:00.000Z" }, at, "Ana Ríos"),
+  ).toBe("lo finalizó Ana Ríos el [02:51] · después de firmar la atención")
 })
 
 it("el estado de un formulario en la lista dice si quedó a medias al firmar o si es de una atención anulada", () => {
