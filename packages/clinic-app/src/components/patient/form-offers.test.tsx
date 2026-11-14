@@ -33,3 +33,10 @@ describe("la anterior, debajo de cada pregunta", () => {
     expect(offers).toContain("onClose={close}")
   })
 })
+
+// Verificación del 14 nov: el aviso de «No tiene» no estaba unido a la casilla «Obligatorio».
+it("el aviso de «No tiene» queda unido a la casilla «Obligatorio»", () => {
+  const panel = source("../settings/form-templates-panel.tsx")
+  expect(panel).toContain("requiredWithoutNone(field) ? noneWarningId : null")
+  expect(panel).toContain("<p id={noneWarningId}")
+})

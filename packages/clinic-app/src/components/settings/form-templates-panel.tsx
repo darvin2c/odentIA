@@ -1030,6 +1030,7 @@ function FieldEditor({
     ...(lost ? [[lost, lostLabel ? `«${lostLabel}»` : "una pregunta quitada"] as [string, string]] : []),
   ]
   const textAnswer = field.type === "texto" || field.type === "texto_largo"
+  const noneWarningId = useId()
   return (
     <div className="rounded-xl bg-muted/40 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
@@ -1074,11 +1075,32 @@ function FieldEditor({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <form.AppField name={`sections[${si}].fields[${fi}].required`}>
-          {(requiredField) => <requiredField.CheckboxField label="Obligatorio" disabled={disabled} className={CHECK_FIELD} />}
+          {(requiredField) => (
+            <FormChoiceField label="Obligatorio" className={CHECK_FIELD}>
+              {(control) => (
+                <Checkbox
+                  id={control.id}
+                  name={control.name}
+                  checked={requiredField.state.value === true}
+                  disabled={disabled}
+                  aria-invalid={control.invalid || undefined}
+                  // El aviso de «No tiene» queda unido a la casilla: se oye al marcarla.
+                  aria-describedby={
+                    [control.describedBy, requiredWithoutNone(field) ? noneWarningId : null].filter(Boolean).join(" ") ||
+                    undefined
+                  }
+                  onCheckedChange={(checked) => {
+                    requiredField.handleChange(checked === true)
+                    requiredField.handleBlur()
+                  }}
+                />
+              )}
+            </FormChoiceField>
+          )}
         </form.AppField>
         {requiredWithoutNone(field) ? (
           // Avisa sin impedir: sin «No tiene», quien no tiene nada no podría finalizar la ficha.
-          <p role="status" className="w-full rounded-md bg-warning-soft p-2 text-sm">
+          <p id={noneWarningId} role="status" className="w-full rounded-md bg-warning-soft p-2 text-sm">
             Obligatoria, «sin marcar» ya no vale como respuesta: agrega la opción «No tiene» (o «Ninguno») para que se
             pueda responder cuando no hay nada.
           </p>
