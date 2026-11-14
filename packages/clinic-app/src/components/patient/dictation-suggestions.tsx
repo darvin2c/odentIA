@@ -743,6 +743,8 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
     { key: "product", label: "Material", max: 200 },
     { key: "quantity", label: "Cuántos en total", number: true, min: 1 },
   ],
+  // La respuesta de una ficha no se corrige aquí: se escribe en la propia pregunta de la ficha.
+  ficha: [],
 }
 
 /** Lo que no pasa el esquema de la operación, dicho en el campo (los mismos límites que `OPERATIONS`). */

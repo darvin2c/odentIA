@@ -13,6 +13,7 @@ import {
   offerWhyWords,
 } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { ClioFormNotice } from "./clio-form-proposals"
 import { FormDetail } from "./encounter-documents"
 import { NewResponseDrawer } from "./formularios-tab"
 
@@ -209,6 +210,10 @@ export function FormOffersBox({
                 >
                   {action}
                 </Button>
+              ) : null}
+              {/* Lo que propuso Clío al dictar: aquí solo se avisa; se acepta en la ficha, en cada pregunta. */}
+              {offer.today?.status === "borrador" ? (
+                <ClioFormNotice responseId={offer.today.responseId} title={offer.title} onOpen={() => act(offer)} />
               ) : null}
             </li>
           )

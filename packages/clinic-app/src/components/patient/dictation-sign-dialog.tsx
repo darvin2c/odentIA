@@ -94,6 +94,8 @@ export function DictationSignDialog({
                     ? "Se emite con «Emitir receta»; si firmas sin emitirla, no entra."
                     : item.kind === "descanso"
                       ? "Se emite con su formulario; si firmas sin emitirlo, no entra."
+                      : item.kind === "ficha" && !can
+                        ? `${item.note ?? "Falta elegir la respuesta."} Se responde en la ficha, que sigue a medias: también después de firmar.`
                       : !can
                         ? (item.note ?? "Falta completarla para que entre.")
                         : null
@@ -137,7 +139,7 @@ export function DictationSignDialog({
                     {/* La cita lleva sus huecos (por si el elegido se ocupó) y el presupuesto, lo que lleva. */}
                     {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} /> : null}
                     {item.kind === "presupuesto" && can ? <BudgetLines item={item} /> : null}
-                    {!can && item.kind !== "receta" && item.kind !== "descanso" ? (
+                    {!can && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha" ? (
                       <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:ml-7 sm:min-h-8" disabled={busy} onClick={() => onComplete(item.id)}>
                         Completar
                       </Button>

@@ -43,7 +43,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
 import {
@@ -141,6 +141,7 @@ import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, UnfinishedFormsBox, useEncounterDocuments } from "./encounter-documents"
 import { FormOffersBox } from "./form-offers"
+import { type ClioFormProposals, ClioFormProposalsContext } from "./clio-form-proposals"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -1128,6 +1129,11 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
     }
+    // La respuesta de una ficha aceptada: la ficha abierta la adopta al leerla otra vez.
+    if (item.kind === "ficha") {
+      void queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
+    }
     // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
     if (item.kind === "alergia") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
@@ -1670,16 +1676,33 @@ export function EncounterEditor({
       </ul>
     ) : null
 
+  // Una ficha abierta al lado: dictar no le pone encima «Lo dictado» (lo dictado para ella aparece en sus preguntas).
+  const formOpenRef = useRef(false)
   /** Al dictar, si cabe, el respaldo se muestra al lado. */
   const startDictation = () => {
     setDictationTyping(false)
-    if (mode === "panel") setTranscriptOpen(true)
+    if (mode === "panel" && !formOpenRef.current) setTranscriptOpen(true)
   }
   const finishDictation = () => {
     dictation.finish()
     setTranscriptOpen(false)
   }
   const showTranscript = () => setTranscriptOpen(true)
+  // Lo que propuso Clío para las fichas empezadas: se acepta en cada pregunta, en el panel de la ficha (forma B).
+  const clioForms = useMemo<ClioFormProposals>(
+    () => ({
+      items: dictation.enabled ? dictation.suggestions.filter((item) => item.kind === "ficha") : [],
+      accept: async (items) => {
+        await dictation.acceptForms.mutateAsync(items)
+      },
+      discard: (item) => dictation.act.mutate({ item, action: "discard" }),
+      busy: dictation.acceptForms.isPending || dictation.act.isPending,
+      setFormOpen: (open) => {
+        formOpenRef.current = open
+      },
+    }),
+    [dictation.enabled, dictation.suggestions, dictation.acceptForms, dictation.act],
+  )
   const contextSurface = {
     title: "Antecedentes y última atención",
     description: "Solo lectura: se editan en Antecedentes, en su página.",
@@ -2254,6 +2277,7 @@ export function EncounterEditor({
             : "Listo para firmar"
 
   return (
+    <ClioFormProposalsContext.Provider value={clioForms}>
     <div
       className={cn(
         "flex flex-col gap-4 pb-20",
@@ -3385,5 +3409,6 @@ export function EncounterEditor({
       ) : null}
       {unsavedGuard.dialog}
     </div>
+    </ClioFormProposalsContext.Provider>
   )
 }

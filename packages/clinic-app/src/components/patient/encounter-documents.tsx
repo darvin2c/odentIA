@@ -57,6 +57,7 @@ import {
   PrescriptionPaper,
 } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
+import { ClioFormNotice, useClioFormProposals } from "./clio-form-proposals"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
@@ -692,6 +693,9 @@ export function EncounterDocumentsBlock({
                 </Button>
               )
             })()}
+            {form.status === "borrador" ? (
+              <ClioFormNotice responseId={form.id} title={formRowTitle(form)} onOpen={() => setOpenForm(form.id)} />
+            ) : null}
           </li>
         ))}
         {docs.files.map((file) => (
@@ -1030,6 +1034,13 @@ export function FormDetail({
     enabled: responseId !== null,
   })
   const response = (forms.data?.data ?? []).find((row) => row.id === responseId) ?? null
+  // Con la ficha abierta al lado, empezar a dictar no le pone «Lo dictado» encima (entrega 11).
+  const clio = useClioFormProposals()
+  const shown = responseId !== null && response !== null
+  useEffect(() => {
+    clio?.setFormOpen(shown)
+    return () => clio?.setFormOpen(false)
+  }, [clio, shown])
   // La anterior del mismo tipo, para leerla al lado de la de hoy (el control de ortodoncia).
   const previous = response?.previousId ? ((forms.data?.data ?? []).find((row) => row.id === response.previousId) ?? null) : null
   const first = response?.firstId ? ((forms.data?.data ?? []).find((row) => row.id === response.firstId) ?? null) : null

@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
+import { byFormOrder } from "./clio-form-proposals"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
 export interface DictationSuggestion {
   id: string
@@ -48,6 +49,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   cita: "Próxima cita",
   presupuesto: "Presupuesto",
   material: "Materiales",
+  ficha: "Fichas",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -503,9 +505,15 @@ export function useDictationSession({
       let current: DictationSuggestion | null = null
       setConfirmReadyFailed(null)
       try {
-        for (const item of suggestions.filter(confirmable)) {
+        // Las de una ficha, en su orden: la pregunta de la que depende otra entra primero.
+        for (const item of suggestions.filter(confirmable).sort(byFormOrder)) {
           current = item
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          // La pregunta de la ficha que alguien respondió a mano: queda la suya, y se dice.
+          if (response?.data?.status === "descartada") {
+            if (response.data.note) toast(response.data.note)
+            continue
+          }
           done.push({ ...item, joined: response?.data?.joined })
         }
       } catch (error) {
@@ -528,9 +536,14 @@ export function useDictationSession({
       let current: DictationSuggestion | null = null
       setConfirmManyFailed(null)
       try {
-        for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate))) {
+        for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate)).sort(byFormOrder)) {
           current = item
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          // La pregunta de la ficha que alguien respondió a mano: queda la suya y no frena la firma.
+          if (response?.data?.status === "descartada") {
+            if (response.data.note) toast(response.data.note)
+            continue
+          }
           // Un hueco que se ocupó no se reserva: se firma después de elegir el que quedó.
           if (response?.data && response.data.status !== "confirmada") {
             throw new ApiError(409, { code: "SLOT_TAKEN", message: `${response.data.note ?? "Un hueco se ocupó."} Revísalo y vuelve a firmar.` })
@@ -542,6 +555,34 @@ export function useDictationSession({
         throw error
       } finally {
         for (const item of done) onApplied(item)
+      }
+      return done
+    },
+    onSettled: () => void refresh(),
+  })
+
+  /**
+   * «Aceptar» y «Aceptar las N» en la ficha (entrega 11): una por una, en el
+   * orden de la ficha. Lo que alguien ya respondió a mano no se pisa: el
+   * servidor la descarta y se dice por qué.
+   */
+  const acceptForms = useMutation({
+    retry: false,
+    mutationFn: async (items: DictationSuggestion[]) => {
+      const done: DictationSuggestion[] = []
+      const notes: string[] = []
+      try {
+        for (const item of [...items].filter(confirmable).sort(byFormOrder)) {
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          if (response?.data?.status === "descartada") {
+            if (response.data.note) notes.push(response.data.note)
+            continue
+          }
+          done.push(item)
+        }
+      } finally {
+        for (const item of done) onApplied(item)
+        if (notes.length) toast(notes.join(" "))
       }
       return done
     },
@@ -620,6 +661,7 @@ export function useDictationSession({
     save,
     confirmReady,
     confirmMany,
+    acceptForms,
     issuePrescription,
     settlePrescription,
     settleMedicalLeave,

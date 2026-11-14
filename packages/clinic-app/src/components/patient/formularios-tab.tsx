@@ -1,6 +1,7 @@
 import { canAttend } from "@odentia/auth/permissions"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
+  AgentMark,
   addSubmitErrors,
   applySubmitError,
   ConfirmDialog,
@@ -37,6 +38,10 @@ import {
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
 import { DeclaredResponse } from "./declared-response"
+import { X } from "lucide-react"
+import { CLINICAL_NAME } from "../../lib/agent-names"
+import { proposalsOf, proposedWords, useClioFormProposals } from "./clio-form-proposals"
+import type { DictationSuggestion } from "./dictation-session"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
@@ -405,6 +410,42 @@ function StaffResponseDetail({
   const answers = useStore(form.store, (state) => state.values.answers)
   const formError = useFormSubmitError(form)
 
+  // Lo que propuso Clío al dictar (entrega 11, forma B): se acepta aquí, en cada pregunta.
+  const clio = useClioFormProposals()
+  const proposals = editable ? proposalsOf(clio, response.id) : []
+  const readyProposals = proposals.filter((item) => item.status === "lista")
+  const proposalFor = (fieldId: string) => proposals.find((item) => item.payload["fieldId"] === fieldId) ?? null
+  const accept = async (items: DictationSuggestion[]) => {
+    if (!clio) return
+    try {
+      // Lo escrito aquí sale antes: así lo aceptado no lo pisa ni choca con su guardado.
+      await persist()
+      await clio.accept(items)
+    } catch (error) {
+      toast.error(submitErrorMessage(error))
+    }
+  }
+  // Lo que entró a la ficha desde fuera de este panel (lo aceptado de Clío, aquí o en la barra del
+  // dictado) se adopta en las preguntas que aquí nadie tocó: así no aparece «Otra pestaña guardó…».
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambian las respuestas guardadas.
+  useEffect(() => {
+    const server = (response.answers ?? {}) as Record<string, unknown>
+    for (const [id, value] of Object.entries(server)) {
+      const base = savedAnswers.current[id] ?? null
+      if (JSON.stringify(value ?? null) === JSON.stringify(base)) continue
+      if (JSON.stringify(form.state.values.answers[id] ?? null) !== JSON.stringify(base)) continue
+      const wasSaved = version.current === saved.current
+      savedAnswers.current = { ...savedAnswers.current, [id]: value }
+      form.setFieldValue(`answers.${id}`, value)
+      // Ya está guardado en el servidor: no es un cambio por guardar.
+      if (wasSaved) {
+        saved.current = version.current
+        changed.current.delete(`answers.${id}`)
+        setSaveState("guardado")
+      }
+    }
+  }, [response.answers])
+
   // El aviso de «salir sin guardar» (×, Escape y el menú) sale solo si algo se pierde de verdad:
   // lo pendiente se guarda al cerrarse, así que no cuenta. Se pierde lo que el servidor no aceptó
   // (mientras siga escrito) o lo que no se pudo guardar.
@@ -673,6 +714,38 @@ function StaffResponseDetail({
           {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
         </p>
       ) : null}
+      {proposals.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
+          <span className="flex items-start gap-2">
+            <AgentMark size="sm" />
+            <span>
+              {readyProposals.length > 0 ? (
+                <>
+                  <strong>
+                    {CLINICAL_NAME} propone {readyProposals.length === 1 ? "1 respuesta" : `${readyProposals.length} respuestas`}
+                  </strong>{" "}
+                  de lo que dictaste. Ninguna entra hasta que la aceptes.
+                </>
+              ) : (
+                <>
+                  {CLINICAL_NAME} no pudo llenar {proposals.length === 1 ? "1 pregunta" : `${proposals.length} preguntas`}: elige tú en cada una.
+                </>
+              )}
+            </span>
+          </span>
+          {readyProposals.length > 1 ? (
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-11 sm:min-h-8"
+              disabled={clio?.busy}
+              onClick={() => void accept(readyProposals)}
+            >
+              Aceptar las {readyProposals.length}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {schema.sections.map((section) => (
         <section key={section.id} className="flex flex-col gap-3">
           <h4 className="text-sm font-semibold">{section.title}</h4>
@@ -688,6 +761,10 @@ function StaffResponseDetail({
                     // «Usar»: copia la respuesta anterior a la de hoy con un clic (la pieza, la clase…); nada se copia solo.
                     const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
                     const beforeId = `${ids}-antes-${field.id}`
+                    const proposal = proposalFor(field.id)
+                    // Lo aceptado de Clío, mientras siga siendo eso: si se cambia a mano, ya es de la persona.
+                    const mark = response.clioAccepted?.[field.id]
+                    const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null)
                     return (
                       <div className="flex flex-col gap-1">
                         <AnswerAppField
@@ -697,6 +774,56 @@ function StaffResponseDetail({
                           // La respuesta anterior se oye al llegar a la pregunta, no solo se ve.
                           describedBy={previous && before ? beforeId : undefined}
                         />
+                        {proposal ? (
+                          <div
+                            role="group"
+                            aria-label={`Propuesta de ${CLINICAL_NAME} para «${field.label}»`}
+                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-xs ${proposal.status === "lista" ? "bg-agent-soft" : "bg-muted"}`}
+                          >
+                            <span className="min-w-0 [overflow-wrap:anywhere]">
+                              {proposal.status === "lista" ? (
+                                <>
+                                  <strong>{CLINICAL_NAME}:</strong> {proposedWords(proposal)}
+                                  {proposal.sourceText ? ` · dijiste «${proposal.sourceText}»` : ""}
+                                </>
+                              ) : (
+                                <>
+                                  <strong>{CLINICAL_NAME} no la llenó:</strong> {proposal.note ?? "elige tú."}
+                                </>
+                              )}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              {proposal.status === "lista" ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="min-h-11 sm:min-h-8"
+                                  aria-label={`Aceptar ${proposedWords(proposal)} en «${field.label}»`}
+                                  disabled={clio?.busy}
+                                  onClick={() => void accept([proposal])}
+                                >
+                                  Aceptar
+                                </Button>
+                              ) : null}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-11 sm:size-8"
+                                aria-label={`Descartar la propuesta de ${CLINICAL_NAME} para «${field.label}»`}
+                                disabled={clio?.busy}
+                                onClick={() => clio?.discard(proposal)}
+                              >
+                                <X className="size-4" aria-hidden />
+                              </Button>
+                            </span>
+                          </div>
+                        ) : null}
+                        {marked ? (
+                          <p className="text-xs text-muted-foreground">
+                            Lo propuso {CLINICAL_NAME} · lo aceptó {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
+                          </p>
+                        ) : null}
                         {previous && before ? (
                           <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                             <span id={beforeId}>
