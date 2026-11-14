@@ -91,7 +91,7 @@ export const Wizard: Story = {
 
 /**
  * Con cambios sin guardar, Cancelar, Esc o el clic fuera preguntan con la
- * confirmación propia: «Continuar editando» deja el cajón como estaba y
+ * confirmación propia: «Seguir aquí» deja el cajón como estaba y
  * «Descartar y salir» lo cierra. Sin cambios, cierra directo.
  */
 export const CambiosSinGuardar: Story = {
@@ -117,6 +117,34 @@ export const CambiosSinGuardar: Story = {
           <div onInput={() => setDirty(true)}>
             <DemoFields />
           </div>
+        </FormDrawer>
+      </div>
+    )
+  },
+}
+
+/**
+ * Si algo se guardó al pulsarlo (la recomendada de un presupuesto), la pregunta
+ * de salir dice que eso queda y que solo se pierde lo escrito.
+ */
+export const ConAlgoYaGuardado: Story = {
+  render: function SavedApartStory() {
+    const [open, setOpen] = useState(true)
+    return (
+      <div className="p-6">
+        <Button type="button" onClick={() => setOpen(true)}>
+          Abrir formulario
+        </Button>
+        <FormDrawer
+          open={open}
+          title="Revisar y enviar"
+          description="Intenta cerrar: lo escrito se pierde, la marca ya está guardada."
+          isDirty
+          unsavedDescription="Se pierde lo que escribiste. La recomendada ya quedó guardada: la opción B."
+          onClose={() => setOpen(false)}
+          onSubmit={demoSubmit}
+        >
+          <DemoFields />
         </FormDrawer>
       </div>
     )

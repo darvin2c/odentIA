@@ -395,7 +395,20 @@ it("la atención firmada muestra sus formularios, y la Historia los lleva con su
     "Presenta dolor: Sí · Intensidad del dolor: 8 de 10 · Pieza 46 · Pruebas de vitalidad: Frío +, Percusión + · Pulpitis irreversible sintomática, periodonto apical normal. · …"
   const timeline = await run((tx) => getTimeline(tx, "org_a", f.patient.id, {}))
   const card = timeline.data.find((item) => item.type === "encounter" && item.refId === f.encounter.id)
-  expect(card?.born?.forms).toEqual([{ id: inside.id, title: "Evaluación de endodoncia", summary }])
+  // Con lo que dice la atención de cada formulario (su estado, entrega 4) y lo respondido en una línea.
+  expect(card?.born?.forms).toEqual([
+    {
+      id: inside.id,
+      title: "Evaluación de endodoncia",
+      summary,
+      state: "finalizado",
+      finalizedAt: expect.any(Date),
+      afterSigning: false,
+      retired: false,
+      discardReason: null,
+      discardedWithAttention: false,
+    },
+  ])
   // El que se llenó fuera de una atención es un hecho suelto, también con su resumen.
   expect(timeline.data.find((item) => item.type === "form")).toMatchObject({
     refId: loose.id,

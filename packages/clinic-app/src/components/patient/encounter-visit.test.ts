@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { visitWaitWords } from "./encounter-visit"
+import { visitBookedWords, visitWaitWords } from "./encounter-visit"
 
 describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", () => {
   it("la sesión 1 de hoy avisa con los días que pide su servicio, sin trabar", () => {
@@ -17,5 +17,27 @@ describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", 
   it("sin espera pendiente no dice nada", () => {
     expect(visitWaitWords({ wait: null })).toBeNull()
     expect(visitWaitWords({})).toBeNull()
+  })
+})
+
+// Mesa de formularios del 13 nov (UX-4): «…sáb 14 nov, 3:00 p. m..», con dos puntos al final.
+describe("«Hoy vino sin cita. Ya tiene una reservada»", () => {
+  /** Los espacios de la hora son especiales: se comparan como espacios. */
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const at = "2026-11-14T20:00:00.000Z"
+
+  it("la hora ya termina en punto: la frase no lleva otro", () => {
+    expect(plain(visitBookedWords({ startsAt: at, serviceName: null }, "es-PE", "America/Lima"))).toBe(
+      "Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 3:00 p. m.",
+    )
+  })
+
+  it("con el servicio, o con un formato de 24 horas, cierra con su punto", () => {
+    expect(plain(visitBookedWords({ startsAt: at, serviceName: "Limpieza dental" }, "es-PE", "America/Lima"))).toBe(
+      "Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 3:00 p. m. · Limpieza dental.",
+    )
+    expect(plain(visitBookedWords({ startsAt: at, serviceName: null }, "es-ES", "Europe/Madrid"))).toBe(
+      "Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 21:00.",
+    )
   })
 })

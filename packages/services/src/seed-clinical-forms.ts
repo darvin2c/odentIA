@@ -9,6 +9,7 @@ import { and, asc, eq, ilike, sql } from "drizzle-orm"
 import {
   addFormAddendum,
   advanceClinicalOrder,
+  archiveFormTemplate,
   archiveSpecialty,
   createClinicalOrder,
   createConsentDocument,
@@ -289,6 +290,39 @@ export async function seedClinicalForms(
       sent!.id,
       "Al llegar dice que el dolor es en la muela de arriba, no en la de abajo, y que empezó hace una semana.",
     )
+  }
+
+  // Un formulario que la clínica dejó de usar: la demo muestra «Ya no se usan» y «Volver a usar».
+  // Solo la primera vez: si alguien lo volvió a usar en la demo, sembrar otra vez no lo toca.
+  const everHadPeriodontal = (await listFormTemplates(tx, orgId, {})).some((t) => t.key === "ficha-periodontal")
+  if (!everHadPeriodontal) {
+    const draft = await createFormTemplate(tx, orgId, ownerUserId, {
+      key: "ficha-periodontal",
+      title: "Ficha periodontal",
+      description: "Evaluación de encías antes de un tratamiento periodontal.",
+      schema: {
+        sections: [
+          {
+            id: "encias",
+            title: "Encías",
+            fields: [
+              { id: "sangrado", label: "¿Sangran al sondaje?", type: "booleano", required: true },
+              {
+                id: "zonas",
+                label: "¿Dónde?",
+                type: "opcion_multiple",
+                options: ["Superior derecha", "Superior izquierda", "Inferior derecha", "Inferior izquierda"],
+                showIf: { field: "sangrado", equals: true },
+              },
+              { id: "higiene", label: "Higiene", type: "opcion_unica", options: ["Buena", "Regular", "Deficiente"] },
+              { id: "observaciones", label: "Observaciones", type: "texto_largo" },
+            ],
+          },
+        ],
+      },
+    })
+    const published = await publishFormTemplate(tx, orgId, ownerUserId, draft.id)
+    await archiveFormTemplate(tx, orgId, ownerUserId, published.id)
   }
 
   const consents = await listConsentDocuments(tx, orgId, { patientId })

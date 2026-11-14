@@ -3,7 +3,7 @@ import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
-import { saidNoWords } from "../../lib/declared-health"
+import { saidByWords, saidNoWords } from "../../lib/declared-health"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type TaskItem, useCan, usePermission } from "../../lib/crm"
@@ -216,7 +216,15 @@ export function PersonSummary({
                   detail.allergySaidNo
                   ? `${saidNoWords(detail.allergySaidNo.by, person.sex)} · sin revisar`
                   : "Sin alergias registradas"
-                : allergies.map((allergy) => allergyName(allergy)).join(", ")}
+                : allergies
+                    .map((allergy) => {
+                      // La que dijo y nadie revisó lleva su marca, como en la franja (QA del 14 nov).
+                      const said = detail.declaredAllergies?.find((group) => group.allergies.includes(allergy.id))
+                      return said
+                        ? `${allergyName(allergy)} (${saidByWords(said.by, person.sex)} · sin revisar)`
+                        : allergyName(allergy)
+                    })
+                    .join(", ")}
             </Fact>
           ) : null}
         </dl>

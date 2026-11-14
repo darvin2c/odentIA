@@ -14,9 +14,7 @@
  *
  * Las demás claves de la entrevista son comunes y no se tocan aquí.
  */
-import { pregnancyToday } from "@odentia/clinical"
-
-import type { InterviewEntry } from "@odentia/clinical"
+import { type InterviewEntry, pregnancyToday } from "@odentia/clinical"
 
 export const MEDICAL_INTERVIEW_GROUPS = [
   "embarazoLactancia",

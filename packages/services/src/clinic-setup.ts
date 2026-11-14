@@ -636,6 +636,9 @@ export async function runClinicSetup(
     .from(clinicalFormTemplate)
     .where(eq(clinicalFormTemplate.organizationId, orgId))
   for (const wanted of plan.forms) {
+    // «Ya está» es el título entero, aquí y en el servicio: uno que solo empieza igual que otro
+    // es otro formulario (`createFormTemplate` ya no los une por la clave recortada a 40). El
+    // mismo título dos veces en el plan tampoco se carga dos veces.
     if (forms.some((f) => fold(f.title) === fold(wanted.title))) {
       items.push({
         area: "Formatos propios",
@@ -652,6 +655,7 @@ export async function runClinicSetup(
         schema: wanted.schema,
         ...(wanted.respondent ? { respondent: wanted.respondent as "staff" | "portal" } : {}),
       })
+      forms.push({ title: wanted.title })
       return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }
     })
   }

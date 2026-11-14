@@ -46,12 +46,19 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
-import { type ConsentDocument, confirmLinkSignedConsent, fetchConsents } from "../../lib/clinical-forms"
+import {
+  type ConsentDocument,
+  canFillFormInAttention,
+  confirmLinkSignedConsent,
+  fetchConsents,
+  unfinishedAfterSigning,
+} from "../../lib/clinical-forms"
 import {
   clinicDateTimeValue,
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
+import { unreviewedWords } from "../../lib/declared-health"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
@@ -132,7 +139,7 @@ import { LinkSignedNotice } from "./link-signed-notice"
 import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
-import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
+import { EncounterDocumentsBlock, FormDetail, UnfinishedFormsBox, useEncounterDocuments } from "./encounter-documents"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -609,6 +616,9 @@ export function EncounterEditor({
   const [budgetLater, setBudgetLater] = useState(false)
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
+  // El formulario a medias que se abre para terminarlo: desde el aviso del cierre («Completar
+  // ahora») o desde «Atención finalizada» («Completar»), sin ir a buscarlo a Documentos.
+  const [finishingForm, setFinishingForm] = useState<string | null>(null)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
@@ -1222,6 +1232,7 @@ export function EncounterEditor({
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
+    setFinishingForm(null)
     void onFinalized(hadCharges)
   }
   const navigate = useNavigate()
@@ -1643,8 +1654,10 @@ export function EncounterEditor({
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   // En pocas líneas, una por bloque: el párrafo de todo junto no se leía (producción, 10 nov).
+  // Lo que dijo de su salud y nadie revisó: se dice al firmar, sin frenar la firma (QA del 14 nov, H6).
+  const unreviewed = unreviewedWords(stripHealth.data?.data.declared, patient.patient.sex)
   const finalizeDescription =
-    recorded.length > 0 || unrecordedAll.length > 0 ? (
+    recorded.length > 0 || unrecordedAll.length > 0 || unreviewed ? (
       <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
         {recorded.map((section) => (
           <li key={section.key}>
@@ -1652,6 +1665,7 @@ export function EncounterEditor({
           </li>
         ))}
         {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
+        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual.</li> : null}
       </ul>
     ) : null
 
@@ -2848,6 +2862,18 @@ export function EncounterEditor({
         onSign={signFromBar}
       />
 
+      {/* «Completar ahora» del cierre: el formulario se abre al lado y la atención sigue como estaba. */}
+      {finalizedBilling ? null : (
+        <FormDetail
+          patientId={patientId}
+          encounterId={encounterId}
+          sex={patient.patient.sex ?? null}
+          responseId={finishingForm}
+          canWrite={canFillFormInAttention(canWrite, !attending, detail.encounter.status)}
+          onClose={() => setFinishingForm(null)}
+          onChanged={handleChildChanged}
+        />
+      )}
       <EncounterClosingDialog
         open={confirmOpen && !confirmWithDictation && signingDocs === null}
         form={closingForm}
@@ -2869,6 +2895,11 @@ export function EncounterEditor({
               }
             : undefined
         }
+        // No frena: quien quiera terminarlo antes de firmar lo abre desde aquí; si no, firma igual.
+        onCompleteForm={(formId) => {
+          setConfirmOpen(false)
+          setFinishingForm(formId)
+        }}
         missing={missing}
         onRegister={(requirement) => {
           setConfirmOpen(false)
@@ -2998,6 +3029,25 @@ export function EncounterEditor({
                   : "Caja ya lo ve en su lista de por cobrar."}
             </DialogDescription>
           </DialogHeader>
+          {/* Lo que quedó a medias, arriba y con su salida: en un teléfono no queda bajo el pliegue. */}
+          <UnfinishedFormsBox
+            forms={finalizedBilling ? unfinishedAfterSigning(docs.forms, "finalizada") : []}
+            canComplete={canWrite}
+            onOpen={setFinishingForm}
+          />
+          {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Completar». */}
+          {finalizedBilling ? (
+            <FormDetail
+              patientId={patientId}
+              encounterId={encounterId}
+              sex={patient.patient.sex ?? null}
+              responseId={finishingForm}
+              canWrite={canWrite}
+              dock={false}
+              onClose={() => setFinishingForm(null)}
+              onChanged={handleChildChanged}
+            />
+          ) : null}
           {/* La cita reservada para lo que hoy quedó hecho: usarla para lo que sigue o liberarla (M1). */}
           <FinalizedFreedAppointments
             appointments={finalizedFreed}

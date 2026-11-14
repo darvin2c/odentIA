@@ -1,6 +1,6 @@
 import type { ConsentSections, HealthDeclarant } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
-import { apiFetch, apiFetchBytes } from "./api"
+import { ApiError, apiFetch, apiFetchBytes } from "./api"
 
 /**
  * Especialidad de la clínica: la única lista (ADR 0039). Nace con las de la
@@ -73,6 +73,13 @@ export interface FormTemplate {
   publishedAt: string | null
   createdAt: string
   updatedAt: string
+  /**
+   * De los publicados «que responde el paciente» les llega uno solo: lo dice el
+   * servidor, con la regla del enlace y del portal. Viene en la lista de plantillas.
+   */
+  reachesPatients?: boolean
+  /** Cuándo se creó el formulario (su primera versión): no cambia al volver a usarlo. Viene en la lista. */
+  formCreatedAt?: string
 }
 
 export interface FormResponse {
@@ -103,6 +110,9 @@ export interface FormResponse {
   discardReason: string | null
   createdAt: string
   updatedAt: string
+  /** Lo de su atención, si tiene: firmada («finalizada», y desde cuándo) o anulada. Viene en la lista. */
+  encounterStatus?: "borrador" | "finalizada" | "anulada" | null
+  encounterFinalizedAt?: string | null
 }
 
 /** El paciente lo envió y nadie del equipo lo revisó todavía. */
@@ -114,11 +124,18 @@ export function isDeclaredUnreviewed(response: FormResponse): boolean {
  * Lo que envió el paciente y va arriba al abrir esta atención: lo que sigue sin
  * revisar y lo que se revisó aquí, que no desaparece.
  */
-export function declaredFormsOfEncounter(forms: readonly FormResponse[], encounterId: string): FormResponse[] {
+export function declaredFormsOfEncounter(
+  forms: readonly FormResponse[],
+  encounterId: string,
+  /** Lo que ya estaba a la vista: si otra persona lo revisa o lo descarta, no desaparece, dice quién (QA del 14 nov). */
+  onScreen: ReadonlySet<string> = new Set(),
+): FormResponse[] {
   return forms.filter(
     (form) =>
       form.source === "portal" &&
-      (isDeclaredUnreviewed(form) || (form.status === "finalizado" && form.encounterId === encounterId)),
+      (isDeclaredUnreviewed(form) ||
+        (form.status === "finalizado" && form.encounterId === encounterId) ||
+        onScreen.has(form.id)),
   )
 }
 
@@ -475,6 +492,28 @@ export function archiveFormTemplate(id: string) {
   return post<FormTemplate>(`${BASE}/form-templates/${id}/archive`, {})
 }
 
+/** «Volver a usar»: publica la versión siguiente con las mismas preguntas. */
+export function reuseFormTemplate(id: string) {
+  return post<FormTemplate>(`${BASE}/form-templates/${id}/reuse`, {})
+}
+
+/** Un cuestionario del paciente, nombrado para decirlo en una confirmación. */
+export interface ReachedQuestionnaire {
+  key: string
+  title: string
+}
+
+/** A quién le llega: el que reciben hoy los pacientes (`now`) y el que recibirán después del cambio (`after`). */
+export interface TemplateReach {
+  now: ReachedQuestionnaire | null
+  after: ReachedQuestionnaire | null
+}
+
+/** Lo dice el servidor, con la regla del enlace y del portal: la pantalla no lo calcula. */
+export function fetchTemplateReach(id: string, change: "publish" | "leave" | "reuse") {
+  return apiFetch<{ data: TemplateReach }>(`${BASE}/form-templates/${id}/reach?change=${change}`)
+}
+
 // --- Capturas ---
 
 export function fetchFormResponses(query: {
@@ -495,11 +534,101 @@ export function createFormResponse(body: {
   return post<FormResponse>(`${BASE}/form-responses`, body)
 }
 
+/**
+ * «Empezar» un formulario. Si la atención a la que se iba a unir ya no está en
+ * curso (se firmó o se anuló en otra pestaña y esta pantalla aún no lo sabe), se
+ * empieza igual, sin unirlo a ella: `detached` lo dice, para avisarlo y refrescar.
+ */
+export async function startFormResponse(
+  body: Parameters<typeof createFormResponse>[0],
+): Promise<{ data: FormResponse; detached: boolean }> {
+  try {
+    return { ...(await createFormResponse(body)), detached: false }
+  } catch (error) {
+    if (!body.encounterId || !(error instanceof ApiError) || error.shape.code !== "ENCOUNTER_CLOSED") throw error
+    return { ...(await createFormResponse({ ...body, encounterId: null })), detached: true }
+  }
+}
+
+/**
+ * En la atención, un formulario se llena mientras se pueda trabajar en ella. Ya
+ * firmada, la atención no se trabaja, pero el formulario que quedó a medias se
+ * termina igual: la firma de la atención no cierra sus formularios.
+ */
+export function canFillFormInAttention(canWrite: boolean, attentionLocked: boolean, attentionStatus: string): boolean {
+  return canWrite && (!attentionLocked || attentionStatus === "finalizada")
+}
+
+/** Los formularios del equipo que una atención ya firmada dejó a medias: los dice arriba, con «Completar». */
+export function unfinishedAfterSigning<T extends Pick<FormResponse, "status" | "source">>(
+  forms: readonly T[],
+  attentionStatus: string,
+): T[] {
+  return attentionStatus === "finalizada"
+    ? forms.filter((form) => form.status === "borrador" && form.source === "staff")
+    : []
+}
+
+/**
+ * Cuándo se finalizó, con fecha y hora (`at` la escribe), quién lo hizo si se
+ * sabe (`by`), y si fue después de firmar su atención: un formulario terminado
+ * después lleva su propia fecha, y se ve.
+ */
+export function finalizedWords(
+  response: Pick<FormResponse, "finalizedAt" | "encounterFinalizedAt">,
+  at: (iso: string) => string,
+  by?: string | null,
+): string | null {
+  if (!response.finalizedAt) return null
+  const after =
+    !!response.encounterFinalizedAt && Date.parse(response.finalizedAt) > Date.parse(response.encounterFinalizedAt)
+  const done = by ? `lo finalizó ${by} el ${at(response.finalizedAt)}` : `finalizado ${at(response.finalizedAt)}`
+  return `${done}${after ? " · después de firmar la atención" : ""}`
+}
+
+/** El estado de un formulario en una lista, dicho entero: a medias, declarado, finalizado, y lo de su atención. */
+export function formStateWords(response: Pick<FormResponse, "status" | "submittedAt" | "encounterStatus">): string {
+  if (response.status === "finalizado")
+    return response.encounterStatus === "anulada" ? "Finalizado · de una atención anulada" : "Finalizado"
+  if (response.status === "descartado") return "Descartado"
+  if (response.submittedAt) return "Lo declaró la persona · por revisar"
+  return response.encounterStatus === "finalizada"
+    ? "Quedó a medias al firmar la atención: falta terminarlo"
+    : "Sin finalizar"
+}
+
+/**
+ * Un formulario de una atención anulada, dicho en su línea de la Historia: el
+ * que quedó sin terminar (la anulación lo descartó, con su mismo motivo), el
+ * que se descartó antes (con el motivo de entonces) y el que ya estaba
+ * finalizado, que se conserva. `at` escribe la fecha y la hora.
+ */
+export function voidedAttentionFormWords(
+  form: {
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    discardReason: string | null
+    discardedWithAttention: boolean
+  },
+  at: (iso: string) => string,
+): string {
+  const name = `Formulario: ${form.title}`
+  if (form.state === "finalizado")
+    return `${name} · finalizado${form.finalizedAt ? ` ${at(form.finalizedAt)}` : ""} · se conserva, marcado como de una atención anulada`
+  if (form.state === "descartado")
+    return form.discardedWithAttention
+      ? `${name} · quedó sin terminar y se descartó al anular la atención, con ese motivo`
+      : `${name} · descartado antes de anular${form.discardReason ? ` · Motivo: ${form.discardReason}` : ""}`
+  return `${name} · sin terminar`
+}
+
 export function updateFormResponse(
   id: string,
   body: { answers: Record<string, unknown>; professionalUserId?: string | null; baseAnswers?: Record<string, unknown> },
 ) {
-  return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
+  // `rejected`: las preguntas cuyo valor no valía (`answers.<id>` → por qué). No se guardaron; lo demás sí.
+  return patch<FormResponse & { rejected?: Record<string, string> }>(`${BASE}/form-responses/${id}`, body)
 }
 
 /** `encounterId`: la atención en curso desde la que se revisa; la respuesta queda ligada a ella. */

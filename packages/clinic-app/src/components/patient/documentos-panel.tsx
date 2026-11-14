@@ -43,6 +43,7 @@ import {
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
+  formStateWords,
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
@@ -585,19 +586,17 @@ export function DocumentosSection({
           teeth: [],
           retired: false,
           title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
-          detail: `${formatDate(date)} · ${
-            declared
-              ? response.submittedAt
-                ? `Lo envió ${sender}${via}${response.status === "finalizado" ? " · revisado" : ""}`
-                : `Lo está respondiendo ${sender}: aún no lo envió`
-              : response.status === "finalizado"
-                ? "Finalizado"
-                : "Sin finalizar"
-          }`,
+          // Lo del equipo dice lo de su atención: quedó a medias al firmarla, o es de una que se anuló.
+          // Lo que declaró el paciente no es de la atención: dice quién lo envió, por dónde y si se revisó.
+          detail: declared ? declaredFormDetail(response, sender, via) : `${formatDate(date)} · ${formStateWords(response)}`,
           date,
           status:
             response.status === "finalizado"
-              ? { label: declared ? "Revisado" : "Finalizado", tone: "success" }
+              ? declared
+                ? { label: "Revisado", tone: "success" }
+                : response.encounterStatus === "anulada"
+                  ? { label: "De una atención anulada", tone: "outline" }
+                  : { label: "Finalizado", tone: "success" }
               : declared
                 ? { label: response.submittedAt ? "Por revisar" : "Sin enviar", tone: "warning" }
                 : { label: "Borrador", tone: "warning" },
@@ -1431,4 +1430,22 @@ function signerWords(
     return name ? `${name}, su representante legal` : "su representante legal"
   }
   return "su representante legal"
+}
+
+/**
+ * La línea de lo que envió el paciente en Documentos: cada fecha dice lo que es
+ * («Lo envió Marta desde su enlace el 13/11/2026 · revisado el 14/11/2026»).
+ * Antes la fecha de revisión iba delante de «Lo envió» (auditor, 14 nov).
+ */
+export function declaredFormDetail(
+  response: Pick<FormResponse, "submittedAt" | "finalizedAt" | "status" | "createdAt">,
+  sender: string,
+  via: string,
+): string {
+  if (!response.submittedAt) return `${formatDate(response.createdAt)} · Lo está respondiendo ${sender}: aún no lo envió`
+  const reviewed =
+    response.status === "finalizado"
+      ? ` · revisado${response.finalizedAt ? ` el ${formatDate(response.finalizedAt)}` : ""}`
+      : ""
+  return `Lo envió ${sender}${via} el ${formatDate(response.submittedAt)}${reviewed}`
 }

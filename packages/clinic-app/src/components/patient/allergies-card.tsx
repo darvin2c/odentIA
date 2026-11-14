@@ -17,7 +17,7 @@ import {
   REMOVAL_REASON_LABELS,
 } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
-import { saidNoGroupOf, saidNoWords } from "../../lib/declared-health"
+import { declaredGroupOf, saidByWords, saidNoGroupOf, saidNoWords, shortDay } from "../../lib/declared-health"
 import {
   type Allergy,
   addAllergyApi,
@@ -82,17 +82,33 @@ function useRestoreAllergy(patientId: string) {
   })
 }
 
-/** Quién la dijo y cuándo: «Registrada por la Dra. Ana · 3 oct», «La declaró el paciente · 17 oct». */
-function useOriginText(): (allergy: Allergy) => string {
-  const memberName = useMemberName()
-  return (allergy) => {
-    const day = allergy.createdAt ? ` · ${allergyDay(allergy.createdAt)}` : ""
-    if (allergy.source === "paciente") return `La declaró el paciente${day}`
-    return allergy.createdBy
-      ? `Registrada por ${memberName(allergy.createdBy)}${day}`
-      : `Registrada${day}`
-  }
+/**
+ * Quién la dijo y cuándo, con las mismas palabras de la franja (QA del 14 nov,
+ * H3 de desarrollo): «Lo dijo ella el 13 nov · sin revisar», «Lo dijo su madre,
+ * Carla, el 13 nov», y el día en que lo dijo, no el día en que entró a su
+ * ficha. Quién lo dijo sale de su declaración (la que entró con ella); sin
+ * declaración no se afirma quién. Lo del equipo: «Registrada por la Dra. Ana · 3 oct».
+ */
+export function allergyOrigin(
+  allergy: Allergy,
+  health: Pick<PatientHealth, "declared" | "declarations">,
+  sex: string | null | undefined,
+  memberName: (userId: string) => string,
+): string {
+  const day = allergy.createdAt ? ` · ${allergyDay(allergy.createdAt)}` : ""
+  if (allergy.source !== "paciente")
+    return allergy.createdBy ? `Registrada por ${memberName(allergy.createdBy)}${day}` : `Registrada${day}`
+  const pending = declaredGroupOf(health.declared, "allergies", allergy.id)
+  const entered = allergy.createdAt ? Date.parse(allergy.createdAt) : Number.NaN
+  const declaration =
+    pending ?? (health.declarations ?? []).find((row) => Date.parse(row.enteredAt) === entered)
+  const said = declaration
+    ? `${capital(saidByWords(declaration.by, sex))}${declaration.at ? `${saidByWords(declaration.by, sex).includes(",") ? "," : ""} el ${shortDay(declaration.at)}` : ""}`
+    : `La dijo la persona${day}`
+  return pending ? `${said} · sin revisar` : said
 }
+
+const capital = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
 
 export function AllergiesCard({
   patientId,
@@ -109,7 +125,7 @@ export function AllergiesCard({
   const titleId = useId()
   const canWrite = usePermission("clinical.write")
   const memberName = useMemberName()
-  const originText = useOriginText()
+  const originText = (allergy: Allergy) => allergyOrigin(allergy, health, sex, memberName)
   // El «No» lo marcó la persona (o quien habla por ella) y nadie se lo preguntó en la clínica.
   const saidNo = saidNoGroupOf(health.declared, "allergies")
   const restore = useRestoreAllergy(patientId)
@@ -121,10 +137,11 @@ export function AllergiesCard({
     mutationFn: () => markAllergiesReviewedApi(patientId),
     onSuccess: async () => {
       await refresh(queryClient, patientId)
-      toast.success("Anotado: no tiene alergias")
+      toast.success(active.length > 0 ? "Alergias revisadas: lo que dijo queda confirmado" : "Anotado: no tiene alergias")
     },
   })
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
+  const saidPending = active.some((allergy) => declaredGroupOf(health.declared, "allergies", allergy.id))
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
   const reviewed = health.allergiesReviewedAt
     ? `Revisadas${health.allergiesReviewedBy ? ` por ${memberName(health.allergiesReviewedBy)}` : ""} · ${allergyDay(health.allergiesReviewedAt)}`
@@ -142,12 +159,22 @@ export function AllergiesCard({
           <p className="text-sm text-muted-foreground">{reviewed}</p>
         </div>
         {canWrite ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
-            <Plus aria-hidden />
-            Agregar alergia
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Lo que dijo y nadie revisó se revisa también aquí, no solo en la atención (auditor, 14 nov):
+                queda confirmado y con quién lo revisó. */}
+            {saidPending ? (
+              <Button type="button" size="sm" variant="outline" disabled={noneReviewed.isPending} onClick={() => noneReviewed.mutate()}>
+                {noneReviewed.isPending ? "Guardando…" : "Alergias revisadas"}
+              </Button>
+            ) : null}
+            <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
+              <Plus aria-hidden />
+              Agregar alergia
+            </Button>
+          </div>
         ) : null}
       </div>
+      {saidPending ? <ActionError error={noneReviewed.error} /> : null}
       {active.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">

@@ -12,6 +12,7 @@ import {
   type PregnancyToday,
   saidNoWords,
   saidWhenWords,
+  specificKin,
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -32,7 +33,7 @@ function guardianOf(contacts: readonly PatientContactLink[]): { kin: string; nam
     guardian.kinship && guardian.kinship in KINSHIP_LABELS
       ? KINSHIP_LABELS[guardian.kinship as keyof typeof KINSHIP_LABELS]
       : guardian.relationshipDetail?.trim()
-  return { kin: (kin || "representante").toLocaleLowerCase("es"), name: guardian.displayName }
+  return { kin: specificKin(kin) ?? "representante", name: guardian.displayName }
 }
 
 /**
@@ -127,6 +128,9 @@ export function pregnancyWords(pregnancy: PregnancyToday): { title: string; deta
   }
   if (pregnancy.weeksToday === null)
     return { title: "Embarazo", detail: `lo dijo el ${day}, sin las semanas`, confirm: false }
+  // Sin una semana de diferencia, «20 semanas hoy (20 el 14 nov)» repite el dato: se dice una vez y el día.
+  if (pregnancy.weeksSaid === pregnancy.weeksToday)
+    return { title: `Embarazo · ${weeksWords(pregnancy.weeksToday)}`, detail: `lo dijo el ${day}`, confirm: false }
   return {
     title: `Embarazo · ${weeksWords(pregnancy.weeksToday)} hoy`,
     detail: `${pregnancy.weeksSaid} el ${day}`,
@@ -140,4 +144,24 @@ export function pregnancyChip(pregnancy: PregnancyToday): string {
   return !words.confirm && pregnancy.weeksToday !== null
     ? `${words.title} (${words.detail})`
     : `${words.title} · ${words.detail}`
+}
+
+/**
+ * Lo que quedó sin revisar, en una línea para el cierre de la atención: «lo que
+ * dijo ella de su salud el 13 nov». Informa y no frena la firma (QA del 14 nov,
+ * H6 de clínica). null si no queda nada.
+ */
+export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefined, sex: Sex): string | null {
+  const parts = (groups ?? []).map((group) => {
+    const day = group.at ? shortDay(group.at) : ""
+    const when = day ? ` el ${day}` : ""
+    if (group.by.kind === "staff") return `lo que anotó el equipo de su salud${when}`
+    if (group.by.kind === "unknown") return `lo declarado de su salud${when}`
+    const who = whoWords(group.by, sex)
+    // Con quien habla por ella, su nombre va entre comas: «lo que dijo de su salud su madre, Carla, el 1 nov».
+    if (who.includes(",")) return `lo que dijo de su salud ${who}${when ? `,${when}` : ""}`
+    return `lo que dijo${who ? ` ${who}` : ""} de su salud${when}`
+  })
+  if (parts.length === 0) return null
+  return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
 }

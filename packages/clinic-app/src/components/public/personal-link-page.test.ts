@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
 import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-link"
+import { setOrgLocale } from "../../lib/locale"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
-import { validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
+import { toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
 
 declareProduct(bareProduct("dental"))
 
@@ -45,6 +46,7 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
       { id: "c2", title: "Implante", procedureRef: null, appointment: { startsAt: LATER, timeZone: "America/Lima" }, signable: true, why: null },
     ],
     questionnaire: null,
+    told: null,
     toSchedule: [],
     another: null,
     confirmVia: null,
@@ -99,13 +101,73 @@ describe("sin firmar desde el teléfono", () => {
   })
 })
 
+// Mesa de formularios del 13 nov (C8): al volver a abrir el enlace no quedaba rastro de lo enviado.
+describe("lo que nos contaste", () => {
+  /** Los espacios de las horas («2:27 p. m.») son especiales: se comparan como espacios. */
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const SENT = "2026-11-13T19:27:00.000Z"
+  const LATER_SENT = "2026-11-13T19:31:00.000Z"
+  const told = (items: NonNullable<PersonalLinkView["told"]>["items"]) => ({ timeZone: "America/Lima", items })
+  // La página fija el formato de la clínica al abrir el enlace.
+  beforeAll(() => void setOrgLocale("es-PE", "America/Lima", "PE"))
+
+  it("sin nada enviado no hay tarjeta", () => {
+    expect(toldWords(view(), "odontólogo")).toBeNull()
+  })
+
+  it("dice qué envió y cuándo, junto lo del mismo envío, y quién lo lee", () => {
+    const words = toldWords(
+      view({ told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: LATER_SENT }]) }),
+      "odontólogo",
+    )
+    expect(words?.sent.map(plain)).toEqual([
+      "Enviaste tus datos y tu salud el viernes, 13 de noviembre, 2:27 p. m.",
+      "Enviaste tus respuestas de «Antes de tu cita» el viernes, 13 de noviembre, 2:31 p. m.",
+    ])
+    expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atenderte.")
+  })
+
+  it("quién lo lee: con «Dr.» lleva «el», sin tratamiento va el nombre, y sin nombre, quien atiende en su clínica", () => {
+    const sent = told([{ what: "salud", at: SENT }])
+    const withDoctor = (professionalName: string, clinician = "odontólogo") => {
+      const base = view({ told: sent })
+      return toldWords({ ...base, appointment: base.appointment && { ...base.appointment, professionalName } }, clinician)?.reader
+    }
+    expect(withDoctor("Dr. Luis Prado")).toBe("Lo lee el Dr. Luis Prado antes de atenderte.")
+    expect(withDoctor("Luis Prado")).toBe("Lo lee Luis Prado antes de atenderte.")
+    expect(withDoctor("", "médico")).toBe("Lo lee tu médico antes de atenderte.")
+    expect(withDoctor("", "optómetra")).toBe("Lo lee tu optómetra antes de atenderte.")
+  })
+
+  // Revisión de la entrega 3: sin una cita por venir no hay «antes de atenderte» que prometer.
+  it("sin cita por venir dice qué envió y cuándo, y no promete quién lo lee antes de atenderla", () => {
+    const sent = told([{ what: "salud", at: SENT }])
+    const none = toldWords(view({ told: sent, appointment: null }), "médico")
+    expect(none?.sent.map(plain)).toEqual(["Enviaste tu salud el viernes, 13 de noviembre, 2:27 p. m."])
+    expect(none?.reader).toBeNull()
+    const cancelled = view({ told: sent })
+    expect(toldWords({ ...cancelled, appointment: cancelled.appointment && { ...cancelled.appointment, cancelled: true } }, "optómetra")?.reader).toBeNull()
+  })
+
+  it("por un hijo, con su nombre", () => {
+    const words = toldWords(
+      view({ patientFirstName: "Mateo", told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: SENT }]) }),
+      "odontólogo",
+    )
+    expect(words?.sent.map(plain)).toEqual([
+      "Enviaste los datos de Mateo, su salud y tus respuestas de «Antes de la cita de Mateo» el viernes, 13 de noviembre, 2:27 p. m.",
+    ])
+    expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atender a Mateo.")
+  })
+})
+
 describe("mientras dura la entrega", () => {
   it("la vista de la API anterior, sin los campos nuevos, no rompe la página ni ofrece «Reservar otra»", () => {
-    const { toSchedule, another, confirmVia, remindersVia, closed, ...old } = view({
+    const { toSchedule, another, confirmVia, remindersVia, closed, told, ...old } = view({
       consents: [{ id: "c1", title: "Exodoncia" } as PersonalLinkView["consents"][number]],
     })
     const ready = withLinkViewDefaults(old as PersonalLinkView)
-    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null })
+    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null, told: null })
     // Antes se firmaba siempre desde el teléfono.
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()

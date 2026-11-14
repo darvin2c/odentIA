@@ -13,11 +13,14 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
-import type { ClinicalOrder } from "../../lib/clinical-forms"
+import type { ClinicalOrder, FormResponse } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
   consentSignatureWords,
+  canFillFormInAttention,
   FORM_RESPONSE_STATUS_LABELS,
+  formStateWords,
+  unfinishedAfterSigning,
   fetchConsents,
   fetchFormResponses,
   teamFormsOfEncounter,
@@ -341,6 +344,7 @@ export function EncounterDocumentsBlock({
 
   const pendingTitles = docs.toSign.map((doc) => doc.titleSnapshot)
   const signed = detail.encounter.status === "finalizada"
+  const unfinished = unfinishedAfterSigning(docs.forms, detail.encounter.status)
 
   return (
     <div className="flex flex-col gap-4">
@@ -383,6 +387,13 @@ export function EncounterDocumentsBlock({
           </DropdownMenu>
         ) : null}
       </div>
+
+      {/* Firmada con un formulario a medias: sigue a la vista como pendiente, y se termina desde aquí. */}
+      <UnfinishedFormsBox
+        forms={unfinished}
+        canComplete={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
+        onOpen={setOpenForm}
+      />
 
       {docs.toPrepare.length > 0 ? (
         <section
@@ -639,18 +650,25 @@ export function EncounterDocumentsBlock({
             </Button>
           </li>
         ))}
-        {docs.forms.map((form) => (
+        {/* El que quedó a medias al firmar ya está arriba, con su «Completar»: aquí no se repite. */}
+        {docs.forms
+          .filter((form) => !unfinished.some((pending) => pending.id === form.id))
+          .map((form) => (
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">
                 Formulario · {form.templateTitle ?? "Formulario"}
               </span>
               <span className="text-xs text-muted-foreground">
-                {FORM_RESPONSE_STATUS_LABELS[form.status]}
+                {signed && form.status === "borrador"
+                  ? formStateWords({ ...form, encounterStatus: "finalizada" })
+                  : FORM_RESPONSE_STATUS_LABELS[form.status]}
               </span>
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
-              {form.status === "borrador" ? "Completar" : "Ver"}
+              {form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
+                ? "Completar"
+                : "Ver"}
             </Button>
           </li>
         ))}
@@ -840,7 +858,8 @@ export function EncounterDocumentsBlock({
         encounterId={encounterId}
         sex={patient.patient.sex ?? null}
         responseId={openForm}
-        canWrite={canWrite && !disabled}
+        // Firmada la atención, su formulario a medias se termina igual desde aquí.
+        canWrite={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
         onClose={() => setOpenForm(null)}
         onChanged={refresh}
       />
@@ -892,8 +911,76 @@ function PrescriptionRow({
   )
 }
 
+/**
+ * Lo que dice el panel de un formulario bajo su título: el borrador se guarda solo; uno
+ * finalizado ya no se cambia (decir «se guarda solo» ahí prometía algo que no pasa). Lo
+ * que respondió el paciente no lleva frase: no lo escribe el equipo, y su vista ya dice
+ * de quién es y qué se puede hacer («Agregar una corrección», «Marcar como revisado»).
+ */
+export function formDetailDescription(
+  response: (Pick<FormResponse, "status"> & Partial<Pick<FormResponse, "source">>) | null,
+  canWrite: boolean,
+): string | undefined {
+  if (response?.source === "portal") return undefined
+  if (response?.status === "borrador" && canWrite) return "Se guarda solo mientras lo completas."
+  if (response?.status === "finalizado") return "Finalizado: ya no se cambia. Para corregir algo, agrega una adenda."
+  return undefined
+}
+
+/**
+ * Los formularios que la atención firmada dejó a medias, una sola vez y con su
+ * única salida: «Completar». Lo usan Documentos de la atención firmada y
+ * «Atención finalizada», el aviso que sale justo al firmar.
+ */
+export function UnfinishedFormsBox({
+  forms,
+  canComplete,
+  onOpen,
+}: {
+  forms: ReadonlyArray<{ id: string; templateTitle: string | null }>
+  /** Puede terminarlo; si no, lo abre para verlo. */
+  canComplete: boolean
+  onOpen: (formId: string) => void
+}): React.JSX.Element | null {
+  if (forms.length === 0) return null
+  return (
+    <section
+      aria-label="Formularios a medias"
+      className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3"
+    >
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium">
+          {forms.length === 1 ? "Falta terminar un formulario" : `Falta terminar ${forms.length} formularios`}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Quedó a medias al firmar la atención. Al terminarlo lleva su propia fecha y hora.
+        </span>
+      </div>
+      <ul className="flex flex-col gap-2">
+        {forms.map((form) => {
+          const title = form.templateTitle ?? "Formulario"
+          return (
+            <li key={form.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span className="min-w-0 break-words text-sm">{title}</span>
+              <Button
+                type="button"
+                size="sm"
+                // Con el título: con varios a medias, cada botón dice cuál abre.
+                aria-label={`${canComplete ? "Completar" : "Ver"} ${title}`}
+                onClick={() => onOpen(form.id)}
+              >
+                {canComplete ? "Completar" : "Ver"}
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 /** Un formulario de la atención se completa al lado, sin salir. */
-function FormDetail({
+export function FormDetail({
   patientId,
   encounterId,
   sex,
@@ -901,6 +988,7 @@ function FormDetail({
   canWrite,
   onClose,
   onChanged,
+  dock,
 }: {
   patientId: string
   encounterId: string
@@ -909,6 +997,8 @@ function FormDetail({
   canWrite: boolean
   onClose: () => void
   onChanged: () => Promise<void>
+  /** `false`: como cajón encima de un diálogo abierto («Atención finalizada»). */
+  dock?: boolean
 }) {
   const forms = useQuery({
     queryKey: ["form-responses", patientId],
@@ -920,8 +1010,9 @@ function FormDetail({
     <DetailDrawer
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Formulario"}
-      description={response?.source === "portal" ? undefined : "Se guarda solo mientras lo completas."}
+      description={formDetailDescription(response, canWrite)}
       onClose={onClose}
+      {...(dock === undefined ? {} : { dock })}
     >
       {response ? (
         <ResponseDetail

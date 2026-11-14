@@ -118,7 +118,7 @@ describe("FormDrawer", () => {
     expect(spinner).not.toBeNull()
   })
 
-  it("con cambios, Cancelar pregunta; «Continuar editando» no cierra y devuelve el foco", async () => {
+  it("con cambios, Cancelar pregunta; «Seguir aquí» no cierra y devuelve el foco", async () => {
     const onClose = vi.fn()
     const nativeConfirm = vi.spyOn(window, "confirm")
     renderDrawer({ isDirty: true, onClose })
@@ -178,6 +178,20 @@ describe("FormDrawer", () => {
     await screen.findByRole("alertdialog", { name: unsaved.title })
     fireEvent.click(screen.getByRole("button", { name: unsaved.discard }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  // QA del 14 nov: la recomendada del presupuesto se guarda al marcarla, y la
+  // pregunta decía que se perdían todos los cambios.
+  it("si algo ya se guardó aparte, la pregunta de salir dice lo que de verdad se pierde", async () => {
+    renderDrawer({
+      isDirty: true,
+      unsavedDescription: "Se pierde lo que escribiste. La recomendada ya quedó guardada.",
+    })
+    await screen.findByText("Editar mesa")
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(dialog.textContent).toContain("La recomendada ya quedó guardada.")
+    expect(dialog.textContent).not.toContain(unsaved.description)
   })
 
   it("sin cambios, Cancelar cierra directo sin preguntar", async () => {

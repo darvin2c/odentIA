@@ -4,6 +4,8 @@ import {
   ageText,
   clinicDateLocale,
   likelyLocaleOf,
+  padWrittenDate,
+  padWrittenPart,
   readWrittenDate,
   writeDate,
   writtenDateFormat,
@@ -34,6 +36,30 @@ describe("fecha escrita", () => {
     expect(writtenDateFormat("de-DE").separator).toBe(".")
   })
 
+  it("completa con un cero el día o el mes de un solo dígito, nunca el año", () => {
+    const pe = writtenDateFormat("es-PE")
+    expect(padWrittenPart("3", pe)).toBe("03")
+    expect(padWrittenPart("03/4", pe)).toBe("03/04")
+    // Ya completo, vacío o en el año: no hay nada que completar.
+    expect(padWrittenPart("30", pe)).toBeNull()
+    expect(padWrittenPart("", pe)).toBeNull()
+    expect(padWrittenPart("03/04/1", pe)).toBeNull()
+    // En el orden año-mes-día el año no se toca y el mes sí.
+    const se = writtenDateFormat("sv-SE")
+    expect(padWrittenPart("1", se)).toBeNull()
+    expect(padWrittenPart("1990-4", se)).toBe("1990-04")
+    expect(padWrittenDate("3/4/1990", pe)).toBe("03/04/1990")
+    expect(padWrittenDate("3-4-1990", pe)).toBe("03/04/1990")
+    expect(padWrittenDate("4/3/1990", writtenDateFormat("en-US"))).toBe("04/03/1990")
+    expect(padWrittenDate("1990 4 3", se)).toBe("1990-04-03")
+    expect(padWrittenDate("3,4,1990", pe)).toBe("03/04/1990")
+    expect(padWrittenDate("3, 4, 1990", pe)).toBe("03/04/1990")
+    // Lo que no son tres partes de números se deja como está.
+    expect(padWrittenDate("3/4", pe)).toBeNull()
+    expect(padWrittenDate("30071995", pe)).toBeNull()
+    expect(padWrittenDate("tres/4/1990", pe)).toBeNull()
+  })
+
   it("muestra en el orden de la clínica lo que se guarda en ISO 8601", () => {
     expect(writeDate("1995-07-30", writtenDateFormat("es-PE"))).toBe("30/07/1995")
     expect(writeDate("1995-07-30", writtenDateFormat("en-US"))).toBe("07/30/1995")
@@ -50,7 +76,11 @@ describe("fecha escrita", () => {
     const peru = writtenDateFormat("es-PE")
     const problem = (text: string) => readWrittenDate(text, TODAY, peru).problem
     expect(readWrittenDate("", TODAY, peru)).toEqual({ iso: null, empty: true, problem: null })
-    expect(problem("30/07/19")).toEqual({ kind: "incompleta" })
+    expect(problem("30/07/1")).toEqual({ kind: "incompleta" })
+    // El año en dos números no se adivina: se pide con sus cuatro.
+    expect(problem("30/07/19")).toEqual({ kind: "anio-corto" })
+    expect(problem("3/4/90")).toEqual({ kind: "incompleta" })
+    expect(problem("03/04/90")).toEqual({ kind: "anio-corto" })
     expect(problem("30/13/1995")).toEqual({ kind: "mes" })
     expect(problem("00/07/1995")).toEqual({ kind: "dia" })
     expect(problem("31/02/1995")).toEqual({ kind: "no-existe", days: 28 })

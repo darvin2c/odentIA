@@ -852,8 +852,22 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  /** Los formularios finalizados en ella, con lo respondido en una línea. */
-  forms: Array<{ id: string; title: string; summary: string }>
+  /**
+   * Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una
+   * atención anulada, que trae también los descartados con su motivo (`discardedWithAttention`: lo
+   * descartó la propia anulación). `summary`: lo respondido en una línea, si lo hay.
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    afterSigning: boolean
+    retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
+    summary: string
+  }>
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
@@ -1068,6 +1082,11 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /**
+   * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
+   * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
+   */
+  declaredAllergies?: Array<{ by: HealthDeclarant; at: string | null; allergies: string[]; saidNo: boolean }>
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }

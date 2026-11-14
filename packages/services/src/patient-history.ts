@@ -25,7 +25,7 @@ import {
   treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
@@ -731,8 +731,26 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  /** Los formularios finalizados en ella, con lo respondido en una línea: se anotaron, no se indicaron. */
-  forms: Array<{ id: string; title: string; summary: string }>
+  /**
+   * Sus formularios del equipo: el que sigue a medias y el finalizado, con cuándo
+   * se terminó y si fue después de firmar la atención. `retired`: la atención se
+   * anuló y lo finalizado en ella va con lo que ya no vale. De una atención
+   * anulada vienen además los descartados, con su motivo: es el único lugar donde
+   * la persona ve qué pasó con lo que había empezado (`discardedWithAttention`:
+   * lo descartó la propia anulación). `summary`: lo respondido en una línea, en
+   * lo finalizado; se anotó, no se indicó.
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: Date | null
+    afterSigning: boolean
+    retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
+    summary: string
+  }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
 }
 
@@ -765,7 +783,7 @@ async function loadBornForEncounters(
     }
     return born
   }
-  const [items, consents, recipes, orders, forms, controls] = await Promise.all([
+  const [items, consents, recipes, orders, forms, records, controls] = await Promise.all([
     tx
       .select()
       .from(treatmentPlanItem)
@@ -798,6 +816,38 @@ async function loadBornForEncounters(
       .from(clinicalOrder)
       .where(and(eq(clinicalOrder.organizationId, orgId), eq(clinicalOrder.patientId, patientId), inArray(clinicalOrder.encounterId, encounterIds)))
       .orderBy(asc(clinicalOrder.createdAt), asc(clinicalOrder.id)),
+    tx
+      .select({
+        id: clinicalFormResponse.id,
+        encounterId: clinicalFormResponse.encounterId,
+        templateTitle: clinicalFormResponse.templateTitle,
+        status: clinicalFormResponse.status,
+        finalizedAt: clinicalFormResponse.finalizedAt,
+        discardedAt: clinicalFormResponse.discardedAt,
+        discardReason: clinicalFormResponse.discardReason,
+        attentionStatus: encounter.status,
+        attentionSignedAt: encounter.finalizedAt,
+        attentionVoidedAt: encounter.voidedAt,
+      })
+      .from(clinicalFormResponse)
+      .innerJoin(
+        encounter,
+        and(eq(encounter.organizationId, clinicalFormResponse.organizationId), eq(encounter.id, clinicalFormResponse.encounterId)),
+      )
+      .where(
+        and(
+          eq(clinicalFormResponse.organizationId, orgId),
+          eq(clinicalFormResponse.patientId, patientId),
+          inArray(clinicalFormResponse.encounterId, encounterIds),
+          // Lo finalizado y lo que el equipo dejó a medias. Lo descartado no es de la historia, salvo
+          // en una atención anulada: ahí se dice qué formularios tenía y qué pasó con cada uno.
+          sql`(${clinicalFormResponse.status} = 'finalizado'
+            or (${clinicalFormResponse.status} = 'borrador' and ${clinicalFormResponse.source} = 'staff')
+            or (${clinicalFormResponse.status} = 'descartado' and ${encounter.status} = 'anulada'))`,
+        ),
+      )
+      .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id)),
+    // Lo respondido en una línea, como lo dice la copia: solo lo finalizado lo tiene.
     loadFormRecords(tx, orgId, patientId, { encounterIds }),
     tx
       .select()
@@ -926,9 +976,25 @@ async function loadBornForEncounters(
       state: row.status === "completado" ? "con resultado" : row.status === "cancelado" ? "cancelada" : "sin resultado",
     })
   }
-  for (const form of forms) {
-    if (!form.encounterId) continue
-    of(form.encounterId).forms.push({ id: form.id, title: form.title, summary: form.summary })
+  const summaries = new Map(records.map((form) => [form.id, form.summary]))
+  for (const row of forms) {
+    if (!row.encounterId) continue
+    const finalized = row.status === "finalizado"
+    const discarded = row.status === "descartado"
+    of(row.encounterId).forms.push({
+      id: row.id,
+      title: row.templateTitle ?? "Formulario clínico",
+      state: finalized ? "finalizado" : discarded ? "descartado" : "a_medias",
+      finalizedAt: row.finalizedAt,
+      // Terminado después de firmar la atención: lleva su propia fecha, y la Historia lo dice.
+      afterSigning: finalized && !!row.finalizedAt && !!row.attentionSignedAt && row.finalizedAt > row.attentionSignedAt,
+      retired: row.attentionStatus === "anulada",
+      discardReason: discarded ? row.discardReason : null,
+      // La anulación lo descartó en su misma transacción: el mismo instante.
+      discardedWithAttention:
+        discarded && !!row.discardedAt && !!row.attentionVoidedAt && row.discardedAt.getTime() === row.attentionVoidedAt.getTime(),
+      summary: summaries.get(row.id) ?? "",
+    })
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")
