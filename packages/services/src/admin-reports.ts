@@ -8,7 +8,6 @@ import {
   saasOpportunity,
   saasProposal,
 } from "@odentia/db/schema/admin-arm"
-import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
   saasFollowUp,
@@ -18,6 +17,7 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { type SQL, sql } from "drizzle-orm"
+import { enteredAtSql, notDemoOrg } from "./admin-alta-sql.js"
 import {
   CLIENT_ORIGIN_WORDS,
   LOST_REASON_WORDS,
@@ -321,25 +321,6 @@ function requireReportsAdmin(actor: AdminActor | null): AdminActor {
   if (actor.role !== "admin")
     throw new ServiceError("FORBIDDEN", 403, "Los reportes son solo para Administración")
   return actor
-}
-
-/** Una organización que no es demo para presentar (ni marcada en su suscripción). */
-export function notDemoOrg(orgId: SQL): SQL {
-  return sql`(not exists (select 1 from ${saasDemo} d where d.organization_id = ${orgId})
-    and not exists (select 1 from ${saasSubscription} ds where ds.organization_id = ${orgId} and ds.is_demo))`
-}
-
-/**
- * Cuándo entró una clínica (el inicio de su alta): la venta cerrada como «Entró» más antigua y,
- * si no hay, cuando se creó su cuenta. La misma regla en el Embudo «Alta» y en los reportes.
- * `clientAlias` es el alias SQL de `saas_client`; `orgAlias`, el de su `organization`.
- */
-export function enteredAtSql(clientAlias = "c", orgAlias = "org"): SQL {
-  for (const alias of [clientAlias, orgAlias])
-    if (!/^[a-z_][a-z0-9_]*$/.test(alias)) throw new Error("Alias no válido")
-  return sql`coalesce(
-          (select min(o.decided_at) from ${saasOpportunity} o where o.client_id = ${sql.raw(`${clientAlias}.id`)} and o.decision = 'entro'),
-          ${sql.raw(`${orgAlias}.created_at`)})`
 }
 
 type Rows<T> = T[]
