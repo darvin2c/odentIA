@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
+import { appointment } from "./agenda.js"
 import { user } from "./auth.js"
 import { diagnosisCodeRef, encounter, orgSpecialty, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
 import { orgFk, timestamps } from "./crm.js"
@@ -221,6 +222,74 @@ export const clinicalFormResponse = pgTable(
     check(
       "clinical_form_response_submitted_via_check",
       sql`${table.submittedVia} is null or ${table.submittedVia} in ('portal','enlace')`,
+    ),
+  ],
+)
+
+/**
+ * «Tu visita» (mesa de formularios del 13 nov, entrega 8): lo que la persona cuenta de una cita
+ * antes de venir, desde su enlace o su portal. Una respuesta por cita: la de noviembre no se lee
+ * como la de mayo. Lo que se le pregunta lo marca la clínica en «Preguntas al paciente» (grupo
+ * «Antes de cada cita»); todo es opcional y nada de esto traba la atención.
+ *
+ * Lo enviado no cambia (`appointment_visit_answer_guard`): solo se anota una vez quién lo vio al
+ * atender, cuándo y en qué atención. En el archivo para otro sistema es un `QuestionnaireResponse`
+ * (HL7 FHIR R4) de esa cita; aquí va con columnas propias porque sus preguntas son fijas.
+ */
+export const appointmentVisitAnswer = pgTable(
+  "appointment_visit_answer",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    appointmentId: uuid("appointment_id").notNull(),
+    /** «¿A qué vienes?», con sus palabras. Nulo si no lo contó o si se le dijo a qué viene (una sesión, un control). */
+    reason: text("reason"),
+    /** «¿Te duele ahora?»: `si` o `no`; nulo si no respondió. */
+    pain: text("pain"),
+    /** Cuánto, de 0 a 10, solo con dolor (escala numérica, NRS-11). */
+    painLevel: integer("pain_level"),
+    /** «¿Algo más que quieras contarnos?» */
+    more: text("more"),
+    /** Lo que se le dijo que venía a hacer («sesión 2 de endodoncia»), tal como lo leyó. */
+    toldPurpose: text("told_purpose"),
+    /** Quien lo envió: la persona o quien decide por ella (escrito, como en la declaración de salud). */
+    respondentContactId: uuid("respondent_contact_id").notNull(),
+    submittedVia: text("submitted_via").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Quién lo vio al atender, cuándo y en qué atención: lo anota el sistema al abrirla quien atiende.
+     * Si esa atención era un borrador vacío y se descartó, la atención se suelta (`ON DELETE SET NULL`
+     * solo de esa columna, en la migración de reglas) y quién y cuándo se quedan.
+     */
+    seenBy: text("seen_by").references(() => user.id),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    seenEncounterId: uuid("seen_encounter_id"),
+  },
+  (table) => [
+    uniqueIndex("appointment_visit_answer_appointment_uidx").on(table.organizationId, table.appointmentId),
+    index("appointment_visit_answer_org_patient_idx").on(table.organizationId, table.patientId),
+    // La cita es de ese paciente y de esa clínica; borrar la cita (o la ficha entera) se lleva lo suyo.
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "appointment_visit_answer_appointment_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.seenEncounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "appointment_visit_answer_seen_encounter_fk",
+    }),
+    check("appointment_visit_answer_pain_check", sql`${table.pain} is null or ${table.pain} in ('si','no')`),
+    check(
+      "appointment_visit_answer_pain_level_check",
+      sql`${table.painLevel} is null or (${table.painLevel} between 0 and 10 and ${table.pain} = 'si')`,
+    ),
+    check("appointment_visit_answer_via_check", sql`${table.submittedVia} in ('enlace','portal')`),
+    // La atención en que se vio puede faltar: un borrador vacío que se descartó (su FK la suelta).
+    check(
+      "appointment_visit_answer_seen_check",
+      sql`(${table.seenAt} is null) = (${table.seenBy} is null) and (${table.seenEncounterId} is null or ${table.seenAt} is not null)`,
     ),
   ],
 )
