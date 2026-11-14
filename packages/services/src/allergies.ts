@@ -20,7 +20,7 @@ import {
 import type { Db } from "@odentia/db"
 import { patient, patientAllergy } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, ne } from "drizzle-orm"
+import { and, eq, inArray, ne } from "drizzle-orm"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { productHooks } from "./products.js"
@@ -427,6 +427,14 @@ export async function markAllergiesReviewed(
 ): Promise<{ reviewedAt: Date }> {
   const locked = await lockHealth(tx, orgId, patientId)
   const active = await activeAllergies(tx, orgId, patientId)
+  // Revisadas con ella, lo que dijo sin confirmar queda confirmado (HL7 FHIR R4
+  // AllergyIntolerance.verificationStatus: unconfirmed → confirmed; auditor, 14 nov).
+  const unconfirmed = active.filter((row) => row.verification === "no_confirmada").map((row) => row.id)
+  if (unconfirmed.length > 0)
+    await tx
+      .update(patientAllergy)
+      .set({ verification: "confirmada", updatedAt: new Date() })
+      .where(and(eq(patientAllergy.organizationId, orgId), inArray(patientAllergy.id, unconfirmed)))
   await touchHealth(
     tx,
     orgId,
@@ -438,6 +446,7 @@ export async function markAllergiesReviewed(
   )
   await audit(tx, orgId, actorUserId, "health.allergies_reviewed", patientId, {
     active: active.length,
+    confirmed: unconfirmed.length,
     revision: { before: locked.revision, after: locked.revision + 1 },
   })
   return { reviewedAt: new Date() }

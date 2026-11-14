@@ -2,7 +2,13 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { asaLabel, type PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { buildDrafts, ClinicalGroupCard, DeclaredHealthSnapshot, hasOriginalDeclaration } from "./antecedentes-tab"
+import {
+  buildDrafts,
+  ClinicalGroupCard,
+  DeclaredHealthSnapshot,
+  hasOriginalDeclaration,
+  healthReviewedWords,
+} from "./antecedentes-tab"
 
 declareProduct(bareProduct("dental"))
 
@@ -82,5 +88,15 @@ describe("«Ver declaración original»", () => {
     expect(hasOriginalDeclaration({ respondent: "patient", answers: {} }, [])).toBe(true)
     expect(hasOriginalDeclaration(null, [{}])).toBe(true)
     expect(hasOriginalDeclaration(null, [])).toBe(false)
+  })
+})
+
+// Auditor, 14 nov: «Revisado por personal autorizado», sin nadie, al lado de una alergia sin revisar.
+describe("la revisión de los antecedentes", () => {
+  it("nombra a quien la hizo y el día, y dice que es de los antecedentes", () => {
+    expect(healthReviewedWords("2026-11-14T15:00:00.000Z", "u1", () => "Dra. Ana Torres")).toBe(
+      "Antecedentes revisados por Dra. Ana Torres · 14 nov",
+    )
+    expect(healthReviewedWords("2026-11-14T15:00:00.000Z", null, () => "")).toBe("Antecedentes revisados · 14 nov")
   })
 })

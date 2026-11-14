@@ -34,7 +34,7 @@ import type { ReactNode } from "react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
 import {
   declaredGroupOf,
   declaredMarkWords,
@@ -486,6 +486,7 @@ export function AntecedentesTab({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const memberName = useMemberName()
   const uid = useId()
 
   const healthQuery = useQuery({
@@ -703,7 +704,7 @@ export function AntecedentesTab({
               : "sin entrevista registrada"}
           </p>
           {health.reviewedAt ? (
-            <Badge variant="secondary">Revisado por personal autorizado</Badge>
+            <Badge variant="secondary">{healthReviewedWords(health.reviewedAt, health.reviewedBy, memberName)}</Badge>
           ) : pendingReview ? (
             // Una marca por declaración sin revisar: quién lo dijo y cuándo, como arriba de la ficha.
             (health.declared?.length ? health.declared : [null]).map((group) => (
@@ -1431,6 +1432,21 @@ export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.E
  * un registro que no hizo el equipo sin su salud (H6: con Sofía, registrada por
  * el equipo sin salud, el diálogo salía vacío).
  */
+/**
+ * Quién revisó los antecedentes y cuándo: «Antecedentes revisados por Dra. Ana
+ * Torres · 14 nov». Antes decía «Revisado por personal autorizado», sin nadie,
+ * al lado de una alergia que nadie había revisado (auditor, 14 nov). Las
+ * alergias tienen su propia revisión, que dice su tarjeta.
+ */
+export function healthReviewedWords(
+  reviewedAt: string,
+  reviewedBy: string | null,
+  memberName: (userId: string) => string,
+): string {
+  const day = shortDay(reviewedAt)
+  return `Antecedentes revisados${reviewedBy ? ` por ${memberName(reviewedBy)}` : ""}${day ? ` · ${day}` : ""}`
+}
+
 export function hasOriginalDeclaration(
   registration: Pick<NonNullable<PatientFull["registration"]>, "respondent" | "answers"> | null,
   later: readonly unknown[],

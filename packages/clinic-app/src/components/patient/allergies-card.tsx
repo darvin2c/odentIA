@@ -137,10 +137,11 @@ export function AllergiesCard({
     mutationFn: () => markAllergiesReviewedApi(patientId),
     onSuccess: async () => {
       await refresh(queryClient, patientId)
-      toast.success("Anotado: no tiene alergias")
+      toast.success(active.length > 0 ? "Alergias revisadas: lo que dijo queda confirmado" : "Anotado: no tiene alergias")
     },
   })
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
+  const saidPending = active.some((allergy) => declaredGroupOf(health.declared, "allergies", allergy.id))
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
   const reviewed = health.allergiesReviewedAt
     ? `Revisadas${health.allergiesReviewedBy ? ` por ${memberName(health.allergiesReviewedBy)}` : ""} · ${allergyDay(health.allergiesReviewedAt)}`
@@ -158,12 +159,22 @@ export function AllergiesCard({
           <p className="text-sm text-muted-foreground">{reviewed}</p>
         </div>
         {canWrite ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
-            <Plus aria-hidden />
-            Agregar alergia
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Lo que dijo y nadie revisó se revisa también aquí, no solo en la atención (auditor, 14 nov):
+                queda confirmado y con quién lo revisó. */}
+            {saidPending ? (
+              <Button type="button" size="sm" variant="outline" disabled={noneReviewed.isPending} onClick={() => noneReviewed.mutate()}>
+                {noneReviewed.isPending ? "Guardando…" : "Alergias revisadas"}
+              </Button>
+            ) : null}
+            <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
+              <Plus aria-hidden />
+              Agregar alergia
+            </Button>
+          </div>
         ) : null}
       </div>
+      {saidPending ? <ActionError error={noneReviewed.error} /> : null}
       {active.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">

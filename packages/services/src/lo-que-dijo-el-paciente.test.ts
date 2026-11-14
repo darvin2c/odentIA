@@ -754,3 +754,13 @@ it("agregar una alergia del equipo no da por revisado el látex que dijo ella", 
   expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toHaveLength(1)
 })
 
+it("revisar sus alergias con ella confirma lo que dijo (FHIR verificationStatus) y le quita la marca", async () => {
+  const f = await clinicalFixture()
+  const ines = await inesSaysLatex(f)
+  expect(ines.latex.verification).toBe("no_confirmada")
+  await f.run((tx) => markAllergiesReviewed(tx, ORG, f.actor, ines.patientId))
+  const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, ines.patientId))
+  expect(reviewed.declared.flatMap((group) => group.allergies)).toEqual([])
+  expect(reviewed.allergies.find((row) => row.id === ines.latex.id)?.verification).toBe("confirmada")
+  expect(await f.run((tx) => declaredAllergiesByPatient(tx, ORG, ines.patientId))).toEqual([])
+})

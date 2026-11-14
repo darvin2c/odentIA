@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderToStaticMarkup } from "react-dom/server"
+import { describe, expect, it, vi } from "vitest"
 import type { Allergy, PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { allergyOrigin } from "./allergies-card"
+import { AllergiesCard, allergyOrigin } from "./allergies-card"
 
 declareProduct(bareProduct("dental"))
+
+vi.mock("../../lib/crm", () => ({ usePermission: () => true, useMemberName: () => () => "Dra. Ana Torres" }))
 
 // QA del 14 nov (H3 de desarrollo): la fila decía «La declaró el paciente» con el día en que entró a
 // su ficha, aunque la hubiera dicho su madre o la hubiera dicho días antes.
@@ -50,5 +54,44 @@ describe("la fila de cada alergia en Antecedentes", () => {
     expect(allergyOrigin({ ...latex, source: "equipo", createdBy: "u1" } as Allergy, { declared: [] }, "F", member)).toMatch(
       /^Registrada por Dra\. Ana Torres · 14 nov/,
     )
+  })
+})
+
+// Auditor, 14 nov: en la ficha, la alergia que dijo la persona solo se podía quitar.
+describe("revisar en la ficha la alergia que dijo", () => {
+  const health = (declared: boolean) =>
+    ({
+      revision: 1,
+      reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
+      allergies: [{ id: "a1", substance: "Látex", source: "paciente", isActive: true, severity: "desconocida", createdAt: "2026-11-14T15:00:00.000Z" }],
+      conditions: [],
+      medications: [],
+      bloodGroup: null,
+      reviewedAt: null,
+      reviewedBy: null,
+      latestAnamnesis: null,
+      declared: declared
+        ? [
+            {
+              by: { kind: "patient", name: null, relation: null },
+              at: "2026-11-14T15:00:00.000Z",
+              allergies: ["a1"],
+              conditions: [],
+              medications: [],
+              pregnancy: false,
+              saidNo: { allergies: false, conditions: false, medications: false },
+            },
+          ]
+        : [],
+    }) as unknown as PatientHealth
+  const render = (value: PatientHealth) =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <AllergiesCard patientId="p1" patientName="Inés Salas" health={value} sex="F" />
+      </QueryClientProvider>,
+    )
+  it("sin revisar, ofrece «Alergias revisadas»; ya revisada, no", () => {
+    expect(render(health(true))).toContain("Alergias revisadas")
+    expect(render(health(false))).not.toContain("Alergias revisadas")
   })
 })
