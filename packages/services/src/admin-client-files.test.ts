@@ -318,6 +318,15 @@ describe("el texto del correo", () => {
 
   it("los adjuntos de un correo sin cliente que no es de la carga no se borran", async () => {
     const now = new Date()
+    const kept: StoredInboundAttachment[] = [
+      {
+        filename: "contrato.pdf",
+        contentType: "application/pdf",
+        size: 3,
+        fileId: null,
+        objectKey: "inbound/contrato-hola.pdf",
+      },
+    ]
     const [row] = await ownerDb
       .insert(saasInboundEmail)
       .values({
@@ -327,15 +336,7 @@ describe("el texto del correo", () => {
         fromAddress: "nadie@files.test",
         toAddress: "hola@odentia32.com",
         receivedAt: new Date(now.getTime() - 40 * DAY),
-        attachments: [
-          {
-            filename: "contrato.pdf",
-            contentType: "application/pdf",
-            size: 3,
-            fileId: null,
-            objectKey: "inbound/contrato-hola.pdf",
-          },
-        ],
+        attachments: kept,
       })
       .returning({ id: saasInboundEmail.id })
     expect(row).toBeDefined()

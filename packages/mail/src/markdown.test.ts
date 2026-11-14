@@ -51,11 +51,13 @@ describe("formato básico de lo que escribe el equipo", () => {
       {
         kind: "list",
         ordered: false,
+        start: 1,
         items: [[{ kind: "text", text: "Agenda" }], [{ kind: "text", text: "Cobros" }]],
       },
       {
         kind: "list",
         ordered: true,
+        start: 1,
         items: [[{ kind: "text", text: "Uno" }], [{ kind: "text", text: "Dos" }]],
       },
     ])
@@ -80,5 +82,42 @@ describe("formato básico de lo que escribe el equipo", () => {
       "Hola <b>Rosa</b> precios (https://odentia32.com/precios)\n# no es título\n\n- uno",
     )
     expect(mail.text.indexOf("- uno")).toBeLessThan(mail.text.indexOf("Darvin Cotrina"))
+  })
+})
+
+describe("lo que encontró la revisión", () => {
+  it("una lista numerada empieza en el número que escribió", () => {
+    const blocks = parseMarkdown("1. Primero\n\nUna explicación.\n\n2. Segundo")
+    expect(markdownText(blocks)).toBe("1. Primero\n\nUna explicación.\n\n2. Segundo")
+    expect(
+      renderEmail({
+        subject: "a",
+        preview: "a",
+        title: "a",
+        formatted: "2. Segundo",
+        paragraphs: [],
+        reason: "r",
+      }).html,
+    ).toContain('<ol start="2"')
+  })
+
+  it("las direcciones con paréntesis quedan enteras", () => {
+    expect(parseInline("Ver https://es.wikipedia.org/wiki/Lima_(Perú).")).toEqual([
+      { kind: "text", text: "Ver " },
+      {
+        kind: "link",
+        href: "https://es.wikipedia.org/wiki/Lima_(Perú)",
+        text: "https://es.wikipedia.org/wiki/Lima_(Perú)",
+      },
+      { kind: "text", text: "." },
+    ])
+    expect(parseInline("(ver https://a.pe/x)")).toEqual([
+      { kind: "text", text: "(ver " },
+      { kind: "link", href: "https://a.pe/x", text: "https://a.pe/x" },
+      { kind: "text", text: ")" },
+    ])
+    expect(parseInline("[aquí](https://es.wikipedia.org/wiki/Lima_(Perú))")).toEqual([
+      { kind: "link", href: "https://es.wikipedia.org/wiki/Lima_(Perú)", text: "aquí" },
+    ])
   })
 })

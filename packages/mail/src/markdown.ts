@@ -20,10 +20,16 @@ export type MarkdownInline =
 
 export type MarkdownBlock =
   | { kind: "paragraph"; lines: MarkdownInline[][] }
-  | { kind: "list"; ordered: boolean; items: MarkdownInline[][] }
+  | {
+      kind: "list"
+      ordered: boolean
+      /** El número con que empieza una lista numerada: se respeta el que escribió. */
+      start: number
+      items: MarkdownInline[][]
+    }
 
 const BULLET = /^\s{0,3}[-*+]\s+(.*)$/
-const NUMBERED = /^\s{0,3}\d{1,9}[.)]\s+(.*)$/
+const NUMBERED = /^\s{0,3}(\d{1,9})[.)]\s+(.*)$/
 
 /** Un enlace que se acepta: https con host, o mailto con una dirección. */
 export function safeHref(raw: string): string | null {
@@ -43,13 +49,24 @@ export function safeHref(raw: string): string | null {
  * cierra queda como texto, con sus marcas.
  */
 const INLINE =
-  /\[([^\]\n]{1,500})\]\(([^()\s]{1,2000})\)|\*\*(?=\S)(.+?)(?<=\S)\*\*|(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\p{L}\p{N}_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\p{L}\p{N}_])|((?:https:\/\/|mailto:)[^\s<>"]+)/gu
+  /\[([^\]\n]{1,500})\]\(((?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)(.+?)(?<=\S)\*\*|(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\p{L}\p{N}_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\p{L}\p{N}_])|((?:https:\/\/|mailto:)[^\s<>"]+)/gu
 
-/** Lo que cierra una oración no es parte de la dirección suelta: «https://a.pe.» */
+/**
+ * Lo que cierra una oración no es parte de la dirección suelta: «https://a.pe.»
+ * o «(ver https://a.pe)». Un «)» que cierra uno de la dirección se queda:
+ * «https://es.wikipedia.org/wiki/Lima_(Perú)».
+ */
 function trimUrl(url: string): { url: string; rest: string } {
-  const match = /[.,;:!?)\]'"»]+$/.exec(url)
-  if (!match) return { url, rest: "" }
-  return { url: url.slice(0, match.index), rest: match[0] }
+  const count = (text: string, char: string) => text.split(char).length - 1
+  let end = url.length
+  while (end > 0) {
+    const head = url.slice(0, end)
+    const last = head.at(-1) ?? ""
+    if (/[.,;:!?\]'"»]/.test(last)) end--
+    else if (last === ")" && count(head, ")") > count(head, "(")) end--
+    else break
+  }
+  return { url: url.slice(0, end), rest: url.slice(end) }
 }
 
 function pushText(out: MarkdownInline[], text: string) {
@@ -91,14 +108,19 @@ export function parseInline(line: string): MarkdownInline[] {
 export function parseMarkdown(text: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = []
   let paragraph: string[] = []
-  let list: { ordered: boolean; items: string[] } | null = null
+  let list: { ordered: boolean; start: number; items: string[] } | null = null
   const flushParagraph = () => {
     if (paragraph.length) blocks.push({ kind: "paragraph", lines: paragraph.map(parseInline) })
     paragraph = []
   }
   const flushList = () => {
     if (list)
-      blocks.push({ kind: "list", ordered: list.ordered, items: list.items.map(parseInline) })
+      blocks.push({
+        kind: "list",
+        ordered: list.ordered,
+        start: list.start,
+        items: list.items.map(parseInline),
+      })
     list = null
   }
   for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
@@ -110,13 +132,12 @@ export function parseMarkdown(text: string): MarkdownBlock[] {
     }
     const bullet = BULLET.exec(line)
     const numbered = bullet ? null : NUMBERED.exec(line)
-    const item = bullet ?? numbered
-    if (item) {
+    if (bullet || numbered) {
       flushParagraph()
       const ordered = Boolean(numbered)
       if (list && list.ordered !== ordered) flushList()
-      list ??= { ordered, items: [] }
-      list.items.push(item[1] ?? "")
+      list ??= { ordered, start: numbered ? Number(numbered[1]) : 1, items: [] }
+      list.items.push((numbered ? numbered[2] : bullet?.[1]) ?? "")
       continue
     }
     flushList()
@@ -148,7 +169,10 @@ export function markdownText(blocks: readonly MarkdownBlock[]): string {
       block.kind === "paragraph"
         ? block.lines.map(inlineText).join("\n")
         : block.items
-            .map((item, index) => `${block.ordered ? `${index + 1}.` : "-"} ${inlineText(item)}`)
+            .map(
+              (item, index) =>
+                `${block.ordered ? `${block.start + index}.` : "-"} ${inlineText(item)}`,
+            )
             .join("\n"),
     )
     .join("\n\n")

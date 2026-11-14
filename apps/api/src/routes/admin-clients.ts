@@ -55,6 +55,7 @@ import {
   decide,
   decideSaasProposal,
   deleteClientFile,
+  filenameForType,
   founderInvitationEmail,
   founderOffer,
   getClient,
@@ -1312,7 +1313,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
           registerClientFile(tx, actor, {
             clientId,
             kind,
-            filename: file.name,
+            filename: filenameForType(file.name, sniffed.mimeType),
             objectKey,
             contentType: sniffed.mimeType,
             sizeBytes: file.size,

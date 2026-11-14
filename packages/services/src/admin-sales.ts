@@ -83,6 +83,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm"
+import { filenameForType } from "./admin-client-files.js"
 import {
   type ClientSignal,
   clientSignals,
@@ -2440,6 +2441,25 @@ export async function prepareEmailReply(
         )
         .limit(1)
     : []
+  const to = email.replyTo ?? email.fromAddress
+  if (fileIds.length > 0 && client) {
+    // El Reply-To no está verificado: los documentos del cliente solo salen a un contacto suyo.
+    const [known] = await tx
+      .select({ id: saasClientContact.id })
+      .from(saasClientContact)
+      .where(
+        and(
+          eq(saasClientContact.clientId, client.id),
+          sql`lower(${saasClientContact.email}) = lower(${to})`,
+        ),
+      )
+      .limit(1)
+    if (!known)
+      throw invalidField(
+        "fileIds",
+        `La respuesta va a ${to}, que no es un contacto del cliente: agrégalo como contacto o envía sin adjuntos`,
+      )
+  }
   const [row] = await tx
     .insert(saasOutreach)
     .values({
@@ -2852,7 +2872,7 @@ export async function outreachEmail(
       const file = files.find((row) => row.id === fileId)
       if (!file) continue
       attachments.push({
-        filename: file.filename,
+        filename: filenameForType(file.filename, file.contentType),
         content: await readFile(file.objectKey),
         contentType: file.contentType,
       })

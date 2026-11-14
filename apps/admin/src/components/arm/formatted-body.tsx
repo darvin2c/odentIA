@@ -56,7 +56,10 @@ function Block({ block }: { block: MarkdownBlock }) {
     )
   const List = block.ordered ? "ol" : "ul"
   return (
-    <List className={block.ordered ? "list-decimal pl-5" : "list-disc pl-5"}>
+    <List
+      className={block.ordered ? "list-decimal pl-5" : "list-disc pl-5"}
+      start={block.ordered && block.start !== 1 ? block.start : undefined}
+    >
       {block.items.map((item, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: los puntos no tienen otra identidad.
         <li key={index}>

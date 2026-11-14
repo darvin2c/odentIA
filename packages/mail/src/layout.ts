@@ -397,7 +397,8 @@ function formattedHtml(markdown: string, color: string): string {
       if (block.kind === "paragraph")
         return `<p class="t2 cuerpo" style="margin:16px 0 0 0;${text}">${block.lines.map((line) => inlineHtml(line, color)).join("<br>")}</p>`
       const tag = block.ordered ? "ol" : "ul"
-      return `<${tag} class="t2 cuerpo" style="margin:12px 0 0 0;padding:0 0 0 22px;${text}">${block.items.map((item) => `<li style="margin:0 0 4px 0;">${inlineHtml(item, color)}</li>`).join("")}</${tag}>`
+      const start = block.ordered && block.start !== 1 ? ` start="${block.start}"` : ""
+      return `<${tag}${start} class="t2 cuerpo" style="margin:12px 0 0 0;padding:0 0 0 22px;${text}">${block.items.map((item) => `<li style="margin:0 0 4px 0;">${inlineHtml(item, color)}</li>`).join("")}</${tag}>`
     })
     .join("")
 }

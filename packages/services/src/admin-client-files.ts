@@ -130,6 +130,33 @@ export function cleanFilename(name: string): string {
   return (clean || "archivo").slice(0, 255)
 }
 
+/** La extensión de cada tipo que se guarda (lo que entra por correo y lo que se sube). */
+const EXT_OF_TYPE: Record<string, readonly string[]> = {
+  "application/pdf": ["pdf"],
+  "image/jpeg": ["jpg", "jpeg"],
+  "image/png": ["png"],
+  "image/webp": ["webp"],
+  "image/gif": ["gif"],
+  "text/csv": ["csv"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ["xlsx"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ["docx"],
+}
+
+/**
+ * El nombre con que sale un documento adjunto: con la extensión de su tipo
+ * real, porque los programas de correo lo abren por ella («factura.html» que es
+ * un PDF sale «factura.pdf»). Un tipo que no está en la lista no se toca.
+ */
+export function filenameForType(name: string, contentType: string): string {
+  const exts = EXT_OF_TYPE[contentType.trim().toLowerCase()]
+  const clean = cleanFilename(name)
+  if (!exts) return clean
+  const match = /\.([A-Za-z0-9]{1,8})$/.exec(clean)
+  if (match && exts.includes((match[1] ?? "").toLowerCase())) return clean
+  const base = (match ? clean.slice(0, match.index) : clean).trim() || "archivo"
+  return `${base.slice(0, 250)}.${exts[0]}`
+}
+
 async function clientExists(tx: Db, clientId: string): Promise<void> {
   const [row] = await tx
     .select({ id: saasClient.id })

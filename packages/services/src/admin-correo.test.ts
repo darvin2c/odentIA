@@ -482,6 +482,38 @@ describe("formato y adjuntos de la respuesta", () => {
     ).resolves.toMatchObject({ inReplyToEmailId: toSupport.id })
   })
 
+  it("los documentos solo salen a un contacto del cliente, con la extensión de su tipo real", async () => {
+    const page = await registerClientFile(ownerDb, admin, {
+      clientId,
+      kind: "otro",
+      filename: "factura.html",
+      objectKey: clientFileKey(clientId, "pdf"),
+      contentType: "application/pdf",
+      sizeBytes: 10,
+    })
+    // El From es del cliente, pero pide la respuesta en otra dirección (sin verificar).
+    const elsewhere = await ingestInboundEmail(
+      ownerDb,
+      mail({ from: "rosa@hilo.test", replyTo: "tercero@otro.test" }),
+    )
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareEmailReply(tx, admin, elsewhere.id, { body: "Va", fileIds: [page.id] }),
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      fields: { fileIds: expect.stringContaining("tercero@otro.test") },
+    })
+    const home = await ingestInboundEmail(ownerDb, mail({ from: "rosa@hilo.test" }))
+    const reply = await ownerDb.transaction((tx) =>
+      prepareEmailReply(tx, admin, home.id, { body: "Va", fileIds: [page.id] }),
+    )
+    const email = await ownerDb.transaction((tx) =>
+      outreachEmail(tx, reply.id, async () => new Uint8Array([1])),
+    )
+    expect(email.attachments[0]?.filename).toBe("factura.pdf")
+  })
+
   it("un correo sin cliente no lleva adjuntos", async () => {
     const inbound = await ingestInboundEmail(ownerDb, mail({ from: "otra.persona@gmail.com" }))
     await expect(
