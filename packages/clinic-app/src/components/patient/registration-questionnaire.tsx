@@ -23,6 +23,7 @@ import {
   type RegistrationConfig,
   REGISTRATION_FIELDS,
   type RegistrationFieldKey,
+  registrationFieldApplies,
   registrationFieldAsked,
   registrationHealthSection,
   SEX_LABELS,
@@ -290,6 +291,12 @@ const TOBACCO_OPTIONS: ReadonlyArray<{ value: Exclude<Draft["tobacco"], "">; lab
   { value: "nunca", label: "Nunca fumé" },
   { value: "fuma", label: "Fumo" },
   { value: "dejo", label: "Lo dejé" },
+]
+/** Cuando responde otra persona, en tercera persona, como la pregunta (B4). */
+const TOBACCO_OPTIONS_OTHER: ReadonlyArray<{ value: Exclude<Draft["tobacco"], "">; label: string }> = [
+  { value: "nunca", label: "Nunca fumó" },
+  { value: "fuma", label: "Fuma" },
+  { value: "dejo", label: "Lo dejó" },
 ]
 const CIGARETTE_OPTIONS = CIGARETTE_BANDS.map((value) => ({
   value,
@@ -753,10 +760,12 @@ export function RegistrationQuestionnaire({
   const medicineKeys = ["anticoagulants", "boneMedicines", "medications"] as const
   const medicinesAsked = medicineKeys.some(asked)
   const medicinesRequired = medicineKeys.some((key) => asked(key) && required(key))
-  const pregnancyAsked =
-    asked("personal.embarazo") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
-  const breastfeedingAsked =
-    asked("medical.lactancia") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
+  // Una sola regla de a quién le corresponde cada pregunta, la del servidor (B11).
+  const applies = (key: RegistrationFieldKey) => registrationFieldApplies(key, { sex: draft.sex || null, age })
+  const pregnancyAsked = asked("personal.embarazo") && applies("personal.embarazo")
+  const breastfeedingAsked = asked("medical.lactancia") && applies("medical.lactancia")
+  const tobaccoAsked = asked("medical.tabaco") && applies("medical.tabaco")
+  const alcoholAsked = asked("medical.alcohol") && applies("medical.alcohol")
   const historyAsked =
     pregnancyAsked ||
     breastfeedingAsked ||
@@ -934,9 +943,9 @@ export function RegistrationQuestionnaire({
     type Medical = NonNullable<Health["medical"]>
     const medical: Medical = {}
     if (breastfeedingAsked && d.breastfeeding) medical.lactancia = d.breastfeeding === "si"
-    if (asked("medical.tabaco") && d.tobacco) medical.tabaco = d.tobacco
-    if (asked("medical.tabaco") && d.tobacco === "fuma" && d.cigarettes) medical.cigarrillos = d.cigarettes
-    if (asked("medical.alcohol") && d.alcohol) medical.alcohol = d.alcohol
+    if (tobaccoAsked && d.tobacco) medical.tabaco = d.tobacco
+    if (tobaccoAsked && d.tobacco === "fuma" && d.cigarettes) medical.cigarrillos = d.cigarettes
+    if (alcoholAsked && d.alcohol) medical.alcohol = d.alcohol
     if (Object.keys(medical).length) health.medical = medical
     if (Object.keys(health).length) answers.health = health
     if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
@@ -2329,12 +2338,12 @@ export function RegistrationQuestionnaire({
         <Question
           name="habits"
           grouped
-          disabled={!(["medical.tabaco", "medical.alcohol"] as const).some(asked)}
+          disabled={!tobaccoAsked && !alcoholAsked}
           title={you("Tus hábitos", `Los hábitos de ${name}`)}
           description="Nos ayuda a cuidarte mejor."
           onSkip={() => set({ tobacco: "", cigarettes: "", alcohol: "" })}
         >
-          {asked("medical.tabaco") ? (
+          {tobaccoAsked ? (
             <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
               {(control) => (
                 <ChoiceButtons
@@ -2344,14 +2353,14 @@ export function RegistrationQuestionnaire({
                   invalid={control.invalid}
                   onBlur={control.onBlur}
                   value={draft.tobacco || null}
-                  options={TOBACCO_OPTIONS}
+                  options={forOther ? TOBACCO_OPTIONS_OTHER : TOBACCO_OPTIONS}
                   onChange={(value) => set({ tobacco: value, ...(value === "fuma" ? {} : { cigarettes: "" }) })}
                   columns={3}
                 />
               )}
             </Labeled>
           ) : null}
-          {asked("medical.tabaco") && draft.tobacco === "fuma" ? (
+          {tobaccoAsked && draft.tobacco === "fuma" ? (
             <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
               {(control) => (
                 <ChoiceButtons
@@ -2368,7 +2377,7 @@ export function RegistrationQuestionnaire({
               )}
             </Labeled>
           ) : null}
-          {asked("medical.alcohol") ? (
+          {alcoholAsked ? (
             <Labeled
               name="alcohol"
               group

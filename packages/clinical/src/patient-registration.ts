@@ -597,6 +597,8 @@ export function registrationFieldApplies(
   key: RegistrationFieldKey,
   person: { sex?: string | null; age?: number | null },
 ): boolean {
+  // El tabaco y el alcohol, desde los 12 años: a un niño de 7 no se le pregunta si fuma (QA del 14 nov, B4).
+  if (key === "medical.tabaco" || key === "medical.alcohol") return person.age == null || person.age >= 12
   if (key !== "personal.embarazo" && key !== "medical.lactancia") return true
   if (person.sex === "M") return false
   return person.age == null || (person.age >= 12 && person.age <= 55)

@@ -7,7 +7,7 @@ import {
   medicineClassAnswers,
   onlyAskedHealth,
 } from "./health-asked.js"
-import { DEFAULT_REGISTRATION_CONFIG } from "./patient-registration.js"
+import { DEFAULT_REGISTRATION_CONFIG, registrationFieldApplies } from "./patient-registration.js"
 
 const nothing: KnownHealthInput = {
   bloodGroup: null,
@@ -177,5 +177,18 @@ describe("«no toma» solo cuando es cierto", () => {
     const onlyClass = { ...nothing, reviewStatus: { ...nothing.reviewStatus, medications: "recorded" }, medications: [{ atcCode: "B01A" }] }
     expect(knownHealthQuestions(onlyClass).has("medications")).toBe(false)
     expect(knownHealthQuestions({ ...onlyClass, medications: [{ atcCode: "B01A" }, { atcCode: null }] }).has("medications")).toBe(true)
+  })
+})
+
+// QA del 14 nov (B4, B11): a un niño de 7 años se le preguntaba si fuma; la regla de a quién le
+// corresponde cada pregunta es una sola, la del servidor.
+describe("a quién le corresponde cada pregunta", () => {
+  it("el tabaco y el alcohol desde los 12 años; el embarazo y la lactancia, mujeres de 12 a 55", () => {
+    expect(registrationFieldApplies("medical.tabaco", { age: 7 })).toBe(false)
+    expect(registrationFieldApplies("medical.alcohol", { age: 7 })).toBe(false)
+    expect(registrationFieldApplies("medical.tabaco", { age: 15 })).toBe(true)
+    expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 61 })).toBe(false)
+    expect(registrationFieldApplies("medical.lactancia", { sex: "M", age: 30 })).toBe(false)
+    expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 30 })).toBe(true)
   })
 })
