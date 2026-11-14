@@ -415,6 +415,19 @@ function StaffResponseDetail({
   const proposals = editable ? proposalsOf(clio, response.id) : []
   const readyProposals = proposals.filter((item) => item.status === "lista")
   const proposalFor = (fieldId: string) => proposals.find((item) => item.payload["fieldId"] === fieldId) ?? null
+  // Respondida a mano, la pregunta ya es de la persona: lo que proponía Clío ahí se descarta solo,
+  // y no aparece después en «Firmar la atención».
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando cambian las respuestas guardadas o lo propuesto.
+  useEffect(() => {
+    if (!clio || clio.busy) return
+    const saved = (response.answers ?? {}) as Record<string, unknown>
+    for (const item of proposals) {
+      const value = saved[String(item.payload["fieldId"])]
+      const answered = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)
+      // Con el mismo valor es la que se acaba de aceptar: esa no se toca.
+      if (answered && JSON.stringify(value) !== JSON.stringify(item.payload["value"] ?? null)) clio.discard(item)
+    }
+  }, [response.answers, proposals.length])
   const accept = async (items: DictationSuggestion[]) => {
     if (!clio) return
     try {
