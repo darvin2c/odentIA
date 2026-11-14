@@ -1,12 +1,15 @@
 import {
   CORE_VITAL_KEYS,
   checkInterviewPregnancy,
+  commonInterviewEntries,
   declaredPregnancy,
   DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
   type DiagnosisSystemKey,
   type ImagingType,
+  type InterviewEntry,
   type MedicationCatalog,
+  type InterviewReading,
   type RegistrationAnswers,
   SUGGESTED_CONSENT_TEMPLATES,
   type SuggestedConsentTemplate,
@@ -242,6 +245,13 @@ export interface ProductInterview {
   check(answers: Record<string, unknown>, today: string): Record<string, unknown>
   /** Lo que la persona declaró en su registro, ya con las claves de la entrevista. */
   declared(health: DeclaredHealth, today: string): Record<string, unknown>
+  /**
+   * La entrevista guardada en la copia de la historia, dato por dato y en el
+   * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
+   * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un
+   * embarazo guardado sin fecha y el día que la copia ya dice arriba. Vacío si nada se respondió.
+   */
+  record(answers: unknown, today: string, reading?: InterviewReading): InterviewEntry[]
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
@@ -277,6 +287,7 @@ export const COMMON_INTERVIEW: ProductInterview = {
       ...(statement ? { embarazoLactancia: { embarazo: statement } } : {}),
     }
   },
+  record: commonInterviewEntries,
 }
 
 /** Lo que el producto revisa al emitir una receta, además de las alergias. */

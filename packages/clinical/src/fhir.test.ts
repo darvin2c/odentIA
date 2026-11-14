@@ -10,6 +10,7 @@ import {
   CONDITION_CLINICAL_STATUS_FHIR,
   CONSENT_STATUS_FHIR,
   ENCOUNTER_STATUS_FHIR,
+  FORM_FIELD_TYPE_FHIR,
   fhirCode,
   PRESCRIPTION_STATUS_FHIR,
   SEX_TO_FHIR_GENDER,
@@ -29,6 +30,8 @@ const R4 = {
   severity: ["mild", "moderate", "severe"],
   medicationRequest: ["active", "on-hold", "cancelled", "completed", "entered-in-error", "stopped", "draft", "unknown"],
   consent: ["draft", "proposed", "active", "rejected", "inactive", "entered-in-error"],
+  // Questionnaire.item.type, sin `group` ni `display`: una pregunta siempre espera respuesta.
+  questionType: ["boolean", "decimal", "integer", "date", "dateTime", "time", "string", "text", "url", "choice", "open-choice", "attachment", "reference", "quantity"],
 }
 
 describe("equivalencias con FHIR R4 (issue 45)", () => {
@@ -57,6 +60,7 @@ describe("equivalencias con FHIR R4 (issue 45)", () => {
     within(ALLERGY_SEVERITY_FHIR, R4.severity)
     within(PRESCRIPTION_STATUS_FHIR, R4.medicationRequest)
     within(CONSENT_STATUS_FHIR, R4.consent)
+    within(FORM_FIELD_TYPE_FHIR, R4.questionType)
   })
 
   it("lo que no tiene equivalencia segura no se inventa", () => {

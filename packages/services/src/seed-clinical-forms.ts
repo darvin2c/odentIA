@@ -1,10 +1,10 @@
 import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { and, eq, ilike, sql } from "drizzle-orm"
+import { and, asc, eq, ilike, sql } from "drizzle-orm"
 import {
   addFormAddendum,
   advanceClinicalOrder,
@@ -106,9 +106,54 @@ export async function seedClinicalForms(
   }
   await linkServicesToSuggestedConsents(tx, orgId, ownerUserId)
 
-  // Captura de ejemplo sobre el paciente semilla (borrador → finalizado).
+  // Capturas de ejemplo sobre el paciente semilla, con la misma plantilla.
   const existing = await listFormResponses(tx, orgId, { patientId, templateId: template.id })
   if (existing.length === 0) {
+    // Una se llenó en su atención firmada más antigua: la atención firmada la muestra con sus
+    // respuestas, la Historia la lleva dentro de su tarjeta con «Ver» y la copia de la historia la
+    // trae. Va escrita como quedó, finalizada el día de esa atención: una atención ya firmada no
+    // recibe formularios nuevos por la operación de siempre.
+    const [signed] = await tx
+      .select({
+        id: encounter.id,
+        startedAt: encounter.startedAt,
+        finalizedAt: encounter.finalizedAt,
+        professionalUserId: encounter.professionalUserId,
+      })
+      .from(encounter)
+      .where(
+        and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.status, "finalizada")),
+      )
+      .orderBy(asc(encounter.startedAt))
+      .limit(1)
+    if (signed)
+      await tx.insert(clinicalFormResponse).values({
+        organizationId: orgId,
+        templateId: template.id,
+        templateVersion: template.version,
+        templateTitle: template.title,
+        templateSnapshot: template.schema,
+        patientId,
+        encounterId: signed.id,
+        professionalUserId: signed.professionalUserId ?? ownerUserId,
+        authorUserId: ownerUserId,
+        status: "finalizado",
+        finalizedAt: signed.finalizedAt ?? signed.startedAt,
+        finalizedBy: ownerUserId,
+        // La 46 es la del dolor de su atención y la de su endodoncia.
+        answers: {
+          pieza: 46,
+          dolor: "Provocado",
+          dolor_intensidad: 7,
+          frio: "Aumentada, persiste",
+          percusion: "Positiva",
+          palpacion: "Negativa",
+          diagnostico_pulpar: "Pulpitis irreversible sintomática",
+          diagnostico_apical: "Periodontitis apical sintomática",
+          observaciones: "Dolor provocado al frío en la pieza 46, que persiste al retirar el estímulo.",
+        },
+      })
+    // La otra, fuera de una atención (borrador → finalizado): un hecho suelto de la Historia.
     const response = await createFormResponse(tx, orgId, ownerUserId, {
       templateId: template.id,
       patientId,
@@ -118,14 +163,15 @@ export async function seedClinicalForms(
     await updateFormResponseDraft(tx, orgId, ownerUserId, response.id, {
       professionalUserId: ownerUserId,
       answers: {
+        // La 36 es la de su caries: lo que cede al retirar el frío se obtura y se controla.
         pieza: 36,
-        dolor: "Provocado",
-        frio: "Aumentada, persiste",
-        percusion: "Positiva",
+        dolor: "Sin dolor",
+        frio: "Aumentada, cede al retirar el estímulo",
+        percusion: "Negativa",
         palpacion: "Negativa",
-        diagnostico_pulpar: "Pulpitis irreversible sintomática",
-        diagnostico_apical: "Periodontitis apical sintomática",
-        observaciones: "Dolor provocado al frío en la pieza 36, que persiste al retirar el estímulo.",
+        diagnostico_pulpar: "Pulpitis reversible",
+        diagnostico_apical: "Tejidos apicales normales",
+        observaciones: "Pieza 36 con caries: sensibilidad al frío que cede sola, sin dolor espontáneo. Se obtura y se controla.",
       },
     })
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)
@@ -214,13 +260,15 @@ export async function seedClinicalForms(
         },
       })
       .returning({ id: clinicalFormResponse.id })
-    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo.
+    // Lo que ella envió no se cambia: lo que el equipo precisa queda aparte, antes de revisarlo, con
+    // su motivo, que es opcional.
     await addFormAddendum(
       tx,
       orgId,
       ownerUserId,
       sent!.id,
       "Al llegar dice que el dolor es en la muela de arriba, no en la de abajo, y que empezó hace una semana.",
+      "Lo confirmó en consulta, al señalar la muela",
     )
   }
 
