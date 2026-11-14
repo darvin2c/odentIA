@@ -66,7 +66,7 @@ export interface VisitAnswer {
 }
 
 /** Si contó algo: una respuesta en blanco no es nada que mostrar. */
-export function visitAnswerHasContent(answer: Pick<VisitAnswer, "reason" | "pain" | "more">): boolean {
+export function visitAnswerHasContent(answer: { reason: string | null; pain: string | null; more: string | null }): boolean {
   return !!answer.reason?.trim() || answer.pain !== null || !!answer.more?.trim()
 }
 
