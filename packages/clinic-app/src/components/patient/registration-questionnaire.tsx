@@ -403,10 +403,10 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.dental.habitos", "dental", "habits"],
   ["health.dental", "dental"],
   ["health.medical.lactancia", "history", "breastfeeding"],
-  ["health.medical.tabaco", "habits", "tobacco"],
-  ["health.medical.cigarrillos", "habits", "cigarettes"],
-  ["health.medical.alcohol", "habits", "alcohol"],
-  ["health.medical", "habits"],
+  ["health.medical.tabaco", "history", "tobacco"],
+  ["health.medical.cigarrillos", "history", "cigarettes"],
+  ["health.medical.alcohol", "history", "alcohol"],
+  ["health.medical", "history"],
   ["acceptsMessages", "send", "messages"],
   ["privacyAccepted", "send", "privacy"],
 ]
@@ -534,7 +534,7 @@ const HEALTH_ITEM_OF_STEP: Record<string, string> = {
   medicinas: "medicines",
   personales: "history",
   odontologicos: "dental",
-  habitos: "habits",
+  habitos: "history",
 }
 /**
  * Lo escrito separado por comas, punto y coma o saltos de línea, en partes. La coma entre dos
@@ -594,7 +594,7 @@ export function uniqueByName(values: string[]): string[] {
 }
 
 /** Las pantallas de su salud en el orden en que se ven (en la lista, los hábitos van antes que la boca). */
-const HEALTH_ITEMS = ["health", "medicines", "history", "dental", "habits"] as const
+const HEALTH_ITEMS = ["health", "medicines", "history", "dental"] as const
 /** El sexo en lo que llena la persona. */
 const PERSON_SEX_CODES = ["F", "M"] as const
 const PERSON_KEYS = ["givenNames", "familyName", "birthDate", "sex", "nationality", "birthPlace"] as const
@@ -801,6 +801,8 @@ export function RegistrationQuestionnaire({
   const historyAsked =
     pregnancyAsked ||
     breastfeedingAsked ||
+    tobaccoAsked ||
+    alcoholAsked ||
     (["personal.cirugias", "personal.hospitalizaciones", "personal.transfusiones"] as const).some(
       asked,
     )
@@ -2153,6 +2155,9 @@ export function RegistrationQuestionnaire({
               hospitalizedText: "",
               transfusion: "",
               transfusionText: "",
+              tobacco: "",
+              cigarettes: "",
+              alcohol: "",
             })
           }
         >
@@ -2255,6 +2260,63 @@ export function RegistrationQuestionnaire({
               onAnswer={(value) => set({ transfusion: value })}
               onText={(value) => set({ transfusionText: value })}
             />
+          ) : null}
+          {/* El tabaco y el alcohol, aquí y no en una pantalla aparte (QA del 14 nov, B13). */}
+          {tobaccoAsked ? (
+            <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.tobacco || null}
+                  options={forOther ? TOBACCO_OPTIONS_OTHER : TOBACCO_OPTIONS}
+                  onChange={(value) => set({ tobacco: value, ...(value === "fuma" ? {} : { cigarettes: "" }) })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {tobaccoAsked && draft.tobacco === "fuma" ? (
+            <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.cigarettes || null}
+                  options={CIGARETTE_OPTIONS}
+                  onChange={(value) => set({ cigarettes: value })}
+                  columns={2}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {alcoholAsked ? (
+            <Labeled
+              name="alcohol"
+              group
+              label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
+              optional
+            >
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.alcohol || null}
+                  options={ALCOHOL_OPTIONS}
+                  onChange={(value) => set({ alcohol: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
           ) : null}
         </Question>
 
@@ -2404,72 +2466,6 @@ export function RegistrationQuestionnaire({
                   options={HABITS}
                   onChange={(value) => set({ habits: value })}
                   columns={2}
-                />
-              )}
-            </Labeled>
-          ) : null}
-        </Question>
-
-        <Question
-          name="habits"
-          grouped
-          disabled={!tobaccoAsked && !alcoholAsked}
-          title={you("Tus hábitos", `Los hábitos de ${name}`)}
-          description="Nos ayuda a cuidarte mejor."
-          onSkip={() => set({ tobacco: "", cigarettes: "", alcohol: "" })}
-        >
-          {tobaccoAsked ? (
-            <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.tobacco || null}
-                  options={forOther ? TOBACCO_OPTIONS_OTHER : TOBACCO_OPTIONS}
-                  onChange={(value) => set({ tobacco: value, ...(value === "fuma" ? {} : { cigarettes: "" }) })}
-                  columns={3}
-                />
-              )}
-            </Labeled>
-          ) : null}
-          {tobaccoAsked && draft.tobacco === "fuma" ? (
-            <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.cigarettes || null}
-                  options={CIGARETTE_OPTIONS}
-                  onChange={(value) => set({ cigarettes: value })}
-                  columns={2}
-                />
-              )}
-            </Labeled>
-          ) : null}
-          {alcoholAsked ? (
-            <Labeled
-              name="alcohol"
-              group
-              label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
-              optional
-            >
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.alcohol || null}
-                  options={ALCOHOL_OPTIONS}
-                  onChange={(value) => set({ alcohol: value })}
-                  columns={3}
                 />
               )}
             </Labeled>

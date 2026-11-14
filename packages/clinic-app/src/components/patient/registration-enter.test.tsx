@@ -134,8 +134,9 @@ it("Enter nunca envía: en la última respuesta lleva al botón, sin pulsarlo", 
 }, 20_000)
 
 // Revisión de la entrega 6 (14 nov): si solo faltaban el tabaco y la última visita al dentista, el enlace
-// abría en «Tus hábitos» (que en la lista va antes que la boca) y «Tu boca» nunca se mostraba.
-it("con lo que falta en «Tu boca» y en «Tus hábitos», empieza por «Tu boca», que se ve primero", async () => {
+// abría en la pantalla que iba después y la otra nunca se mostraba. Desde la QA (B13) el tabaco va en
+// «Algo más sobre tu salud», que se ve antes que «Tu boca»: empieza por ahí.
+it("con lo que falta en dos pantallas, empieza por la que se ve primero", async () => {
   // La clínica pregunta la última visita (en la lista de hoy viene apagada); el tabaco ya viene en «Opcional».
   const config = {
     ...DEFAULT_REGISTRATION_CONFIG,
@@ -159,7 +160,7 @@ it("con lo que falta en «Tu boca» y en «Tus hábitos», empieza por «Tu boca
   // La pantalla que se ve es la única sin `hidden`, con `data-active`.
   const shown = () =>
     document.querySelector("[data-slot=questionnaire-item][data-active] [data-slot=questionnaire-title]")?.textContent
-  await waitFor(() => expect(shown()).toBe("Tu boca"), { timeout: 5000 })
+  await waitFor(() => expect(shown()).toBe("Algo más sobre tu salud"), { timeout: 5000 })
 }, 20_000)
 
 // QA del 14 nov: C8 (la coma decimal partía «letrozol 2,5 mg») y B8 (la enfermedad marcada y escrita otra vez).
