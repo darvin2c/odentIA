@@ -126,7 +126,12 @@ async function clinic(options: { forms?: boolean } = {}) {
   }
   const offers = (encounterId: string) =>
     f.run((tx) => getEncounterFormOffers(tx, orgId, f.patient.id, encounterId))
-  return { ...f, orgId, specialties, attention, offers }
+  /** La atención abierta se anuló: la siguiente no tiene que firmarla antes. */
+  const forget = () => {
+    open = null
+    fresh = false
+  }
+  return { ...f, orgId, specialties, attention, offers, forget }
 }
 
 /** La fecha de nacimiento de quien cumple `years` años justo hoy (o mañana, con `tomorrow`), en Lima. */
@@ -196,8 +201,13 @@ it("una ficha que se llama igual que una del producto, con otra clave, tampoco s
 
 it("una ficha del producto dice «sin mirar» hasta que alguien de la clínica la abre o la cambia", async () => {
   const c = await clinic()
+  // De cada ficha, la versión en uso (la lista trae también las archivadas).
   const marks = async () =>
-    new Map((await c.run((tx) => listClinicFormTemplates(tx, c.orgId))).map((row) => [row.key, row]))
+    new Map(
+      (await c.run((tx) => listClinicFormTemplates(tx, c.orgId)))
+        .filter((row) => row.status === "publicado")
+        .map((row) => [row.key, row]),
+    )
   const before = await marks()
   expect([...before.values()].every((row) => row.fromProduct && !row.looked)).toBe(true)
   // La lista dice también cuál se ofrece por la edad: la pantalla no lo calcula.
@@ -381,13 +391,35 @@ it("en el control, la ficha de hoy trae la anterior del mismo tipo, aunque la pl
   ;[offer] = await c.offers(control.id)
   expect(offer).toMatchObject({ today: { responseId: today.id, status: "borrador" } })
   expect(offer?.previous?.responseId).toBe(initial.id)
+})
 
-  // La de una atención anulada no se pone al lado.
+it("la ficha finalizada en una atención que después se anuló no se pone al lado", async () => {
+  const c = await clinic()
+  const template = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find(
+    (row) => row.key === "ficha-de-ortodoncia",
+  )!
+  // Se anula una atención en curso (firmada ya no se anula): su ficha finalizada se conserva, marcada.
+  const first = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  const initial = await c.run((tx) =>
+    createFormResponse(tx, c.orgId, c.actor, {
+      templateId: template.id,
+      patientId: c.patient.id,
+      encounterId: first.id,
+      answers: { clase_molar: "Clase I" },
+    }),
+  )
+  await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, initial.id))
   await c.run((tx) => voidEncounter(tx, c.orgId, c.actor, c.patient.id, first.id, { reason: "Paciente equivocado" }))
-  ;[offer] = await c.offers(control.id)
-  expect(offer?.previous).toBeNull()
-  const after = await c.run((tx) => listPatientFormResponses(tx, c.orgId, { patientId: c.patient.id }))
-  expect(after.find((row) => row.id === today.id)?.previousId).toBeNull()
+  c.forget()
+
+  const control = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  const [offer] = await c.offers(control.id)
+  expect(offer).toMatchObject({ key: "ficha-de-ortodoncia", previous: null })
+  const today = await c.run((tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: template.id, patientId: c.patient.id, encounterId: control.id }),
+  )
+  const listed = await c.run((tx) => listPatientFormResponses(tx, c.orgId, { patientId: c.patient.id }))
+  expect(listed.find((row) => row.id === today.id)?.previousId).toBeNull()
 })
 
 it("nada traba la atención: con una ficha ofrecida y sin tocarla, la atención se firma", async () => {
