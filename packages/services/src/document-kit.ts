@@ -266,12 +266,16 @@ const STAND_INS: Record<string, string> = {
  * pide en color, la unión entre dibujos y el marco de una tecla («1️⃣»). Quitado
  * eso, lo que queda (el «1» de la tecla) se escribe como texto.
  */
-const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}‍︎️⃣]/gu
+const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u200d\ufe0e\ufe0f\u20e3]/gu
 
 /** Donde había un emoji: se marca para ordenar después los espacios que deja. */
 const GAP = "\u0000"
 /** Un espacio que dejó un emoji quitado: se borra antes de un signo o al borde de una línea. */
 const SOFT = "\u0001"
+/** Espacios y emojis seguidos; el espacio que dejan antes de un signo o al final, y al empezar una línea. */
+const GAP_RUN = new RegExp(`[ ${GAP}]*${GAP}[ ${GAP}]*`, "g")
+const SOFT_BEFORE_SIGN = new RegExp(`${SOFT}(?=[.,;:!?)\\]}»”\\n]|$)`, "g")
+const SOFT_AT_LINE_START = new RegExp(`(^|\\n)${SOFT}`, "g")
 
 /**
  * El texto que esta letra puede escribir: cada carácter que no cubre (un emoji con
@@ -316,10 +320,10 @@ export function printable(value: string, face: Face = "sans"): string {
   if (!out.includes(GAP)) return out
   const tidy = out
     // Los espacios y emojis seguidos valen un espacio, si había alguno («Hola 👍 Ñandú»), o nada («a👍b»).
-    .replace(new RegExp(`[ ${GAP}]*${GAP}[ ${GAP}]*`, "g"), (run) => (run.includes(" ") ? SOFT : ""))
+    .replace(GAP_RUN, (run) => (run.includes(" ") ? SOFT : ""))
     // Ese espacio sobra antes de un signo y al borde de una línea.
-    .replace(new RegExp(`${SOFT}(?=[.,;:!?)\\]}»”\\n]|$)`, "g"), "")
-    .replace(new RegExp(`(^|\\n)${SOFT}`, "g"), "$1")
+    .replace(SOFT_BEFORE_SIGN, "")
+    .replace(SOFT_AT_LINE_START, "$1")
     .replaceAll(SOFT, " ")
   return tidy.trim() === "" && clean.trim() !== "" ? "(emoji)" : tidy
 }

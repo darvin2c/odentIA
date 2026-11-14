@@ -116,7 +116,7 @@ export interface FormRecord {
 }
 
 /** «13/11/2026»: una fecha sin hora es ese día en cualquier zona. */
-function civilDay(value: string): string {
+export function civilDay(value: string): string {
   const [year, month, day] = value.split("-")
   return `${day}/${month}/${year}`
 }
@@ -250,6 +250,11 @@ function byWordsOf(form: FormHead, zone: Zone): string {
  * copia y la Historia (`getTimeline`), que ordenan igual.
  */
 export const formRecordAtSql = sql`coalesce(case when ${clinicalFormResponse.source} = 'portal' then ${clinicalFormResponse.submittedAt} end, ${clinicalFormResponse.finalizedAt}, ${clinicalFormResponse.submittedAt})`
+
+/** La misma hora que `formRecordAtSql`, de una ficha ya leída. */
+export function formRecordAt(form: Pick<FormRecord, "source" | "submittedAt" | "finalizedAt">): Date | null {
+  return (form.source === "portal" ? form.submittedAt : null) ?? form.finalizedAt ?? form.submittedAt
+}
 
 /**
  * «con 1 corrección», «con 2 adendas»: lo agregado después, para que una línea

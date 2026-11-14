@@ -97,7 +97,7 @@ import {
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
-import { type FormRecord, type FormRecordItem, loadFormRecords } from "./form-record.js"
+import { civilDay, type FormRecord, type FormRecordItem, formRecordAt, loadFormRecords } from "./form-record.js"
 import { proposeHealthChannel } from "./health-documents.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getPatient, requirePatient } from "./patients.js"
@@ -107,6 +107,9 @@ import { productHooks } from "./products.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 
 /** La pieza y las caras de un diagnóstico o procedimiento, sacadas de su sitio. */
+/** Los tres grupos de antecedentes que se declaran y se revisan. */
+type HealthTopic = "allergies" | "conditions" | "medications"
+
 /** El sitio dicho por el producto: en palabras para el PDF y como `bodySite` para FHIR. */
 type RecordSite = { siteWords: string | null; bodySite: { text: string } | null }
 
@@ -199,7 +202,7 @@ export interface PatientRecord {
    * declaración de ese grupo, para no perderlo cuando nadie de la clínica lo preguntó.
    */
   groups: Record<
-    "allergies" | "conditions" | "medications",
+    HealthTopic,
     { state: string; saidNo: { by: HealthDeclarant; at: Date } | null }
   >
   /**
@@ -510,7 +513,7 @@ export async function loadPatientRecord(
   const reviewOf = (at: Date | null, by: string | null) =>
     at ? { at, by: by ? (reviewers.get(by) ?? null) : null } : null
   // Su último «no» a un grupo (las declaraciones vienen de la más nueva a la más antigua).
-  const saidNoOf = (topic: "allergies" | "conditions" | "medications") => {
+  const saidNoOf = (topic: HealthTopic) => {
     const last = health.declarations.find((declaration) => {
       const state = declaration.health[topic]?.state
       return state !== undefined && state !== "unanswered"
@@ -702,7 +705,7 @@ function entryNote(entry: RecordInterview["entries"][number], sex: string | null
 /** De qué declaración sin revisar es una alergia, una enfermedad o una medicina; undefined si ya se revisó o la anotó el equipo. */
 function declaredGroupOf(
   record: PatientRecord,
-  topic: "allergies" | "conditions" | "medications",
+  topic: HealthTopic,
   id: string,
 ): DeclaredHealthGroup | undefined {
   return record.declared.find((group) => group[topic].includes(id))
@@ -785,8 +788,6 @@ function uuidV5(namespace: string, name: string): string {
 /** El id del vínculo de una persona con este paciente (`RelatedPerson`). */
 const relatedPersonId = (patientId: string, contactId: string): string => uuidV5(patientId, `RelatedPerson:${contactId}`)
 
-type HealthTopic = "allergies" | "conditions" | "medications"
-
 /**
  * Lo que cubrió cada revisión, con quién y cuándo. «Revisar antecedentes» cubre las
  * enfermedades y la medicación, salvo el grupo que quedó «no se le preguntó»; las
@@ -807,11 +808,7 @@ function reviewScopes(
   return out
 }
 
-/** «Ya no lo toma (hasta el 10/11/2026)»: la que no es vigente con la regla común (`isCurrentMedication`). */
-const medicationEnded = (row: { endDate: string | null }, today: string): boolean => !isCurrentMedication(row, today)
 
-/** «13/11/2026»: un día de calendario, igual en cualquier zona. */
-const civilDayWords = (day: string): string => day.split("-").reverse().join("/")
 
 /** El PDF para leer: todo lo de la persona, en el estilo de sus recetas y consentimientos. */
 export async function renderPatientRecordPdf(
@@ -889,7 +886,7 @@ export async function renderPatientRecordPdf(
 
   section("Alergias y antecedentes")
   // Lo que dijo la persona y nadie revisó va marcado, con quién lo dijo y cuándo, como en la ficha.
-  const markOf = (topic: "allergies" | "conditions" | "medications", id: string): string | null => {
+  const markOf = (topic: HealthTopic, id: string): string | null => {
     const group = declaredGroupOf(record, topic, id)
     return group ? unreviewedWords(group, p.sex, zone) : null
   }
@@ -979,8 +976,8 @@ export async function renderPatientRecordPdf(
   if (record.medications.length)
     kit.bullets(
       record.medications.map((m) => {
-        const ended = medicationEnded(m, record.today)
-        const until = m.endDate ? ` · hasta el ${civilDayWords(m.endDate)}` : ""
+        const ended = !isCurrentMedication(m, record.today)
+        const until = m.endDate ? ` · hasta el ${civilDay(m.endDate)}` : ""
         const mark = markOf("medications", m.id)
         return `${ended ? "Ya no lo toma" : "Medicamento"}: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${until}${m.notes ? ` · ${m.notes}` : ""}${mark ? ` · ${mark}` : ""}`
       }),
@@ -1383,7 +1380,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
   // Lo que dijo la persona y nadie revisó: quién lo afirma, en el campo de R4 para eso, y una nota
   // con la marca de la ficha («Lo dijo ella el …, sin revisar»).
   const statedBy = (
-    topic: "allergies" | "conditions" | "medications",
+    topic: HealthTopic,
     id: string,
     field: "asserter" | "informationSource",
   ): Record<string, unknown> => {
@@ -1457,7 +1454,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       resourceType: "MedicationStatement",
       id: m.id,
       subject: patientRef,
-      status: medicationEnded(m, record.today) ? "completed" : "active",
+      status: isCurrentMedication(m, record.today) ? "active" : "completed",
       medicationCodeableConcept: { text: m.name },
       ...(m.startDate || m.endDate
         ? { effectivePeriod: { ...(m.startDate ? { start: m.startDate } : {}), ...(m.endDate ? { end: m.endDate } : {}) } }
@@ -1736,8 +1733,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
               : null
     // R4: `authored` es cuándo se dieron las respuestas. Lo que respondió la persona es de cuando lo
     // envió, no de cuando el equipo lo revisó (auditor, QA de la entrega 2); la revisión va en el texto.
-    const authored =
-      (form.source === "portal" ? form.submittedAt : null) ?? form.finalizedAt ?? form.submittedAt ?? record.generatedAt
+    const authored = formRecordAt(form) ?? record.generatedAt
     resources.push(
       questionnaireResponse({
         id: form.id,

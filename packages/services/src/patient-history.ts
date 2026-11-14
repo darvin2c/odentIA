@@ -38,7 +38,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
-import { addedWords, formRecordAtSql, loadFormRecords } from "./form-record.js"
+import { addedWords, formRecordAt, formRecordAtSql, loadFormRecords } from "./form-record.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -1591,7 +1591,7 @@ export async function getTimeline(
       type: "form",
       // Lo que respondió la persona va el día en que lo envió, no el de su revisión (auditor, QA de
       // la entrega 2); lo dice `byText`. Es la misma hora con la que se ordena (`getTimeline`).
-      createdAt: (form.source === "portal" ? form.submittedAt : null) ?? form.finalizedAt ?? new Date(0),
+      createdAt: formRecordAt(form) ?? new Date(0),
       title:
         form.source === "portal"
           ? `Lo que respondió el paciente: ${form.title}`
