@@ -1,10 +1,11 @@
 import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { demoSignatureStrokes } from "./demo-signature.js"
-import { and, eq, ilike, sql } from "drizzle-orm"
+import { clinicToday } from "./inventory-stock.js"
+import { and, asc, eq, ilike, sql } from "drizzle-orm"
 import {
   advanceClinicalOrder,
   archiveSpecialty,
@@ -135,9 +136,49 @@ export async function seedClinicalForms(
   }
   await linkServicesToSuggestedConsents(tx, orgId, ownerUserId)
 
-  // Captura de ejemplo sobre el paciente semilla (borrador → finalizado).
+  // Capturas de ejemplo sobre el paciente semilla, con la misma plantilla.
   const existing = await listFormResponses(tx, orgId, { patientId, templateId: template.id })
   if (existing.length === 0) {
+    // Una se llenó en su atención firmada más antigua: la atención firmada la muestra con sus
+    // respuestas, la Historia la lleva dentro de su tarjeta con «Ver» y la copia de la historia la
+    // trae. Va escrita como quedó, finalizada el día de esa atención: una atención ya firmada no
+    // recibe formularios nuevos por la operación de siempre.
+    const [signed] = await tx
+      .select({
+        id: encounter.id,
+        startedAt: encounter.startedAt,
+        finalizedAt: encounter.finalizedAt,
+        professionalUserId: encounter.professionalUserId,
+      })
+      .from(encounter)
+      .where(
+        and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.status, "finalizada")),
+      )
+      .orderBy(asc(encounter.startedAt))
+      .limit(1)
+    if (signed)
+      await tx.insert(clinicalFormResponse).values({
+        organizationId: orgId,
+        templateId: template.id,
+        templateVersion: template.version,
+        templateTitle: template.title,
+        templateSnapshot: template.schema,
+        patientId,
+        encounterId: signed.id,
+        professionalUserId: signed.professionalUserId ?? ownerUserId,
+        authorUserId: ownerUserId,
+        status: "finalizado",
+        finalizedAt: signed.finalizedAt ?? signed.startedAt,
+        answers: {
+          dolor: true,
+          intensidad: 7,
+          zona: "Localizado",
+          hallazgos: "Dolor provocado al frío en pieza 36, percusión positiva leve.",
+          // El día de la clínica, no el de UTC: una atención de la noche no cae en el día siguiente.
+          fecha_evaluacion: await clinicToday(tx, orgId, signed.startedAt),
+        },
+      })
+    // La otra, fuera de una atención (borrador → finalizado): un hecho suelto de la Historia.
     const response = await createFormResponse(tx, orgId, ownerUserId, {
       templateId: template.id,
       patientId,
@@ -147,11 +188,9 @@ export async function seedClinicalForms(
     await updateFormResponseDraft(tx, orgId, ownerUserId, response.id, {
       professionalUserId: ownerUserId,
       answers: {
-        dolor: true,
-        intensidad: 7,
-        zona: "Localizado",
-        hallazgos: "Dolor provocado al frío en pieza 36, percusión positiva leve.",
-        fecha_evaluacion: new Date().toISOString().slice(0, 10),
+        dolor: false,
+        hallazgos: "Pieza 46 sin dolor espontáneo; sensibilidad leve al frío que cede sola. Se mantiene en observación.",
+        fecha_evaluacion: await clinicToday(tx, orgId),
       },
     })
     await finalizeFormResponse(tx, orgId, ownerUserId, response.id)
