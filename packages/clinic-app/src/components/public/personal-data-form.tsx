@@ -1,4 +1,4 @@
-import { declaredHealthAnswered, type RegistrationAnswers } from "@odentia/clinical"
+import { declaredHealthAnswered, isChildAge, type RegistrationAnswers } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
@@ -66,6 +66,34 @@ function sendsSomething(input: PersonalDataInput): boolean {
 }
 
 /**
+ * Lo que dice la página al terminar. Del enlace de un niño (menor de 12) se le
+ * habla a quien lo cuida, con el nombre del niño: «Listo, Carla», «ya tiene lo
+ * que nos contaste de la salud de Thiago» (mesa del 13 nov, entrega 7).
+ */
+export function personalDataSentWords(
+  form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">,
+  clinicName: string,
+  outcome: "nada" | "con-salud" | "sin-salud" | "ya-enviado",
+): { title: string; text: string } {
+  const child = isChildAge(form.age) && !!form.firstName
+  const greeted = child ? form.respondentFirstName : form.firstName
+  const listo = greeted ? `Listo, ${greeted}` : "Listo"
+  const health = child ? `la salud de ${form.firstName}` : "tu salud"
+  const data = child ? `los datos de ${form.firstName}` : "tus datos"
+  if (outcome === "nada")
+    return { title: "Gracias", text: `No nos contaste nada de ${health}. Si quieres, cuéntanoslo antes de venir o en la cita.` }
+  if (outcome === "ya-enviado") return { title: listo, text: `${clinicName} ya tiene ${data}.` }
+  const withHealth = outcome === "con-salud"
+  return {
+    title: listo,
+    text:
+      form.missing.length === 0
+        ? `${clinicName} ya tiene ${withHealth ? `lo que nos contaste de ${health}` : "tus respuestas"}.`
+        : `${clinicName} ya tiene ${data}${withHealth ? ` y ${child ? "su salud" : "tu salud"}` : ""}.`,
+  }
+}
+
+/**
  * «Tus datos» de «Su enlace»: el mismo cuestionario por temas del registro,
  * solo con lo que falta y, si nadie la registró aún, su salud (opcional; sin
  * nada que falte, la pantalla es solo «Tu salud»). Al final, si aún no lo
@@ -128,27 +156,20 @@ export function PersonalDataForm({
         addressSource={addressSource}
         onSubmit={async (answers) => {
           const input = toInput(answers, form.pending)
-          const listo = form.firstName ? `Listo, ${form.firstName}` : "Listo"
           if (!sendsSomething(input)) {
             // Queda dicho que ya respondió, para no volver a pedírselo; si falla, no pasa nada.
             if (form.missing.length === 0) void submitPersonalData(slug, token, input).catch(() => undefined)
             // Solo su salud y no contó nada: no hay nada que enviar; la tarjeta sigue ahí, opcional.
-            onSent({ title: "Gracias", text: "No nos contaste nada de tu salud. Si quieres, cuéntanoslo antes de venir o en la cita." })
+            onSent(personalDataSentWords(form, clinicName, "nada"))
             return
           }
           const withHealth = form.asksHealth && !!input.health
           try {
             await send.mutateAsync(input)
-            onSent({
-              title: listo,
-              text:
-                form.missing.length === 0
-                  ? `${clinicName} ya tiene ${withHealth ? "lo que nos contaste de tu salud" : "tus respuestas"}.`
-                  : `${clinicName} ya tiene tus datos${withHealth ? " y tu salud" : ""}.`,
-            })
+            onSent(personalDataSentWords(form, clinicName, withHealth ? "con-salud" : "sin-salud"))
           } catch (error) {
             if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") {
-              onSent({ title: listo, text: `${clinicName} ya tiene tus datos.` })
+              onSent(personalDataSentWords(form, clinicName, "ya-enviado"))
               return
             }
             // Lo que es de un dato, el cuestionario lo dice en su campo.
