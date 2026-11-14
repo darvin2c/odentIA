@@ -220,6 +220,14 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        id: "pacientes-formulario-terminar-tras-firmar",
+        q: "Firmé la atención y me quedó un formulario a medias, ¿qué hago?",
+        a: "Termínalo cuando puedas: firmar la atención no lo cierra. El cierre te lo avisa sin frenarte, con «Completar ahora» por si prefieres terminarlo antes de firmar. Ya firmada, «Atención finalizada» lo nombra con «Completar», y en la atención, en Documentos, sale arriba «Falta terminar un formulario». También está en Documentos de la ficha, como «Borrador», con «Completar». Ábrelo, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, los formularios del equipo a medias se descartan con el motivo de la anulación: dejan de salir en Documentos, y la Historia lo dice en la atención anulada, bajo «Anulado ese día». Lo que envió el paciente no se descarta: sigue en Documentos, «Por revisar».",
+        forms: ["firme la atencion y quedo un formulario a medias", "terminar un formulario despues de firmar", "desde donde termino el formulario que deje a medias"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-cuestionario-respondio-antes-de-venir",
         q: "¿Dónde veo lo que respondió antes de venir?",
         a: "Al abrir su atención sale arriba, en una caja con sus respuestas, quién lo envió, por dónde y cuándo. También está en su página › Clínica › Documentos, como «Por revisar», con «Ver». Es para leer: lo que escribió no se cambia. «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta, como dichas por ella y sin confirmar. Mientras la atención sigue abierta, lo revisado queda a la vista en ella; después de firmarla, y si lo revisaste desde Documentos, se ve en Documentos (con «Ver») y en la Historia, dentro de esa atención. Lo que dijo de su salud (alergias, enfermedades, medicinas, embarazo) está arriba de su ficha, en su caja «Lo dijo ella… sin revisar», y en la atención, en «Revisa con… lo que dijo de su salud» (o en «Pregúntale a…», si además falta preguntarle algo).",
@@ -366,8 +374,32 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "formularios-formulario-propio-crear-publicar",
         q: "¿Cómo hago un formulario propio o un cuestionario para antes de la cita?",
-        a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios»; ahí, «Nueva plantilla»: pones el título, eliges en «Quién lo responde» si lo llena el equipo desde la ficha o el paciente desde el portal, y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». No se usa hasta que tocas «Publicar». Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas.",
+        a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios»; ahí, «Nueva plantilla»: pones el título, eliges en «Quién lo responde» si lo llena el equipo desde la ficha o el paciente desde el portal, y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». No se usa hasta que tocas «Publicar». Si lo responde el paciente, publicarlo reemplaza al cuestionario que hoy reciben los pacientes con cita por venir: la confirmación dice cuál antes de publicar. Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas.",
         forms: ["como publico un formulario", "cuestionario para que el paciente llene antes de venir", "pregunta que sale solo si responde que si", "nueva plantilla de formulario"],
+      },
+      {
+        id: "formularios-formulario-dejar-de-usar",
+        q: "¿Cómo dejo de usar un formulario?",
+        a: "En Configuración › Consentimientos, «Crear un formulario» lleva a «Formularios propios». En el formulario que está en uso, toca «Dejar de usar» y confirma: deja de ofrecerse para llenarlo, y lo ya llenado sigue en cada paciente con sus preguntas. Queda abajo, en «Ya no se usan», con la fecha en que se dejó, y desde ahí se recupera cuando quieras. Si es un cuestionario que responde el paciente, la confirmación dice qué recibirán los pacientes desde ese momento.",
+        forms: ["quitar un formulario que ya no uso", "que el paciente deje de recibir el cuestionario", "retirar un formulario publicado"],
+      },
+      {
+        id: "formularios-formulario-volver-a-usar",
+        q: "¿Cómo vuelvo a usar un formulario que dejé de usar?",
+        a: "En «Formularios propios», abajo, está «Ya no se usan», con cada formulario y la fecha en que se dejó. «Volver a usar» lo pone otra vez en uso con las mismas preguntas, como una versión nueva; lo ya llenado no cambia. Si lo responde el paciente, antes pide confirmar y dice a qué cuestionario reemplaza. Si alguna de sus preguntas ya no se puede publicar como quedó, se abre para corregirla y publicarlo.",
+        forms: ["volver a usar un formulario que deje de usar", "recuperar un formulario que ya no se usa", "donde estan los formularios que deje de usar"],
+      },
+      {
+        id: "formularios-formulario-mismo-titulo",
+        q: "Hice dos formularios con el mismo nombre, ¿qué pasa?",
+        a: "Son dos formularios distintos: ninguno reemplaza al otro ni se vuelve su versión. Al escribir un título que ya existe, la pantalla avisa «Ya tienes un formulario con ese título»: si el otro está en uso ofrece «Cambiar el que ya tengo», y si lo habías dejado de usar ofrece «Volver a usar» con su nombre; en los dos casos deja guardar igual. En la lista de «Formularios propios» y en «Nuevo» › «Formulario», los que se llaman igual dicen cuántas preguntas tienen y cuándo se crearon, para distinguirlos. Si uno sobra, «Dejar de usar».",
+        forms: ["dos formularios con el mismo nombre", "tengo un formulario repetido con el mismo titulo", "cual de los dos formularios iguales es el mio"],
+      },
+      {
+        id: "formularios-formulario-cambiar-pregunta",
+        q: "¿Cómo cambio una pregunta de un formulario que ya uso?",
+        a: "Un formulario publicado no se edita: se prepara su versión siguiente. En «Formularios propios», en ese formulario, «Nueva versión desde la…» abre sus preguntas: cambia, agrega o quita lo que necesites y «Guardar»; queda como borrador y el formulario se sigue usando como estaba. Con «Publicar versión…» la nueva pasa a ser la que se usa y la anterior se archiva. Lo ya llenado con la versión anterior conserva sus preguntas y sus respuestas.",
+        forms: ["cambiar una pregunta de un formulario publicado", "editar un formulario que ya esta en uso", "agregar una pregunta a un formulario que ya uso"],
       },
     ],
   },

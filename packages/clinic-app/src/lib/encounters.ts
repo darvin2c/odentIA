@@ -62,6 +62,11 @@ export interface ClosingCheck {
    * realizado: el cierre los propone marcados y manda en `resolveDiagnosisIds` los que siguen marcados.
    */
   resolvable?: ClosingResolvable[]
+  /**
+   * Los formularios de la atención que siguen a medias. No bloquean: el cierre
+   * lo avisa y se terminan después de firmar, desde Documentos.
+   */
+  openForms?: Array<{ id: string; title: string }>
 }
 
 /** Un diagnóstico que un tratamiento de hoy resuelve: «Pulpitis (CIE-11 DA09.0) · pieza 46». */

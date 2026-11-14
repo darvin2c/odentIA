@@ -79,7 +79,9 @@ import {
 import {
   type ConsentNeed,
   cancelDerivationTask,
+  discardVoidedEncounterForms,
   getEncounterConsentNeeds,
+  listOpenEncounterForms,
 } from "./clinical-forms.js"
 import {
   type ClosingResolvable,
@@ -2205,6 +2207,11 @@ export interface ClosingCheckBase {
    * marcados y se resuelven los que vuelven en `resolveDiagnosisIds` (QA del 9 nov).
    */
   resolvable: ClosingResolvable[]
+  /**
+   * Los formularios de la atención que siguen a medias. No bloquean: el cierre
+   * lo avisa y se terminan después de firmar, con su propia fecha.
+   */
+  openForms: Array<{ id: string; title: string }>
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión: «Endodoncia · sesión 2 de 2». */
@@ -2641,6 +2648,7 @@ export async function checkEncounterClosing(
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
+  const openForms = await listOpenEncounterForms(tx, orgId, row.id)
   // Lo que ya terminó en esta atención (lo de una sesión al registrarlo, «Completar») ya dejó su
   // control: se muestra con lo que termina al firmar, para cambiarlo o quitarlo igual (QA antes de
   // entregar); no como uno que ya tenía.
@@ -2671,7 +2679,7 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
-  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, controls, ...product }
+  return { ready: missing.length === 0, missing, consents, materials, health, sessions, resolvable, openForms, controls, ...product }
 }
 
 /** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
@@ -3492,6 +3500,8 @@ export async function finalizeEncounter(
     // Lo que faltaba saber de su salud al firmar, y si se usó anestesia: la constancia del aviso.
     healthGaps: closing.health.gaps,
     anesthetics: closing.health.anesthetics.length,
+    // Cuántos formularios quedaron a medias al firmar: la constancia de ese aviso.
+    openForms: closing.openForms.length,
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
       ? "fecha"
@@ -3799,7 +3809,8 @@ export async function voidEncounterProcedure(
 /**
  * Los papeles de una atención anulada que aún valen (ADR 0002: se anula «lo
  * ligado»): el descanso médico emitido, las órdenes pedidas o en proceso (y la
- * tarea de una derivación) y los consentimientos sin firmar. Un consentimiento
+ * tarea de una derivación), los consentimientos sin firmar y los formularios a
+ * medias, que se descartan. Un consentimiento
  * firmado, o firmado por la persona en su enlace, no se toca: es un acto suyo
  * y anular la atención no lo retira; una orden con resultado tampoco, porque
  * el resultado ya existe. Así el código del papel (`/comprobar`) dice
@@ -3874,6 +3885,9 @@ async function voidEncounterPapers(
     })
     await audit(tx, orgId, actorUserId, "consent.cancel", "consent_document", consent.id, { encounterId, reason })
   }
+  // Sus formularios a medias: descartados con el mismo motivo (lo anotado para otra persona no
+  // queda como un borrador que alguien pueda finalizar). Los finalizados no cambian.
+  await discardVoidedEncounterForms(tx, orgId, actorUserId, encounterId, reason, at)
 }
 
 /**

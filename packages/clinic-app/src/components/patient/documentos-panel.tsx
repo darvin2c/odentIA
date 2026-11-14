@@ -43,6 +43,7 @@ import {
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
+  formStateWords,
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
@@ -585,13 +586,17 @@ export function DocumentosSection({
           teeth: [],
           retired: false,
           title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
-          detail: declared
-            ? declaredFormDetail(response, sender, via)
-            : `${formatDate(date)} · ${response.status === "finalizado" ? "Finalizado" : "Sin finalizar"}`,
+          // Lo del equipo dice lo de su atención: quedó a medias al firmarla, o es de una que se anuló.
+          // Lo que declaró el paciente no es de la atención: dice quién lo envió, por dónde y si se revisó.
+          detail: declared ? declaredFormDetail(response, sender, via) : `${formatDate(date)} · ${formStateWords(response)}`,
           date,
           status:
             response.status === "finalizado"
-              ? { label: declared ? "Revisado" : "Finalizado", tone: "success" }
+              ? declared
+                ? { label: "Revisado", tone: "success" }
+                : response.encounterStatus === "anulada"
+                  ? { label: "De una atención anulada", tone: "outline" }
+                  : { label: "Finalizado", tone: "success" }
               : declared
                 ? { label: response.submittedAt ? "Por revisar" : "Sin enviar", tone: "warning" }
                 : { label: "Borrador", tone: "warning" },
