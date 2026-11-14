@@ -732,7 +732,8 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja en una p
     await expect(anon.getByText("El DNI tiene 8 números; faltan 5")).toBeVisible()
     await expect(anon.getByText("Escribe tu fecha de nacimiento")).toBeVisible()
     await expect(anon.getByText("Escribe un celular para avisarte de tu cita")).toBeVisible()
-    await expect(anon.getByText("Elige una opción")).toBeVisible()
+    // Novedades y promociones se pregunta y no frena (mesa del 13 nov, decisión 7).
+    await expect(anon.getByText("Elige una opción")).toHaveCount(0)
     await expect(anon.getByText("Para reservar necesitamos que aceptes el aviso de privacidad")).toBeVisible()
     await expect(anon.getByLabel("Nombres", { exact: true })).toHaveValue("Carla")
     await expect(anon.getByLabel("Apellidos", { exact: true })).toBeFocused()

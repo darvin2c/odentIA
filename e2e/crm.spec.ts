@@ -712,7 +712,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(reserve).toBeInViewport()
   await reserve.click()
   await expect(page.getByText("Escribe tu fecha de nacimiento")).toBeVisible()
-  await expect(page.getByText("Elige una opción")).toBeVisible()
+  // Novedades y promociones se pregunta y no frena (mesa del 13 nov, decisión 7).
+  await expect(page.getByText("Elige una opción")).toHaveCount(0)
   await expect(page.getByLabel("Fecha de nacimiento")).toBeFocused()
   await page.getByLabel("Fecha de nacimiento").fill("14/02/1990")
   // Novedades y promociones: nunca respondió, se pregunta sin nada marcado.

@@ -173,8 +173,8 @@ export function PromotionsQuestion({ id, clinicName }: { id: string; clinicName:
     <ChoiceCards
       id={id}
       strong
-      legend={`¿Quieres recibir novedades y promociones de ${clinicName} por WhatsApp?`}
-      description={`Descuentos y campañas de ${clinicName}. Puedes darte de baja cuando quieras.`}
+      legend={`¿Quieres recibir novedades y promociones de ${clinicName} por WhatsApp? (opcional)`}
+      description={`Descuentos y campañas de ${clinicName}. Si no respondes, no te las enviamos. Puedes darte de baja cuando quieras.`}
       options={PROMOTION_OPTIONS}
       value={value === null ? null : value ? "si" : "no"}
       onChange={(next) => field.handleChange(next === "si")}
@@ -841,7 +841,7 @@ function BookingDataFields({
       used.add(source)
       put(key, found[source])
     }
-    if (asks.promotions && value.promotions === null) put("promotions", "Elige una opción")
+    // Novedades y promociones se pregunta y se puede dejar sin responder (mesa del 13 nov, decisión 7).
     used.add("privacyAccepted")
     if (!value.privacyAccepted) put("privacyAccepted", "Para reservar necesitamos que aceptes el aviso de privacidad")
     const loose = Object.entries(found).find(([key]) => !used.has(key))?.[1] ?? null
@@ -1160,7 +1160,7 @@ export function checkYou(
     if (draft.phoneIncomplete) errors.phone = "Revisa el celular: está incompleto"
     else if (!draft.phone) errors.phone = "Escribe un celular para avisarte de tu cita"
   }
-  if (pending?.promotions && draft.promotions === null) errors.promotions = "Elige una opción"
+  // Novedades y promociones: se pregunta y no frena (decisión 7); el aviso de privacidad, sí.
   if (pending?.privacy && !draft.privacy) errors.privacy = "Para reservar necesitamos que aceptes el aviso de privacidad"
   return errors
 }
