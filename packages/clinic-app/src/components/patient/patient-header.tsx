@@ -192,6 +192,25 @@ export function PatientClinicalStrip({
   const pregnancy = health?.pregnancy ?? null
   // El «No» que marcó la persona (o quien habla por ella) no es «Niega alergias»: nadie se lo preguntó.
   const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
+  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
+  // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
+  const classWords = health?.medicineClasses
+    ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
+          const known = health.medicineClasses?.[key]
+          if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
+          // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
+          const unclassed =
+            known.answer === "unknown" && detail.currentMedications.some((row) => !medicationClassOf(row.atcCode))
+          return [
+            {
+              key,
+              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}${unclassed ? " · revisa sus medicinas" : ""}`,
+              warn: known.answer !== "no",
+              said: known.said,
+            },
+          ]
+        })
+      : []
   const alerts = [
     ...(pregnancy
       ? [
@@ -214,6 +233,15 @@ export function PatientClinicalStrip({
           group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
       ),
     })),
+    // Su «No sé» o su «No» a una clase de medicina, dentro de la caja de su última declaración (B9).
+    ...classWords
+      .filter((word) => word.said && groups.length > 0)
+      .map((word) => ({
+        id: `clase-${word.key}`,
+        label: word.label,
+        tone: word.warn ? ("warning" as const) : ("secondary" as const),
+        group: groups.length - 1,
+      })),
     // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
     // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
     ...(health?.latestAnamnesis
@@ -253,24 +281,6 @@ export function PatientClinicalStrip({
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
-  // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
-  // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
-  const classWords = health?.medicineClasses
-    ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
-          const known = health.medicineClasses?.[key]
-          if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
-          // «No sabe» con medicinas sin clase: puede ser una de ellas (QA del 14 nov, C2).
-          const unclassed =
-            known.answer === "unknown" && detail.currentMedications.some((row) => !medicationClassOf(row.atcCode))
-          return [
-            {
-              key,
-              label: `${MEDICATION_CLASSES[key].label}: ${CLASS_ANSWER_WORDS[known.answer](known.said)}${unclassed ? " · revisa sus medicinas" : ""}`,
-              warn: known.answer !== "no",
-            },
-          ]
-        })
-      : []
   if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
@@ -354,7 +364,7 @@ export function PatientClinicalStrip({
             </Badge>
           </li>
         ) : null}
-        {classWords.map((word) => (
+        {classWords.filter((word) => !(word.said && groups.length > 0)).map((word) => (
           <li key={word.key} className="flex min-w-0 max-w-full">
             <Badge
               variant="outline"

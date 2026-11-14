@@ -341,3 +341,18 @@ it("«Anticoagulante: no sabe · revisa sus medicinas» si toma algo sin clase",
   const page = text(<PatientClinicalStrip detail={withOther} sex="F" health={health([], classes)} medicineClasses />)
   expect(page).toContain("Anticoagulante: no sabe · revisa sus medicinas")
 })
+
+// QA del 14 nov (B9): «Anticoagulante: no sabe» que dijo ella iba fuera de su caja «Lo dijo ella».
+it("su «No sé» al anticoagulante va dentro de la caja de lo que dijo", () => {
+  const plain: Detail = { activeAllergies: [allergy("a1", "Látex")], activeConditions: [], currentMedications: [], allergyReview: "recorded" }
+  const classes = {
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "unasked", said: false } },
+  } as Partial<PatientHealth>
+  const markup = renderToStaticMarkup(
+    <PatientClinicalStrip detail={plain} sex="F" health={health([group({ allergies: ["a1"] })], classes)} medicineClasses />,
+  )
+  const boxes = [...markup.matchAll(/<ul aria-labelledby="([^"]+)"[^>]*>(.*?)<\/ul>/g)].map((match) => match[2]!.replace(/<[^>]+>/g, "|"))
+  expect(boxes[0]).toContain("Anticoagulante: no sabe")
+  // Lo que nadie preguntó no es de ella: queda fuera.
+  expect(boxes[0]).not.toContain("no se le preguntó")
+})
