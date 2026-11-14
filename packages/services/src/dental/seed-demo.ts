@@ -4270,6 +4270,61 @@ await savePatientHealth(db, ORG_A, ANA_ID, julia.id, {
   conditions: [],
   medications: [],
 })
+// Thiago, 6 años y asmático (mesa del 13 nov, entrega 7, caso C3): lo registra su mamá, Carla, por el QR.
+// Su salud se le pregunta a ella con ejemplos de niño, sin embarazo ni tabaco, y en «Thiago de pequeño»
+// cuenta que ya no toma biberón, que se chupa el dedo, que come dulces 4 o más veces al día y que se
+// cepilla solo. La odontóloga lo lee sin clics en la atención, con «Lo dijo su madre, Carla…».
+// Siempre tiene 6 años: nació hace 6 años y 2 meses.
+const thiagoBirth = new Date()
+thiagoBirth.setUTCFullYear(thiagoBirth.getUTCFullYear() - 6, thiagoBirth.getUTCMonth() - 2, 1)
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: {
+          displayName: "Thiago Quispe Ramos",
+          givenNames: "Thiago",
+          familyName: "Quispe Ramos",
+          birthDate: thiagoBirth.toISOString().slice(0, 10),
+          sex: "M",
+          docType: "DNI",
+          docNumber: "78901355",
+        },
+        respondent: "representative",
+        representative: {
+          displayName: "Carla Ramos Díaz",
+          relationship: "guardian",
+          relationshipDetail: "Madre",
+          phone: "+51987000939",
+          docType: "DNI",
+          docNumber: "45678955",
+        },
+        privacyAccepted: true,
+        health: {
+          allergies: { state: "none", items: [] },
+          conditions: { state: "recorded", items: [{ name: "Asma" }] },
+          anticoagulants: { state: "none" },
+          boneMedicines: { state: "none" },
+          medications: { state: "recorded", items: [{ name: "Salbutamol inhalador cuando tiene crisis" }] },
+          dental: {
+            corazon: { riesgoEndocarditis: "no" },
+            problemaAnestesia: "no",
+            biberon: "ya_no",
+            chupon: "dedo",
+            dulcesEntreComidas: "4_o_mas",
+            pastaConFluor: "si",
+            quienCepilla: "solo",
+          },
+        },
+      },
+    },
+  ),
+)
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
 // de «Madre» espera «Confirmar» o «No es representante», tarea `confirmar_representante`)
