@@ -704,7 +704,6 @@ function ReviewForm({
                       type="button"
                       variant="link"
                       className="h-auto self-start p-0"
-                      aria-label={`Marcar la ${inSentence(option.label)} como recomendada`}
                       disabled={busy}
                       onClick={() => recommend.mutate(option.id)}
                     >
