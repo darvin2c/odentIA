@@ -414,8 +414,10 @@ export async function patientHealthQuestionsWith(
   // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
   // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
   const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
-  if (sent && sawToday) return { ask: [], onlyNew: false, health, known }
-  const onlyNew = sent ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6).
+  const responded = !!sent || health.declarations.some((row) => row.via === "registro")
+  if (responded && sawToday) return { ask: [], onlyNew: false, health, known }
+  const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)

@@ -12,7 +12,7 @@ import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { consentTemplate, consentTemplateService } from "@odentia/db/schema/clinical-forms"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
-import { savePatientHealth } from "./clinical.js"
+import { recordHealthDeclaration, savePatientHealth } from "./clinical.js"
 import {
   createConsentDocument,
   createConsentTemplate,
@@ -390,4 +390,19 @@ it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nun
   expect(await linkedKeys(orgId, row.id)).toEqual(["odontopediatria"])
   await run((tx) => ensureClinicConsents(tx, orgId, null))
   expect(await linkedKeys(orgId, row.id)).toEqual(["pulpectomia"])
+})
+
+// QA del 14 nov (B6): quien se registró en línea con la lista de hoy ya respondió: su enlace no le
+// insiste con lo que dejó en blanco.
+it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en blanco", async () => {
+  const { orgId, run } = await newClinic()
+  const patient = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Ya Registrada" }))
+  await run((tx) =>
+    recordHealthDeclaration(tx, orgId, patient.id, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: { allergies: { state: "none", items: [] }, anticoagulants: { state: "unanswered" }, boneMedicines: { state: "none" } },
+    }),
+  )
+  expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])
 })
