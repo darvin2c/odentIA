@@ -92,12 +92,16 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * vez, «Tus medicinas» (`medicinas`): primero las dos que cambian lo que se hace
  * en la cita (anticoagulantes y medicinas para los huesos) y al final «algún otro».
  *
+ * - `visit`: «Antes de cada cita» (mesa del 13 nov, entrega 8): a qué viene, si le duele y algo
+ *   más, de esa cita. No van al registro ni a su ficha: se preguntan en su enlace o su portal antes
+ *   de cada cita, llegan a «Hoy viene a…» de esa atención y nunca son obligatorios.
+ *
  * Solo entran aquí datos que el paciente sabe responder solo y que la ficha ya
  * guarda. Lo que se pregunta junto (la referencia con la dirección, el
  * parentesco con el contacto de emergencia, la aseguradora con el seguro) sigue
  * a su dato y nunca es obligatorio.
  */
-export type RegistrationFieldGroup = "always" | "clinic" | "census" | "health"
+export type RegistrationFieldGroup = "always" | "clinic" | "census" | "health" | "visit"
 
 interface RegistrationFieldDef {
   key: string
@@ -156,6 +160,10 @@ export const REGISTRATION_FIELDS = [
   { key: "dental.dulcesEntreComidas", label: "Dulces o jugos entre comidas", step: "ninez", group: "health", products: ["dental"] },
   { key: "dental.pastaConFluor", label: "Pasta de dientes con flúor", step: "ninez", group: "health", products: ["dental"] },
   { key: "dental.quienCepilla", label: "Quién le cepilla los dientes", step: "ninez", group: "health", products: ["dental"] },
+  // Antes de cada cita: lo de esa visita, en los tres productos.
+  { key: "visit.reason", label: "A qué viene, con sus palabras", step: "visita", group: "visit" },
+  { key: "visit.pain", label: "Si le duele ahora y cuánto", step: "visita", group: "visit" },
+  { key: "visit.more", label: "Algo más que quiera contarnos", step: "visita", group: "visit" },
 ] as const satisfies readonly RegistrationFieldDef[]
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
 
@@ -167,7 +175,7 @@ export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
  * tabaco ya eran de latidIA: son nuevos solo en odentIA). Lo que no figura es de
  * la versión 1.
  */
-export const REGISTRATION_QUESTIONS_VERSION = 3
+export const REGISTRATION_QUESTIONS_VERSION = 4
 const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Record<ClinicalProduct, number>>>> = {
   "dental.corazon": 2,
   "dental.problemaAnestesia": 2,
@@ -181,6 +189,10 @@ const QUESTIONS_SINCE: Partial<Record<RegistrationFieldKey, number | Partial<Rec
   "dental.dulcesEntreComidas": 3,
   "dental.pastaConFluor": 3,
   "dental.quienCepilla": 3,
+  // Antes de cada cita (entrega 8).
+  "visit.reason": 4,
+  "visit.pain": 4,
+  "visit.more": 4,
 }
 
 const fieldProducts = (field: (typeof REGISTRATION_FIELDS)[number]): readonly ClinicalProduct[] | null =>
@@ -217,6 +229,7 @@ export const OPTIONAL_ONLY_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] 
   .filter(
     (field) =>
       field.group === "census" ||
+      field.group === "visit" ||
       field.step === "personales" ||
       field.step === "odontologicos" ||
       field.step === "habitos" ||
@@ -248,6 +261,7 @@ const optionalDefaults: Record<string, true> = {
   "medical.lactancia": true, "medical.tabaco": true,
   "dental.biberon": true, "dental.chupon": true, "dental.dulcesEntreComidas": true, "dental.pastaConFluor": true,
   "dental.quienCepilla": true,
+  "visit.reason": true, "visit.pain": true, "visit.more": true,
 }
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
   version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
@@ -855,6 +869,8 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     // A quién se le pregunta cada dato de salud: la misma regla del registro y de su enlace.
     const person = { sex: data.demographics.sex, age: ageInYears(data.demographics.birthDate, context.today) }
     for (const field of REGISTRATION_FIELDS) {
+      // Lo de la visita no es del registro: se pregunta antes de cada cita.
+      if (field.group === "visit") continue
       const key = field.key
       const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
       const value = registrationFieldValue(data, field)

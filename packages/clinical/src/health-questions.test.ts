@@ -62,19 +62,27 @@ describe("los datos de salud nuevos", () => {
       "dental.dulcesEntreComidas",
       "dental.pastaConFluor",
       "dental.quienCepilla",
+      "visit.reason",
+      "visit.pain",
+      "visit.more",
     ])
-    // Quien ya vio las de la entrega 6 ve solo las de un niño, y solo en odentIA.
+    // Quien ya vio las de la entrega 6 ve solo las de un niño, y solo en odentIA, y las de antes de cada cita.
     expect(newRegistrationQuestions(2, "dental").map((item) => item.key)).toEqual([
       "dental.biberon",
       "dental.chupon",
       "dental.dulcesEntreComidas",
       "dental.pastaConFluor",
       "dental.quienCepilla",
+      "visit.reason",
+      "visit.pain",
+      "visit.more",
     ])
-    expect(newRegistrationQuestions(2, "medical")).toEqual([])
+    // Lo de antes de cada cita es de los tres productos.
+    const visit = ["visit.reason", "visit.pain", "visit.more"]
+    expect(newRegistrationQuestions(2, "medical").map((item) => item.key)).toEqual(visit)
     // latidIA ya preguntaba la lactancia y el tabaco: para ella son nuevas solo las dos medicinas.
-    expect(newRegistrationQuestions(1, "medical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
-    expect(newRegistrationQuestions(1, "optical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines"])
+    expect(newRegistrationQuestions(1, "medical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines", ...visit])
+    expect(newRegistrationQuestions(1, "optical").map((item) => item.key)).toEqual(["anticoagulants", "boneMedicines", ...visit])
     expect(newRegistrationQuestions(REGISTRATION_QUESTIONS_VERSION, "dental")).toEqual([])
   })
 
