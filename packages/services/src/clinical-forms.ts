@@ -329,7 +329,7 @@ export async function archiveSpecialty(
   if (publishedForm || publishedConsent) {
     throw conflict(
       "HAS_PUBLISHED",
-      "Archiva primero las plantillas publicadas de esta especialidad",
+      "Deja de usar primero las fichas de esta especialidad",
     )
   }
   return updateSpecialty(tx, orgId, actorUserId, specialtyId, { isActive: false })
@@ -567,11 +567,11 @@ const FIELD_ID_RE = /^[a-z0-9][a-z0-9_-]{0,48}$/i
 export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
   const pathOf = (rest: string) => (at ? `${at}.${rest}` : rest)
   if (!raw || typeof raw !== "object" || !("sections" in raw)) {
-    throw validation("El esquema del formulario es obligatorio")
+    throw validation("Las preguntas de la ficha son obligatorias")
   }
   const sections: unknown = raw.sections
   if (!Array.isArray(sections) || sections.length === 0 || sections.length > 30) {
-    throw invalidField(pathOf("sections"), "El formulario necesita entre 1 y 30 secciones")
+    throw invalidField(pathOf("sections"), "La ficha necesita entre 1 y 30 secciones")
   }
   const errors: Record<string, string> = {}
   const fail = (path: string, message: string) => {
@@ -1051,7 +1051,7 @@ export async function createFormTemplate(
   actorUserId: string,
   input: CreateFormTemplateInput,
 ): Promise<FormTemplateRow> {
-  const title = assertName(input.title, "Título del formulario", 200)
+  const title = assertName(input.title, "Título de la ficha", 200)
   // Con clave, es la versión siguiente de esa plantilla. Sin ella es un formulario nuevo y nunca
   // se une a otro: dos títulos iguales, o que empiezan igual, son dos formularios.
   const key = input.key ? assertKey(input.key, "Clave") : await newFormTemplateKey(tx, orgId, title)
@@ -1070,7 +1070,7 @@ export async function createFormTemplate(
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, key)))
     .orderBy(desc(clinicalFormTemplate.version))
   if (existing.some((row) => row.status === "borrador")) {
-    const message = "Ya hay un borrador de este formulario: edítalo o publícalo"
+    const message = "Ya hay un borrador de esta ficha: edítalo o publícalo"
     throw new ServiceError("DRAFT_EXISTS", 409, message, { title: message })
   }
   const version = (existing[0]?.version ?? 0) + 1
@@ -1098,7 +1098,7 @@ export async function createFormTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la plantilla")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la ficha")
     throw e
   }
 }
@@ -1126,11 +1126,11 @@ export async function updateFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Plantilla")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador") {
     throw conflict("IMMUTABLE", "Solo un borrador puede editarse: publica una versión nueva")
   }
-  const title = patch.title !== undefined ? assertName(patch.title, "Título del formulario", 200) : current.title
+  const title = patch.title !== undefined ? assertName(patch.title, "Título de la ficha", 200) : current.title
   const description =
     patch.description !== undefined
       ? assertOptionalText(patch.description, "Descripción", 2000)
@@ -1161,7 +1161,7 @@ export async function updateFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Plantilla")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_template.update", "clinical_form_template", row.id, {
     version: row.version,
   })
@@ -1198,7 +1198,7 @@ export async function publishFormTemplate(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Plantilla")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador") throw conflict("IMMUTABLE", "Solo un borrador puede publicarse")
   assertFormSchema(current.schema)
   if (current.specialtyId) {
@@ -1221,7 +1221,7 @@ export async function publishFormTemplate(
     .set({ status: "publicado", publishedAt: new Date(), updatedAt: new Date() })
     .where(eq(clinicalFormTemplate.id, current.id))
     .returning()
-  if (!published) throw notFound("Plantilla")
+  if (!published) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_template.publish", "clinical_form_template", published.id, {
     key: current.key,
     version: published.version,
@@ -1246,8 +1246,8 @@ export async function archiveFormTemplate(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Plantilla")
-  if (current.status === "archivado") throw conflict("ARCHIVED", "Este formulario ya no se usa")
+  if (!current) throw notFound("Ficha")
+  if (current.status === "archivado") throw conflict("ARCHIVED", "Esta ficha ya no se usa")
   const [row] = await tx
     .update(clinicalFormTemplate)
     .set({ status: "archivado", updatedAt: new Date() })
@@ -1255,7 +1255,7 @@ export async function archiveFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Plantilla")
+  if (!row) throw notFound("Ficha")
   // «Dejar de usar» la que estaba en uso no es lo mismo que archivar un borrador: «Actividad del
   // equipo» lo dice con las palabras de la pantalla.
   const action = current.status === "publicado" ? "form_template.leave" : "form_template.archive"
@@ -1285,7 +1285,7 @@ export async function reuseFormTemplate(
       and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Plantilla")
+  if (!current) throw notFound("Ficha")
   // Un «Volver a usar» a la vez por formulario: el segundo espera aquí y, al leer las versiones,
   // ya ve la que publicó el primero. Bloquear las filas no alcanza, porque el primero solo inserta.
   await tx.execute(
@@ -1297,9 +1297,9 @@ export async function reuseFormTemplate(
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, current.key)))
     .orderBy(desc(clinicalFormTemplate.version))
   if (versions.some((row) => row.status === "publicado"))
-    throw conflict("IN_USE", "Este formulario ya está en uso")
+    throw conflict("IN_USE", "Esta ficha ya está en uso")
   if (versions.some((row) => row.status === "borrador")) {
-    throw conflict("DRAFT_EXISTS", "Este formulario tiene un borrador: publícalo para volver a usarlo, o archívalo")
+    throw conflict("DRAFT_EXISTS", "Esta ficha tiene un borrador: publícalo para volver a usarla, o archívalo")
   }
   // La última que estuvo en uso: un borrador archivado nunca se llegó a usar.
   const last = versions.find((row) => row.publishedAt !== null)
@@ -1350,10 +1350,10 @@ export async function reuseFormTemplate(
     .catch((error: unknown) => {
       // Otra operación creó esa versión mientras tanto (una versión nueva desde el constructor):
       // el índice único lo impide y se responde como un choque, no como un error interno.
-      if (isUniqueViolation(error)) throw conflict("DUPLICATE", "Este formulario cambió mientras tanto: recarga para ver cómo quedó")
+      if (isUniqueViolation(error)) throw conflict("DUPLICATE", "Esta ficha cambió mientras tanto: recarga para ver cómo quedó")
       throw error
     })
-  if (!row) throw notFound("Plantilla")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_template.reuse", "clinical_form_template", row.id, {
     key: row.key,
     version: row.version,
@@ -1452,7 +1452,7 @@ export async function listOpenEncounterForms(
       ),
     )
     .orderBy(asc(clinicalFormResponse.createdAt), asc(clinicalFormResponse.id))
-  return rows.map((row) => ({ id: row.id, title: row.title ?? "Formulario" }))
+  return rows.map((row) => ({ id: row.id, title: row.title ?? "Ficha" }))
 }
 
 export async function createFormResponse(
@@ -1472,18 +1472,18 @@ export async function createFormResponse(
       ),
     )
     .limit(1)
-  if (!template) throw notFound("Plantilla")
+  if (!template) throw notFound("Ficha")
   if (template.status !== "publicado") {
     throw invalidField(
       "templateId",
       template.status === "archivado"
-        ? "Este formulario ya no se usa: elige otro, o vuelve a usarlo desde Configuración"
-        : "Este formulario aún es un borrador: publícalo para empezar a llenarlo",
+        ? "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración"
+        : "Esta ficha aún es un borrador: publícala para empezar a llenarla",
     )
   }
   // La pantalla ya no lo ofrece; el servidor tampoco lo acepta.
   if (template.respondent === "portal") {
-    throw invalidField("templateId", "Este formulario lo responde el paciente: el equipo no lo llena por él")
+    throw invalidField("templateId", "Esto lo responde el paciente: el equipo no lo llena por él")
   }
   const schema = assertFormSchema(template.schema)
   let encounterId: string | null = null
@@ -1496,8 +1496,8 @@ export async function createFormResponse(
       throw conflict(
         "ENCOUNTER_CLOSED",
         visible.status === "anulada"
-          ? "La atención está anulada: el formulario se empieza sin unirlo a ella"
-          : "La atención ya está firmada: el formulario se empieza sin unirlo a ella",
+          ? "La atención está anulada: la ficha se empieza sin unirla a ella"
+          : "La atención ya está firmada: la ficha se empieza sin unirla a ella",
       )
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
@@ -1584,14 +1584,14 @@ export async function updateFormResponseDraft(
     )
     .limit(1)
     .for("update")
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
 
   if (current.status !== "borrador") {
     throw conflict(
       "FINALIZED",
       current.status === "descartado"
-        ? "El formulario está descartado"
-        : "El formulario está finalizado: usa una adenda",
+        ? "La ficha está descartada"
+        : "La ficha está finalizada: usa una adenda",
     )
   }
   const schema = assertFormSchema(current.templateSnapshot)
@@ -1605,7 +1605,7 @@ export async function updateFormResponseDraft(
   ) {
     throw conflict(
       "STALE_DRAFT",
-      "Otra pestaña o persona guardó otras respuestas de este formulario mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
+      "Otra pestaña o persona guardó otras respuestas de esta ficha mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
     )
   }
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
@@ -1628,7 +1628,7 @@ export async function updateFormResponseDraft(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Formulario")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {})
   return row
 }
@@ -1647,11 +1647,11 @@ export async function finalizeFormResponse(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador")
     throw conflict(
       "FINALIZED",
-      current.status === "descartado" ? "El formulario está descartado" : "El formulario ya está finalizado",
+      current.status === "descartado" ? "La ficha está descartada" : "La ficha ya está finalizada",
     )
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
@@ -1664,7 +1664,7 @@ export async function finalizeFormResponse(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .returning()
-  if (!row) throw notFound("Formulario")
+  if (!row) throw notFound("Ficha")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
   // Lo declarado sobre alergias pasa a los antecedentes sin confirmar, para que
   // la receta avise; la misma transacción: si no se puede, no se finaliza.
@@ -1719,7 +1719,7 @@ export async function discardFormResponse(
     )
     .for("update")
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "borrador")
     throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
   const clean = (reason ?? "").trim()
@@ -1757,9 +1757,9 @@ export async function addFormAddendum(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   if (current.status !== "finalizado") {
-    throw validation("La adenda solo aplica a formularios finalizados")
+    throw validation("La adenda solo aplica a fichas finalizadas")
   }
   const clean = (text ?? "").trim()
   if (!clean) throw invalidField("text", "La adenda no puede estar vacía")
@@ -1827,7 +1827,7 @@ export async function formResponsePatientId(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
-  if (!current) throw notFound("Formulario")
+  if (!current) throw notFound("Ficha")
   return current.patientId
 }
 
@@ -1981,7 +1981,7 @@ export async function createConsentTemplate(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la plantilla")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe esa versión de la ficha")
     throw e
   }
 }

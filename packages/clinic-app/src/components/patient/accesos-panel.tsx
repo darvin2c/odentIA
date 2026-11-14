@@ -36,7 +36,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   controles: "Controles",
   recetas: "Recetas",
   documentos: "Imágenes y documentos",
-  formularios: "Formularios",
+  formularios: "Fichas",
   consentimientos: "Consentimientos",
   ordenes: "Órdenes",
   descarga: "Descargó la historia completa",

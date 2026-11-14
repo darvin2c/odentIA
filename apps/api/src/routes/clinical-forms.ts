@@ -426,8 +426,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   app.use("/consents/:id", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
   app.use("/consents/:id/*", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
   app.use("/orders/:id/*", paperLock(clinicalOrderPatientId, "Orden no encontrada"))
-  app.use("/form-responses/:id", paperLock(formResponsePatientId, "Formulario no encontrado"))
-  app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Formulario no encontrado"))
+  app.use("/form-responses/:id", paperLock(formResponsePatientId, "Ficha no encontrada"))
+  app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Ficha no encontrada"))
 
   // Un id mal escrito no existe: se responde lo mismo que con uno que no se encuentra, en vez de
   // dejar que la base lo rechace como un error interno.
@@ -439,10 +439,10 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   // A la base va el id ya normalizado, nunca como llegó: lo que `canonicalUuid` acepta (un guion
   // en otro sitio, un espacio de más) PostgreSQL no siempre lo lee, y sería otra vez un error interno.
   const formId = (c: Context) => canonicalUuid(c.req.param("id")) ?? ""
-  app.use("/form-templates/:id", knownId("Plantilla no encontrada"))
-  app.use("/form-templates/:id/*", knownId("Plantilla no encontrada"))
-  app.use("/form-responses/:id", knownId("Formulario no encontrado"))
-  app.use("/form-responses/:id/*", knownId("Formulario no encontrado"))
+  app.use("/form-templates/:id", knownId("Ficha no encontrada"))
+  app.use("/form-templates/:id/*", knownId("Ficha no encontrada"))
+  app.use("/form-responses/:id", knownId("Ficha no encontrada"))
+  app.use("/form-responses/:id/*", knownId("Ficha no encontrada"))
 
   // --- Especialidades ---
   app.get("/specialties", async (c) => {
@@ -763,7 +763,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const encounterId = query.encounterId ? canonicalUuid(query.encounterId) : undefined
     if (encounterId === null) return notFoundResponse(c, "Atención no encontrada")
     const templateId = query.templateId ? canonicalUuid(query.templateId) : undefined
-    if (templateId === null) return notFoundResponse(c, "Plantilla no encontrada")
+    if (templateId === null) return notFoundResponse(c, "Ficha no encontrada")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         // Cada ficha con la anterior del mismo tipo, para verla al lado de la de hoy.

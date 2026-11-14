@@ -206,7 +206,7 @@ export async function markFormTemplateLooked(
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)))
     .limit(1)
-  if (!template) throw notFound("Plantilla")
+  if (!template) throw notFound("Ficha")
   const mark = (await productFormMarks(tx, orgId)).get(template.key)
   if (!mark || mark.looked) return { looked: true }
   await tx.insert(auditEvent).values({

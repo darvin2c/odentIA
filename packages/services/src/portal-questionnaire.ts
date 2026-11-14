@@ -111,7 +111,7 @@ export async function previewPatientQuestionnaire(
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.id, templateId), eq(clinicalFormTemplate.organizationId, orgId)))
     .limit(1)
-  if (!template) throw notFound("Plantilla")
+  if (!template) throw notFound("Ficha")
   const named = (row: FormTemplateRow | null) => (row ? { key: row.key, title: row.title } : null)
   const becomes = change !== "leave" && template.respondent === "portal"
   return {

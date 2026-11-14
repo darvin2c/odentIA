@@ -495,13 +495,13 @@ it("los rechazos al empezar o llenar un formulario se dicen con palabras de la p
   await f.run((tx) => archiveFormTemplate(tx, ORG, f.actor, template.id))
   await expect(start(template.id)).rejects.toMatchObject({
     status: 400,
-    fields: { templateId: "Este formulario ya no se usa: elige otro, o vuelve a usarlo desde Configuración" },
+    fields: { templateId: "Esta ficha ya no se usa: elige otra, o vuelve a usarla desde Configuración" },
   })
   // Uno que todavía es un borrador.
   const draft = await f.run((tx) => createFormTemplate(tx, ORG, f.actor, { title: "Borrador con mensajes claros", schema }))
   await expect(start(draft.id)).rejects.toMatchObject({
     status: 400,
-    fields: { templateId: "Este formulario aún es un borrador: publícalo para empezar a llenarlo" },
+    fields: { templateId: "Esta ficha aún es un borrador: publícala para empezar a llenarla" },
   })
 })
 
@@ -515,7 +515,7 @@ it("«Actividad del equipo» dice de qué formulario se trata al publicarlo, dej
   const { items } = await f.run((tx) => listWorkspaceAudit(tx, ORG, { area: "configuracion" }))
   const about = (id: string, action: string) => items.find((item) => item.entityId === id && item.action === action)
   expect(about(template.id, "form_template.publish")).toMatchObject({
-    what: "Publicó una versión de una plantilla de formulario",
+    what: "Publicó una versión de una ficha de consulta",
     about: "«Ficha con nombre en la actividad» · versión 1",
   })
   expect(about(template.id, "form_template.leave")).toMatchObject({
