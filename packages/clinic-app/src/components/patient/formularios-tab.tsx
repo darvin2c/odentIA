@@ -48,6 +48,7 @@ import {
   AnswerAppField,
   type AttachmentOption,
   answersForServer,
+  isEmptyAnswer,
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
@@ -461,9 +462,8 @@ function StaffResponseDetail({
     for (const item of proposals) {
       const fieldId = String(item.payload["fieldId"])
       const value = saved[fieldId]
-      const answered = value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)
       // Con el mismo valor es la que se acaba de confirmar: esa no se toca.
-      if (!answered || JSON.stringify(value) === JSON.stringify(item.payload["value"] ?? null) || discardSent.current.has(item.id)) continue
+      if (isEmptyAnswer(value) || JSON.stringify(value) === JSON.stringify(item.payload["value"] ?? null) || discardSent.current.has(item.id)) continue
       discardSent.current.add(item.id)
       clio.discard(item)
       if (item.status === "lista" && !typedHere.current.has(fieldId)) {
