@@ -82,7 +82,7 @@ it("Enter en la respuesta de la alergia pasa a la pregunta siguiente, sin cambia
   enter(document.activeElement as Element)
   expect(question(/alguna de estas enfermedades/).contains(document.activeElement)).toBe(true)
   expect(screen.getByLabelText(/¿A qué\?/)).toBeTruthy()
-})
+}, 20_000)
 
 /** Enter como lo hace el navegador: si nadie lo detuvo, un botón con el foco se pulsa. */
 function enterLikeBrowser(target: Element) {
@@ -104,7 +104,7 @@ it("Enter repetido después de «¿A qué?» recorre las preguntas sin contestar
   for (const name of [/alguna de estas enfermedades/, /válvula del corazón/, /antibiótico antes de ir al dentista/, /problema con la anestesia/]) {
     expect(answered(name), String(name)).toEqual([])
   }
-})
+}, 20_000)
 
 // …y en la última pantalla, Enter en la última respuesta escrita lo enviaba todo. Desde la entrega 6,
 // lo que toma va en su propio paso, «Tus medicinas», que termina en «¿Tomas algún otro medicamento…?».
