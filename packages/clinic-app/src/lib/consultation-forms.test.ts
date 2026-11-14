@@ -13,6 +13,7 @@ import {
   draftOf,
   formsBelowOffers,
   reusableAnswer,
+  newFormSubmitWords,
   offerStateWords,
   offerWhyWords,
   unlooked,
@@ -157,4 +158,19 @@ it("«Nuevo › Ficha» trae como responsable a quien la empieza, si atiende", (
   // Desde la atención manda quien atiende.
   expect(defaultResponsible("luis", "ana", team)).toBe("luis")
   expect(defaultResponsible("se-fue", "ana", team)).toBe("")
+})
+
+// Verificación del 14 nov: una ficha apagada decía «se elige en «Otra ficha…»», y «Otra ficha…» decía «Empezar» al abrir la que estaba a medias.
+it("una ficha apagada dice que está sin usar y cómo volver a usarla", () => {
+  expect(appearsWords({ specialtyId: "s", offeredUnderYears: null, inUse: false }, "Ortodoncia")).toBe(
+    "Sin usar: no aparece en la atención. Para volver a usarla, enciende su interruptor «En uso»",
+  )
+  expect(appearsWords({ specialtyId: null, inUse: false }, null)).not.toContain("Otra ficha")
+})
+it("«Nueva ficha» dice «Seguir» si la elegida ya está a medias", () => {
+  const templates = [{ id: "t1", title: "Ficha de odontopediatría" }, { id: "t2", title: "Ficha de ortodoncia" }]
+  const drafts = [{ id: "r1", templateId: "t1", templateTitle: "Ficha de odontopediatría", status: "borrador" as const, source: "staff" as const }]
+  expect(newFormSubmitWords("t1", templates, drafts)).toBe("Seguir")
+  expect(newFormSubmitWords("t2", templates, drafts)).toBe("Empezar")
+  expect(newFormSubmitWords("", templates, drafts)).toBe("Empezar")
 })

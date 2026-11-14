@@ -135,9 +135,11 @@ export function unlooked(template: Pick<FormTemplate, "fromProduct" | "looked"> 
  * aparece sola: se elige en «Otra ficha…».
  */
 export function appearsWords(
-  template: Pick<FormTemplate, "specialtyId" | "offeredUnderYears">,
+  template: Pick<FormTemplate, "specialtyId" | "offeredUnderYears"> & Partial<Pick<FormTemplate, "inUse">>,
   specialtyName: string | null,
 ): string {
+  // Apagada no aparece en ningún lado, tampoco en «Otra ficha…»: se dice cómo volver a usarla.
+  if (template.inUse === false) return "Sin usar: no aparece en la atención. Para volver a usarla, enciende su interruptor «En uso»"
   if (!template.specialtyId || !specialtyName) return "No aparece sola: se elige en «Otra ficha…»"
   const byAge = template.offeredUnderYears ? `, y de cualquier menor de ${template.offeredUnderYears} años` : ""
   return `Aparece en la atención de: ${specialtyName}${byAge}`
@@ -153,6 +155,19 @@ export function answerWords(field: Pick<FormFieldDef, "type" | "unit">, value: u
   if (typeof value === "object" || field.type === "adjunto" || field.type === "firma") return "En la ficha anterior"
   const text = String(value)
   return field.unit && (field.type === "numero" || field.type === "texto") ? `${text} ${field.unit}` : text
+}
+
+/**
+ * El botón de «Nueva ficha»: «Seguir» si la elegida ya está a medias en esta
+ * atención (se abre la misma), «Empezar» si no.
+ */
+export function newFormSubmitWords(
+  templateId: string,
+  templates: ReadonlyArray<Pick<FormTemplate, "id" | "title">>,
+  drafts: ReadonlyArray<Pick<FormResponse, "id" | "templateId" | "templateTitle" | "status" | "source">>,
+): "Seguir" | "Empezar" {
+  const chosen = templates.find((template) => template.id === templateId)
+  return chosen && draftOf(chosen, drafts) ? "Seguir" : "Empezar"
 }
 
 /**

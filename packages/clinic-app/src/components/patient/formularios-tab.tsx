@@ -47,7 +47,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
-import { answerWords, defaultResponsible, draftOf, reusableAnswer } from "../../lib/consultation-forms"
+import { answerWords, defaultResponsible, draftOf, newFormSubmitWords, reusableAnswer } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -147,6 +147,8 @@ export function NewResponseDrawer({
     },
   })
   const surface = useFormSurface(form)
+  // Si la elegida ya está a medias, el botón dice lo que hace: la abre.
+  const chosenId = useStore(form.store, (state) => state.values.templateId)
   // Sin ninguna ficha en uso no se abre una lista vacía: se dice dónde se crean.
   if (open && !loading && templates.length === 0) return <NoFormsDrawer onClose={onClose} />
   return (
@@ -159,7 +161,7 @@ export function NewResponseDrawer({
       }}
       title="Nueva ficha"
       description="Se ofrece la versión en uso de cada ficha. Se guarda sola mientras la llenas."
-      submitLabel="Empezar"
+      submitLabel={newFormSubmitWords(chosenId, templates, drafts)}
     >
       <div className="flex flex-col gap-4">
         <form.AppField name="templateId">
