@@ -22,7 +22,7 @@ export function AuthLegal() {
 /** Entrar recibe, no vende (lienzo «Entrar: dos fondos», prueba 2). */
 export function WelcomeAside() {
   return (
-    <AuthAside tag={`Tu ${panelWords.place.one}`} title="Omnicanal" accent="y agéntica.">
+    <AuthAside tag="ARM · Agentic Relationship Management" title={`Tu ${panelWords.place.one}`} accent="es un ARM.">
       <p>Tus agentes siguieron trabajando mientras no estabas.</p>
     </AuthAside>
   )

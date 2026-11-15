@@ -462,7 +462,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
               )
             ) : (
               // Sin plan publicado (sin cifras): no se pide tarjeta nunca, el pago va con su comprobante (lib/offer.ts).
-              "No te pedimos tarjeta: ni para probar ni después. Tú decides qué puede hacer cada agente, y lo que no da resultado no se cobra."
+              "No te pedimos tarjeta: ni para probar ni después. Tú decides qué agentes trabajan, y recordar no se cobra."
             )}
           </p>
           <div className="hh-key hh-desk rise d4">
