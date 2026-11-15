@@ -72,7 +72,7 @@ export const MATRIX: MatrixRow[] = [
   },
   {
     task: "Agenda la cita con el sí de la persona",
-    marks: { crm: "no", chatbot: "medias", software: "no", manual: "no" },
+    marks: { crm: "medias", chatbot: "medias", software: "no", manual: "no" },
   },
   {
     task: `Una sola ficha por ${WORDS.patient === "cliente" ? "cliente" : "persona"}, con todos sus canales`,
@@ -94,8 +94,8 @@ export const MATRIX: MatrixRow[] = [
     marks: { crm: "no", chatbot: "no", software: "si", manual: "no" },
   },
   {
-    task: "Tú decides qué hace cada agente, y queda registrado qué hizo",
-    marks: { crm: "no", chatbot: "medias", software: "no", manual: "no" },
+    task: "Tú enciendes cada agente y eliges sus seguimientos, y queda registrado qué hizo",
+    marks: { crm: "medias", chatbot: "medias", software: "no", manual: "no" },
   },
   {
     task: "Sin límite de usuarios: pagas por el trabajo hecho",
@@ -189,7 +189,7 @@ export const ALTERNATIVES: Alternative[] = [
     pitch: `Lo que hoy depende de que alguien se acuerde, en ${NAME} pasa solo.`,
     rows: [
       { task: "De noche", them: "El mensaje espera hasta mañana.", us: "Sofi responde y agenda a cualquier hora." },
-      { task: "La agenda", them: "Un cuaderno, y alguien que se acuerde de avisar.", us: "Una agenda donde Argos recuerda cada cita." },
+      { task: "La agenda", them: "Un cuaderno, y alguien que se acuerde de avisar.", us: "Una agenda donde Argos recuerda las citas a quien aceptó sus avisos." },
       { task: "Los datos", them: "En el celular de quien atendió.", us: `En la ficha de ${WORDS.theClinic}, y cada rol ve solo lo suyo.` },
       { task: `Los ${P} que no volvieron`, them: "Se pierden.", us: ARGOS_BACK },
       { task: "Si cambias de recepcionista", them: "Se va con lo que sabía.", us: "Todo queda en la ficha." },
