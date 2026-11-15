@@ -28,4 +28,4 @@ Dictar con el paciente en la unidad dental se volvía una lista de cosas por rev
 
 - `packages/services/src/dental/site.ts` (`columns` con `pending`, `pending`), `plan.ts` (`addPlanItem`, `updatePlanItem`), `encounters.ts` (`addEncounterProcedure`).
 - `packages/services/src/encounter-dictation.ts` (`fitToScope` de `dental/dictation.ts`, `listConfirmedDictation`, `undoConfirmedDictation`, `keepConfirmedDictation`).
-- `packages/clinic-app/src/components/patient/dictation-sign-dialog.tsx`, `dictation-suggestions.tsx`, `encounter-procedures.tsx`; `apps/dental-clinic/src/components/dental/dictation-finding-choices.tsx` (`PlanSiteChoices`).
+- `packages/clinic-app/src/components/patient/dictation-sign-list.tsx`, `dictation-suggestions.tsx`, `encounter-procedures.tsx`; `apps/dental-clinic/src/components/dental/dictation-finding-choices.tsx` (`PlanSiteChoices`).

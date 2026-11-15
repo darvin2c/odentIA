@@ -23,7 +23,8 @@ export interface FormOffer {
   /** La de esta atención, si ya se empezó. */
   today: { responseId: string; status: "borrador" | "finalizado" } | null
   /** La anterior del mismo tipo, ya en su historia. */
-  previous: { responseId: string; finalizedAt: string; professionalUserId: string | null } | null
+  /** `unfinished`: quedó a medias en una atención ya firmada; `finalizedAt` es la hora de esa firma. */
+  previous: { responseId: string; finalizedAt: string; professionalUserId: string | null; unfinished?: boolean } | null
 }
 
 export function fetchFormOffers(patientId: string, encounterId: string) {

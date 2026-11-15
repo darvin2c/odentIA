@@ -22,6 +22,7 @@ import {
   diagnosisCatalog,
   encounter,
   encounterDiagnosis,
+  encounterDictationSuggestion,
   encounterProcedure,
   imagingStudy,
   patient,
@@ -790,7 +791,7 @@ async function assertAttachmentAnswers(
   }
 }
 
-function isEmptyAnswer(value: unknown): boolean {
+export function isEmptyAnswer(value: unknown): boolean {
   if (value === null || value === undefined) return true
   if (typeof value === "string") return value.trim() === ""
   if (Array.isArray(value)) return value.length === 0
@@ -1679,6 +1680,8 @@ export async function updateFormResponseDraft(
     professionalUserId?: string | null
     /** Las respuestas guardadas de las que partió quien escribe: otra pestaña no se pisa (`STALE_DRAFT`). */
     baseAnswers?: unknown
+    /** Lo que dice la auditoría además de quién: Clío dice de qué pregunta (sin el valor clínico). */
+    auditMetadata?: Record<string, unknown>
   },
   // `rejected`: las preguntas cuyo valor no valía (`answers.<id>` → por qué y qué quedó); conservan lo ya guardado, lo demás se guarda.
 ): Promise<FormResponseRow & { rejected: Record<string, string> }> {
@@ -1752,7 +1755,7 @@ export async function updateFormResponseDraft(
     )
     .returning()
   if (!row) throw notFound("Ficha")
-  await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {})
+  await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, input.auditMetadata ?? {})
   return { ...row, rejected }
 }
 
@@ -1975,6 +1978,62 @@ export type ListedFormResponse = FormResponseRow & {
   editedByTeamAt: Date | null
   encounterStatus: string | null
   encounterFinalizedAt: Date | null
+  /**
+   * Las respuestas que propuso Clío al dictar y aceptó una persona, mientras
+   * sigan siendo esas (si alguien las cambia a mano, ya son suyas): por pregunta,
+   * quién la aceptó y cuándo.
+   */
+  clioAccepted: Record<string, { by: string | null; at: Date; atSign?: true }>
+}
+
+/** Una respuesta que propuso Clío y confirmó una persona: quién, cuándo y si entró al firmar. */
+export interface ClioMark {
+  by: string | null
+  byName: string | null
+  at: Date
+  atSign: boolean
+}
+
+/**
+ * Las marcas de Clío de las fichas de un paciente, por pregunta, mientras la
+ * respuesta siga siendo la que se confirmó (cambiada a mano ya es de la
+ * persona). La misma regla en la ficha, la Historia y la copia (entrega 11).
+ */
+export async function clioMarksFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<(response: { id: string; answers: unknown }) => Record<string, ClioMark>> {
+  const accepted = await tx
+    .select({
+      payload: encounterDictationSuggestion.payload,
+      by: encounterDictationSuggestion.decidedBy,
+      byName: user.name,
+      at: encounterDictationSuggestion.decidedAt,
+    })
+    .from(encounterDictationSuggestion)
+    .leftJoin(user, eq(user.id, encounterDictationSuggestion.decidedBy))
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.kind, "ficha"),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+      ),
+    )
+  return (response) => {
+    const answers = (response.answers ?? {}) as Record<string, unknown>
+    const marks: Record<string, ClioMark> = {}
+    for (const item of accepted) {
+      const fieldId = item.payload["fieldId"]
+      if (item.payload["responseId"] !== response.id || typeof fieldId !== "string" || !item.at) continue
+      if (JSON.stringify(answers[fieldId] ?? null) !== JSON.stringify(item.payload["value"] ?? null)) continue
+      // Entró con la firma de la atención: así lo dice la ficha.
+      const atSign = (item.payload["_meta"] as { atSign?: boolean } | undefined)?.atSign === true
+      marks[fieldId] = { by: item.by, byName: item.byName, at: item.at, atSign }
+    }
+    return marks
+  }
 }
 
 export async function listFormResponses(
@@ -2049,8 +2108,16 @@ export async function listFormResponses(
       null,
     )
   }
+  // Lo que confirmó una persona de lo que propuso Clío (entrega 11), solo si hay fichas del equipo.
+  const staff = rows.some((row) => row.response.source === "staff" && row.response.encounterId)
+  const marksOf = staff ? await clioMarksFor(tx, orgId, query.patientId) : (): Record<string, ClioMark> => ({})
+  const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] =>
+    Object.fromEntries(
+      Object.entries(marksOf(response)).map(([fieldId, mark]) => [fieldId, { by: mark.by, at: mark.at, ...(mark.atSign ? { atSign: true as const } : {}) }]),
+    )
   return rows.map((row) => ({
     ...row.response,
+    clioAccepted: clioAccepted(row.response),
     respondent:
       row.name === null
         ? null

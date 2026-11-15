@@ -862,6 +862,13 @@
       "when": 1794700493913,
       "tag": "0122_kairos_vigila_el_alta_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1794702102164,
+      "tag": "0123_clio_propone_fichas",
+      "breakpoints": true
     }
   ]
 }

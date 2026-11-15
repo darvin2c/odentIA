@@ -127,6 +127,11 @@ export interface FormResponse {
   previousId?: string | null
   /** La de inicio del mismo tipo, si no es la anterior (desde el tercer control). Viene en la lista. */
   firstId?: string | null
+  /**
+   * Lo que propuso Clío al dictar y aceptó una persona, mientras siga siendo eso
+   * (si alguien lo cambia a mano, ya es suyo): por pregunta, quién y cuándo.
+   */
+  clioAccepted?: Record<string, { by: string | null; at: string; atSign?: boolean }>
 }
 
 /** El paciente lo envió y nadie del equipo lo revisó todavía. */
@@ -576,12 +581,14 @@ export function canFillFormInAttention(canWrite: boolean, attentionLocked: boole
 }
 
 /** Los formularios del equipo que una atención ya firmada dejó a medias: los dice arriba, con «Completar». */
-export function unfinishedAfterSigning<T extends Pick<FormResponse, "status" | "source">>(
+export function unfinishedAfterSigning<T extends Pick<FormResponse, "id" | "status" | "source">>(
   forms: readonly T[],
   attentionStatus: string,
+  /** Las que se finalizaron con la firma («Finalizarla al firmar»): la lista puede no traerlo aún. */
+  finishedNow: readonly string[] = [],
 ): T[] {
   return attentionStatus === "finalizada"
-    ? forms.filter((form) => form.status === "borrador" && form.source === "staff")
+    ? forms.filter((form) => form.status === "borrador" && form.source === "staff" && !finishedNow.includes(form.id))
     : []
 }
 
@@ -609,7 +616,7 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
   if (response.status === "descartado") return "Descartado"
   if (response.submittedAt) return "Lo declaró la persona · por revisar"
   return response.encounterStatus === "finalizada"
-    ? "Quedó a medias al firmar la atención: falta terminarlo"
+    ? "Quedó a medias al firmar la atención: falta terminarla"
     : "Sin finalizar"
 }
 

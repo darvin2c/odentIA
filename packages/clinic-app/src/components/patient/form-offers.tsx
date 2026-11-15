@@ -13,6 +13,7 @@ import {
   offerWhyWords,
 } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { ClioFormNotice } from "./clio-form-proposals"
 import { FormDetail } from "./encounter-documents"
 import { NewResponseDrawer } from "./formularios-tab"
 
@@ -192,7 +193,9 @@ export function FormOffersBox({
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {offerWhyWords(offer)}
-                  {offer.previous ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}, se ve debajo de cada pregunta` : ""}
+                  {offer.previous
+                    ? ` · la anterior, del ${dayOf(offer.previous.finalizedAt)}${offer.previous.unfinished ? ", que quedó a medias" : ""}, se ve debajo de cada pregunta`
+                    : ""}
                 </span>
               </div>
               {allowed ? (
@@ -209,6 +212,10 @@ export function FormOffersBox({
                 >
                   {action}
                 </Button>
+              ) : null}
+              {/* Lo que propuso Clío al dictar: aquí solo se avisa; se acepta en la ficha, en cada pregunta. */}
+              {offer.today?.status === "borrador" ? (
+                <ClioFormNotice responseId={offer.today.responseId} title={offer.title} onOpen={() => act(offer)} />
               ) : null}
             </li>
           )
