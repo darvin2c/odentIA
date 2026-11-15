@@ -106,6 +106,12 @@ describe("la comprobación del servidor lee lo mal oído", () => {
     expect(ask(adult, "cpod_o", "8", "obturados a ver 8 no 7", heard)).toMatchObject({ status: "lista", payload: { value: 7 } })
     expect(ask(adult, "ceod_c", "3", "cariados 3", heard)).toBeNull()
   })
+  it("leído el término, la corrección dicha después sigue valiendo («de 6 no perdón de 4»)", () => {
+    const heard = "Okay este seguimos con la ficha overjat de 6 no perdón de 4 mm Pásame el espejo por favor abre un poquito más ya así over byte de Point de tres molar derecha clase 2 división 1"
+    expect(ask(ortho, "overjet", "6", "overjat de 6", heard)).toMatchObject({ status: "lista", payload: { value: 4 } })
+    expect(ask(ortho, "overjet", "4", "overjat de 6 no perdón de 4 mm", heard)).toMatchObject({ status: "lista", payload: { value: 4 } })
+    expect(ask(adult, "cpod_o", "8", "obturados a ver 8 no 7", "p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor")).toMatchObject({ payload: { value: 7 } })
+  })
   it("el número de otro término no es de la pregunta cuyo término no se oyó", () => {
     // «descarriados» era «tres cariados»: el «uno» es de la extracción, no de los cariados (base del 15 nov: 3 de 3).
     const heard = "beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá"
@@ -152,6 +158,14 @@ describe("la segunda lectura de una oración", () => {
       payload: { value: "Positiva", reread: true },
     })
     expect(prepareFormAnswer({ ...reread, payload: { question: number, answer: "Negativa" } }, percussion, FDI, "dolor a la percusión")).toBeNull()
+  })
+  it("una sola opción en la lista de varias es la respuesta de una pregunta de una opción", () => {
+    // Medición del 15 nov: la segunda lectura respondió «Positiva» en `answers`.
+    const said = "Dolor a la palpación en el fondo de vestíbulo de la treinta y seis."
+    const palpation = at(percussion, "palpacion")
+    expect(prepareFormAnswer({ payload: { question: palpation, answers: ["Positiva"] }, sourceText: said }, percussion, FDI, said)).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    // Dos opciones en una pregunta de una no se eligen.
+    expect(prepareFormAnswer({ payload: { question: palpation, answers: ["Positiva", "Negativa"] }, sourceText: said }, percussion, FDI, said)).toBeNull()
   })
   it("si no calza, la red sigue avisando la oración: no cambia el aviso por otro", () => {
     const transcript = "dolor a la percusión"

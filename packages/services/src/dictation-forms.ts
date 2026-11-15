@@ -1046,8 +1046,8 @@ function pairedNumber(question: DictationFormQuestion, questions: readonly Dicta
   const before = terms.map((term) => numberNear(words, term.start - 1, -1))
   const after = terms.map((term) => {
     const read = numberNear(words, term.end + 1, 1)
-    // «obturados a ver 8 no 7»: lo corregido enseguida.
-    const fixed = read && ["no", "perdon"].includes(words[read.next] ?? "") ? numberNear(words, read.next, 1) : null
+    // «obturados a ver 8 no 7», «de 6 no perdón de 4»: lo corregido enseguida, desde lo que sigue al «no».
+    const fixed = read && ["no", "perdon"].includes(words[read.next] ?? "") ? numberNear(words, read.next + 1, 1) : null
     return fixed ?? read
   })
   const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
@@ -1129,8 +1129,11 @@ function checkFormAnswer(
   // persona («Dijiste «…»») es lo dictado, tal cual.
   const said = heardBy(question, dictated)
   const sentence = heardBy(question, heardSentence)
-  const raw = typeof draft.payload["answer"] === "string" ? draft.payload["answer"].trim() : ""
   const list = Array.isArray(draft.payload["answers"]) ? draft.payload["answers"].filter((item): item is string => typeof item === "string" && !!item.trim()) : []
+  // Una sola opción en la lista de varias, en una pregunta de una sola, es esa respuesta: el modelo a
+  // veces la escribe ahí (medición del 15 nov, la segunda lectura). Se comprueba igual que las demás.
+  const answer = typeof draft.payload["answer"] === "string" ? draft.payload["answer"].trim() : ""
+  const raw = answer || (question.type !== "opcion_multiple" && list.length === 1 ? (list[0] ?? "").trim() : "")
   const base = {
     responseId: question.responseId,
     fieldId: question.fieldId,
