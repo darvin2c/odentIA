@@ -5,7 +5,10 @@ import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-grou
  * Pocas opciones, todas a la vista: un grupo de botones en vez de una lista
  * desplegable. Se elige una con un toque o con las flechas del teclado. `tone`
  * «primary» marca con el color de la marca lo elegido cuando la elección
- * cambia lo que sigue; «neutral», cuando solo es un dato. Con `columns` las
+ * cambia lo que sigue; «neutral», cuando solo es un dato. Lo que responde el
+ * paciente (el registro y su enlace) va siempre en «primary»: con «neutral», lo
+ * elegido queda a 1,1:1 del fondo y se confunde con el cursor encima (WCAG
+ * 1.4.11 pide 3:1). Con `columns` las
  * opciones ocupan celdas iguales (textos largos o muchas opciones) en vez de
  * ir una detrás de otra. Con `onClear`, tocar otra vez lo elegido lo desmarca
  * (el examen por sistemas vuelve a «No examinado»).
@@ -102,6 +105,7 @@ export function MultiChoiceButtons<T extends string>({
   options,
   onChange,
   label,
+  tone = "neutral",
   columns,
   disabled = false,
   className,
@@ -110,6 +114,7 @@ export function MultiChoiceButtons<T extends string>({
   options: ReadonlyArray<{ value: T; label: string }>
   onChange: (value: T[]) => void
   label: string
+  tone?: "neutral" | "primary"
   columns?: 2 | 3 | 4
   disabled?: boolean
   className?: string
@@ -137,7 +142,7 @@ export function MultiChoiceButtons<T extends string>({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className={itemClass(Boolean(columns), "neutral")}
+          className={itemClass(Boolean(columns), tone)}
         >
           {option.label}
         </ToggleGroupItem>

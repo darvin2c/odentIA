@@ -771,7 +771,7 @@ function BoneChoice({
       <span id={id} className="text-sm">
         {label} <span className="text-muted-foreground">(opcional)</span>
       </span>
-      <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
+      <ChoiceButtons tone="primary" aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
     </div>
   )
 }
@@ -1605,7 +1605,7 @@ export function RegistrationQuestionnaire({
           {asked("sex") ? (
             <Labeled name="sex" group label="Sexo" optional={!required("sex")}>
               {(control) => (
-              <ChoiceButtons
+              <ChoiceButtons tone="primary"
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -1706,7 +1706,7 @@ export function RegistrationQuestionnaire({
           </Labeled>
           <Labeled name="repRelation" group label={`¿Qué eres de ${name}?`}>
             {(control) => (
-              <ChoiceButtons
+              <ChoiceButtons tone="primary"
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -1767,7 +1767,7 @@ export function RegistrationQuestionnaire({
           required={required("docType")}
           disabled={!asked("docType")}
           title={you("Tu documento", `El documento de ${name}`)}
-          onSkip={() => set({ docType: null, docNumber: "", docCountry: "" })}
+          skips={{ docType: null, docNumber: "", docCountry: "" }}
           check={() =>
             needs(
               required("docType") && !draft.docType,
@@ -1847,16 +1847,14 @@ export function RegistrationQuestionnaire({
           required={fill ? wants("phone") || wants("email") || wants("address") : !forOther || required("email") || required("address")}
           disabled={!!fill && !wants("phone") && !wants("email") && !wants("address")}
           title={you("¿Cómo te contactamos?", `¿Cómo contactamos a ${name}?`)}
-          onSkip={() =>
-            set({
+          skips={{
               phone: "",
               phoneDigits: 0,
               email: "",
               address: "",
               addressCity: "",
               addressReference: "",
-            })
-          }
+          }}
           check={() =>
             phoneFound(
               "phone",
@@ -2023,14 +2021,12 @@ export function RegistrationQuestionnaire({
           required={required("emergencyContactName")}
           disabled={!asked("emergencyContactName")}
           title="¿A quién llamamos en una emergencia?"
-          onSkip={() =>
-            set({
+          skips={{
               emergencyName: "",
               emergencyPhone: "",
               emergencyPhoneDigits: 0,
               emergencyRelationship: "",
-            })
-          }
+          }}
           check={() => {
             const needed = required("emergencyContactName") || Boolean(draft.emergencyName.trim())
             return (
@@ -2100,14 +2096,14 @@ export function RegistrationQuestionnaire({
             "¿Tienes seguro de salud?",
             `¿${first || "La persona"} tiene seguro de salud?`,
           )}
-          onSkip={() => set({ insurance: "", insurerName: "", affiliationNumber: "" })}
+          skips={{ insurance: "", insurerName: "", affiliationNumber: "" }}
           check={() =>
             needs(required("insuranceType") && !insurance, "insurance", "Elige una opción.")
           }
         >
           <Labeled name="insurance" group label="¿Cuál?" optional={!required("insuranceType")}>
             {(control) => (
-              <ChoiceButtons
+              <ChoiceButtons tone="primary"
                 id={control.id}
                 aria-label="Seguro de salud"
                 aria-describedby={control.describedBy}
@@ -2170,8 +2166,7 @@ export function RegistrationQuestionnaire({
                 : "Así quien te atiende lo sabe antes de empezar."
           }
           saysOptional={!!fill}
-          onSkip={() =>
-            set({
+          skips={{
               allergies: "",
               allergiesText: "",
               allergiesReaction: "",
@@ -2184,8 +2179,7 @@ export function RegistrationQuestionnaire({
               anesthesiaWhat: "",
               bleeding: "",
               bloodGroup: "",
-            })
-          }
+          }}
           check={() =>
             declaredFound(
               "allergies",
@@ -2263,7 +2257,7 @@ export function RegistrationQuestionnaire({
               onState={(value) => set({ conditions: value })}
               onText={(value) => set({ conditionsText: value })}
               before={
-                <MultiChoiceButtons
+                <MultiChoiceButtons tone="primary"
                   label="Enfermedades"
                   value={draft.conditionsPicked}
                   options={child ? CHILD_CONDITION_OPTIONS : CONDITION_OPTIONS}
@@ -2285,7 +2279,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.corazon")}
               >
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2308,7 +2302,7 @@ export function RegistrationQuestionnaire({
                 optional
               >
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2337,7 +2331,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.problemaAnestesia")}
               >
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2353,7 +2347,7 @@ export function RegistrationQuestionnaire({
               {draft.anesthesia === "si" ? (
                 <Labeled name="anesthesiaWhat" group label="¿Qué pasó?" optional>
                   {(control) => (
-                    <ChoiceButtons
+                    <ChoiceButtons tone="primary"
                       id={control.id}
                       aria-labelledby={control.labelId}
                       aria-describedby={control.describedBy}
@@ -2380,7 +2374,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.problemaAnestesia")}
               >
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2425,8 +2419,7 @@ export function RegistrationQuestionnaire({
               : "Es opcional. Algunas medicinas cambian lo que se hace en la cita."
           }
           saysOptional
-          onSkip={() =>
-            set({
+          skips={{
               anticoagulants: "",
               anticoagulantsText: "",
               boneMedicines: "",
@@ -2436,8 +2429,7 @@ export function RegistrationQuestionnaire({
   boneForm: "",
               medications: "",
               medicationsText: "",
-            })
-          }
+          }}
           check={() =>
             declaredFound(
               "anticoagulants",
@@ -2566,8 +2558,7 @@ export function RegistrationQuestionnaire({
               "Las semanas de embarazo van de 0 a 42.",
             )
           }
-          onSkip={() =>
-            set({
+          skips={{
               pregnant: "",
               pregnancyWeeks: "",
               breastfeeding: "",
@@ -2580,8 +2571,7 @@ export function RegistrationQuestionnaire({
               tobacco: "",
               cigarettes: "",
               alcohol: "",
-            })
-          }
+          }}
         >
           {pregnancyAsked ? (
             <Labeled
@@ -2592,7 +2582,7 @@ export function RegistrationQuestionnaire({
             >
               {(control) => (
               <>
-              <ChoiceButtons
+              <ChoiceButtons tone="primary"
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -2630,7 +2620,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2688,7 +2678,7 @@ export function RegistrationQuestionnaire({
           {tobaccoAsked ? (
             <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2705,7 +2695,7 @@ export function RegistrationQuestionnaire({
           {tobaccoAsked && draft.tobacco === "fuma" ? (
             <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2727,7 +2717,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2750,12 +2740,12 @@ export function RegistrationQuestionnaire({
           // En presente y para niño o niña: lo que se pregunta es de hoy (biberón, dulces, quién le cepilla; K8).
           title={first ? `Los dientes de ${first} en casa` : "Sus dientes en casa"}
           description={`${answeredBy} Nos ayuda a cuidarlos.`}
-          onSkip={() => set({ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" })}
+          skips={{ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" }}
         >
           {asked("dental.biberon") ? (
             <Labeled name="bottle" group label={first ? `¿${first} toma biberón o pecho para dormir?` : "¿Toma biberón o pecho para dormir?"} optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2772,7 +2762,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.chupon") ? (
             <Labeled name="pacifier" group label="¿Usa chupón o se chupa el dedo?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2794,7 +2784,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2811,7 +2801,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.pastaConFluor") ? (
             <Labeled name="fluoride" group label="¿Su pasta de dientes tiene flúor?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2828,7 +2818,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.quienCepilla") ? (
             <Labeled name="brusher" group label="¿Quién le cepilla los dientes?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2850,8 +2840,7 @@ export function RegistrationQuestionnaire({
           disabled={!dentalKeys.some(asked)}
           title={you("Tu boca", `La boca de ${name}`)}
           description="Nos ayuda a preparar la primera visita."
-          onSkip={() =>
-            set({
+          skips={{
               dentalLast: "",
               dentalExperience: "",
               dentalAnxiety: "",
@@ -2859,8 +2848,7 @@ export function RegistrationQuestionnaire({
               floss: "",
               bruxism: "",
               habits: [],
-            })
-          }
+          }}
         >
           {asked("dental.ultimaVisita") ? (
             <Labeled
@@ -2883,7 +2871,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.experienciaPrevia") ? (
             <Labeled name="dentalExperience" group label="¿Cómo le fue esa vez?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2905,7 +2893,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2922,7 +2910,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.cepilladosAlDia") ? (
             <Labeled name="brushing" group label="¿Cuántas veces al día se cepilla los dientes?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2939,7 +2927,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.hiloDental") ? (
             <Labeled name="floss" group label="¿Usa hilo dental?" optional>
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2961,7 +2949,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2984,7 +2972,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {() => (
-                <MultiChoiceButtons
+                <MultiChoiceButtons tone="primary"
                   label="Hábitos"
                   value={draft.habits}
                   options={HABITS}
@@ -3001,16 +2989,14 @@ export function RegistrationQuestionnaire({
           grouped
           disabled={!censusKeys.some(censusAsked)}
           title={you("Para conocerte mejor", `Para conocer mejor a ${name}`)}
-          onSkip={() =>
-            set({
+          skips={{
               maritalStatus: "",
               educationLevel: "",
               occupation: "",
               origin: "",
               referralKind: "",
               referralSource: "",
-            })
-          }
+          }}
         >
           {censusAsked("maritalStatus") ? (
             <Labeled name="maritalStatus" group label="Estado civil" optional>
@@ -3114,7 +3100,7 @@ export function RegistrationQuestionnaire({
             saysOptional
             title={child ? `La visita de ${name}` : "Tu visita"}
             description={`Lo lee ${fill.visit?.reader ?? "quien te atiende"} antes de empezar. Todo es opcional.`}
-            onSkip={() => set({ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "" })}
+            skips={{ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "" }}
           >
             {fill.visit?.purpose ? (
               <p className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
@@ -3146,7 +3132,7 @@ export function RegistrationQuestionnaire({
             {visitAsks.pain ? (
               <Labeled name="visitPain" group label={you("¿Te duele ahora?", `¿A ${name} le duele ahora?`)} optional>
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3164,7 +3150,7 @@ export function RegistrationQuestionnaire({
             {visitAsks.pain && draft.visitPain === "si" ? (
               <Labeled name="visitPainLevel" group label="¿Cuánto? 0 es sin dolor, 10 el peor." optional>
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3220,7 +3206,7 @@ export function RegistrationQuestionnaire({
                 hint={`Descuentos y campañas${fill.clinicName ? ` de ${fill.clinicName}` : ""}. Puedes darte de baja cuando quieras.`}
               >
                 {(control) => (
-                  <ChoiceButtons
+                  <ChoiceButtons tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3288,7 +3274,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons
+                <ChoiceButtons tone="primary"
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3347,7 +3333,7 @@ function Question({
   disabled = false,
   grouped = false,
   check,
-  onSkip,
+  skips,
   submit,
   sending = false,
   missing,
@@ -3363,7 +3349,11 @@ function Question({
   disabled?: boolean
   grouped?: boolean
   check?: () => Found
-  onSkip?: () => void
+  /**
+   * Lo que «Saltar» deja en blanco. Con algo ya respondido en la pantalla, «Saltar» no se ofrece
+   * (K10): borraría lo escrito sin avisar, y «Siguiente» ya sigue con lo que hay.
+   */
+  skips?: Partial<Draft>
   /** Última pantalla: el texto del botón que envía. */
   submit?: string
   sending?: boolean
@@ -3377,6 +3367,10 @@ function Question({
   if (fillContext && check) fillContext.checks.set(name, check)
   const finish = fillContext?.label ? { label: fillContext.label, sending: fillContext.sending } : null
   const allOptional = grouped && !required
+  const values = useStore(form.store, (state) => state.values)
+  const answered =
+    !!skips &&
+    draftHasWriting(Object.fromEntries(Object.keys(skips).map((key) => [key, values[key as keyof Draft]])) as Partial<Draft>)
   // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de la pantalla desde la que se envía.
   const submitError = useFormSubmitError(form)
   const loose = name === "send" || (finish && fillContext?.at === name) ? submitError : null
@@ -3404,7 +3398,8 @@ function Question({
       disabled={disabled}
       invalid={loose !== null}
       onStatusChange={(status) => {
-        if (status === "skipped") onSkip?.()
+        if (status !== "skipped" || !skips) return
+        for (const [key, value] of Object.entries(skips)) form.setFieldValue(key as keyof Draft, value as never)
       }}
       onKeyDown={(event) => {
         const target = event.target
@@ -3447,7 +3442,7 @@ function Question({
       >
         {/* Enter (`advanceOnEnter`) va de la última pregunta a «Siguiente» o «Enviar»: no se detiene en volver ni en saltar. */}
         <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
-        {required ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
+        {required || answered ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
         {submit ?? finish ? (
           <QuestionnaireSubmit
             disabled={submit ? sending : finish?.sending}
@@ -3582,7 +3577,7 @@ function Pick({
 }) {
   if (options.length <= 4 && options.every((option) => option.label.length <= 20))
     return (
-      <ChoiceButtons
+      <ChoiceButtons tone="primary"
         id={control.id}
         aria-label={label}
         aria-describedby={control.describedBy}
@@ -3660,7 +3655,7 @@ function DeclaredField({
     <Labeled name={name} group label={label} hint={hint} optional={optional}>
       {(control) => (
         <>
-          <ChoiceButtons
+          <ChoiceButtons tone="primary"
             id={control.id}
             aria-labelledby={control.labelId}
             aria-describedby={control.describedBy}
@@ -3718,7 +3713,7 @@ function YesNoField({
     <Labeled name={name} group label={label} optional>
       {(control) => (
         <>
-          <ChoiceButtons
+          <ChoiceButtons tone="primary"
             id={control.id}
             aria-labelledby={control.labelId}
             aria-describedby={control.describedBy}
