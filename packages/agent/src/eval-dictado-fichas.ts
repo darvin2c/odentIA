@@ -16,9 +16,9 @@
  *     el valor dicho, y nunca lista (revisión final del 15 nov, decisión 2);
  *   - lo que el modelo respondió y la comprobación del servidor paró;
  *   - de lo perdido, si el profesional lo ve en «No pude usar esto» (por el
- *     motivo de lo parado o por la red de la oración,
- *     `formSentencesWithoutAnswer`) o se perdió en silencio, y cuántos avisos
- *     da la red sobre preguntas que el dictado no espera.
+ *     motivo de lo parado o por la red de la oración, con `formDropNotices`,
+ *     la misma función del servidor) o se perdió en silencio, y cuántos
+ *     avisos da la red sobre preguntas que el dictado no espera.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
  *
@@ -32,9 +32,8 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import {
   type DictationFormQuestion,
-  formAnswerDropReason,
+  formDropNotices,
   formQuestionsOf,
-  formSentencesWithoutAnswer,
   prepareFormAnswer,
   productHooksFor,
   withDiagnosisFormAnswers,
@@ -111,7 +110,7 @@ const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odenti
 const rawFile = resolve(arg("crudo", join(tmpdir(), "odentia-eval", `dictado-fichas-${now.toISOString().replace(/[:.]/g, "-")}.jsonl`)))
 let rawSaved = 0
 function saveRaw(entry: Record<string, unknown>) {
-  mkdirSync(dirname(rawFile), { recursive: true })
+  if (!rawSaved) mkdirSync(dirname(rawFile), { recursive: true })
   appendFileSync(rawFile, `${JSON.stringify(entry)}\n`)
   rawSaved += 1
 }
@@ -187,29 +186,27 @@ for (const dictation of cases) {
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
   for (const draft of derived) twins.add(draft)
   const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
-  const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
+  const keyOf = ({ responseId, fieldId }: { responseId?: unknown; fieldId?: unknown }) => `${String(responseId)}.${String(fieldId)}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
-  // Como el servidor: lo parado con motivo va a «No pude usar esto», y la red avisa de la oración que
-  // nombra una pregunta sin propuesta ni aviso (`formSentencesWithoutAnswer`).
-  const reasons = new Map<number, string>()
-  for (const { draft, ready } of prepared) {
-    if (ready || twins.has(draft) || !draft.sourceText?.trim()) continue
-    const why = formAnswerDropReason(draft, questions, { site: product.site, transcript: dictation.texto })
-    if (why) reasons.set(Number(draft.payload["question"]), why)
-  }
-  const handled = new Set([...prepared.filter((item) => item.ready).map((item) => Number(item.draft.payload["question"])), ...reasons.keys()])
-  const net = formSentencesWithoutAnswer(dictation.texto, questions, handled, product.site)
-  const keyOfQuestion = (number: number) => {
-    const question = questions.find((item) => item.number === number)
-    return question ? `${question.responseId}.${question.fieldId}` : ""
-  }
-  const noticed = (key: string) => [...reasons.keys()].some((number) => keyOfQuestion(number) === key)
-  const caught = (key: string) => net.some((item) => item.questions.some((number) => keyOfQuestion(number) === key))
+  // Lo que va a «No pude usar esto», con la misma función que el servidor: lo parado con su motivo y
+  // la oración que nombra una pregunta sin propuesta ni aviso (la red).
+  const notices = formDropNotices(
+    prepared.map(({ draft, ready }) => ({ draft, ready: ready !== null })),
+    twins,
+    questions,
+    { site: product.site, transcript: dictation.texto },
+  )
+  const byNumber = new Map(questions.map((question) => [question.number, question]))
+  const keysOf = (items: typeof notices) =>
+    new Set(items.flatMap((item) => item.questions.flatMap((number) => (byNumber.has(number) ? [keyOf(byNumber.get(number) ?? {})] : []))))
+  const net = notices.filter((item) => item.by === "red")
+  const noticedKeys = keysOf(notices.filter((item) => item.by === "motivo"))
+  const caughtKeys = keysOf(net)
   // Lo que la red nombra y el dictado no espera de esa pregunta: un aviso de más, que se lee a mano.
   const wanted = new Set([...Object.keys(dictation.espera.fichas ?? {}), ...(dictation.espera.revisar ?? []), ...Object.keys(dictation.espera.cambia ?? {})])
   totals.avisosRed += net.length
   for (const item of net) {
-    if (item.questions.some((number) => wanted.has(keyOfQuestion(number)))) continue
+    if ([...keysOf([item])].some((key) => wanted.has(key))) continue
     totals.avisosRedDeMas += 1
     netExtra.push(`${dictation.id}: «${item.said}» → ${item.why}`)
   }
@@ -230,9 +227,14 @@ for (const dictation of cases) {
     else {
       totals.perdidas += 1
       // ¿Lo supo el profesional? Por el motivo de lo parado, por la red, o en silencio.
-      const how = noticed(key) ? "con aviso" : caught(key) ? "con aviso de la red" : "en silencio"
-      if (how === "con aviso") totals.perdidasAvisadas += 1
-      else if (how === "con aviso de la red") totals.perdidasRed += 1
+      let how = "en silencio"
+      if (noticedKeys.has(key)) {
+        totals.perdidasAvisadas += 1
+        how = "con aviso"
+      } else if (caughtKeys.has(key)) {
+        totals.perdidasRed += 1
+        how = "con aviso de la red"
+      }
       notes.push(`perdió ${key} (${how})`)
     }
   }
@@ -279,7 +281,7 @@ for (const dictation of cases) {
   console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
   if (notes.length) {
     const labelOf = (number: unknown) => {
-      const question = questions.find((item) => item.number === number)
+      const question = byNumber.get(Number(number))
       return question ? `${question.formTitle}: ${question.label}` : `pregunta ${String(number)} (no existe)`
     }
     saveRaw({
@@ -296,9 +298,9 @@ for (const dictation of cases) {
         ...(twins.has(draft) ? { gemela: true } : {}),
         queda: ready ? ready.status : "parada",
         ...(ready?.note ? { motivo: ready.note } : {}),
-        ...(ready ? {} : { aviso: formAnswerDropReason(draft, questions, { site: product.site, transcript: dictation.texto }) }),
       })),
-      red: net.map(({ said, why }) => ({ said, why })),
+      // Lo que vería en «No pude usar esto»: por el motivo de lo parado o por la red.
+      avisos: notices,
       noUsado: read.unused,
     })
   }
