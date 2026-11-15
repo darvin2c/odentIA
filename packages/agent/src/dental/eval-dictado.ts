@@ -13,12 +13,12 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { dictatedService, productHooksFor } from "@odentia/services"
+import { dictatedService } from "@odentia/services"
 import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/dental"
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { askDictationModel } from "../dictation.js"
-import { consultaSummary, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
+import { consultaSummary, diagnosisProposed, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
 import { DENTAL_DICTATION_PROFILE } from "./dictation.js"
 
 interface ExpectedFinding {
@@ -113,8 +113,6 @@ function variantOf(condition: string, spoken: unknown): string | undefined {
 }
 
 const totals = { esperados: 0, bien: 0, detalleBien: 0, detalleEsperado: 0, perdidos: 0, inventados: 0, otrosBien: 0, otrosEsperados: 0, costo: 0, sinCosto: 0, serviciosOtros: 0 }
-/** Cómo dice el odontólogo los servicios con otras palabras, como los lee el servidor. */
-const synonyms = productHooksFor("dental").dictation?.serviceSynonyms ?? []
 const now = new Date()
 
 for (const dictation of bank.dictados) {
@@ -184,8 +182,7 @@ for (const dictation of bank.dictados) {
   }
   const plans = read.drafts.filter((draft) => draft.kind === "plan").map((draft) => draft.payload["toothNumber"])
   const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? ""))
-  // Un código admite variantes («K04.6|K04.7»): basta con una.
-  for (const code of dictation.espera.diagnosticos ?? []) other(`diagnóstico ${code}`, code.split("|").some((one) => codes.some((item) => item.toUpperCase().startsWith(one))))
+  for (const code of dictation.espera.diagnosticos ?? []) other(`diagnóstico ${code}`, diagnosisProposed(code, codes))
   for (const tooth of dictation.espera.planes ?? []) other(`indicación en la ${tooth}`, plans.includes(tooth))
   if (dictation.espera.controles) other("control", read.drafts.filter((draft) => draft.kind === "control").length === dictation.espera.controles)
   if (dictation.espera.nota) other("nota", read.drafts.some((draft) => draft.kind === "nota"))
@@ -254,13 +251,12 @@ for (const dictation of bank.dictados) {
   const offered = read.drafts
     .filter((draft) => draft.kind === "procedimiento" || draft.kind === "plan")
     .flatMap((draft) => {
-      const found = dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, synonyms)
-      return [...(found.match ? [found.match] : []), ...found.candidates]
+      const found = dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, "dental")
+      return [found.match ?? [], found.candidates].flat()
     })
   for (const name of dictation.espera.serviciosNo ?? []) {
-    const ok = !offered.includes(name)
-    if (!ok) totals.serviciosOtros += 1
-    other(`sin «${name}»`, ok)
+    totals.serviciosOtros += Number(offered.includes(name))
+    other(`sin «${name}»`, !offered.includes(name))
   }
   for (const name of dictation.espera.serviciosSi ?? []) other(`propone «${name}»`, offered.includes(name))
   const indications = plain(read.drafts.filter((draft) => draft.kind === "nota").map((draft) => String(draft.payload["indications"] ?? "")).join(" "))

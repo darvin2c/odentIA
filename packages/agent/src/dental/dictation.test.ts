@@ -286,12 +286,11 @@ describe("lo que recibe el modelo en cada pausa", () => {
 
 /** Lo que encontró la prueba con voz real del 15 nov (corrida c2), tal como lo oyó Chrome. */
 describe("la prueba con voz del 15 nov", () => {
-  const pause = (transcript: string, context = "") =>
-    dictationMessages(
-      { provider: "openai", services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript, context, pending: [] },
-      DENTAL_DICTATION_PROFILE,
-      false,
-    )
+  const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, pending: [] }
+  const pause = (transcript: string, context = "") => dictationMessages({ ...base, transcript, context }, DENTAL_DICTATION_PROFILE, false)
+  const endo = formQuestionsOf([
+    { id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} },
+  ])
   const fixed = String(((pause("x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
   const before = "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor"
   const now = "sin respuesta también percusión negativa palpación positiva"
@@ -302,15 +301,14 @@ describe("la prueba con voz del 15 nov", () => {
     // Un tramo que empieza otra frase no lleva ese aviso.
     expect(String(pause("percusión negativa", before)[1]?.content)).not.toContain("la pausa cortó")
     // La frase unida se encuentra en lo dictado, con el final de lo anterior delante.
-    const forms = formQuestionsOf([
-      { id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} },
-    ])
-    const calor = forms.find((item) => item.fieldId === "calor")?.number ?? 0
+    const calor = endo.find((item) => item.fieldId === "calor")?.number ?? 0
     const reply = new AIMessage({ content: "", tool_calls: [{ id: "1", name: "registrar_dictado", args: { fichas: [{ question: calor, answer: "Sin respuesta", dicho: "calor sin respuesta también" }] } }] })
     const model = { invoke: async () => reply }
-    const ask = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript: now, context: before, pending: [], forms }
-    const { read } = await askDictationModel(model, { provider: "openai", modelName: "prueba" }, ask, DENTAL_DICTATION_PROFILE)
+    const ask = { ...base, transcript: now, context: before, forms: endo }
+    const { read, heard } = await askDictationModel(model, { provider: "openai", modelName: "prueba" }, ask, DENTAL_DICTATION_PROFILE)
     expect(read?.drafts).toEqual([{ kind: "ficha", payload: { question: calor, answer: "Sin respuesta" }, sourceText: "calor sin respuesta también" }])
+    // Con eso mismo comprueban la red y el servidor.
+    expect(heard).toBe(`frío sin respuesta calor ${now}`)
     // Sin lo anterior, esa frase no se dijo: no se muestra.
     const alone = await askDictationModel(model, { provider: "openai", modelName: "prueba" }, { ...ask, context: "" }, DENTAL_DICTATION_PROFILE)
     expect(alone.read?.drafts[0]?.sourceText).toBe("")
@@ -329,10 +327,7 @@ describe("la prueba con voz del 15 nov", () => {
 
   it("el tiempo de enfermedad cuenta desde lo que se fecha, y el diagnóstico de la ficha va también a Diagnóstico (v07)", () => {
     expect(fixed).toContain("Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años»")
-    const forms = formQuestionsOf([
-      { id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} },
-    ])
-    expect(dictationFormsText(forms)).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
+    expect(dictationFormsText(endo)).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
   })
 })
 

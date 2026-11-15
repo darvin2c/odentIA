@@ -13,7 +13,7 @@ import {
 } from "@odentia/dental"
 import { findDiagnosisCode } from "../diagnosis-codes.js"
 import { normalizeForSearch } from "../knowledge.js"
-import type { DictationPrepared, ProductDictation, ServiceSynonyms } from "../product-hooks.js"
+import type { DictationPrepared, ProductDictation } from "../product-hooks.js"
 import { orgStrictVariants } from "./odontogram.js"
 import { registerToothFinding } from "./tooth-panel.js"
 
@@ -301,26 +301,10 @@ interface DentalDictationContext {
   strictVariants: boolean
 }
 
-/**
- * Cómo dice el odontólogo lo que hizo o indica, cuando no es el nombre del
- * servicio (prueba con voz del 15 nov: «cambiamos el arco» es el control de
- * ortodoncia, y sin esto calzaba con «Apexificación, cambio de medicación»).
- * Lista corta y revisable: solo lo que se dice en la consulta con el mismo
- * sentido.
- */
-const DENTAL_SERVICE_SYNONYMS: ServiceSynonyms = [
-  { name: "control de ortodoncia", said: ["cambio de arco", "ajuste de arco", "ajuste de ortodoncia", "activacion de ortodoncia"] },
-  { name: "restauracion", said: ["obturacion", "curacion"] },
-  { name: "obturacion", said: ["restauracion", "curacion"] },
-  { name: "exodoncia", said: ["extraccion"] },
-  { name: "profilaxis", said: ["limpieza"] },
-  { name: "limpieza", said: ["profilaxis"] },
-  { name: "endodoncia", said: ["tratamiento de conducto"] },
-]
-
 export const DENTAL_DICTATION: ProductDictation = {
   kinds: ["odontograma"],
-  serviceSynonyms: DENTAL_SERVICE_SYNONYMS,
+  // «la resina de la pieza 36 por oclusal»: la pieza y la cara dicen dónde, no cuál prestación.
+  placeWords: ["pieza", "piezas", "diente", "dientes", "muela", "muelas", "cara", "caras", "oclusales", ...Object.keys(SPOKEN_SURFACE)],
   catalogText: dictationFindingsText,
   async context(tx, orgId): Promise<DentalDictationContext> {
     return { strictVariants: await orgStrictVariants(tx, orgId) }

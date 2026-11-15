@@ -322,7 +322,7 @@ export function demoSegment(
   now: Date,
   pending: DictationPending[],
   diagnosisSystem: DiagnosisSystemKey = "ICD-10",
-): Omit<DictationExtraction, "model"> {
+): Omit<DictationExtraction, "model" | "heard"> {
   // Una frase que corrige o quita algo no es, además, un registro nuevo.
   const order = (sentence: string) => /^(no,? |quita)/.test(plain(sentence))
   const kept = transcript

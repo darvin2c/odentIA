@@ -226,7 +226,7 @@ export function demoSegment(
   now: Date,
   pending: DictationPending[],
   diagnosisSystem: DiagnosisSystemKey = "ICD-10",
-): Omit<DictationExtraction, "model"> {
+): Omit<DictationExtraction, "model" | "heard"> {
   // Una frase que corrige o quita algo no es, además, un registro nuevo («quita la endodoncia»).
   const order = (sentence: string) => /^(no,? es |quita)/.test(plain(sentence))
   const drafts = demoExtraction(transcript, services, now, diagnosisSystem).filter((draft) => !order(draft.sourceText ?? ""))

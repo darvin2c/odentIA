@@ -43,36 +43,34 @@ describe("un procedimiento del tarifario solo se propone si calza con lo dicho",
     "Exodoncia simple",
     "Restauración con resina compuesta, una superficie",
   ]
-  const dental = productHooksFor("dental").dictation?.serviceSynonyms ?? []
 
   it("«cambiamos el arco» no es la apexificación: es el control de ortodoncia (v03)", () => {
-    expect(dictatedService("cambiamos el arco", DEMO, dental)).toEqual({ match: null, candidates: ["Control de ortodoncia"] })
-    // Sin las formas de decirlo del producto, no calza con ninguno: queda sin servicio ni precio.
-    expect(dictatedService("cambiamos el arco", DEMO)).toEqual({ match: null, candidates: [] })
+    expect(dictatedService("cambiamos el arco", DEMO, "dental")).toEqual({ match: null, candidates: ["Control de ortodoncia"] })
+    // Sin la palabra de todos los días del catálogo («arco»), no calzaría con ninguno: sin servicio ni precio.
+    expect(dictatedService("cambiamos el arco", DEMO, "medical")).toEqual({ match: null, candidates: [] })
   })
 
   it("«cera de ortodoncia» no calza con la aparatología: no propone ninguna (v03)", () => {
-    expect(dictatedService("cera de ortodoncia", DEMO, dental)).toEqual({ match: null, candidates: [] })
+    expect(dictatedService("cera de ortodoncia", DEMO, "dental")).toEqual({ match: null, candidates: [] })
   })
 
   it("lo que sí se dijo se sigue encontrando, también con otra palabra del mismo sentido", () => {
-    expect(dictatedService("Control de ortodoncia", DEMO, dental).match).toBe("Control de ortodoncia")
-    expect(dictatedService("profilaxis", DEMO, dental).match).toBe("Limpieza dental (profilaxis)")
-    expect(dictatedService("la limpieza", DEMO, dental).candidates).toEqual(["Limpieza dental (profilaxis)"])
-    expect(dictatedService("endodoncia", DEMO, dental).candidates).toEqual(["Endodoncia anterior vital", "Endodoncia posterior vital"])
-    expect(dictatedService("extracción", DEMO, dental).candidates).toEqual(["Exodoncia simple"])
-    expect(dictatedService("resina oclusal", DEMO, dental).candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
-    expect(dictatedService("restauración con resina", DEMO, dental).match).toBe("Restauración con resina compuesta, una superficie")
-    expect(dictatedService("hicimos la exodoncia simple", DEMO, dental).match).toBe("Exodoncia simple")
-    expect(dictatedService("obturación de la 36", DEMO, dental).candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
+    expect(dictatedService("Control de ortodoncia", DEMO, "dental").match).toBe("Control de ortodoncia")
+    expect(dictatedService("profilaxis", DEMO, "dental").match).toBe("Limpieza dental (profilaxis)")
+    expect(dictatedService("la limpieza", DEMO, "dental").candidates).toEqual(["Limpieza dental (profilaxis)"])
+    expect(dictatedService("endodoncia", DEMO, "dental").candidates).toEqual(["Endodoncia anterior vital", "Endodoncia posterior vital"])
+    expect(dictatedService("extracción", DEMO, "dental").candidates).toEqual(["Exodoncia simple"])
+    expect(dictatedService("resina oclusal", DEMO, "dental").candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
+    expect(dictatedService("restauración con resina", DEMO, "dental").match).toBe("Restauración con resina compuesta, una superficie")
+    expect(dictatedService("hicimos la exodoncia simple", DEMO, "dental").match).toBe("Exodoncia simple")
+    expect(dictatedService("obturación de la 36", DEMO, "dental").candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
   })
 
   it("en latidIA, igual: lo que no calza no propone otro servicio", () => {
     const LATIDIA = ["Consulta de medicina general", "Nebulización", "Inyectable intramuscular", "Electrocardiograma", "Ecografía abdominal"]
-    const medical = productHooksFor("medical").dictation?.serviceSynonyms ?? []
-    expect(dictatedService("le pusimos una inyección intramuscular", LATIDIA, medical).candidates).toEqual(["Inyectable intramuscular"])
-    expect(dictatedService("cambiamos el vendaje", LATIDIA, medical)).toEqual({ match: null, candidates: [] })
-    expect(dictatedService("ecografía de partes blandas", LATIDIA, medical)).toEqual({ match: null, candidates: [] })
+    expect(dictatedService("le pusimos una inyección intramuscular", LATIDIA, "medical").candidates).toEqual(["Inyectable intramuscular"])
+    expect(dictatedService("cambiamos el vendaje", LATIDIA, "medical")).toEqual({ match: null, candidates: [] })
+    expect(dictatedService("ecografía de partes blandas", LATIDIA, "medical")).toEqual({ match: null, candidates: [] })
   })
 })
 

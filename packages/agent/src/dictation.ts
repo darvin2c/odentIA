@@ -224,7 +224,7 @@ export interface DictationProfile {
     now: Date,
     pending: DictationPending[],
     diagnosisSystem: DiagnosisSystemKey,
-  ): Omit<DictationExtraction, "model">
+  ): Omit<DictationExtraction, "model" | "heard">
 }
 
 /** Lo que se le pregunta al modelo en una pausa del dictado, con lo de la clínica ya leído. */
@@ -430,7 +430,7 @@ export function readDictation(
   parts: DictationProfile["parts"],
   /** Las preguntas de ficha que se le dieron: una respuesta a otra no existe y se avisa. */
   forms: readonly DictationFormQuestion[] = [],
-): Omit<DictationExtraction, "model"> | null {
+): Omit<DictationExtraction, "model" | "heard"> | null {
   if (!isRecord(args)) return null
   let omitted = 0
   const unused: string[] = []
@@ -550,6 +550,8 @@ export interface DictationExtraction {
   /** Lo que dijo para pedir lo que no se pudo usar, tal cual está en lo dictado: la pantalla lo muestra. */
   unused: string[]
   model: string
+  /** Lo dictado con que se comprobó la pausa (`askDictationModel`): con eso la comprueba también el servidor. */
+  heard: string
 }
 
 const empty = (value: unknown) =>
@@ -769,11 +771,16 @@ export async function askDictationModel(
   ask: DictationAsk,
   profile: DictationProfile,
 ): Promise<{
-  read: Omit<DictationExtraction, "model"> | null
+  read: Omit<DictationExtraction, "model" | "heard"> | null
   reply: AIMessage
   repeated: string[]
   /** Los argumentos tal como llegaron del modelo: la medición los guarda para ver qué respondió. */
   raw: string | null
+  /**
+   * Lo dictado con que se comprueba lo que respondió: el tramo, con el final del anterior delante si
+   * sigue su frase (`withPauseBridge`). La red y el servidor comprueban con lo mismo.
+   */
+  heard: string
 }> {
   const record = tool(async () => "registrado", {
     name: DICTATION_TOOL,
@@ -781,11 +788,12 @@ export async function askDictationModel(
     schema: profile.extraction,
   })
   const { reply, args, repeated, raw } = await callRecorder(model, spec, record, dictationMessages(ask, profile, viaResponses(model)))
+  const heard = withPauseBridge(ask.context, ask.transcript)
   return {
-    // La frase que sigue la del tramo anterior se comprueba con su final delante, como en el servidor.
-    read: args === undefined ? null : readDictation(args, withPauseBridge(ask.context, ask.transcript), ask.pending.length, profile.parts, ask.forms ?? []),
+    read: args === undefined ? null : readDictation(args, heard, ask.pending.length, profile.parts, ask.forms ?? []),
     reply,
     repeated,
     raw,
+    heard,
   }
 }

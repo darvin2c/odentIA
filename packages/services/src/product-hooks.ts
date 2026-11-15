@@ -338,19 +338,14 @@ export interface DictationPrepared {
  * clases propias suma (odentIA: los hallazgos del odontograma), cómo se dice su
  * «dónde» y qué operación ejecuta cada una al confirmarse.
  */
-/**
- * Otras formas de decir lo que nombra un servicio, para reconocerlo en lo
- * dictado (prueba con voz del 15 nov): un servicio cuyo nombre lleva `name`
- * también se dice con cada `said` en su lugar («restauración» también es
- * «obturación»; el «control de ortodoncia» también es «cambio de arco»).
- */
-export type ServiceSynonyms = ReadonlyArray<{ name: string; said: readonly string[] }>
-
 export interface ProductDictation {
   /** Las clases de sugerencia propias del producto, además de las comunes. */
   kinds: readonly DictationKind[]
-  /** Cómo se dicen sus servicios con otras palabras: sin ellas, solo por su nombre. */
-  serviceSynonyms: ServiceSynonyms
+  /**
+   * Las palabras de lo dicho que dicen dónde y no cuál prestación (odentIA: la
+   * pieza y sus caras): no cuentan al buscarla en el tarifario (`matchService`).
+   */
+  placeWords: readonly string[]
   /** Lo del producto que va en la parte fija de las instrucciones (odentIA: los hallazgos que se dictan). */
   catalogText(): string
   /** Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la variante del hallazgo). */

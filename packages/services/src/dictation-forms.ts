@@ -923,7 +923,7 @@ export function withoutFormPhrases(text: string, formPhrases: readonly string[])
   const covered = new Set(phrases.flatMap(meaningful).map((word) => word.slice(0, 5)))
   const sentences = sentencesOf(text)
   const kept = sentences.filter((sentence) => {
-    const said = plain(sentence).replace(/[.;,]+$/, "").trim()
+    const said = saidOf(sentence)
     if (!said) return false
     if (CORRECTION.test(said) || asked(said)) return false
     const hits = phrases.filter((phrase) => said.includes(phrase) || phrase.includes(said))
@@ -939,13 +939,16 @@ export function withoutFormPhrases(text: string, formPhrases: readonly string[])
   return kept.join(" ").trim()
 }
 
+/** Una oración como se compara: sin tildes ni mayúsculas, sin la puntuación del final. */
+const saidOf = (sentence: string) => plain(sentence).replace(/[.;,]+$/, "").trim()
+
 /** Lo que se le preguntó al paciente («¿Te duele cuando comes?») no es de la historia (prueba con voz del 15 nov). */
 const asked = (said: string) => said.startsWith("¿") || said.endsWith("?")
 
 /** El texto de la consulta sin lo que se le preguntó al paciente, en toda pausa, con ficha o sin ella. */
 const withoutAsked = (text: string) =>
   sentencesOf(text)
-    .filter((sentence) => !asked(plain(sentence).replace(/[.;,]+$/, "").trim()))
+    .filter((sentence) => !asked(saidOf(sentence)))
     .join(" ")
     .trim()
 
@@ -963,7 +966,17 @@ export function withoutFormNotes<T extends FormDraftLike>(
   site: ProductSite,
   transcript?: string,
 ): T[] {
-  if (!questions.length) return drafts.flatMap((draft) => (draft.kind === "nota" ? cleanNote(draft, withoutAsked) : [draft]))
+  const clean = questions.length ? formPhrasesCleaner(drafts, questions, site, transcript) : withoutAsked
+  return drafts.flatMap((draft) => (draft.kind === "nota" ? cleanNote(draft, clean) : [draft]))
+}
+
+/** La limpieza de la consulta con fichas: sin las frases de lo que fue para una ficha (`withoutFormPhrases`). */
+function formPhrasesCleaner<T extends FormDraftLike>(
+  drafts: readonly T[],
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  transcript?: string,
+): (text: string) => string {
   // De la frase de una ficha, las oraciones que nombran su pregunta: si la frase abarca otra cosa
   // («… Se cementan brackets»), eso sigue siendo de la consulta.
   const phrases = drafts
@@ -977,7 +990,7 @@ export function withoutFormNotes<T extends FormDraftLike>(
       const label = labelStems(question.label)
       return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
     })
-  return drafts.flatMap((draft) => (draft.kind === "nota" ? cleanNote(draft, (text) => withoutFormPhrases(text, phrases)) : [draft]))
+  return (text) => withoutFormPhrases(text, phrases)
 }
 
 /** Una nota con cada texto limpio; si queda vacía, no se propone. */
@@ -1106,25 +1119,26 @@ function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberT
     return fixed ?? read
   })
   const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
-  const read = (order: "antes" | "despues", sure: boolean): PairedNumber => ({ value: (order === "antes" ? before : after)[mine]?.value ?? null, sure, order })
-  if (counted(before) !== counted(after)) return read(counted(before) > counted(after) ? "antes" : "despues", true)
+  const pick = (order: PairedNumber["order"], sure: boolean): PairedNumber => ({ value: (order === "antes" ? before : after)[mine]?.value ?? null, sure, order })
+  if (counted(before) !== counted(after)) return pick(counted(before) > counted(after) ? "antes" : "despues", true)
   // Los números que ningún término toma en un orden, y si alguno queda en el borde del lado de su
   // término: sin nada dicho de ese lado, salvo palabras de enlace.
+  const said = words.flatMap((word, at) => (LINKS.has(word) ? [] : [at]))
+  const [first = words.length, last = -1] = [said[0], said.at(-1)]
   const numbers: Array<{ at: number; next: number }> = []
   for (let at = 0; at < words.length; ) {
     const number = readNumber(words, at)
     if (number) numbers.push({ at, next: number.next })
     at = number ? number.next : at + 1
   }
-  const bare = (list: string[]) => list.every((word) => LINKS.has(word))
-  const looseAtEdge = (taken: Array<{ at: number } | null>, side: -1 | 1) =>
-    numbers.some((number) => !taken.some((item) => item?.at === number.at) && bare(side === -1 ? words.slice(0, number.at) : words.slice(number.next)))
-  const beforeLoose = looseAtEdge(before, 1)
-  const afterLoose = looseAtEdge(after, -1)
-  if (beforeLoose !== afterLoose) return read(beforeLoose ? "despues" : "antes", false)
+  const loose = (taken: Array<{ at: number } | null>) => numbers.filter((number) => !taken.some((item) => item?.at === number.at))
+  // En «número y término», el suelto con nada dicho después; en «término y número», con nada dicho antes.
+  const beforeLoose = loose(before).some((number) => number.next > last)
+  const afterLoose = loose(after).some((number) => number.at <= first)
+  if (beforeLoose !== afterLoose) return pick(beforeLoose ? "despues" : "antes", false)
   // Sin orden: solo un número a su lado es el suyo; con uno a cada lado, no se sabe.
-  const sides = [before[mine], after[mine]].filter((item) => item !== null)
-  return { value: sides.length === 1 ? (sides[0]?.value ?? null) : null, sure: false, order: before[mine] ? "antes" : "despues" }
+  if (Boolean(before[mine]) !== Boolean(after[mine])) return pick(before[mine] ? "antes" : "despues", false)
+  return { value: null, sure: false, order: "antes" }
 }
 
 /** El número de una pregunta por su lugar en lo dicho (`pairedNumber`). */
@@ -1176,7 +1190,7 @@ function numberPhrase(text: string, value: number, term: readonly string[], orde
     const step = order === "antes" ? 1 : -1
     // Del lado del término, saltando hasta dos palabras de enlace («uno con extracción»).
     let near = order === "antes" ? number.next : at - 1
-    for (let skipped = 0; skipped < 2 && near >= 0 && near < words.length && LINKS.has(words[near] ?? ""); skipped += 1) near += step
+    for (let skipped = 0; skipped < 2 && LINKS.has(words[near] ?? ""); skipped += 1) near += step
     if (!termWord(words[near], term)) continue
     while (termWord(words[near + step], term)) near += step
     const [first, last] = order === "antes" ? [at, near] : [near, number.next - 1]
@@ -1344,11 +1358,11 @@ function checkFormAnswer(
     case "numero":
     case "escala":
     case "pieza": {
-      let number = Number(raw.replace(",", "."))
-      if (!raw || !Number.isFinite(number)) return null
+      const proposed = Number(raw.replace(",", "."))
+      if (!raw || !Number.isFinite(proposed)) return null
       // El número tiene que estar en lo dicho: nunca uno que el modelo dedujo o convirtió.
       // La pieza también se dice dígito a dígito («la cuatro seis»), como en el odontograma.
-      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : heard, [number])) return null
+      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : heard, [proposed])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
@@ -1357,11 +1371,9 @@ function checkFormAnswer(
       // obturados»): vale el número que lo dicho le da a esta pregunta (prueba con voz del 15 nov).
       // El número de otro término dicho no es de esta pregunta, si su término no se oyó.
       const terms = question.type === "numero" ? numberTerms(question, questions, sentence || said) : null
-      if (terms && numberOfAnother(question, terms, number)) return null
-      const proposed = number
+      if (terms && numberOfAnother(question, terms, proposed)) return null
       const paired = terms ? pairedNumber(question, terms) : null
-      const meant = question.type === "pieza" ? null : (paired?.value ?? correctedNumber(said, sentence))
-      if (meant !== null) number = meant
+      const number = question.type === "pieza" ? proposed : (paired?.value ?? correctedNumber(said, sentence) ?? proposed)
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)
         return ready(number)
@@ -1376,17 +1388,17 @@ function checkFormAnswer(
       // La frase que se muestra es la del número que se usó: «uno con extracción indicada», no la que
       // citó Clío con el número de al lado (prueba con voz del 15 nov, v08).
       const shown = paired?.value != null && terms && !containsAll(heard, [paired.value]) ? numberPhrase(heardSentence || dictated, paired.value, terms.own, paired.order) : null
-      const withShown = (prepared: PreparedFormAnswer): PreparedFormAnswer => (shown ? { ...prepared, said: shown } : prepared)
       // Listo solo si el número va pegado a su término en el orden en que se dijo (prueba con voz del 15
       // nov, v11: «para confirmarse 6 perdidos 2» no dejó claro si perdidos es 6 o 2). Si el orden se
-      // dedujo y no da lo que propuso Clío, o ninguno está pegado, la propone por revisar.
-      if (paired && (paired.value === null || (!paired.sure && paired.value !== proposed)))
-        return withShown(review(number, `Dijiste «${shortSaid(shown ?? dictated)}»: no queda claro qué número es de «${question.label}». Revísala.`))
-      // Chrome a veces escribe una cifra de más («0,99» por «cero coma nueve», v12): un número dictado
-      // con más de un decimal se propone por revisar.
-      if (question.type === "numero" && (String(number).split(".")[1]?.length ?? 0) > NUMBER_DECIMALS)
-        return withShown(review(number, `Dijiste «${shortSaid(dictated)}»: revisa los decimales.`))
-      return withShown(ready(number))
+      // dedujo y no da lo que propuso Clío, o ninguno está pegado, la propone por revisar. Chrome a veces
+      // escribe una cifra de más («0,99» por «cero coma nueve», v12): con más de un decimal, también.
+      const prepared =
+        paired && (paired.value === null || (!paired.sure && paired.value !== proposed))
+          ? review(number, `Dijiste «${shortSaid(shown ?? dictated)}»: no queda claro qué número es de «${question.label}». Revísala.`)
+          : (String(number).split(".")[1]?.length ?? 0) > NUMBER_DECIMALS
+            ? review(number, `Dijiste «${shortSaid(dictated)}»: revisa los decimales.`)
+            : ready(number)
+      return shown ? { ...prepared, said: shown } : prepared
     }
   }
 }

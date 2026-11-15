@@ -40,13 +40,14 @@ import {
   formQuestionsOf,
   prepareFormAnswer,
   productHooksFor,
+  pendingFormValues,
   withDiagnosisFormAnswers,
   withFormTwins,
   withoutFormNotes,
-  withPauseBridge,
 } from "@odentia/services"
 import { costMicrosOf, withAiMeter } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile, rereadFormSentences } from "./dictation.js"
+import { diagnosisProposed } from "./eval-consulta.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
 
@@ -160,7 +161,7 @@ for (const dictation of cases) {
   )
   if (questions.length) totals.conFichas += 1
   const model = await modelOf(product.profile)
-  const { read, reply, raw } = await askDictationModel(
+  const { read, reply, raw, heard } = await askDictationModel(
     model,
     spec,
     {
@@ -192,12 +193,17 @@ for (const dictation of cases) {
     saveRaw({ id: dictation.id, texto: dictation.texto, notas: ["no respondió con la herramienta"], crudo: rawOf(raw, reply.content) })
     continue
   }
-  // Como la atención y el servidor: lo nuevo que sigue la frase del tramo anterior se comprueba con su final delante.
-  const heard = withPauseBridge(dictation.contexto, dictation.texto)
+  // `heard`: como la atención y el servidor, lo nuevo que sigue la frase del tramo anterior se comprueba con su final delante.
   // Como la atención (`extractDictation`): lo que la red avisaría se lee una vez más, y su costo se cuenta aparte.
-  const keyOfQuestion = (question: DictationFormQuestion) => `${question.responseId}.${question.fieldId}`
+  // Lo que dejó propuesto la pausa anterior, leído como lo lee el servidor.
   const previous = dictation.previas ?? {}
-  const pending = new Map(questions.filter((question) => keyOfQuestion(question) in previous).map((question) => [question.number, previous[keyOfQuestion(question)]] as const))
+  const pending = pendingFormValues(
+    Object.entries(previous).map(([key, value]) => {
+      const [responseId, fieldId] = key.split(".")
+      return { kind: "ficha", payload: { responseId, fieldId, value } }
+    }),
+    questions,
+  )
   const misses = formNetMisses(read.drafts, questions, product.site, heard, pending)
   let reread: typeof read.drafts = []
   if (misses.length) {
@@ -348,16 +354,17 @@ for (const dictation of cases) {
     if (noteText.includes(want.toLowerCase())) totals.notaBien += 1
     else notes.push(`la nota perdió «${want}» (nota: «${noteText.slice(0, 160)}»; sin limpiar: «${read.drafts.filter((draft) => draft.kind === "nota").flatMap((draft) => Object.values(draft.payload)).join(" ").slice(0, 160)}»)`)
   }
-  const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? "").toUpperCase())
+  const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? ""))
   for (const code of dictation.espera.diagnosticos ?? []) {
     totals.diagnosticosEsperados += 1
-    if (code.split("|").some((one) => codes.some((item) => item.startsWith(one)))) totals.diagnosticosBien += 1
+    if (diagnosisProposed(code, codes)) totals.diagnosticosBien += 1
     else notes.push(`no propuso el diagnóstico ${code} (propuso: ${codes.join(", ") || "ninguno"})`)
   }
   for (const [key, said] of Object.entries(dictation.espera.dicho ?? {})) {
     totals.dichoEsperado += 1
-    if ((shownSaid.get(key) ?? "").toLowerCase() === said.toLowerCase()) totals.dichoBien += 1
-    else notes.push(`${key} dice «${shownSaid.get(key) ?? ""}» en vez de «${said}»`)
+    const shown = shownSaid.get(key) ?? ""
+    if (shown.toLowerCase() === said.toLowerCase()) totals.dichoBien += 1
+    else notes.push(`${key} dice «${shown}» en vez de «${said}»`)
   }
   for (const unwanted of dictation.espera.noEnNota ?? []) {
     totals.notaSobraEsperada += 1

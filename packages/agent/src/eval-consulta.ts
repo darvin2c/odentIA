@@ -42,6 +42,10 @@ const plain = (text: string) =>
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
+/** Un código de diagnóstico esperado, con sus variantes («K04.6|K04.7»): basta con que uno de los propuestos empiece con una. */
+export const diagnosisProposed = (expected: string, codes: readonly string[]) =>
+  expected.split("|").some((one) => codes.some((code) => code.toUpperCase().startsWith(one.toUpperCase())))
+
 /** Si el texto tiene alguna de las variantes, empezando donde empieza una palabra. */
 const has = (text: string, word: string) =>
   word.split("|").some((variant) => new RegExp(`(^|[^a-z0-9])${escape(plain(variant))}`).test(text))

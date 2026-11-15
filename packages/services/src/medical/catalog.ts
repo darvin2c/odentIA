@@ -18,6 +18,8 @@ export const medicalCatalog: ProductCatalog = {
     analisis: ["laboratorio", "examen"],
     vacuna: ["inmunizacion"],
     inyeccion: ["inyectable", "aplicacion"],
+    ekg: ["electrocardiograma"],
+    ecg: ["electrocardiograma"],
     suero: ["hidratacion"],
   },
   specialties: () => MEDICAL_SPECIALTIES,
