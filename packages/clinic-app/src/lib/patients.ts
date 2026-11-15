@@ -1161,13 +1161,19 @@ export function hcLabel(n: number): string {
 }
 
 /**
- * Edad en años desde la fecha de nacimiento (AAAA-MM-DD), con el día de la
+ * Años cumplidos desde la fecha de nacimiento (AAAA-MM-DD), con el día de la
  * clínica, como `patientAge` en el servidor: nunca como un instante en UTC ni con
- * el día del navegador. "" si falta o no es una fecha real.
+ * el día del navegador. null si falta, no es una fecha real o es futura.
  */
-export function ageFrom(birthDate: string | null | undefined, today: string = clinicToday()): string {
+export function ageYears(birthDate: string | null | undefined, today: string = clinicToday()): number | null {
   const age = ageInYears(birthDate, today)
-  return age === null || age < 0 ? "" : `${age}`
+  return age === null || age < 0 ? null : age
+}
+
+/** La edad de `ageYears` para mostrarla: "" si no se sabe. */
+export function ageFrom(birthDate: string | null | undefined, today?: string): string {
+  const age = ageYears(birthDate, today)
+  return age === null ? "" : `${age}`
 }
 
 export function statusLabel(status: string): string {

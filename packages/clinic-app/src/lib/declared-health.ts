@@ -18,7 +18,7 @@ import {
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import type { DeclaredHealthGroup, PatientContactLink, PatientHealth } from "./patients"
+import type { DeclaredHealthGroup, HealthDeclarationView, PatientContactLink, PatientHealth } from "./patients"
 
 export type { HealthDeclarant }
 // Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
@@ -56,16 +56,13 @@ type Sex = string | null | undefined
  */
 export function allergiesSaidUnknown(
   health: Pick<PatientHealth, "reviewStatus" | "allergies" | "declarations">,
-): { by: HealthDeclarant; at: string } | null {
-  const said = allergiesSaidUnknownOf({
+): HealthDeclarationView | null {
+  return allergiesSaidUnknownOf({
     reviewState: health.reviewStatus.allergies,
     activeAllergies: health.allergies.filter((row) => row.isActive && row.verification !== "descartada").length,
-    declarations: (health.declarations ?? []).map((row) => ({
-      ...row,
-      health: row.health as NonNullable<RegistrationAnswers["health"]>,
-    })),
+    // Lo que dijo llega como lo guardó el servidor: la forma del registro.
+    declarations: (health.declarations ?? []) as ReadonlyArray<HealthDeclarationView & { health: NonNullable<RegistrationAnswers["health"]> }>,
   })
-  return said ? { by: said.by, at: said.at } : null
 }
 
 /** «Su madre dijo que no sabe si tiene alergias (13 nov).»: lo que dijo, no «no se le preguntó». */

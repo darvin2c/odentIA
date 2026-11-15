@@ -81,7 +81,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
-import { requirePatient } from "./patients.js"
+import { type PatientFull, requirePatient } from "./patients.js"
 import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -1070,38 +1070,21 @@ export async function allergiesSaidNoByPatient(
 /**
  * Su «No sé» a las alergias, para quien ve las alergias (QA del 15 nov, K16): quién lo dijo y
  * cuándo, si es lo último que dijo de ellas y la ficha no sabe más (`allergiesSaidUnknownOf`). No es
- * «no se le preguntó». null si no. Nada más de su salud.
+ * «no se le preguntó». Toma la ficha que ya leyó quien lo pide (`getPatient`) y lee sus
+ * declaraciones solo si la ficha aún no sabe si tiene alergias. null si no. Nada más de su salud.
  */
 export async function allergiesSaidUnknownByPatient(
   tx: Db,
   orgId: string,
-  patientId: string,
+  full: Pick<PatientFull, "patient" | "activeAllergies">,
 ): Promise<{ by: HealthDeclarant; at: Date } | null> {
-  const [header] = await tx
-    .select({ reviewStatus: patient.healthReviewStatus })
-    .from(patient)
-    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-    .limit(1)
-  if (!header) throw notFound("Paciente")
-  const state = (header.reviewStatus as { allergies?: unknown } | null)?.allergies
-  if (state === "none" || state === "recorded") return null
-  const active = await tx
-    .select({ id: patientAllergy.id })
-    .from(patientAllergy)
-    .where(
-      and(
-        eq(patientAllergy.organizationId, orgId),
-        eq(patientAllergy.patientId, patientId),
-        eq(patientAllergy.isActive, true),
-        sql`${patientAllergy.verification} <> 'descartada'`,
-      ),
-    )
-    .limit(1)
-  const said = allergiesSaidUnknownOf({
-    reviewState: "unknown",
-    activeAllergies: active.length,
-    declarations: await healthDeclarationsOf(tx, orgId, patientId),
-  })
+  const known = {
+    reviewState: String((full.patient.healthReviewStatus as { allergies?: unknown } | null)?.allergies ?? "unknown"),
+    activeAllergies: full.activeAllergies.filter((row) => row.verification !== "descartada").length,
+  }
+  if (known.reviewState !== "unknown" || known.activeAllergies > 0) return null
+  const said = allergiesSaidUnknownOf({ ...known, declarations: await healthDeclarationsOf(tx, orgId, full.patient.id) })
+  // Solo quién y cuándo: la declaración entera es de quien lee la historia.
   return said ? { by: said.by, at: said.at } : null
 }
 

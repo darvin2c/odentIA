@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, type HealthDeclarant } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -176,11 +176,12 @@ export function ClinicalAlertsCard({
     const group = declaredGroupOf(groups, topic, id)
     return group ? `${saidByWords(group.by, sex)} · sin revisar` : null
   }
+  // «su madre dijo que no (13 nov)», y su «No sé», «dijo que no sabe (13 nov)».
+  const saidWords = (said: { by: HealthDeclarant; at: string | null }, answer?: "no sabe") =>
+    `${saidNoWords(said.by, sex, answer).toLocaleLowerCase("es")}${said.at ? ` (${shortDay(said.at)})` : ""}`
   const saidNo = (topic: "allergies" | "conditions" | "medications"): string | null => {
     const group = saidNoGroupOf(groups, topic)
-    return group
-      ? `${saidNoWords(group.by, sex).toLocaleLowerCase("es")}${group.at ? ` (${shortDay(group.at)})` : ""}`
-      : null
+    return group ? saidWords(group) : null
   }
   // Su «No sé» a las alergias: se le preguntó y no sabe (QA del 15 nov, K16).
   const saidUnknown = health ? allergiesSaidUnknown(health) : null
@@ -260,7 +261,7 @@ export function ClinicalAlertsCard({
                 : allergyState === "none"
                   ? "Alergias: niega"
                   : saidUnknown
-                    ? `Alergias: ${saidNoWords(saidUnknown.by, sex, "no sabe").replace(/^./, (letter) => letter.toLocaleLowerCase("es"))} (${shortDay(saidUnknown.at)})`
+                    ? `Alergias: ${saidWords(saidUnknown, "no sabe")}`
                     : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (

@@ -1,4 +1,4 @@
-import { ageFrom } from "@odentia/clinic-app/lib/patients"
+import { ageYears } from "@odentia/clinic-app/lib/patients"
 
 /** Dentición que corresponde mostrar por edad; el clínico puede cambiarla. */
 export type Dentition = "adult" | "mixed" | "primary"
@@ -11,10 +11,9 @@ export function suggestedDentition(
   birthDate: string | null | undefined,
   today?: string,
 ): Dentition | null {
-  // Con el día de la clínica (`ageFrom`): leída como medianoche UTC, la edad subía un día antes en Lima.
-  const years = ageFrom(birthDate, today)
-  if (!years) return null
-  const age = Number(years)
+  // Con el día de la clínica (`ageYears`): leída como medianoche UTC, la edad subía un día antes en Lima.
+  const age = ageYears(birthDate, today)
+  if (age === null) return null
   if (age <= 5) return "primary"
   if (age <= 12) return "mixed"
   return "adult"

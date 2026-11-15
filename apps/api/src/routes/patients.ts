@@ -890,7 +890,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         const seesAllergies = clinicalRead || canAccess(memberRole, "clinical.alerts")
         const allergySaidNo = seesAllergies ? await allergiesSaidNoByPatient(tx, orgId, c.req.param("id")) : null
         // Su «No sé» a las alergias, con quién y cuándo: tampoco es «no se le preguntó» (QA del 15 nov, K16).
-        const allergySaidUnknown = seesAllergies ? await allergiesSaidUnknownByPatient(tx, orgId, c.req.param("id")) : null
+        const allergySaidUnknown = seesAllergies ? await allergiesSaidUnknownByPatient(tx, orgId, full) : null
         // Y qué alergias activas dijo la persona y nadie revisó, con quién y cuándo: la marca de
         // recepción (QA del 14 nov). Solo las alergias, nada más de lo declarado.
         const declaredAllergies = seesAllergies ? await declaredAllergiesByPatient(tx, orgId, c.req.param("id")) : []
@@ -913,17 +913,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           patient: clinicalRead ? full.patient : withoutClinical(full.patient),
           registration: full.registration ? { ...full.registration, answers: declared } : null,
           // Recepción ve de cada alergia solo lo que necesita: la sustancia y su severidad (`allergyAlertsOf`).
-          activeAllergies: clinicalRead
-            ? full.activeAllergies
-            : canAccess(memberRole, "clinical.alerts")
-              ? allergyAlertsOf(full.activeAllergies)
-              : [],
+          activeAllergies: !seesAllergies ? [] : clinicalRead ? full.activeAllergies : allergyAlertsOf(full.activeAllergies),
           // Sin alergias registradas no es lo mismo «niega» que «no se le preguntó»: la
           // cabecera lo dice a quien ve las alergias (mesa del 9 nov). Nada más de su salud.
-          allergyReview:
-            clinicalRead || canAccess(memberRole, "clinical.alerts")
-              ? (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown"
-              : null,
+          allergyReview: seesAllergies
+            ? ((full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown")
+            : null,
           allergySaidNo,
           allergySaidUnknown,
           declaredAllergies,

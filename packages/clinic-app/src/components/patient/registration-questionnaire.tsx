@@ -957,6 +957,7 @@ export function RegistrationQuestionnaire({
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
+  const repRelation = relationOf(draft.repRelation)
   const docTypes = profile.documentTypes.map(({ code }) => ({
     value: code,
     label: DOC_TYPE_LABELS[code],
@@ -1600,9 +1601,9 @@ export function RegistrationQuestionnaire({
           }
           check={() =>
             needs(!draft.repName.trim(), "repName", "Escribe tu nombre y apellidos.") ??
-            needs(!relationOf(draft.repRelation), "repRelation", `Elige qué eres de ${name}.`) ??
+            needs(!repRelation, "repRelation", `Elige qué eres de ${name}.`) ??
             needs(
-              minor && relationOf(draft.repRelation)?.relationship !== "guardian",
+              minor && repRelation?.relationship !== "guardian",
               "repRelation",
               `${first || "La persona"} es menor de edad: lo registra su madre, padre o tutor.`,
             ) ??
@@ -1636,7 +1637,7 @@ export function RegistrationQuestionnaire({
                 aria-describedby={control.describedBy}
                 invalid={control.invalid}
                 onBlur={control.onBlur}
-                value={relationOf(draft.repRelation)?.value ?? null}
+                value={repRelation?.value ?? null}
                 options={RELATIONS}
                 onChange={(value) => set({ repRelation: value })}
                 columns={3}

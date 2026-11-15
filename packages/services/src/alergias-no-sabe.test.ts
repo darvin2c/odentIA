@@ -3,7 +3,7 @@ import { addPatientAllergy } from "./allergies.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { allergiesSaidNoByPatient, allergiesSaidUnknownByPatient, getPatientHealth } from "./clinical.js"
-import { createPatient, patientPersonId } from "./patients.js"
+import { createPatient, getPatient, patientPersonId } from "./patients.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { submitPersonalLinkData } from "./su-enlace.js"
 import { setupTestDb } from "./test-setup.js"
@@ -39,12 +39,15 @@ it("su «No sé» a las alergias, desde su enlace, se lee «no sabe», con quié
   // La ficha sigue sin saber si tiene: eso no cambia.
   expect(health.reviewStatus.allergies).toBe("unknown")
   // A quien ve las alergias (también recepción): dijo que no sabe, no «no se le preguntó» ni «dijo que no».
-  const said = await f.run((tx) => allergiesSaidUnknownByPatient(tx, ORG, created.id))
+  const saidUnknown = () => f.run(async (tx) => allergiesSaidUnknownByPatient(tx, ORG, await getPatient(tx, ORG, created.id)))
+  const said = await saidUnknown()
+  // Solo quién y cuándo: lo que viaja a recepción no trae nada más de lo que dijo.
+  expect(Object.keys(said ?? {}).sort()).toEqual(["at", "by"])
   expect(said).toMatchObject({ by: { kind: "patient" } })
   expect(said?.at.getTime()).toBe(health.declarations[0]!.at.getTime())
   expect(await f.run((tx) => allergiesSaidNoByPatient(tx, ORG, created.id))).toBeNull()
 
   // Cuando el equipo anota una alergia, ya se sabe más: deja de decirse.
   await f.run((tx) => addPatientAllergy(tx, ORG, f.actor, created.id, { substance: "Látex" }))
-  expect(await f.run((tx) => allergiesSaidUnknownByPatient(tx, ORG, created.id))).toBeNull()
+  expect(await saidUnknown()).toBeNull()
 })

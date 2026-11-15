@@ -427,10 +427,10 @@ export async function patientHealthQuestionsWith(
   const skipped = (Object.keys(health.medicineClasses) as Array<keyof typeof health.medicineClasses>).filter(
     (key) => health.medicineClasses[key].answer === "skipped",
   )
-  if (responded && !answeredOldList && skipped.length === 0) return { ask: [], onlyNew: false, health, known }
   const onlyNew = responded
-    ? new Set<string>(answeredOldList ? newRegistrationQuestions(1, product).map((question) => question.key) : skipped)
+    ? new Set<string>([...(answeredOldList ? newRegistrationQuestions(1, product).map((question) => question.key) : []), ...skipped])
     : null
+  if (onlyNew?.size === 0) return { ask: [], onlyNew: false, health, known }
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)
