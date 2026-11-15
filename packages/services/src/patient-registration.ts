@@ -1318,8 +1318,13 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
-  // Por dónde llegó, para lo que quede en «¿Es la misma persona?»: su registro queda con él.
-  const heldVia = entryPoint === "platform" ? undefined : entryPoint
+  // Lo que queda para recepción en «¿Es la misma persona?»: sus respuestas, el aviso que vio y por
+  // dónde llegó, con los que se registra al decidir.
+  const submitted = {
+    answers,
+    notice: { version: config.version, text: config.privacyNotice },
+    entryPoint: entryPoint === "platform" ? undefined : entryPoint,
+  }
   const docType = demographics.docType || null
   const documentOf = {
     docType,
@@ -1332,9 +1337,7 @@ export async function registerPatient(
     const owner = await findRealPersonByDocument(tx, orgId, documentOf)
     if (owner) {
       const held = await heldByDocument(tx, orgId, owner, demographics)
-      held.hold.answers = answers
-      held.hold.notice = { version: config.version, text: config.privacyNotice }
-      held.hold.entryPoint = heldVia
+      Object.assign(held.hold, submitted)
       throw held
     }
   }
@@ -1350,9 +1353,7 @@ export async function registerPatient(
         ownerPatientId: owner.patientId,
         declared: { displayName: demographics.displayName, phone: demographics.phone ?? null, email: demographics.email ?? null },
         match: "celular",
-        answers,
-        notice: { version: config.version, text: config.privacyNotice },
-        entryPoint: heldVia,
+        ...submitted,
       })
     }
   }
@@ -1378,11 +1379,7 @@ export async function registerPatient(
     }
     if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
-    if (e instanceof RegistrationHeld && isPublic) {
-      e.hold.answers = answers
-      e.hold.notice = { version: config.version, text: config.privacyNotice }
-      e.hold.entryPoint = heldVia
-    }
+    if (e instanceof RegistrationHeld && isPublic) Object.assign(e.hold, submitted)
     throw e
   }
 

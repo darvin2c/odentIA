@@ -932,7 +932,7 @@ export interface EncounterBorn {
   /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
   told?: VisitAnswerView | null
   /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó en la atención firmada. */
-  saidAtSigning?: HealthAtSigning[]
+  healthAtSigning?: HealthAtSigning[]
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 

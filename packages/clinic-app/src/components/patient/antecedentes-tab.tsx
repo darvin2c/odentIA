@@ -1515,7 +1515,7 @@ export function laterDeclarationsOf(
   declarations: readonly HealthDeclarationView[],
   registration: Pick<NonNullable<PatientFull["registration"]>, "answers" | "createdAt"> | null,
 ): HealthDeclarationView[] {
-  const shown = registration && registrationHealthOf(registration) ? new Date(registration.createdAt).getTime() : null
+  const shown = registration && hasRegistrationHealth(registration) ? new Date(registration.createdAt).getTime() : null
   const ofRegistration = (declaration: HealthDeclarationView) =>
     shown !== null && [declaration.enteredAt, declaration.at].some((at) => new Date(at).getTime() === shown)
   return declarations.filter(
@@ -1523,10 +1523,10 @@ export function laterDeclarationsOf(
   )
 }
 
-/** La salud que trae el registro con que se creó su ficha, si dice algo. */
-function registrationHealthOf(registration: Pick<NonNullable<PatientFull["registration"]>, "answers">): Rec | null {
+/** Si el registro con que se creó su ficha trae algo de su salud. */
+function hasRegistrationHealth(registration: Pick<NonNullable<PatientFull["registration"]>, "answers">): boolean {
   const health = ((registration.answers ?? {}) as Rec)["health"]
-  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0 ? (health as Rec) : null
+  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
 }
 
 export function hasOriginalDeclaration(
@@ -1535,7 +1535,7 @@ export function hasOriginalDeclaration(
 ): boolean {
   if (later.length > 0) return true
   if (!registration) return false
-  return registration.respondent !== "staff" || registrationHealthOf(registration) !== null
+  return registration.respondent !== "staff" || hasRegistrationHealth(registration)
 }
 
 /**

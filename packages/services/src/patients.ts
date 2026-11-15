@@ -10,8 +10,8 @@ import {
   registrationContactInputSchema,
   SEX_CODES,
   validateDemographics,
+  type PublicEntryPoint,
   type RegistrationContactInput,
-  type RegistrationEntryPoint,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -322,7 +322,7 @@ export interface RegistrationHold {
   /** El aviso de privacidad que vio y aceptó al registrarse: al decidir vale este. */
   notice?: { version: number; text: string }
   /** Por dónde se registró: al decidir, su registro queda con él. */
-  entryPoint?: Exclude<RegistrationEntryPoint, "platform">
+  entryPoint?: PublicEntryPoint
 }
 
 /** Texto neutro para quien se registra: no confirma que el documento exista. */

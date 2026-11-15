@@ -111,10 +111,10 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
           <p className="text-sm">{visitHistoryLine(born.told)}</p>
         </Part>
       ) : null}
-      {!retired && born.saidAtSigning?.length ? (
+      {!retired && born.healthAtSigning?.length ? (
         // Lo que seguía sin revisar al firmarla, como quedó en la atención firmada (auditor, 15 nov, A2).
         <Part label="Lo que dijo de su salud al firmar">
-          <HealthAtSigningList patientId={patientId} groups={born.saidAtSigning} />
+          <HealthAtSigningList patientId={patientId} groups={born.healthAtSigning} />
         </Part>
       ) : null}
       {/* Una ficha finalizada es algo que se anotó en la atención, no que se indicó:

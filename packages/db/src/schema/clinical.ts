@@ -509,7 +509,7 @@ export const patientAllergy = pgTable(
     isActive: boolean("is_active").notNull().default(true),
     /**
      * Quitarla no la borra: queda en «Alergias quitadas» con quién, cuándo y por qué. El
-     * motivo es un atajo por su código (`ALLERGY_REMOVAL_REASONS`, que FHIR traduce) o lo
+     * motivo es un atajo por su código (`ALLERGY_REMOVAL_REASONS`, con su sentido en FHIR) o lo
      * que se escribió; `allergyRemovalReasonWords` lo dice en palabras.
      */
     removedReason: text("removed_reason"),

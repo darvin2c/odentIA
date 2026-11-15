@@ -64,7 +64,7 @@ it("al firmar, la atención guarda lo que dijo de su salud y seguía sin revisar
   const detail = await f.run((tx) => getEncounterDetail(tx, ORG, f.patient.id, f.encounter.id))
   expect(detail.encounter.healthAtSigning).toEqual(expected)
   const history = await f.run((tx) => getTimeline(tx, ORG, f.patient.id, { types: ["encounter"] }))
-  expect(history.data.find((item) => item.id === f.encounter.id)?.born?.saidAtSigning).toEqual(expected)
+  expect(history.data.find((item) => item.id === f.encounter.id)?.born?.healthAtSigning).toEqual(expected)
 
   // Revisarlo después no cambia lo que quedó al firmar.
   await f.run((tx) => markAllergiesReviewed(tx, ...f.args))

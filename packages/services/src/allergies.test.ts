@@ -88,7 +88,7 @@ describe("alergias una por una (tablero 7)", () => {
     await expect(
       f.run((tx) => removePatientAllergy(tx, org, actor, patientId, latex.id, "x".repeat(501))),
     ).rejects.toMatchObject({ status: 400, fields: { reason: expect.any(String) } })
-    // Un atajo se guarda por su código, que la copia traduce a FHIR.
+    // Un atajo se guarda por su código, con su sentido en FHIR para la copia.
     const removed = await f.run((tx) =>
       removePatientAllergy(tx, org, actor, patientId, latex.id, "Era otra cosa (malestar, efecto secundario)"),
     )

@@ -14,7 +14,7 @@ export type AllergySeverity = (typeof ALLERGY_SEVERITIES)[number]
  * Por qué se quitó una alergia (tablero 7 del lienzo de Pacientes). El motivo se
  * escribe (auditor, 15 nov, A11: «era naproxeno y no ibuprofeno» no cabía en tres
  * opciones fijas); los tres de siempre quedan como atajos y se guardan por su
- * código, que FHIR traduce: «ya no la tiene» (`clinicalStatus` resolved), «era
+ * código, con su sentido en FHIR para la copia: «ya no la tiene» (`clinicalStatus` resolved), «era
  * otra cosa» (refuted) y «se registró por error» (entered-in-error). Lo escrito
  * se guarda tal cual. Quitar nunca borra.
  */

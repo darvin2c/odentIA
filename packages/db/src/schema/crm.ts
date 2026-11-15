@@ -1,4 +1,4 @@
-import type { RegistrationEntryPoint } from "@odentia/clinical"
+import type { PublicEntryPoint } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   boolean,
@@ -829,7 +829,7 @@ export const registrationHold = pgTable(
      * registro queda con él, no como alta del equipo. Nulo en lo dejado antes de
      * guardarlo: entonces vale el código QR, el que nombra su fila de «Te espera».
      */
-    entryPoint: text("entry_point").$type<Exclude<RegistrationEntryPoint, "platform">>(),
+    entryPoint: text("entry_point").$type<PublicEntryPoint>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

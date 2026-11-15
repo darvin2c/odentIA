@@ -14,16 +14,13 @@ import {
   medicationClassOf,
   type PregnancyToday,
   saidNoWords,
+  weeksWords,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { type DeclaredHealthGroup, ENTRY_DECLARED_KEYS, getPatientHealth, type PatientHealth } from "./clinical.js"
-import { clinicToday } from "./inventory-stock.js"
-import { requirePatient } from "./patients.js"
-import { productHooks } from "./products.js"
+import type { ProductInterview } from "./product-hooks.js"
 
 type Row = HealthAtSigning["rows"][number]
-
-const weeksWords = (weeks: number): string => `${weeks} ${weeks === 1 ? "semana" : "semanas"}`
 
 /** El embarazo al firmar: las semanas de ese día; pasado su término ya no se afirma. */
 function pregnancyValue(pregnancy: PregnancyToday): string {
@@ -83,15 +80,24 @@ export function healthAtSigningRows(
   return rows
 }
 
-/** La foto al firmar: una por declaración que aún dice algo; vacía si no queda nada sin revisar. */
-export async function healthAtSigningOf(tx: Db, orgId: string, patientId: string): Promise<HealthAtSigning[]> {
+/**
+ * La foto al firmar: una por declaración que aún dice algo; vacía si no queda nada sin revisar.
+ * Lo que la firma ya sabe (el sexo de la persona, el día de la clínica y la entrevista de su
+ * producto) llega de ella: no se vuelve a leer dentro de la misma transacción.
+ */
+export async function healthAtSigningOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  context: { sex: string | null; today: string; interview: Pick<ProductInterview, "record"> },
+): Promise<HealthAtSigning[]> {
   const health = await getPatientHealth(tx, orgId, patientId)
   if (health.declared.length === 0) return []
-  const [person, hooks, today] = await Promise.all([requirePatient(tx, orgId, patientId), productHooks(tx, orgId), clinicToday(tx, orgId)])
-  const interview = health.latestAnamnesis ? hooks.interview.record(health.latestAnamnesis.answers, today) : []
+  const { sex, today } = context
+  const interview = health.latestAnamnesis ? context.interview.record(health.latestAnamnesis.answers, today) : []
   const last = health.declared.at(-1)
   return health.declared.flatMap((group) => {
-    const rows = healthAtSigningRows(health, group, { sex: person.sex, today, last: group === last, interview })
+    const rows = healthAtSigningRows(health, group, { sex, today, last: group === last, interview })
     return rows.length > 0 ? [{ by: group.by, at: group.at?.toISOString() ?? null, rows }] : []
   })
 }
