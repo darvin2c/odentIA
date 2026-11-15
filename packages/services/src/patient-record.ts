@@ -11,16 +11,21 @@ import { createHash } from "node:crypto"
 import {
   ALLERGY_CATEGORY_FHIR,
   ALLERGY_CRITICALITY_FHIR,
+  ALLERGY_REMOVAL_FHIR,
+  allergyRemovalReasonWords,
   ALLERGY_SEVERITY_FHIR,
   ALLERGY_TYPE_FHIR,
   ALLERGY_VERIFICATION_FHIR,
+  type AllergyRemovalReason,
   APPOINTMENT_STATUS_FHIR,
   CONDITION_CLINICAL_STATUS_FHIR,
   CONSENT_STATUS_FHIR,
   DIAGNOSIS_SYSTEM_INFO,
+  type DirectedMedicineDeclaration,
   ENCOUNTER_STATUS_FHIR,
   FHIR_ALLERGY_CLINICAL_SYSTEM,
   FHIR_ALLERGY_VERIFICATION_SYSTEM,
+  FHIR_ATC_SYSTEM,
   FHIR_CONDITION_CLINICAL_SYSTEM,
   FHIR_CONDITION_VERIFICATION_SYSTEM,
   FHIR_CONSENT_CATEGORY,
@@ -37,6 +42,7 @@ import {
   FORM_FIELD_TYPE_FHIR,
   fhirCode,
   type HealthDeclarant,
+  HEALTH_DECLARATION_REASON_LABELS,
   HL7_IDENTIFIER_TYPE_SYSTEM,
   hl7DocumentTypeCode,
   type InterviewEntry,
@@ -44,8 +50,10 @@ import {
   isCurrentMedication,
   isImageDocumentCategory,
   KINSHIP_LABELS,
+  lowerFirst,
   MEDICATION_CLASSES,
   type MedicationClass,
+  medicationClassOf,
   type MedicineClassAnswer,
   PREGNANCY_ENTRY_KEY,
   PRESCRIPTION_STATUS_FHIR,
@@ -80,8 +88,15 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { type DeclaredHealthGroup, ENTRY_DECLARED_KEYS, getPatientHealth, type HealthDeclaration } from "./clinical.js"
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { AGENT_NAMES } from "./agent-names.js"
+import {
+  type DeclaredHealthGroup,
+  directedMedicineNotes,
+  ENTRY_DECLARED_KEYS,
+  getPatientHealth,
+  type HealthDeclaration,
+} from "./clinical.js"
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import {
@@ -161,6 +176,8 @@ export interface RecordDeclaration {
   at: Date
   via: HealthDeclaration["via"]
   by: HealthDeclarant
+  /** Por qué llegó antes de una cita: algo cambió, corrigió lo enviado o dijo que nada cambió (entrega 10). */
+  reason: HealthDeclaration["reason"]
   /** Lo que respondió, en palabras; lo que dejó sin responder no sale. */
   entries: InterviewEntry[]
 }
@@ -191,6 +208,11 @@ export interface PatientRecord {
     phone: string | null
   }>
   allergies: Array<typeof patientAllergy.$inferSelect>
+  /**
+   * Las alergias que se quitaron, con quién y por qué: quitar nunca borra, y lo que llegó como
+   * declarado no se lee como si siguiera en pie (auditor, A11).
+   */
+  removedAllergies: Array<typeof patientAllergy.$inferSelect & { removedByName: string | null }>
   conditions: Array<typeof patientCondition.$inferSelect>
   medications: Array<typeof patientMedication.$inferSelect>
   /** El día de la clínica de la copia: una medicina con fin anterior ya no la toma. */
@@ -284,18 +306,34 @@ const textOf = (value: unknown): string => (typeof value === "string" ? value.tr
 const joined = (...parts: string[]): string => parts.filter(Boolean).join(" · ")
 
 /**
- * Lo que trae una declaración, como lo respondió: sus alergias, enfermedades y
- * medicinas, el grupo sanguíneo, el embarazo con las semanas que dijo y lo demás
- * de la entrevista, que cuenta el producto (`interviewEntries`).
+ * Cómo respondió a la pregunta de una clase de medicina («¿Tomas algún anticoagulante?»): «No»,
+ * «No sabe» o la que dijo, con por qué y cómo la toma (los huesos); null si no respondió.
+ */
+function directedMedicineWords(answer: DirectedMedicineDeclaration | undefined): string | null {
+  if (!answer || answer.state === "unanswered") return null
+  if (answer.state === "none") return "No"
+  if (answer.state === "unknown") return "No sabe"
+  return joined(answer.detail?.trim() || "Sí, no dijo cuál", ...directedMedicineNotes(answer))
+}
+
+/**
+ * Lo que trae una declaración, como lo respondió: su respuesta a «¿Cambió algo?», sus alergias,
+ * enfermedades y medicinas (también el anticoagulante y los huesos, que se preguntan aparte), el
+ * grupo sanguíneo, el embarazo con las semanas que dijo y lo demás de la entrevista, que cuenta el
+ * producto (`interviewEntries`). «Nada cambió» no trae salud: sin su respuesta salía vacía (QA final
+ * de formularios, H1 de desarrollo).
  */
 function declarationEntries(
   health: HealthDeclaration["health"],
   interviewEntries: InterviewEntry[],
+  reason: HealthDeclaration["reason"],
 ): InterviewEntry[] {
   const out: InterviewEntry[] = []
   const add = (key: string, label: string, value: string | null) => {
     if (value) out.push({ key, label, value })
   }
+  if (reason === "cambio" || reason === "sin_cambios")
+    add("cambio", "¿Cambió algo en su salud o en sus medicinas?", reason === "cambio" ? "Sí" : "No, sigue igual")
   add(
     "allergies",
     "Alergias",
@@ -305,9 +343,12 @@ function declarationEntries(
     }),
   )
   add("conditions", "Enfermedades", declaredGroupWords(health.conditions, (item) => joined(textOf(item.name), textOf(item.notes))))
+  for (const group of ["anticoagulants", "boneMedicines"] as const)
+    add(group, MEDICATION_CLASSES[group].label, directedMedicineWords(health[group]))
   add(
     "medications",
-    "Medicación",
+    // Con las dos clases preguntadas aparte, la pregunta es «¿algún otro medicamento?», como en la ficha.
+    health.anticoagulants || health.boneMedicines ? "Otros medicamentos" : "Medicación",
     declaredGroupWords(health.medications, (item) =>
       joined(textOf(item.name), textOf(item.dose), textOf(item.frequency), textOf(item.notes)),
     ),
@@ -399,7 +440,8 @@ function interviewOf(
         ...(entry.key === PREGNANCY_ENTRY_KEY && unreviewedPregnancy
           ? { unreviewed: { by: unreviewedPregnancy.by, at: unreviewedPregnancy.at, repeatsVersion } }
           : (() => {
-              // El corazón, la anestesia, el tabaco y la lactancia que dijo y nadie revisó (QA de la entrega 6).
+              // El corazón, la anestesia, el tabaco, la lactancia y lo de un niño en casa que dijo y nadie
+              // revisó (QA de la entrega 6; lo de un niño, dato por dato, revisión final del 15 nov).
               const keys = ENTRY_DECLARED_KEYS[entry.key]
               const group = keys ? health.declared.find((item) => keys.some((key) => item.interview.includes(key))) : undefined
               return group ? { unreviewed: { by: group.by, at: group.at } } : {}
@@ -436,6 +478,14 @@ export async function loadPatientRecord(
     .from(patientAllergy)
     .where(and(byPatient(patientAllergy), eq(patientAllergy.isActive, true)))
     .orderBy(asc(patientAllergy.createdAt))
+  const removedAllergies = (
+    await tx
+      .select({ row: patientAllergy, removedByName: user.name })
+      .from(patientAllergy)
+      .leftJoin(user, eq(user.id, patientAllergy.removedBy))
+      .where(and(byPatient(patientAllergy), eq(patientAllergy.isActive, false), isNotNull(patientAllergy.removedAt)))
+      .orderBy(asc(patientAllergy.removedAt))
+  ).map(({ row, removedByName }) => ({ ...row, removedByName }))
   const conditions = await tx
     .select()
     .from(patientCondition)
@@ -576,6 +626,12 @@ export async function loadPatientRecord(
     siteWords: site.words(row),
     bodySite: site.bodySite(row),
   })
+  const timezone = establishmentRow?.timezone || "UTC"
+  // Lo de la entrevista que trajo una declaración, como lo cuenta el producto, con las claves con que entró ese día.
+  const saidInterviewOf = (declaration: HealthDeclaration): InterviewEntry[] => {
+    const day = clinicDay(declaration.at, timezone)
+    return hooks.interview.record(hooks.interview.declared(declaration.health, day), day)
+  }
   return {
     generatedAt: new Date(),
     clinic: await loadDocumentClinic(tx, orgId),
@@ -603,6 +659,7 @@ export async function loadPatientRecord(
         phone: c.phone,
       })),
     allergies,
+    removedAllergies,
     conditions,
     medications,
     today,
@@ -620,19 +677,13 @@ export async function loadPatientRecord(
     changed: health.changed,
     declarations: health.declarations
       .filter((declaration) => declaration.via !== "formulario")
-      .map((declaration) => {
-        const day = clinicDay(declaration.at, establishmentRow?.timezone || "UTC")
-        return {
-          at: declaration.at,
-          via: declaration.via,
-          by: declaration.by,
-          entries: declarationEntries(
-            declaration.health,
-            // Lo de la entrevista, como lo cuenta el producto, con las claves con que entró ese día.
-            hooks.interview.record(hooks.interview.declared(declaration.health, day), day),
-          ),
-        }
-      })
+      .map((declaration) => ({
+        at: declaration.at,
+        via: declaration.via,
+        by: declaration.by,
+        reason: declaration.reason,
+        entries: declarationEntries(declaration.health, saidInterviewOf(declaration), declaration.reason),
+      }))
       .reverse(),
     medicineClasses: (Object.keys(health.medicineClasses) as MedicationClass[]).flatMap((group) => {
       const known = health.medicineClasses[group]
@@ -642,7 +693,7 @@ export async function loadPatientRecord(
       interviewVersions,
       (answers, current, shownDay) => hooks.interview.record(answers, today, current ? { legacySaidOn, shownDay } : {}),
       health,
-      (at) => clinicDay(at, establishmentRow?.timezone || "UTC"),
+      (at) => clinicDay(at, timezone),
     ),
     familyHistory: health.familyHistory,
     encounters: encounters.map((row) => ({
@@ -799,6 +850,22 @@ const DECLARATION_VIA_WORDS: Record<RecordDeclaration["via"], string> = {
   formulario: "En un formulario",
 }
 
+/** «Se quitó la alergia a Ibuprofeno: era otra cosa (…) · lo quitó Ana Torres el 14 de noviembre de 2026». */
+function removedAllergyWords(a: PatientRecord["removedAllergies"][number], zone: Zone): string {
+  // Un atajo, en sus palabras; lo escrito, tal cual (auditor, 15 nov, A11: el motivo es libre).
+  const why = a.removedReason ? lowerFirst(allergyRemovalReasonWords(a.removedReason)) : null
+  const when = a.removedAt ? ` el ${dayWords(a.removedAt, zone)}` : ""
+  return `Se quitó la ${a.kind === "intolerancia" ? "intolerancia" : "alergia"} a ${a.substance}${why ? `: ${why}` : ""} · lo quitó ${a.removedByName ?? "el equipo"}${when}`
+}
+
+/** «Desde su enlace · corrigió lo que había enviado»: por dónde llegó y, antes de una cita, por qué. */
+function declarationTitle(declaration: Pick<RecordDeclaration, "via" | "reason">): string {
+  const via = DECLARATION_VIA_WORDS[declaration.via]
+  return declaration.reason
+    ? `${via} · ${lowerFirst(HEALTH_DECLARATION_REASON_LABELS[declaration.reason])}`
+    : via
+}
+
 /** «Madre: Diabetes tipo 2 (CIE-10 · E11)». */
 function familyWords(row: PatientRecord["familyHistory"][number]): string {
   const who = KINSHIP_LABELS[row.relationship as keyof typeof KINSHIP_LABELS] ?? row.relationship
@@ -873,7 +940,8 @@ function reviewScopes(
 /** «Lo contó ella el 13 nov., 9:15 a. m., desde su enlace · lo vio Dra. Ana Torres al atender, el …». */
 function visitToldWords(told: PatientRecord["visitAnswers"][number], zone: Zone, sex: string | null): string {
   const said = `${saidWhenWords(told.by, dayTimeWords(told.submittedAt, zone), sex)}, desde su ${told.submittedVia === "portal" ? "portal" : "enlace"}`
-  return told.seen ? `${said} · lo vio ${told.seen.by} al atender, el ${dayTimeWords(told.seen.at, zone)}` : said
+  // Lo que nadie vio todavía al atender va «sin revisar», con el criterio de lo que declaró (QA final de formularios).
+  return told.seen ? `${said} · lo vio ${told.seen.by} al atender, el ${dayTimeWords(told.seen.at, zone)}` : `${said}, sin revisar`
 }
 
 /** Lo que contó, pregunta por pregunta, sin lo que no respondió. */
@@ -1005,12 +1073,13 @@ export async function renderPatientRecordPdf(
     if (group.state === "none") return [`${label}: niega`]
     if (group.state !== "unknown" || !record.reviews.history) return []
     const said = group.saidNo
-      ? `; ${saidNoWords(group.saidNo.by, p.sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))} el ${dayWords(group.saidNo.at, zone)}`
+      ? `; ${lowerFirst(saidNoWords(group.saidNo.by, p.sex))} el ${dayWords(group.saidNo.at, zone)}`
       : ""
     return [`${label}: no se le preguntó en la clínica${said}`]
   })
   if (
     !record.allergies.length &&
+    !record.removedAllergies.length &&
     !record.conditions.length &&
     !record.medications.length &&
     !saidNo.length &&
@@ -1044,6 +1113,8 @@ export async function renderPatientRecordPdf(
         ],
       ]),
     })
+  // Lo quitado no se borra: sale con quién lo quitó, cuándo y por qué (auditor, A11).
+  if (record.removedAllergies.length) kit.bullets(record.removedAllergies.map((a) => removedAllergyWords(a, zone)))
   if (record.conditions.length)
     kit.bullets(
       record.conditions.map(
@@ -1059,9 +1130,16 @@ export async function renderPatientRecordPdf(
         const ended = !isCurrentMedication(m, record.today)
         const until = m.endDate ? ` · hasta el ${civilDay(m.endDate)}` : ""
         const mark = markOf("medications", m.id)
-        // Lo que no volvió a nombrar al decir que cambió no se lee como lo de hoy (dev H2).
+        // La de una clase se dice con su clase, como la ficha: «Anticoagulante: Warfarina 5 mg» (auditor, A15).
+        // Lo que no volvió a nombrar al decir que cambió no se lee como lo de hoy (dev H2): «Antes».
+        const group = medicationClassOf(m.atcCode)
+        const kind = group ? MEDICATION_CLASSES[group].label : null
         const before = record.changed?.medications.includes(m.id)
-        return `${ended ? "Ya no lo toma" : before ? "Antes" : "Medicamento"}: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${until}${m.notes ? ` · ${m.notes}` : ""}${mark ? ` · ${mark}` : ""}`
+        const head =
+          ended || before
+            ? `${ended ? "Ya no lo toma" : "Antes"}${kind ? ` (${kind.toLocaleLowerCase("es")})` : ""}`
+            : (kind ?? "Medicamento")
+        return `${head}: ${m.name}${m.dose ? ` · ${m.dose}` : ""}${m.frequency ? ` · ${m.frequency}` : ""}${until}${m.notes ? ` · ${m.notes}` : ""}${mark ? ` · ${mark}` : ""}`
       }),
     )
 
@@ -1101,7 +1179,7 @@ export async function renderPatientRecordPdf(
     for (const declaration of record.declarations) {
       kit.ensure(40)
       kit.gap(6)
-      kit.text(DECLARATION_VIA_WORDS[declaration.via], { face: "sansBold", size: SIZE.table })
+      kit.text(declarationTitle(declaration), { face: "sansBold", size: SIZE.table })
       kit.text(saidWhenWords(declaration.by, dayTimeWords(declaration.at, zone), p.sex), {
         size: SIZE.second,
         tone: "gray",
@@ -1253,10 +1331,13 @@ export async function renderPatientRecordPdf(
         if (group.title) kit.subheading(group.title)
         dataRows(
           // Lo que dejó sin contestar la persona se dice como en su revisión: «No respondió».
-          // Lo que propuso Clío y confirmó una persona lo dice, como en la Historia (entrega 11, C8).
+          // Lo que propuso Clío y confirmó una persona lo dice, como en la Historia (entrega 11, C8); si la
+          // llenó más de una persona, quién escribió cada respuesta (QA final de formularios, H10).
           group.items.map((item) => [
             item.label,
-            `${item.words ?? (source === "portal" ? "No respondió" : "Sin respuesta")}${item.clio ? ` (${item.clio})` : ""}`,
+            `${item.words ?? (source === "portal" ? "No respondió" : "Sin respuesta")}${
+              item.clio ? ` (${item.clio})` : item.writtenBy ? ` (lo escribió ${item.writtenBy})` : ""
+            }`,
           ]),
           190,
         )
@@ -1307,7 +1388,13 @@ interface AskedItem {
   options?: string[] | null
   /** Vacío si quedó sin responder: la pregunta consta, sin respuesta. */
   answers: Array<Record<string, unknown>>
+  /** Quién dio esta respuesta, si no es quien llenó todo (`questionnaireresponse-author` de R4). */
+  author?: Record<string, unknown> | null
 }
+
+/** La extensión de R4 para decir quién dio una respuesta en particular (`QuestionnaireResponse.item`). */
+const FHIR_ITEM_AUTHOR_EXTENSION = "http://hl7.org/fhir/StructureDefinition/questionnaireresponse-author"
+const CLIO_NAME = AGENT_NAMES.asistente_clinico
 
 const xhtml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
@@ -1386,6 +1473,7 @@ function questionnaireResponse(input: {
     item: input.groups.map((group) => ({
       ...labelOf(group),
       item: group.items.map((item) => ({
+        ...(item.author ? { extension: [{ url: FHIR_ITEM_AUTHOR_EXTENSION, valueReference: item.author }] } : {}),
         linkId: item.linkId,
         text: item.text,
         ...(item.answers.length ? { answer: item.answers } : {}),
@@ -1502,19 +1590,28 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     const who = asserterOf(group.by, patientRef)
     return { ...(who ? { [field]: who } : {}), note: [{ text: changed ?? unreviewedWords(group, p.sex, record.clinic) }] }
   }
-  for (const a of record.allergies) {
+  const allergyRows = [
+    ...record.allergies.map((a) => ({ a, removed: null })),
+    ...record.removedAllergies.map((a) => ({ a, removed: a })),
+  ]
+  for (const { a, removed } of allergyRows) {
     const category = fhirCode(ALLERGY_CATEGORY_FHIR, a.category)
     const severity = fhirCode(ALLERGY_SEVERITY_FHIR, a.severity)
+    // La que se quitó, como lo dice su motivo (auditor, A11): resuelta, refutada o un error, con una
+    // nota de quién la quitó y por qué. Lo que sigue sin revisar es solo de las que están en pie.
+    const removal = removed ? (ALLERGY_REMOVAL_FHIR[removed.removedReason as AllergyRemovalReason] ?? null) : null
+    const clinicalStatus = !removed ? "active" : removal ? removal.clinicalStatus : "inactive"
+    const stated = removed ? { note: [{ text: removedAllergyWords(removed, record.clinic) }] } : statedBy("allergies", a.id, "asserter")
     resources.push({
       resourceType: "AllergyIntolerance",
       id: a.id,
       patient: patientRef,
-      clinicalStatus: { coding: [{ system: FHIR_ALLERGY_CLINICAL_SYSTEM, code: "active" }] },
+      ...(clinicalStatus ? { clinicalStatus: { coding: [{ system: FHIR_ALLERGY_CLINICAL_SYSTEM, code: clinicalStatus }] } } : {}),
       verificationStatus: {
         coding: [
           {
             system: FHIR_ALLERGY_VERIFICATION_SYSTEM,
-            code: fhirCode(ALLERGY_VERIFICATION_FHIR, a.verification) ?? "unconfirmed",
+            code: removal?.verificationStatus ?? fhirCode(ALLERGY_VERIFICATION_FHIR, a.verification) ?? "unconfirmed",
           },
         ],
       },
@@ -1524,7 +1621,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ? { criticality: fhirCode(ALLERGY_CRITICALITY_FHIR, a.criticality) }
         : {}),
       code: { text: a.substance },
-      ...statedBy("allergies", a.id, "asserter"),
+      ...stated,
       ...(a.reaction || severity
         ? {
             reaction: [
@@ -1569,7 +1666,12 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       subject: patientRef,
       // La que no volvió a nombrar al decir que cambió: no se sabe si la sigue tomando (R4 `unknown`).
       status: !isCurrentMedication(m, record.today) ? "completed" : record.changed?.medications.includes(m.id) ? "unknown" : "active",
-      medicationCodeableConcept: { text: m.name },
+      // Con su código ATC, si lo tiene: el del medicamento, o el de su clase (B01A, M05B) si lo dijo
+      // al responder por ella (auditor, A15: la warfarina viajaba solo como texto).
+      medicationCodeableConcept: {
+        ...(m.atcCode ? { coding: [{ system: FHIR_ATC_SYSTEM, code: m.atcCode }] } : {}),
+        text: m.name,
+      },
       ...(m.startDate || m.endDate
         ? { effectivePeriod: { ...(m.startDate ? { start: m.startDate } : {}), ...(m.endDate ? { end: m.endDate } : {}) } }
         : {}),
@@ -1591,7 +1693,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       subject: patientRef,
       status,
       medicationCodeableConcept: {
-        coding: [{ system: "http://www.whocc.no/atc", code: MEDICATION_CLASSES[item.group].atc }],
+        coding: [{ system: FHIR_ATC_SYSTEM, code: MEDICATION_CLASSES[item.group].atc }],
         text: MEDICATION_CLASSES[item.group].label,
       },
       ...(item.said ? { informationSource: patientRef } : {}),
@@ -1813,7 +1915,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         authoredOn: row.issuedAt.toISOString(),
         medicationCodeableConcept: {
           ...(item.atcCode
-            ? { coding: [{ system: "http://www.whocc.no/atc", code: item.atcCode }] }
+            ? { coding: [{ system: FHIR_ATC_SYSTEM, code: item.atcCode }] }
             : {}),
           text: [item.medicationName, item.strength].filter(Boolean).join(" "),
         },
@@ -1889,6 +1991,13 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
             repeats: item.type === "opcion_multiple",
             options: item.options,
             answers: formAnswers(item, exportedDocuments),
+            // Quién dio cada respuesta, si no la dio toda una sola persona: lo que propuso Clío es suyo
+            // (quien lo confirmó va en su `Provenance`), lo demás de quien lo escribió (QA final, H10).
+            author: item.clioConfirmed
+              ? { display: CLIO_NAME }
+              : item.writtenBy
+                ? { display: item.writtenBy }
+                : null,
           })),
         })),
         notes: [
@@ -1918,6 +2027,27 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           },
         ],
       })
+    // Lo que propuso Clío y confirmó una persona, como lo dice el PDF: en R4, una `Provenance` con
+    // Clío como autor y quien lo confirmó como `verifier` (QA final de formularios, H10). R4 no apunta
+    // a una pregunta de la respuesta: su texto la nombra, y la pregunta lleva a Clío como autor.
+    for (const item of form.sections.flatMap((group) => group.items)) {
+      if (!item.clioConfirmed) continue
+      const confirmer = item.clioConfirmed.by ?? "El equipo de la clínica"
+      resources.push({
+        resourceType: "Provenance",
+        id: uuidV5(form.id, `clio/${item.id}`),
+        text: {
+          status: "generated",
+          div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${xhtml(`${item.label}: lo propuso ${CLIO_NAME} al dictar y lo confirmó ${confirmer}.`)}</p></div>`,
+        },
+        target: [{ reference: `QuestionnaireResponse/${form.id}` }],
+        recorded: item.clioConfirmed.at.toISOString(),
+        agent: [
+          { type: { coding: [{ system: FHIR_PROVENANCE_PARTICIPANT_SYSTEM, code: "author" }] }, who: { display: CLIO_NAME } },
+          { type: { coding: [{ system: FHIR_PROVENANCE_PARTICIPANT_SYSTEM, code: "verifier" }] }, who: { display: confirmer } },
+        ],
+      })
+    }
   }
   // La entrevista de salud vigente, como la cuenta el producto: cada dato en palabras.
   if (record.interview)
@@ -1957,19 +2087,22 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     )
   // Cada declaración original, como lo que es: lo que envió, con su fecha y quién. La fuente es quien
   // lo dijo; nadie del equipo figura como autor.
+  let previousDeclaration: string | null = null
   record.declarations.forEach((declaration, index) => {
     if (declaration.entries.length === 0) return
+    const id = `${p.patientId}-declaracion-${index + 1}`
+    const source = asserterOf(declaration.by, patientRef)
     resources.push(
       questionnaireResponse({
-        id: `${p.patientId}-declaracion-${index + 1}`,
+        id,
         title: "Declaración de salud",
         authored: declaration.at,
         patientRef,
-        source: asserterOf(declaration.by, patientRef),
+        source,
         groups: [
           {
             linkId: "declaracion",
-            text: DECLARATION_VIA_WORDS[declaration.via],
+            text: declarationTitle(declaration),
             items: declaration.entries.map((entry) => ({
               linkId: entry.key,
               text: entry.label,
@@ -1979,10 +2112,31 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
           },
         ],
         notes: [
-          `${DECLARATION_VIA_WORDS[declaration.via]}. ${saidWhenWords(declaration.by, dayTimeWords(declaration.at, record.clinic), p.sex)}.`,
+          `${declarationTitle(declaration)}. ${saidWhenWords(declaration.by, dayTimeWords(declaration.at, record.clinic), p.sex)}.`,
         ],
       }),
     )
+    // Lo que volvió a responder antes de una cita (lo corrigió, o algo cambió) revisa lo que había
+    // dicho: en R4, una `Provenance` con su motivo (`reason`), quién lo dijo y qué revisa (`entity`).
+    if (declaration.reason === "correccion" || declaration.reason === "cambio")
+      resources.push({
+        resourceType: "Provenance",
+        id: `${id}-motivo`,
+        target: [{ reference: `QuestionnaireResponse/${id}` }],
+        recorded: declaration.at.toISOString(),
+        activity: { coding: [{ system: FHIR_DATA_OPERATION_SYSTEM, code: "UPDATE" }] },
+        reason: [{ text: HEALTH_DECLARATION_REASON_LABELS[declaration.reason] }],
+        agent: [
+          {
+            type: { coding: [{ system: FHIR_PROVENANCE_PARTICIPANT_SYSTEM, code: "author" }] },
+            who: source ?? { display: "Quien lo declaró" },
+          },
+        ],
+        ...(previousDeclaration
+          ? { entity: [{ role: "revision", what: { reference: `QuestionnaireResponse/${previousDeclaration}` } }] }
+          : {}),
+      })
+    previousDeclaration = id
   })
   // Lo que contó antes de cada cita: lo dijo quien lo envió (la fuente), no el equipo; la atención
   // es la de esa cita, si la hubo. La cita no tiene campo en `QuestionnaireResponse` de R4: va en el texto.

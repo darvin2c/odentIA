@@ -25,7 +25,7 @@ const hasVisual = Astro.slots.has("visual")
         <a class="btn btn-p" href={cta.href}>{cta.label}</a>
         {secondary && <a class="btn btn-g" href={secondary.href}>{secondary.label}</a>}
       </div>
-      <p class="mono note rise d4">Sin tarjeta para probar. Tú decides qué puede hacer cada agente.</p>
+      <p class="mono note rise d4">Sin tarjeta para probar. Tú decides qué agentes trabajan.</p>
     </div>
     {hasVisual && <div class="visual"><slot name="visual" /></div>}
   </div>

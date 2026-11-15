@@ -378,9 +378,9 @@ it("la copia no da lo de antes como vigente: «Antes: Warfarina 5 mg · dijo que
   await renderPatientRecordPdf(record, record.clinic)
   const printed = JSON.stringify(lay.mock.calls.map((call) => call[0]))
   lay.mockRestore()
-  expect(printed).toMatch(/Antes: Warfarina 5 mg[^"]* · dijo que cambió el /)
-  expect(printed).not.toContain("Medicamento: Warfarina 5 mg")
-  expect(printed).toContain("Medicamento: Apixabán 5 mg")
+  expect(printed).toMatch(/Antes \(anticoagulante\): Warfarina 5 mg[^"]* · dijo que cambió el /)
+  expect(printed).not.toContain("Anticoagulante: Warfarina 5 mg")
+  expect(printed).toContain("Anticoagulante: Apixabán 5 mg")
   const statements = (patientRecordFhirBundle(record) as { entry: Array<{ resource: Record<string, unknown> }> }).entry
     .map((entry) => entry.resource)
     .filter((resource) => resource.resourceType === "MedicationStatement")

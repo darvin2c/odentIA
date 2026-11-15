@@ -121,15 +121,15 @@
 .home .hero-copy {
   position: relative;
   z-index: 2;
-  max-width: 500px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 28px;
   pointer-events: auto;
 }
 .home .hh-title {
   margin: 0;
-  font-size: clamp(50px, 5.6vw, 80px);
+  font-size: clamp(46px, 4.7vw, 68px);
   line-height: 0.96;
   letter-spacing: -0.05em;
   font-weight: 800;

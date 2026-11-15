@@ -5,8 +5,10 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
 import {
   encounter,
+  encounterDictationSuggestion,
   patient,
   patientAllergy,
   patientAnamnesis,
@@ -19,6 +21,7 @@ import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, it, vi } from "vitest"
+import { addPatientAllergy, removePatientAllergy } from "./allergies.js"
 import {
   addDeclaredHealth,
   getPatientHealth,
@@ -1229,7 +1232,9 @@ it("lo que contó antes de su cita va en la copia: en el PDF, con su cita y en s
   expect(text).toContain("Lo que contó antes de cada cita (1)")
   expect(text).toContain("Me duele la muela de abajo")
   expect(text).toContain("Lo que contó antes de venir")
-  expect(text).toContain("desde su enlace")
+  // Nadie lo vio todavía al atender: va «sin revisar», con el criterio de lo que declaró (QA final de
+  // formularios, punto 27).
+  expect(text).toContain("desde su enlace, sin revisar")
   const answer = resourcesOf(record).find((resource) => resource.id === told!.id) as Record<string, unknown> | undefined
   expect(answer).toMatchObject({
     resourceType: "QuestionnaireResponse",
@@ -1237,6 +1242,224 @@ it("lo que contó antes de su cita va en la copia: en el PDF, con su cita y en s
     source: { reference: expect.stringContaining("Patient/") },
   })
   expect(JSON.stringify(answer)).toContain("Me duele la muela de abajo")
+  expect(JSON.stringify(answer)).toContain("sin revisar")
   // Nadie del equipo figura como autor: lo contó ella.
   expect(answer).not.toHaveProperty("author")
+  // Visto al atender, ya no.
+  await ownerDb.update(appointmentVisitAnswer).set({ seenBy: f.actor, seenAt: new Date() }).where(eq(appointmentVisitAnswer.id, told!.id))
+  const seen = await printedText(await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id)))
+  expect(seen).toContain("lo vio Clínico al atender")
+  expect(seen).not.toContain("desde su enlace, sin revisar")
+})
+
+// Revisión final de formularios (15 nov, H1 de desarrollo): la copia no traía el anticoagulante ni los
+// huesos de lo declarado, la corrección que solo cambiaba el anticoagulante salía vacía (en FHIR, ni
+// salía) y «nada cambió» también.
+it("cada declaración va con lo suyo: el anticoagulante, los huesos, la corrección con su motivo y «nada cambió»", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const herself = { kind: "patient" as const, name: null, relation: null }
+  await run((tx) =>
+    recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "enlace",
+      by: herself,
+      health: {
+        medications: { state: "recorded", items: [{ name: "Losartán" }] },
+        anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
+        boneMedicines: { state: "recorded", detail: "alendronato", reason: "osteoporosis", form: "pastillas" },
+      },
+    }),
+  )
+  await run((tx) =>
+    recordHealthDeclaration(tx, "org_a", f.patient.id, {
+      via: "enlace",
+      by: herself,
+      health: { anticoagulants: { state: "recorded", detail: "apixabán 5 mg" } },
+      reason: "correccion",
+    }),
+  )
+  await run((tx) => recordHealthDeclaration(tx, "org_a", f.patient.id, { via: "enlace", by: herself, health: {}, reason: "sin_cambios" }))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.declarations.map((declaration) => declaration.reason)).toEqual([null, "correccion", "sin_cambios"])
+  const [first, corrected, unchanged] = record.declarations
+  expect(first?.entries.map((entry) => [entry.label, entry.value])).toEqual([
+    ["Anticoagulante", "warfarina 5 mg"],
+    ["Medicina para los huesos", "alendronato · por osteoporosis · pastillas"],
+    ["Otros medicamentos", "Losartán"],
+  ])
+  expect(corrected?.entries.map((entry) => [entry.label, entry.value])).toEqual([["Anticoagulante", "apixabán 5 mg"]])
+  expect(unchanged?.entries.map((entry) => entry.value)).toEqual(["No, sigue igual"])
+  const text = await printedText(record)
+  expect(text).toContain("warfarina 5 mg")
+  expect(text).toContain("apixabán 5 mg")
+  expect(text).toContain("Desde su enlace · corrigió lo que había enviado")
+  expect(text).toContain("No, sigue igual")
+  // En FHIR, las tres; la corrección dice que lo es, con su motivo, y qué corrige.
+  const resources = resourcesOf(record)
+  const declarations = resources.filter(
+    (resource) => resource.resourceType === "QuestionnaireResponse" && String(resource.id).includes("-declaracion-"),
+  )
+  expect(declarations.map((resource) => resource.id)).toEqual([1, 2, 3].map((n) => `${f.patient.id}-declaracion-${n}`))
+  expect(JSON.stringify(declarations[1])).toContain("apixabán 5 mg")
+  expect(JSON.stringify(declarations[2])).toContain("No, sigue igual")
+  const correction = resources.find(
+    (resource) =>
+      resource.resourceType === "Provenance" &&
+      (resource.target as Array<{ reference: string }>)[0]?.reference === `QuestionnaireResponse/${f.patient.id}-declaracion-2`,
+  )
+  expect(correction).toMatchObject({
+    activity: { coding: [{ code: "UPDATE" }] },
+    reason: [{ text: "Corrigió lo que había enviado" }],
+    entity: [{ role: "revision", what: { reference: `QuestionnaireResponse/${f.patient.id}-declaracion-1` } }],
+    agent: [{ type: { coding: [{ code: "author" }] }, who: { reference: expect.stringContaining("Patient/") } }],
+  })
+})
+
+// Revisión final de formularios (15 nov, H10 de desarrollo): la copia decía «Lo llenó y lo finalizó Ana
+// Torres» aunque otra persona escribió una respuesta, y en FHIR no estaban las marcas de Clío.
+it("la ficha dice quién escribió cada respuesta, y en FHIR lo que propuso Clío va con quien lo confirmó", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const other = randomUUID()
+  await ownerDb.insert(user).values({ id: other, name: "Dra. Otra Persona", email: `${other}@example.test` })
+  const template = await publishTemplate(f, "Evaluación de endodoncia", ENDODONTICS)
+  const response = await run((tx) =>
+    createFormResponse(tx, "org_a", f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id, answers: {} }),
+  )
+  await run((tx) => updateFormResponseDraft(tx, "org_a", f.actor, response.id, { answers: ANSWERS }))
+  await run((tx) => updateFormResponseDraft(tx, "org_a", other, response.id, { answers: { ...ANSWERS, sangrado: 20 } }))
+  // Clío propuso «Intensidad 8» y lo confirmó quien atiende.
+  await ownerDb.insert(encounterDictationSuggestion).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    encounterId: f.encounter.id,
+    professionalUserId: f.actor,
+    kind: "ficha",
+    payload: { responseId: response.id, fieldId: "intensidad", value: 8 },
+    status: "confirmada",
+    decidedBy: f.actor,
+    decidedAt: new Date(),
+  })
+  await run((tx) => finalizeFormResponse(tx, "org_a", f.actor, response.id))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const [form] = record.forms
+  expect(form?.byWords).toMatch(/^Lo llenaron Clínico y Dra\. Otra Persona · lo finalizó Clínico el /)
+  const items = form?.sections.flatMap((section) => section.items) ?? []
+  expect(items.find((item) => item.id === "sangrado")?.writtenBy).toBe("Dra. Otra Persona")
+  expect(items.find((item) => item.id === "hallazgos")?.writtenBy).toBe("Clínico")
+  const text = await printedText(record)
+  expect(text).toContain("lo escribió Dra. Otra Persona")
+  expect(text).not.toContain("Lo llenó y lo finalizó")
+  const resources = resourcesOf(record)
+  const answer = resources.find((resource) => resource.id === response.id) as unknown as {
+    item: Array<{ item: Array<Record<string, unknown>> }>
+  }
+  const fhirItems = answer.item.flatMap((group) => group.item)
+  const authorOf = (linkId: string) =>
+    (fhirItems.find((item) => item.linkId === linkId)?.extension as Array<{ url: string; valueReference: { display: string } }> | undefined)?.find(
+      (extension) => extension.url === "http://hl7.org/fhir/StructureDefinition/questionnaireresponse-author",
+    )?.valueReference.display
+  expect(authorOf("sangrado")).toBe("Dra. Otra Persona")
+  expect(authorOf("hallazgos")).toBe("Clínico")
+  expect(authorOf("intensidad")).toBe("Clío")
+  const clio = resources.find(
+    (resource) =>
+      resource.resourceType === "Provenance" &&
+      (resource.target as Array<{ reference: string }>)[0]?.reference === `QuestionnaireResponse/${response.id}` &&
+      JSON.stringify(resource.agent).includes("Clío"),
+  )
+  expect(clio).toMatchObject({
+    agent: [
+      { type: { coding: [{ code: "author" }] }, who: { display: "Clío" } },
+      { type: { coding: [{ code: "verifier" }] }, who: { display: "Clínico" } },
+    ],
+  })
+  expect(JSON.stringify(clio)).toContain("Intensidad del dolor")
+})
+
+// B4 de la entrega 7: «de pequeño» salía en la copia sin «sin revisar» en cada dato.
+it("«de pequeño» va en la copia con «sin revisar» dato por dato, y lo que anotó el equipo no lleva la marca", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const health = await run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  // La odontóloga anotó quién le cepilla; después la mamá contó lo demás.
+  await run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: { quienCepilla: "adulto" } } },
+    }),
+  )
+  const mother = { kind: "representative" as const, name: "Carla", relation: "madre" }
+  const declared = { dental: { biberon: "si" as const, dulcesEntreComidas: "4_o_mas" as const } }
+  await run(async (tx) => {
+    await addDeclaredHealth(tx, "org_a", null, f.patient.id, declared, { entity: "registration_hold", entityId: f.patient.id, at: new Date() })
+    await recordHealthDeclaration(tx, "org_a", f.patient.id, { via: "enlace", by: mother, health: declared })
+  })
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const entries = record.interview?.entries ?? []
+  const entry = (key: string) => entries.find((item) => item.key === `antecedentesOdontologicos.${key}`)
+  expect(entry("biberon")?.unreviewed?.by).toMatchObject({ kind: "representative", name: "Carla" })
+  expect(entry("dulcesEntreComidas")?.unreviewed?.by).toMatchObject({ kind: "representative", name: "Carla" })
+  // Lo que anotó el equipo no lleva la marca de ella.
+  expect(entry("quienCepilla")?.value).toBe("Lo cepilla un adulto")
+  expect(entry("quienCepilla")?.unreviewed).toBeUndefined()
+  const text = await printedText(record)
+  expect(text).toContain("Toma biberón o pecho para dormir")
+  expect(text).toMatch(/Lo dijo su madre, Carla, el [^"]+, sin revisar/)
+})
+
+// Auditor de la revisión final (A15): la warfarina perdía «Anticoagulante» en la copia y en FHIR iba
+// solo como texto.
+it("la medicina de una clase conserva su clase en el PDF y su código ATC en FHIR", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  await run((tx) =>
+    addDeclaredHealth(
+      tx,
+      "org_a",
+      null,
+      f.patient.id,
+      { anticoagulants: { state: "recorded", detail: "warfarina 5 mg" } },
+      { entity: "registration_hold", entityId: f.patient.id, at: new Date() },
+    ),
+  )
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  const text = await printedText(record)
+  expect(text).toContain("Anticoagulante: warfarina 5 mg")
+  const [warfarin] = record.medications
+  const statement = resourcesOf(record).find((resource) => resource.id === warfarin?.id)
+  expect(statement).toMatchObject({
+    medicationCodeableConcept: { coding: [{ system: "http://www.whocc.no/atc", code: expect.stringMatching(/^B01A/) }], text: "warfarina 5 mg" },
+  })
+})
+
+// Auditor de la revisión final (A11): la alergia quitada no salía en la copia, y en FHIR faltaba que
+// era un error o que no era alergia.
+it("la alergia quitada sale en la copia con quién la quitó y por qué, y en FHIR como lo dice su motivo", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const ibuprofen = await run((tx) => addPatientAllergy(tx, "org_a", f.actor, f.patient.id, { substance: "Ibuprofeno" }))
+  const latex = await run((tx) => addPatientAllergy(tx, "org_a", f.actor, f.patient.id, { substance: "Látex" }))
+  const nuts = await run((tx) => addPatientAllergy(tx, "org_a", f.actor, f.patient.id, { substance: "Maní" }))
+  await run((tx) => removePatientAllergy(tx, "org_a", f.actor, f.patient.id, ibuprofen.id, "otra_cosa"))
+  await run((tx) => removePatientAllergy(tx, "org_a", f.actor, f.patient.id, latex.id, "error"))
+  await run((tx) => removePatientAllergy(tx, "org_a", f.actor, f.patient.id, nuts.id, "ya_no"))
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.allergies).toEqual([])
+  const text = await printedText(record)
+  expect(text).toContain("Se quitó la alergia a Ibuprofeno: era otra cosa (malestar, efecto secundario) · lo quitó Clínico el")
+  expect(text).not.toContain("Sin registros.")
+  const statusOf = (id: string) => {
+    const resource = resourcesOf(record).find((item) => item.id === id) as
+      | { clinicalStatus?: { coding: Array<{ code: string }> }; verificationStatus: { coding: Array<{ code: string }> } }
+      | undefined
+    return [resource?.clinicalStatus?.coding[0]?.code ?? null, resource?.verificationStatus.coding[0]?.code]
+  }
+  expect(statusOf(ibuprofen.id)).toEqual(["inactive", "refuted"])
+  expect(statusOf(latex.id)).toEqual([null, "entered-in-error"])
+  expect(statusOf(nuts.id)[0]).toBe("resolved")
+  expect(JSON.stringify(resourcesOf(record).find((item) => item.id === latex.id))).toContain("se registró por error")
 })

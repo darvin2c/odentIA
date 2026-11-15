@@ -91,7 +91,7 @@ export const VISTIA_PAGES = {
       "Dos agentes de IA para tu óptica: Sofi responde por WhatsApp, Instagram y más canales, agenda el examen de la vista y dice cómo va el pedido de lentes; Argos recuerda citas, invita al control y responde las cifras de tu óptica.",
     crumb: "Agentes",
     hero: {
-      tag: "Agentes",
+      tag: "ARM · Agentes",
       title: "Dos agentes que hacen el trabajo.",
       accent: "Tú decides hasta dónde.",
       lead: "Sofi atiende a quien escribe, por cualquier canal y a cualquier hora. Argos se ocupa de lo pendiente: recordar la cita, invitar al control y traer de vuelta a quien faltó. Todo queda en la ficha de cada cliente.",

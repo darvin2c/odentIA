@@ -734,7 +734,15 @@ export interface FormRecord {
     id: string
     title: string
     /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
-    items: Array<{ id: string; label: string; words: string | null; /** «Clío · confirmó…», mientras siga siendo eso. */ clio?: string | null }>
+    items: Array<{
+      id: string
+      label: string
+      words: string | null
+      /** «Clío · confirmó…», mientras siga siendo eso. */
+      clio?: string | null
+      /** Quién escribió esta respuesta, si la ficha la llenó más de una persona. */
+      writtenBy?: string | null
+    }>
   }>
   /** `reason`: por qué se corrigió, si quien corrigió lo dijo. */
   addenda: Array<{ id: string; text: string; reason?: string | null; authorName: string | null; createdAt: string }>

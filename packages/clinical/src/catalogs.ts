@@ -20,7 +20,6 @@ export type AllergySeverity = (typeof ALLERGY_SEVERITIES)[number]
  */
 export const ALLERGY_REMOVAL_REASONS = ["ya_no", "otra_cosa", "error"] as const
 export type AllergyRemovalReason = (typeof ALLERGY_REMOVAL_REASONS)[number]
-
 /** El largo máximo del motivo con que se quita una alergia, igual en la pantalla y el servidor. */
 export const ALLERGY_REMOVAL_REASON_MAX = 500
 
