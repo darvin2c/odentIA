@@ -345,6 +345,10 @@ export function useKairosDecide() {
         toast.success("Listo: sus mensajes, los de antes y los que vengan, quedan en su ficha")
         return
       }
+      if (item.kind === "ausencia_choca") {
+        toast.success(absenceClashDoneWords(item, decision.result))
+        return
+      }
       const outreach = decision.outreach
       if (outreach?.channel === "whatsapp" && outreach.chatId) {
         tab?.close()
@@ -402,6 +406,7 @@ export function KairosItemCard({
   now: Date
 }) {
   if (CHAT_KINDS.has(item.kind)) return <ChatItemCard item={item} isAdmin={isAdmin} now={now} />
+  if (item.kind === "ausencia_choca") return <AbsenceClashCard item={item} now={now} />
   return <DecisionCard item={item} isAdmin={isAdmin} now={now} />
 }
 
@@ -635,6 +640,147 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
           onClose={() => setCreating(false)}
         />
       ) : null}
+    </li>
+  )
+}
+
+/** Las presentaciones que caen en una ausencia y quién puede tomarlas (`payload` de `ausencia_choca`). */
+export function absenceClashOf(item: Pick<KairosItem, "payload">): {
+  userName: string
+  tasks: Array<{ taskId: string; clientId: string | null; clientName: string; startsAt: string }>
+  candidates: Array<{ userId: string; name: string }>
+} {
+  const list = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value)
+      ? value.filter(
+          (entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object",
+        )
+      : []
+  return {
+    userName: text(item.payload.userName) ?? "",
+    tasks: list(item.payload.tasks).flatMap((task) => {
+      const taskId = text(task.taskId)
+      const startsAt = text(task.startsAt)
+      return taskId && startsAt
+        ? [
+            {
+              taskId,
+              clientId: text(task.clientId),
+              clientName: text(task.clientName) ?? "Cliente",
+              startsAt,
+            },
+          ]
+        : []
+    }),
+    candidates: list(item.payload.candidates).flatMap((person) => {
+      const userId = text(person.userId)
+      return userId ? [{ userId, name: text(person.name) ?? "" }] : []
+    }),
+  }
+}
+
+const firstNameOf = (name: string) => name.trim().split(/\s+/)[0] || name
+
+/** Lo que se dice después de decidir: a quién se pasaron, o que Kairós pide otra hora. */
+export function absenceClashDoneWords(
+  item: Pick<KairosItem, "payload">,
+  result: Record<string, unknown> | null,
+): string {
+  const { candidates, tasks } = absenceClashOf(item)
+  const n = tasks.length
+  if (text(result?.choice) === "pasar") {
+    const to = candidates.find((person) => person.userId === text(result?.toUserId))
+    const who = to ? firstNameOf(to.name) : "otra persona"
+    return n === 1
+      ? `Pasó a ${who}: le queda en Hoy y a la clínica se le avisa con quién será`
+      : `Pasaron a ${who}: le quedan en Hoy y a cada clínica se le avisa con quién será`
+  }
+  return n === 1
+    ? "Kairós le escribe a la clínica para pedirle otra hora"
+    : "Kairós le escribe a cada clínica para pedirle otra hora"
+}
+
+/**
+ * «2 presentaciones de Ana caen en sus vacaciones»: cuáles son y qué hacer.
+ * «Pasar a Luis» (si alguien está libre a todas esas horas) o «Pedir otra
+ * hora» (Kairós le escribe a la clínica). Solo Administración; nada se mueve solo.
+ */
+function AbsenceClashCard({ item, now }: { item: KairosItem; now: Date }) {
+  const decide = useKairosDecide()
+  const leave = useFocusOnLeave<HTMLLIElement>()
+  const { tasks, candidates } = absenceClashOf(item)
+  const due = dueWords(item.expiresAt, now)
+  const run = (edited: Record<string, unknown> | null) => {
+    leave.markLeaving()
+    decide.mutate(edited ? { item, action: "aprobar", edited } : { item, action: "descartar" }, {
+      onError: (error) => toast.error(submitErrorMessage(error)),
+    })
+  }
+  const pending = decide.isPending
+  return (
+    <li ref={leave.ref} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <AgentMark size="sm" />
+        <p className="min-w-0 flex-1 basis-48 font-medium [overflow-wrap:anywhere]">{item.title}</p>
+        <Badge variant={due.urgent ? "destructive" : "outline"}>{due.text}</Badge>
+      </div>
+      <p className="text-sm [overflow-wrap:anywhere]">
+        <span className="font-medium">Por qué: </span>
+        {item.reason}
+      </p>
+      {tasks.length > 0 ? (
+        <ul className="flex flex-col gap-1 text-sm">
+          {tasks.map((task) => (
+            <li key={task.taskId} className="flex flex-wrap items-center gap-x-2">
+              {task.clientId ? (
+                <ClientName clientId={task.clientId} tab="venta">
+                  {task.clientName}
+                </ClientName>
+              ) : (
+                <span>{task.clientName}</span>
+              )}
+              <span className="text-muted-foreground">{supportDayTime(task.startsAt)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {candidates.slice(0, 3).map((person, index) => (
+          <Button
+            key={person.userId}
+            type="button"
+            size="sm"
+            variant={index === 0 ? "default" : "outline"}
+            disabled={pending}
+            onClick={() => run({ choice: "pasar", toUserId: person.userId })}
+          >
+            Pasar a {firstNameOf(person.name)}
+          </Button>
+        ))}
+        <Button
+          type="button"
+          size="sm"
+          variant={candidates.length === 0 ? "default" : "outline"}
+          disabled={pending}
+          onClick={() => run({ choice: "otra_hora" })}
+        >
+          Pedir otra hora
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pending}
+          onClick={() => run(null)}
+        >
+          Ahora no
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {candidates.length > 0
+          ? "«Pasar a…» cambia quién presenta y le avisa a la clínica con quién será. «Pedir otra hora»: Kairós le escribe a la clínica."
+          : "Nadie más está libre a esas horas: Kairós le escribe a la clínica pidiendo otra hora."}
+      </p>
     </li>
   )
 }

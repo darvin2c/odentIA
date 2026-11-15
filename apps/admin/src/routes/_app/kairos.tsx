@@ -22,6 +22,7 @@ import {
   KairosUnconfirmed,
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
+import { KairosSellsSwitch } from "../../components/arm/kairos-sells"
 import { limaDay } from "../../components/arm/sale-words"
 import { type ProductChoice, ProductFilter } from "../../components/product"
 import {
@@ -141,6 +142,7 @@ function KairosPage() {
             : undefined
         }
       />
+      {isAdmin ? <KairosSellsSwitch /> : null}
       <div className="flex flex-wrap items-center gap-3">
         <ViewTabs
           label="Qué ver de Kairós"

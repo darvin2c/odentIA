@@ -918,6 +918,20 @@
       "when": 1794719226189,
       "tag": "0130_lo_dicho_por_dato_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1794727217849,
+      "tag": "0131_kairos_vende",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1794727221767,
+      "tag": "0132_kairos_vende_reglas",
+      "breakpoints": true
     }
   ]
 }

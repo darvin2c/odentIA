@@ -2,6 +2,7 @@ import {
   type AgentRuntime,
   consumeAgentRun,
   createAlreadyTold,
+  createKairosSeller,
   createKairosWriter,
   decisionKeyStartProblem,
   embedderFromEnv,
@@ -15,6 +16,7 @@ import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage }
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
+  adminChannelsFromEnv,
   configureDocumentChecks,
   configureDocumentLogos,
   configurePublicLinks,
@@ -31,13 +33,14 @@ import { sql } from "drizzle-orm"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
-import { runHelpVideosTick } from "./help-videos.js"
-import { kairosQueue } from "./kairos.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runDemosTick } from "./demos.js"
 import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
+import { runHelpVideosTick } from "./help-videos.js"
 import { consumeInbound } from "./inbound.js"
+import { kairosQueue } from "./kairos.js"
+import { kairosSellsQueue } from "./kairos-vende.js"
 import { runLegalNoticesTick } from "./legal-notices.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { consumeOutbound } from "./outbound.js"
@@ -451,7 +454,11 @@ queues.push({
 
 // Avisos en el equipo (push web): «Te espera» con la clínica abierta y el servicio cortado. Sin claves VAPID no se envía.
 if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) {
-  const sender = webPushSender({ publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT })
+  const sender = webPushSender({
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.VAPID_SUBJECT,
+  })
   let nextPushPoll = 0
   queues.push({
     name: "push_notices",
@@ -496,6 +503,45 @@ queues.push(
   }),
 )
 
+// Kairós vende (ADR 0189): responde solo en los chats de la administración a quien todavía no tiene su app y
+// agenda la presentación, con el interruptor de Administración prendido; y envía los avisos de lo que agendó.
+// Sale por la app de Meta de la administración y, si no hay WhatsApp, por el canal de correo de las conversaciones.
+const conversationMailer =
+  env.CONVERSATION_SMTP_USER && env.CONVERSATION_SMTP_PASS
+    ? createMailer({
+        host: env.SMTP_HOST,
+        port: env.SMTP_PORT,
+        user: env.CONVERSATION_SMTP_USER,
+        pass: env.CONVERSATION_SMTP_PASS,
+        from: env.SMTP_FROM,
+        fromByBrand: {
+          ...(env.MEDICAL_SMTP_FROM ? { latidia: env.MEDICAL_SMTP_FROM } : {}),
+          ...(env.OPTICAL_SMTP_FROM ? { vistia: env.OPTICAL_SMTP_FROM } : {}),
+        },
+      })
+    : mailer
+queues.push(
+  kairosSellsQueue({
+    ownerDb,
+    seller: createKairosSeller({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
+    channels: adminChannelsFromEnv(env),
+    // Solo pruebas (e2e): lo que iría a graph.facebook.com va al servidor local que hace de Meta.
+    ...(env.ADMIN_META_GRAPH_URL
+      ? {
+          fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+            const url =
+              typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+            return fetch(
+              url.replace(/^https:\/\/graph\.facebook\.com/, env.ADMIN_META_GRAPH_URL),
+              init,
+            )
+          }) as typeof fetch,
+        }
+      : {}),
+    mailer: conversationMailer,
+  }),
+)
+
 /** Un ciclo recorre sus colas y toma una tarea de cada una por vuelta. */
 async function consume(own: QueueDef[]): Promise<void> {
   while (!stopping) {
@@ -536,11 +582,18 @@ const isAgentRun = (queue: QueueDef) => queue.name === "agent_runs"
 const isPush = (queue: QueueDef) => queue.name === "push_notices"
 // Kairós también: su pasada espera al modelo (hasta 20 borradores y 30 resúmenes) y no puede atrasar la ingesta.
 const isKairos = (queue: QueueDef) => queue.name === "kairos"
+// Kairós que vende, igual: espera al modelo en cada mensaje.
+const isKairosSells = (queue: QueueDef) => queue.name === "kairos-vende"
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 await Promise.all([
-  consume(queues.filter((queue) => !isAgentRun(queue) && !isPush(queue) && !isKairos(queue))),
+  consume(
+    queues.filter(
+      (queue) => !isAgentRun(queue) && !isPush(queue) && !isKairos(queue) && !isKairosSells(queue),
+    ),
+  ),
   consume(queues.filter(isAgentRun)),
   consume(queues.filter(isPush)),
   consume(queues.filter(isKairos)),
+  consume(queues.filter(isKairosSells)),
 ])
 process.exit(0)
