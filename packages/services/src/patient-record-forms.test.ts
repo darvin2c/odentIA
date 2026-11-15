@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import {
+  encounter,
   patient,
   patientAllergy,
   patientAnamnesis,
@@ -13,8 +14,9 @@ import {
   patientHealthDeclaration,
   patientRegistration,
 } from "@odentia/db/schema/clinical"
-import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
-import { orgProfile } from "@odentia/db/schema/org"
+import { appointmentVisitAnswer, clinicalFormAddendum, clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { branch, orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { afterEach, expect, it, vi } from "vitest"
 import {
@@ -91,6 +93,14 @@ const runOf = (f: Fixture) => f.run as <T>(fn: (tx: Db) => Promise<T>) => Promis
 
 async function publishTemplate(f: Fixture, title: string, schema: FormSchemaDef, respondent: "staff" | "portal" = "staff") {
   const run = runOf(f)
+  // Un cuestionario del paciente ya no se crea (entrega 8): este es uno de los de antes, como quedó.
+  if (respondent === "portal") {
+    const [row] = await ownerDb
+      .insert(clinicalFormTemplate)
+      .values({ organizationId: "org_a", key: `de-antes-${randomUUID().slice(0, 8)}`, title, status: "publicado", respondent, schema, publishedAt: new Date() })
+      .returning()
+    return row!
+  }
   const draft = await run((tx) => createFormTemplate(tx, "org_a", f.actor, { title, schema, respondent }))
   return run((tx) => publishFormTemplate(tx, "org_a", f.actor, draft.id))
 }
@@ -1170,4 +1180,63 @@ it("la copia trae lo que dijo del corazón, la anestesia y sus medicinas, con qu
     ["clase-anticoagulants", "unknown"],
     ["clase-boneMedicines", "not-taken"],
   ])
+})
+
+// Mesa de formularios del 13 nov, entrega 8: lo que contó antes de su cita también va en la copia.
+it("lo que contó antes de su cita va en la copia: en el PDF, con su cita y en su atención, y en FHIR como dicho por ella", async () => {
+  const f = await clinicalFixture()
+  const run = runOf(f)
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" })
+    .returning({ id: scheduleRoom.id })
+  const startsAt = new Date(Date.now() - 2 * 3_600_000)
+  const [visit] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: "org_a",
+      branchId: site!.id,
+      patientId: f.patient.id,
+      professionalUserId: f.actor,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+    })
+    .returning({ id: appointment.id })
+  await ownerDb.update(encounter).set({ appointmentId: visit!.id }).where(eq(encounter.id, f.encounter.id))
+  const [told] = await ownerDb
+    .insert(appointmentVisitAnswer)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      appointmentId: visit!.id,
+      reason: "Me duele la muela de abajo",
+      pain: "si",
+      painLevel: 8,
+      respondentContactId: f.patient.personId,
+      submittedVia: "enlace",
+      submittedAt: new Date(startsAt.getTime() - 86_400_000),
+    })
+    .returning()
+  const record = await run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(record.visitAnswers.map((row) => [row.id, row.encounterId])).toEqual([[told!.id, f.encounter.id]])
+  const text = await printedText(record)
+  expect(text).toContain("Lo que contó antes de cada cita (1)")
+  expect(text).toContain("Me duele la muela de abajo")
+  expect(text).toContain("Lo que contó antes de venir")
+  expect(text).toContain("desde su enlace")
+  const answer = resourcesOf(record).find((resource) => resource.id === told!.id) as Record<string, unknown> | undefined
+  expect(answer).toMatchObject({
+    resourceType: "QuestionnaireResponse",
+    encounter: { reference: `Encounter/${f.encounter.id}` },
+    source: { reference: expect.stringContaining("Patient/") },
+  })
+  expect(JSON.stringify(answer)).toContain("Me duele la muela de abajo")
+  // Nadie del equipo figura como autor: lo contó ella.
+  expect(answer).not.toHaveProperty("author")
 })
