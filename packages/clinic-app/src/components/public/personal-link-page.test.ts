@@ -1,9 +1,18 @@
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { type PersonalLinkView, withLinkViewDefaults } from "../../lib/booking-link"
+import { draftUntilWords, personalLinkDraftKey, readDeviceDraft, sweepDeviceDrafts, writeDeviceDraft } from "../../lib/device-draft"
 import { setOrgLocale } from "../../lib/locale"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import { unsignableWords } from "./link-steps"
-import { pendingItems, toldWords, validatePersonalLinkSearch, whatFollows } from "./personal-link-page"
+import {
+  beforeVisitCard,
+  type DraftOnDevice,
+  expiredLinkWords,
+  pendingItems,
+  toldWords,
+  validatePersonalLinkSearch,
+  whatFollows,
+} from "./personal-link-page"
 
 declareProduct(bareProduct("dental"))
 
@@ -45,8 +54,10 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
       { id: "c1", title: "Exodoncia", procedureRef: "Pieza 38", appointment: { startsAt: THURSDAY, timeZone: "America/Lima" }, signable: true, why: null },
       { id: "c2", title: "Implante", procedureRef: null, appointment: { startsAt: LATER, timeZone: "America/Lima" }, signable: true, why: null },
     ],
-    questionnaire: null,
+    visit: null,
     told: null,
+    healthCheck: null,
+    correctHealth: false,
     toSchedule: [],
     another: null,
     confirmVia: null,
@@ -80,6 +91,42 @@ describe("al terminar algo", () => {
     const after = whatFollows(view({ consents: [], data: null, toSchedule: [{ planItemId: "p1", title: "Corona" }] }), { key: "x", at: THURSDAY })
     expect(after.next.map((item) => item.key)).toEqual(["cita"])
     expect(after.more).toBe(true)
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 8 (C2): antes había dos tarjetas y dos envíos.
+describe("antes de su cita, una sola tarjeta", () => {
+  const questions = { reason: true, pain: true, more: true }
+  it("junta sus datos, su salud y su visita, y dice quién lo lee", () => {
+    const items = pendingItems(
+      view({ consents: [], data: { missing: [{ key: "birthDate", label: "Fecha de nacimiento" }], health: true }, visit: { purpose: null, questions } }),
+      "odontólogo",
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      abre: "datos",
+      title: "Antes de tu cita",
+      text: "Tus datos, tu salud, tus medicinas y a qué vienes.",
+      detail: "Lo lee la Dra. Díaz antes de atenderte.",
+      action: "Empezar",
+    })
+  })
+
+  it("en una sesión le dice a qué viene; solo su visita es opcional", () => {
+    const card = beforeVisitCard(
+      view({ data: null, visit: { purpose: "sesión 2 de endodoncia", questions: { reason: false, pain: true, more: false } } }),
+      "odontólogo",
+    )
+    expect(card).toMatchObject({ badge: "Opcional", text: "Vienes a: sesión 2 de endodoncia. Cuéntanos si te duele algo." })
+  })
+
+  it("sin cita por venir, sus datos siguen siendo «Tus datos»", () => {
+    const items = pendingItems(view({ consents: [], appointment: null, visit: null }), "odontólogo")
+    expect(items[0]).toMatchObject({ title: "Tus datos", action: "Completar" })
+  })
+
+  it("los enlaces que abrían el cuestionario de antes siguen abriendo", () => {
+    expect(validatePersonalLinkSearch({ token: "t", abre: "cuestionario" })).toMatchObject({ abre: "cuestionario" })
   })
 })
 
@@ -117,12 +164,12 @@ describe("lo que nos contaste", () => {
 
   it("dice qué envió y cuándo, junto lo del mismo envío, y quién lo lee", () => {
     const words = toldWords(
-      view({ told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: LATER_SENT }]) }),
+      view({ told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "visita", at: LATER_SENT }]) }),
       "odontólogo",
     )
     expect(words?.sent.map(plain)).toEqual([
       "Enviaste tus datos y tu salud el viernes, 13 de noviembre, 2:27 p. m.",
-      "Enviaste tus respuestas de «Antes de tu cita» el viernes, 13 de noviembre, 2:31 p. m.",
+      "Enviaste lo de tu visita el viernes, 13 de noviembre, 2:31 p. m.",
     ])
     expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atenderte.")
   })
@@ -151,11 +198,11 @@ describe("lo que nos contaste", () => {
 
   it("por un hijo, con su nombre", () => {
     const words = toldWords(
-      view({ patientFirstName: "Mateo", told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "cuestionario", at: SENT }]) }),
+      view({ patientFirstName: "Mateo", told: told([{ what: "datos", at: SENT }, { what: "salud", at: SENT }, { what: "visita", at: SENT }]) }),
       "odontólogo",
     )
     expect(words?.sent.map(plain)).toEqual([
-      "Enviaste los datos de Mateo, su salud y tus respuestas de «Antes de la cita de Mateo» el viernes, 13 de noviembre, 2:27 p. m.",
+      "Enviaste los datos de Mateo, su salud y lo de la visita de Mateo el viernes, 13 de noviembre, 2:27 p. m.",
     ])
     expect(words?.reader).toBe("Lo lee la Dra. Díaz antes de atender a Mateo.")
   })
@@ -163,11 +210,11 @@ describe("lo que nos contaste", () => {
 
 describe("mientras dura la entrega", () => {
   it("la vista de la API anterior, sin los campos nuevos, no rompe la página ni ofrece «Reservar otra»", () => {
-    const { toSchedule, another, confirmVia, remindersVia, closed, told, ...old } = view({
+    const { toSchedule, another, confirmVia, remindersVia, closed, told, visit, ...old } = view({
       consents: [{ id: "c1", title: "Exodoncia" } as PersonalLinkView["consents"][number]],
     })
     const ready = withLinkViewDefaults(old as PersonalLinkView)
-    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null, told: null })
+    expect(ready).toMatchObject({ toSchedule: [], another: null, confirmVia: null, remindersVia: null, closed: null, told: null, visit: null })
     // Antes se firmaba siempre desde el teléfono.
     expect(ready.consents).toEqual([{ id: "c1", title: "Exodoncia", procedureRef: null, appointment: null, signable: true, why: null }])
     expect(() => whatFollows(ready, { key: "datos", at: THURSDAY })).not.toThrow()
@@ -175,11 +222,158 @@ describe("mientras dura la entrega", () => {
   })
 })
 
+// Mesa de formularios del 13 nov, entrega 10 (C6 y C8): «¿Cambió algo?» y lo que dice después.
+describe("¿cambió algo?", () => {
+  const plain = (text: string) => text.replace(/\s/g, " ")
+  const SENT = "2026-11-13T19:27:00.000Z"
+  beforeAll(() => void setOrgLocale("es-PE", "America/Lima", "PE"))
+
+  it("va en la tarjeta «Antes de tu cita», sin decir lo que dijo antes", () => {
+    const card = beforeVisitCard(view({ data: null, healthCheck: { since: "2026-09-13T15:00:00.000Z" } }), "odontólogo")
+    expect(card?.text).toBe("Si cambió algo en tu salud o en tus medicinas.")
+    expect(card?.title).toBe("Antes de tu cita")
+    expect(pendingItems(view({ data: null, healthCheck: null }))).not.toContainEqual(expect.objectContaining({ key: "datos" }))
+  })
+
+  it("con «No» dice que nos dijo que nada cambió y cuándo", () => {
+    const words = toldWords(view({ told: { timeZone: "America/Lima", items: [{ what: "sin_cambios", at: SENT }] } }), "odontólogo")
+    expect(words?.sent.map(plain)).toEqual(["Nos dijiste que nada cambió en tu salud ni en tus medicinas el viernes, 13 de noviembre, 2:27 p. m."])
+    const both = toldWords(
+      view({ told: { timeZone: "America/Lima", items: [{ what: "visita", at: SENT }, { what: "sin_cambios", at: SENT }] } }),
+      "odontólogo",
+    )
+    expect(both?.sent.map(plain)).toEqual([
+      "Enviaste lo de tu visita y nos dijiste que nada cambió en tu salud ni en tus medicinas el viernes, 13 de noviembre, 2:27 p. m.",
+    ])
+  })
+
+  it("«Corregir» se abre con su dirección, y una dirección rara no lo abre", () => {
+    expect(validatePersonalLinkSearch({ token: "t", abre: "datos", corregir: "1" })).toMatchObject({ abre: "datos", corregir: true })
+    expect(validatePersonalLinkSearch({ token: "t", abre: "datos", corregir: "sí" }).corregir).toBeUndefined()
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 9 (C8): si la interrumpen, lo escrito sigue en su celular.
+describe("si la interrumpen, lo escrito sigue en su celular", () => {
+  const questions = { reason: true, pain: true, more: true }
+  const marta = () =>
+    view({
+      firstName: "Marta",
+      consents: [],
+      data: { missing: [], health: true },
+      visit: { purpose: null, questions },
+    })
+  /** El almacenamiento de su celular, en memoria. */
+  const phone = () => {
+    const items = new Map<string, string>()
+    return {
+      get length() {
+        return items.size
+      },
+      clear: () => items.clear(),
+      getItem: (key: string) => items.get(key) ?? null,
+      key: (index: number) => [...items.keys()][index] ?? null,
+      removeItem: (key: string) => void items.delete(key),
+      setItem: (key: string, value: string) => void items.set(key, value),
+    } as Storage
+  }
+  const token = "token-de-marta"
+  const key = personalLinkDraftKey("dental-smile", token, THURSDAY)
+  /** Lo que la tarjeta lee de su celular al abrir el enlace, como la página. */
+  const onDevice = (): DraftOnDevice | null => {
+    sweepDeviceDrafts()
+    const saved = readDeviceDraft(key)
+    return saved ? { step: saved.step, until: draftUntilWords(saved.expiresAt, Date.now(), "es-PE", "America/Lima") } : null
+  }
+  const CALL = new Date("2026-11-11T14:15:00-05:00").getTime()
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(CALL)
+    vi.stubGlobal("window", { localStorage: phone(), sessionStorage: phone() })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it("C8: cierra en el paso 3 y vuelve una hora después: la tarjeta dice dónde iba y un toque sigue", () => {
+    writeDeviceDraft(key, { medicationsText: "warfarina 5 mg" }, { item: "medicines", current: 3, total: 6 })
+    vi.setSystemTime(CALL + 60 * 60 * 1000)
+    const [card] = pendingItems(marta(), "odontólogo", onDevice())
+    expect(card).toMatchObject({
+      abre: "datos",
+      title: "Antes de tu cita",
+      badge: "Sin enviar",
+      text: "Vas en el paso 3 de 6",
+      action: "Seguir donde ibas",
+      resume: true,
+    })
+    expect(card?.detail?.replace(/\s/g, " ")).toBe(
+      "Lo que escribiste sigue guardado en este celular hasta mañana, 2:15 p. m. Todavía no lo enviaste.",
+    )
+    // Nunca lo que escribió.
+    expect(JSON.stringify(card)).not.toContain("warfarina")
+    // «Seguir donde ibas» abre el recorrido con lo escrito y su paso, sin volver a preguntar.
+    expect(validatePersonalLinkSearch({ token, abre: "datos", sigue: 1 })).toMatchObject({ abre: "datos", sigue: true })
+  })
+
+  it("dos días después ya no está, y la tarjeta no promete otra cosa", () => {
+    writeDeviceDraft(key, { medicationsText: "warfarina 5 mg" }, { item: "medicines", current: 3, total: 6 })
+    vi.setSystemTime(CALL + 2 * 24 * 60 * 60 * 1000)
+    const [card] = pendingItems(marta(), "odontólogo", onDevice())
+    expect(card).toMatchObject({ title: "Antes de tu cita", action: "Empezar" })
+    expect(card?.resume).toBeUndefined()
+    expect(JSON.stringify(card)).not.toMatch(/guardado|paso 3/)
+    // Y ya no está en su celular.
+    expect(window.localStorage.length).toBe(0)
+  })
+
+  it("desde el celular de su hija (sin nada guardado), empieza en blanco", () => {
+    expect(pendingItems(marta(), "odontólogo", onDevice())[0]).toMatchObject({ action: "Empezar" })
+  })
+
+  it("al terminar otra cosa, lo que sigue también dice «seguir donde ibas»", () => {
+    const after = whatFollows(
+      view({ data: { missing: [], health: true }, visit: { purpose: null, questions } }),
+      { key: "firma:c1", at: THURSDAY },
+      { step: { item: "medicines", current: 3, total: 6 }, until: "hasta mañana, 2:15 p. m." },
+    )
+    expect(after.next.find((item) => item.key === "datos")).toMatchObject({ next: "Antes de tu cita: seguir donde ibas", resume: true })
+  })
+
+  it("una dirección sin «sigue» no repone sola", () => {
+    expect(validatePersonalLinkSearch({ token, abre: "datos" }).sigue).toBeUndefined()
+    expect(validatePersonalLinkSearch({ token, abre: "datos", sigue: "no" }).sigue).toBeUndefined()
+  })
+})
+
+// Entrega 9: al vencer el enlace se borra de su celular lo que dejó sin enviar; la pantalla no dice «No perdiste nada».
+describe("el enlace vencido dice lo que pasó con lo escrito", () => {
+  const offer = { channel: "whatsapp" as const, to: "•••701", sentAt: null }
+  it("sin nada a medias, no perdió nada", () => {
+    expect(expiredLinkWords(false, null)).toBe("No perdiste nada: escríbenos por el chat y te enviamos uno nuevo.")
+    expect(expiredLinkWords(false, offer)).toBe("No perdiste nada. Pide uno nuevo y te lo enviamos por WhatsApp al •••701.")
+  })
+
+  it("si se borró lo que había escrito sin enviar, lo dice", () => {
+    expect(expiredLinkWords(true, null)).toBe(
+      "Lo que habías escrito sin enviar se borró de este celular. Escríbenos por el chat y te enviamos uno nuevo.",
+    )
+    expect(expiredLinkWords(true, offer)).toBe(
+      "Lo que habías escrito sin enviar se borró de este celular. Pide uno nuevo y te lo enviamos por WhatsApp al •••701.",
+    )
+    expect(expiredLinkWords(true, offer)).not.toContain("No perdiste nada")
+  })
+})
+
 // QA del 14 nov (B15): «Faltan 2: tipo de documento, número de documento; y unas preguntas de tu salud» se leía como 3.
 describe("la tarjeta de sus datos cuenta lo de su salud", () => {
   it("dos datos y su salud: «Faltan 3»", () => {
+    // Sin cita: con una, va en «Antes de tu cita» (entrega 8), que no cuenta.
     const [datos] = pendingItems(
       view({
+        appointment: null,
         consents: [],
         toSchedule: [],
         data: {

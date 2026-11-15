@@ -29,7 +29,7 @@ import { allowedInboundAttachment } from "./inbound-email.js"
 
 /**
  * La dirección de avisos de la app de Meta de la administración
- * (`/api/webhooks/meta/admin`, ADR 0188): lo que le escriben a Sallca por
+ * (`/api/webhooks/meta/admin`, ADR 0189): lo que le escriben a Sallca por
  * WhatsApp, Messenger o Instagram entra al ARM como el correo. Es otra app que
  * la de las clínicas: un aviso firmado con `META_APP_SECRET` no vale aquí (401),
  * y nada de lo que llega aquí toca una clínica.

@@ -554,7 +554,7 @@ export function createApp(deps: AppDeps) {
       metaSignupAvailable: Boolean(deps.metaSignup),
     }),
   )
-  // WhatsApp, Instagram y Messenger de la administración (ADR 0188).
+  // WhatsApp, Instagram y Messenger de la administración (ADR 0189).
   app.route(
     "/api/admin/chats",
     createAdminChatsRoute({

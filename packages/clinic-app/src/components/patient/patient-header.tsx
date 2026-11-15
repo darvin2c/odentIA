@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { declaredMarkWords, pregnancyChip } from "../../lib/declared-health"
+import { changedMarkWords, declaredMarkWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -71,6 +71,8 @@ import { NewEncounterButton } from "./new-encounter-button"
 import { StaleEncounterNotice } from "./stale-encounter"
 import { UpcomingLine, usePersonUpcoming } from "./next-up"
 import { PatientAvatar } from "./patient-avatar"
+import { PersonalLinkActions } from "./send-personal-link"
+import { beforeVisitKey, beforeVisitWords, fetchBeforeVisit, healthToReviewWords } from "../../lib/before-visit"
 import { useOpenWide } from "./wide-section"
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
@@ -190,6 +192,7 @@ export function PatientClinicalStrip({
     return index === -1 ? null : index
   }
   const pregnancy = health?.pregnancy ?? null
+  const changed = health?.changed ?? null
   // El «No» que marcó la persona (o quien habla por ella) no es «Niega alergias»: nadie se lo preguntó.
   const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
   // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
@@ -220,19 +223,29 @@ export function PatientClinicalStrip({
             // Pasado el término ya no es una alerta: se pide confirmarlo.
             tone: pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
             group: groupIndex((group) => group.pregnancy),
+            changed: false,
           },
         ]
       : []),
     ...(saidNoAllergies !== null
-      ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, group: saidNoAllergies }]
+      ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, group: saidNoAllergies, changed: false }]
       : []),
-    ...clinicalAlerts(detail).map((alert) => ({
-      ...alert,
-      group: groupIndex(
-        (group) =>
-          group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
-      ),
-    })),
+    ...clinicalAlerts(detail).map((alert) => {
+      // Lo que dijo que cambió (entrega 10) va con esa marca, aunque viniera de una declaración anterior.
+      const wasChanged =
+        !!changed &&
+        (changed.allergies.includes(alert.id) || changed.conditions.includes(alert.id) || changed.medications.includes(alert.id))
+      return {
+        ...alert,
+        changed: wasChanged,
+        group: wasChanged
+          ? null
+          : groupIndex(
+              (group) =>
+                group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
+            ),
+      }
+    }),
     // Su «No sé» o su «No» a una clase de medicina, dentro de la caja de su última declaración (B9).
     ...classWords
       .filter((word) => word.said && groups.length > 0)
@@ -241,6 +254,7 @@ export function PatientClinicalStrip({
         label: word.label,
         tone: word.warn ? ("warning" as const) : ("secondary" as const),
         group: groups.length - 1,
+        changed: false,
       })),
     // Lo de la entrevista que cambia la cita (el corazón, la anestesia, la lactancia), dentro de la
     // caja de quien lo dijo si nadie lo revisó (QA del 14 nov, causa raíz). Solo quien lee la historia.
@@ -250,18 +264,22 @@ export function PatientClinicalStrip({
           label: alert.label,
           tone: "warning" as const,
           group: groupIndex((group) => alert.keys.some((key) => group.interview?.includes(key))),
+          changed: false,
         }))
       : []),
   ]
   // Lo grave primero, sea de quien sea (QA del 14 nov, H1): las alergias severas que confirmó el
   // equipo; después cada declaración sin revisar, con su severa delante; después lo demás.
   const severe = (alert: (typeof alerts)[number]) => alert.tone === "destructive"
-  const confirmed = alerts.filter((alert) => alert.group === null)
+  const confirmed = alerts.filter((alert) => alert.group === null && !alert.changed)
+  // Lo que dijo que cambió, con su marca, después de lo que nadie revisó (entrega 10).
+  const saidChanged = alerts.filter((alert) => alert.group === null && alert.changed)
   const ordered = [
     ...confirmed.filter(severe),
     ...groups.flatMap((_group, index) =>
       alerts.filter((alert) => alert.group === index).sort((a, b) => Number(severe(b)) - Number(severe(a))),
     ),
+    ...saidChanged,
     ...confirmed.filter((alert) => !severe(alert)),
   ]
   // El límite corta solo por la cola: una alergia severa nunca se va a «+N».
@@ -270,6 +288,7 @@ export function PatientClinicalStrip({
   )
   const isShown = (alert: (typeof alerts)[number]) => shownIds.has(alert.id)
   const hidden = ordered.length - shownIds.size
+  const unchanged = health?.unchanged ?? null
   const allergyWord =
     saidNoAllergies !== null
       ? null
@@ -281,7 +300,7 @@ export function PatientClinicalStrip({
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null
-  if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0) return null
+  if (alerts.length === 0 && !allergyWord && !medicationWord && classWords.length === 0 && !unchanged) return null
   const moreLabel = `+${hidden} ${hidden === 1 ? "alerta" : "alertas"}`
   const chip = (alert: (typeof alerts)[number]) => (
     <Badge
@@ -342,6 +361,24 @@ export function PatientClinicalStrip({
             </li>
           )
         })}
+        {changed && saidChanged.some(isShown) ? (
+          // Lo de antes no se borra: queda con su marca hasta que lo revise quien la atiende (entrega 10).
+          <li className="flex w-full min-w-0 max-w-full flex-col gap-1.5 rounded-md border border-dashed border-warning/40 bg-warning-soft/40 px-2 py-1 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+            <span id={`${stripId}-cambio`} className="text-xs font-medium">
+              {changedMarkWords(changed.by, changed.at, sex)}
+            </span>
+            <ul aria-labelledby={`${stripId}-cambio`} className="flex min-w-0 flex-wrap items-center gap-2">
+              {saidChanged.filter(isShown).map(item)}
+            </ul>
+          </li>
+        ) : null}
+        {unchanged ? (
+          <li className="flex min-w-0 max-w-full">
+            <Badge variant="secondary" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">
+              {unchangedWords(unchanged.by, unchanged.at, sex)}
+            </Badge>
+          </li>
+        ) : null}
         {confirmed.filter((alert) => !severe(alert) && isShown(alert)).map(item)}
         {allergyWord ? (
           <li className="flex min-w-0 max-w-full">
@@ -398,6 +435,45 @@ function withHealth(detail: PatientFull, health: PatientHealth): PatientFull {
 }
 
 /**
+ * «Antes de su cita: respondió el 13 nov. Lo lee el equipo clínico.» o «por responder · su enlace
+ * se le envió por WhatsApp el 12 nov, 6:10 p. m.», con «Enviarle su enlace» y «Mostrar su código»
+ * ahí mismo (mesa de formularios del 13 nov, entrega 10, C10). Es estado, no contenido: lo ve quien
+ * edita sus datos (`patients.write`, como «Faltan datos»), sin abrir nada. Sin nada que decir, nada.
+ */
+function BeforeVisitLine({ patientId, sex }: { patientId: string; sex?: string | null }) {
+  const canEdit = usePermission("patients.write")
+  const status = useQuery({
+    queryKey: beforeVisitKey(patientId),
+    queryFn: () => fetchBeforeVisit(patientId),
+    enabled: canEdit,
+    retry: false,
+  })
+  const data = status.data?.data
+  // Un fallo no tapa la cabecera: la línea simplemente no sale.
+  if (!canEdit || !data) return null
+  const visit = data.visit
+  const words = visit ? beforeVisitWords(visit) : null
+  return (
+    <>
+      {visit && words ? (
+        <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center">
+          <p>
+            <span className="text-muted-foreground">Antes de su cita: </span>
+            <span className="font-medium">{words.state}</span>
+            {visit.state === "respondio" ? `. ${words.detail}` : ` · ${words.detail}`}
+          </p>
+          {visit.state === "por_responder" ? <PersonalLinkActions patientId={patientId} missing="" /> : null}
+        </div>
+      ) : null}
+      {data.healthToReview ? (
+        // Decisión del dueño (entrega 10): una línea neutra, sin qué dijo; sale aunque no tenga cita.
+        <p className="text-sm text-muted-foreground">{healthToReviewWords(data.healthToReview.at, sex)}</p>
+      ) : null}
+    </>
+  )
+}
+
+/**
  * Lo que la persona tiene por delante, según quien mira (mesa del 9 nov): su
  * próxima cita a quien ve la agenda y lo que debe o tiene a favor a quien ve la
  * caja, en la cabecera de todas las pestañas. Cada moneda por separado, sin
@@ -408,10 +484,13 @@ function HeaderStatus({
   personId,
   patientId,
   onAccount,
+  sex,
 }: {
   personId: string
   patientId: string | null
   onAccount: boolean
+  /** Para «los revisa quien la atiende»: sin sexo registrado no se supone. */
+  sex?: string | null
 }) {
   const canAppointments = usePermission("appointments.read")
   const canFinance = usePermission("finance.read")
@@ -424,10 +503,13 @@ function HeaderStatus({
   const locale = useOrgLocale() ?? "es"
   const balances = (account.data?.data.byCurrency ?? []).filter((row) => row.saldo !== 0)
   const showMoney = canFinance && Boolean(patientId)
-  if (!upcoming && !showMoney) return null
+  const canEditPerson = usePermission("patients.write")
+  if (!upcoming && !showMoney && !(canEditPerson && patientId)) return null
   return (
     <section aria-label="Lo que viene" className="flex flex-col gap-1">
       {upcoming ? <UpcomingLine {...upcoming} /> : null}
+      {/* «Antes de su cita» va con su próxima cita; «Declaró datos de su salud…» sale aunque no tenga una. */}
+      {patientId ? <BeforeVisitLine patientId={patientId} sex={sex} /> : null}
       {showMoney ? (
         <p className="text-sm">
           <span className="text-muted-foreground">Cuenta: </span>
@@ -775,7 +857,7 @@ export function PersonHeader({
             )}
           </p>
         ) : null}
-        <HeaderStatus personId={person.id} patientId={patient?.id ?? null} onAccount={onAccount} />
+        <HeaderStatus personId={person.id} patientId={patient?.id ?? null} onAccount={onAccount} sex={person.sex} />
         {detail ? (
           <PatientClinicalStrip
             detail={clinicalHealth ? withHealth(detail, clinicalHealth) : detail}

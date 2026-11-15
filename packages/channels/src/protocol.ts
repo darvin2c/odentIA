@@ -372,7 +372,7 @@ export interface ChannelAdapterDeps {
   webhookSecret?: string
   /**
    * Topes de `fetchMedia` (WhatsApp, Messenger, Instagram): tamaño y tiempo de
-   * la descarga. Los pone la administración (ADR 0188); sin ellos se baja como
+   * la descarga. Los pone la administración (ADR 0189); sin ellos se baja como
    * siempre.
    */
   media?: MediaDownloadLimits

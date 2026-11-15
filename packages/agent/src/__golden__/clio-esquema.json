@@ -528,6 +528,48 @@
         "additionalProperties": false
       }
     },
+    "fichas": {
+      "default": [],
+      "description": "Respuestas a las preguntas de las fichas abiertas que se listan con lo dictado, una por pregunta. Vacío si no hay fichas abiertas o lo dictado no responde ninguna.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40,
+            "description": "El número de la pregunta en la lista de fichas abiertas que se te da con lo dictado."
+          },
+          "answer": {
+            "description": "La respuesta que dijo: «Sí» o «No», una de las opciones tal como está en la lista, o el número en cifras («6», «7.5», «46»). Vacío si la pregunta admite varias opciones.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "answers": {
+            "description": "Solo si la pregunta admite varias opciones: las que nombró, cada una tal como está en la lista.",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    },
     "correcciones": {
       "default": [],
       "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
@@ -600,6 +642,7 @@
     "procedimientos",
     "citas",
     "materiales",
+    "fichas",
     "correcciones",
     "quitar"
   ],

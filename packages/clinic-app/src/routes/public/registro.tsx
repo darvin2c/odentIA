@@ -7,6 +7,7 @@ import { RegistrationQuestionnaire } from "../../components/patient/registration
 import { RegistroPageSkeleton } from "../../components/skeletons/public-registro"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
+import { deviceDraftKey } from "../../lib/device-draft"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { setOrgLocale } from "../../lib/locale"
 import { fetchPublicRegistration, submitPublicRegistration } from "../../lib/patient-registration"
@@ -150,7 +151,8 @@ function PublicRegistrationPage() {
           countryCode={info.countryCode ?? null}
           ownRecord={ownRecord}
           addressSource={addressSource}
-          draftKey={`${slug}:${token ?? entryPoint ?? "qr"}`}
+          // Lo escrito queda en este celular un día, de esta clínica y de este enlace (entrega 9).
+          draftKey={deviceDraftKey({ clinic: slug, flow: "registro", token, entry: entryPoint })}
           onSubmit={async (answers) => {
             try {
               const result = await submitPublicRegistration(slug, {

@@ -110,6 +110,7 @@ export * from "./letterhead.js"
 export * from "./emergency-advice.js"
 export * from "./encounter-diagnoses.js"
 export * from "./encounter-dictation.js"
+export * from "./dictation-forms.js"
 export * from "./encounters.js"
 export * from "./encounter-visit.js"
 export * from "./encounter-plan-remove.js"
@@ -184,6 +185,10 @@ export * from "./portal-access.js"
 export * from "./portal-papers.js"
 export * from "./portal-policy.js"
 export * from "./portal-questionnaire.js"
+export * from "./portal-visit.js"
+export * from "./visit-answers.js"
+export * from "./before-visit.js"
+export * from "./health-check.js"
 export * from "./prescriptions.js"
 export * from "./procedure-codings.js"
 export * from "./product-agent.js"
@@ -192,6 +197,7 @@ export type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 export {
   agentTextsFor,
   dictationFor,
+  productHooksFor,
   helpTopicsFor,
   productAgentTexts,
   productDictation,

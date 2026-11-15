@@ -60,7 +60,7 @@ const orgRouteApi = getRouteApi("/_org")
 
 const TITLE = "Preguntas al paciente"
 const SUBTITLE =
-  "Lo que se le pregunta al paciente al registrarse y en su enlace, lo registre recepción o se registre solo. Lo que responde llega a su ficha como «lo dijo él» y quien atiende lo revisa con él."
+  "Lo que se le pregunta al paciente al registrarse, en su enlace y antes de cada cita, lo registre recepción o se registre solo. Lo que responde llega a su ficha como «lo dijo él» y quien atiende lo revisa con él."
 
 /** La tarjeta de página, la misma en toda la plataforma. */
 const CARD = "elevated flex flex-col gap-5 rounded-xl border bg-card p-5 sm:p-6"

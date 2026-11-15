@@ -361,7 +361,7 @@ it("hay que preguntarle su salud mientras nadie la registró y no envió «Tus d
   expect(onlyNew).toEqual(expect.arrayContaining(["anticoagulants", "boneMedicines", "dental.corazon"]))
   for (const key of ["allergies", "conditions", "medications", "bloodGroup"]) expect(onlyNew).not.toContain(key)
   const todo = await run((tx) =>
-    patientTodo(tx, orgId, { patientId: patient.id, contactId: patient.personId, withAppointment: false }),
+    patientTodo(tx, orgId, { patientId: patient.id, contactId: patient.personId, appointmentId: null }),
   )
   expect(todo).toMatchObject({ health: true, healthOnlyNew: true })
   // Sin otro dato que le falte, el aviso al reservar no cuenta «sus datos» solo por esas preguntas.

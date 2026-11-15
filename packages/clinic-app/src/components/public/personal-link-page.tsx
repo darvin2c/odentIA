@@ -38,13 +38,23 @@ import {
 } from "../../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { useHydrated } from "../../lib/hydrated"
-import { activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
+import {
+  clearDeviceDraft,
+  clearDeviceDraftsOfLink,
+  type DeviceDraftStep,
+  draftResumeWords,
+  draftUntilWords,
+  personalLinkDraftKey,
+  readDeviceDraft,
+  sweepDeviceDrafts,
+} from "../../lib/device-draft"
+import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
 import { portalTotalsText } from "../../lib/portal"
 import { appWords } from "../../lib/product-words"
 import { AppointmentBlock } from "./appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "./budget-responder"
 import { type BookingPick, ChooseAppointment, type ChooseMode } from "./choose-appointment"
-import { LinkConsentStep, LinkQuestionnaireStep } from "./link-steps"
+import { LinkConsentStep } from "./link-steps"
 import { PersonalDataForm } from "./personal-data-form"
 import { capital, longDay, timeLabel } from "./week-slots"
 
@@ -59,7 +69,10 @@ import { capital, longDay, timeLabel } from "./week-slots"
  * propias de quién decide ni de qué se firma.
  */
 
-/** Lo que abre cada mensaje (`?abre=`), y el cuestionario, que se abre desde la lista. */
+/**
+ * Lo que abre cada mensaje (`?abre=`). `cuestionario` es el de antes: los enlaces ya enviados que
+ * lo nombran abren «Antes de tu cita» (`datos`).
+ */
 export const PERSONAL_LINK_OPENS = [
   "firma",
   "presupuesto",
@@ -79,6 +92,10 @@ export interface PersonalLinkSearch {
   sede?: string
   con?: string
   hora?: string
+  /** Con `abre=datos`: «Corregir mi salud o mis medicinas» (entrega 10). */
+  corregir?: boolean
+  /** Desde «Seguir donde ibas»: «Antes de tu cita» sigue con lo escrito en este celular y su paso (entrega 9). */
+  sigue?: true
 }
 
 const text = (value: unknown) =>
@@ -97,6 +114,8 @@ export function validatePersonalLinkSearch(search: Record<string, unknown>): Per
     sede: text(search.sede),
     con: text(search.con),
     hora: text(search.hora),
+    ...(search.corregir === "1" || search.corregir === 1 || search.corregir === true ? { corregir: true } : {}),
+    ...(search.sigue === 1 || search.sigue === "1" || search.sigue === true ? { sigue: true as const } : {}),
   }
 }
 
@@ -190,6 +209,34 @@ export interface PendingItem {
   next: string
   /** El inicio de su cita: así se sabe qué es de la misma cita. */
   at: string | null
+  /** Lo dejó a medias en este celular: el botón sigue donde iba y se ofrece «Empezar de nuevo». */
+  resume?: boolean
+}
+
+/** Lo que dejó escrito en este celular para esa tarjeta (entrega 9): en qué paso iba y hasta cuándo sigue. */
+export interface DraftOnDevice {
+  step: DeviceDraftStep | null
+  /** «hasta mañana, 2:15 p. m.» */
+  until: string
+}
+
+/**
+ * La tarjeta de lo que dejó a medias en este celular (dibujo 16): «Vas en el paso 3 de
+ * 6», hasta cuándo sigue guardado y «Seguir donde ibas». Sin borrador, la de siempre: no
+ * promete nada que ya no esté.
+ */
+function withDraft(item: PendingItem, draft: DraftOnDevice | null | undefined): PendingItem {
+  if (!draft) return item
+  const words = draftResumeWords(draft.step, draft.until)
+  return {
+    ...item,
+    badge: "Sin enviar",
+    text: words.title,
+    detail: words.text,
+    action: "Seguir donde ibas",
+    next: `${item.title}: seguir donde ibas`,
+    resume: true,
+  }
 }
 
 /**
@@ -198,8 +245,12 @@ export interface PendingItem {
  * Si esa cita sigue «Por confirmar», confirmarla va primero: abre la cita, donde se
  * confirma con el mismo botón de siempre.
  */
-export function whatFollows(view: PersonalLinkView, done: { key: string; at: string | null }): { next: PendingItem[]; more: boolean } {
-  const rest = pendingItems(view).filter((item) => item.key !== done.key)
+export function whatFollows(
+  view: PersonalLinkView,
+  done: { key: string; at: string | null },
+  draft?: DraftOnDevice | null,
+): { next: PendingItem[]; more: boolean } {
+  const rest = pendingItems(view, undefined, draft).filter((item) => item.key !== done.key)
   const sameAppointment = done.at ? rest.filter((item) => item.at === done.at) : []
   const appointment = view.appointment
   const confirm: PendingItem[] =
@@ -223,12 +274,79 @@ export function whatFollows(view: PersonalLinkView, done: { key: string; at: str
   }
 }
 
-export function pendingItems(view: PersonalLinkView): PendingItem[] {
+/**
+ * Quien lee lo que envía antes de atenderla: «el Dr. Luis Prado», o «tu odontólogo» si la cita
+ * no dice con quién es.
+ */
+function readerOf(view: PersonalLinkView, clinician: string): string {
+  const professional = view.appointment?.professionalName?.trim()
+  return professional ? withArticle(professional) : `tu ${clinician}`
+}
+
+/**
+ * «Antes de tu cita» (mesa del 13 nov, entrega 8): con una cita por venir, sus datos, su salud y
+ * su visita van en una sola tarjeta y un solo recorrido. Lo que lleva, en palabras: «Tus datos, tu
+ * salud, tus medicinas y a qué vienes». Nulo si no hay cita o no le queda nada de eso.
+ */
+export function beforeVisitCard(view: PersonalLinkView, clinician: string): PendingItem | null {
+  const appointment = view.appointment && !view.appointment.cancelled ? view.appointment : null
+  if (!appointment || (!view.data && !view.visit && !view.healthCheck)) return null
+  const name = view.patientFirstName
+  const missing = view.data?.missing.length ?? 0
+  const parts = [
+    missing > 0 ? (name ? `los datos de ${name}` : "tus datos") : null,
+    view.data?.health ? (name ? "su salud, sus medicinas" : "tu salud, tus medicinas") : null,
+    // «¿Cambió algo?» (entrega 10): solo la pregunta, nunca lo que dijo entonces.
+    view.healthCheck && !view.data?.health
+      ? name
+        ? `si cambió algo en la salud o en las medicinas de ${name}`
+        : "si cambió algo en tu salud o en tus medicinas"
+      : null,
+    view.visit
+      ? view.visit.questions.reason
+        ? name
+          ? `a qué viene ${name}`
+          : "a qué vienes"
+        : name
+          ? "si le duele algo"
+          : "si te duele algo"
+      : null,
+  ].filter((part): part is string => !!part)
+  // Solo si le duele (una sesión, un control): se le pide que lo cuente.
+  const what = parts.length === 1 && view.visit && !view.visit.questions.reason ? `Cuéntanos ${parts[0]}` : capital(listed(parts))
+  const purpose = view.visit?.purpose ? `${name ? `${name} viene a` : "Vienes a"}: ${view.visit.purpose}. ` : ""
+  return {
+    key: "datos",
+    abre: "datos",
+    title: name ? `Antes de la cita de ${name}` : "Antes de tu cita",
+    // Lo de su visita es opcional; sus datos, si faltan, no.
+    badge: missing > 0 ? "Por completar" : "Opcional",
+    text: `${purpose}${what}.`,
+    detail: `Lo lee ${readerOf(view, clinician)} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.`,
+    action: "Empezar",
+    next: name ? `Antes de la cita de ${name}: empezar` : "Antes de tu cita: empezar",
+    at: appointment.startsAt,
+  }
+}
+
+/**
+ * Una tarjeta por cosa que hacer. `draft`: lo que dejó a medias en este celular en «Antes de
+ * tu cita» o «Tus datos» (los dos son el mismo recorrido), que cambia esa tarjeta.
+ */
+export function pendingItems(view: PersonalLinkView, clinician = "odontólogo", draft?: DraftOnDevice | null): PendingItem[] {
+  const items = linkItems(view, clinician)
+  return draft ? items.map((item) => (item.key === "datos" ? withDraft(item, draft) : item)) : items
+}
+
+function linkItems(view: PersonalLinkView, clinician: string): PendingItem[] {
   const name = view.patientFirstName
   const cita = view.appointment && !view.appointment.cancelled ? view.appointment.startsAt : null
   const items: PendingItem[] = []
   const missing = view.data?.missing ?? []
-  if (missing.length > 0) {
+  const before = beforeVisitCard(view, clinician)
+  if (before) {
+    items.push(before)
+  } else if (missing.length > 0) {
     items.push({
       key: "datos",
       abre: "datos",
@@ -283,18 +401,6 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
       at: consent.appointment?.startsAt ?? cita,
     })
   }
-  if (view.questionnaire) {
-    items.push({
-      key: "cuestionario",
-      abre: "cuestionario",
-      title: name ? `Antes de la cita de ${name}` : "Antes de tu cita",
-      badge: "Por responder",
-      text: view.questionnaire.title,
-      action: "Responder",
-      next: `Responder: ${view.questionnaire.title}`,
-      at: cita,
-    })
-  }
   for (const budget of view.budgets) {
     items.push({
       key: `presupuesto:${budget.id}`,
@@ -335,12 +441,18 @@ export function toldWords(view: PersonalLinkView, clinician: string): { sent: st
   const said = (what: NonNullable<PersonalLinkView["told"]>["items"][number]["what"], first: boolean): string => {
     if (what === "datos") return name ? `los datos de ${name}` : "tus datos"
     if (what === "salud") return name ? (first ? `la salud de ${name}` : "su salud") : "tu salud"
-    return `tus respuestas de «${name ? `Antes de la cita de ${name}` : "Antes de tu cita"}»`
+    return name ? `lo de la visita de ${name}` : "lo de tu visita"
   }
   const moments = [...new Set(told.items.map((item) => item.at))]
+  // «¿Cambió algo?» con «No» (entrega 10): no envió su salud, dijo que nada cambió.
+  const unchanged = name ? `que nada cambió en la salud ni en las medicinas de ${name}` : "que nada cambió en tu salud ni en tus medicinas"
   const sent = moments.map((at) => {
-    const parts = told.items.filter((item) => item.at === at).map((item, index) => said(item.what, index === 0))
-    return withPeriod(`Enviaste ${listed(parts)} el ${whenText({ startsAt: at, timeZone: told.timeZone })}`)
+    const here = told.items.filter((item) => item.at === at)
+    const parts = here.filter((item) => item.what !== "sin_cambios").map((item, index) => said(item.what, index === 0))
+    const when = whenText({ startsAt: at, timeZone: told.timeZone })
+    const saidUnchanged = here.some((item) => item.what === "sin_cambios")
+    if (parts.length === 0) return withPeriod(`Nos dijiste ${unchanged} el ${when}`)
+    return withPeriod(`Enviaste ${listed(parts)}${saidUnchanged ? ` y nos dijiste ${unchanged}` : ""} el ${when}`)
   })
   if (!view.appointment || view.appointment.cancelled) return { sent, reader: null }
   const professional = view.appointment.professionalName?.trim()
@@ -370,16 +482,22 @@ function messagesSummary(view: PersonalLinkView, messages: PersonalLinkMessages)
 }
 
 /** Un enlace a otra pantalla de la misma página: con el mismo token, y «atrás» del teléfono sirve. */
-function screenLink(token: string, to: { abre?: PersonalLinkOpens; id?: string } = {}) {
+function screenLink(token: string, to: { abre?: PersonalLinkOpens; id?: string; corregir?: boolean; sigue?: boolean } = {}) {
   return (
     <Link
       to="/pendientes"
-      search={{ token, ...(to.abre ? { abre: to.abre } : {}), ...(to.id ? { id: to.id } : {}) }}
+      search={{
+        token,
+        ...(to.abre ? { abre: to.abre } : {}),
+        ...(to.id ? { id: to.id } : {}),
+        ...(to.corregir ? { corregir: true } : {}),
+        ...(to.sigue ? { sigue: true as const } : {}),
+      }}
     />
   )
 }
 
-function Block({ item, token }: { item: PendingItem; token: string }) {
+function Block({ item, token, onRestart }: { item: PendingItem; token: string; onRestart?: () => void }) {
   return (
     <section aria-label={item.title} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
@@ -390,12 +508,23 @@ function Block({ item, token }: { item: PendingItem; token: string }) {
         <p className="break-words">{item.text}</p>
         {item.detail ? <p className="text-muted-foreground">{item.detail}</p> : null}
       </div>
-      <Button
-        className="min-h-11 self-start"
-        render={screenLink(token, { abre: item.abre, id: item.id })}
-      >
-        {item.action}
-      </Button>
+      {item.resume && onRestart ? (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button className="min-h-11" render={screenLink(token, { abre: item.abre, id: item.id, sigue: true })}>
+            {item.action}
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11" onClick={onRestart}>
+            Empezar de nuevo
+          </Button>
+        </div>
+      ) : (
+        <Button
+          className="min-h-11 self-start"
+          render={screenLink(token, { abre: item.abre, id: item.id })}
+        >
+          {item.action}
+        </Button>
+      )}
     </section>
   )
 }
@@ -453,7 +582,7 @@ function ActionDone({
               key={item.key}
               variant={index === 0 ? "default" : "outline"}
               className="h-auto min-h-11 w-full justify-start py-2 text-left whitespace-normal"
-              render={screenLink(token, { abre: item.abre, id: item.id })}
+              render={screenLink(token, { abre: item.abre, id: item.id, sigue: item.resume })}
             >
               {item.next}
             </Button>
@@ -530,7 +659,8 @@ export function PersonalLinkPage({
   const [legacyMessages] = useState(
     () => typeof window !== "undefined" && window.location.hash === "#mensajes",
   )
-  const abre = search.abre ?? (legacyMessages ? "mensajes" : undefined)
+  // Los enlaces que abrían el cuestionario de antes (`abre=cuestionario`) abren ahora «Antes de tu cita».
+  const abre = search.abre === "cuestionario" ? "datos" : (search.abre ?? (legacyMessages ? "mensajes" : undefined))
   const [arrived] = useState(() => (token ? (landed.get(token) ?? null) : null))
   const [news, setNews] = useState<News | null>(arrived?.news ?? null)
   // La cita recién reservada o cambiada, mientras la vista se actualiza.
@@ -561,6 +691,35 @@ export function PersonalLinkPage({
   useEffect(() => {
     if (token) landed.delete(token)
   }, [token])
+
+  // Lo escrito a medias en «Antes de tu cita» vive en este celular (entrega 9): es de esta
+  // clínica, de este enlace y de la cita para la que responde.
+  const draftAppointment = booked ?? view?.appointment ?? null
+  const draftKey =
+    slug && token
+      ? personalLinkDraftKey(slug, token, draftAppointment && !draftAppointment.cancelled ? draftAppointment.startsAt : null)
+      : undefined
+  const [draftOnDevice, setDraftOnDevice] = useState<DraftOnDevice | null>(null)
+  // Se mira al hidratar y cada vez que cambia de pantalla (pudo escribir en el recorrido).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `screenKey` es el momento de volver a mirar, no un dato.
+  useEffect(() => {
+    if (!hydrated || !draftKey) return
+    sweepDeviceDrafts()
+    const saved = readDeviceDraft(draftKey)
+    setDraftOnDevice(saved ? { step: saved.step, until: draftUntilWords(saved.expiresAt, Date.now(), activeOrgLocale()) } : null)
+  }, [hydrated, draftKey, screenKey])
+  // El enlace ya no sirve, o ya no le queda nada de eso: lo escrito en el celular ya no sirve y se borra.
+  const linkGone =
+    (viewQuery.error instanceof ApiError &&
+      (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")) ||
+    (!!view && (view.status !== "abierto" || (!view.data && !view.visit)))
+  // Si borró algo, la pantalla del enlace vencido lo dice en vez de «No perdiste nada».
+  const [draftDropped, setDraftDropped] = useState(false)
+  useEffect(() => {
+    if (!linkGone || !slug || !token) return
+    if (clearDeviceDraftsOfLink(slug, token) > 0) setDraftDropped(true)
+    setDraftOnDevice(null)
+  }, [linkGone, slug, token])
 
   const refresh = () => {
     setDidSomething(true)
@@ -627,7 +786,7 @@ export function PersonalLinkPage({
   })
 
   if (!ready && hydrated)
-    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
   if (viewQuery.isPending || landing) {
     return (
       <PageShell maxWidth="md">
@@ -643,7 +802,7 @@ export function PersonalLinkPage({
       viewQuery.error instanceof ApiError &&
       (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")
     ) {
-      return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+      return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
     }
     return (
       <PageShell maxWidth="md">
@@ -656,7 +815,7 @@ export function PersonalLinkPage({
     )
   }
   if (slug === null || token === undefined)
-    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} />
+    return <Closed view={null} slug={slug} token={token ?? null} didSomething={false} draftDropped={draftDropped} />
 
   const appointment = booked ?? view.appointment
   if (view.status !== "abierto") {
@@ -673,7 +832,7 @@ export function PersonalLinkPage({
         </PageShell>
       )
     }
-    return <Closed view={view} slug={slug} token={token} didSomething={didSomething} />
+    return <Closed view={view} slug={slug} token={token} didSomething={didSomething} draftDropped={draftDropped} />
   }
 
   const offersBooking = !!view.booking && !appointment
@@ -711,8 +870,15 @@ export function PersonalLinkPage({
   }
 
   const activeAppointment = appointment && !appointment.cancelled ? appointment : null
-  const items = pendingItems(view)
+  const clinician = appWords().clinician.one
+  const items = pendingItems(view, clinician, draftOnDevice)
   const name = view.patientFirstName
+  /** «Empezar de nuevo» en su tarjeta: lo escrito se borra de este celular y el recorrido empieza en blanco. */
+  const restartDraft = () => {
+    if (draftKey) clearDeviceDraft(draftKey)
+    setDraftOnDevice(null)
+    void navigate({ to: "/pendientes", search: { token, abre: "datos" } })
+  }
 
   if (flow) {
     return (
@@ -783,7 +949,7 @@ export function PersonalLinkPage({
 
   /** «Listo» y lo que sigue de esa cita, dentro de la misma cabecera. */
   if (done) {
-    const { next, more } = whatFollows(view, done)
+    const { next, more } = whatFollows(view, done, draftOnDevice)
     return one(
       done.screen,
       <ActionDone
@@ -810,7 +976,6 @@ export function PersonalLinkPage({
       onAction={items.length > 0 ? toList : undefined}
     />
   )
-  const clinician = appWords().clinician.one
 
   if (abre === "mensajes") {
     if (!view.messages) {
@@ -890,24 +1055,60 @@ export function PersonalLinkPage({
     )
   }
 
+  // «Corregir mi salud o mis medicinas» (entrega 10): vuelve a responder su salud, sin ver lo guardado.
+  if (abre === "datos" && search.corregir && view.correctHealth) {
+    const title = name ? `Corregir la salud de ${name}` : "Corregir tu salud o tus medicinas"
+    return one(
+      title,
+      <>
+        <p className="text-sm text-muted-foreground">
+          Vuelves a responder las preguntas de {name ? `la salud de ${name}` : "tu salud y tus medicinas"}. La clínica recibe
+          lo nuevo para revisarlo {name ? "con ustedes" : "contigo"}; lo de antes no se borra.
+        </p>
+        <PersonalDataForm
+          slug={slug}
+          token={token}
+          clinicName={view.clinicName}
+          mode="corregir"
+          onSent={(words) => {
+            refresh()
+            setDone({ key: "datos", screen: title, ...words, at: activeAppointment?.startsAt ?? null })
+          }}
+        />
+      </>,
+    )
+  }
+
   if (abre === "datos") {
     const missing = view.data?.missing ?? []
     const healthOnly = missing.length === 0 && !!view.data?.health
     const withHealth = !!view.data?.health && !healthOnly
-    const title = name
-      ? healthOnly
-        ? `La salud de ${name}`
-        : `Los datos de ${name}${withHealth ? " y su salud" : ""}`
-      : healthOnly
-        ? "Tu salud"
-        : withHealth
-          ? "Tus datos y tu salud"
-          : "Tus datos"
-    if (!view.data)
+    // Con una cita por venir es «Antes de tu cita»: sus datos, su salud y su visita, un solo recorrido.
+    const before = beforeVisitCard(view, clinician)
+    const title = before
+      ? before.title
+      : name
+        ? healthOnly
+          ? `La salud de ${name}`
+          : `Los datos de ${name}${withHealth ? " y su salud" : ""}`
+        : healthOnly
+          ? "Tu salud"
+          : withHealth
+            ? "Tus datos y tu salud"
+            : "Tus datos"
+    if (!view.data && !view.visit && !view.healthCheck) {
+      // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
+      const sentAt = view.told?.items.at(-1)?.at
       return one(
-        title,
-        empty("Tus datos ya están en la clínica", "No te falta nada por completar."),
+        activeAppointment ? (name ? `Antes de la cita de ${name}` : "Antes de tu cita") : title,
+        sentAt && view.told
+          ? empty(
+              "Ya lo enviaste",
+              `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
+            )
+          : empty("Ya está en la clínica", "No te falta nada por completar."),
       )
+    }
     return one(
       title,
       <>
@@ -921,8 +1122,12 @@ export function PersonalLinkPage({
           slug={slug}
           token={token}
           clinicName={view.clinicName}
+          reader={activeAppointment ? readerOf(view, clinician) : null}
+          draftKey={draftKey}
+          resume={search.sigue === true}
           onSent={(words) => {
             refresh()
+            setDraftOnDevice(null)
             setDone({
               key: "datos",
               screen: title,
@@ -932,41 +1137,6 @@ export function PersonalLinkPage({
           }}
         />
       </>,
-    )
-  }
-
-  if (abre === "cuestionario") {
-    const title = name ? `Antes de la cita de ${name}` : "Antes de tu cita"
-    if (!view.questionnaire) {
-      // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
-      const sentAt = view.told?.items.find((item) => item.what === "cuestionario")?.at
-      return one(
-        title,
-        sentAt && view.told
-          ? empty(
-              "Ya lo enviaste",
-              `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
-            )
-          : empty("No tienes preguntas por responder", "Si ya respondiste, la clínica tiene tus respuestas."),
-      )
-    }
-    return one(
-      title,
-      <LinkQuestionnaireStep
-        slug={slug}
-        token={token}
-        onAlreadySent={refresh}
-        onSent={() => {
-          refresh()
-          setDone({
-            key: "cuestionario",
-            screen: title,
-            title: "Gracias, recibimos tus respuestas",
-            text: `Tu ${clinician} las revisa contigo en la cita.`,
-            at: activeAppointment?.startsAt ?? null,
-          })
-        }}
-      />,
     )
   }
 
@@ -1134,7 +1304,7 @@ export function PersonalLinkPage({
           </section>
         ) : null}
         {items.map((item) => (
-          <Block key={item.key} item={item} token={token} />
+          <Block key={item.key} item={item} token={token} onRestart={item.resume ? restartDraft : undefined} />
         ))}
         {view.toSchedule.length > 0 ? (
           // M3: lo que aceptó de su presupuesto y aún no tiene cita.
@@ -1187,6 +1357,27 @@ export function PersonalLinkPage({
               ))}
               {told.reader ? <p className="text-muted-foreground">{told.reader}</p> : null}
             </div>
+            {view.correctHealth ? (
+              // Entrega 10 (C8): sabe qué envió y cuándo, y cómo corregirlo, sin ver lo guardado (decisión 9).
+              <div className="flex flex-col gap-2 border-t pt-3 text-sm">
+                <p className="font-medium">¿Te equivocaste en algo, como la dosis de una medicina?</p>
+                <Button
+                  variant="outline"
+                  className="min-h-11 self-start"
+                  render={screenLink(token, { abre: "datos", corregir: true })}
+                >
+                  Corregir mi salud o mis medicinas
+                </Button>
+                <p className="text-muted-foreground">
+                  Vuelves a responder esas preguntas. La clínica recibe lo nuevo para revisarlo {name ? "con ustedes" : "contigo"}; lo
+                  de antes no se borra.
+                </p>
+                <p className="text-muted-foreground">
+                  Lo que respondiste no se muestra aquí, porque este enlace se abre sin código. Lo ves en tu portal del paciente,
+                  con tu código, si la clínica te dio acceso.
+                </p>
+              </div>
+            ) : null}
           </section>
         ) : null}
         {view.messages ? (
@@ -1224,11 +1415,14 @@ function Closed({
   slug,
   token,
   didSomething,
+  draftDropped = false,
 }: {
   view: PersonalLinkView | null
   slug: string | null
   token: string | null
   didSomething: boolean
+  /** Al cerrarse el enlace se borró de este celular lo que había escrito sin enviar. */
+  draftDropped?: boolean
 }) {
   const closed = view?.closed ?? null
   const shell = (content: ReactNode) => <PageShell maxWidth="md">{content}</PageShell>
@@ -1251,15 +1445,11 @@ function Closed({
     )
   }
   if (closed?.reason === "vencido" && closed.resend && slug && token) {
-    return shell(<Resend slug={slug} token={token} offer={closed.resend} />)
+    return shell(<Resend slug={slug} token={token} offer={closed.resend} draftDropped={draftDropped} />)
   }
   if (closed?.reason === "vencido") {
     return shell(
-      <EmptyState
-        icon={Clock}
-        title="Este enlace venció"
-        description="No perdiste nada: escríbenos por el chat y te enviamos uno nuevo."
-      />,
+      <EmptyState icon={Clock} title="Este enlace venció" description={expiredLinkWords(draftDropped, null)} />,
     )
   }
   if (closed?.reason === "quitado") {
@@ -1280,6 +1470,20 @@ function Closed({
   )
 }
 
+/**
+ * Lo que dice un enlace vencido. Lo enviado ya llegó, pero si dejó algo escrito sin
+ * enviar, al vencer se borró de este celular (entrega 9): se dice eso, no «No perdiste
+ * nada». Con `offer`, se puede pedir uno nuevo desde aquí.
+ */
+export function expiredLinkWords(draftDropped: boolean, offer: PersonalLinkResend | null): string {
+  const lost = draftDropped ? "Lo que habías escrito sin enviar se borró de este celular." : "No perdiste nada."
+  return offer
+    ? `${lost} Pide uno nuevo y te lo enviamos ${viaWords(offer)}.`
+    : draftDropped
+      ? `${lost} Escríbenos por el chat y te enviamos uno nuevo.`
+      : "No perdiste nada: escríbenos por el chat y te enviamos uno nuevo."
+}
+
 /** «por WhatsApp al •••701» o «por correo a e•••@gmail.com». */
 function viaWords(offer: PersonalLinkResend): string {
   if (offer.channel === "correo") return `por correo${offer.to ? ` a ${offer.to}` : ""}`
@@ -1295,10 +1499,13 @@ function Resend({
   slug,
   token,
   offer,
+  draftDropped,
 }: {
   slug: string
   token: string
   offer: PersonalLinkResend
+  /** Al vencer se borró de este celular lo que había escrito sin enviar. */
+  draftDropped: boolean
 }) {
   const send = useMutation({ retry: false, mutationFn: () => resendPersonalLink(slug, token) })
   const sent = send.data?.data ?? null
@@ -1331,7 +1538,7 @@ function Resend({
     <EmptyState
       icon={Clock}
       title="Este enlace venció"
-      description={`No perdiste nada. Pide uno nuevo y te lo enviamos ${viaWords(offer)}.`}
+      description={expiredLinkWords(draftDropped, offer)}
     >
       <div className="flex flex-col items-center gap-2">
         <SubmitButton

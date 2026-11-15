@@ -343,8 +343,8 @@ export function ChooseAppointment({
   // Quien ya es paciente: lo que le falta y lo que acepta, también al cambiar o agendar (novedades). Vive en
   // la página, como lo de quien es nueva: no se pierde al volver a elegir la hora. Lo que falta se dice junto al campo.
   const youForm = useYouForm({
-    validate: (value) =>
-      asksYou ? checkYou(value, youFields, view.pending, profile) : asksPromotions && value.promotions === null ? { promotions: "Elige una opción" } : {},
+    // Novedades y promociones se pregunta y se puede dejar sin responder (mesa del 13 nov, decisión 7).
+    validate: (value) => (asksYou ? checkYou(value, youFields, view.pending, profile) : {}),
     submit: async (value) => {
       if (!slot) return
       const input = asksYou

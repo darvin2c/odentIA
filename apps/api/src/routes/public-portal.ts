@@ -1,4 +1,4 @@
-import type { ClinicalProduct } from "@odentia/clinical"
+import { type ClinicalProduct, visitAnswerSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   cancelPortalAppointment,
@@ -8,7 +8,8 @@ import {
   getPortalAccount,
   listPortalOrders,
   getPortalAppointmentCalendar,
-  getPortalQuestionnaire,
+  getPortalHealth,
+  getPortalVisit,
   getPortalAppointments,
   getPortalPaperFileUrl,
   getPortalPaperPdf,
@@ -24,7 +25,7 @@ import {
   resolvePortalOrgByLinkToken,
   resolvePortalOrgBySessionToken,
   revokePortalSession,
-  savePortalQuestionnaire,
+  savePortalVisit,
   ServiceError,
   type PortalContext,
   type Storage,
@@ -361,16 +362,15 @@ export function createPublicPortalRoute(deps: {
   // Sus pedidos (ADR 0172): van con «Su cuenta».
   app.get("/orders", async (c) => portalCall(c, (tx, ctx) => listPortalOrders(tx, ctx)))
 
-  // Cuestionario previo a la cita: lo responde quien tiene la sesión.
-  app.get("/questionnaire", async (c) => portalCall(c, (tx, ctx) => getPortalQuestionnaire(tx, ctx)))
-  app.put("/questionnaire", async (c) => {
-    const parsed = z
-      .object({ answers: z.record(z.string(), z.unknown()), submit: z.boolean().optional() })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null))
+  // «Antes de tu cita»: lo de su visita, con la misma regla de su enlace (lo responde quien decide por el paciente).
+  app.get("/visit", async (c) => portalCall(c, (tx, ctx) => getPortalVisit(tx, ctx)))
+  app.post("/visit", async (c) => {
+    const parsed = visitAnswerSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return portalCall(c, (tx, ctx) => savePortalQuestionnaire(tx, ctx, parsed.data))
+    return portalCall(c, (tx, ctx) => savePortalVisit(tx, ctx, parsed.data))
   })
+  // «Lo que nos contaste de tu salud»: lo que su enlace no muestra se lee aquí, con su código (entrega 10).
+  app.get("/health", async (c) => portalCall(c, (tx, ctx) => getPortalHealth(tx, ctx)))
 
   // Si el teléfono no puede guardar la llave, la sesión se recuerda 30 días (decisión 9).
   app.post("/session/remember", async (c) => portalCall(c, (tx, ctx) => rememberPortalSession(tx, ctx)))

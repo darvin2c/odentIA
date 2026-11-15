@@ -3,6 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { conversation } from "@odentia/db/schema/crm"
 import {
   clinicOriginOf,
+  receptionHealthStatus,
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
@@ -155,6 +156,19 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => previewPersonalLinkSend(tx, orgId, params.data.id)))
+  })
+
+  // «Antes de su cita: respondió el … / por responder» y cuándo se le envió su enlace (entrega 10).
+  // Es estado, no contenido: lo ve quien edita sus datos, como «Faltan datos», sin permiso nuevo.
+  app.get("/patients/:id/personal-link/before-visit", async c => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Esto lo ve quien edita sus datos"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    if (!params.success) return validationError(c, params.error.issues)
+    // Con «Declaró datos de su salud el …»: solo la fecha y que hay algo por revisar, nunca qué.
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => receptionHealthStatus(tx, orgId, params.data.id)))
   })
 
   app.post("/patients/:id/personal-link", async c => {

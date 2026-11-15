@@ -1,6 +1,6 @@
 -- El WhatsApp de la administración (14 nov): lo que TS no declara. Las tablas `saas_chat` y
 -- `saas_inbound_message` y las columnas nuevas de `saas_outreach`, `saas_follow_up` y
--- `saas_client_file` las generó 0123 desde el esquema; viven en `admin` y no reciben ningún GRANT
+-- `saas_client_file` las generó 0127 desde el esquema; viven en `admin` y no reciben ningún GRANT
 -- al rol de la aplicación (ADR 0063 y 0064). No llevan RLS: no tienen `organization_id`.
 
 -- La bitácora sigue solo agregando, con las mismas excepciones de 0108 (solo administración de

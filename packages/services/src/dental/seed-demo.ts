@@ -34,6 +34,7 @@ import {
   clinicalNote,
   encounter,
   encounterDiagnosis,
+  encounterDictationSuggestion,
   encounterPlanItem,
   encounterProcedure,
   encounterSite,
@@ -46,6 +47,7 @@ import {
   patientContact,
   patientDocument,
   patientDocumentContext,
+  patientHealthDeclaration,
   patientMedication,
   patientPayment,
   patientPaymentApplication,
@@ -64,6 +66,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
+  appointmentVisitAnswer,
   clinicalFormResponse,
   clinicalFormTemplate,
   consentDocument,
@@ -592,6 +595,8 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   // El periodontograma apunta a su atención (ADR 0054): va antes que ella.
   await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, orgs))
   await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, orgs))
+  // Lo que contaron antes de sus citas apunta a la atención en que se vio: va antes que ella.
+  await db.delete(appointmentVisitAnswer).where(inArray(appointmentVisitAnswer.organizationId, orgs))
   await db.delete(encounter).where(inArray(encounter.organizationId, orgs))
   // «Mi calendario» apunta a la persona: va antes que el equipo.
   await db.delete(calendarFeedUse).where(inArray(calendarFeedUse.organizationId, orgs))
@@ -4805,6 +4810,143 @@ if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la se
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
 
+// «Antes de tu cita» (mesa del 13 nov, entrega 8, caso C2): Marta tiene cita hoy con la Dra. Ana, y
+// recepción anotó «Dolor en muela de abajo». Ayer contó desde su enlace a qué viene y cuánto le duele:
+// al atenderla, «Hoy viene a…» lo trae con «Usar como motivo», sin teclear. Su próxima cita, en tres
+// meses, aún no tiene lo de esa visita: su enlace se lo vuelve a preguntar (C6).
+{
+  const [martaRow] = await db
+    .select({ patientId: patient.id, personId: patient.personId })
+    .from(patient)
+    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
+    .where(and(eq(patient.organizationId, ORG_A), eq(contact.docNumber, "70090815")))
+    .limit(1)
+  if (!martaRow) throw new Error("Falta Marta en la semilla")
+  const martaToday = await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: martaRow.patientId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    startsAt: lima(0, "16:00"),
+    endsAt: lima(0, "16:45"),
+    status: "confirmada",
+    reason: "Dolor en muela de abajo",
+    notice: false,
+  })
+  await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: martaRow.patientId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: lima(90, "10:00"),
+    endsAt: lima(90, "10:45"),
+    notice: false,
+    outsideSchedule: true,
+  })
+  const yesterday = new Date(lima(-1, "14:27"))
+  const [told] = await db.insert(appointmentVisitAnswer).values({
+    organizationId: ORG_A,
+    patientId: martaRow.patientId,
+    appointmentId: martaToday.id,
+    reason: "Me duele la muela de abajo a la derecha hace 3 días, sobre todo de noche",
+    pain: "si",
+    painLevel: 8,
+    more: "Que me avisen antes de la inyección",
+    respondentContactId: martaRow.personId,
+    submittedVia: "enlace",
+    submittedAt: yesterday,
+  }).returning({ id: appointmentVisitAnswer.id })
+  await db.insert(auditEvent).values({
+    organizationId: ORG_A,
+    actorUserId: `contact:${martaRow.personId}`,
+    entity: "appointment_visit_answer",
+    entityId: told!.id,
+    action: "visit_answer.sent",
+    metadata: { patientId: martaRow.patientId, appointmentId: martaToday.id, via: "enlace" },
+    createdAt: yesterday,
+  })
+}
+
+// «¿Cambió algo?» (mesa del 13 nov, entrega 10, caso C6): Elena se registró sola hace dos meses, antes
+// de su limpieza de entonces, y dijo que toma warfarina. Pasado el mes, su enlace para la cita de
+// pasado mañana empieza con «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?»;
+// recepción ve en su página «Antes de su cita: por responder», sin nada de lo que dijo.
+{
+  const twoMonthsAgo = new Date(lima(-60, "18:20"))
+  await db.transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "public", entryPoint: "qr" },
+      {
+        submissionId: randomUUID(),
+        formVersion: registrationConfig.version,
+        answers: {
+          demographics: {
+            displayName: "Elena Vargas Núñez",
+            givenNames: "Elena",
+            familyName: "Vargas Núñez",
+            birthDate: "1958-08-02",
+            sex: "F",
+            // Su propio celular: el de Carla (+51987000939, entrega 7) haría esperar su registro a recepción.
+            phone: "+51987000941",
+            docType: "DNI",
+            docNumber: "70090816",
+          },
+          respondent: "patient",
+          privacyAccepted: true,
+          health: {
+            allergies: { state: "none", items: [] },
+            conditions: { state: "recorded", items: [{ name: "Fibrilación auricular" }] },
+            anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
+            boneMedicines: { state: "none" },
+            medications: { state: "none", items: [] },
+          },
+        },
+      },
+    ),
+  )
+  const [elena] = await db
+    .select({ patientId: patient.id })
+    .from(patient)
+    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
+    .where(and(eq(patient.organizationId, ORG_A), eq(contact.docNumber, "70090816")))
+    .limit(1)
+  const elenaId = elena?.patientId
+  if (!elenaId) throw new Error("Falta Elena en la semilla")
+  // Lo dijo hace dos meses: la declaración guarda ese día (se siembra con el dueño de la base).
+  await db
+    .update(patientHealthDeclaration)
+    .set({ saidAt: twoMonthsAgo })
+    .where(and(eq(patientHealthDeclaration.organizationId, ORG_A), eq(patientHealthDeclaration.patientId, elenaId)))
+  // Su limpieza de entonces, antes de que abra la sede: no choca con la historia de Reportes.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: elenaId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: new Date(lima(-59, "07:10")),
+    endsAt: new Date(lima(-59, "07:40")),
+    durationMin: 30,
+    status: "atendida",
+    createdBy: ANA_ID,
+  })
+  await createAppointment(db, ORG_A, RECEPCION_ID, {
+    branchId: miraflores.id,
+    patientId: elenaId,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    startsAt: lima(2, "07:15"),
+    endsAt: lima(2, "07:45"),
+    notice: false,
+    outsideSchedule: true,
+  })
+}
+
 // El control se cumple con la visita que toca (ADR 0152).
 // - Sofía Ramírez: su control de mantenimiento de 6 meses, indicado hace 5, ya
 //   está en su ventana, y mañana tiene una limpieza dada desde la Agenda, sin
@@ -4946,6 +5088,9 @@ for (const seed of [
 //   de su cita, y «Empezar la de hoy» la abre con la del 12 oct al lado.
 // - C3 · Thiago, 6 años, con una cita sin servicio con la Dra. Ana: se le ofrece la de odontopediatría
 //   por su edad, y la odontoestomatológica por la especialidad de quien atiende.
+// - Entrega 11 · Mateo Flores, 16 años, control de ortodoncia con el Dr. Luis: la ficha de hoy ya
+//   empezada y lo que propuso Clío al dictar: overjet y clase I izquierda por aceptar, la clase II
+//   derecha sin su división (por revisar: la elige él) y el overbite ya aceptado.
 {
   const [ortho] = await db
     .select()
@@ -5035,6 +5180,104 @@ for (const seed of [
     notice: false,
   })
   await createEncounter(db, ORG_A, ANA_ID, thiago.id, { appointmentId: thiagoToday.id })
+
+  const mateo = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Mateo Flores Guzmán",
+    givenNames: "Mateo",
+    familyName: "Flores Guzmán",
+    birthDate: "2010-02-11",
+    phone: "+51987650732",
+    registeredBranchId: miraflores.id,
+  })
+  const mateoToday = await createAppointment(db, ORG_A, ANA_ID, {
+    branchId: miraflores.id,
+    patientId: mateo.id,
+    professionalUserId: LUIS_ID,
+    serviceId: serviceIdA("ORTODONCIA_CTRL"),
+    startsAt: lima(0, "11:30"),
+    endsAt: lima(0, "12:00"),
+    status: "confirmada",
+    outsideSchedule: true,
+    overrideBusy: true,
+    notice: false,
+  })
+  const mateoVisit = await createEncounter(db, ORG_A, LUIS_ID, mateo.id, { appointmentId: mateoToday.id })
+  const dictatedAt = new Date()
+  const [mateoForm] = await db
+    .insert(clinicalFormResponse)
+    .values({
+      organizationId: ORG_A,
+      templateId: ortho.id,
+      templateVersion: ortho.version,
+      templateTitle: ortho.title,
+      templateSnapshot: ortho.schema,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      authorUserId: LUIS_ID,
+      status: "borrador",
+      source: "staff",
+      answers: { overbite: 3 },
+    })
+    .returning({ id: clinicalFormResponse.id })
+  if (!mateoForm) throw new Error("No se creó la ficha de Mateo")
+  // Lo que Clío propuso del dictado, con la forma que guarda el servicio (`prepareFormAnswer`).
+  const proposal = (fieldId: string, label: string, type: string, order: number, value: unknown, extra: Record<string, unknown> = {}) => ({
+    responseId: mateoForm.id,
+    fieldId,
+    formTitle: ortho.title,
+    label,
+    type,
+    order,
+    value,
+    ...extra,
+  })
+  await db.insert(encounterDictationSuggestion).values([
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("overjet", "Overjet", "numero", 4, 5, { unit: "mm" }),
+      sourceText: "Overjet de cinco milímetros",
+      status: "lista",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("clase_molar_izquierda", "Clase molar izquierda (Angle)", "opcion_unica", 1, "Clase I"),
+      sourceText: "Clase uno molar izquierda",
+      status: "lista",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("clase_molar_derecha", "Clase molar derecha (Angle)", "opcion_unica", 0, null),
+      sourceText: "clase dos molar derecha",
+      status: "por_revisar",
+      note: "Dijiste «clase dos molar derecha»: no alcanza para elegir entre «Clase II división 1» y «Clase II división 2». Elige tú.",
+    },
+    {
+      organizationId: ORG_A,
+      patientId: mateo.id,
+      encounterId: mateoVisit.id,
+      professionalUserId: LUIS_ID,
+      kind: "ficha",
+      payload: proposal("overbite", "Overbite", "numero", 5, 3, { unit: "mm" }),
+      sourceText: "overbite de tres",
+      status: "confirmada",
+      entityId: mateoForm.id,
+      decidedBy: LUIS_ID,
+      decidedAt: dictatedAt,
+    },
+  ])
 }
 // Configuración › Comisiones por profesional con cada caso: el odontólogo de la demo comisiona solo
 // por la endodoncia (lo demás que atiende no comisiona), junto a quien tiene porcentaje y servicios aparte.

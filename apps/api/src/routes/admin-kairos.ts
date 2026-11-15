@@ -72,7 +72,7 @@ export interface AdminKairosDeps {
   conversationMailer?: Mailer
   /** «Conectar con Facebook» está configurado: sin él, el paso de WhatsApp del alta espera a Meta. */
   metaSignupAvailable?: boolean
-  /** Los canales de la administración (ADR 0188): con WhatsApp, el mensaje sale por el número de Sallca. */
+  /** Los canales de la administración (ADR 0189): con WhatsApp, el mensaje sale por el número de Sallca. */
   channels?: AdminChannels | undefined
   /** Solo las pruebas lo cambian (el envío a Meta). */
   fetch?: typeof fetch

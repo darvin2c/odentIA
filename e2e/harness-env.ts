@@ -158,7 +158,7 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     // El correo entrante (soporte@ y los demás buzones) llega firmado como lo firma el worker de
     // Cloudflare; con una clave solo de pruebas, el recorrido lo manda igual.
     INBOUND_EMAIL_SECRET: "e2e-only-inbound-email-secret-0123456789abcdef",
-    // Los canales de la administración (ADR 0188) con claves solo de pruebas: los avisos de Meta
+    // Los canales de la administración (ADR 0189) con claves solo de pruebas: los avisos de Meta
     // llegan firmados con ellas y lo que sale va a la Meta de mentira del supervisor
     // (`ADMIN_META_GRAPH_URL`, `meta-graph-stub.ts`).
     ADMIN_META_APP_SECRET: "e2e-only-admin-meta-app-secret-0123456789",

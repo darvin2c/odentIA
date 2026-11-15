@@ -29,6 +29,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Plus, X } from "lucide-react"
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
@@ -46,7 +47,6 @@ import {
   fetchFormTemplates,
   fetchSpecialties,
   publishFormTemplate,
-  fetchTemplateReach,
   reuseFormTemplate,
   updateFormTemplate,
   useClinicSpecialties,
@@ -69,7 +69,6 @@ import {
   sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
-  touchesPatients,
   twinDetail,
   uniqueKey,
   versionStatusWords,
@@ -262,29 +261,6 @@ export function FormTemplatesPanel() {
     [listed, unused],
   )
 
-  // A quién le llega hoy y a quién le llegará después del cambio: lo dice el servidor al abrir la
-  // confirmación, solo si el cambio toca un cuestionario del paciente. La pantalla no lo calcula.
-  const changing = publishing
-    ? { template: publishing, change: "publish" as const }
-    : leaving
-      ? { template: leaving, change: "leave" as const }
-      : reusing
-        ? { template: reusing, change: "reuse" as const }
-        : null
-  const asksReach = changing !== null && touchesPatients(changing.template, templates)
-  const reachQuery = useQuery({
-    queryKey: ["form-template-reach", changing?.template.id, changing?.change],
-    queryFn: () => fetchTemplateReach(changing?.template.id ?? "", changing?.change ?? "publish"),
-    enabled: asksReach,
-    // Siempre lo de ahora: otra persona pudo publicar otro cuestionario hace un minuto.
-    staleTime: 0,
-    gcTime: 0,
-    retry: 1,
-  })
-  const reach = asksReach ? (reachQuery.data?.data ?? null) : null
-  // Mientras llega, la confirmación espera; si no se pudo consultar, se confirma igual, sin nombrar a ninguno.
-  const reachLoading = asksReach && reachQuery.isPending
-  const CHECKING = "Comprobando qué cuestionario reciben hoy los pacientes…"
 
   return (
     <div ref={listRef} className="flex flex-col gap-4">
@@ -379,7 +355,8 @@ export function FormTemplatesPanel() {
                             Versión {version.version} · {versionStatusWords(version)}
                           </Badge>
                         ))}
-                        {latest.respondent === "portal" ? <Badge variant="outline">Lo responde el paciente</Badge> : null}
+                        {/* El cuestionario del paciente de antes: lo respondido se conserva; ya no se publica (entrega 8). */}
+                        {latest.respondent === "portal" ? <Badge variant="outline">Lo respondía el paciente · ya no se usa</Badge> : null}
                       </div>
                     </div>
                     {canAdmin ? (
@@ -521,10 +498,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "publish"}
         variant="default"
         title={publishing ? `¿Publicar la versión ${publishing.version} de «${publishing.title}»?` : "Publicar"}
-        // Lo que de verdad pasa: el del paciente dice a quién le llega y a cuál reemplaza, por su nombre.
-        description={publishing ? (reachLoading ? CHECKING : publishWords(publishing, templates, reach)) : ""}
+        description={publishing ? publishWords(publishing, templates) : ""}
         confirmLabel="Publicar"
-        pending={publishMutation.isPending || reachLoading}
+        pending={publishMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "publish" && sending.run(() => publishMutation.mutate(confirm.draft))}
       />
@@ -532,9 +508,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "leave"}
         variant="default"
         title={leaving ? `¿Dejar de usar «${leaving.title}»?` : "Dejar de usar"}
-        description={leaving ? (reachLoading ? CHECKING : leaveWords(leaving, reach)) : ""}
+        description={leaving ? leaveWords(leaving) : ""}
         confirmLabel="Dejar de usar"
-        pending={leaveMutation.isPending || reachLoading}
+        pending={leaveMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "leave" && sending.run(() => leaveMutation.mutate(confirm.current))}
       />
@@ -542,9 +518,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "reuse"}
         variant="default"
         title={reusing ? `¿Volver a usar «${reusing.title}»?` : "Volver a usar"}
-        description={reusing ? (reachLoading ? CHECKING : (reuseWords(reusing, reach) ?? "")) : ""}
+        description={reusing ? (reuseWords(reusing) ?? "") : ""}
         confirmLabel="Volver a usar"
-        pending={reuseMutation.isPending || reachLoading}
+        pending={reuseMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "reuse" && sending.run(() => reuseMutation.mutate(confirm.last))}
       />
@@ -669,7 +645,8 @@ function useTemplateForm(initial: FormTemplate | null, onSubmit: (value: Templat
     title: initial?.title ?? "",
     description: initial?.description ?? "",
     specialtyId: initial?.specialtyId ?? "",
-    respondent: initial?.respondent ?? "staff",
+    // Un borrador de los de antes que respondía el paciente pasa al equipo al guardarlo: ya no se publica para el paciente.
+    respondent: "staff",
     sections: initial ? structuredClone(initial.schema.sections) : [{ id: "general", title: "General", fields: [] }],
   }))
   return useAppForm({
@@ -835,23 +812,16 @@ function TemplateBuilder({
             />
           )}
         </form.AppField>
-        <form.AppField name="respondent">
-          {(field) => (
-            <field.SelectField
-              label="Quién lo responde"
-              options={[
-                { value: "staff", label: "El equipo, desde la ficha" },
-                { value: "portal", label: "El paciente, desde el portal (cuestionario previo)" },
-              ]}
-              description={
-                respondent === "portal"
-                  ? "Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo finaliza. Al finalizarlo, las respuestas marcadas como alergias pasan a sus antecedentes sin confirmar y la receta avisa."
-                  : undefined
-              }
-              disabled={!canAdmin}
-            />
-          )}
-        </form.AppField>
+        {/* Lo llena el equipo: lo que se le pregunta al paciente, también antes de cada cita, está en un
+            solo lugar (mesa del 13 nov, decisión 1). */}
+        <p className="text-sm text-muted-foreground">
+          Lo llena el equipo en la ficha o en la atención. Lo que se le pregunta al paciente, también antes de cada
+          cita, está en{" "}
+          <Link to="/settings/patient-registration" className="underline underline-offset-4">
+            Preguntas al paciente
+          </Link>
+          .
+        </p>
         <form.Field name="sections" mode="array">
           {(sectionsField) => {
             // `mode="array"` solo vuelve a pintar al cambiar el largo: lo demás se lee de `sections`.

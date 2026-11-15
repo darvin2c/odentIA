@@ -402,6 +402,13 @@ export const HEALTH_DECLARATION_VIAS = ["enlace", "registro", "formulario"] as c
 export const HEALTH_DECLARATION_RESPONDENTS = ["patient", "representative", "staff"] as const
 
 /**
+ * Por qué llegó, antes de una cita (entrega 10): dijo que algo cambió y volvió a responder, corrigió
+ * lo que había enviado, o dijo que nada cambió (`sin_cambios`, sin salud: `health` vacío). Nulo: lo
+ * primero que dijo, o un registro. La misma lista que `HEALTH_DECLARATION_REASONS` de `@odentia/clinical`.
+ */
+export const HEALTH_DECLARATION_ROW_REASONS = ["cambio", "correccion", "sin_cambios"] as const
+
+/**
  * Cada vez que la persona, o quien habla por ella, declaró algo de su salud:
  * lo que dijo tal como llegó, quién lo dijo y cuándo. Solo se agrega y se lee.
  * Antecedentes guarda lo vigente, que el equipo corrige; esta fila es lo que
@@ -427,6 +434,8 @@ export const patientHealthDeclaration = pgTable(
     /** Su vínculo en palabras («madre», «hermana»); nulo si no se sabe. */
     declarantRelation: text("declarant_relation"),
     health: jsonb("health").$type<NonNullable<RegistrationAnswers["health"]>>().notNull(),
+    /** Por qué llegó (`HEALTH_DECLARATION_ROW_REASONS`); nulo si es lo primero que dijo o un registro. */
+    reason: text("reason").$type<(typeof HEALTH_DECLARATION_ROW_REASONS)[number]>(),
     /** Cuándo lo dijo la persona. */
     saidAt: timestamp("said_at", { withTimezone: true }).notNull().defaultNow(),
     /** Cuándo entró a su ficha: el mismo instante de las filas de Antecedentes que trajo. */
@@ -446,6 +455,11 @@ export const patientHealthDeclaration = pgTable(
     check(
       "patient_health_declaration_respondent_check",
       sql`${table.respondent} IN ('patient','representative','staff')`,
+    ),
+    // «Nada cambió» no trae salud: lo que dijo es eso, y nada más.
+    check(
+      "patient_health_declaration_reason_check",
+      sql`${table.reason} IS NULL OR ${table.reason} IN ('cambio','correccion') OR (${table.reason} = 'sin_cambios' AND ${table.health} = '{}'::jsonb)`,
     ),
   ],
 )
@@ -2275,7 +2289,8 @@ export const clinicalFollowUpItem = pgTable(
  * se dice, lo que se hizo hoy, la próxima cita, el presupuesto a pedido,
  * issue 109, y el material que se usó, ADR 0106), el odontograma de odentIA y
  * los signos vitales, el examen por sistemas y el descanso médico de latidIA
- * (issue 229, entrega 10).
+ * (issue 229, entrega 10), y la respuesta de una ficha de consulta empezada
+ * (entrega 11 de la mesa de formularios).
  */
 export const DICTATION_KINDS = [
   "nota",
@@ -2292,6 +2307,7 @@ export const DICTATION_KINDS = [
   "cita",
   "presupuesto",
   "material",
+  "ficha",
 ] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
@@ -2338,7 +2354,7 @@ export const encounterDictationSuggestion = pgTable(
     ),
     check(
       "encounter_dictation_suggestion_kind_check",
-      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')`,
+      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material','ficha')`,
     ),
     check(
       "encounter_dictation_suggestion_status_check",

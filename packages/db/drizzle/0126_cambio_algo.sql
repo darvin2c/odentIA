@@ -1,0 +1,2 @@
+ALTER TABLE "patient_health_declaration" ADD COLUMN "reason" text;--> statement-breakpoint
+ALTER TABLE "patient_health_declaration" ADD CONSTRAINT "patient_health_declaration_reason_check" CHECK ("patient_health_declaration"."reason" IS NULL OR "patient_health_declaration"."reason" IN ('cambio','correccion') OR ("patient_health_declaration"."reason" = 'sin_cambios' AND "patient_health_declaration"."health" = '{}'::jsonb));

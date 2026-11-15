@@ -176,7 +176,7 @@ export const REMINDER_DATA_KEY = "recordatorio_cita_datos"
 
 /**
  * «Antes de tu cita» (entrega 2, decisión 4): un aviso por cita. Cuando la cita trae
- * más que datos por completar (un consentimiento por firmar, el cuestionario, un
+ * más que datos por completar (un consentimiento por firmar, lo de su visita, un
  * presupuesto por responder), el recordatorio dice cuántas cosas son y abre «Tus
  * pendientes». Sale en lugar del recordatorio y solo a quien decide por el paciente;
  * mientras WhatsApp no lo aprueba, sale el de datos o el de siempre. Nunca dice qué es

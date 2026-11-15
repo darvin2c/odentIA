@@ -1092,6 +1092,54 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         forms: ["no le puedo enviar su enlace"],
       },
       {
+        // Mesa de formularios del 13 nov, entrega 8.
+        id: "antes-de-cita-que-le-llega",
+        q: "¿Qué le llega al paciente antes de su cita?",
+        a: "En su enlace tiene una sola tarjeta: «Antes de tu cita». Si le faltan datos o tiene algo por firmar, el recordatorio de su cita se lo dice y trae el enlace; si solo le queda contar a qué viene o decir si cambió algo de su salud, le llega el recordatorio de siempre y, por WhatsApp si escribió en el día o por correo, una línea para contarlo si quiere. Junta lo que falta de sus datos, su salud y sus medicinas, y al final «Tu visita»: a qué viene, con sus palabras, si le duele y cuánto, y algo más. Lo de la visita es opcional, y si su cita es una sesión o un control se le dice a qué viene, como la segunda sesión de un tratamiento, y solo se le pregunta si le duele. Si lo último que dijo de su salud tiene más de un mes, la tarjeta empieza con «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?»: con «No, sigue igual» queda anotado con su fecha; con «Sí, cambió» vuelve a responder su salud y sus medicinas, y lo nuevo llega por revisar, sin borrar lo de antes. Lo envía de una vez y le dice quién lo lee antes de atenderlo. Después, su enlace dice qué envió y cuándo, sin mostrar sus respuestas, y le deja «Corregir mi salud o mis medicinas»; lo que respondió lo ve en su portal, con su código. Se pregunta en cada cita: lo de una visita no se lee como de otra. En su portal ve lo mismo para su próxima cita. Llega a «Hoy viene a…» de la atención de esa cita, con «Usar como motivo». Qué se le pregunta lo eliges en Configuración › Preguntas al paciente, en «Antes de cada cita». Si no responde, la atención se abre, se firma y se cobra igual.",
+        forms: [
+          "que le llega al paciente antes de la cita",
+          "el paciente responde algo antes de venir",
+          "cuestionario antes de la cita",
+          "donde elijo lo que se le pregunta antes de la cita",
+        ],
+      },
+      {
+        id: "recepcion-como-le-mando-lo-que-responde",
+        q: "¿Cómo le mando lo que tiene que responder?",
+        a: "No hace falta armar nada: su enlace tiene «Antes de tu cita», con sus datos que faltan y lo de su visita, y el recordatorio de su cita se lo lleva cuando le falta algo o lo invita a contar a qué viene. En su página, bajo su próxima cita, ves «Antes de su cita:» con «por responder» y cuándo se le envió su enlace, con «Enviarle su enlace» y «Mostrar su código» ahí mismo; si le faltan datos, también desde «Completar» en la cita de la Agenda. Si no se le puede enviar, «Copiar enlace» o «Mostrar su código». Lo que responde lo lee quien lo atiende: recepción no ve sus respuestas.",
+        forms: [
+          "como le mando el cuestionario al paciente",
+          "enviarle lo que tiene que responder antes de su cita",
+          "como le pido que responda antes de venir",
+        ],
+      },
+      {
+        // Mesa de formularios del 13 nov, entrega 10 (C10).
+        id: "recepcion-puedo-ver-lo-que-respondio",
+        q: "¿Puedo ver lo que respondió?",
+        a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Si declaró algo de su salud que nadie revisó todavía, dice «Declaró datos de su salud» con el día, también sin cita por venir: lo revisa quien lo atiende, y tú no ves qué. Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
+        forms: [
+          "ya respondio lo de antes de su cita",
+          "como se si el paciente respondio",
+          "puedo ver lo que contesto el paciente",
+          "recepcion ve las respuestas",
+          "sabe si respondio antes de venir",
+        ],
+      },
+      {
+        // Mesa de formularios del 13 nov, entrega 9.
+        id: "paciente-se-le-borro-lo-que-escribio",
+        q: "La paciente dice que se le borró lo que escribió, ¿qué pasó?",
+        a: "Lo que escribe desde su enlace (sus datos, su salud, «Antes de tu cita») se guarda en su propio celular, no en la clínica, hasta que lo envía o por un día, lo que pase primero. Si vuelve en ese mismo celular y en ese mismo navegador dentro del día, ve «Vas en el paso 3 de 6» y «Seguir donde ibas». Empieza en blanco si lo abre desde otro celular, desde otro navegador o en una ventana privada, si pasó más de un día, si su enlace venció, si borró los datos del navegador o si tocó «Empezar de nuevo». El registro por el código QR o desde la web, sin enlace, se borra al cerrar la página: puede llenarse en un equipo de la clínica, y así nadie ve lo de la persona anterior. Hasta que lo envía, la clínica no recibe nada y nadie del equipo puede recuperarlo: que lo vuelva a responder, o que lo cuente en la cita. Lo que ya envió no se pierde: llegó a la clínica.",
+        forms: [
+          "la paciente dice que se le borro lo que escribio",
+          "se le borro lo que estaba llenando",
+          "el paciente perdio lo que respondio",
+          "se perdieron sus respuestas antes de enviar",
+          "puedo recuperar lo que escribio el paciente",
+        ],
+      },
+      {
         id: "doy-acceso-portal",
         q: "¿Cómo le doy acceso al portal?",
         a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
@@ -1100,7 +1148,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ve-paciente-portal",
         q: "¿Qué ve el paciente en su portal?",
-        a: "Todo lo suyo que la clínica deja ver en Configuración › Portal del paciente («Citas», «Presupuestos», «Cuenta y saldo» y «Documentos»): sus citas, sus presupuestos, su cuenta y sus documentos terminados. Vale para toda la clínica; no se elige por persona. Recetas y órdenes (con su resultado) desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
+        a: "Todo lo suyo que la clínica deja ver en Configuración › Portal del paciente («Citas», «Presupuestos», «Cuenta y saldo» y «Documentos»): sus citas, sus presupuestos, su cuenta y sus documentos terminados. Vale para toda la clínica; no se elige por persona. Recetas y órdenes (con su resultado) desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». Con «Citas», también «Lo que nos contaste de tu salud»: lo último que envió de su salud, tal como lo envió, que su enlace no muestra porque se abre sin código. No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
         forms: ["que ve el paciente en el portal", "que documentos ve en el portal", "el paciente ve sus radiografias"],
       },
       {
@@ -2199,7 +2247,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "alergias-paciente-escribe-cuestionario-llegan-ficha",
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",
-        a: "Sí, si en la pregunta marcas «Son alergias: pasan a sus antecedentes». Cuando el profesional finaliza el cuestionario, cada alergia entra a Antecedentes como declarada, sin confirmar, y la receta avisa al escribir un medicamento que choca. No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
+        a: "Sus alergias se le preguntan en su registro y en su enlace («Antes de tu cita»), y llegan a Antecedentes como «lo dijo él», sin revisar; la receta avisa al escribir un medicamento que choca. Si respondió un cuestionario de los de antes que las preguntaba, entran al «Marcar como revisado». No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
       },
     ],
   },

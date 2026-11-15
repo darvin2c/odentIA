@@ -3,6 +3,8 @@ import {
   formatMoneyAmount,
   moneyTotalsText,
   type PatientGuide,
+  type VisitAnswerInput,
+  type VisitQuestions,
 } from "@odentia/clinical"
 import type {
   AuthenticationResponseJSON,
@@ -12,7 +14,6 @@ import type {
 } from "@simplewebauthn/browser"
 import { ApiError, apiFetch, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
-import type { FormSchemaDef } from "./clinical-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /**
@@ -423,31 +424,73 @@ export async function fetchPortalAccount(sessionToken: string): Promise<PortalAc
   return res.data
 }
 
-export interface PortalQuestionnaire {
-  template: { id: string; title: string; version: number; schema: FormSchemaDef } | null
-  response: {
-    id: string
-    answers: Record<string, unknown>
-    submittedAt: string | null
-    status: string
-  } | null
+/**
+ * «Antes de tu cita» en el portal (mesa del 13 nov, entrega 8): lo de su visita para su próxima
+ * cita, con la misma regla de su enlace. De lo enviado, solo cuándo.
+ */
+export interface PortalVisit {
+  visit: { appointmentId: string; startsAt: string; purpose: string | null; questions: VisitQuestions } | null
+  sent: { at: string; own: boolean } | null
   respondent: { name: string; relationship: string }
 }
 
-export async function fetchPortalQuestionnaire(sessionToken: string): Promise<PortalQuestionnaire> {
-  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire")
+export async function fetchPortalVisit(sessionToken: string): Promise<PortalVisit> {
+  const res = await portalFetch<{ data: PortalVisit }>(sessionToken, "/visit")
   return res.data
 }
 
-export async function savePortalQuestionnaireApi(
-  sessionToken: string,
-  input: { answers: Record<string, unknown>; submit?: boolean },
-): Promise<PortalQuestionnaire> {
-  const res = await portalFetch<{ data: PortalQuestionnaire }>(sessionToken, "/questionnaire", {
-    method: "PUT",
+export async function sendPortalVisitApi(sessionToken: string, input: VisitAnswerInput): Promise<PortalVisit> {
+  const res = await portalFetch<{ data: PortalVisit }>(sessionToken, "/visit", {
+    method: "POST",
     body: JSON.stringify(input),
   })
   return res.data
+}
+
+/**
+ * «Lo que nos contaste de tu salud» (entrega 10, decisión 9): lo que su enlace no muestra, porque
+ * se abre sin código, se lee en su portal. Su última declaración, tal como la envió, y si después
+ * dijo que nada cambió.
+ */
+export interface PortalHealth {
+  told: { at: string; reason: "cambio" | "correccion" | null; health: Record<string, unknown> } | null
+  unchanged: { at: string } | null
+}
+
+export async function fetchPortalHealth(sessionToken: string): Promise<PortalHealth> {
+  const res = await portalFetch<{ data: PortalHealth }>(sessionToken, "/health")
+  return res.data
+}
+
+/** Lo que dijo de cada grupo, en una línea: «Penicilina», «No», «No sé». Nulo si no respondió ese grupo. */
+export function portalHealthLines(health: Record<string, unknown>): Array<{ label: string; value: string }> {
+  const lines: Array<{ label: string; value: string }> = []
+  const group = (key: string, label: string, name: "substance" | "name") => {
+    const value = health[key] as { state?: string; items?: Array<Record<string, unknown>> } | undefined
+    if (!value?.state || value.state === "unanswered") return
+    const text =
+      value.state === "none"
+        ? "No"
+        : value.state === "unknown"
+          ? "No sé"
+          : (value.items ?? [])
+              .map((item) => [item[name], item.dose].filter((part) => typeof part === "string" && part.trim()).join(" "))
+              .filter(Boolean)
+              .join(", ")
+    if (text) lines.push({ label, value: text })
+  }
+  const directed = (key: string, label: string) => {
+    const value = health[key] as { state?: string; detail?: string } | undefined
+    if (!value?.state || value.state === "unanswered") return
+    const text = value.state === "none" ? "No" : value.state === "unknown" ? "No sé" : value.detail?.trim() || "Sí"
+    lines.push({ label, value: text })
+  }
+  group("allergies", "Alergias", "substance")
+  group("conditions", "Enfermedades", "name")
+  directed("anticoagulants", "Anticoagulantes")
+  directed("boneMedicines", "Medicinas para los huesos")
+  group("medications", health.anticoagulants || health.boneMedicines ? "Otros medicamentos" : "Medicinas", "name")
+  return lines
 }
 
 export async function closePortalSessionApi(sessionToken: string): Promise<void> {

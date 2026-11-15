@@ -48,6 +48,7 @@ const looseValue = (site: ProductSite, row: Pick<SiteColumns, "siteSystem" | "si
   row.siteSystem === site.system ? site.value(row.siteCode) : null
 import { listTreatmentJourneys } from "./treatment-journey.js"
 import { encounterSessionKey, encounterSessionsOf } from "./to-schedule.js"
+import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
 const RETIRED_BUDGETS = ["cancelado"] as const
@@ -754,6 +755,11 @@ export interface EncounterBorn {
     fromPerson: boolean
   }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
+  /**
+   * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8), con
+   * cuándo lo envió y quién lo vio al atender; nulo si no contó nada.
+   */
+  told?: VisitAnswerView | null
 }
 
 const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
@@ -1001,6 +1007,10 @@ async function loadBornForEncounters(
       summary: summaries.get(row.id) ?? "",
       fromPerson: row.source === "portal",
     })
+  }
+  // Lo que contó antes de venir, en la atención de su cita.
+  for (const told of await patientVisitAnswers(tx, orgId, patientId)) {
+    if (told.encounterId && encounterIds.includes(told.encounterId)) of(told.encounterId).told = told
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")

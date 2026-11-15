@@ -252,6 +252,20 @@ export interface HealthDeclarationView {
   via: "enlace" | "registro" | "formulario"
   by: HealthDeclarant
   health: Record<string, unknown>
+  /**
+   * Por qué llegó, antes de una cita (entrega 10): dijo que algo cambió, lo corrigió o dijo que
+   * nada cambió (sin salud). Nulo u omitido: lo primero que dijo, o un registro.
+   */
+  reason?: "cambio" | "correccion" | "sin_cambios" | null
+}
+
+/** Lo vigente que «dijo que cambió» la última vez que volvió a responder (lo decide el servidor). */
+export interface ChangedHealth {
+  by: HealthDeclarant
+  at: string
+  allergies: string[]
+  conditions: string[]
+  medications: string[]
 }
 
 export interface PatientHealth {
@@ -277,6 +291,10 @@ export interface PatientHealth {
   pregnancy?: PregnancyToday | null
   /** Lo que declaró de su salud, tal como llegó, de lo más nuevo a lo más antiguo. */
   declarations?: HealthDeclarationView[]
+  /** Lo vigente que «dijo que cambió» (entrega 10); nulo si nada. Opcional: un servidor anterior no lo manda. */
+  changed?: ChangedHealth | null
+  /** «Dijo que nada cambió en su salud ni en sus medicinas», si fue lo último que dijo (entrega 10). */
+  unchanged?: { by: HealthDeclarant; at: string } | null
   /** Anticoagulantes y medicinas para los huesos: si toma, si dijo que no, si no sabe o si nadie se lo preguntó. */
   medicineClasses?: Record<MedicationClass, MedicineClassAnswer>
   latestAnamnesis: {
@@ -704,7 +722,7 @@ export interface FormRecord {
     id: string
     title: string
     /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
-    items: Array<{ id: string; label: string; words: string | null }>
+    items: Array<{ id: string; label: string; words: string | null; /** «Clío · confirmó…», mientras siga siendo eso. */ clio?: string | null }>
   }>
   /** `reason`: por qué se corrigió, si quien corrigió lo dijo. */
   addenda: Array<{ id: string; text: string; reason?: string | null; authorName: string | null; createdAt: string }>
@@ -739,6 +757,28 @@ export interface EncounterDetail {
   addenda: ClinicalNote[]
   /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
   visit?: EncounterVisit | null
+  /**
+   * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8): solo de
+   * esa cita, en el borrador y firmada, con quién lo vio al atender. Nulo sin cita o si no contó nada.
+   */
+  visitAnswer?: VisitAnswerView | null
+}
+
+/** Lo que contó antes de su cita, como lo manda el servidor. */
+export interface VisitAnswerView {
+  id: string
+  appointmentId: string
+  appointmentStartsAt: string
+  reason: string | null
+  pain: "si" | "no" | null
+  painLevel: number | null
+  more: string | null
+  toldPurpose: string | null
+  submittedAt: string
+  submittedVia: "enlace" | "portal"
+  by: HealthDeclarant
+  seen: { by: string; at: string } | null
+  seenEncounterId: string | null
 }
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
@@ -886,6 +926,8 @@ export interface EncounterBorn {
     /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
     fromPerson?: boolean
   }>
+  /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
+  told?: VisitAnswerView | null
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 

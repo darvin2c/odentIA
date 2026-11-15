@@ -1,5 +1,5 @@
 /**
- * Los canales de la administración (ADR 0188), de punta a punta en pantalla:
+ * Los canales de la administración (ADR 0189), de punta a punta en pantalla:
  * un WhatsApp firmado como lo firma Meta llega desde el celular de un contacto
  * que ya tenemos; tras una pasada de Kairós, Hoy dice «WhatsApp sin cliente»,
  * «¿De quién es?» sugiere ese contacto y «Es de …» lo liga; en la ficha ›

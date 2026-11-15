@@ -37,6 +37,8 @@ import {
   type SWEETS_ANSWERS,
   validateDemographics,
   validateRegistrationAnswers,
+  type VisitAnswerInput,
+  type VisitQuestions,
 } from "@odentia/clinical"
 import {
   Button,
@@ -69,6 +71,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "@odentia/ui"
 import {
   advanceOnEnter,
@@ -88,8 +91,22 @@ import {
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
-import { createContext, useContext, useEffect, useId, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react"
 import type { AddressSource } from "../../lib/address-suggestions"
+import {
+  clearDeviceDraft,
+  DEVICE_DRAFT_PROMISE,
+  type DeviceDraft,
+  type DeviceDraftStep,
+  deviceDraftPlace,
+  deviceDraftsWork,
+  draftResumeWords,
+  draftUntilWords,
+  readDeviceDraft,
+  sweepDeviceDrafts,
+  writeDeviceDraft,
+} from "../../lib/device-draft"
+import { activeOrgLocale } from "../../lib/locale"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { productUi } from "../../product/product-ui"
 import { AddressStreetField } from "../address/address-street-field"
@@ -209,6 +226,11 @@ interface Draft {
   referralSource: string
   messages: "" | "si" | "no"
   privacy: boolean
+  /** «Tu visita», antes de su cita: a qué viene, si le duele y cuánto, algo más. Todo opcional. */
+  visitReason: string
+  visitPain: YesNo
+  visitPainLevel: string
+  visitMore: string
 }
 
 const EMPTY: Draft = {
@@ -291,7 +313,13 @@ const EMPTY: Draft = {
   referralSource: "",
   messages: "",
   privacy: false,
+  visitReason: "",
+  visitPain: "",
+  visitPainLevel: "",
+  visitMore: "",
 }
+/** La escala del dolor, de 0 (sin dolor) a 10 (el peor): un grupo que se recorre con flechas. */
+const PAIN_LEVELS = Array.from({ length: 11 }, (_, level) => ({ value: String(level), label: String(level) }))
 
 const DECLARED: ReadonlyArray<{ value: Exclude<Declared, "">; label: string }> = [
   { value: "none", label: "No" },
@@ -464,6 +492,10 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.medical", "history"],
   ["acceptsMessages", "send", "messages"],
   ["privacyAccepted", "send", "privacy"],
+  ["visit.reason", "visit", "visitReason"],
+  ["visit.painLevel", "visit", "visitPainLevel"],
+  ["visit.pain", "visit", "visitPain"],
+  ["visit.more", "visit", "visitMore"],
 ]
 
 /**
@@ -473,7 +505,7 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
  */
 function whereOf(key: string): (typeof WHERE)[number] | undefined {
   const bare = key.replace(/^answers\./, "")
-  const path = /^(demographics|representative|health|respondent|privacyAccepted|acceptsMessages)\b/.test(bare)
+  const path = /^(demographics|representative|health|respondent|privacyAccepted|acceptsMessages|visit)\b/.test(bare)
     ? bare
     : `demographics.${bare}`
   return WHERE.find(([prefix]) => path.startsWith(prefix))
@@ -492,31 +524,86 @@ type Found = { field: keyof Draft; message: string } | null
 /** En una pantalla donde todo es opcional, los campos no repiten «(opcional)»: lo dice la pantalla. */
 const AllOptionalContext = createContext(false)
 
-/** Lo escrito en el registro, guardado en la pestaña (se va al cerrarla). */
-function readQuestionnaireDraft(key: string | undefined): Partial<Draft> | null {
-  if (!key || typeof window === "undefined") return null
-  try {
-    const text = window.sessionStorage.getItem(`registro:${key}`)
-    return text ? (JSON.parse(text) as Partial<Draft>) : null
-  } catch {
-    return null
-  }
+/**
+ * Lo que no se guarda en el celular aunque esté escrito (entrega 9): aceptar el aviso de
+ * privacidad y lo de novedades son decisiones de quien envía, y se toman de nuevo al
+ * volver. Quien siga en un celular compartido no las encuentra marcadas por otro.
+ */
+const NOT_KEPT_ON_DEVICE: ReadonlySet<keyof Draft> = new Set<keyof Draft>(["privacy", "messages"])
+
+/** El mismo tipo que en el formulario vacío: texto, número, sí/no, una lista de textos o el documento sin elegir. */
+function sameShape(empty: Draft[keyof Draft], value: unknown): boolean {
+  if (Array.isArray(empty)) return Array.isArray(value) && value.every((item) => typeof item === "string")
+  if (empty === null) return value === null || typeof value === "string"
+  return typeof value === typeof empty
 }
 
-function writeQuestionnaireDraft(key: string, value: Draft): void {
-  try {
-    window.sessionStorage.setItem(`registro:${key}`, JSON.stringify(value))
-  } catch {
-    // Sin espacio o sin permiso: se sigue sin guardar.
+/**
+ * Lo escrito que va al celular, o lo que se repone desde él: solo los campos del
+ * formulario, con su tipo, y nunca lo de `NOT_KEPT_ON_DEVICE`. Lo que no cuadra (otra
+ * versión, un valor tocado a mano) se descarta y ese campo queda en blanco.
+ */
+export function draftKeptOnDevice(values: object): Partial<Draft> {
+  const source = values as Partial<Record<keyof Draft, unknown>>
+  const kept: Partial<Record<keyof Draft, unknown>> = {}
+  for (const key of Object.keys(EMPTY) as Array<keyof Draft>) {
+    if (NOT_KEPT_ON_DEVICE.has(key) || !(key in source)) continue
+    const value = source[key]
+    if (sameShape(EMPTY[key], value)) kept[key] = value
   }
+  return kept as Partial<Draft>
 }
 
-function clearQuestionnaireDraft(key: string): void {
-  try {
-    window.sessionStorage.removeItem(`registro:${key}`)
-  } catch {
-    // Nada que borrar.
-  }
+/** Si lo guardado tiene algo escrito de verdad (no solo «Para mí», que viene elegido). */
+function draftHasWriting(values: Partial<Draft>): boolean {
+  return (Object.keys(values) as Array<keyof Draft>).some((key) => {
+    if (key === "respondent") return false
+    const value = values[key]
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === "string") return value.trim().length > 0
+    if (typeof value === "number") return value > 0
+    return value === true
+  })
+}
+
+/** Informa en qué paso va el cuestionario (lo que pinta «Paso 3 de 6»), para guardarlo con lo escrito. */
+function StepSeen({ current, total, onSeen }: { current: number; total: number; onSeen: (current: number, total: number) => void }) {
+  useEffect(() => onSeen(current, total), [current, total, onSeen])
+  return null
+}
+
+/**
+ * «Vas en el paso 3 de 6»: lo escrito sigue en este celular y aún no se envió. «Seguir
+ * donde ibas» lo repone con su paso; «Empezar de nuevo» lo borra del celular.
+ */
+export function DraftResumeNotice({
+  step,
+  until,
+  onResume,
+  onRestart,
+}: {
+  step: DeviceDraftStep | null
+  until: string
+  onResume: () => void
+  onRestart: () => void
+}) {
+  const words = draftResumeWords(step, until)
+  return (
+    <section aria-label={words.title} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-xl leading-snug font-semibold">{words.title}</h2>
+        <p className="text-sm text-pretty text-muted-foreground">{words.text}</p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button type="button" className="min-h-11" onClick={onResume}>
+          Seguir donde ibas
+        </Button>
+        <Button type="button" variant="outline" className="min-h-11" onClick={onRestart}>
+          Empezar de nuevo
+        </Button>
+      </div>
+    </section>
+  )
 }
 
 function useRegistrationForm(
@@ -552,7 +639,13 @@ function showFound(form: RegistrationForm, found: NonNullable<Found>): void {
  * de «Enviar», que va en la última pantalla con contenido (cada pantalla lo
  * lleva; el cuestionario muestra solo el de la última).
  */
-const FinishContext = createContext<{ label: string | null; sending: boolean; checks: Map<string, () => Found> } | null>(null)
+const FinishContext = createContext<{
+  label: string | null
+  sending: boolean
+  checks: Map<string, () => Found>
+  /** La pantalla desde la que se envió: el error del envío va solo en ella, no deja inválidas a las demás. */
+  at: string | null
+} | null>(null)
 
 /**
  * «Su enlace»: quien ya es paciente completa solo lo que le falta y, si nadie
@@ -582,6 +675,11 @@ export interface RegistrationFill {
   promotions?: boolean
   /** El nombre de la clínica, para decir a quién llegan sus datos. */
   clinicName?: string
+  /**
+   * «Tu visita», el último paso de «Antes de tu cita» (entrega 8): lo que se le pregunta de esa cita.
+   * `purpose`: a qué viene, si la cita lo dice; `reader`: quien lo lee («el Dr. Luis Prado»).
+   */
+  visit?: { purpose: string | null; questions: VisitQuestions; reader: string } | null
 }
 
 const HEALTH_KEYS = new Set<string>(
@@ -684,6 +782,7 @@ export function RegistrationQuestionnaire({
   shortcuts = true,
   addressSource,
   draftKey,
+  resume = false,
   onSubmit,
 }: {
   config: RegistrationConfig
@@ -697,18 +796,22 @@ export function RegistrationQuestionnaire({
   /** Letras de atajo para el teclado; la vista previa imita un celular y no las lleva. */
   shortcuts?: boolean
   /**
-   * Con una clave, lo escrito sobrevive a recargar o a «Atrás» en esa pestaña
-   * (`sessionStorage`: se va al cerrarla) y salir con algo escrito pide confirmar.
+   * Con una clave (`deviceDraftKey`), lo escrito y el paso quedan en este celular hasta
+   * enviarlo o por un día (entrega 9), y al volver se ofrece «Seguir donde ibas». Si el
+   * navegador no deja guardar, salir con algo escrito pide confirmar, como antes.
    */
   draftKey?: string
+  /** Viene de «Seguir donde ibas» de su tarjeta: repone lo escrito y su paso sin volver a preguntar. */
+  resume?: boolean
   /** Sugerencias para «Calle y número» (Geoapify, issue 36); sin ellas, el campo de siempre. */
   addressSource?: AddressSource
   /**
    * Recibe las respuestas ya validadas. Si lanza, lo que el servidor señala por
    * dato (`fields`, el `ApiError` tal cual) va a su campo y su pantalla; el
-   * resto se dice en la última pantalla.
+   * resto se dice en la última pantalla. En «Su enlace» con «Tu visita», lo de
+   * su visita llega aparte (`visit`), en el mismo envío.
    */
-  onSubmit: (answers: RegistrationAnswers) => Promise<void>
+  onSubmit: (answers: RegistrationAnswers, extra: { visit: VisitAnswerInput | null }) => Promise<void>
 }) {
   const profile = clinicalProfileFor(countryCode)
   const phoneCountry = normalizeCountry(countryCode)
@@ -720,7 +823,8 @@ export function RegistrationQuestionnaire({
     if (wants("phone") || wants("email") || wants("address")) return "contact"
     if (wants("emergencyContactName")) return "emergency"
     if (wants("insuranceType")) return "insurance"
-    if (!fill.health) return "send"
+    // Sin nada de sus datos ni de su salud, «Antes de tu cita» es solo «Tu visita».
+    if (!fill.health) return fill.visit ? "visit" : "send"
     // La primera pantalla de su salud con algo que preguntarle, en el orden en que se ven.
     const wanted = new Set(
       REGISTRATION_FIELDS.filter((field) => field.group === "health" && fill.healthKeys?.has(field.key)).map(
@@ -729,47 +833,74 @@ export function RegistrationQuestionnaire({
     )
     return (fill.healthKeys && HEALTH_ITEMS.find((screen) => wanted.has(screen))) || "health"
   })
-  // Lo escrito antes de recargar, en esta pestaña: se repone ya montada la página (el
-  // servidor no lo conoce, y pintarlo distinto rompería la hidratación).
+  // Lo escrito en este celular (entrega 9): se lee ya montada la página (el servidor no
+  // lo conoce, y pintarlo distinto rompería la hidratación).
   const [restored, setRestored] = useState(false)
+  // Lo guardado que se le ofrece retomar: mientras decide, no se escribe encima.
+  const [offered, setOffered] = useState<DeviceDraft<Draft> | null>(null)
+  // Si este navegador guarda: solo entonces la pantalla lo promete.
+  const [keeps, setKeeps] = useState(false)
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
+  const seeStep = useCallback(
+    (current: number, total: number) =>
+      setProgress((now) => (now?.current === current && now.total === total ? now : { current, total })),
+    [],
+  )
   const sentRef = useRef(false)
+  // La pantalla desde la que se envió: si falla, el error se dice solo ahí.
+  const [sentFrom, setSentFrom] = useState<string | null>(null)
   const form = useRegistrationForm(
     { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
-      await onSubmit(buildAnswers())
-      // Enviado: lo escrito se borra de la pestaña ya, antes de que la pantalla cambie.
+      await onSubmit(buildAnswers(), { visit: buildVisit() })
+      // Enviado: lo escrito se borra del celular ya, antes de que la pantalla cambie.
       sentRef.current = true
-      if (draftKey) clearQuestionnaireDraft(draftKey)
+      if (draftKey) clearDeviceDraft(draftKey)
     },
   )
   const draft = useStore(form.store, (state) => state.values)
   const submitted = useStore(form.store, (state) => state.isSubmitSuccessful)
   const touched = useStore(form.store, (state) => state.isDirty) || restored
-  // biome-ignore lint/correctness/useExhaustiveDependencies: se repone una vez, al montar
-  useEffect(() => {
-    const saved = readQuestionnaireDraft(draftKey)
-    if (!saved) return
-    form.reset({ ...form.state.values, ...saved }, { keepDefaultValues: true })
+  /** Pone lo guardado en el formulario y vuelve a su paso. */
+  const takeBack = (saved: DeviceDraft<Draft>) => {
+    form.reset({ ...form.state.values, ...draftKeptOnDevice(saved.values) }, { keepDefaultValues: true })
     setRestored(true)
-  }, [])
+    if (saved.step) setItem(saved.step.item)
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se lee una vez, al montar
   useEffect(() => {
     if (!draftKey) return
+    // Lo vencido de cualquier enlace se borra al abrir; lo de este, si venció, también.
+    sweepDeviceDrafts()
+    // El registro sin enlace (QR o web) puede ser la tablet de la clínica: lo suyo vive en la
+    // pestaña, no se promete un día en el celular y, al recargar, vuelve solo, sin ofrecérselo a nadie.
+    const inTab = deviceDraftPlace(draftKey) === "pestaña"
+    setKeeps(!inTab && deviceDraftsWork())
+    const saved = readDeviceDraft<Draft>(draftKey)
+    if (!saved || !draftHasWriting(draftKeptOnDevice(saved.values))) return
+    if (resume || inTab) takeBack(saved)
+    else setOffered(saved)
+  }, [])
+  useEffect(() => {
+    if (!draftKey || offered) return
     if (submitted) {
-      clearQuestionnaireDraft(draftKey)
+      clearDeviceDraft(draftKey)
       return
     }
-    if (touched && !sentRef.current) writeQuestionnaireDraft(draftKey, draft)
-  }, [draftKey, draft, submitted, touched])
-  // Salir con algo escrito pide confirmar al navegador: se avisa antes de perderlo.
+    if (!touched || sentRef.current) return
+    const step: DeviceDraftStep | null = progress ? { item, ...progress } : null
+    writeDeviceDraft(draftKey, draftKeptOnDevice(draft), step)
+  }, [draftKey, draft, submitted, touched, offered, item, progress])
+  // Sin dónde guardar, salir con algo escrito pide confirmar al navegador: se avisa antes de perderlo.
   useEffect(() => {
-    if (!draftKey || submitted || !touched || sentRef.current) return
+    if (!draftKey || keeps || submitted || !touched || sentRef.current) return
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault()
     }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
-  }, [draftKey, submitted, touched])
+  }, [draftKey, keeps, submitted, touched])
   const sending = useStore(form.store, (state) => state.isSubmitting)
 
   const set = (patch: Partial<Draft>) => {
@@ -805,7 +936,9 @@ export function RegistrationQuestionnaire({
   const fillHasContent =
     !!fill &&
     (fill.health ||
+      !!fill.visit ||
       [...PERSON_KEYS, "docType", "phone", "email", "address", "emergencyContactName", "insuranceType"].some((key) => fillWants(fill, key)))
+  const visitAsks = fill?.visit?.questions ?? null
   const finishEarly = !!fill && !sendInFill && fillHasContent
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
@@ -1082,6 +1215,19 @@ export function RegistrationQuestionnaire({
     return answers
   }
 
+  /** «Tu visita» como la guarda el servidor: solo lo que se le preguntó y respondió; cuánto, solo con dolor. */
+  function buildVisit(): VisitAnswerInput | null {
+    if (!visitAsks) return null
+    const d = draft
+    const level = d.visitPain === "si" && d.visitPainLevel !== "" ? Number(d.visitPainLevel) : undefined
+    return {
+      ...(visitAsks.reason && d.visitReason.trim() ? { reason: d.visitReason.trim() } : {}),
+      ...(visitAsks.pain && d.visitPain ? { pain: d.visitPain } : {}),
+      ...(level !== undefined ? { painLevel: level } : {}),
+      ...(visitAsks.more && d.visitMore.trim() ? { more: d.visitMore.trim() } : {}),
+    }
+  }
+
   /**
    * Al enviar, la misma regla del servidor (con el producto de la clínica: lo
    * de «Tu boca» o los hábitos solo se pide en el suyo). En «Su enlace» no se
@@ -1118,7 +1264,10 @@ export function RegistrationQuestionnaire({
       (name) => name && (form.getFieldMeta(name)?.errors.length ?? 0) > 0,
     )
     if (!field) {
-      setItem("send")
+      // Lo que no es de un campo (el servidor no respondió, sin red) se dice donde se envió. «Su
+      // enlace» sin «Antes de enviar» se queda en su pantalla: ir a «send», que no tiene, lo devolvía
+      // al paso 1 (QA de la entrega 6, A1).
+      if (!finishEarly) setItem("send")
       return
     }
     setItem(ITEM_OF_FIELD.get(field) ?? "send")
@@ -1152,6 +1301,7 @@ export function RegistrationQuestionnaire({
       })
       return
     }
+    setSentFrom(item)
     const ok = await submitForm(form, { fieldMap: fieldOf, root })
     if (!ok) goToFirstInvalid(root)
   }
@@ -1182,9 +1332,27 @@ export function RegistrationQuestionnaire({
   /** Lo que la regla de la ficha dice de lo escrito en un campo, con sus mismas palabras. */
   const says = (field: keyof Draft, problem: string | null): Found => (problem ? { field, message: problem } : null)
 
+  if (offered && draftKey) {
+    // Volvió con algo escrito en este celular: un toque y sigue donde iba (C8).
+    return (
+      <DraftResumeNotice
+        step={offered.step}
+        until={draftUntilWords(offered.expiresAt, Date.now(), activeOrgLocale())}
+        onResume={() => {
+          takeBack(offered)
+          setOffered(null)
+        }}
+        onRestart={() => {
+          clearDeviceDraft(draftKey)
+          setOffered(null)
+        }}
+      />
+    )
+  }
+
   return (
     <FormContext.Provider value={form}>
-      <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks } : null}>
+      <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks, at: sentFrom } : null}>
       <Questionnaire
         item={item}
         onItemChange={setItem}
@@ -1210,9 +1378,14 @@ export function RegistrationQuestionnaire({
                   }}
                 />
               </span>
+              {draftKey ? <StepSeen current={state.current} total={state.total} onSeen={seeStep} /> : null}
             </div>
           )}
         />
+        {draftKey && keeps ? (
+          // Solo si de verdad se guarda: en una ventana privada que lo bloquea, no se promete.
+          <p className="-mt-5 text-xs text-pretty text-muted-foreground">{DEVICE_DRAFT_PROMISE}</p>
+        ) : null}
 
         <Question
           name="respondent"
@@ -2780,6 +2953,96 @@ export function RegistrationQuestionnaire({
           ) : null}
         </Question>
 
+        {fill && visitAsks ? (
+          // «Tu visita», el último paso de «Antes de tu cita» (mesa del 13 nov, entrega 8): todo
+          // opcional; en una sesión o un control se le dice a qué viene y solo se le pregunta si le duele.
+          <Question
+            name="visit"
+            grouped
+            saysOptional
+            title={child ? `La visita de ${name}` : "Tu visita"}
+            description={`Lo lee ${fill.visit?.reader ?? "quien te atiende"} antes de empezar. Todo es opcional.`}
+            onSkip={() => set({ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "" })}
+          >
+            {fill.visit?.purpose ? (
+              <p className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
+                <span className="text-muted-foreground">{child ? "Viene a: " : "Vienes a: "}</span>
+                <span className="font-medium">{fill.visit.purpose}</span>
+              </p>
+            ) : null}
+            {visitAsks.reason ? (
+              <Labeled
+                name="visitReason"
+                label={you(
+                  "¿A qué vienes? Cuéntalo con tus palabras: qué te molesta o qué te gustaría cambiar.",
+                  `¿A qué viene ${name}? Cuéntalo con tus palabras: qué le molesta o qué le gustaría cambiar.`,
+                )}
+                optional
+              >
+                {(control) => (
+                  <Textarea
+                    {...control.props}
+                    rows={3}
+                    maxLength={2000}
+                    enterKeyHint="next"
+                    value={draft.visitReason}
+                    onChange={(event) => set({ visitReason: event.target.value })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.pain ? (
+              <Labeled name="visitPain" group label={you("¿Te duele ahora?", `¿A ${name} le duele ahora?`)} optional>
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.visitPain || null}
+                    options={YES_NO}
+                    // Sin dolor, no hay cuánto.
+                    onChange={(value) => set({ visitPain: value, ...(value === "si" ? {} : { visitPainLevel: "" }) })}
+                    columns={2}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.pain && draft.visitPain === "si" ? (
+              <Labeled name="visitPainLevel" group label="¿Cuánto? 0 es sin dolor, 10 el peor." optional>
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.visitPainLevel || null}
+                    options={PAIN_LEVELS}
+                    onChange={(value) => set({ visitPainLevel: value })}
+                    // Tocar otra vez el número lo desmarca: no hace falta decir cuánto.
+                    onClear={() => set({ visitPainLevel: "" })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {visitAsks.more ? (
+              <Labeled name="visitMore" label="¿Algo más que quieras contarnos?" optional>
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    autoComplete="off"
+                    maxLength={2000}
+                    value={draft.visitMore}
+                    onChange={(event) => set({ visitMore: event.target.value })}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+          </Question>
+        ) : null}
+
         {fill ? (
           <Question
             name="send"
@@ -2790,8 +3053,9 @@ export function RegistrationQuestionnaire({
             description={`Tus respuestas llegan a ${fill.clinicName ?? "quien te atiende"} al tocar «Enviar». Lo que ya tenemos no cambia.`}
             submit={sending ? "Enviando…" : submitLabel}
             sending={sending}
+            // Novedades y promociones se pregunta y se puede dejar sin responder, como en el registro (mesa
+            // del 13 nov, decisión 7): solo el aviso de privacidad, si falta, se pide para enviar.
             check={() =>
-              needs(!!fill.promotions && !draft.messages, "messages", "Elige una opción.") ??
               needs(!!fill.privacy && !draft.privacy, "privacy", "Para enviar necesitamos que aceptes el aviso de privacidad.")
             }
           >
@@ -2799,6 +3063,7 @@ export function RegistrationQuestionnaire({
               <Labeled
                 name="messages"
                 group
+                optional
                 label={`¿Quieres recibir novedades y promociones de ${fill.clinicName ?? "quien te atiende"} por WhatsApp?`}
                 hint={`Descuentos y campañas${fill.clinicName ? ` de ${fill.clinicName}` : ""}. Puedes darte de baja cuando quieras.`}
               >
@@ -2962,7 +3227,7 @@ function Question({
   const allOptional = grouped && !required
   // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de la pantalla desde la que se envía.
   const submitError = useFormSubmitError(form)
-  const loose = name === "send" || finish ? submitError : null
+  const loose = name === "send" || (finish && fillContext?.at === name) ? submitError : null
 
   function blocked(fieldset: HTMLElement): boolean {
     const found = check?.() ?? null

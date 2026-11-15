@@ -691,8 +691,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(page.getByRole("heading", { name: "Revisa y reserva" })).toBeVisible()
   await expect(page.getByText(/Paso 2 de 2 · Revisa y reserva/)).toBeVisible()
   // Es para ella misma: «Para Eva» solo se dice cuando la cita es de otra persona (su hijo, por ejemplo).
-  await expect(page.getByRole("region", { name: "Tu cita" })).toContainText("Consulta")
-  await expect(page.getByRole("region", { name: "Tu cita" })).not.toContainText("Para Eva")
+  await expect(page.getByRole("region", { name: "Tu cita", exact: true })).toContainText("Consulta")
+  await expect(page.getByRole("region", { name: "Tu cita", exact: true })).not.toContainText("Para Eva")
   const yourData = page.getByRole("region", { name: "Tus datos" })
   await expect(yourData).toContainText("Eva Rojas")
   await expect(yourData).toContainText("DNI ••••8902")
@@ -712,7 +712,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(reserve).toBeInViewport()
   await reserve.click()
   await expect(page.getByText("Escribe tu fecha de nacimiento")).toBeVisible()
-  await expect(page.getByText("Elige una opción")).toBeVisible()
+  // Novedades y promociones se pregunta y no frena (mesa del 13 nov, decisión 7).
+  await expect(page.getByText("Elige una opción")).toHaveCount(0)
   await expect(page.getByLabel("Fecha de nacimiento")).toBeFocused()
   await page.getByLabel("Fecha de nacimiento").fill("14/02/1990")
   // Novedades y promociones: nunca respondió, se pregunta sin nada marcado.
@@ -724,11 +725,11 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   // Lo que eligió ella misma queda confirmado: no se le pide «Confirmar» después.
   await expect(page.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible()
   await expect(page.getByText("Te lo confirmamos también por el chat.")).toBeVisible()
-  await expect(page.getByRole("region", { name: "Tu cita" })).toContainText("Confirmada")
+  await expect(page.getByRole("region", { name: "Tu cita", exact: true })).toContainText("Confirmada")
   await expect(page.getByRole("button", { name: "Confirmar", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Añadir al calendario" })).toBeVisible()
-  // Ya no le falta ningún dato; su salud queda como opcional.
-  await expect(page.getByRole("region", { name: "Tu salud" })).toContainText("Opcional")
+  // Ya no le falta ningún dato: su salud y su visita quedan como opcionales, en «Antes de tu cita» (entrega 8).
+  await expect(page.getByRole("region", { name: "Antes de tu cita" })).toContainText("Opcional")
   await info.attach("reserva-lista", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Queda en la agenda como cualquier cita, con su origen, y la confirmación va a la conversación.
@@ -767,7 +768,7 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
   await expect(page).toHaveURL(new RegExp(`/pendientes\\?token=${token}$`))
   await expect(page.getByRole("heading", { level: 1, name: "Tus pendientes" })).toBeVisible()
-  const yourAppointment = page.getByRole("region", { name: "Tu cita" })
+  const yourAppointment = page.getByRole("region", { name: "Tu cita", exact: true })
   await expect(yourAppointment).toBeVisible()
   const firstStart = rows[0]!.startsAt.toISOString()
   await yourAppointment.getByRole("button", { name: "Cambiar", exact: true }).click()

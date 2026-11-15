@@ -31,7 +31,7 @@ import { runService, serviceErrorResponse } from "./helpers.js"
 
 /**
  * Las conversaciones de la administración por WhatsApp, Instagram y Messenger
- * (`/api/admin/chats`, tras el guard de admin; ADR 0188). Leer y responder es
+ * (`/api/admin/chats`, tras el guard de admin; ADR 0189). Leer y responder es
  * del equipo (Soporte solo lo de una clínica con su app: lo demás es 404);
  * decir de quién es y «No es una clínica», de Administración.
  *

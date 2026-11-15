@@ -286,6 +286,47 @@ describe("la franja de arriba de la ficha y de la atención", () => {
   })
 })
 
+// Mesa de formularios del 13 nov, entrega 10 (C6): le cambiaron el anticoagulante.
+describe("¿cambió algo?, en la franja", () => {
+  const anticoagulant = (id: string, name: string) =>
+    ({ id, name, dose: null, atcCode: "B01AF02" }) as unknown as PatientFull["currentMedications"][number]
+  const detail: Detail = {
+    activeAllergies: [],
+    activeConditions: [],
+    currentMedications: [anticoagulant("m-new", "Apixabán 5 mg"), anticoagulant("m-old", "Warfarina 5 mg")],
+    allergyReview: "none",
+  }
+
+  it("el nuevo arriba, por revisar; el anterior sigue, como «dijo que cambió»", () => {
+    const page = text(
+      <PatientClinicalStrip
+        detail={detail}
+        sex="F"
+        health={health([group({ at: "2027-05-14T15:00:00.000Z", medications: ["m-new"] })], {
+          changed: { by: { kind: "patient", name: null, relation: null }, at: "2027-05-14T15:00:00.000Z", allergies: [], conditions: [], medications: ["m-old"] },
+        })}
+      />,
+    )
+    const fresh = page.indexOf("Anticoagulante: Apixabán 5 mg")
+    const old = page.indexOf("Anticoagulante: Warfarina 5 mg")
+    expect(page).toMatch(/Lo dijo ella el 14 may( 2027)?, sin revisar/)
+    expect(page).toMatch(/Dijo que cambió el 14 may( 2027)?/)
+    expect(fresh).toBeGreaterThan(-1)
+    expect(old).toBeGreaterThan(fresh)
+  })
+
+  it("con «No» dice que nada cambió, con su fecha", () => {
+    const page = text(
+      <PatientClinicalStrip
+        detail={{ ...detail, currentMedications: [anticoagulant("m-old", "Warfarina 5 mg")] }}
+        sex="F"
+        health={health([], { unchanged: { by: { kind: "patient", name: null, relation: null }, at: "2027-05-14T15:00:00.000Z" } })}
+      />,
+    )
+    expect(page).toMatch(/Dijo el 14 may( 2027)? que nada cambió en su salud ni en sus medicinas/)
+  })
+})
+
 // QA del 14 nov (causa raíz): el corazón y la anestesia que dijo el paciente iban a la entrevista sin
 // quién lo dijo y no salían arriba. Ahora salen, dentro de la caja de quien lo dijo, si nadie lo revisó.
 describe("lo que dijo de su corazón y de la anestesia", () => {

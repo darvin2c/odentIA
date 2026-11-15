@@ -18,7 +18,7 @@ import {
 } from "@odentia/services"
 
 /**
- * Enviar por los canales de la administración (ADR 0188) lo que ya quedó
+ * Enviar por los canales de la administración (ADR 0189) lo que ya quedó
  * reservado (`prepareChatReply`): lo usan la conversación (`admin-chats`) y el
  * sí de un mensaje de Kairós (`admin-kairos`). Sale una sola vez, después del
  * commit, con el id del envío como `biz_opaque_callback_data` en WhatsApp.

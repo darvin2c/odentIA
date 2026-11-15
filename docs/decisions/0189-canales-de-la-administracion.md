@@ -1,4 +1,4 @@
-# 0188 · Los canales de la administración
+# 0189 · Los canales de la administración
 
 Fecha: 2026-11-14 · Estado: aceptada · Extiende la [0185](0185-el-arm-de-la-administracion.md) y la [0186](0186-correo-de-la-administracion.md) (el correo entrante del ARM)
 
@@ -37,4 +37,4 @@ Al ARM solo le llegaba el correo. Las clínicas y los interesados nos escriben p
 
 - Servicios: `packages/services/src/admin-inbound-chat.ts`, `admin-channels.ts`, `admin-kairos.ts` (`chat_sin_cliente`, `responder_chat`).
 - Rutas: `apps/api/src/routes/admin-meta-webhook.ts`, `admin-chats.ts`.
-- Esquema: `packages/db/src/schema/admin-arm.ts`; migraciones `0123_canales_de_la_administracion` y `0124_canales_de_la_administracion_reglas`.
+- Esquema: `packages/db/src/schema/admin-arm.ts`; migraciones `0127_canales_de_la_administracion` y `0128_canales_de_la_administracion_reglas`.

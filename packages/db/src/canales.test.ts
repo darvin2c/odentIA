@@ -9,7 +9,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createOwnerDb, type Db } from "./client.js"
 
-// El WhatsApp de la administración (0123 y 0124): la conversación y lo que entra, el envío que
+// El WhatsApp de la administración (0127 y 0128): la conversación y lo que entra, el envío que
 // sale en una conversación (sin cliente, con su `wamid` anotado una vez) y la actividad que no
 // cambia de conversación. Sin GRANT al rol de la aplicación, como el resto del ARM.
 
