@@ -243,4 +243,116 @@ describe("la franja de arriba de la ficha y de la atención", () => {
     expect(box?.inside).toContain("Alergia: Látex")
     expect(box?.inside).not.toContain("Penicilinas")
   })
+
+  it("Marta: «Anticoagulante» y «Huesos» arriba, dichos por ella, antes que lo demás que toma", () => {
+    const marta: Detail = {
+      activeAllergies: [],
+      activeConditions: [],
+      currentMedications: [
+        medication("m0", "Losartán"),
+        { id: "m1", name: "warfarina", dose: "5 mg", atcCode: "B01A" } as unknown as PatientFull["currentMedications"][number],
+        { id: "m2", name: "alendronato", dose: null, atcCode: "M05B" } as unknown as PatientFull["currentMedications"][number],
+      ],
+      allergyReview: "none",
+    }
+    const markup = html(
+      <PatientClinicalStrip detail={marta} sex="F" health={health([group({ medications: ["m1", "m2"] })])} />,
+    )
+    const [box] = boxes(markup)
+    expect(box?.label).toBe("Lo dijo ella el 13 nov, sin revisar")
+    expect(box?.inside).toContain("Anticoagulante: warfarina 5 mg")
+    expect(box?.inside).toContain("Medicina para los huesos: alendronato")
+    expect(box?.inside).not.toContain("Losartán")
+    const page = markup.replace(/<[^>]+>/g, "|")
+    expect(page.indexOf("Anticoagulante: warfarina 5 mg")).toBeGreaterThan(-1)
+    expect(page.indexOf("Medicina para los huesos: alendronato")).toBeGreaterThan(page.indexOf("Anticoagulante: warfarina 5 mg"))
+    expect(page.indexOf("Toma Losartán")).toBeGreaterThan(page.indexOf("Medicina para los huesos: alendronato"))
+  })
+
+  it("en la atención, «No se le preguntó» no es «dijo que no»; la ficha no lo repite", () => {
+    const classes = {
+      medicineClasses: {
+        anticoagulants: { answer: "unasked", said: false },
+        boneMedicines: { answer: "no", said: true },
+      },
+    } as Partial<PatientHealth>
+    const encounter = text(
+      <PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} medicineClasses />,
+    )
+    expect(encounter).toContain("Anticoagulante: no se le preguntó")
+    expect(encounter).toContain("Medicina para los huesos: dijo que no")
+    const chart = text(<PatientClinicalStrip detail={detail} sex="F" health={health([], classes)} />)
+    expect(chart).not.toContain("no se le preguntó")
+  })
+})
+
+// QA del 14 nov (causa raíz): el corazón y la anestesia que dijo el paciente iban a la entrevista sin
+// quién lo dijo y no salían arriba. Ahora salen, dentro de la caja de quien lo dijo, si nadie lo revisó.
+describe("lo que dijo de su corazón y de la anestesia", () => {
+  const base = bareProduct("dental")
+  const withAlerts = {
+    ...base,
+    health: {
+      ...base.health,
+      alerts: () => [
+        { keys: ["corazon" as const, "antibiotico" as const], label: "Corazón: válvula, de nacimiento o endocarditis" },
+        { keys: ["anestesia" as const], label: "Tuvo problemas con la anestesia o sangró tras una extracción" },
+      ],
+    },
+  }
+  const plain: Detail = { activeAllergies: [], activeConditions: [], currentMedications: [], allergyReview: "none" }
+  const answers = { latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" } }
+
+  it("lo dicho y sin revisar va en su caja; lo que ya revisó el equipo va afuera", () => {
+    declareProduct(withAlerts)
+    try {
+      const said = renderToStaticMarkup(
+        <PatientClinicalStrip
+          detail={plain}
+          sex="M"
+          health={health([group({ interview: ["corazon"] })], answers as Partial<PatientHealth>)}
+        />,
+      )
+      const page = said.replace(/<[^>]+>/g, "|")
+      expect(page).toContain("Lo dijo él el 13 nov, sin revisar")
+      expect(page.indexOf("Corazón: válvula")).toBeGreaterThan(page.indexOf("Lo dijo él el 13 nov"))
+      // La anestesia no la dijo en esta declaración: la anotó el equipo y va fuera de la caja.
+      expect(page).toContain("Tuvo problemas con la anestesia")
+      const reviewed = text(<PatientClinicalStrip detail={plain} sex="M" health={health([], answers as Partial<PatientHealth>)} />)
+      expect(reviewed).toContain("Corazón: válvula")
+      expect(reviewed).not.toContain("Lo dijo él")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
+  })
+})
+
+// QA del 14 nov (C2): «No sé» al anticoagulante con medicinas sin clase anotadas.
+it("«Anticoagulante: no sabe · revisa sus medicinas» si toma algo sin clase", () => {
+  const withOther: Detail = {
+    activeAllergies: [],
+    activeConditions: [],
+    currentMedications: [{ id: "m9", name: "Sintrom", dose: null, atcCode: null } as unknown as PatientFull["currentMedications"][number]],
+    allergyReview: "none",
+  }
+  const classes = {
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "no", said: true } },
+  } as Partial<PatientHealth>
+  const page = text(<PatientClinicalStrip detail={withOther} sex="F" health={health([], classes)} medicineClasses />)
+  expect(page).toContain("Anticoagulante: no sabe · revisa sus medicinas")
+})
+
+// QA del 14 nov (B9): «Anticoagulante: no sabe» que dijo ella iba fuera de su caja «Lo dijo ella».
+it("su «No sé» al anticoagulante va dentro de la caja de lo que dijo", () => {
+  const plain: Detail = { activeAllergies: [allergy("a1", "Látex")], activeConditions: [], currentMedications: [], allergyReview: "recorded" }
+  const classes = {
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "unasked", said: false } },
+  } as Partial<PatientHealth>
+  const markup = renderToStaticMarkup(
+    <PatientClinicalStrip detail={plain} sex="F" health={health([group({ allergies: ["a1"] })], classes)} medicineClasses />,
+  )
+  const boxes = [...markup.matchAll(/<ul aria-labelledby="([^"]+)"[^>]*>(.*?)<\/ul>/g)].map((match) => match[2]!.replace(/<[^>]+>/g, "|"))
+  expect(boxes[0]).toContain("Anticoagulante: no sabe")
+  // Lo que nadie preguntó no es de ella: queda fuera.
+  expect(boxes[0]).not.toContain("no se le preguntó")
 })

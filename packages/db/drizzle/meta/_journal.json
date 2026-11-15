@@ -838,8 +838,22 @@
     {
       "idx": 119,
       "version": "7",
-      "when": 1794685218338,
-      "tag": "0119_clio_propone_fichas",
+      "when": 1794683267187,
+      "tag": "0119_preguntas_al_paciente",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1794683271292,
+      "tag": "0120_preguntas_al_paciente_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1794700538893,
+      "tag": "0121_clio_propone_fichas",
       "breakpoints": true
     }
   ]

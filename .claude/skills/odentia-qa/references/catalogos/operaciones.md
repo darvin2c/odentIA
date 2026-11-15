@@ -91,6 +91,13 @@ Rutas: `S` = `packages/services/src/`, `API` = `apps/api/src/routes/`, `P` = `pa
 
 **Ya falló:** el aviso de duplicados mostró cinco homónimos y no a la persona; al escribir «+44…» el país no cambió y se ofreció guardar un número falso; el contacto de emergencia apareció como quien «habla por ella»; la alergia que anotó el profesional quedó como «declarada por el paciente»; guardar la identidad pisó sin aviso el cambio de otra sesión; cambiar el número dejó dos WhatsApp.
 
+**Sumado por la QA de la entrega 6 (14 nov 2026):**
+- [ ] Lo que dice el paciente se suma, no pisa: al enviar desde su enlace, lo que no se le preguntó se descarta en el servidor, aunque venga en el cuerpo. Se prueba colando `allergies: none` y `medications: none`.
+- [ ] Una pregunta que cambia de sentido cambia lo que vale su «No»: al partir una pregunta («¿toma medicamentos?» en tres), todo lugar que leía su estado agregado (la tarjeta, la caja «Revisa con ella», el «no toma») deja de usarlo para lo que ya no pregunta.
+- [ ] Tras un error al enviar, el formulario de varios pasos deja reenviar desde donde estaba, sin «Saltar» ni perder lo respondido. Se prueba con un 500 simulado en el último paso.
+- [ ] Una sola respuesta para varias filas se guarda en una sola, o sin atribuir (la reacción de varias alergias).
+- [ ] «Ya respondió» es uno solo para todas las vías: registro, enlace y recepción.
+
 ## O-ATE-01 Abrir una atención, escribir y registrar lo hecho
 
 **Dónde:** `S/encounters.ts` (el borrador y los procedimientos), `S/encounter-attending.ts` (quién la lleva), `S/plan.ts` (el plan y sus estados), `S/encounter-dictation.ts` y el dictado de cada producto (`S/dental/dictation.ts`, `S/medical/dictation.ts`).

@@ -4,12 +4,14 @@ import { setOrgLocale } from "../../lib/locale"
 import { asaLabel, type PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import {
+  AntecedentesSummary,
   buildDrafts,
   ClinicalGroupCard,
   DeclaredHealthSnapshot,
   hasOriginalDeclaration,
   healthReviewedWords,
 } from "./antecedentes-tab"
+import { EMPTY_HEALTH_FORM } from "./patient-health-fields"
 
 // Las fechas en el formato de la clínica, no en el de la máquina que corre la prueba (el CI está en inglés).
 beforeAll(() => {
@@ -107,5 +109,62 @@ describe("la revisión de los antecedentes", () => {
       "Antecedentes revisados por Dra. Ana Torres · 14 nov",
     )
     expect(healthReviewedWords("2026-11-14T15:00:00.000Z", null, () => "")).toBe("Antecedentes revisados · 14 nov")
+  })
+})
+
+// QA del 14 nov (causa raíz): «Ver declaración original» no traía el corazón, la anestesia, el tabaco,
+// la lactancia ni las operaciones que dijo.
+describe("«Ver declaración original» con todo lo que dijo", () => {
+  it("el corazón, el antibiótico, la anestesia, el tabaco, la lactancia y las operaciones, tal como llegaron", () => {
+    const page = renderToStaticMarkup(
+      <DeclaredHealthSnapshot
+        health={{
+          dental: { corazon: { riesgoEndocarditis: "si", antibioticoPrevio: "no_sabe" }, problemaAnestesia: "no" },
+          medical: { tabaco: "fuma", cigarrillos: "10_o_mas", lactancia: true },
+          personal: { cirugias: "Apendicectomía" },
+        }}
+      />,
+    ).replace(/<[^>]+>/g, "")
+    expect(page).toContain("Válvula, problema del corazón de nacimiento o endocarditis · Sí")
+    expect(page).toContain("Su médico le indicó antibiótico antes del dentista · No sabe")
+    expect(page).toContain("Problema con la anestesia o sangrado tras una extracción · No")
+    expect(page).toContain("Tabaco · Fuma, 10 o más al día")
+    expect(page).toContain("Lactancia · Sí")
+    expect(page).toContain("Operaciones · Apendicectomía")
+  })
+})
+
+// QA del 14 nov (B7): «Lo dijo ella · sin revisar» iba sobre toda la tarjeta, también sobre el losartán
+// que anotó el equipo. La marca va por dato.
+describe("la marca de lo que dijo, por dato", () => {
+  it("con lo del equipo en la misma tarjeta, solo lo que dijo ella lleva la marca", () => {
+    const page = renderToStaticMarkup(
+      <AntecedentesSummary
+        saved={{
+          ...EMPTY_HEALTH_FORM,
+          reviewStatus: { conditions: "unknown", medications: "recorded" },
+          medications: [
+            { id: "m1", name: "Losartán", dose: "50 mg", endDate: "" },
+            { id: "m2", name: "warfarina", dose: "5 mg", endDate: "" },
+          ] as unknown as typeof EMPTY_HEALTH_FORM.medications,
+        }}
+        pendingReview
+        groups={[
+          {
+            by: { kind: "patient", name: null, relation: null },
+            at: "2026-11-14T15:00:00.000Z",
+            allergies: [],
+            conditions: [],
+            medications: ["m2"],
+            pregnancy: false,
+            saidNo: { allergies: false, conditions: false, medications: false },
+          },
+        ]}
+        pregnancy={null}
+        sex="F"
+      />,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toContain("Losartán 50 mg, warfarina 5 mg (lo dijo ella, sin revisar)")
+    expect(page).not.toContain("Lo dijo ella · sin revisar")
   })
 })

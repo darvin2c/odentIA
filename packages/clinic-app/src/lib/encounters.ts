@@ -40,7 +40,8 @@ export interface ClosingCheck {
    * ASA sin clasificar) y los anestésicos locales de esos materiales: con
    * anestesia y algo por saber, el cierre lo avisa. No bloquea.
    */
-  health?: { gaps: HealthGap[]; anesthetics: string[] }
+  /** `risks`: lo que dijo del corazón y de la anestesia que cambia una anestesia. */
+  health?: { gaps: HealthGap[]; anesthetics: string[]; risks?: string[] }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**

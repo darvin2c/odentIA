@@ -26,6 +26,7 @@ import {
   declaredAllergiesByPatient,
   getPatientHealth,
   markHealthDenied,
+  recordHealthDeclaration,
   savePatientHealth,
 } from "./clinical.js"
 import { ServiceError } from "./errors.js"
@@ -791,4 +792,81 @@ it("un registro con todo sin responder no es una declaración, aunque lo haya co
   const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   expect(health.declarations).toEqual([])
   expect(health.declared).toEqual([])
+})
+
+// Revisión de la entrega 6 (14 nov): el «cuántos al día» que anotó el equipo se quedaba junto a un
+// «Lo dejé» y la entrevista entera no pasaba: se perdían también el corazón y la anestesia. Y desde la
+// QA (B2): lo que dijo no pisa lo que anotó el equipo; llena lo que falta, y la versión es de ella.
+it("si dice que dejó de fumar, lo que anotó el equipo se queda, lo que faltaba se guarda y la versión es suya", async () => {
+  const f = await clinicalFixture()
+  const ana = await person(f, "Ana", "Fumadora")
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, ana.patientId, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: 0, answers: { habitos: { tabaco: "fuma", cigarrillos: "10_o_mas" } } },
+    }),
+  )
+  await f.run((tx) =>
+    addDeclaredHealth(
+      tx,
+      ORG,
+      null,
+      ana.patientId,
+      { medical: { tabaco: "dejo" }, dental: { problemaAnestesia: "si" } },
+      { entity: "registration_hold", entityId: ana.patientId, at: new Date() },
+    ),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, ana.patientId))
+  const answers = health.latestAnamnesis?.answers as Record<string, Record<string, unknown>>
+  expect(answers["habitos"]).toEqual({ tabaco: "fuma", cigarrillos: "10_o_mas" })
+  expect(answers["antecedentesOdontologicos"]).toMatchObject({ problemaAnestesia: "si" })
+  const [version] = await ownerDb
+    .select({ createdBy: patientAnamnesis.createdBy })
+    .from(patientAnamnesis)
+    .where(eq(patientAnamnesis.patientId, ana.patientId))
+    .orderBy(desc(patientAnamnesis.version))
+    .limit(1)
+  expect(version?.createdBy).toBeNull()
+})
+
+// QA del 14 nov (causa raíz): el corazón, la anestesia, el tabaco y la lactancia que dijo iban a la
+// entrevista sin quién lo dijo. Ahora llevan su declaración, como el embarazo, hasta que el equipo revisa.
+it("lo que dijo del corazón, la anestesia y la lactancia queda como dicho por ella hasta que el equipo revisa", async () => {
+  const f = await clinicalFixture()
+  const berta = await person(f, "Berta", "Válvula")
+  const declared = {
+    dental: { corazon: { riesgoEndocarditis: "si" as const, antibioticoPrevio: "si" as const }, problemaAnestesia: "no_sabe" as const },
+    medical: { lactancia: true },
+  }
+  await f.run(async (tx) => {
+    await addDeclaredHealth(tx, ORG, null, berta.patientId, declared, {
+      entity: "registration_hold",
+      entityId: berta.patientId,
+      at: new Date(),
+    })
+    await recordHealthDeclaration(tx, ORG, berta.patientId, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  const said = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(said.declared).toHaveLength(1)
+  expect(said.declared[0]?.by).toMatchObject({ kind: "patient" })
+  expect([...(said.declared[0]?.interview ?? [])].sort()).toEqual(["anestesia", "antibiotico", "corazon", "lactancia"])
+  // El equipo lo revisa y guarda: ya no es «lo dijo ella, sin revisar».
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, berta.patientId, {
+      expectedRevision: said.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      conditions: [],
+      medications: [],
+      anamnesis: { expectedVersion: said.latestAnamnesis!.version, answers: said.latestAnamnesis!.answers as Record<string, unknown> },
+    }),
+  )
+  const reviewed = await f.run((tx) => getPatientHealth(tx, ORG, berta.patientId))
+  expect(reviewed.declared.flatMap((group) => group.interview)).toEqual([])
 })

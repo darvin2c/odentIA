@@ -372,6 +372,7 @@ it("con anestesia y sin sus antecedentes, el cierre lo dice; «niega» lo deja d
   expect(before.health).toEqual({
     gaps: ["allergies", "conditions", "medications", "asa"],
     anesthetics: ["Lidocaína 2 % con epinefrina"],
+    risks: [],
   })
 
   // «Niega enfermedades» desde la atención: quién y cuándo en la auditoría, sin tocar lo demás

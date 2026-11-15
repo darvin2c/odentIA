@@ -287,4 +287,106 @@ describe("«Pregúntale» con representante", () => {
     expect(askWhom([{ ...guardian, relationship: "family" }])).toBeNull()
     expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
+
+  it("Marta: el anticoagulante y la medicina para los huesos van cada uno en su fila", () => {
+    const marta = {
+      ...health,
+      allergyReviewDue: false,
+      reviewPending: true,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "recorded" },
+      medications: [
+        { id: "m1", name: "warfarina 5 mg", atcCode: "B01A", endDate: null },
+        { id: "m2", name: "alendronato", atcCode: "M05B", endDate: null },
+        { id: "m3", name: "Losartán", atcCode: null, endDate: null },
+      ],
+      declared: [
+        {
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: [],
+          conditions: [],
+          medications: ["m1", "m2", "m3"],
+          pregnancy: false,
+          saidNo: { allergies: false, conditions: false, medications: false },
+        },
+      ],
+    } as unknown as PatientHealth
+    const page = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <HealthReviewNotice patientId="p1" patientName="Marta Ríos" health={marta} sex="F" />
+      </QueryClientProvider>,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toMatch(/Anticoagulante\|+[^|]*warfarina 5 mg/)
+    expect(page).toMatch(/Medicina para los huesos\|+[^|]*alendronato/)
+    expect(page).toMatch(/Medicinas\|+[^|]*Losartán/)
+  })
+})
+
+// QA del 14 nov (causa raíz): Víctor dijo que tiene una válvula operada y que su médico le indicó
+// antibiótico; «Revisa con él lo que dijo» no lo traía.
+describe("«Revisa con él» trae lo que dijo de su corazón", () => {
+  it("cada dato de la entrevista que dijo en esa declaración, con su respuesta", () => {
+    const base = bareProduct("dental")
+    declareProduct({
+      ...base,
+      health: {
+        ...base.health,
+        saidRows: () => [
+          { keys: ["corazon", "antibiotico"], label: "Corazón", value: "válvula, problema de nacimiento o endocarditis: sí · antibiótico antes del dentista: sí" },
+          { keys: ["tabaco"], label: "Tabaco", value: "nunca fumó" },
+        ],
+      },
+    })
+    try {
+      const victor = {
+        ...health,
+        reviewPending: true,
+        latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" },
+        declared: [
+          {
+            by: { kind: "patient", name: null, relation: null },
+            at: "2026-11-13T19:27:00.000Z",
+            allergies: [],
+            conditions: [],
+            medications: [],
+            pregnancy: false,
+            interview: ["corazon", "antibiotico"],
+            saidNo: { allergies: false, conditions: false, medications: false },
+          },
+        ],
+      } as unknown as PatientHealth
+      const page = render(victor).replace(/<[^>]+>/g, "|")
+      expect(page).toMatch(/Corazón\|+[^|]*válvula, problema de nacimiento o endocarditis: sí/)
+      // El tabaco no lo dijo en esta declaración: no se le atribuye.
+      expect(page).not.toContain("nunca fumó")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
+  })
+})
+
+// QA del 14 nov (B9): «Revisa con ella» no traía su «No sé» al anticoagulante, y «Anticoagulante (no dijo
+// cuál)» repetía la palabra.
+it("su «No sé» al anticoagulante se revisa con ella, y lo dicho sin nombre dice «no dijo cuál»", () => {
+  const ernesto = {
+    ...health,
+    reviewPending: true,
+    medications: [{ id: "m1", name: "Medicina para los huesos (no dijo cuál)", atcCode: "M05B", endDate: null, isActive: true }],
+    medicineClasses: { anticoagulants: { answer: "unknown", said: true }, boneMedicines: { answer: "yes", said: false } },
+    declared: [
+      {
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: ["m1"],
+        pregnancy: false,
+        saidNo: { allergies: false, conditions: false, medications: false },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = render(ernesto).replace(/<[^>]+>/g, "|")
+  expect(page).toMatch(/Anticoagulante\|+[^|]*no sabe/)
+  expect(page).toMatch(/Medicina para los huesos\|+[^|]*no dijo cuál/)
+  expect(page).not.toContain("(no dijo cuál)")
 })
