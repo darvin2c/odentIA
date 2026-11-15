@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "../../lib/locale"
-import { asaLabel, type PatientHealth } from "../../lib/patients"
+import { asaLabel, type HealthDeclarationView, type PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import {
   AntecedentesSummary,
@@ -10,6 +10,7 @@ import {
   DeclaredHealthSnapshot,
   hasOriginalDeclaration,
   healthReviewedWords,
+  laterDeclarationsOf,
 } from "./antecedentes-tab"
 import { EMPTY_HEALTH_FORM } from "./patient-health-fields"
 
@@ -99,6 +100,45 @@ describe("«Ver declaración original»", () => {
     expect(hasOriginalDeclaration({ respondent: "patient", answers: {} }, [])).toBe(true)
     expect(hasOriginalDeclaration(null, [{}])).toBe(true)
     expect(hasOriginalDeclaration(null, [])).toBe(false)
+  })
+})
+
+// Auditor, 15 nov (A3): quien se registró en línea y recepción resolvió con «Es otra persona» se quedaba
+// sin «Ver declaración original»: su declaración entró con la ficha y su registro no traía su salud.
+describe("lo que se muestra aparte del registro con que se creó su ficha", () => {
+  const patient = { kind: "patient" as const, name: null, relation: null }
+  const declaration = (via: HealthDeclarationView["via"], at: string, enteredAt: string): HealthDeclarationView => ({
+    at,
+    enteredAt,
+    via,
+    by: patient,
+    health: { allergies: { state: "recorded", items: [{ substance: "Ibuprofeno" }] } },
+  })
+  const withHealth = { answers: { health: { allergies: { state: "recorded", items: [{ substance: "Ibuprofeno" }] } } } }
+
+  it("el registro que trae su salud ya la muestra: su declaración no se repite", () => {
+    // Registro en línea directo: entró con la ficha, en el mismo instante.
+    const sameTime = "2026-11-14T08:29:00.000Z"
+    expect(laterDeclarationsOf([declaration("registro", sameTime, sameTime)], { ...withHealth, createdAt: sameTime })).toEqual([])
+    // Recepción lo resolvió después: el registro lleva la hora en que lo envió, la de su declaración.
+    expect(
+      laterDeclarationsOf([declaration("registro", sameTime, "2026-11-14T13:10:00.000Z")], { ...withHealth, createdAt: sameTime }),
+    ).toEqual([])
+  })
+
+  it("si el registro no trae su salud, su declaración se muestra con su hora", () => {
+    // Lo que ya se resolvió antes: el registro quedó del equipo, sin su salud, a la hora de recepción.
+    const resolvedAt = "2026-11-14T13:10:00.000Z"
+    const said = declaration("registro", "2026-11-14T08:29:00.000Z", resolvedAt)
+    expect(laterDeclarationsOf([said], { answers: {}, createdAt: resolvedAt })).toEqual([said])
+  })
+
+  it("lo de su enlace y otro registro posterior siempre van aparte", () => {
+    const link = declaration("enlace", "2026-11-15T10:00:00.000Z", "2026-11-15T10:00:00.000Z")
+    const again = declaration("registro", "2026-11-16T10:00:00.000Z", "2026-11-16T10:05:00.000Z")
+    const form = declaration("formulario", "2026-11-17T10:00:00.000Z", "2026-11-17T10:00:00.000Z")
+    expect(laterDeclarationsOf([link, again, form], { ...withHealth, createdAt: "2026-11-14T08:29:00.000Z" })).toEqual([link, again])
+    expect(laterDeclarationsOf([link], null)).toEqual([link])
   })
 })
 

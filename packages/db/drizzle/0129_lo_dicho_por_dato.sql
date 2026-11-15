@@ -1,0 +1,2 @@
+ALTER TABLE "registration_hold" ADD COLUMN "entry_point" text;--> statement-breakpoint
+ALTER TABLE "registration_hold" ADD CONSTRAINT "registration_hold_entry_check" CHECK ("registration_hold"."entry_point" IS NULL OR "registration_hold"."entry_point" IN ('qr', 'public_link', 'conversation'));

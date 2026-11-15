@@ -1,3 +1,4 @@
+import type { RegistrationEntryPoint } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import {
   boolean,
@@ -823,10 +824,20 @@ export const registrationHold = pgTable(
      */
     noticeVersion: integer("notice_version"),
     noticeText: text("notice_text"),
+    /**
+     * Por dónde se registró (`patient_registration.entry_point`): al decidir, su
+     * registro queda con él, no como alta del equipo. Nulo en lo dejado antes de
+     * guardarlo: entonces vale el código QR, el que nombra su fila de «Te espera».
+     */
+    entryPoint: text("entry_point").$type<Exclude<RegistrationEntryPoint, "platform">>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check("registration_hold_match_check", sql`${table.match} IN ('documento', 'celular')`),
+    check(
+      "registration_hold_entry_check",
+      sql`${table.entryPoint} IS NULL OR ${table.entryPoint} IN ('qr', 'public_link', 'conversation')`,
+    ),
     foreignKey({ columns: [table.organizationId, table.taskId], foreignColumns: [crmTask.organizationId, crmTask.id] }).onDelete("cascade"),
     uniqueIndex("registration_hold_task_uidx").on(table.organizationId, table.taskId),
   ],
