@@ -4889,7 +4889,8 @@ await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaTod
             familyName: "Vargas Núñez",
             birthDate: "1958-08-02",
             sex: "F",
-            phone: "+51987000939",
+            // Su propio celular: el de Carla (+51987000939, entrega 7) haría esperar su registro a recepción.
+            phone: "+51987000941",
             docType: "DNI",
             docNumber: "70090816",
           },
