@@ -1,4 +1,4 @@
-import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
+import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, HEALTH_DECLARATION_REASON_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -1562,16 +1562,15 @@ function RegistrationSnapshotDialog({
           const sent = declaration.health as Rec
           const blood = sent["bloodGroup"]
           // Antes de una cita (entrega 10): si llegó porque algo cambió, porque lo corrigió, o si dijo que nada cambió.
+          // Las mismas palabras que la copia de la historia (`HEALTH_DECLARATION_REASON_LABELS`).
           const title =
             declaration.reason === "sin_cambios"
-              ? "Dijo que nada cambió en su salud ni en sus medicinas"
-              : declaration.reason === "cambio"
-                ? "Dijo que algo cambió, desde su enlace"
-                : declaration.reason === "correccion"
-                  ? "Lo corrigió desde su enlace"
-                  : declaration.via === "enlace"
-                    ? "Lo que envió desde su enlace"
-                    : "Lo que envió en su registro en línea"
+              ? HEALTH_DECLARATION_REASON_LABELS.sin_cambios
+              : declaration.reason
+                ? `${HEALTH_DECLARATION_REASON_LABELS[declaration.reason]}, desde su enlace`
+                : declaration.via === "enlace"
+                  ? "Lo que envió desde su enlace"
+                  : "Lo que envió en su registro en línea"
           return (
             <section key={declaration.enteredAt} aria-label={title} className="flex flex-col gap-3 text-sm">
               <div className="flex flex-col gap-0.5">

@@ -14,6 +14,7 @@ import { user } from "@odentia/db/schema/auth"
 import { encounter, patient, patientContact, patientDocument } from "@odentia/db/schema/clinical"
 import { clinicalFormAddendum, clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { declarantOfLink } from "./clinical.js"
@@ -43,6 +44,15 @@ export interface FormRecordItem {
    * «Clío · confirmó Ana Torres el 14/11/2026 14:06» (entrega 11, criterio C8).
    */
   clio?: string | null
+  /** Quién confirmó lo que propuso Clío y cuándo, para FHIR (`Provenance` con `verifier`). */
+  clioConfirmed?: { by: string | null; at: Date } | null
+  /**
+   * Quién escribió esta respuesta, cuando la ficha la llenó más de una persona y no es de Clío: «lo
+   * escribió Luis Prado» en la copia, la atención firmada y la Historia, y su autor en FHIR
+   * (`questionnaireresponse-author`). null si la llenó una sola persona, si no tiene respuesta o si no
+   * consta (lo guardado antes de anotarlo) (QA final de formularios, H10).
+   */
+  writtenBy?: string | null
 }
 
 export interface FormRecordSection {
@@ -64,6 +74,11 @@ export interface FormRecord {
   via: "enlace" | "portal" | null
   /** Quién lo llenó: quien lo empezó en la clínica, o la persona que lo respondió. */
   filledBy: string | null
+  /**
+   * Quienes escribieron alguna respuesta de lo que llenó el equipo, en el orden en que lo hicieron
+   * (quien la empezó, primero). Con más de una, la frase los nombra a todos.
+   */
+  writers: string[]
   /** Quien lo respondió es el propio paciente; null si lo llenó el equipo o no se sabe quién. */
   filledByPatient: boolean | null
   /** El contacto que lo respondió, para nombrarlo en FHIR (`RelatedPerson`). */
@@ -196,14 +211,19 @@ function answerOf(
 
 type FormHead = Omit<FormRecord, "whoWords" | "byWords" | "summary" | "sections" | "addenda" | "addendaTitle">
 
+/** «Ana Torres y Luis Prado», «A, B y C». */
+const WRITERS_LIST = new Intl.ListFormat("es", { type: "conjunction" })
+
 /**
  * Quién lo llenó: alguien del equipo, o la persona que lo respondió, que puede ser
  * el paciente o quien habla por él. La única frase para decirlo: la usan la copia,
  * la atención firmada y la Historia.
  */
 function filledWordsOf(form: FormHead): string {
-  if (form.source !== "portal") return `Lo llenó ${form.filledBy ?? "el equipo"}`
-  return `Lo respondió ${form.respondentWords ?? "la persona"}`
+  if (form.source === "portal") return `Lo respondió ${form.respondentWords ?? "la persona"}`
+  // Otra persona escribió alguna respuesta: la ficha no es solo de quien la empezó (QA final, H10).
+  if (form.writers.length > 1) return `Lo llenaron ${WRITERS_LIST.format(form.writers)}`
+  return `Lo llenó ${form.filledBy ?? "el equipo"}`
 }
 
 /**
@@ -220,7 +240,7 @@ function closedWordsOf(form: FormHead): string {
 
 /** La misma persona lo llenó y lo finalizó: se nombra una vez. */
 function sameHandOf(form: FormHead): boolean {
-  return form.source !== "portal" && (!form.finalizedBy || form.finalizedBy === form.filledBy)
+  return form.source !== "portal" && form.writers.length <= 1 && (!form.finalizedBy || form.finalizedBy === form.filledBy)
 }
 
 /** Quién lo llenó y quién lo cerró, sin fechas. En lo del equipo, quien lo finalizó solo si fue otra persona. */
@@ -299,6 +319,57 @@ function summaryOf(sections: FormRecordSection[]): string {
     line = next
   }
   return line
+}
+
+/**
+ * Quién escribió cada respuesta de lo que llenó el equipo (QA final de formularios, H10): lo dice la
+ * auditoría de la ficha, con quién guardó y qué preguntas cambió cada guardado (`questions`, desde
+ * este cambio). Un guardado que no cambió nada no hace autor a nadie. Lo guardado antes, sin
+ * `questions`, es de quien lo guardó si fue una sola persona; si fueron varias, no se le atribuye a
+ * ninguna: la frase de la ficha las nombra a todas. Sin auditoría (lo sembrado), es de quien la empezó.
+ * Solo se escriben respuestas con `createFormResponse` y `updateFormResponseDraft`: otro camino que
+ * las escriba tiene que dejar también sus `questions`, o se le atribuyen a quien no fue.
+ *
+ * Cada guardado automático deja una fila: se resume en la base (quiénes, en orden, y el último que
+ * cambió cada pregunta) y no se traen todas.
+ */
+async function formWritersFor(
+  tx: Db,
+  orgId: string,
+  responseIds: readonly string[],
+): Promise<Map<string, { names: string[]; last: Map<string, string> }>> {
+  const out = new Map<string, { names: string[]; last: Map<string, string> }>()
+  if (responseIds.length === 0) return out
+  const questions = sql`${auditEvent.metadata}->'questions'`
+  // Un guardado que no cambió nada (`questions` vacío) no cuenta; uno de antes, sin `questions`, sí.
+  const writes = sql`select ${auditEvent.entityId} as response_id, ${auditEvent.actorUserId} as actor, ${auditEvent.createdAt} as at,
+      case when jsonb_typeof(${questions}) = 'array' then ${questions} end as questions
+    from ${auditEvent}
+    where ${and(
+      eq(auditEvent.organizationId, orgId),
+      eq(auditEvent.entity, "clinical_form_response"),
+      inArray(auditEvent.action, ["form_response.create", "form_response.update"]),
+      inArray(auditEvent.entityId, [...responseIds]),
+    )}
+      and coalesce(jsonb_array_length(case when jsonb_typeof(${questions}) = 'array' then ${questions} end), 1) > 0`
+  const [writers, last] = await Promise.all([
+    tx.execute<{ responseId: string; name: string }>(sql`with w as (${writes})
+      select w.response_id as "responseId", ${user.name} as name from w join ${user} on ${user.id} = w.actor
+      group by w.response_id, ${user.id}, ${user.name} order by w.response_id, min(w.at)`),
+    tx.execute<{ responseId: string; question: string; name: string }>(sql`with w as (${writes})
+      select distinct on (w.response_id, q.question) w.response_id as "responseId", q.question, ${user.name} as name
+      from w cross join lateral jsonb_array_elements_text(coalesce(w.questions, '[]'::jsonb)) as q(question)
+      join ${user} on ${user.id} = w.actor
+      order by w.response_id, q.question, w.at desc`),
+  ])
+  const of = (responseId: string) => {
+    let entry = out.get(responseId)
+    if (!entry) out.set(responseId, (entry = { names: [], last: new Map() }))
+    return entry
+  }
+  for (const row of writers) of(row.responseId).names.push(row.name)
+  for (const row of last) of(row.responseId).last.set(row.question, row.name)
+  return out
 }
 
 /**
@@ -387,6 +458,11 @@ export async function loadFormRecords(
     .orderBy(asc(clinicalFormAddendum.createdAt), asc(clinicalFormAddendum.id))
   // Lo que propuso Clío y confirmó una persona: la marca va en su pregunta, en la Historia y en la copia.
   const marksOf = await clioMarksFor(tx, orgId, patientId)
+  const writersOf = await formWritersFor(
+    tx,
+    orgId,
+    rows.filter(({ row }) => row.source !== "portal").map(({ row }) => row.id),
+  )
   const schemas = new Map(rows.map(({ row }) => [row.id, schemaOf(row.templateSnapshot)]))
   // Un adjunto se nombra por su papel, aunque después se haya retirado.
   const attachmentIds = rows.flatMap(({ row }) =>
@@ -442,28 +518,36 @@ export async function loadFormRecords(
           ) || (byPatient ? "el paciente" : null)
     const answers = (row.answers ?? {}) as Record<string, unknown>
     const marks = marksOf(row)
-    const clioOf = (fieldId: string): string | null => {
-      const mark = marks[fieldId]
-      return mark ? `Clío · ${mark.atSign ? "confirmó al firmar" : "confirmó"} ${mark.byName ?? "alguien del equipo"} el ${dayTimeWords(mark.at, zone)}` : null
-    }
+    const fromPerson = row.source === "portal"
+    // Quién escribió sus respuestas, en lo del equipo; sin auditoría (lo sembrado), quien la empezó.
+    const written = fromPerson ? null : writersOf.get(row.id)
+    const writers = fromPerson ? [] : written?.names.length ? written.names : authorName ? [authorName] : []
     const sections = (schemas.get(row.id) as FormSchemaDef).sections
       .map((section) => ({
         id: section.id,
         title: section.title,
         items: section.fields
           .filter((field) => !field.showIf || conditionMet(field.showIf, answers[field.showIf.field]))
-          .map((field) => ({
-            id: field.id,
-            label: field.label,
-            type: field.type,
-            options: field.options ?? null,
-            unit: field.unit ?? null,
-            ...answerOf(field, answers[field.id], context),
-            clio: clioOf(field.id),
-          })),
+          .map((field) => {
+            const answer = answerOf(field, answers[field.id], context)
+            const mark = marks[field.id]
+            return {
+              id: field.id,
+              label: field.label,
+              type: field.type,
+              options: field.options ?? null,
+              unit: field.unit ?? null,
+              ...answer,
+              clio: mark
+                ? `Clío · ${mark.atSign ? "confirmó al firmar" : "confirmó"} ${mark.byName ?? "alguien del equipo"} el ${dayTimeWords(mark.at, zone)}`
+                : null,
+              clioConfirmed: mark ? { by: mark.byName, at: mark.at } : null,
+              // Con más de una persona, cada respuesta dice quién la escribió (QA final de formularios, H10).
+              writtenBy: writers.length > 1 && !mark && answer.words !== null ? (written?.last.get(field.id) ?? null) : null,
+            }
+          }),
       }))
       .filter((section) => section.items.length > 0)
-    const fromPerson = row.source === "portal"
     const via: FormRecord["via"] =
       fromPerson && (row.submittedVia === "enlace" || row.submittedVia === "portal") ? row.submittedVia : null
     const head = {
@@ -473,7 +557,9 @@ export async function loadFormRecords(
       encounterId: row.encounterId,
       source: fromPerson ? ("portal" as const) : ("staff" as const),
       via,
-      filledBy: fromPerson ? respondentName : authorName,
+      // Lo del equipo lo llenó quien escribió sus respuestas; si fue solo otra persona, ella, no quien la empezó.
+      filledBy: fromPerson ? respondentName : writers.length === 1 ? (writers[0] ?? authorName) : authorName,
+      writers,
       filledByPatient: fromPerson && row.respondentContactId ? byPatient : null,
       respondentWords,
       respondentContactId: fromPerson ? row.respondentContactId : null,
