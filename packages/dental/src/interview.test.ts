@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems, dentalInterviewLines } from "./interview.js"
+import { childhoodLines, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems, dentalInterviewLines } from "./interview.js"
 
 describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lactancia", () => {
   it("se dice en palabras, y lo que no se respondió no sale", () => {
@@ -24,6 +24,35 @@ describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lac
     )
     expect(dentalHabitsErrors({ habitos: { tabaco: "fuma", cigarrillos: "menos_10" } })).toEqual({})
     expect(dentalHabitsErrors({ habitos: { tabaco: "nunca", cigarrillos: "menos_10" } })).toHaveProperty("habitos.cigarrillos")
+  })
+})
+
+describe("«de pequeño»: lo que cuenta quien cuida a un niño", () => {
+  it("se lee en tres filas, con sus palabras, y lo que no se respondió no sale", () => {
+    expect(
+      childhoodLines({ biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" }),
+    ).toEqual([
+      { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
+      { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+      { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
+    ])
+    // A los 8 años no se preguntan el biberón ni el chupón: no hay fila «De pequeño».
+    expect(childhoodLines({ dulcesEntreComidas: "1_a_3", quienCepilla: "adulto" })).toEqual([
+      { label: "Dulces o jugos entre comidas", value: "1 a 3 veces al día" },
+      { label: "Dientes", value: "lo cepilla un adulto" },
+    ])
+    expect(childhoodLines({ bruxismo: true })).toEqual([])
+    expect(childhoodLines(undefined)).toEqual([])
+  })
+
+  it("solo se guardan las respuestas de su lista", () => {
+    expect(dentalInterviewErrors({ antecedentesOdontologicos: { dulcesEntreComidas: "4_o_mas", biberon: "ya_no" } })).toEqual({})
+    expect(dentalInterviewErrors({ antecedentesOdontologicos: { dulcesEntreComidas: "muchos" } })).toHaveProperty(
+      "antecedentesOdontologicos.dulcesEntreComidas",
+    )
+    expect(dentalInterviewErrors({ antecedentesOdontologicos: { quienCepilla: "papá" } })).toHaveProperty(
+      "antecedentesOdontologicos.quienCepilla",
+    )
   })
 })
 
@@ -79,5 +108,21 @@ describe("«Odontológicos y hábitos» en palabras (copia de la historia)", () 
       { key: "antecedentesOdontologicos.cepilladosAlDia", label: "Cepillados al día", value: "0" },
     ])
     expect(dentalInterviewEntries(undefined)).toEqual([])
+  })
+
+  it("lo de pequeño que contó quien cuida a un niño también va en la copia, con las palabras de la pantalla", () => {
+    expect(
+      dentalInterviewEntries({
+        antecedentesOdontologicos: { biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" },
+      }).map((entry) => `${entry.key} · ${entry.label}: ${entry.value}`),
+    ).toEqual([
+      "antecedentesOdontologicos.biberon · Biberón o pecho para dormir: Ya no toma biberón",
+      "antecedentesOdontologicos.chupon · Chupón o dedo: Se chupa el dedo",
+      "antecedentesOdontologicos.dulcesEntreComidas · Dulces o jugos entre comidas: 4 o más veces al día",
+      "antecedentesOdontologicos.pastaConFluor · Pasta de dientes con flúor: Pasta con flúor",
+      "antecedentesOdontologicos.quienCepilla · Quién le cepilla los dientes: Se cepilla sin ayuda",
+    ])
+    // Una respuesta que no es de la lista no sale.
+    expect(dentalInterviewEntries({ antecedentesOdontologicos: { biberon: "mucho" } })).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import { HELP_TOPICS, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
+import { CHILDHOOD_DENTAL_SENTENCE, HELP_TOPICS, SHARED_HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en latidIA (issue 229, entrega 11) ----------
@@ -262,6 +262,14 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * Reportes no tiene sus pasos (`funnelStepsOf`); el plan tiene una sola fase.
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // «De pequeño» es de odentIA (pediatría dental); en un consultorio, solo lo común de quien cuida a un niño.
+  "que-le-preguntan-a-la-mama-de-un-nino": (faq) => [
+    {
+      ...faq,
+      a: swap(faq.a, CHILDHOOD_DENTAL_SENTENCE, ""),
+      forms: (faq.forms ?? []).filter((form) => form !== "biberón y chupón"),
+    },
+  ],
   "alergias-toca-ultima-atencion": (faq) => [
     {
       ...faq,

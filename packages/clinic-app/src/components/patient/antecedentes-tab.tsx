@@ -1,4 +1,4 @@
-import { CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
+import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -777,6 +777,11 @@ export function AntecedentesTab({
             (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
           ),
         )}
+        // Lo del producto (odentIA: «de pequeño» de un niño), con la marca de quien lo contó.
+        productMark={(() => {
+          const said = (health.declared ?? []).find((group) => (group.productLines ?? []).length > 0)
+          return said ? declaredMarkWords(said.by, said.at, sex) : undefined
+        })()}
       />
 
       <FormDrawer
@@ -1122,6 +1127,7 @@ export function AntecedentesTab({
                     disabled={readOnly}
                     idPrefix={uid}
                     sex={patientQuery.data?.data.patient.sex ?? null}
+                    age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
                     errors={interviewErrors}
                   />
                 )}

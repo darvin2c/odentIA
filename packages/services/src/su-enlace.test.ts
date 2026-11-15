@@ -1471,7 +1471,7 @@ it("«Tus datos y tu salud»: la salud se pregunta solo si nadie la registró y 
   const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
   expect(view.data?.health).toBe(true)
   const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
-  expect(form).toMatchObject({ asksHealth: true, firstName: "Lía" })
+  expect(form).toMatchObject({ asksHealth: true, firstName: "Lía", respondentFirstName: null })
   expect(form.registration.fields).toBeDefined()
 
   await f.run((tx) =>
@@ -1871,6 +1871,32 @@ it("«Lo que nos contaste»: el cuestionario enviado antes de su última cita pa
   // Una cita cancelada no fue una visita: lo enviado para ella sigue siendo de la que viene.
   await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, visit))
   expect(await told(fresh.token)).toEqual(["datos", "salud", "cuestionario"])
+})
+
+it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, con biberón y sin tabaco", async () => {
+  const f = await clinicalFixture()
+  const thiago = await minimal(f, { given: "Thiago", surname: "Quispe" })
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 6, birth.getUTCMonth() - 2, 1)
+  await ownerDb.update(contact).set({ birthDate: birth.toISOString().slice(0, 10), sex: "M" }).where(eq(contact.id, thiago.personId))
+  const [carla] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Carla Ramos", givenNames: "Carla", familyName: "Ramos" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: thiago.patientId, contactId: carla!.id, relationship: "guardian", createdBy: f.actor })
+  await f.run((tx) => grantResponsibility(tx, ORG, f.actor, thiago.patientId, { contactId: carla!.id, kind: "representante_legal", startsAt: "2020-01-01" }))
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla!.id, patientId: thiago.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form).toMatchObject({ firstName: "Thiago", age: 6, respondentFirstName: "Carla" })
+  expect(form.healthQuestions).toEqual(expect.arrayContaining(["dental.biberon", "dental.chupon", "dental.quienCepilla"]))
+  expect(form.healthQuestions).not.toContain("medical.tabaco")
+  expect(form.healthQuestions).not.toContain("personal.embarazo")
+  // Lo de un niño entra a su entrevista; lo de un adulto que llegue igual se descarta.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: {},
+      health: { dental: { biberon: "ya_no", quienCepilla: "adulto" }, medical: { tabaco: "nunca" } },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "ya_no", quienCepilla: "adulto" } })
 })
 
 // QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita
