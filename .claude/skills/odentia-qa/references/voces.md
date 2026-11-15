@@ -18,6 +18,7 @@ Una voz genérica opina sobre la pantalla. Una voz profunda recorre casos concre
 - **Comprobado o supuesto.** Lo que se hizo en la pantalla o se leyó en el código está comprobado. Lo que depende de cómo trabaja una clínica real y no tiene fuente va marcado como **supuesto**. Lo legal queda como pendiente: ninguna voz da el visto bueno jurídico.
 - **Ninguna decisión esconde un problema.** Si algo está mal, se anota aunque un ADR o un `AGENTS.md` diga que es a propósito, o aunque venga de cómo se armó la demo.
 - **No inventa.** Si no encuentra nada serio, lo dice: un problema inventado para cumplir hace más daño que el silencio.
+- **Recorrido base.** La voz que la ficha designa recorre también, aunque el cambio sea de otra parte, registrar un paciente, reservar, atender, subir una imagen, recetar, firmar y cobrar (apartado 3 de `SKILL.md`). Si una falla, es un hallazgo alto aunque no sea del cambio.
 - **Mira lo que ve la persona.** Capturas, no solo el árbol de accesibilidad.
 - **Parte de su catálogo y lo hace crecer.** Cada voz tiene uno (la lista está en «Cada voz tiene su catálogo, y crece» de `mesa.md`). Revisa una por una las comprobaciones de los flujos que el área toca y marca cada una: cumple, no cumple o no se pudo ver. Es el piso, no el techo: además arma sus casos y busca lo que el catálogo no tiene, y lo devuelve en **Para mi catálogo**, con el texto listo para sumarlo. El repositorio es público: un fallo de permisos, de aislamiento o de datos nunca va a un catálogo.
 - **En la app**, recibe `comun.md` de la ronda. Crea sus datos con el prefijo `QA`, teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. No toca la configuración de canales.
@@ -255,7 +256,7 @@ Su catálogo es `catalogos/medidas.md`: las tareas frecuentes con sus pasos medi
 
 **Cuenta y ancho:** los de cada tarea que revisa.
 
-Entra al final y trabaja sobre lo que a las otras voces les costó. Lee sus informes y capturas y elige de 3 a 5 tareas con más tropiezos. Repite cada una y mide:
+Entra al final. Recorre todas las pantallas que tocó el cambio o el área, de punta a punta y en cada ancho que corresponda. Además lee los informes y capturas de las otras voces y repite las 3 a 5 tareas con más tropiezos. En cada tarea mide:
 
 - Pantallas, pestañas, cajones y clics hasta terminar.
 - Cuántas veces la persona sale de donde estaba y vuelve.
@@ -268,10 +269,12 @@ Después revisa la tarea contra esta lista, y cada falla es un hallazgo:
 - **Fluido:** ¿algo interrumpe la atención, obliga a cambiar de pantalla o pide decidir sin necesidad?
 - **Intuitivo:** ¿lo frecuente se descubre sin explicación? ¿Lo poco frecuente está a mano sin estorbar? ¿Las palabras son las de quien lo usa?
 - **Qué se puede y qué no:** ¿cada límite se dice donde ocurre y con la salida, en vez de un botón que desaparece sin motivo?
+- **En su sitio:** jerarquía visual (lo importante arriba y a la vista), alineación, espaciado, densidad, agrupación y orden en que se lee. ¿Cada cosa está donde la persona la busca? ¿Algo sobra o compite?
+- **Formularios largos:** propone cómo organizarlos: grupos con título según cómo se trabaja (`FieldSet`/`FieldGroup`); dos columnas en escritorio para campos cortos que van juntos (mm y lado, fecha y hora); orden según el examen o la tarea; lo poco frecuente plegado; y el ancho del cajón o del panel acorde al formulario. En el celular, siempre una columna. Mide cuánto hay que desplazarse y cuántas veces se salta de un lado a otro, antes y después.
 - **Estados:** vacío, cargando, error, a medias y hecho. ¿Cada uno se ve y se distingue? ¿Lo pendiente se distingue de lo confirmado?
 - **Recuperación:** ¿se conserva el borrador? ¿Se puede deshacer o corregir sin rehacer todo?
 - **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral. El teclado se recorre de verdad en cada tarea que mide, sin ratón, y se anota dónde se traba: no se da por visto.
-- **Coherente:** ¿se comporta como el resto de odentIA?
+- **Coherente con el sistema de diseño:** pone cada pantalla nueva o cambiada al lado de los componentes de `@odentia/ui` (Field, Input, Select, Checkbox, Button) y de una pantalla buena de referencia de la app, con captura del antes y del después. Revisa alto, borde, fondo, espaciado y botones; que nada se repita, como un título igual a su etiqueta; y que todo lo que se agrega o empieza tenga cómo quitarse o deshacerse. Lo que no coincide es un hallazgo.
 
 Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra pantalla, y cumple tres cosas:
 
@@ -279,7 +282,7 @@ Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra 
 - **Posible de verdad.** Antes de proponerla, comprueba en el código que el rol tiene el permiso y que el servicio ya existe. Si algo falta, lo dice.
 - **Menos, no más.** Quita pasos, decisiones o ruido. No agrega botones por agregar.
 
-Devuelve hasta 5 propuestas. Cada una dice la tarea y quién la hace; cómo es hoy, con pasos, saltos y captura; la propuesta, con dónde va y qué componente usa; cuánto cambia («de 4 pantallas a 1», «de 14 clics a 3»); si es chica o mediana; y qué voz tropezó ahí. Si la tarea ya es simple, lo dice y no propone nada.
+Siempre devuelve entre 3 y 5 propuestas de mejora de diseño, aunque todo funcione: flujo, jerarquía, textos, estados o pulido visual. Van ordenadas por valor sobre costo. Cada una dice la tarea y quién la hace; cómo es hoy, con pasos, saltos y captura; la propuesta, con dónde va y qué componente usa; cuánto cambia («de 4 pantallas a 1», «de 14 clics a 3»); si es chica o mediana; y qué voz tropezó ahí. Si un área ya está muy bien, igual propone el pulido que la llevaría a mejor. Volver sin propuestas es un hallazgo sobre la propia revisión, no un resultado.
 
 ### En la mesa
 
@@ -290,4 +293,4 @@ No lee servicios ni permisos: eso es de desarrollo, y lo que su propuesta supong
 - **Entre las dos vueltas, arma la propuesta.** Lee lo que salió de la primera vuelta y el banco de casos, repite en la pantalla de hoy los casos con más tropiezos y los mide (pantallas, clics, saltos, decisiones). Devuelve una o dos formas de resolverlo. Cada una dice dónde va, qué patrón que ya existe usa, y los pasos de cada caso del banco contados antes y después. Dice cuál recomienda y qué pierde la otra. Sus giras: la del teclado, siempre, y la del error o la de la interrupción.
 - **En la segunda vuelta**, si la propuesta ya venía hecha (un lienzo aprobado, un arreglo con forma): recorre cada caso del banco con ella, cuenta los pasos y aplica la lista de arriba. A diferencia del novato, dice cómo resolverlo: qué quitar, mover, agrupar o decir, y con qué patrón.
 
-Si la tarea ya es simple, lo dice y no propone nada.
+Igual que en la app: si la tarea ya es simple, propone el pulido que la mejoraría; sin propuestas es un hallazgo sobre la revisión.
