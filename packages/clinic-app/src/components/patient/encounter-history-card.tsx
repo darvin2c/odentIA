@@ -8,12 +8,13 @@ import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
-import { visitHistoryLine } from "../../lib/visit-answer-words"
+import { visitHistoryLine, visitToldLabel } from "../../lib/visit-answer-words"
 import { productUi } from "../../product/product-ui"
 import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
 import { FormViewButton } from "./form-record"
+import { HealthAtSigningList } from "./health-at-signing"
 import { useOpenWide } from "./wide-section"
 
 /** «mié 4 nov, 10:30»: el día y la hora, siempre absolutos. */
@@ -105,9 +106,18 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
   return (
     <>
       {!retired && born.told ? (
-        // Lo que contó antes de venir, en la atención de su cita, con quién lo vio (mesa del 13 nov, entrega 8).
-        <Part label="Lo que contó antes de venir">
+        // Lo que contó antes de venir, en la atención en que se leyó, con quién lo vio (mesa del 13 nov,
+        // entrega 8); si lo contó para otra cita suya, lo dice (QA final de formularios, 15 nov, H2).
+        <Part
+          label={visitToldLabel(born.told)}
+        >
           <p className="text-sm">{visitHistoryLine(born.told)}</p>
+        </Part>
+      ) : null}
+      {!retired && born.healthAtSigning?.length ? (
+        // Lo que seguía sin revisar al firmarla, como quedó en la atención firmada (auditor, 15 nov, A2).
+        <Part label="Lo que dijo de su salud al firmar">
+          <HealthAtSigningList patientId={patientId} groups={born.healthAtSigning} />
         </Part>
       ) : null}
       {/* Una ficha finalizada es algo que se anotó en la atención, no que se indicó:

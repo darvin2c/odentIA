@@ -404,8 +404,9 @@ it("la pulpectomía de las clínicas de hoy pasa a pedir el suyo, sin quedar nun
 })
 
 // QA del 14 nov (B6): quien se registró en línea con la lista de hoy ya respondió: su enlace no le
-// insiste con lo que dejó en blanco.
-it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en blanco", async () => {
+// insiste con lo que dejó en blanco. Salvo lo que saltó del anticoagulante y los huesos, que cambian la
+// cita y se le preguntaron (QA de formularios del 15 nov, A12 y D3 del auditor): solo eso.
+it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en blanco, salvo el anticoagulante y los huesos que saltó", async () => {
   const { orgId, run } = await newClinic()
   const patient = await run((tx) => createPatient(tx, orgId, ACTOR, { displayName: "Ya Registrada" }))
   await run((tx) =>
@@ -413,6 +414,19 @@ it("quien se registró con la lista de hoy no recibe otra vez lo que dejó en bl
       via: "registro",
       by: { kind: "patient", name: null, relation: null },
       health: { allergies: { state: "none", items: [] }, anticoagulants: { state: "unanswered" }, boneMedicines: { state: "none" } },
+    }),
+  )
+  expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual(["anticoagulants"])
+  // Se le muestra al abrir su enlace, pero el aviso al reservar no sale solo por eso.
+  expect(
+    await run((tx) => patientTodo(tx, orgId, { patientId: patient.id, contactId: patient.personId, appointmentId: null })),
+  ).toMatchObject({ health: true, healthOnlyNew: true })
+  // Ya respondido, no se le vuelve a preguntar.
+  await run((tx) =>
+    recordHealthDeclaration(tx, orgId, patient.id, {
+      via: "enlace",
+      by: { kind: "patient", name: null, relation: null },
+      health: { anticoagulants: { state: "none" } },
     }),
   )
   expect(await run((tx) => patientHealthQuestions(tx, orgId, patient.id))).toEqual([])

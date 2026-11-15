@@ -10,9 +10,10 @@ import type { HealthDeclarant } from "./health-review.js"
 type Sex = string | null | undefined
 
 /**
- * El parentesco, si dice cuál es. «Madre, padre o tutor» es la opción del
- * registro, no un parentesco: no se escribe «su madre, padre o tutor» ni se
- * inventa cuál de los tres fue (QA del 14 nov).
+ * El parentesco, si dice cuál es. «Madre, padre o tutor» fue la opción del
+ * registro hasta el 15 nov, no un parentesco: lo guardado así no se escribe «su
+ * madre, padre o tutor» ni se inventa cuál de los tres fue (QA del 14 nov). Desde
+ * entonces el registro guarda «Madre», «Padre» o «Tutor legal» (K15).
  */
 const GENERIC_KIN = new Set(["madre, padre o tutor", "madre, padre o tutora", "representante"])
 export function specificKin(relation: string | null | undefined): string | null {
@@ -40,7 +41,7 @@ export function whoWords(by: HealthDeclarant, sex: Sex): string {
   const kin = specificKin(by.relation)
   if (kin && first) return `su ${kin}, ${first}`
   if (kin) return `su ${kin}`
-  // Eligió «Madre, padre o tutor» en el registro: quien la cuida, sin decir cuál de los tres.
+  // Eligió «Madre, padre o tutor» en el registro de antes: quien la cuida, sin decir cuál de los tres.
   if (by.relation) return first ? `${caregiver(sex)}, ${first}` : caregiver(sex)
   if (first) return first
   return sex === "F" ? "quien habla por ella" : sex === "M" ? "quien habla por él" : "quien habla en su nombre"
@@ -62,15 +63,28 @@ export function saidWhenWords(by: HealthDeclarant, day: string, sex: Sex): strin
 }
 
 /**
- * El «No» que marcó quien declaró: «Dijo que no», «Su madre dijo que no». No es
- * el «niega» que anota un profesional cuando se lo pregunta.
+ * Lo vigente que volvió a responder sin nombrarlo (entrega 10): «Dijo que cambió el 14 nov», «Su
+ * madre, Carla, dijo que cambió el 14 nov». Las mismas palabras en la ficha y en la copia.
+ * `day`: el día ya en palabras, o vacío si no consta.
  */
-export function saidNoWords(by: HealthDeclarant, sex: Sex): string {
-  if (by.kind === "staff") return "El equipo anotó que no"
+export function changedWhenWords(by: HealthDeclarant, day: string, sex: Sex): string {
+  const when = day ? ` el ${day}` : ""
+  if (by.kind !== "representative") return `Dijo que cambió${when}`
+  const who = whoWords(by, sex)
+  return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+}
+
+/**
+ * El «No» que marcó quien declaró: «Dijo que no», «Su madre dijo que no». No es
+ * el «niega» que anota un profesional cuando se lo pregunta. Con `answer`, su
+ * «No sé»: «Su madre dijo que no sabe», que tampoco es «no se le preguntó».
+ */
+export function saidNoWords(by: HealthDeclarant, sex: Sex, answer: "no" | "no sabe" = "no"): string {
+  if (by.kind === "staff") return `El equipo anotó que ${answer}`
   if (by.kind === "representative") {
     const kin = specificKin(by.relation)
     const who = kin ? `su ${kin}` : by.relation ? caregiver(sex) : whoWords(by, sex)
-    return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que no`
+    return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que ${answer}`
   }
-  return "Dijo que no"
+  return `Dijo que ${answer}`
 }

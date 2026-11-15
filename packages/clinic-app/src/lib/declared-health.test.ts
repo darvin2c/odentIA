@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "./locale"
 import {
   askWhom,
+  changedHistoryOf,
+  declaredInterviewRows,
   declaredGroupOf,
   declaredMarkWords,
   pregnancyChip,
@@ -93,6 +95,14 @@ describe("las palabras de lo que dijo el paciente", () => {
     )
   })
 
+  // QA del 15 nov (K15): el registro ya separa «Madre», «Padre» y «Tutor legal», y lo dice con su nombre.
+  it("lo que guarda el registro de hoy se dice con su parentesco", () => {
+    const said = (relation: string, name: string) => whoWords({ kind: "representative", name, relation }, "M")
+    expect(said("Madre", "Rosa Lozano")).toBe("su madre, Rosa")
+    expect(said("Padre", "Luis Ríos")).toBe("su padre, Luis")
+    expect(said("Tutor legal", "Ana Vera")).toBe("su tutor legal, Ana")
+  })
+
   it("cada fila se busca en su declaración: con dos fechas o dos personas, cada cosa con la suya", () => {
     const group = (by: HealthDeclarant, at: string, patch: Partial<DeclaredHealthGroup>): DeclaredHealthGroup => ({
       by,
@@ -170,5 +180,88 @@ describe("lo que quedó sin revisar, al firmar", () => {
     ).toBe("lo que dijo de su salud su madre, Carla, el 1 nov y lo que dijo él de su salud el 13 nov")
     expect(unreviewedWords([], "F")).toBeNull()
     expect(unreviewedWords(undefined, "F")).toBeNull()
+  })
+
+  // Revisión final del 15 nov (dev H6): con tres declaraciones del mismo día decía «lo que dijo ella de
+  // su salud el 14 nov, lo que dijo ella… y lo que dijo ella…».
+  it("lo del mismo día y de la misma persona se dice una vez", () => {
+    const herselfOn = (at: string) => ({ ...base, at, by: { kind: "patient" as const, name: null, relation: null } })
+    expect(
+      unreviewedWords([herselfOn("2026-11-14T22:20:00.000Z"), herselfOn("2026-11-14T22:21:00.000Z"), herselfOn("2026-11-14T22:22:00.000Z")], "F"),
+    ).toBe("lo que dijo ella de su salud el 14 nov")
+  })
+})
+
+// Revisión final del 15 nov (dev H2, ux D5): con dos correcciones del anticoagulante, Antecedentes, el
+// Resumen, «Revisa con…» y la copia daban tres anticoagulantes vigentes. Cada dato, con lo de hoy y su
+// historia: «Anticoagulante: apixabán 5 mg · antes warfarina 7.5 mg y warfarina 5 mg, cambió el 14 nov».
+describe("lo que dijo que cambió, por dato", () => {
+  const meds = [
+    { id: "apix", name: "apixabán", dose: "5 mg", atcCode: "B01AF02" },
+    { id: "w75", name: "warfarina", dose: "7.5 mg", atcCode: "B01AA03" },
+    { id: "w5", name: "warfarina", dose: "5 mg", atcCode: "B01AA03" },
+    { id: "los", name: "losartán", dose: null, atcCode: "C09CA01" },
+    { id: "ome", name: "omeprazol", dose: null, atcCode: null },
+  ]
+  const health = {
+    allergies: [{ id: "pen", substance: "Penicilina" }],
+    conditions: [{ id: "hta", name: "Hipertensión" }],
+    medications: meds,
+    changed: { by: herself, at: "2026-11-14T22:21:00.000Z", allergies: ["pen"], conditions: [], medications: ["w75", "w5", "los"] },
+  }
+
+  it("lo de antes no se lee como vigente: va junto a lo de hoy de su misma clase", () => {
+    const history = changedHistoryOf(health)
+    expect(history.current("medications", meds).map((row) => row.id)).toEqual(["apix", "ome"])
+    expect(history.beforeFor("medications", meds[0]!)).toBe("antes warfarina 7.5 mg y warfarina 5 mg, cambió el 14 nov")
+    // Una medicina sin clase no se empareja con otra: «omeprazol · antes losartán» diría lo que no dijo.
+    expect(history.beforeFor("medications", meds[4]!)).toBeNull()
+    expect(history.alone("medications", meds).map((piece) => piece.line)).toEqual(["Medicación: antes losartán · dijo que cambió el 14 nov"])
+  })
+
+  it("una alergia que no volvió a nombrar sigue siendo una alergia: queda, con su marca", () => {
+    const history = changedHistoryOf(health)
+    expect(history.current("allergies", health.allergies)).toHaveLength(1)
+    expect(history.alone("allergies", health.allergies)).toEqual([])
+    expect(history.allergyMark("pen")).toBe("dijo que cambió el 14 nov")
+  })
+
+  it("si ya no toma ninguna de esa clase, lo de antes va solo, con su marca", () => {
+    const history = changedHistoryOf({ ...health, changed: { ...health.changed, medications: ["apix", "w75", "w5"] } })
+    expect(history.current("medications", meds).map((row) => row.id)).toEqual(["los", "ome"])
+    expect(history.alone("medications", meds)).toEqual([
+      {
+        group: "anticoagulants",
+        label: "Anticoagulante",
+        text: "antes apixabán 5 mg, warfarina 7.5 mg y warfarina 5 mg · dijo que cambió el 14 nov",
+        line: "Anticoagulante: antes apixabán 5 mg, warfarina 7.5 mg y warfarina 5 mg · dijo que cambió el 14 nov",
+      },
+    ])
+  })
+
+  it("con quien habla por ella, lo dice ella", () => {
+    const history = changedHistoryOf({ ...health, changed: { ...health.changed, by: mother, conditions: ["hta"] } })
+    expect(history.alone("conditions", health.conditions)[0]?.line).toBe(
+      "Enfermedades: antes Hipertensión · su madre, Carla, dijo que cambió el 14 nov",
+    )
+  })
+
+  it("sin nada que cambió, todo es de hoy", () => {
+    const history = changedHistoryOf({ ...health, changed: null })
+    expect(history.current("medications", meds)).toHaveLength(5)
+    expect(history.alone("medications", meds)).toEqual([])
+  })
+})
+
+// Revisión final de formularios (H9): la anestesia y el sangrado se preguntan por separado.
+describe("«Ver declaración original»: la anestesia y el sangrado", () => {
+  it("trae la anestesia con qué pasó y el sangrado por separado; lo de antes, con su pregunta doble", () => {
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: { anestesia: "si", quePaso: "alergia", sangrado: "no" } } })).toEqual([
+      { label: "Problema con la anestesia", value: "Sí, alergia o ronchas" },
+      { label: "Sangrado largo tras una extracción", value: "No" },
+    ])
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: "no_sabe" } })).toEqual([
+      { label: "Problema con la anestesia o sangrado tras una extracción", value: "No sabe" },
+    ])
   })
 })

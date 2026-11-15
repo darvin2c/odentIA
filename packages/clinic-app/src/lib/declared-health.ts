@@ -7,16 +7,25 @@
  * deduce quién fue por quién figura hoy como su representante.
  */
 import {
+  allergiesSaidUnknownOf,
+  anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
+  changedWhenWords,
   type HealthDeclarant,
   KINSHIP_LABELS,
+  MEDICATION_CLASSES,
+  type MedicationClass,
+  medicationClassOf,
   type PregnancyToday,
+  type RegistrationAnswers,
   saidNoWords,
   saidWhenWords,
   specificKin,
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
+import { listWords } from "./materials"
+import type { ChangedHealth, DeclaredHealthGroup, HealthDeclarationView, PatientContactLink, PatientHealth } from "./patients"
 
 export type { HealthDeclarant }
 // Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
@@ -49,6 +58,27 @@ export function askWhom(contacts: readonly PatientContactLink[]): string | null 
 type Sex = string | null | undefined
 
 /**
+ * Su «No sé» a las alergias en lo que lee quien ve la historia (la regla de
+ * `allergiesSaidUnknownOf`, la misma del servidor): quién lo dijo y cuándo. null si no.
+ */
+export function allergiesSaidUnknown(
+  health: Pick<PatientHealth, "reviewStatus" | "allergies" | "declarations">,
+): HealthDeclarationView | null {
+  return allergiesSaidUnknownOf({
+    reviewState: health.reviewStatus.allergies,
+    activeAllergies: health.allergies.filter((row) => row.isActive && row.verification !== "descartada").length,
+    // Lo que dijo llega como lo guardó el servidor: la forma del registro.
+    declarations: (health.declarations ?? []) as ReadonlyArray<HealthDeclarationView & { health: NonNullable<RegistrationAnswers["health"]> }>,
+  })
+}
+
+/** «Su madre dijo que no sabe si tiene alergias (13 nov).»: lo que dijo, no «no se le preguntó». */
+export function allergiesUnknownWords(said: { by: HealthDeclarant; at: string | null }, sex: Sex): string {
+  const day = said.at ? shortDay(said.at) : ""
+  return `${saidNoWords(said.by, sex, "no sabe")} si tiene alergias${day ? ` (${day})` : ""}.`
+}
+
+/**
  * «13 nov», y de otro año «13 nov 2025». Un día de calendario (`2026-11-13`) se
  * dice tal cual; un instante, en la zona de la clínica.
  */
@@ -77,17 +107,82 @@ export function declaredMarkWords(by: HealthDeclarant, at: string | null | undef
   return `${saidWhenWords(by, at ? shortDay(at) : "", sex)}, sin revisar`
 }
 
+type ChangedRow = { id?: string | undefined; name?: string | null; substance?: string | null; dose?: string | null; atcCode?: string | null }
+
+const TOPIC_WORDS: Record<Topic, string> = { allergies: "Alergias", conditions: "Enfermedades", medications: "Medicación" }
+
+/** Lo de antes sin nada de hoy a su lado, de un grupo: «Anticoagulante» y «antes warfarina 5 mg · dijo que cambió el 14 nov». */
+export interface ChangedAlone {
+  /** La clase de medicina; nula para lo demás. */
+  group: MedicationClass | null
+  label: string
+  text: string
+  /** Las dos juntas: «Anticoagulante: antes warfarina 5 mg · dijo que cambió el 14 nov». */
+  line: string
+}
+
 /**
- * La marca de lo vigente que la persona volvió a responder sin nombrarlo (entrega 10): «Dijo que
- * cambió el 14 may», «Su madre, Carla, dijo que cambió el 14 may». No se borra: lo decide quien
- * la atiende.
+ * Lo que dijo que cambió (entrega 10), por dato y no por declaración (revisión final del 15 nov,
+ * dev H2 y ux D5): lo vigente que volvió a responder sin nombrar no se lee como de hoy. Lo de antes
+ * de una clase de medicina (anticoagulante, huesos) va junto a lo de hoy de esa clase, en la
+ * primera fila: «apixabán 5 mg · antes warfarina 5 mg, cambió el 14 nov». Lo demás, y lo de una
+ * clase de la que ya no nombró nada, en su propia línea: «Medicación: antes losartán · dijo que
+ * cambió el 14 nov». Una medicina sin clase nunca se junta con otra: diría un cambio que no dijo.
+ * Una alergia queda vigente, con su marca (`allergyMark`). La franja, Antecedentes, el Resumen y
+ * «Revisa con…» lo dicen igual.
  */
-export function changedMarkWords(by: HealthDeclarant, at: string | null | undefined, sex: Sex): string {
-  const day = at ? shortDay(at) : ""
-  const when = day ? ` el ${day}` : ""
-  if (by.kind !== "representative") return `Dijo que cambió${when}`
-  const who = whoWords(by, sex)
-  return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+export function changedHistoryOf(
+  health: { changed?: ChangedHealth | null; medications?: ReadonlyArray<ChangedRow> },
+  sex?: Sex,
+) {
+  const changed = health.changed ?? null
+  // Una alergia que no volvió a nombrar sigue siendo una alergia (y una severa no se esconde): queda
+  // con su marca, no pasa a «antes».
+  const isBefore = (topic: Topic, id: string | undefined) => topic !== "allergies" && !!id && !!changed?.[topic].includes(id)
+  // La clase de una fila: la trae la fila o, en el formulario, la medicina guardada con ese id.
+  const classOf = (row: ChangedRow): MedicationClass | null =>
+    medicationClassOf(row.atcCode ?? health.medications?.find((item) => item.id === row.id)?.atcCode)
+  const words = (row: ChangedRow) => [row.name ?? row.substance, row.dose].filter(Boolean).join(" ")
+  const day = changed?.at ? shortDay(changed.at) : ""
+  // «Dijo que cambió el 14 may», «Su madre, Carla, dijo que cambió el 14 may» (entrega 10), en minúscula.
+  const mark = changed ? changedWhenWords(changed.by, day, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es")) : ""
+  /** Lo de antes de un grupo, de una clase (o sin clase con `null`). */
+  const beforeIn = (topic: Topic, rows: ReadonlyArray<ChangedRow>, group: MedicationClass | null | undefined) =>
+    rows.filter((row) => isBefore(topic, row.id) && (group === undefined || classOf(row) === group))
+  return {
+    /** La marca de una alergia vigente que no volvió a nombrar: «dijo que cambió el 14 nov», o null. */
+    allergyMark: (id: string | undefined): string | null => (id && changed?.allergies.includes(id) ? mark : null),
+    /** Las filas de hoy: sin lo de antes. */
+    current: <T extends ChangedRow>(topic: Topic, rows: ReadonlyArray<T>): T[] => rows.filter((row) => !isBefore(topic, row.id)),
+    /** Lo de antes que va junto a esta fila de hoy, o null. */
+    beforeFor: (topic: Topic, row: ChangedRow, rows: ReadonlyArray<ChangedRow> = health.medications ?? []): string | null => {
+      if (topic !== "medications" || isBefore(topic, row.id)) return null
+      const group = classOf(row)
+      if (!group) return null
+      // Solo la primera de hoy de esa clase lleva la historia: no se repite.
+      const first = rows.find((item) => !isBefore(topic, item.id) && classOf(item) === group)
+      if (first?.id !== row.id) return null
+      const before = beforeIn(topic, rows, group)
+      return before.length > 0 ? `antes ${listWords(before.map(words))}, cambió el ${day}` : null
+    },
+    /** Lo de antes que no tiene nada de hoy a su lado, un grupo por pieza. */
+    alone: (topic: Topic, rows: ReadonlyArray<ChangedRow>): ChangedAlone[] => {
+      if (!changed) return []
+      const piece = (group: MedicationClass | null, label: string, before: ChangedRow[]): ChangedAlone[] => {
+        if (before.length === 0) return []
+        const text = `antes ${listWords(before.map(words))} · ${mark}`
+        return [{ group, label, text, line: `${label}: ${text}` }]
+      }
+      if (topic !== "medications") return piece(null, TOPIC_WORDS[topic], beforeIn(topic, rows, undefined))
+      const today = rows.filter((row) => !isBefore(topic, row.id))
+      return [
+        ...(Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((group) =>
+          today.some((row) => classOf(row) === group) ? [] : piece(group, MEDICATION_CLASSES[group].label, beforeIn(topic, rows, group)),
+        ),
+        ...piece(null, TOPIC_WORDS.medications, beforeIn(topic, rows, null)),
+      ]
+    },
+  }
 }
 
 /** «Dijo el 14 may que nada cambió en su salud ni en sus medicinas» (entrega 10). */
@@ -173,7 +268,8 @@ export function pregnancyChip(pregnancy: PregnancyToday): string {
  * H6 de clínica). null si no queda nada.
  */
 export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefined, sex: Sex): string | null {
-  const parts = (groups ?? []).map((group) => {
+  // Lo de la misma persona el mismo día se dice una vez (revisión final del 15 nov, dev H6).
+  const said = (groups ?? []).map((group) => {
     const day = group.at ? shortDay(group.at) : ""
     const when = day ? ` el ${day}` : ""
     if (group.by.kind === "staff") return `lo que anotó el equipo de su salud${when}`
@@ -183,6 +279,7 @@ export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefin
     if (who.includes(",")) return `lo que dijo de su salud ${who}${when ? `,${when}` : ""}`
     return `lo que dijo${who ? ` ${who}` : ""} de su salud${when}`
   })
+  const parts = [...new Set(said)]
   if (parts.length === 0) return null
   return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
 }
@@ -190,6 +287,7 @@ export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefin
 const INTERVIEW_ANSWER_WORDS: Record<string, string> = { si: "Sí", no: "No", no_sabe: "No sabe" }
 const DECLARED_TOBACCO_WORDS: Record<string, string> = { nunca: "Nunca fumó", fuma: "Fuma", dejo: "Lo dejó" }
 const DECLARED_CIGARETTE_WORDS: Record<string, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
+const DECLARED_ALCOHOL_WORDS: Record<string, string> = { no: "No toma", ocasional: "A veces", frecuente: "Con frecuencia" }
 
 /**
  * Lo demás que dijo en una declaración, tal como llegó, en filas: el corazón, el antibiótico, la
@@ -204,10 +302,18 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
   const medical = rec(health["medical"])
   const personal = rec(health["personal"])
   const answer = (value: unknown) => (typeof value === "string" ? (INTERVIEW_ANSWER_WORDS[value] ?? value) : null)
+  // La anestesia (con qué pasó) y el sangrado, por separado (H9); lo de antes, con su pregunta doble.
+  const anesthesia = anesthesiaAnswersOf(dental["problemaAnestesia"])
+  const how = anesthesia.what ? anesthesiaTroubleWords(anesthesia.what) : null
   const rows: Array<{ label: string; value: string | null }> = [
     { label: "Válvula, problema del corazón de nacimiento o endocarditis", value: answer(heart["riesgoEndocarditis"]) },
     { label: "Su médico le indicó antibiótico antes del dentista", value: answer(heart["antibioticoPrevio"]) },
-    { label: "Problema con la anestesia o sangrado tras una extracción", value: answer(dental["problemaAnestesia"]) },
+    { label: "Problema con la anestesia o sangrado tras una extracción", value: answer(anesthesia.joint) },
+    {
+      label: "Problema con la anestesia",
+      value: anesthesia.anesthesia ? `${answer(anesthesia.anesthesia)}${how ? `, ${how}` : ""}` : null,
+    },
+    { label: "Sangrado largo tras una extracción", value: answer(anesthesia.bleeding) },
     {
       label: "Tabaco",
       value:
@@ -217,6 +323,8 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
               .join(", ")
           : null,
     },
+    // Revisión final del 15 nov (clínica H8): el alcohol que dijo no salía.
+    { label: "Alcohol", value: typeof medical["alcohol"] === "string" ? (DECLARED_ALCOHOL_WORDS[medical["alcohol"]] ?? medical["alcohol"]) : null },
     { label: "Lactancia", value: typeof medical["lactancia"] === "boolean" ? (medical["lactancia"] ? "Sí" : "No") : null },
     { label: "Operaciones", value: typeof personal["cirugias"] === "string" && personal["cirugias"].trim() ? personal["cirugias"] : null },
     {

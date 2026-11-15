@@ -8,12 +8,12 @@
  * dijo la persona y nadie revisó: esas siguen sin revisar hasta «Sin cambios».
  */
 import {
-  ALLERGY_REMOVAL_REASONS,
+  ALLERGY_REMOVAL_REASON_MAX,
   ALLERGY_SEVERITIES,
   type AllergenEntry,
-  type AllergyRemovalReason,
   allergenByCode,
   allergenName,
+  allergyRemovalReasonOf,
   codeAllergySubstance,
   normalizeDrugText,
 } from "@odentia/clinical"
@@ -37,6 +37,27 @@ export function allergyReviewDue(reviewedAt: Date | null, now: Date = new Date()
 }
 
 export type PatientAllergyRow = typeof patientAllergy.$inferSelect
+
+/**
+ * De cada alergia activa, lo que necesita quien solo ve las alergias (recepción, `clinical.alerts`,
+ * QA del 15 nov): la sustancia (con su lista, para nombrarla) y su severidad (con la criticidad y si
+ * es una intolerancia, que dicen cuánto alerta). Lo que contó de la reacción, quién la anotó y cuándo
+ * son de la historia. La descartada ya no alerta.
+ */
+export function allergyAlertsOf(rows: readonly PatientAllergyRow[]) {
+  return rows
+    .filter((row) => row.verification !== "descartada")
+    .map(({ id, substance, substanceSystem, substanceCode, kind, severity, criticality, isActive }) => ({
+      id,
+      substance,
+      substanceSystem,
+      substanceCode,
+      kind,
+      severity,
+      criticality,
+      isActive,
+    }))
+}
 
 export interface AllergySubstanceInput {
   /** Lo escrito; si viene la lista y el código, se toma el nombre de la lista. */
@@ -120,7 +141,7 @@ async function lockHealth(tx: Db, orgId: string, patientId: string) {
  * nov: al agregar la penicilina del equipo, el látex que dijo la paciente perdía
  * su marca sin que nadie lo revisara). Es la regla de `declared` en `getPatientHealth`.
  */
-async function declaredUnreviewed(
+export async function declaredUnreviewed(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -283,9 +304,10 @@ export async function addPatientAllergy(
 }
 
 /**
- * «Quitar» (solo quien escribe en la historia), con su motivo. Deja de avisar
- * al recetar, pero no se borra: queda en «Alergias quitadas» y se puede volver
- * a poner.
+ * «Quitar» (solo quien escribe en la historia), o «Agregar una corrección» a la
+ * que dijo la persona, con su motivo escrito: un atajo se guarda por su código
+ * (`allergyRemovalReasonOf`). Deja de avisar al recetar, pero no se borra: queda
+ * en «Alergias quitadas», con quién, cuándo y por qué, y se puede volver a poner.
  */
 export async function removePatientAllergy(
   tx: Db,
@@ -295,11 +317,10 @@ export async function removePatientAllergy(
   allergyId: string,
   reason: string,
 ): Promise<PatientAllergyRow> {
-  if (!(ALLERGY_REMOVAL_REASONS as readonly string[]).includes(reason))
-    throw invalidField(
-      "reason",
-      "Elige por qué se quita: ya no es alérgica, era otra cosa o se registró por error",
-    )
+  const why = allergyRemovalReasonOf(reason)
+  if (!why) throw invalidField("reason", "Escribe por qué se quita, por ejemplo «era naproxeno y no ibuprofeno»")
+  if (why.length > ALLERGY_REMOVAL_REASON_MAX)
+    throw invalidField("reason", `El motivo debe tener hasta ${ALLERGY_REMOVAL_REASON_MAX} caracteres`)
   const locked = await lockHealth(tx, orgId, patientId)
   const current = await requireAllergy(tx, orgId, patientId, allergyId)
   if (!current.isActive)
@@ -309,7 +330,7 @@ export async function removePatientAllergy(
     .update(patientAllergy)
     .set({
       isActive: false,
-      removedReason: reason as AllergyRemovalReason,
+      removedReason: why,
       removedAt: now,
       removedBy: actorUserId,
       updatedAt: now,
@@ -318,9 +339,9 @@ export async function removePatientAllergy(
     .returning()
   if (!row) throw notFound("Alergia")
   await touchHealth(tx, orgId, patientId, actorUserId, locked, "keep", { exceptId: allergyId })
+  // El motivo queda en la alergia: escrito, puede decir algo clínico, y la auditoría no lo copia.
   await audit(tx, orgId, actorUserId, "health.allergy_removed", patientId, {
     allergyId,
-    reason,
     revision: { before: locked.revision, after: locked.revision + 1 },
   })
   return row

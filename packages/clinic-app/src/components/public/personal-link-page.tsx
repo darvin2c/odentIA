@@ -276,11 +276,36 @@ export function whatFollows(
 }
 
 /**
- * Quien lee lo que envía antes de atenderla: «el Dr. Luis Prado», o «tu odontólogo» si la cita
- * no dice con quién es.
+ * Ya no le queda nada que escribir en este enlace: ni sus datos, ni su visita, ni «¿Cambió algo?»,
+ * ni corregir su salud. Entonces lo escrito a medias en su celular ya no sirve y se borra; mientras
+ * le quede algo, se guarda (también lo de «Corregir», H3).
+ */
+export function nothingLeftToWrite(view: PersonalLinkView): boolean {
+  return view.status !== "abierto" || (!view.data && !view.visit && !view.healthCheck && !view.correctHealth)
+}
+
+/** «Tu cita», si sigue en pie: la cancelada se ve, pero no cuenta para lo demás. */
+function liveAppointmentOf(view: PersonalLinkView): PersonalLinkView["appointment"] {
+  return view.appointment && !view.appointment.cancelled ? view.appointment : null
+}
+
+/**
+ * La cita de «Antes de tu cita» (QA final de formularios, 15 nov, H4): la que dice el servidor (la
+ * que está en curso hasta que termina o, si no, la próxima en pie), que puede no ser la que se
+ * cambia o se cancela; una API anterior no la trae y entonces es la cita a la vista.
+ */
+export function beforeVisitWhen(view: PersonalLinkView): (PersonalLinkWhen & { professionalName: string | null }) | null {
+  if (view.beforeVisit) return view.beforeVisit
+  const appointment = liveAppointmentOf(view)
+  return appointment ? { startsAt: appointment.startsAt, timeZone: appointment.timeZone, professionalName: appointment.professionalName } : null
+}
+
+/**
+ * Quien lee lo que envía antes de atenderla: el de la cita de «Antes de tu cita» («el Dr. Luis
+ * Prado»), o «tu odontólogo» si la cita no dice con quién es.
  */
 function readerOf(view: PersonalLinkView, clinician: string): string {
-  const professional = view.appointment?.professionalName?.trim()
+  const professional = beforeVisitWhen(view)?.professionalName?.trim()
   return professional ? withArticle(professional) : `tu ${clinician}`
 }
 
@@ -290,7 +315,7 @@ function readerOf(view: PersonalLinkView, clinician: string): string {
  * salud, tus medicinas y a qué vienes». Nulo si no hay cita o no le queda nada de eso.
  */
 export function beforeVisitCard(view: PersonalLinkView, clinician: string): PendingItem | null {
-  const appointment = view.appointment && !view.appointment.cancelled ? view.appointment : null
+  const appointment = beforeVisitWhen(view)
   if (!appointment || (!view.data && !view.visit && !view.healthCheck)) return null
   const name = view.patientFirstName
   const missing = view.data?.missing.length ?? 0
@@ -316,6 +341,9 @@ export function beforeVisitCard(view: PersonalLinkView, clinician: string): Pend
   // Solo si le duele (una sesión, un control): se le pide que lo cuente.
   const what = parts.length === 1 && view.visit && !view.visit.questions.reason ? `Cuéntanos ${parts[0]}` : capital(listed(parts))
   const purpose = view.visit?.purpose ? `${name ? `${name} viene a` : "Vienes a"}: ${view.visit.purpose}. ` : ""
+  // Con la cita de hoy en curso, «Tu cita» de arriba es la que viene: la tarjeta dice para cuál es.
+  const shown = liveAppointmentOf(view)?.startsAt ?? null
+  const forWhen = shown === appointment.startsAt ? "" : `${name ? "Para su cita" : "Para tu cita"} del ${withPeriod(whenText(appointment))} `
   return {
     key: "datos",
     abre: "datos",
@@ -323,7 +351,7 @@ export function beforeVisitCard(view: PersonalLinkView, clinician: string): Pend
     // Lo de su visita es opcional; sus datos, si faltan, no.
     badge: missing > 0 ? "Por completar" : "Opcional",
     text: `${purpose}${what}.`,
-    detail: `Lo lee ${readerOf(view, clinician)} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.`,
+    detail: `${forWhen}Lo lee ${readerOf(view, clinician)} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.`,
     action: "Empezar",
     next: name ? `Antes de la cita de ${name}: empezar` : "Antes de tu cita: empezar",
     at: appointment.startsAt,
@@ -341,7 +369,7 @@ export function pendingItems(view: PersonalLinkView, clinician = "odontólogo", 
 
 function linkItems(view: PersonalLinkView, clinician: string): PendingItem[] {
   const name = view.patientFirstName
-  const cita = view.appointment && !view.appointment.cancelled ? view.appointment.startsAt : null
+  const cita = liveAppointmentOf(view)?.startsAt ?? null
   const items: PendingItem[] = []
   const missing = view.data?.missing ?? []
   const before = beforeVisitCard(view, clinician)
@@ -455,10 +483,9 @@ export function toldWords(view: PersonalLinkView, clinician: string): { sent: st
     if (parts.length === 0) return withPeriod(`Nos dijiste ${unchanged} el ${when}`)
     return withPeriod(`Enviaste ${listed(parts)}${saidUnchanged ? ` y nos dijiste ${unchanged}` : ""} el ${when}`)
   })
-  if (!view.appointment || view.appointment.cancelled) return { sent, reader: null }
-  const professional = view.appointment.professionalName?.trim()
-  const who = professional ? withArticle(professional) : `tu ${clinician}`
-  return { sent, reader: `Lo lee ${who} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.` }
+  // Es lo de la cita de «Antes de tu cita»: lo lee quien la atiende.
+  if (!beforeVisitWhen(view)) return { sent, reader: null }
+  return { sent, reader: `Lo lee ${readerOf(view, clinician)} ${name ? `antes de atender a ${name}` : "antes de atenderte"}.` }
 }
 
 /** Lo que eligió de «Tus mensajes», dicho corto; por dónde le llegan, solo si de verdad salen por ahí (B2). */
@@ -694,12 +721,12 @@ export function PersonalLinkPage({
   }, [token])
 
   // Lo escrito a medias en «Antes de tu cita» vive en este celular (entrega 9): es de esta
-  // clínica, de este enlace y de la cita para la que responde.
-  const draftAppointment = booked ?? view?.appointment ?? null
-  const draftKey =
-    slug && token
-      ? personalLinkDraftKey(slug, token, draftAppointment && !draftAppointment.cancelled ? draftAppointment.startsAt : null)
-      : undefined
+  // clínica, de este enlace y de la cita para la que responde (la de «Antes de tu cita»).
+  const shownAppointment = booked ?? view?.appointment ?? null
+  const draftStartsAt =
+    view?.beforeVisit?.startsAt ?? (shownAppointment && !shownAppointment.cancelled ? shownAppointment.startsAt : null)
+  const draftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt) : undefined
+  const correctionDraftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt, "corregir") : undefined
   const [draftOnDevice, setDraftOnDevice] = useState<DraftOnDevice | null>(null)
   // Se mira al hidratar y cada vez que cambia de pantalla (pudo escribir en el recorrido).
   // biome-ignore lint/correctness/useExhaustiveDependencies: `screenKey` es el momento de volver a mirar, no un dato.
@@ -713,7 +740,7 @@ export function PersonalLinkPage({
   const linkGone =
     (viewQuery.error instanceof ApiError &&
       (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")) ||
-    (!!view && (view.status !== "abierto" || (!view.data && !view.visit)))
+    (!!view && nothingLeftToWrite(view))
   // Si borró algo, la pantalla del enlace vencido lo dice en vez de «No perdiste nada».
   const [draftDropped, setDraftDropped] = useState(false)
   useEffect(() => {
@@ -871,6 +898,8 @@ export function PersonalLinkPage({
   }
 
   const activeAppointment = appointment && !appointment.cancelled ? appointment : null
+  // La de «Antes de tu cita»: con la cita de hoy en curso, la de hoy, aunque «Tu cita» sea la que viene.
+  const beforeWhen = beforeVisitWhen(view)
   const clinician = appWords().clinician.one
   const items = pendingItems(view, clinician, draftOnDevice)
   const name = view.patientFirstName
@@ -967,7 +996,9 @@ export function PersonalLinkPage({
       />,
       done.at && activeAppointment && activeAppointment.startsAt === done.at
         ? activeAppointment
-        : null,
+        : done.at && beforeWhen && beforeWhen.startsAt === done.at
+          ? beforeWhen
+          : null,
     )
   }
 
@@ -1074,12 +1105,15 @@ export function PersonalLinkPage({
           token={token}
           clinicName={view.clinicName}
           mode="corregir"
+          // Lo escrito a medias también queda en su celular, aparte de «Antes de tu cita» (H3).
+          draftKey={correctionDraftKey}
           onSent={(words) => {
             refresh()
-            setDone({ key: "datos", screen: title, ...words, at: activeAppointment?.startsAt ?? null })
+            setDone({ key: "datos", screen: title, ...words, at: beforeWhen?.startsAt ?? null })
           }}
         />
       </>,
+      beforeWhen,
     )
   }
 
@@ -1104,13 +1138,14 @@ export function PersonalLinkPage({
       // Ya lo envió (volvió atrás, o lo tenía abierto en otra pestaña): se dice eso y cuándo llegó.
       const sentAt = view.told?.items.at(-1)?.at
       return one(
-        activeAppointment ? (name ? `Antes de la cita de ${name}` : "Antes de tu cita") : title,
+        beforeWhen ? (name ? `Antes de la cita de ${name}` : "Antes de tu cita") : title,
         sentAt && view.told
           ? empty(
               "Ya lo enviaste",
               `${withPeriod(`Lo recibimos el ${whenText({ startsAt: sentAt, timeZone: view.told.timeZone })}`)} Si quieres cambiar algo, díselo a tu ${clinician} en la cita.`,
             )
           : empty("Ya está en la clínica", "No te falta nada por completar."),
+        beforeWhen,
       )
     }
     return one(
@@ -1126,7 +1161,7 @@ export function PersonalLinkPage({
           slug={slug}
           token={token}
           clinicName={view.clinicName}
-          reader={activeAppointment ? readerOf(view, clinician) : null}
+          reader={beforeWhen ? readerOf(view, clinician) : null}
           draftKey={draftKey}
           resume={search.sigue === true}
           onSent={(words) => {
@@ -1136,11 +1171,12 @@ export function PersonalLinkPage({
               key: "datos",
               screen: title,
               ...words,
-              at: activeAppointment?.startsAt ?? null,
+              at: beforeWhen?.startsAt ?? null,
             })
           }}
         />
       </>,
+      beforeWhen,
     )
   }
 

@@ -19,6 +19,7 @@ import type { ReactNode } from "react"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useCan, usePermission } from "../../lib/crm"
+import { clinicToday } from "../../lib/inventory"
 import { activeOrgLocale } from "../../lib/locale"
 import { useClinicalProfile } from "../../lib/org"
 import { sexLabel } from "../../lib/patient-overview"
@@ -107,7 +108,7 @@ export function FiliacionPanel({
   })
   const asksInsurance = config.data ? config.data.data.fields.insuranceType !== "hidden" : false
   const showInsurance = asksInsurance || Boolean(p.insuranceType || p.insurerName || p.affiliationNumber)
-  const age = ageLabel(p.birthDate)
+  const age = ageLabel(p.birthDate, clinicToday())
   const edit = (section: FiliacionSectionKey) => (canWrite ? () => setEditing(section) : undefined)
   const gaps = detail.missingData ?? []
   // El contacto de emergencia es una persona vinculada con la marca (decisión 25).

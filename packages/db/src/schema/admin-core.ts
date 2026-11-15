@@ -67,6 +67,8 @@ export const adminStaff = adminSchema.table("admin_staff", {
   mailLocal: text("mail_local"),
   mailCopyTo: text("mail_copy_to"),
   mailFirstSentAt: timestamp("mail_first_sent_at", { withTimezone: true }),
+  /** Su sala fija de videollamada para las presentaciones (https). */
+  meetingUrl: text("meeting_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
@@ -88,7 +90,67 @@ export const adminStaff = adminSchema.table("admin_staff", {
       AND length(${table.mailCopyTo}) BETWEEN 3 AND 254 AND ${table.mailCopyTo} LIKE '_%@_%._%'
       AND strpos(${table.mailCopyTo}, ' ') = 0)`,
   ),
+  check(
+    "admin_staff_meeting_url_check",
+    sql`${table.meetingUrl} IS NULL OR (${table.meetingUrl} ~ '^https://[^\\s]+$' AND length(${table.meetingUrl}) <= 500)`,
+  ),
 ])
+
+/**
+ * El horario semanal en que una persona del equipo da presentaciones: franjas
+ * por día de la semana en Lima (0 = domingo), en minutos desde la medianoche.
+ * Varias por día; que no se solapen lo cuida el servicio
+ * (`admin-staff-schedule.ts`), que las reemplaza todas a la vez.
+ */
+export const adminStaffHours = adminSchema.table(
+  "admin_staff_hours",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: text("user_id")
+      .notNull()
+      .references(() => adminStaff.userId, { onDelete: "cascade" }),
+    weekday: integer("weekday").notNull(),
+    startMin: integer("start_min").notNull(),
+    endMin: integer("end_min").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("admin_staff_hours_user_idx").on(table.userId, table.weekday),
+    check(
+      "admin_staff_hours_range_check",
+      sql`${table.weekday} BETWEEN 0 AND 6 AND ${table.startMin} >= 0 AND ${table.endMin} <= 1440
+        AND ${table.startMin} < ${table.endMin}`,
+    ),
+  ],
+)
+
+/**
+ * Una ausencia de una persona del equipo (vacaciones, unas horas): no se le
+ * ofrecen presentaciones en ese tramo y sus tareas salen en Hoy del resto. La
+ * marca ella o Administración (`created_by`).
+ */
+export const adminStaffAbsence = adminSchema.table(
+  "admin_staff_absence",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: text("user_id")
+      .notNull()
+      .references(() => adminStaff.userId, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    reason: text("reason"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("admin_staff_absence_user_idx").on(table.userId, table.endsAt),
+    check(
+      "admin_staff_absence_check",
+      sql`${table.endsAt} > ${table.startsAt}
+        AND (${table.reason} IS NULL OR length(trim(${table.reason})) BETWEEN 1 AND 200)`,
+    ),
+  ],
+)
 
 /**
  * Auditoría administrativa append-only: solo INSERT/SELECT. Sin UPDATE ni

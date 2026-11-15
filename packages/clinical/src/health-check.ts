@@ -6,8 +6,44 @@
  * que dijo que nada cambió, con su fecha; con «Sí» vuelve a responder su salud y sus medicinas.
  */
 
+import type { RegistrationFieldKey } from "./patient-registration.js"
+
 /** Cuántos meses de calendario pasan antes de volver a preguntarle. */
 export const HEALTH_CHECK_AFTER_MONTHS = 1
+
+/**
+ * «Sí, cambió» abre «¿Qué cambió?» (revisión final de formularios, 15 nov, D3): sus medicinas, sus
+ * enfermedades o sus alergias, y solo se le muestra eso. Antes volvía a responder todo, y quien
+ * empezó una medicina pasaba por cuatro pasos en blanco. Lo de la salud que no es una enfermedad
+ * pero cambia la atención (un embarazo, una operación, el corazón, la anestesia) va con «enfermedades».
+ */
+export const HEALTH_CHANGE_TOPICS = ["medicinas", "enfermedades", "alergias"] as const
+export type HealthChangeTopic = (typeof HEALTH_CHANGE_TOPICS)[number]
+
+/** Las preguntas de cada tema, con las claves del registro. */
+export const HEALTH_CHANGE_TOPIC_KEYS: Record<HealthChangeTopic, readonly RegistrationFieldKey[]> = {
+  medicinas: ["anticoagulants", "boneMedicines", "medications"],
+  enfermedades: [
+    "conditions",
+    "dental.corazon",
+    "dental.problemaAnestesia",
+    "personal.embarazo",
+    "personal.cirugias",
+    "personal.hospitalizaciones",
+    "personal.transfusiones",
+    "medical.lactancia",
+  ],
+  alergias: ["allergies"],
+}
+
+/** De lo que la clínica pregunta (`questions`), lo de los temas que eligió. */
+export function healthChangeQuestions(
+  topics: readonly HealthChangeTopic[],
+  questions: readonly RegistrationFieldKey[],
+): RegistrationFieldKey[] {
+  const wanted = new Set(topics.flatMap((topic) => HEALTH_CHANGE_TOPIC_KEYS[topic]))
+  return questions.filter((key) => wanted.has(key))
+}
 
 /**
  * El mismo instante un mes de calendario después. Un día que el mes siguiente no tiene (31 de
@@ -24,9 +60,9 @@ export function addCalendarMonths(at: Date, months: number): Date {
 }
 
 /**
- * Si toca preguntarle: su última declaración (también «nada cambió») tiene más de un mes. Sin
- * ninguna declaración no se le pregunta esto: lo que falta de su salud se le pregunta aparte, dato
- * por dato (entrega 6).
+ * Si toca preguntarle: lo último que se supo de su salud (lo que dijo, también «nada cambió», o lo
+ * que anotó el equipo) tiene más de un mes. Sin nada sabido no se le pregunta esto: lo que falta de
+ * su salud se le pregunta aparte, dato por dato (entrega 6).
  */
 export function healthCheckDue(lastSaidAt: Date | null, now: Date): boolean {
   if (!lastSaidAt) return false

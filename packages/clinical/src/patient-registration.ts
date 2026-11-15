@@ -30,6 +30,8 @@ export const CONTACT_RELATIONSHIP_LABELS: Record<ContactRelationship, string> = 
 }
 export type RegistrationRespondent = "patient" | "representative" | "staff"
 export type RegistrationEntryPoint = "platform" | "public_link" | "qr" | "conversation"
+/** Por dónde llega un registro desde fuera: todo menos el alta del equipo. */
+export type PublicEntryPoint = Exclude<RegistrationEntryPoint, "platform">
 export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
@@ -339,6 +341,59 @@ export const INTERVIEW_ANSWERS = ["si", "no", "no_sabe"] as const
 export type InterviewAnswer = (typeof INTERVIEW_ANSWERS)[number]
 export const INTERVIEW_ANSWER_LABELS: Record<InterviewAnswer, string> = { si: "Sí", no: "No", no_sabe: "No sabe" }
 /**
+ * «¿Qué pasó?» con la anestesia del dentista, con el Sí (revisión final de formularios, H9): un
+ * desmayo o una baja de presión (lo más común, vasovagal), una alergia u otra cosa. Cambian lo que
+ * se prepara antes de anestesiar.
+ */
+export const ANESTHESIA_TROUBLES = ["desmayo", "alergia", "otra"] as const
+export type AnesthesiaTrouble = (typeof ANESTHESIA_TROUBLES)[number]
+/** Como lo dice la persona (`said`) y quien responde por ella o su ficha (`other`). */
+export const ANESTHESIA_TROUBLE_WORDS: Record<AnesthesiaTrouble, { said: string; other: string }> = {
+  desmayo: { said: "Me desmayé o me bajó la presión", other: "Se desmayó o le bajó la presión" },
+  alergia: { said: "Alergia o ronchas", other: "Alergia o ronchas" },
+  otra: { said: "Otra cosa", other: "Otra cosa" },
+}
+/** Qué pasó con la anestesia, dentro de una frase: «se desmayó o le bajó la presión». */
+export function anesthesiaTroubleWords(what: AnesthesiaTrouble): string {
+  const words = ANESTHESIA_TROUBLE_WORDS[what].other
+  return words.charAt(0).toLocaleLowerCase("es") + words.slice(1)
+}
+/**
+ * La anestesia y el sangrado tras una extracción, cada uno con su respuesta; «¿Qué pasó?» solo con
+ * el Sí a la anestesia. Antes era una sola pregunta («¿algún problema con la anestesia, o sangraste
+ * mucho…?») y se guardaba como una sola respuesta: eso sigue valiendo como tal (`anesthesiaAnswersOf`).
+ */
+export const anesthesiaAnswersSchema = z
+  .strictObject({
+    anestesia: z.enum(INTERVIEW_ANSWERS).optional(),
+    quePaso: z.enum(ANESTHESIA_TROUBLES).optional(),
+    sangrado: z.enum(INTERVIEW_ANSWERS).optional(),
+  })
+  .refine((v) => v.anestesia !== undefined || v.sangrado !== undefined, "Responde al menos una de las dos")
+  .refine((v) => v.quePaso === undefined || v.anestesia === "si", { message: "Qué pasó se dice solo con el Sí", path: ["quePaso"] })
+
+/**
+ * Lo que dijo de la anestesia y del sangrado, venga como venga: `joint` es lo guardado antes con la
+ * pregunta doble, que no se parte (no se sabe cuál de las dos fue); lo demás, cada respuesta.
+ */
+export function anesthesiaAnswersOf(value: unknown): {
+  joint: InterviewAnswer | null
+  anesthesia: InterviewAnswer | null
+  what: AnesthesiaTrouble | null
+  bleeding: InterviewAnswer | null
+} {
+  const none = { joint: null, anesthesia: null, what: null, bleeding: null }
+  if ((INTERVIEW_ANSWERS as readonly unknown[]).includes(value)) return { ...none, joint: value as InterviewAnswer }
+  const parsed = anesthesiaAnswersSchema.safeParse(value)
+  if (!parsed.success) return none
+  return {
+    joint: null,
+    anesthesia: parsed.data.anestesia ?? null,
+    what: parsed.data.quePaso ?? null,
+    bleeding: parsed.data.sangrado ?? null,
+  }
+}
+/**
  * Cuánto fuma quien fuma, como lo responde el paciente: el corte de 10 al día
  * es el del grado de la periodontitis (AAP/EFP 2018) y el de los implantes. Va
  * junto a `habitos.tabaco` de la entrevista (la forma de latidIA); el número
@@ -437,8 +492,11 @@ export const registrationAnswersSchema = z.strictObject({
       corazon: z.strictObject({
         riesgoEndocarditis: z.enum(INTERVIEW_ANSWERS).optional(), antibioticoPrevio: z.enum(INTERVIEW_ANSWERS).optional(),
       }).refine(v => v.riesgoEndocarditis !== undefined || v.antibioticoPrevio !== undefined, "Responde al menos una de las dos").optional(),
-      /** Un problema con la anestesia del dentista o un sangrado largo tras una extracción. */
-      problemaAnestesia: z.enum(INTERVIEW_ANSWERS).optional(),
+      /**
+       * Un problema con la anestesia del dentista (y qué pasó) y un sangrado largo tras una extracción,
+       * cada uno con su respuesta (H9). Lo guardado antes, una sola respuesta para los dos, sigue valiendo.
+       */
+      problemaAnestesia: z.union([z.enum(INTERVIEW_ANSWERS), anesthesiaAnswersSchema]).optional(),
       /** «De pequeño», lo que cuenta quien cuida a un menor de 12. */
       biberon: z.enum(BOTTLE_ANSWERS).optional(),
       chupon: z.enum(PACIFIER_ANSWERS).optional(),
@@ -677,12 +735,19 @@ export function declaredLactationAndTobacco(
   return out
 }
 
-/** Lo que no se le pregunta a un niño (menor de 12): lo de un adulto. */
+/**
+ * Lo que no se le pregunta a un niño (menor de 12): lo de un adulto. Sus medicinas son una sola
+ * pregunta, «¿Toma alguna medicina, aunque sea a veces?» (el inhalador de rescate se usa cuando lo
+ * necesita, no todos los días; GINA): sin la del anticoagulante ni la de los huesos, que son de
+ * adulto (K7).
+ */
 const NOT_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set([
   "personal.embarazo",
   "medical.lactancia",
   "medical.tabaco",
   "medical.alcohol",
+  "anticoagulants",
+  "boneMedicines",
 ])
 /** Lo que solo se le pregunta a quien cuida a un niño: «de pequeño». */
 const ONLY_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set(
@@ -695,7 +760,8 @@ const EARLY_CHILDHOOD: ReadonlySet<RegistrationFieldKey> = new Set(["dental.bibe
  * A quién se le pregunta cada dato de salud: el embarazo y la lactancia, solo a
  * mujeres de 12 a 55 años (sin el sexo o la edad en la ficha se pregunta: no se
  * supone). A un niño (menor de 12) no se le pregunta lo de un adulto (embarazo,
- * lactancia, tabaco ni alcohol); a quien lo cuida, «de pequeño», con biberón y
+ * lactancia, tabaco, alcohol, anticoagulantes ni medicinas para los huesos: sus
+ * medicinas son una sola pregunta); a quien lo cuida, «de pequeño», con biberón y
  * chupón solo hasta los 6 años. Sin la edad, «de pequeño» no se pregunta: no se
  * supone que es un niño. Una sola regla para el registro, «Su enlace» y lo que
  * el servidor cuenta como «falta preguntar».

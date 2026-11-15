@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { ageInYears, diagnosisCodeLabel, isChildAge } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useRef } from "react"
@@ -13,8 +13,10 @@ import { formatDate } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
 import {
+  allergiesSaidUnknown,
+  allergiesUnknownWords,
   askWhom,
-  changedMarkWords,
+  changedHistoryOf,
   declaredGroupOf,
   pregnancyGroupOf,
   pregnancyWords,
@@ -112,6 +114,7 @@ export function EncounterHealthReview({
       disabled={disabled}
       askTo={askWhom(patient.contacts)}
       sex={patient.patient.sex}
+      child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
     />
   )
 }
@@ -148,10 +151,22 @@ export function EncounterContextBody({
     return <ErrorState message="No se pudieron cargar los antecedentes" onRetry={() => void health.refetch()} />
   const data = health.data.data
   const allergies = data.allergies.filter((allergy) => allergy.isActive)
-  const conditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
+  // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca dos anticoagulantes vigentes
+  // (revisión final del 15 nov, dev H2).
   // La que toma: sin fin o con fin desde hoy, como en la receta; la ya terminada no se dice como actual.
   const today = clinicToday()
-  const medications = data.medications.filter((medication) => isCurrentMedication(medication, today))
+  const currentMedications = data.medications.filter((medication) => isCurrentMedication(medication, today))
+  const history = changedHistoryOf({ changed: data.changed, medications: currentMedications }, patient?.patient.sex)
+  const activeConditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
+  const conditions = history.current("conditions", activeConditions)
+  const medications = history.current("medications", currentMedications)
+  const beforeConditions = history.alone("conditions", activeConditions)
+  const beforeMedications = history.alone("medications", currentMedications)
+  const beforeItem = (piece: (typeof beforeConditions)[number]) => (
+    <li key={piece.line} className="text-muted-foreground">
+      {piece.line}
+    </li>
+  )
   const asa = asaLabel(data.asaClass)
   const showsAsa = productUi().health.showsAsa || asa !== null
   // Lo que dijo la persona y nadie revisó se dice igual que en la franja: su «No» no es un «niega».
@@ -163,13 +178,16 @@ export function EncounterContextBody({
     return group ? `${saidNoWords(group.by, sex)} · sin revisar.` : null
   }
   const unreviewed = (topic: "allergies" | "conditions" | "medications", id: string): string => {
-    // Lo vigente que volvió a responder sin nombrarlo (entrega 10): sigue ahí, con esa marca.
-    if (data.changed?.[topic].includes(id)) return ` · ${changedMarkWords(data.changed.by, data.changed.at, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))}`
+    // La alergia que volvió a responder sin nombrarla (entrega 10) sigue ahí, con esa marca.
+    const mark = topic === "allergies" ? history.allergyMark(id) : null
+    if (mark) return ` · ${mark}`
     const group = declaredGroupOf(groups, topic, id)
     return group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = data.pregnancy ? pregnancyWords(data.pregnancy) : null
+  const interviewRows = productUi().health.saidRows?.((data.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? []
+  const saidUnknownAllergies = allergiesSaidUnknown(data)
   return (
     <div className="flex flex-col gap-5 text-sm">
       {data.unchanged ? (
@@ -197,7 +215,9 @@ export function EncounterContextBody({
             {saidNo("allergies") ??
               (data.reviewStatus.allergies === "none"
                 ? "No tiene alergias."
-                : "Aún no se le preguntó por alergias.")}
+                : saidUnknownAllergies
+                  ? allergiesUnknownWords(saidUnknownAllergies, sex)
+                  : "Aún no se le preguntó por alergias.")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -213,7 +233,7 @@ export function EncounterContextBody({
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Enfermedades</h3>
-        {conditions.length === 0 ? (
+        {conditions.length === 0 && beforeConditions.length === 0 ? (
           // Como las alergias: «niega» solo si se le preguntó; si no, se dice que no se preguntó.
           <p className="text-muted-foreground">
             {saidNo("conditions") ??
@@ -232,12 +252,13 @@ export function EncounterContextBody({
                 {unreviewed("conditions", condition.id)}
               </li>
             ))}
+            {beforeConditions.map(beforeItem)}
           </ul>
         )}
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Medicación</h3>
-        {medications.length === 0 ? (
+        {medications.length === 0 && beforeMedications.length === 0 ? (
           <p className="text-muted-foreground">
             {saidNo("medications") ??
               (data.reviewStatus.medications === "none"
@@ -248,17 +269,40 @@ export function EncounterContextBody({
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {medications.map((medication) => (
-              <li key={medication.id}>
-                {medication.name}
-                {medication.dose ? ` · ${medication.dose}` : ""}
-                {medication.frequency ? ` · ${medication.frequency}` : ""}
-                {unreviewed("medications", medication.id)}
-              </li>
-            ))}
+            {medications.map((medication) => {
+              const before = history.beforeFor("medications", medication)
+              return (
+                <li key={medication.id}>
+                  {medication.name}
+                  {medication.dose ? ` · ${medication.dose}` : ""}
+                  {medication.frequency ? ` · ${medication.frequency}` : ""}
+                  {before ? ` · ${before}` : ""}
+                  {unreviewed("medications", medication.id)}
+                </li>
+              )
+            })}
+            {beforeMedications.map(beforeItem)}
           </ul>
         )}
       </section>
+      {interviewRows.length > 0 ? (
+        // Lo de la entrevista que cambia la cita (el corazón, la anestesia) y lo de un niño en casa, también
+        // ya revisado: no desaparece de la atención (revisión final del 15 nov, K4).
+        <section className="flex flex-col gap-1">
+          <h3 className="font-medium">De su entrevista</h3>
+          <ul className="flex flex-col gap-1">
+            {interviewRows.map((row) => {
+              const group = groups?.find((item) => row.keys.some((key) => item.interview?.includes(key)))
+              return (
+                <li key={row.label}>
+                  {row.label}: {row.value}
+                  {group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ) : null}
       {showsAsa ? (
         <section className="flex flex-col gap-1">
           <h3 className="font-medium">Riesgo anestésico</h3>

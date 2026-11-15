@@ -4,10 +4,19 @@ import { fileURLToPath } from "node:url"
 import { canAccess, ORG_ROLES, type Permission } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
-import { HELP_TOPICS, helpSmallTalk, helpTopicForScreen, helpWritePermissions, matchHelpTopics, PRODUCT_ONLY_SCREENS } from "./help-guide.js"
+import {
+  HELP_TOPICS,
+  helpGuideForRole,
+  helpItemScreen,
+  helpSmallTalk,
+  helpTopicForScreen,
+  helpWritePermissions,
+  matchHelpTopics,
+  PRODUCT_ONLY_SCREENS,
+} from "./help-guide.js"
 import { helpTopicsFor } from "./products.js"
 import { describeHelpSearch, helpBanks, measureHelpBank } from "./help-guide-suite.js"
-import { exactHelpOption } from "./help.js"
+import { describeHelpScreen, exactHelpOption } from "./help.js"
 
 /**
  * La guía de Ariadna contra el código y contra lo que pregunta la gente. Sin
@@ -89,6 +98,20 @@ describe("la guía coincide con el código", () => {
 })
 
 describeHelpSearch("odentIA", HELP_TOPICS)
+
+// QA de formularios del 15 nov (K18, B8 de la entrega 7): «niño» en la pregunta de la mamá llevaba a
+// Pacientes cualquier pregunta con un niño. Dicha entera, o con lo que se le pregunta, la sigue encontrando.
+describe("la pregunta de la mamá no se lleva cualquier pregunta con un niño", () => {
+  const top = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]
+  it("«niño» suelto no la responde ni ancla Pacientes", () => {
+    expect(top("le doy una cita a un niño el viernes")?.faq?.id).not.toBe("que-le-preguntan-a-la-mama-de-un-nino")
+    expect(top("le doy una cita a un niño el viernes")?.topic.id).not.toBe("pacientes")
+  })
+  it("lo que se le pregunta a la mamá, sí", () => {
+    for (const question of ["¿Qué le preguntan a la mamá de un niño?", "que le preguntan a la mama de un menor", "biberón y chupón"])
+      expect(top(question)?.faq?.id, question).toBe("que-le-preguntan-a-la-mama-de-un-nino")
+  })
+})
 
 describe("la solo lectura por falta de pago", () => {
   const faqsOf = (topicId: string) => HELP_TOPICS.find((topic) => topic.id === topicId)?.faqs ?? []
@@ -205,5 +228,65 @@ describe("lo que dijo el paciente, con las palabras de quien pregunta", () => {
     )?.a
     expect(answer).not.toContain("sigue a la vista ahí")
     expect(answer).toContain("después de firmarla")
+  })
+})
+
+// Revisión final de formularios del 15 nov (A8 del auditor, H8 de desarrollo): «¿dónde veo lo que respondió?»
+// le daba a la odontóloga y a caja la respuesta de recepción, y a caja le prometía lo clínico.
+describe("cada rol recibe la respuesta que es para él", () => {
+  const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+  const idsOf = (role: string) => new Set(helpGuideForRole(HELP_TOPICS, role).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.id)))
+  const WHAT_SHE_SAID = ["pacientes-cuestionario-respondio-antes-de-venir", "recepcion-puedo-ver-lo-que-respondio", "caja-puedo-ver-lo-que-dijo-de-su-salud"]
+
+  it.each([
+    ["owner", "pacientes-cuestionario-respondio-antes-de-venir"],
+    ["admin", "pacientes-cuestionario-respondio-antes-de-venir"],
+    ["clinician", "pacientes-cuestionario-respondio-antes-de-venir"],
+    ["reception", "recepcion-puedo-ver-lo-que-respondio"],
+    ["cashier", "caja-puedo-ver-lo-que-dijo-de-su-salud"],
+  ])("%s tiene una sola de las tres: la suya", (role, own) => {
+    const ids = idsOf(role)
+    expect(WHAT_SHE_SAID.filter((id) => ids.has(id))).toEqual([own])
+  })
+
+  it("cada permiso que nombra una respuesta existe en la matriz", () => {
+    for (const faq of faqs) {
+      const named = [faq.needs, faq.notFor?.has, faq.notFor?.lacks].flatMap((item) => (item === undefined ? [] : [item].flat()))
+      for (const permission of named) expect(ORG_ROLES.some((role) => canAccess(role, permission as Permission)), `${faq.id}: ${permission}`).toBe(true)
+    }
+  })
+
+  it("lo escrito igual que en la guía tampoco trae la de otro rol", () => {
+    const exactId = (question: string, role: string) => {
+      const option = exactHelpOption(question, helpGuideForRole(HELP_TOPICS, role))
+      return option?.kind === "faq" ? option.faq.id : null
+    }
+    expect(exactId("¿Puedo ver lo que respondió?", "reception")).toBe("recepcion-puedo-ver-lo-que-respondio")
+    expect(exactId("¿Puedo ver lo que respondió?", "clinician")).not.toBe("recepcion-puedo-ver-lo-que-respondio")
+    expect(exactId("¿Dónde veo lo que respondió antes de venir?", "clinician")).toBe("pacientes-cuestionario-respondio-antes-de-venir")
+    expect(exactId("¿Dónde veo lo que respondió antes de venir?", "cashier")).toBeNull()
+  })
+
+  it("la de caja no promete nada clínico ni sus alergias", () => {
+    const cashier = faqs.find((faq) => faq.id === "caja-puedo-ver-lo-que-dijo-de-su-salud")
+    expect(cashier?.a).toMatch(/^No:/)
+    expect(cashier?.a).not.toContain("sí las ves")
+  })
+})
+
+// Pendiente de la entrega 11 de formularios: en la atención, la Ayuda decía «Estás en la ficha de una persona»
+// y «Llévame» sacaba a la lista de Pacientes.
+describe("dentro de una persona", () => {
+  const patients = HELP_TOPICS.find((topic) => topic.id === "pacientes")
+  it("sabe si está en su atención, en su página o en la lista", () => {
+    expect(helpItemScreen("/patients/p1/encounters/e1", patients)).toEqual({ label: "la atención", named: true })
+    expect(helpItemScreen("/people/p1", patients)).toEqual({ label: "la ficha de una persona", named: false })
+    expect(helpItemScreen("/people", patients)).toBeNull()
+    expect(helpItemScreen("/agenda", HELP_TOPICS.find((topic) => topic.id === "agenda"))).toBeNull()
+  })
+  it("la Ayuda nombra la atención", () => {
+    expect(describeHelpScreen("/patients/p1/encounters/e1").title).toBe("la atención")
+    expect(describeHelpScreen("/people/p1").title).toBe("la ficha de una persona")
+    expect(describeHelpScreen("/people").title).toBe("Pacientes")
   })
 })

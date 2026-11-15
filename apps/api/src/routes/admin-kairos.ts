@@ -11,6 +11,8 @@ import {
   createSaasProposal,
   decideKairosItem,
   draftPendingKairosItems,
+  getAriadnaChats,
+  getKairosSells,
   KAIROS_DRAFTS_PER_PASS,
   type KairosDraftWriter,
   type KairosExecutors,
@@ -28,8 +30,11 @@ import {
   prepareChatMessage,
   prepareEmailReply,
   prepareOutreach,
+  reassignPresentation,
   recordPresentation,
   ServiceError,
+  setAriadnaChats,
+  setKairosSells,
   settleKairosOutreach,
   todayForStaff,
   updateClient,
@@ -191,6 +196,8 @@ function executorsAt(
     // Lo que ya pasó los 30 días queda para borrarse ahora: lo borra el worker en su vuelta
     // siguiente (esta ruta no tiene el almacenamiento).
     markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
+    reassignPresentation: (tx, actor, taskId, toUserId) =>
+      reassignPresentation(tx, actor, taskId, toUserId, now),
   }
 }
 
@@ -231,6 +238,8 @@ export async function sendKairosOutreachEmail(
     return { emailSent: sent, outreachStatus: "pendiente", itemStatus: "incierta" }
   }
 }
+
+const sellsBody = z.strictObject({ enabled: z.boolean() })
 
 export function createAdminKairosRoute(deps: AdminKairosDeps) {
   const app = new Hono()
@@ -385,6 +394,46 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
     return runService(c, 200, () =>
       deps.ownerDb.transaction((tx) => todayForStaff(tx, actor, parsed.data)),
     )
+  })
+
+  // «Kairós responde solo en los chats» (ADR 0189): el interruptor general, solo Administración.
+  app.get("/sells", (c) =>
+    runService(c, 200, () => {
+      adminOf(c)
+      return deps.ownerDb.transaction((tx) => getKairosSells(tx))
+    }),
+  )
+  app.put("/sells", async (c) => {
+    const raw = await c.req.json().catch(() => null)
+    const parsed = sellsBody.safeParse(raw)
+    return runService(c, 200, () => {
+      const actor = adminOf(c)
+      if (!parsed.success)
+        throw new ServiceError("VALIDATION", 400, "Di si lo prendes o lo apagas", {
+          enabled: "Di si lo prendes o lo apagas",
+        })
+      return deps.ownerDb.transaction((tx) => setKairosSells(tx, actor, parsed.data.enabled))
+    })
+  })
+
+  // «Ariadna responde en los chats de las clínicas con su app» (ADR 0191): su propio interruptor, solo Administración.
+  app.get("/ariadna", (c) =>
+    runService(c, 200, () => {
+      adminOf(c)
+      return deps.ownerDb.transaction((tx) => getAriadnaChats(tx))
+    }),
+  )
+  app.put("/ariadna", async (c) => {
+    const raw = await c.req.json().catch(() => null)
+    const parsed = sellsBody.safeParse(raw)
+    return runService(c, 200, () => {
+      const actor = adminOf(c)
+      if (!parsed.success)
+        throw new ServiceError("VALIDATION", 400, "Di si la prendes o la apagas", {
+          enabled: "Di si la prendes o la apagas",
+        })
+      return deps.ownerDb.transaction((tx) => setAriadnaChats(tx, actor, parsed.data.enabled))
+    })
   })
 
   // Una pasada a pedido (útil en local; en producción la corre el worker cada 5 min).

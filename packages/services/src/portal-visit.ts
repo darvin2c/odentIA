@@ -7,16 +7,17 @@ import type { DeclaredPatientHealthInput } from "./clinical.js"
 import { ServiceError } from "./errors.js"
 import { logAccess, type PortalContext, requireScope } from "./portal.js"
 import { contactDecides } from "./responsibilities.js"
-import { nextAppointmentIdOf, saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
+import { beforeVisitAppointmentOf, saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
 
 /**
  * «Antes de tu cita» desde el portal (mesa de formularios del 13 nov, entrega 8): la misma regla
  * que su enlace (`visitAskOf`, `saveVisitAnswer`). Lo responde quien decide por el paciente (él
- * mismo o su representante legal vigente), para su próxima cita, una vez. El portal ya no tiene un
+ * mismo o su representante legal vigente), para la cita en curso o, si no hay, su próxima cita
+ * (`beforeVisitAppointmentOf`, la misma de su enlace y de recepción), una vez. El portal ya no tiene un
  * cuestionario propio: lo que antes respondía ahí se dejó de usar, y lo enviado sigue en su ficha.
  */
 export interface PortalVisitView {
-  /** Lo que se le pregunta para su próxima cita; nulo si no hay nada por responder. */
+  /** Lo que se le pregunta para la cita de «Antes de tu cita»; nulo si no hay nada por responder. */
   visit: { appointmentId: string; startsAt: Date; purpose: string | null; questions: VisitQuestions } | null
   /** Lo que ya envió para esa cita: cuándo, nunca qué. */
   sent: { at: Date; own: boolean } | null
@@ -44,7 +45,7 @@ export async function getPortalVisit(tx: Db, ctx: PortalContext): Promise<Portal
   const respondent = await respondentOf(tx, ctx)
   const { patientId, contactId } = ctx.session
   const decides = await contactDecides(tx, ctx.orgId, patientId, contactId)
-  const appointmentId = decides ? await nextAppointmentIdOf(tx, ctx.orgId, patientId) : null
+  const appointmentId = decides ? ((await beforeVisitAppointmentOf(tx, ctx.orgId, patientId))?.id ?? null) : null
   const ask = await visitAskOf(tx, ctx.orgId, { patientId, appointmentId })
   await logAccess(tx, ctx.orgId, ctx.session.id, "visit.viewed")
   return {
@@ -101,7 +102,8 @@ export async function savePortalVisit(tx: Db, ctx: PortalContext, input: unknown
   await respondentOf(tx, ctx)
   const { patientId, contactId } = ctx.session
   // Quién lo responde lo decide la operación, igual que desde su enlace.
-  await saveVisitAnswer(tx, ctx.orgId, { patientId, contactId }, await nextAppointmentIdOf(tx, ctx.orgId, patientId), input, "portal")
+  const appointmentId = (await beforeVisitAppointmentOf(tx, ctx.orgId, patientId))?.id ?? null
+  await saveVisitAnswer(tx, ctx.orgId, { patientId, contactId }, appointmentId, input, "portal")
   await logAccess(tx, ctx.orgId, ctx.session.id, "visit.sent")
   return getPortalVisit(tx, ctx)
 }

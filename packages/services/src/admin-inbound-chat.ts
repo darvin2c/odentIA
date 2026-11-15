@@ -35,10 +35,14 @@
 import { isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  type AriadnaChatReplyKind,
+  type ChatTurnAgent,
+  kairosChatTurn,
   kairosItem,
   SAAS_CHAT_CHANNELS,
   type SaasChatChannel,
   type SaasInboundMedia,
+  type SaasOutreachPurpose,
   type SaasOutreachStatus,
   saasChat,
   saasClient,
@@ -58,6 +62,7 @@ import { outreachAdminOnlySql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { sendableProposal } from "./admin-sales.js"
 import { invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
+import { getAriadnaChats, getKairosSells } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -155,7 +160,7 @@ async function clientOf(tx: Db, clientId: string | null) {
 }
 
 /** La conversación bloqueada, si quien mira la ve; si no, como si no existiera. */
-async function lockChat(tx: Db, actor: AdminActor, chatId: string): Promise<ChatRow> {
+async function lockChat(tx: Db, actor: AdminActor | null, chatId: string): Promise<ChatRow> {
   if (!UUID.test(chatId)) throw notFound("Conversación")
   const [chat] = await tx
     .select()
@@ -164,7 +169,8 @@ async function lockChat(tx: Db, actor: AdminActor, chatId: string): Promise<Chat
     .for("update")
     .limit(1)
   if (!chat) throw notFound("Conversación")
-  if (!seesChat(actor, await clientOf(tx, chat.clientId))) throw notFound("Conversación")
+  // Sin persona es Kairós (el worker): lo que atiende no depende de un rol.
+  if (actor && !seesChat(actor, await clientOf(tx, chat.clientId))) throw notFound("Conversación")
   return chat
 }
 
@@ -375,8 +381,10 @@ export async function ingestInboundChat(
   }))
   const body = trimTo(input.body, BODY_MAX)
   const client = await clientOf(tx, chat.clientId)
-  // Se decide al llegar: Soporte solo ve lo que entra en una conversación de una clínica con su app.
-  const adminOnly = !client?.organizationId
+  // Se decide al llegar: Soporte solo ve lo que entra en una conversación de una clínica con su app,
+  // y no lo que llega después de que Ariadna la pasó a Administración (la conversación es de
+  // Administración desde ese mensaje, ADR 0191): tampoco su actividad ni lo que pida Hoy.
+  const adminOnly = !client?.organizationId || (await chatHandedToAdministration(tx, chat))
   const [created] = await tx
     .insert(saasInboundMessage)
     .values({
@@ -386,6 +394,8 @@ export async function ingestInboundChat(
       media,
       receivedAt: input.receivedAt,
       adminOnly,
+      // Cuándo lo guardamos, con el reloj de nuestras respuestas: Kairós vende mira esto para saber si ya respondió.
+      createdAt: now,
     })
     .onConflictDoNothing({ target: saasInboundMessage.externalId })
     .returning()
@@ -523,6 +533,8 @@ async function recordReplyActivity(tx: Db, row: OutreachRecord, now: Date): Prom
     clientId: row.clientId,
     requestId: await latestRequestId(tx, row.clientId),
     authorUserId: row.createdBy,
+    byKairos: row.byKairos,
+    byAriadna: row.byAriadna,
     body: row.body.slice(0, ACTIVITY_MAX),
     kind: row.channel as SaasChatChannel,
     direction: "salio",
@@ -576,7 +588,31 @@ export async function assignChat(
   input: AssignChatInput,
   now = new Date(),
 ): Promise<AssignChatResult> {
-  const staff = requireAdmin(actor)
+  return assignChatBy(tx, requireAdmin(actor), chatId, input, now)
+}
+
+/**
+ * Kairós dice de quién es una conversación que atiende solo: la clínica que él
+ * mismo creó con el nombre que le dieron (`datos_de_la_clinica`), nunca una que
+ * ya existía. Es la misma operación que la de una persona, a nombre de Kairós
+ * (sin `matched_by_user`, auditada sin persona).
+ */
+export async function kairosAssignChat(
+  tx: Db,
+  chatId: string,
+  input: AssignChatInput,
+  now = new Date(),
+): Promise<AssignChatResult> {
+  return assignChatBy(tx, null, chatId, input, now)
+}
+
+async function assignChatBy(
+  tx: Db,
+  staff: AdminActor | null,
+  chatId: string,
+  input: AssignChatInput,
+  now: Date,
+): Promise<AssignChatResult> {
   const chat = await lockChat(tx, staff, chatId)
   if (!UUID.test(input.clientId ?? "")) throw invalidField("clientId", "Cliente no encontrado")
   const [client] = await tx
@@ -608,7 +644,7 @@ export async function assignChat(
     .set({
       clientId: client.id,
       contactId,
-      matchedByUser: staff.userId,
+      matchedByUser: staff?.userId ?? null,
       matchedAt: now,
       notClinicAt: null,
       notClinicBy: null,
@@ -945,6 +981,10 @@ export type ChatEntry =
       adminOnly: boolean
       createdBy: { userId: string; name: string } | null
       sentAt: Date | null
+      /** Lo escribió Kairós solo (`by_kairos`): se muestra con su nombre, no el de una persona. */
+      byKairos: boolean
+      /** Lo escribió Ariadna (con `byKairos`): se muestra con su nombre. */
+      byAriadna: boolean
     }
 
 export interface ChatDetail {
@@ -955,6 +995,37 @@ export interface ChatDetail {
   client: { id: string; name: string; product: string; hasAccount: boolean } | null
   contact: { id: string; name: string; phone: string | null } | null
   notClinicAt: Date | null
+  /** «Lo atiendo yo» (o Kairós la pasó al equipo): mientras tenga fecha, Kairós no responde solo. */
+  kairosPausedAt: Date | null
+  /**
+   * Kairós responde solo en esta conversación: está prendido, no está pausada, no es de una
+   * clínica con su app ni «No es una clínica» (`kairosHandlesChat`).
+   */
+  handledByKairos: boolean
+  /**
+   * Kairós podría atenderla si no estuviera pausada: está prendido y no es de una clínica con su
+   * app ni «No es una clínica». Con esto la pantalla ofrece «Devolver a Kairós».
+   */
+  kairosAvailable: boolean
+  /** Quién dijo «Lo atiendo yo»; nulo si nadie (o si la pasó Kairós). */
+  kairosPausedBy: { userId: string; name: string } | null
+  /**
+   * Kairós o Ariadna la pasó al equipo (o no pudo responder): cuándo, por qué, quién y, si fue
+   * Ariadna, a quién (`soporte`, `administracion` o `paciente`). Nulo si no fue así.
+   */
+  kairosHandover: {
+    at: Date
+    why: string | null
+    agent: ChatTurnAgent
+    to: AriadnaChatReplyKind | null
+  } | null
+  /**
+   * Ariadna responde sola en esta conversación: está prendida, no está pausada y es de una clínica
+   * con su app (ADR 0191).
+   */
+  handledByAriadna: boolean
+  /** Ariadna podría atenderla si no estuviera pausada: con esto la pantalla ofrece «Devolver a Ariadna». */
+  ariadnaAvailable: boolean
   lastInboundAt: Date | null
   /** Se puede responder con texto libre: no pasaron 24 h desde su último mensaje. */
   canReplyFreely: boolean
@@ -994,6 +1065,16 @@ function chatBrand(client: { product: string } | null): string {
 /** «— Ana · odentIA»: la firma de una respuesta en una conversación. */
 export function chatSignature(name: string | null | undefined, client: { product: string } | null) {
   return `— ${firstName(name)} · ${chatBrand(client)}`
+}
+
+/** «— Kairós · odentIA»: lo que escribe Kairós solo lleva su nombre, no el de una persona. */
+export function kairosChatSignature(client: { product: string } | null) {
+  return `— Kairós · ${chatBrand(client)}`
+}
+
+/** «— Ariadna · latidIA»: lo que escribe Ariadna en el chat de una clínica con su app. */
+export function ariadnaChatSignature(client: { product: string } | null) {
+  return `— Ariadna · ${chatBrand(client)}`
 }
 
 async function userName(tx: Db, userId: string): Promise<string | null> {
@@ -1085,9 +1166,54 @@ export async function getChat(
         adminOnly: Boolean(adminOnly),
         createdBy: row.createdBy ? { userId: row.createdBy, name: authorName ?? "" } : null,
         sentAt: row.sentAt,
+        byKairos: row.byKairos,
+        byAriadna: row.byAriadna,
       }),
     ),
   ].sort((a, b) => a.at.getTime() - b.at.getTime())
+  // Lo mismo que `kairosHandlesChat`, sin la pausa: la pantalla ofrece «Devolver a Kairós».
+  const kairosAvailable =
+    !chat.notClinicAt && !client?.organizationId && (await getKairosSells(tx)).enabled
+  // Lo mismo para Ariadna, con la clínica que ya tiene su app.
+  const ariadnaAvailable =
+    !chat.notClinicAt &&
+    Boolean(client?.organizationId) &&
+    !client?.archivedAt &&
+    (await getAriadnaChats(tx)).enabled
+  // Pausada sin persona: la pasó Kairós o Ariadna (su último turno que pasó o falló dice por qué).
+  const [handed] =
+    chat.kairosPausedAt && !chat.kairosPausedBy
+      ? await tx
+          .select({
+            at: kairosChatTurn.updatedAt,
+            why: kairosChatTurn.why,
+            agent: kairosChatTurn.agent,
+            to: kairosChatTurn.ariadnaReply,
+          })
+          .from(kairosChatTurn)
+          .where(
+            and(
+              eq(kairosChatTurn.chatId, chat.id),
+              inArray(kairosChatTurn.outcome, ["paso", "fallo"]),
+            ),
+          )
+          .orderBy(desc(kairosChatTurn.updatedAt))
+          .limit(1)
+      : []
+  // Lo que Ariadna pasó a Administración (cobros, su plan) es de Administración desde ese mensaje:
+  // Soporte no ve que se pasó, ni a quién, ni que está en pausa, ni puede devolverla a Ariadna.
+  const hiddenHandover = !admin && handed?.to === "administracion"
+  const kairosHandover =
+    chat.kairosPausedAt && !chat.kairosPausedBy && !hiddenHandover
+      ? {
+          at: handed?.at ?? chat.kairosPausedAt,
+          why: handed?.why ?? null,
+          agent:
+            (handed?.agent as ChatTurnAgent | undefined) ??
+            (client?.organizationId ? "ariadna" : "kairos"),
+          to: (handed?.to as AriadnaChatReplyKind | null | undefined) ?? null,
+        }
+      : null
   const today = limaDate(now)
   const files: ChatFile[] =
     admin && messages.length > 0
@@ -1136,6 +1262,16 @@ export async function getChat(
       : null,
     contact: contact ?? null,
     notClinicAt: chat.notClinicAt,
+    kairosPausedAt: hiddenHandover ? null : chat.kairosPausedAt,
+    handledByKairos: kairosAvailable && !chat.kairosPausedAt,
+    kairosAvailable,
+    handledByAriadna: ariadnaAvailable && !chat.kairosPausedAt,
+    ariadnaAvailable: ariadnaAvailable && !hiddenHandover,
+    kairosPausedBy:
+      chat.kairosPausedAt && chat.kairosPausedBy
+        ? { userId: chat.kairosPausedBy, name: (await userName(tx, chat.kairosPausedBy)) ?? "" }
+        : null,
+    kairosHandover,
     lastInboundAt: chat.lastInboundAt,
     ...chatFreeWindow(chat.lastInboundAt, now),
     replySignature: chatSignature(await userName(tx, actor.userId), client),
@@ -1169,6 +1305,11 @@ export interface ChatReplyInput {
   body?: string | null
   /** Solo Administración: Soporte no lo ve aunque vea la conversación. */
   adminOnly?: boolean | null
+  /**
+   * Solo cuando Ariadna la pasó a Administración: con `adminOnly: false`, que Administración
+   * quitó a propósito «Solo administración» (sin esto, lo de esa conversación sale solo para ella).
+   */
+  adminOnlyOverride?: boolean | null
   /** Fuera de las 24 h, solo en WhatsApp: la plantilla con que se retoma. */
   template?: string | null
   /**
@@ -1242,7 +1383,27 @@ export async function prepareChatReply(
   // Se decide al reservarlo, como el mensaje al llegar: lo de una conversación que no es de una
   // clínica con su app es de la venta; lo demás, si Administración lo marca. Lo que escribe
   // Soporte (solo en una clínica con app) nunca lo es.
-  const adminOnly = !client?.organizationId || (actor.role === "admin" && Boolean(input.adminOnly))
+  // Escribir a mano es atenderla: Kairós o Ariadna dejan de responder solo aquí, como con «Lo atiendo yo».
+  // Así una persona puede escribir primero (la propuesta, un seguimiento) sin que respondan los dos.
+  if (!chat.kairosPausedAt) {
+    await tx
+      .update(saasChat)
+      .set({ kairosPausedAt: now, kairosPausedBy: actor.userId, updatedAt: now })
+      .where(eq(saasChat.id, chat.id))
+    await writeAdminAudit(tx, actor, {
+      action: "chat.kairos_paused",
+      entityId: chat.id,
+      metadata: { chatId: chat.id, alEscribir: true },
+    })
+  }
+  // Lo que Ariadna pasó a Administración (cobros, su plan) nace «Solo administración» aunque llegue
+  // `adminOnly: false` (la pantalla lo manda siempre): mostrárselo a Soporte pide decirlo aparte,
+  // con `adminOnlyOverride`. Así un formulario que se quedó sin marcar no lo deja ver.
+  const handedToAdministration = await chatHandedToAdministration(tx, chat)
+  const markedAdminOnly = handedToAdministration
+    ? !(input.adminOnly === false && input.adminOnlyOverride === true)
+    : Boolean(input.adminOnly)
+  const adminOnly = !client?.organizationId || (actor.role === "admin" && markedAdminOnly)
   let proposalId: string | null = null
   if (input.proposalId && !template) {
     if (!chat.clientId)
@@ -1312,6 +1473,194 @@ export async function prepareChatReply(
     template,
     templateParams,
   }
+}
+
+/**
+ * Ariadna pasó esta conversación a Administración y sigue así (pausada sin persona, su último pase
+ * fue a Administración): lo que se responda es solo de Administración.
+ */
+export async function chatHandedToAdministration(
+  tx: Db,
+  chat: { id: string; kairosPausedAt: Date | null; kairosPausedBy: string | null },
+): Promise<boolean> {
+  if (!chat.kairosPausedAt || chat.kairosPausedBy) return false
+  const [turn] = await tx
+    .select({ to: kairosChatTurn.ariadnaReply })
+    .from(kairosChatTurn)
+    .where(
+      and(eq(kairosChatTurn.chatId, chat.id), inArray(kairosChatTurn.outcome, ["paso", "fallo"])),
+    )
+    .orderBy(desc(kairosChatTurn.updatedAt))
+    .limit(1)
+  return turn?.to === "administracion"
+}
+
+/**
+ * Las plantillas de utilidad con que escribe Kairós fuera de las 24 h: retomar (pedir otra hora) y
+ * el recordatorio de la presentación (nombre, día y hora, enlace de la sala).
+ */
+export const KAIROS_CHAT_TEMPLATES = ["retomar_conversacion", "recordatorio_presentacion"] as const
+export type KairosChatTemplate = (typeof KAIROS_CHAT_TEMPLATES)[number]
+
+export interface KairosChatReplyInput {
+  /** El texto (sin firma: la pone el envío); con plantilla, lo que se guarda de ella. */
+  body: string
+  /** Fuera de las 24 h, solo WhatsApp. */
+  template?: KairosChatTemplate | null
+  templateParams?: string[]
+  /**
+   * Si Hoy deja de pedir respuesta (`chat_sin_cliente`, `responder_chat`). No cuando Kairós lo
+   * pasa al equipo: ahí la respuesta es el aviso fijo y Hoy lo tiene que mostrar.
+   */
+  closeItems?: boolean
+  /** `aviso` (recordatorio, otra hora, cambio): no responde el último mensaje. Por omisión, `respuesta`. */
+  purpose?: SaasOutreachPurpose
+  /** Quien escribe: Kairós (por omisión) o Ariadna, en el chat de una clínica con su app. */
+  agent?: ChatTurnAgent
+  /** Solo Ariadna: lo que Soporte no ve (lo que pasa a Administración). Lo de Kairós siempre lo es. */
+  adminOnly?: boolean
+}
+
+/**
+ * Reserva lo que escribe Kairós solo en una conversación (`pendiente`, a su nombre: `by_kairos`,
+ * sin persona), con su firma «— Kairós · odentIA». Se envía después del commit con
+ * `sendChatOutreach`, igual que lo de una persona: enviado, no salió o incierto, nunca se
+ * reintenta. Texto libre solo dentro de las 24 h (después, 409 `CHAT_WINDOW_CLOSED`); la plantilla,
+ * solo en WhatsApp. Siempre es solo de Administración: Kairós solo escribe en la venta.
+ */
+export async function prepareKairosChatReply(
+  tx: Db,
+  chatId: string,
+  input: KairosChatReplyInput,
+  now = new Date(),
+): Promise<ChatReply> {
+  const chat = await lockChat(tx, null, chatId)
+  const client = await clientOf(tx, chat.clientId)
+  const template = input.template ?? null
+  if (template && chat.channel !== "whatsapp")
+    throw invalidField("template", "Solo WhatsApp retoma una conversación con una plantilla")
+  const ariadna = input.agent === "ariadna"
+  // Ariadna escribe solo a la clínica con su app: ahí Soporte ve la conversación, salvo lo que pasa a Administración.
+  if (ariadna && !client?.organizationId)
+    throw new ServiceError(
+      "CHAT_NOT_CLINIC_APP",
+      409,
+      "Ariadna solo responde a una clínica con su app",
+    )
+  const signature = ariadna ? ariadnaChatSignature(client) : kairosChatSignature(client)
+  let body: string
+  if (template) {
+    body = trimTo(input.body, OUTREACH_BODY_MAX) ?? `Plantilla «${template}»`
+  } else {
+    if (!chatFreeWindow(chat.lastInboundAt, now).canReplyFreely) {
+      const message = CHAT_WINDOW_CLOSED_WORDS[chat.channel as SaasChatChannel](
+        chat.lastInboundAt !== null,
+      )
+      throw new ServiceError("CHAT_WINDOW_CLOSED", 409, message, { body: message })
+    }
+    const text = (input.body ?? "").trim()
+    if (!text) throw invalidField("body", "Escribe el mensaje")
+    body = `${text.slice(0, OUTREACH_BODY_MAX - signature.length - 2)}\n\n${signature}`
+  }
+  const [row] = await tx
+    .insert(saasOutreach)
+    .values({
+      clientId: chat.clientId,
+      contactId: chat.contactId,
+      channel: chat.channel as SaasChatChannel,
+      toAddress: chat.address,
+      body,
+      chatId: chat.id,
+      template,
+      adminOnly: ariadna ? Boolean(input.adminOnly) : true,
+      byKairos: true,
+      byAriadna: ariadna,
+      purpose: input.purpose ?? "respuesta",
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  if (input.closeItems !== false)
+    await closeChatKairosItems(
+      tx,
+      chat.id,
+      ["chat_sin_cliente", "responder_chat"],
+      ariadna ? "Ariadna le respondió" : "Kairós le respondió",
+      now,
+    )
+  await writeAdminAudit(tx, null, {
+    action: "kairos.chat_reply_prepared",
+    organizationId: client?.organizationId ?? null,
+    entityId: chat.clientId ?? chat.id,
+    metadata: {
+      outreachId: row.id,
+      channel: chat.channel,
+      chatId: chat.id,
+      template,
+      agent: ariadna ? "ariadna" : "kairos",
+    },
+  })
+  return {
+    outreachId: row.id,
+    chatId: chat.id,
+    clientId: chat.clientId,
+    to: chat.address,
+    body,
+    template: template as ChatTemplate | null,
+    templateParams: input.templateParams ?? [],
+  }
+}
+
+/**
+ * «Lo atiendo yo»: Kairós deja de responder solo en esta conversación hasta «Devolver a Kairós».
+ * Lo hace cualquiera del equipo que la ve. Si ya estaba pausada, no cambia quién la pausó.
+ */
+export async function pauseChatKairos(
+  tx: Db,
+  actor: AdminActor,
+  chatId: string,
+  now = new Date(),
+): Promise<{ chatId: string; kairosPausedAt: Date }> {
+  const chat = await lockChat(tx, actor, chatId)
+  if (chat.kairosPausedAt) return { chatId: chat.id, kairosPausedAt: chat.kairosPausedAt }
+  await tx
+    .update(saasChat)
+    .set({ kairosPausedAt: now, kairosPausedBy: actor.userId, updatedAt: now })
+    .where(eq(saasChat.id, chat.id))
+  await writeAdminAudit(tx, actor, {
+    action: "chat.kairos_paused",
+    entityId: chat.id,
+    metadata: { chatId: chat.id },
+  })
+  return { chatId: chat.id, kairosPausedAt: now }
+}
+
+/** «Devolver a Kairós»: vuelve a responder solo lo que siga sin respuesta y lo que llegue. */
+export async function resumeChatKairos(
+  tx: Db,
+  actor: AdminActor,
+  chatId: string,
+  now = new Date(),
+): Promise<{ chatId: string; kairosPausedAt: null }> {
+  const chat = await lockChat(tx, actor, chatId)
+  // Lo que Ariadna pasó a Administración lo devuelve solo Administración: para Soporte no hay nada
+  // que devolver (ni sabe que se pasó).
+  if (actor.role !== "admin" && (await chatHandedToAdministration(tx, chat)))
+    throw new ServiceError("CHAT_NOT_PAUSED", 409, "Esta conversación no está en pausa")
+  if (chat.kairosPausedAt) {
+    await tx
+      .update(saasChat)
+      .set({ kairosPausedAt: null, kairosPausedBy: null, updatedAt: now })
+      .where(eq(saasChat.id, chat.id))
+    await writeAdminAudit(tx, actor, {
+      action: "chat.kairos_resumed",
+      entityId: chat.id,
+      metadata: { chatId: chat.id },
+    })
+  }
+  return { chatId: chat.id, kairosPausedAt: null }
 }
 
 export interface ChatMessageInput {
@@ -1422,7 +1771,45 @@ async function settleChatOutreach(
       ...(extra.metaStatus ? { metaStatus: extra.metaStatus } : {}),
     },
   })
+  if (status !== "enviado" && updated.byKairos && updated.purpose === "respuesta")
+    await handOverKairosReply(tx, updated, status, now, extra.why ?? null)
   return updated
+}
+
+/**
+ * La respuesta de Kairós no salió (Meta la rechazó) o no se sabe si salió: la conversación no
+ * está atendida. Su turno pasa a `fallo` con el porqué y la conversación queda pausada sin
+ * persona («Kairós se la pasó al equipo»): `responder_chat` sale en Hoy y el equipo la ve.
+ */
+async function handOverKairosReply(
+  tx: Db,
+  row: OutreachRecord,
+  status: "incierto" | "no_salio",
+  now: Date,
+  why: string | null,
+): Promise<void> {
+  const words =
+    status === "no_salio"
+      ? `Su respuesta no salió${why ? ` (${why.slice(0, 200)})` : ""}`
+      : "No se sabe si salió su respuesta"
+  const turns = await tx
+    .update(kairosChatTurn)
+    .set({ outcome: "fallo", why: words.slice(0, 500), updatedAt: now })
+    .where(and(eq(kairosChatTurn.outreachId, row.id), eq(kairosChatTurn.outcome, "respondio")))
+    .returning({ chatId: kairosChatTurn.chatId })
+  const chatId = turns[0]?.chatId ?? row.chatId
+  if (!chatId) return
+  const paused = await tx
+    .update(saasChat)
+    .set({ kairosPausedAt: now, kairosPausedBy: null, updatedAt: now })
+    .where(and(eq(saasChat.id, chatId), isNull(saasChat.kairosPausedAt)))
+    .returning({ id: saasChat.id })
+  if (turns.length > 0 || paused.length > 0)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.chat_failed",
+      entityId: row.clientId ?? chatId,
+      metadata: { chatId, clientId: row.clientId, outreachId: row.id, why: words },
+    })
 }
 
 export interface ChatOutreachResult {

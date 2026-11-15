@@ -49,6 +49,8 @@ import {
   getPlanNextStep,
   getPlanNextSteps,
   allergiesSaidNoByPatient,
+  allergyAlertsOf,
+  allergiesSaidUnknownByPatient,
   declaredAllergiesByPatient,
   getStaffMissingData,
   getTimeline,
@@ -71,6 +73,7 @@ import {
   makeImageThumbnail,
   markAllergiesReviewed,
   markHealthDenied,
+  reviewDeclaredHealth,
   operationBodySchema,
   operationBodyShape,
   PATIENT_AVATAR_MAX_BYTES,
@@ -238,7 +241,9 @@ const allergySubstance = {
 const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
-const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
+// El motivo es libre: lo vacío y lo largo los dice el servicio junto a «Motivo» (`removePatientAllergy`).
+const allergyRemoveInput = z.object({ reason: z.string() }).strict()
+const healthReviewedInput = z.object({ expectedRevision: z.number().int().min(0) }).strict()
 const healthDeniedInput = z
   .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })
   .strict()
@@ -887,6 +892,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         // quién lo dijo y cuándo: no es un «niega» del equipo. null si no es un «No» declarado.
         const seesAllergies = clinicalRead || canAccess(memberRole, "clinical.alerts")
         const allergySaidNo = seesAllergies ? await allergiesSaidNoByPatient(tx, orgId, c.req.param("id")) : null
+        // Su «No sé» a las alergias, con quién y cuándo: tampoco es «no se le preguntó» (QA del 15 nov, K16).
+        const allergySaidUnknown = seesAllergies ? await allergiesSaidUnknownByPatient(tx, orgId, full) : null
         // Y qué alergias activas dijo la persona y nadie revisó, con quién y cuándo: la marca de
         // recepción (QA del 14 nov). Solo las alergias, nada más de lo declarado.
         const declaredAllergies = seesAllergies ? await declaredAllergiesByPatient(tx, orgId, c.req.param("id")) : []
@@ -895,6 +902,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
             ...full,
             allergyReview: (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown",
             allergySaidNo,
+            allergySaidUnknown,
             declaredAllergies,
           }
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
@@ -907,15 +915,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           // Lo clínico de la ficha (grupo sanguíneo, clase ASA, revisión de salud) es de quien lee la historia.
           patient: clinicalRead ? full.patient : withoutClinical(full.patient),
           registration: full.registration ? { ...full.registration, answers: declared } : null,
-          activeAllergies:
-            clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
+          // Recepción ve de cada alergia solo lo que necesita: la sustancia y su severidad (`allergyAlertsOf`).
+          activeAllergies: !seesAllergies ? [] : clinicalRead ? full.activeAllergies : allergyAlertsOf(full.activeAllergies),
           // Sin alergias registradas no es lo mismo «niega» que «no se le preguntó»: la
           // cabecera lo dice a quien ve las alergias (mesa del 9 nov). Nada más de su salud.
-          allergyReview:
-            clinicalRead || canAccess(memberRole, "clinical.alerts")
-              ? (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown"
-              : null,
+          allergyReview: seesAllergies
+            ? ((full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown")
+            : null,
           allergySaidNo,
+          allergySaidUnknown,
           declaredAllergies,
           activeConditions: [],
           currentMedications: [],
@@ -1091,6 +1099,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) =>
         markHealthDenied(tx, orgId, userId, c.req.param("id"), [...new Set(parsed.data.groups)]),
       ),
+    )
+  })
+  // «Lo revisé con ella»: lo que dijo queda revisado tal como está, sin rearmar los antecedentes.
+  app.post("/:id/health/reviewed", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = healthReviewedInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => reviewDeclaredHealth(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
   })
   app.post("/:id/health/allergies/reviewed", async (c) => {

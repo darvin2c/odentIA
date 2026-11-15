@@ -406,8 +406,12 @@ function RecentActivities({ client }: { client: ClientDetail }) {
                       : ""}
                 </span>
                 <span className="text-muted-foreground">
-                  {activity.byKairos ? "Kairós" : (activity.author?.name ?? "Sistema")} ·{" "}
-                  {whenWords(activity.happenedAt)}
+                  {activity.byAriadna
+                    ? "Ariadna"
+                    : activity.byKairos
+                      ? "Kairós"
+                      : (activity.author?.name ?? "Sistema")}{" "}
+                  · {whenWords(activity.happenedAt)}
                 </span>
                 {activity.adminOnly ? <Badge variant="outline">Solo administración</Badge> : null}
               </span>

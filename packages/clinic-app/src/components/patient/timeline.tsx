@@ -29,6 +29,7 @@ import { isImageCategory } from "../../lib/document-list"
 import type { DocumentFilter } from "../../lib/patient-areas"
 import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-overview"
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
+import { visitForAppointmentWords, visitHistoryLine, visitToldHeading } from "../../lib/visit-answer-words"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
 import { EncounterHistoryCard, VoidedEncounterLine } from "./encounter-history-card"
@@ -63,7 +64,7 @@ const FILTERS: Array<{ value: FeedFilter; label: string; types: string }> = [
     value: "todo",
     label: "Todo",
     types:
-      "encounter,note,odontogram,anamnesis,document,plan,budget,follow_up,prescription,consent,order,form",
+      "encounter,note,odontogram,anamnesis,document,plan,budget,follow_up,prescription,consent,order,form,visit_answer",
   },
   { value: "encounter", label: "Atenciones", types: "encounter" },
   { value: "plan", label: "Plan", types: "plan,budget,follow_up" },
@@ -479,6 +480,34 @@ function FactCard({
   )
 }
 
+/**
+ * Lo que contó antes de una cita y aún no se leyó en ninguna atención (QA final de formularios,
+ * 15 nov, H2): para qué cita, quién y cuándo lo contó, y lo que contó, como en la copia de su
+ * historia. Al leerse en una atención, pasa a su tarjeta.
+ */
+function VisitAnswerCard({ item, timezone, locale }: { item: TimelineItem; timezone: string; locale: string | undefined }) {
+  const told = item.told
+  return (
+    <div className="flex flex-col gap-1 elevated rounded-xl border bg-card px-6 py-4">
+      <CardHeaderRow
+        badge={timelineTypeLabel(item.type)}
+        context={told ? `${visitForAppointmentWords(told)} · sin leer en una atención` : null}
+        createdAt={item.createdAt}
+        timezone={timezone}
+        locale={locale}
+      />
+      {told ? (
+        <>
+          <p className="text-xs text-muted-foreground">{visitToldHeading(told, null)}</p>
+          <p className="text-sm">{visitHistoryLine(told)}</p>
+        </>
+      ) : (
+        <p className="text-sm font-medium">{item.title}</p>
+      )}
+    </div>
+  )
+}
+
 /** Historia clínica unificada: atenciones (también las anuladas), notas, anamnesis, papeles, odontograma y plan. */
 export function Timeline({ patientId, initialTooth, onOdontogramSelect }: TimelineProps) {
   const [filter, setFilter] = useState<FeedFilter>("todo")
@@ -549,6 +578,8 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
       <FactCard key={item.id} patientId={patientId} item={item} timezone={timezone} locale={locale} />
     ) : item.type === "note" ? (
       <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
+    ) : item.type === "visit_answer" ? (
+      <VisitAnswerCard key={item.id} item={item} timezone={timezone} locale={locale} />
     ) : item.type === "odontogram" ? (
       <OdontogramCard key={item.id} item={item} timezone={timezone} locale={locale} onOdontogramSelect={onOdontogramSelect} />
     ) : history.owns(item.type) ? (

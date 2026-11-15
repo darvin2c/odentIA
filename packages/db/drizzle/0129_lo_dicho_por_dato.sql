@@ -1,0 +1,5 @@
+ALTER TABLE "patient_allergy" DROP CONSTRAINT "patient_allergy_removed_reason_check";--> statement-breakpoint
+ALTER TABLE "encounter" ADD COLUMN "health_at_signing" jsonb;--> statement-breakpoint
+ALTER TABLE "registration_hold" ADD COLUMN "entry_point" text;--> statement-breakpoint
+ALTER TABLE "patient_allergy" ADD CONSTRAINT "patient_allergy_removed_reason_check" CHECK ("patient_allergy"."removed_reason" IS NULL OR (btrim("patient_allergy"."removed_reason") <> '' AND char_length("patient_allergy"."removed_reason") <= 500));--> statement-breakpoint
+ALTER TABLE "registration_hold" ADD CONSTRAINT "registration_hold_entry_check" CHECK ("registration_hold"."entry_point" IS NULL OR "registration_hold"."entry_point" IN ('qr', 'public_link', 'conversation'));

@@ -64,7 +64,8 @@ const envSchema = z.object({
    * Los canales de la administración (ADR 0189): la app de Meta propia de
    * Sallca, con su número de WhatsApp, su página de Facebook (Messenger) y su
    * cuenta de Instagram. Cada canal se prende con sus variables y las dos
-   * comunes (`adminChannelsFromEnv`); el worker aún no envía por ellos: las declara para que la configuración sea la misma.
+   * comunes (`adminChannelsFromEnv`); el worker los usa cuando Kairós responde solo en los chats
+   * y para los avisos de las presentaciones que agendó.
    */
   ADMIN_META_APP_SECRET: z.string().default(""),
   ADMIN_META_VERIFY_TOKEN: z.string().default(""),
@@ -73,6 +74,11 @@ const envSchema = z.object({
   ADMIN_META_PAGE_ID: z.string().default(""),
   ADMIN_META_PAGE_ACCESS_TOKEN: z.string().default(""),
   ADMIN_IG_ACCOUNT_ID: z.string().default(""),
+  /**
+   * Solo pruebas (e2e): la Graph API de Meta de los canales de la administración en
+   * un servidor local, como en la API. Producción no arranca con ella.
+   */
+  ADMIN_META_GRAPH_URL: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**
@@ -85,6 +91,12 @@ const envSchema = z.object({
   SMTP_USER: z.string().default(""),
   SMTP_PASS: z.string().default(""),
   SMTP_FROM: z.string().min(1),
+  /**
+   * El canal de ZeptoMail de las conversaciones de la administración, como en la API: por ahí salen
+   * los avisos por correo de Kairós (recordatorio de la presentación). Vacías, por SMTP_USER.
+   */
+  CONVERSATION_SMTP_USER: z.string().optional().default(""),
+  CONVERSATION_SMTP_PASS: z.string().optional().default(""),
   // El remitente de los correos de latidIA (issue 229); vacío, el de SMTP_FROM con su nombre.
   MEDICAL_SMTP_FROM: z.string().optional(),
   // El de vistIA, igual.
@@ -161,6 +173,8 @@ const envSchema = z.object({
   if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
   const sender = senderModeStartProblem(data)
   if (sender) ctx.addIssue({ code: "custom", path: ["CHANNEL_SENDER_MODE"], message: sender })
+  if (data.NODE_ENV === "production" && data.ADMIN_META_GRAPH_URL)
+    ctx.addIssue({ code: "custom", path: ["ADMIN_META_GRAPH_URL"], message: "ADMIN_META_GRAPH_URL es solo de pruebas: en producción los canales de la administración hablan con Meta" })
 })
 
 function loadEnv() {

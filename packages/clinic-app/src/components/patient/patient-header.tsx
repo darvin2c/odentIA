@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { changedMarkWords, declaredMarkWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
+import { changedHistoryOf, declaredMarkWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -120,6 +120,8 @@ const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, 
   took: () => "la tomó antes, hoy no",
   no: (said) => (said ? "dijo que no" : "no toma"),
   unknown: () => "no sabe",
+  // Se le preguntó y no respondió («Saltar» en «Tus medicinas»): su enlace se lo vuelve a preguntar.
+  skipped: () => "no respondió",
 }
 
 /** Lo declarado que llega a quien solo ve las alergias, como grupos de la franja. */
@@ -159,6 +161,7 @@ export function PatientClinicalStrip({
   health,
   sex,
   medicineClasses = false,
+  child = false,
 }: {
   detail: Pick<
     PatientFull,
@@ -167,6 +170,7 @@ export function PatientClinicalStrip({
     | "currentMedications"
     | "allergyReview"
     | "allergySaidNo"
+    | "allergySaidUnknown"
     | "declaredAllergies"
   >
   onAntecedentes?: () => void
@@ -181,6 +185,8 @@ export function PatientClinicalStrip({
    * se le preguntó», «dijo que no» o «no sabe» (mesa del 13 nov). La ficha muestra solo la marca.
    */
   medicineClasses?: boolean
+  /** Un menor de 12: no se le preguntan anticoagulantes ni medicinas para los huesos (K7). */
+  child?: boolean
 }) {
   const stripId = useId()
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
@@ -192,12 +198,16 @@ export function PatientClinicalStrip({
     return index === -1 ? null : index
   }
   const pregnancy = health?.pregnancy ?? null
-  const changed = health?.changed ?? null
+  // Lo que dijo que cambió, por dato (revisión final del 15 nov, dev H2): lo de antes va junto a lo de
+  // hoy de su misma clase, y nunca como otro chip vigente que se esconde tras «+N».
+  const history = changedHistoryOf({ changed: health?.changed, medications: detail.currentMedications }, sex)
+  const beforeIds = new Set([...(health?.changed?.conditions ?? []), ...(health?.changed?.medications ?? [])])
   // El «No» que marcó la persona (o quien habla por ella) no es «Niega alergias»: nadie se lo preguntó.
   const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
   // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
   // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
-  const classWords = health?.medicineClasses
+  // A un niño no se le preguntan: «Anticoagulante: dijo que no · huesos» no le sirve a quien lo atiende (K7).
+  const classWords = health?.medicineClasses && !child
     ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
           const known = health.medicineClasses?.[key]
           if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
@@ -228,24 +238,39 @@ export function PatientClinicalStrip({
         ]
       : []),
     ...(saidNoAllergies !== null
-      ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, group: saidNoAllergies, changed: false }]
+      ? // Su «No» no es una alerta: se dice, sin forma de aviso (revisión final del 15 nov, ux U3).
+        [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "secondary" as const, group: saidNoAllergies, changed: false }]
       : []),
-    ...clinicalAlerts(detail).map((alert) => {
-      // Lo que dijo que cambió (entrega 10) va con esa marca, aunque viniera de una declaración anterior.
-      const wasChanged =
-        !!changed &&
-        (changed.allergies.includes(alert.id) || changed.conditions.includes(alert.id) || changed.medications.includes(alert.id))
-      return {
-        ...alert,
-        changed: wasChanged,
-        group: wasChanged
-          ? null
-          : groupIndex(
-              (group) =>
-                group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
-            ),
-      }
-    }),
+    ...clinicalAlerts(detail)
+      .filter((alert) => !beforeIds.has(alert.id))
+      .map((alert) => {
+        const medication = detail.currentMedications.find((row) => row.id === alert.id)
+        const before = medication ? history.beforeFor("medications", medication) : history.allergyMark(alert.id)
+        return {
+          ...alert,
+          label: before ? `${alert.label} · ${before}` : alert.label,
+          changed: false,
+          group: groupIndex(
+            (group) =>
+              group.allergies.includes(alert.id) || group.conditions.includes(alert.id) || group.medications.includes(alert.id),
+          ),
+        }
+      }),
+    // Lo de antes sin nada de hoy a su lado (ya no nombró ninguna de esa clase), con su marca (entrega 10).
+    ...(
+      [
+        ["conditions", detail.activeConditions],
+        ["medications", detail.currentMedications],
+      ] as const
+    ).flatMap(([topic, rows]) =>
+      history.alone(topic, rows).map((piece, index) => ({
+        id: `cambio-${topic}-${index}`,
+        label: piece.line,
+        tone: "warning" as const,
+        group: null,
+        changed: true,
+      })),
+    ),
     // Su «No sé» o su «No» a una clase de medicina, dentro de la caja de su última declaración (B9).
     ...classWords
       .filter((word) => word.said && groups.length > 0)
@@ -295,7 +320,8 @@ export function PatientClinicalStrip({
       : noAllergies && detail.allergyReview === "none"
         ? "Niega alergias"
         : noAllergies && detail.allergyReview === "unknown"
-          ? "Alergias: no preguntado"
+          ? // Su «No sé» no es «no preguntado», como el del anticoagulante (QA del 15 nov, K16).
+            `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`
           : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
@@ -361,17 +387,8 @@ export function PatientClinicalStrip({
             </li>
           )
         })}
-        {changed && saidChanged.some(isShown) ? (
-          // Lo de antes no se borra: queda con su marca hasta que lo revise quien la atiende (entrega 10).
-          <li className="flex w-full min-w-0 max-w-full flex-col gap-1.5 rounded-md border border-dashed border-warning/40 bg-warning-soft/40 px-2 py-1 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-            <span id={`${stripId}-cambio`} className="text-xs font-medium">
-              {changedMarkWords(changed.by, changed.at, sex)}
-            </span>
-            <ul aria-labelledby={`${stripId}-cambio`} className="flex min-w-0 flex-wrap items-center gap-2">
-              {saidChanged.filter(isShown).map(item)}
-            </ul>
-          </li>
-        ) : null}
+        {/* Lo de antes no se borra: queda con su marca hasta que lo revise quien la atiende (entrega 10). */}
+        {saidChanged.filter(isShown).map(item)}
         {unchanged ? (
           <li className="flex min-w-0 max-w-full">
             <Badge variant="secondary" className="h-auto min-h-5 max-w-full py-px text-left whitespace-normal">

@@ -1,4 +1,7 @@
 import {
+  ANESTHESIA_TROUBLE_WORDS,
+  ANESTHESIA_TROUBLES,
+  type AnesthesiaTrouble,
   BONE_MEDICINE_FORMS,
   BONE_MEDICINE_REASONS,
   type BOTTLE_ANSWERS,
@@ -13,6 +16,9 @@ import {
   DOC_TYPE_LABELS,
   EDUCATION_LEVEL_LABELS,
   EDUCATION_LEVELS,
+  HEALTH_CHANGE_TOPICS,
+  type HealthChangeTopic,
+  healthChangeQuestions,
   type IdentityDocType,
   identityDocumentError,
   INSURANCE_TYPE_LABELS,
@@ -110,7 +116,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { productUi } from "../../product/product-ui"
 import { AddressStreetField } from "../address/address-street-field"
-import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
+import { ChoiceButtons as BaseChoiceButtons, MultiChoiceButtons as BaseMultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
 import { placeErrors } from "./form-errors"
@@ -127,9 +133,22 @@ import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
  *
  * «Nombres» y «Apellidos» son dos campos (ADR 0058).
  */
-type Respondent = "patient" | "representative"
+/** `""`: aún no respondió «¿Eres Lucía o respondes por ella?» en su enlace. */
+/**
+ * Lo que responde el paciente se ve elegido con el color de la clínica (Y1): con el tono neutro, lo
+ * elegido quedaba a 1,1:1 del fondo (WCAG 1.4.11 pide 3:1). Todas las opciones del registro y de su
+ * enlace pasan por aquí.
+ */
+function ChoiceButtons<T extends string>(props: Omit<Parameters<typeof BaseChoiceButtons<T>>[0], "tone">) {
+  return <BaseChoiceButtons {...props} tone="primary" />
+}
+function MultiChoiceButtons<T extends string>(props: Omit<Parameters<typeof BaseMultiChoiceButtons<T>>[0], "tone">) {
+  return <BaseMultiChoiceButtons {...props} tone="primary" />
+}
+
+type Respondent = "" | "patient" | "representative"
 type Declared = "" | "none" | "recorded" | "unknown"
-type Relation = "" | "guardian" | "family" | "other"
+type Relation = "" | "madre" | "padre" | "tutor" | "family" | "other"
 type YesNo = "" | "si" | "no"
 type YesNoUnknown = "" | "si" | "no" | "nose"
 type BottleAnswer = (typeof BOTTLE_ANSWERS)[number]
@@ -185,10 +204,12 @@ interface Draft {
   boneForm: "" | (typeof BONE_MEDICINE_FORMS)[number]
   medications: Declared
   medicationsText: string
-  /** odentIA: el corazón (antibiótico antes de atender) y la anestesia. */
+  /** odentIA: el corazón (antibiótico antes de atender), la anestesia (y qué pasó) y el sangrado tras una extracción. */
   heartRisk: YesNoUnknown
   heartAntibiotic: YesNoUnknown
   anesthesia: YesNoUnknown
+  anesthesiaWhat: "" | AnesthesiaTrouble
+  bleeding: YesNoUnknown
   bloodGroup: string
   pregnant: YesNoUnknown
   pregnancyWeeks: string
@@ -205,7 +226,7 @@ interface Draft {
   floss: YesNo
   bruxism: YesNoUnknown
   habits: string[]
-  /** «De pequeño» de un menor de 12, lo que cuenta quien lo cuida (odentIA). */
+  /** «Los dientes de Thiago en casa» de un menor de 12, lo que cuenta quien lo cuida (odentIA). */
   bottle: "" | BottleAnswer
   pacifier: "" | PacifierAnswer
   sweets: "" | SweetsAnswer
@@ -231,6 +252,14 @@ interface Draft {
   visitPain: YesNo
   visitPainLevel: string
   visitMore: string
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10) y, con «Sí», «¿Qué cambió?»
+   * (revisión final del 15 nov, D3): su respuesta y lo que eligió.
+   */
+  healthCheck: "" | "sin_cambios" | "cambio"
+  changeTopics: HealthChangeTopic[]
+  /** «¿Empezaste o dejaste alguna medicina?» de «Tu visita» (D1): con «Sí», sus medicinas, después. */
+  visitMedicines: YesNo
 }
 
 const EMPTY: Draft = {
@@ -280,6 +309,8 @@ const EMPTY: Draft = {
   heartRisk: "",
   heartAntibiotic: "",
   anesthesia: "",
+  anesthesiaWhat: "",
+  bleeding: "",
   bloodGroup: "",
   pregnant: "",
   pregnancyWeeks: "",
@@ -317,6 +348,9 @@ const EMPTY: Draft = {
   visitPain: "",
   visitPainLevel: "",
   visitMore: "",
+  healthCheck: "",
+  changeTopics: [],
+  visitMedicines: "",
 }
 /** La escala del dolor, de 0 (sin dolor) a 10 (el peor): un grupo que se recorre con flechas. */
 const PAIN_LEVELS = Array.from({ length: 11 }, (_, level) => ({ value: String(level), label: String(level) }))
@@ -335,11 +369,25 @@ const YES_NO_UNKNOWN: ReadonlyArray<{ value: Exclude<YesNoUnknown, "">; label: s
   { value: "si", label: "Sí" },
   { value: "nose", label: "No sé" },
 ]
-const RELATIONS: ReadonlyArray<{ value: Exclude<Relation, "">; label: string; detail: string }> = [
-  { value: "guardian", label: "Madre, padre o tutor", detail: "Madre, padre o tutor" },
-  { value: "family", label: "Familiar", detail: "Familiar" },
-  { value: "other", label: "Otra relación", detail: "Otra relación" },
+/**
+ * Qué es de la persona quien la registra. Madre, padre y tutor legal van por separado (QA del 15
+ * nov, K15): el vínculo guarda el parentesco escrito y su código HL7 (`kinshipFromWords`: MTH, FTH;
+ * «tutor» no es un parentesco), y lo que dijo se lee «su madre, Rosa». Los tres son el mismo vínculo
+ * `guardian`: quién decide por ella no cambia con la palabra.
+ */
+const RELATIONS: ReadonlyArray<{
+  value: Exclude<Relation, "">
+  label: string
+  relationship: NonNullable<RegistrationAnswers["representative"]>["relationship"]
+}> = [
+  { value: "madre", label: "Madre", relationship: "guardian" },
+  { value: "padre", label: "Padre", relationship: "guardian" },
+  { value: "tutor", label: "Tutor legal", relationship: "guardian" },
+  { value: "family", label: "Familiar", relationship: "family" },
+  { value: "other", label: "Otra relación", relationship: "other" },
 ]
+/** La opción elegida; un borrador de antes («guardian», la opción que juntaba las tres) cuenta como sin elegir. */
+const relationOf = (value: Relation) => RELATIONS.find((option) => option.value === value)
 const EXPERIENCES = [
   { value: "positiva", label: "Bien" },
   { value: "regular", label: "Regular" },
@@ -363,7 +411,7 @@ const CIGARETTE_OPTIONS = CIGARETTE_BANDS.map((value) => ({
 const CONDITION_OPTIONS = DECLARED_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
 /** Las de un niño, para quien lo cuida: sin «presión alta» ni radioterapia. */
 const CHILD_CONDITION_OPTIONS = DECLARED_CHILD_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
-/** «De pequeño», con las palabras del dibujo de la mesa (entrega 7). */
+/** «Los dientes de Thiago en casa», con las palabras del dibujo de la mesa (entrega 7). */
 const BOTTLE_OPTIONS: ReadonlyArray<{ value: BottleAnswer; label: string }> = [
   { value: "no", label: "No" },
   { value: "si", label: "Sí" },
@@ -384,6 +432,11 @@ const FLUORIDE_OPTIONS: ReadonlyArray<{ value: Exclude<YesNoUnknown, "">; label:
   { value: "no", label: "No" },
   { value: "nose", label: "No sé" },
 ]
+/** «que la cuidas» y «respondes por ella», según su sexo; sin él, la frase va sin pronombre (K8). */
+const SEX_WORDS: Partial<Record<string, { pronoun: string; subject: string }>> = {
+  F: { pronoun: "la", subject: "ella" },
+  M: { pronoun: "lo", subject: "él" },
+}
 /** «Él solo» o «Ella sola» según su sexo; sin él, «Sin ayuda». */
 const brusherOptions = (sex: string): ReadonlyArray<{ value: BrusherAnswer; label: string }> => [
   { value: "solo", label: sex === "F" ? "Ella sola" : sex === "M" ? "Él solo" : "Sin ayuda" },
@@ -465,6 +518,8 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.medications", "medicines", "medications"],
   ["health.bloodGroup", "health", "bloodGroup"],
   ["health.dental.corazon", "health", "heartRisk"],
+  ["health.dental.problemaAnestesia.sangrado", "health", "bleeding"],
+  ["health.dental.problemaAnestesia.quePaso", "health", "anesthesiaWhat"],
   ["health.dental.problemaAnestesia", "health", "anesthesia"],
   ["health.personal.embarazo", "history", "pregnant"],
   ["health.personal.semanasEmbarazo", "history", "pregnant"],
@@ -667,6 +722,13 @@ export interface RegistrationFill {
   firstName?: string | null
   /** Sus años cumplidos: de un menor de 12 se le pregunta lo de un niño a quien lo cuida. */
   age?: number | null
+  /** Su sexo, solo para concordar las palabras («que la cuidas», «respondes por ella»); nulo si no se sabe. */
+  sex?: "F" | "M" | null
+  /**
+   * «¿Eres Lucía o respondes por ella?» primero (K1): su enlace es suyo y su ficha no dice que sea
+   * mayor de edad. Si responde por ella, la pantalla le habla a quien responde y le pide su nombre.
+   */
+  asksWho?: boolean
   /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
   respondentFirstName?: string | null
   /** Aún no aceptó el aviso de privacidad (registrada por teléfono, por ejemplo): se pide al final. */
@@ -680,6 +742,44 @@ export interface RegistrationFill {
    * `purpose`: a qué viene, si la cita lo dice; `reader`: quien lo lee («el Dr. Luis Prado»).
    */
   visit?: { purpose: string | null; questions: VisitQuestions; reader: string } | null
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?» (entrega 10), después de
+   * saber quién responde: `since`, lo último que se supo de su salud; `questions`, de dónde sale lo
+   * que vuelve a responder según lo que elija en «¿Qué cambió?».
+   */
+  healthCheck?: { since: string; questions: readonly RegistrationFieldKey[] } | null
+  /**
+   * «¿Empezaste o dejaste alguna medicina?» en «Tu visita» (revisión final del 15 nov, D1): con un
+   * «Sí», sus medicinas con estas preguntas, en el paso siguiente. Vacío: no se le pregunta.
+   */
+  medicineQuestions?: readonly RegistrationFieldKey[]
+}
+
+/** «13 nov»: el día de lo último que se supo de su salud, como lo dice la página. */
+function shortSince(since: string): string {
+  const date = new Date(since)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleDateString("es", { day: "numeric", month: "short" }).replace(/\./g, "")
+}
+
+/**
+ * «¿Cambió algo en tu salud o en tus medicinas desde tu última visita (13 nov)?» (entrega 10). A
+ * quien responde por otra persona (un niño, o dijo «Respondo por ella») se le pregunta por ella, con
+ * su nombre (`about`). No lista lo que dijo entonces (decisión 9).
+ */
+export function healthCheckQuestion(about: string | null, since: string): string {
+  const day = shortSince(since)
+  const when = day ? ` (${day})` : ""
+  return about
+    ? `¿Cambió algo en la salud o en las medicinas de ${about} desde su última visita${when}?`
+    : `¿Cambió algo en tu salud o en tus medicinas desde tu última visita${when}?`
+}
+
+/** «¿Qué cambió?»: los temas en palabras, de ella o de la persona por la que responde. */
+const CHANGE_TOPIC_WORDS: Record<HealthChangeTopic, { own: string; other: string }> = {
+  medicinas: { own: "Mis medicinas", other: "Sus medicinas" },
+  enfermedades: { own: "Mis enfermedades", other: "Sus enfermedades" },
+  alergias: { own: "Mis alergias", other: "Sus alergias" },
 }
 
 const HEALTH_KEYS = new Set<string>(
@@ -738,6 +838,12 @@ function BoneChoice({
       <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
     </div>
   )
+}
+
+/** De lo marcado, lo que está en la lista que se ve: la de un niño o la de un adulto (B6 de la 7). */
+export function shownConditions(picked: readonly string[], child: boolean): string[] {
+  const list: readonly string[] = child ? DECLARED_CHILD_CONDITION_OPTIONS : DECLARED_CONDITION_OPTIONS
+  return picked.filter((value) => list.includes(value))
 }
 
 /** Sin repetir lo mismo escrito dos veces, sin importar mayúsculas ni tildes. */
@@ -811,18 +917,31 @@ export function RegistrationQuestionnaire({
    * resto se dice en la última pantalla. En «Su enlace» con «Tu visita», lo de
    * su visita llega aparte (`visit`), en el mismo envío.
    */
-  onSubmit: (answers: RegistrationAnswers, extra: { visit: VisitAnswerInput | null }) => Promise<void>
+  onSubmit: (
+    answers: RegistrationAnswers,
+    extra: {
+      visit: VisitAnswerInput | null
+      /** Su respuesta a «¿Cambió algo?», si se le preguntó (`fill.healthCheck`). */
+      healthCheck?: "sin_cambios" | "cambio" | null
+      /** Dijo en «Tu visita» que empezó o dejó una medicina: lo de sus medicinas va en su salud. */
+      medicinesChanged?: boolean
+    },
+  ) => Promise<void>
 }) {
   const profile = clinicalProfileFor(countryCode)
   const phoneCountry = normalizeCountry(countryCode)
   const [item, setItem] = useState(() => {
     if (!fill) return ownRecord ? "person" : "respondent"
+    // «¿Eres Lucía o respondes por ella?» va primero: decide a quién le habla todo lo demás (K1).
+    if (fill.asksWho) return "respondent"
     const wants = (key: string) => fillWants(fill, key)
     if (PERSON_KEYS.some(wants)) return "person"
     if (wants("docType")) return "document"
     if (wants("phone") || wants("email") || wants("address")) return "contact"
     if (wants("emergencyContactName")) return "emergency"
     if (wants("insuranceType")) return "insurance"
+    // «¿Cambió algo?» va antes de lo de su salud: decide qué más se le pregunta.
+    if (fill.healthCheck) return "change"
     // Sin nada de sus datos ni de su salud, «Antes de tu cita» es solo «Tu visita».
     if (!fill.health) return fill.visit ? "visit" : "send"
     // La primera pantalla de su salud con algo que preguntarle, en el orden en que se ven.
@@ -850,10 +969,17 @@ export function RegistrationQuestionnaire({
   // La pantalla desde la que se envió: si falla, el error se dice solo ahí.
   const [sentFrom, setSentFrom] = useState<string | null>(null)
   const form = useRegistrationForm(
-    { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
+    // Donde el enlace pregunta quién responde, nada viene elegido: no se supone (K1).
+    { ...EMPTY, respondent: ownRecord ? "representative" : fill?.asksWho ? "" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
-      await onSubmit(buildAnswers(), { visit: buildVisit() })
+      // Lo de «¿Cambió algo?» se lee del formulario al enviar: «No, sigue igual» lo pone y envía en el mismo toque.
+      const { healthCheck, visitMedicines } = form.state.values
+      await onSubmit(buildAnswers(), {
+        visit: buildVisit(),
+        healthCheck: fill?.healthCheck && healthCheck ? healthCheck : null,
+        medicinesChanged: asksMedicineChange && visitMedicines === "si",
+      })
       // Enviado: lo escrito se borra del celular ya, antes de que la pantalla cambie.
       sentRef.current = true
       if (draftKey) clearDeviceDraft(draftKey)
@@ -915,15 +1041,25 @@ export function RegistrationQuestionnaire({
   const ageNow = fill && !isRealDate(draft.birthDate) ? (fill.age ?? null) : ageOn(draft.birthDate, today)
   // Un niño (menor de 12): su salud se le pregunta a quien lo cuida, con ejemplos de niño (mesa del 13 nov, entrega 7).
   const child = isChildAge(ageNow)
+  // Su sexo: el que escribe o, en «Su enlace», el de su ficha.
+  const sexNow = draft.sex || fill?.sex || ""
   // A quién se le pregunta cada dato de salud: la misma regla del servidor (`registrationFieldApplies`).
   const applies = (key: RegistrationFieldKey) =>
-    !HEALTH_KEYS.has(key) || registrationFieldApplies(key, { sex: draft.sex || null, age: ageNow })
+    !HEALTH_KEYS.has(key) || registrationFieldApplies(key, { sex: sexNow || null, age: ageNow })
+  // De su salud, además de lo que falta: lo de lo que eligió en «¿Qué cambió?» (D3) y, si dijo en «Tu
+  // visita» que empezó o dejó una medicina, sus medicinas (D1). Lo demás no se le vuelve a preguntar.
+  const changeTopics = draft.changeTopics.filter((topic) => HEALTH_CHANGE_TOPICS.includes(topic))
+  const changedKeys =
+    fill?.healthCheck && draft.healthCheck === "cambio" ? healthChangeQuestions(changeTopics, fill.healthCheck.questions) : []
+  const asksMedicineChange = !!fill?.visit && (fill.medicineQuestions?.length ?? 0) > 0
+  const visitMedicineKeys = asksMedicineChange && draft.visitMedicines === "si" ? (fill?.medicineQuestions ?? []) : []
+  const alsoAsked = new Set<RegistrationFieldKey>([...changedKeys, ...visitMedicineKeys])
+  const medicinesAfterVisit = visitMedicineKeys.length > 0
   const asked = (key: RegistrationFieldKey) =>
     !fill
       ? registrationFieldAsked(config, key, countryCode, product) && applies(key)
       : HEALTH_KEYS.has(key) || registrationHealthSection(key) !== null
-        ? fill.health &&
-          (!fill.healthKeys || fill.healthKeys.has(key)) &&
+        ? ((fill.health && (!fill.healthKeys || fill.healthKeys.has(key))) || alsoAsked.has(key)) &&
           registrationFieldAsked(config, key, countryCode, product) &&
           applies(key)
         : fillWants(fill, key)
@@ -937,12 +1073,20 @@ export function RegistrationQuestionnaire({
     !!fill &&
     (fill.health ||
       !!fill.visit ||
+      !!fill.healthCheck ||
       [...PERSON_KEYS, "docType", "phone", "email", "address", "emergencyContactName", "insuranceType"].some((key) => fillWants(fill, key)))
   const visitAsks = fill?.visit?.questions ?? null
   const finishEarly = !!fill && !sendInFill && fillHasContent
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
+  const repRelation = relationOf(draft.repRelation)
+  // Su celular y su documento se piden si queda como su responsable (el registro) o si recepción lo
+  // registra después (un menor sin representante, en su enlace). A quien solo responde por la
+  // persona en su enlace, basta su nombre y qué es de ella (K1).
+  const repToRegister = !fill || (repInFill && minor)
+  // En el registro, quien registra a otra persona queda como su responsable y recibe sus avisos.
+  const registersRep = forOther && !fill
   const docTypes = profile.documentTypes.map(({ code }) => ({
     value: code,
     label: DOC_TYPE_LABELS[code],
@@ -955,9 +1099,36 @@ export function RegistrationQuestionnaire({
   // A quien cuida a un niño se le habla a él, también en «Su enlace»: «¿Thiago tiene…?».
   const aboutOther = forOther || (!!fill && child)
   const you = (self: string, other: string) => (aboutOther ? other : self)
-  // Quien responde por el niño: «Lo respondes tú, Carla».
-  const caregiver = fill ? (fill.respondentFirstName?.trim() ?? "") : (draft.repName.trim().split(/\s+/)[0] ?? "")
-  const answeredBy = child ? (caregiver ? `Lo respondes tú, ${caregiver}.` : "Lo respondes tú, que lo cuidas.") : ""
+  // «la» o «lo», «ella» o «él», según su sexo: «que la cuidas». Sin saberlo, la frase va sin pronombre (K8).
+  const { pronoun, subject } = SEX_WORDS[sexNow] ?? { pronoun: null, subject: null }
+  // Quien responde por la persona: «Lo respondes tú, Carla». En su enlace, quien lo abrió o, si dijo
+  // «Respondo por ella», el nombre que escribió (K1).
+  const repFirst = draft.repName.trim().split(/\s+/)[0] ?? ""
+  const caregiver = fill ? fill.respondentFirstName?.trim() || (forOther ? repFirst : "") : repFirst
+  // A quien responde por otra persona en su enlace se le dice que lo responde ella, sea niño o adulto.
+  const speaksToCaregiver = child || (!!fill && forOther)
+  const answeredBy = speaksToCaregiver
+    ? caregiver
+      ? `Lo respondes tú, ${caregiver}.`
+      : pronoun
+        ? `Lo respondes tú, que ${pronoun} cuidas.`
+        : "Lo respondes tú."
+    : ""
+  // El primer paso: «¿Para quién es el registro?» o, en su enlace, con el nombre de su ficha (K1),
+  // «¿Eres Lucía o respondes por ella?»; sin saber su sexo, sin pronombre.
+  const who = fill?.asksWho
+    ? {
+        title: first && subject ? `¿Eres ${first} o respondes por ${subject}?` : "¿Quién responde?",
+        self: first ? `Soy ${first}` : "Soy quien se atenderá",
+        other: `Respondo por ${subject ?? (first || "otra persona")}`,
+        otherHint: pronoun ? `Eres su madre, su padre o quien ${pronoun} cuida` : "Eres su madre, su padre o un familiar",
+      }
+    : {
+        title: "¿Para quién es el registro?",
+        self: "Para mí",
+        other: "Para otra persona",
+        otherHint: "Un hijo, un familiar o alguien a tu cargo",
+      }
   // Con el correo en el registro, basta el celular o el correo.
   const phoneRequired = !forOther && !asked("email") && wants("phone")
 
@@ -1003,7 +1174,7 @@ export function RegistrationQuestionnaire({
   const breastfeedingAsked = asked("medical.lactancia")
   const tobaccoAsked = asked("medical.tabaco")
   const alcoholAsked = asked("medical.alcohol")
-  // «Thiago de pequeño»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
+  // «Los dientes de Thiago en casa»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
   const childhoodKeys = [
     "dental.biberon",
     "dental.chupon",
@@ -1093,15 +1264,16 @@ export function RegistrationQuestionnaire({
 
     const answers: RegistrationAnswers = {
       demographics: demographics as RegistrationAnswers["demographics"],
-      respondent: d.respondent,
+      respondent: d.respondent || "patient",
       privacyAccepted: d.privacy,
     }
     if (forOther || (repInFill && minor && d.repName.trim())) {
-      const relation = RELATIONS.find((option) => option.value === d.repRelation) ?? RELATIONS[0]
+      // Sin elegir, el vínculo sin parentesco: nunca se supone cuál de los tres es.
+      const relation = relationOf(d.repRelation)
       answers.representative = {
         displayName: d.repName.trim(),
-        relationship: relation.value,
-        relationshipDetail: relation.detail,
+        relationship: relation?.relationship ?? "guardian",
+        relationshipDetail: relation?.label ?? "",
         ...(d.repPhone ? { phone: d.repPhone } : {}),
         ...(minor && d.repDoc.trim() ? { docType: repDocType, docNumber: d.repDoc.trim() } : {}),
       }
@@ -1117,8 +1289,12 @@ export function RegistrationQuestionnaire({
     if (asked("conditions"))
       health.conditions = {
         state: stateOf(d.conditions),
-        // Lo marcado de la lista y lo escrito en «Otra», sin repetir la misma enfermedad (B8).
-        items: uniqueByName([...(d.conditions === "recorded" ? d.conditionsPicked : []), ...listed(d.conditions, d.conditionsText)]).map(
+        // Lo marcado de la lista que se ve y lo escrito en «Otra», sin repetir la misma enfermedad (B8). Lo
+        // marcado con la otra lista (la fecha cambió de adulto a niño) ya no se ve y no se envía (B6 de la 7).
+        items: uniqueByName([
+          ...(d.conditions === "recorded" ? shownConditions(d.conditionsPicked, child) : []),
+          ...listed(d.conditions, d.conditionsText),
+        ]).map(
           (value) => ({ name: value }),
         ),
       }
@@ -1191,8 +1367,14 @@ export function RegistrationQuestionnaire({
         ...(d.heartRisk ? { riesgoEndocarditis: INTERVIEW_OF[d.heartRisk] } : {}),
         ...(d.heartAntibiotic ? { antibioticoPrevio: INTERVIEW_OF[d.heartAntibiotic] } : {}),
       }
-    if (asked("dental.problemaAnestesia") && d.anesthesia) dental.problemaAnestesia = INTERVIEW_OF[d.anesthesia]
-    // «De pequeño», con las claves de la entrevista de odentIA.
+    // La anestesia (con qué pasó, solo con el Sí) y el sangrado, cada uno con su respuesta (H9).
+    if (asked("dental.problemaAnestesia") && (d.anesthesia || d.bleeding))
+      dental.problemaAnestesia = {
+        ...(d.anesthesia ? { anestesia: INTERVIEW_OF[d.anesthesia] } : {}),
+        ...(d.anesthesia === "si" && d.anesthesiaWhat ? { quePaso: d.anesthesiaWhat } : {}),
+        ...(d.bleeding ? { sangrado: INTERVIEW_OF[d.bleeding] } : {}),
+      }
+    // «Los dientes de Thiago en casa», con las claves de la entrevista de odentIA.
     if (asked("dental.biberon") && d.bottle) dental.biberon = d.bottle
     if (asked("dental.chupon") && d.pacifier) dental.chupon = d.pacifier
     if (asked("dental.dulcesEntreComidas") && d.sweets) dental.dulcesEntreComidas = d.sweets
@@ -1209,9 +1391,9 @@ export function RegistrationQuestionnaire({
     if (Object.keys(health).length) answers.health = health
     if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
     // Se le dijo que le escribiremos por WhatsApp a ese número sobre sus citas: va con lo que
-    // envía para que quede guardado. En «Su enlace», quien responde por un menor aún no tiene
-    // ficha en la que guardarlo.
-    if (forOther ? !fill && !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
+    // envía para que quede guardado. En «Su enlace», quien responde por ella no tiene ficha en la
+    // que guardarlo: vale el celular de la persona, si lo escribió.
+    if (registersRep ? !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
   }
 
@@ -1350,6 +1532,148 @@ export function RegistrationQuestionnaire({
     )
   }
 
+  // «Tus medicinas»: en su lugar o, si llega por «¿Empezaste o dejaste alguna medicina?», después de «Tu visita» (D1).
+  const medicinesScreen = (
+    <Question
+      name="medicines"
+      grouped
+      required={medicinesRequired}
+      disabled={!medicinesAsked}
+      title={you("Tus medicinas", `Las medicinas de ${name}`)}
+      description={
+        medicinesRequired
+          ? "Algunas medicinas cambian lo que se hace en la cita."
+          : "Es opcional. Algunas medicinas cambian lo que se hace en la cita."
+      }
+      saysOptional
+      skips={{
+          anticoagulants: "",
+          anticoagulantsText: "",
+          boneMedicines: "",
+          boneMedicinesText: "",
+          boneNow: "",
+          boneReason: "",
+          boneForm: "",
+          medications: "",
+          medicationsText: "",
+      }}
+      check={() =>
+        declaredFound(
+          "anticoagulants",
+          asked("anticoagulants") && required("anticoagulants"),
+          draft.anticoagulants,
+          draft.anticoagulantsText,
+          true,
+        ) ??
+        declaredFound(
+          "boneMedicines",
+          asked("boneMedicines") && required("boneMedicines"),
+          draft.boneMedicines,
+          draft.boneMedicinesText,
+          true,
+        ) ??
+        declaredFound(
+          "medications",
+          asked("medications") && required("medications"),
+          draft.medications,
+          draft.medicationsText,
+          true,
+        )
+      }
+    >
+      {asked("anticoagulants") ? (
+        <DeclaredField
+          name="anticoagulants"
+          optional={!required("anticoagulants")}
+          label={you(
+            "¿Tomas algún medicamento para que la sangre no forme coágulos, o aspirina todos los días?",
+            `¿${first || "La persona"} toma algún medicamento para que la sangre no forme coágulos, o aspirina todos los días?`,
+          )}
+          hint="Por ejemplo, warfarina, Sintrom, rivaroxabán, apixabán o clopidogrel."
+          detailLabel="¿Cuál? (si lo sabes)"
+          detailOptional
+          detailMax={200}
+          state={draft.anticoagulants}
+          text={draft.anticoagulantsText}
+          onState={(value) => set({ anticoagulants: value })}
+          onText={(value) => set({ anticoagulantsText: value })}
+        />
+      ) : null}
+      {asked("boneMedicines") ? (
+        <DeclaredField
+          name="boneMedicines"
+          optional={!required("boneMedicines")}
+          label={you(
+            "¿Tomas o tomaste alguna vez medicinas para los huesos, por osteoporosis o por un cáncer?",
+            `¿${first || "La persona"} toma o tomó alguna vez medicinas para los huesos, por osteoporosis o por un cáncer?`,
+          )}
+          hint="Pastillas, como el alendronato, o una inyección."
+          detailLabel="¿Cuál y desde cuándo? (si lo sabes)"
+          detailOptional
+          detailMax={200}
+          state={draft.boneMedicines}
+          text={draft.boneMedicinesText}
+          onState={(value) => set({ boneMedicines: value, ...(value === "recorded" ? {} : { boneNow: "", boneReason: "", boneForm: "" }) })}
+          onText={(value) => set({ boneMedicinesText: value })}
+        >
+          {/* Opcional: cambian el riesgo antes de una extracción (AAOMS 2022). */}
+          <div className="grid gap-3">
+            <BoneChoice
+              label={you("¿La tomas ahora?", "¿La toma ahora?")}
+              value={draft.boneNow}
+              options={[
+                { value: "si", label: "Sí" },
+                { value: "no", label: "Ya no" },
+              ]}
+              onChange={(value) => set({ boneNow: value as Draft["boneNow"] })}
+            />
+            <BoneChoice
+              label="¿Por qué?"
+              value={draft.boneReason}
+              options={[
+                { value: "osteoporosis", label: "Osteoporosis" },
+                { value: "cancer", label: "Un cáncer" },
+                { value: "no_sabe", label: "No sé" },
+              ]}
+              onChange={(value) => set({ boneReason: value as Draft["boneReason"] })}
+            />
+            <BoneChoice
+              label="¿Cómo?"
+              value={draft.boneForm}
+              options={[
+                { value: "pastillas", label: "Pastillas" },
+                { value: "inyeccion", label: "Inyección" },
+              ]}
+              onChange={(value) => set({ boneForm: value as Draft["boneForm"] })}
+            />
+          </div>
+        </DeclaredField>
+      ) : null}
+      {asked("medications") ? (
+        <DeclaredField
+          name="medications"
+          optional={!required("medications")}
+          label={
+            // A quien cuida a un niño, una sola pregunta: el inhalador de rescate se usa cuando lo
+            // necesita, y «todos los días» lo dejaba fuera (K7).
+            child
+              ? `¿${first || "La persona"} toma alguna medicina, aunque sea a veces?`
+              : asked("anticoagulants") || asked("boneMedicines")
+                ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
+                : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
+          }
+          hint={child ? "Por ejemplo, inhalador, medicina para las convulsiones o jarabe, todos los días o cuando lo necesita." : undefined}
+          detailLabel="¿Cuál? (si lo sabes) Si son varios, sepáralos con comas."
+          detailOptional
+          state={draft.medications}
+          text={draft.medicationsText}
+          onState={(value) => set({ medications: value })}
+          onText={(value) => set({ medicationsText: value })}
+        />
+      ) : null}
+    </Question>
+  )
+
   return (
     <FormContext.Provider value={form}>
       <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks, at: sentFrom } : null}>
@@ -1390,8 +1714,10 @@ export function RegistrationQuestionnaire({
         <Question
           name="respondent"
           required
-          disabled={ownRecord || !!fill}
-          title="¿Para quién es el registro?"
+          disabled={ownRecord || (!!fill && !fill.asksWho)}
+          // En su enlace, con el nombre de su ficha (K1): «¿Eres Lucía o respondes por ella?». Sin
+          // saber su sexo, sin pronombre.
+          title={who.title}
         >
           <QuestionnaireChoices>
             <QuestionnaireChoice
@@ -1399,17 +1725,15 @@ export function RegistrationQuestionnaire({
               checked={draft.respondent === "patient"}
               onChange={() => set({ respondent: "patient" })}
             >
-              Para mí
+              {who.self}
             </QuestionnaireChoice>
             <QuestionnaireChoice
               value="representative"
               checked={draft.respondent === "representative"}
               onChange={() => set({ respondent: "representative" })}
             >
-              Para otra persona
-              <QuestionnaireChoiceDescription>
-                Un hijo, un familiar o alguien a tu cargo
-              </QuestionnaireChoiceDescription>
+              {who.other}
+              <QuestionnaireChoiceDescription>{who.otherHint}</QuestionnaireChoiceDescription>
             </QuestionnaireChoice>
           </QuestionnaireChoices>
           <FieldMessage name="respondent" />
@@ -1572,34 +1896,33 @@ export function RegistrationQuestionnaire({
           name="rep"
           grouped
           required
-          disabled={fill ? !(repInFill && minor) : !forOther}
-          // En «Su enlace» de un niño lo llena quien lo cuida: se le habla a ella, con el nombre del niño. Quién
-          // queda como representante no cambia: lo registra la clínica con su documento.
-          title={fill ? (child ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
+          // En «Su enlace» lo llena quien responde por la persona (un niño, o quien dijo «Respondo por ella»,
+          // K1): se le habla a ella, con el nombre de la persona. Desde el enlace no se registra a nadie: de
+          // un menor sin representante, la clínica lo registra con su documento.
+          disabled={fill ? !(forOther || repToRegister) : !forOther}
+          title={fill ? (child || forOther ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
           description={
             fill
-              ? child
-                ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
-                : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
+              ? repToRegister
+                ? child || forOther
+                  ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
+                  : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
+                : `Así sabemos quién respondió por ${name}.`
               : `Quedas como quien habla por ${name} con la clínica.`
           }
           check={() =>
             needs(!draft.repName.trim(), "repName", "Escribe tu nombre y apellidos.") ??
-            needs(!draft.repRelation, "repRelation", `Elige qué eres de ${name}.`) ??
+            needs(!repRelation, "repRelation", `Elige qué eres de ${name}.`) ??
             needs(
-              minor && draft.repRelation !== "guardian",
+              minor && repRelation?.relationship !== "guardian",
               "repRelation",
               `${first || "La persona"} es menor de edad: lo registra su madre, padre o tutor.`,
             ) ??
-            phoneFound(
-              "repPhone",
-              draft.repPhone,
-              draft.repPhoneDigits,
-              true,
-              "Escribe tu celular.",
-            ) ??
-            needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.") ??
-            says("repDoc", minor ? identityDocumentError(repDocType, draft.repDoc) : null)
+            (repToRegister
+              ? phoneFound("repPhone", draft.repPhone, draft.repPhoneDigits, true, "Escribe tu celular.") ??
+                needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.") ??
+                says("repDoc", minor ? identityDocumentError(repDocType, draft.repDoc) : null)
+              : null)
           }
         >
           <Labeled name="repName" label="Tu nombre y apellidos">
@@ -1621,13 +1944,14 @@ export function RegistrationQuestionnaire({
                 aria-describedby={control.describedBy}
                 invalid={control.invalid}
                 onBlur={control.onBlur}
-                value={draft.repRelation || null}
+                value={repRelation?.value ?? null}
                 options={RELATIONS}
                 onChange={(value) => set({ repRelation: value })}
                 columns={3}
               />
             )}
           </Labeled>
+          {repToRegister ? (
           <Labeled
             name="repPhone"
             label="Tu celular"
@@ -1648,7 +1972,8 @@ export function RegistrationQuestionnaire({
               />
             )}
           </Labeled>
-          {minor ? (
+          ) : null}
+          {minor && repToRegister ? (
             <Labeled
               name="repDoc"
               label={`Tu ${DOC_TYPE_LABELS[repDocType]}`}
@@ -1674,7 +1999,7 @@ export function RegistrationQuestionnaire({
           required={required("docType")}
           disabled={!asked("docType")}
           title={you("Tu documento", `El documento de ${name}`)}
-          onSkip={() => set({ docType: null, docNumber: "", docCountry: "" })}
+          skips={{ docType: null, docNumber: "", docCountry: "" }}
           check={() =>
             needs(
               required("docType") && !draft.docType,
@@ -1754,16 +2079,14 @@ export function RegistrationQuestionnaire({
           required={fill ? wants("phone") || wants("email") || wants("address") : !forOther || required("email") || required("address")}
           disabled={!!fill && !wants("phone") && !wants("email") && !wants("address")}
           title={you("¿Cómo te contactamos?", `¿Cómo contactamos a ${name}?`)}
-          onSkip={() =>
-            set({
+          skips={{
               phone: "",
               phoneDigits: 0,
               email: "",
               address: "",
               addressCity: "",
               addressReference: "",
-            })
-          }
+          }}
           check={() =>
             phoneFound(
               "phone",
@@ -1805,9 +2128,12 @@ export function RegistrationQuestionnaire({
             label={you("Tu celular", "Su celular")}
             optional={!phoneRequired}
             hint={
-              forOther
+              // En su enlace no se registra a quien responde por ella: sus avisos van a este número.
+              registersRep
                 ? "Si no tiene, sus avisos te llegan a ti."
-                : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
+                : forOther
+                  ? `Le escribiremos por WhatsApp a este número sobre las citas de ${name}: la confirmación, los recordatorios y los cambios.`
+                  : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
             }
           >
             {(control) => (
@@ -1927,14 +2253,12 @@ export function RegistrationQuestionnaire({
           required={required("emergencyContactName")}
           disabled={!asked("emergencyContactName")}
           title="¿A quién llamamos en una emergencia?"
-          onSkip={() =>
-            set({
+          skips={{
               emergencyName: "",
               emergencyPhone: "",
               emergencyPhoneDigits: 0,
               emergencyRelationship: "",
-            })
-          }
+          }}
           check={() => {
             const needed = required("emergencyContactName") || Boolean(draft.emergencyName.trim())
             return (
@@ -2004,7 +2328,7 @@ export function RegistrationQuestionnaire({
             "¿Tienes seguro de salud?",
             `¿${first || "La persona"} tiene seguro de salud?`,
           )}
-          onSkip={() => set({ insurance: "", insurerName: "", affiliationNumber: "" })}
+          skips={{ insurance: "", insurerName: "", affiliationNumber: "" }}
           check={() =>
             needs(required("insuranceType") && !insurance, "insurance", "Elige una opción.")
           }
@@ -2056,6 +2380,18 @@ export function RegistrationQuestionnaire({
           ) : null}
         </Question>
 
+        {fill?.healthCheck ? (
+          // Después de saber quién responde: lo que diga queda de quien lo dijo, y se le pregunta por la
+          // persona por la que responde (pendiente de la revisión de lo que dijo el paciente).
+          <HealthCheckStep
+            title={healthCheckQuestion(aboutOther ? name : null, fill.healthCheck.since)}
+            other={aboutOther}
+            offered={HEALTH_CHANGE_TOPICS.filter(
+              (topic) => healthChangeQuestions([topic], fill.healthCheck?.questions ?? []).length > 0,
+            )}
+          />
+        ) : null}
+
         <Question
           name="health"
           grouped
@@ -2063,7 +2399,7 @@ export function RegistrationQuestionnaire({
           disabled={!healthAsked}
           title={you("Tu salud", `La salud de ${name}`)}
           description={
-            child
+            speaksToCaregiver
               ? fill
                 ? `${answeredBy} ${healthRequired ? "" : "Es opcional; "}${healthRequired ? "Lo" : "lo"} revisan contigo en la cita.`
                 : `${answeredBy} Así quien atiende a ${name} lo sabe antes de empezar.`
@@ -2074,8 +2410,7 @@ export function RegistrationQuestionnaire({
                 : "Así quien te atiende lo sabe antes de empezar."
           }
           saysOptional={!!fill}
-          onSkip={() =>
-            set({
+          skips={{
               allergies: "",
               allergiesText: "",
               allergiesReaction: "",
@@ -2085,9 +2420,10 @@ export function RegistrationQuestionnaire({
               heartRisk: "",
               heartAntibiotic: "",
               anesthesia: "",
+              anesthesiaWhat: "",
+              bleeding: "",
               bloodGroup: "",
-            })
-          }
+          }}
           check={() =>
             declaredFound(
               "allergies",
@@ -2108,7 +2444,7 @@ export function RegistrationQuestionnaire({
               "Elige una respuesta.",
             ) ??
             needs(
-              asked("dental.problemaAnestesia") && required("dental.problemaAnestesia") && !draft.anesthesia,
+              asked("dental.problemaAnestesia") && required("dental.problemaAnestesia") && !draft.anesthesia && !draft.bleeding,
               "anesthesia",
               "Elige una respuesta.",
             ) ??
@@ -2226,29 +2562,76 @@ export function RegistrationQuestionnaire({
             </>
           ) : null}
           {asked("dental.problemaAnestesia") ? (
-            <Labeled
-              name="anesthesia"
-              group
-              label={you(
-                "¿Tuviste algún problema con la anestesia del dentista, o sangraste mucho después de una extracción?",
-                `¿${first || "La persona"} tuvo algún problema con la anestesia del dentista, o sangró mucho después de una extracción?`,
-              )}
-              optional={!required("dental.problemaAnestesia")}
-            >
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.anesthesia || null}
-                  options={YES_NO_UNKNOWN}
-                  onChange={(value) => set({ anesthesia: value })}
-                  columns={3}
-                />
-              )}
-            </Labeled>
+            // La anestesia y el sangrado, por separado: son dos riesgos distintos (H9). Con el Sí a la
+            // anestesia, «¿Qué pasó?»; con el No, ningún paso más.
+            <>
+              <Labeled
+                name="anesthesia"
+                group
+                label={you(
+                  "¿Tuviste algún problema con la anestesia del dentista?",
+                  `¿${first || "La persona"} tuvo algún problema con la anestesia del dentista?`,
+                )}
+                optional={!required("dental.problemaAnestesia")}
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.anesthesia || null}
+                    options={YES_NO_UNKNOWN}
+                    onChange={(value) => set({ anesthesia: value, ...(value === "si" ? {} : { anesthesiaWhat: "" }) })}
+                    columns={3}
+                  />
+                )}
+              </Labeled>
+              {draft.anesthesia === "si" ? (
+                <Labeled name="anesthesiaWhat" group label="¿Qué pasó?" optional>
+                  {(control) => (
+                    <ChoiceButtons
+                      id={control.id}
+                      aria-labelledby={control.labelId}
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      onBlur={control.onBlur}
+                      value={draft.anesthesiaWhat || null}
+                      options={ANESTHESIA_TROUBLES.map((value) => ({
+                        value,
+                        label: you(ANESTHESIA_TROUBLE_WORDS[value].said, ANESTHESIA_TROUBLE_WORDS[value].other),
+                      }))}
+                      onChange={(value) => set({ anesthesiaWhat: value })}
+                    />
+                  )}
+                </Labeled>
+              ) : null}
+              <Labeled
+                name="bleeding"
+                group
+                label={you(
+                  "¿Sangraste mucho después de una extracción?",
+                  `¿${first || "La persona"} sangró mucho después de una extracción?`,
+                )}
+                hint={you("Cuando te sacaron una muela o un diente.", "Cuando le sacaron una muela o un diente.")}
+                optional={!required("dental.problemaAnestesia")}
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.bleeding || null}
+                    options={YES_NO_UNKNOWN}
+                    onChange={(value) => set({ bleeding: value })}
+                    columns={3}
+                  />
+                )}
+              </Labeled>
+            </>
           ) : null}
           {asked("bloodGroup") ? (
             <Labeled name="bloodGroup" group label="Grupo sanguíneo" optional={!required("bloodGroup")}>
@@ -2268,141 +2651,7 @@ export function RegistrationQuestionnaire({
           ) : null}
         </Question>
 
-        <Question
-          name="medicines"
-          grouped
-          required={medicinesRequired}
-          disabled={!medicinesAsked}
-          title={you("Tus medicinas", `Las medicinas de ${name}`)}
-          description={
-            medicinesRequired
-              ? "Algunas medicinas cambian lo que se hace en la cita."
-              : "Es opcional. Algunas medicinas cambian lo que se hace en la cita."
-          }
-          saysOptional
-          onSkip={() =>
-            set({
-              anticoagulants: "",
-              anticoagulantsText: "",
-              boneMedicines: "",
-              boneMedicinesText: "",
-  boneNow: "",
-  boneReason: "",
-  boneForm: "",
-              medications: "",
-              medicationsText: "",
-            })
-          }
-          check={() =>
-            declaredFound(
-              "anticoagulants",
-              asked("anticoagulants") && required("anticoagulants"),
-              draft.anticoagulants,
-              draft.anticoagulantsText,
-              true,
-            ) ??
-            declaredFound(
-              "boneMedicines",
-              asked("boneMedicines") && required("boneMedicines"),
-              draft.boneMedicines,
-              draft.boneMedicinesText,
-              true,
-            ) ??
-            declaredFound(
-              "medications",
-              asked("medications") && required("medications"),
-              draft.medications,
-              draft.medicationsText,
-              true,
-            )
-          }
-        >
-          {asked("anticoagulants") ? (
-            <DeclaredField
-              name="anticoagulants"
-              optional={!required("anticoagulants")}
-              label={you(
-                "¿Tomas algún medicamento para que la sangre no forme coágulos, o aspirina todos los días?",
-                `¿${first || "La persona"} toma algún medicamento para que la sangre no forme coágulos, o aspirina todos los días?`,
-              )}
-              hint="Por ejemplo, warfarina, Sintrom, rivaroxabán, apixabán o clopidogrel."
-              detailLabel="¿Cuál? (si lo sabes)"
-              detailOptional
-              detailMax={200}
-              state={draft.anticoagulants}
-              text={draft.anticoagulantsText}
-              onState={(value) => set({ anticoagulants: value })}
-              onText={(value) => set({ anticoagulantsText: value })}
-            />
-          ) : null}
-          {asked("boneMedicines") ? (
-            <DeclaredField
-              name="boneMedicines"
-              optional={!required("boneMedicines")}
-              label={you(
-                "¿Tomas o tomaste alguna vez medicinas para los huesos, por osteoporosis o por un cáncer?",
-                `¿${first || "La persona"} toma o tomó alguna vez medicinas para los huesos, por osteoporosis o por un cáncer?`,
-              )}
-              hint="Pastillas, como el alendronato, o una inyección."
-              detailLabel="¿Cuál y desde cuándo? (si lo sabes)"
-              detailOptional
-              detailMax={200}
-              state={draft.boneMedicines}
-              text={draft.boneMedicinesText}
-              onState={(value) => set({ boneMedicines: value, ...(value === "recorded" ? {} : { boneNow: "", boneReason: "", boneForm: "" }) })}
-              onText={(value) => set({ boneMedicinesText: value })}
-            >
-              {/* Opcional: cambian el riesgo antes de una extracción (AAOMS 2022). */}
-              <div className="grid gap-3">
-                <BoneChoice
-                  label={you("¿La tomas ahora?", "¿La toma ahora?")}
-                  value={draft.boneNow}
-                  options={[
-                    { value: "si", label: "Sí" },
-                    { value: "no", label: "Ya no" },
-                  ]}
-                  onChange={(value) => set({ boneNow: value as Draft["boneNow"] })}
-                />
-                <BoneChoice
-                  label="¿Por qué?"
-                  value={draft.boneReason}
-                  options={[
-                    { value: "osteoporosis", label: "Osteoporosis" },
-                    { value: "cancer", label: "Un cáncer" },
-                    { value: "no_sabe", label: "No sé" },
-                  ]}
-                  onChange={(value) => set({ boneReason: value as Draft["boneReason"] })}
-                />
-                <BoneChoice
-                  label="¿Cómo?"
-                  value={draft.boneForm}
-                  options={[
-                    { value: "pastillas", label: "Pastillas" },
-                    { value: "inyeccion", label: "Inyección" },
-                  ]}
-                  onChange={(value) => set({ boneForm: value as Draft["boneForm"] })}
-                />
-              </div>
-            </DeclaredField>
-          ) : null}
-          {asked("medications") ? (
-            <DeclaredField
-              name="medications"
-              optional={!required("medications")}
-              label={
-                asked("anticoagulants") || asked("boneMedicines")
-                  ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
-                  : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
-              }
-              detailLabel="¿Cuál? (si lo sabes) Si son varios, sepáralos con comas."
-              detailOptional
-              state={draft.medications}
-              text={draft.medicationsText}
-              onState={(value) => set({ medications: value })}
-              onText={(value) => set({ medicationsText: value })}
-            />
-          ) : null}
-        </Question>
+        {medicinesAfterVisit ? null : medicinesScreen}
 
         <Question
           name="history"
@@ -2416,8 +2665,7 @@ export function RegistrationQuestionnaire({
               "Las semanas de embarazo van de 0 a 42.",
             )
           }
-          onSkip={() =>
-            set({
+          skips={{
               pregnant: "",
               pregnancyWeeks: "",
               breastfeeding: "",
@@ -2430,8 +2678,7 @@ export function RegistrationQuestionnaire({
               tobacco: "",
               cigarettes: "",
               alcohol: "",
-            })
-          }
+          }}
         >
           {pregnancyAsked ? (
             <Labeled
@@ -2497,7 +2744,8 @@ export function RegistrationQuestionnaire({
           {asked("personal.cirugias") ? (
             <YesNoField
               name="surgeries"
-              label={you("¿Te han operado alguna vez?", `¿A ${name} lo han operado alguna vez?`)}
+              // Sin «lo» ni «la»: vale para niño y niña aunque no se sepa su sexo (K8).
+              label={you("¿Te han operado alguna vez?", `¿Han operado alguna vez a ${name}?`)}
               detail="¿De qué y cuándo?"
               answer={draft.surgeries}
               text={draft.surgeriesText}
@@ -2510,7 +2758,7 @@ export function RegistrationQuestionnaire({
               name="hospitalized"
               label={you(
                 "¿Has estado internado en un hospital?",
-                `¿${first || "La persona"} ha estado internada en un hospital?`,
+                `¿Alguna vez internaron a ${name} en un hospital?`,
               )}
               detail="¿Por qué y cuándo?"
               answer={draft.hospitalized}
@@ -2596,9 +2844,10 @@ export function RegistrationQuestionnaire({
           name="childhood"
           grouped
           disabled={!childhoodKeys.some(asked)}
-          title={first ? `${first} de pequeño` : "De pequeño"}
-          description={`${answeredBy} Ayuda a cuidar sus dientes.`}
-          onSkip={() => set({ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" })}
+          // En presente y para niño o niña: lo que se pregunta es de hoy (biberón, dulces, quién le cepilla; K8).
+          title={first ? `Los dientes de ${first} en casa` : "Sus dientes en casa"}
+          description={`${answeredBy} Nos ayuda a cuidarlos.`}
+          skips={{ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" }}
         >
           {asked("dental.biberon") ? (
             <Labeled name="bottle" group label={first ? `¿${first} toma biberón o pecho para dormir?` : "¿Toma biberón o pecho para dormir?"} optional>
@@ -2683,7 +2932,7 @@ export function RegistrationQuestionnaire({
                   invalid={control.invalid}
                   onBlur={control.onBlur}
                   value={draft.brusher || null}
-                  options={brusherOptions(draft.sex)}
+                  options={brusherOptions(sexNow)}
                   onChange={(value) => set({ brusher: value })}
                   columns={3}
                 />
@@ -2698,8 +2947,7 @@ export function RegistrationQuestionnaire({
           disabled={!dentalKeys.some(asked)}
           title={you("Tu boca", `La boca de ${name}`)}
           description="Nos ayuda a preparar la primera visita."
-          onSkip={() =>
-            set({
+          skips={{
               dentalLast: "",
               dentalExperience: "",
               dentalAnxiety: "",
@@ -2707,8 +2955,7 @@ export function RegistrationQuestionnaire({
               floss: "",
               bruxism: "",
               habits: [],
-            })
-          }
+          }}
         >
           {asked("dental.ultimaVisita") ? (
             <Labeled
@@ -2849,16 +3096,14 @@ export function RegistrationQuestionnaire({
           grouped
           disabled={!censusKeys.some(censusAsked)}
           title={you("Para conocerte mejor", `Para conocer mejor a ${name}`)}
-          onSkip={() =>
-            set({
+          skips={{
               maritalStatus: "",
               educationLevel: "",
               occupation: "",
               origin: "",
               referralKind: "",
               referralSource: "",
-            })
-          }
+          }}
         >
           {censusAsked("maritalStatus") ? (
             <Labeled name="maritalStatus" group label="Estado civil" optional>
@@ -2962,7 +3207,7 @@ export function RegistrationQuestionnaire({
             saysOptional
             title={child ? `La visita de ${name}` : "Tu visita"}
             description={`Lo lee ${fill.visit?.reader ?? "quien te atiende"} antes de empezar. Todo es opcional.`}
-            onSkip={() => set({ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "" })}
+            skips={{ visitReason: "", visitPain: "", visitPainLevel: "", visitMore: "", visitMedicines: "" }}
           >
             {fill.visit?.purpose ? (
               <p className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
@@ -3040,8 +3285,37 @@ export function RegistrationQuestionnaire({
                 )}
               </Labeled>
             ) : null}
+            {asksMedicineChange ? (
+              // Sin esperar el mes de «¿Cambió algo?» (D1): lo que diga de sus medicinas llega por revisar.
+              <Labeled
+                name="visitMedicines"
+                group
+                label={you(
+                  "¿Empezaste o dejaste alguna medicina desde tu última visita?",
+                  `¿${first || "La persona"} empezó o dejó alguna medicina desde su última visita?`,
+                )}
+                hint={draft.visitMedicines === "si" ? "En el paso siguiente nos cuentas cuál." : undefined}
+                optional
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.visitMedicines || null}
+                    options={YES_NO}
+                    onChange={(value) => set({ visitMedicines: value })}
+                    columns={2}
+                  />
+                )}
+              </Labeled>
+            ) : null}
           </Question>
         ) : null}
+
+        {medicinesAfterVisit ? medicinesScreen : null}
 
         {fill ? (
           <Question
@@ -3179,6 +3453,103 @@ function declaredFound(
 }
 
 /**
+ * «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?» (entrega 10), con «¿Qué
+ * cambió?» (revisión final del 15 nov, D3). «No, sigue igual» es el botón principal: sigue o, si no
+ * queda nada más, envía en el mismo toque. «Sí, cambió» pregunta qué cambió (sus medicinas, sus
+ * enfermedades o sus alergias, `offered`) y solo se le pregunta eso; lo de antes no se borra.
+ */
+function HealthCheckStep({
+  title,
+  other,
+  offered,
+}: {
+  title: string
+  /** Responde por otra persona: «Sus medicinas». */
+  other: boolean
+  offered: readonly HealthChangeTopic[]
+}) {
+  const form = useRegistrationFormContext()
+  const fillContext = useContext(FinishContext)
+  const finish = fillContext?.label ? { label: fillContext.label, sending: fillContext.sending } : null
+  const answer = useStore(form.store, (state) => state.values.healthCheck)
+  const topics = useStore(form.store, (state) => state.values.changeTopics)
+  const check = (): Found => (answer === "cambio" && topics.length === 0 ? { field: "changeTopics", message: "Elige qué cambió." } : null)
+  // Al enviar desde aquí se revisa también esta pantalla.
+  if (fillContext) fillContext.checks.set("change", check)
+  const unchanged = () => {
+    form.setFieldValue("healthCheck", "sin_cambios")
+    form.setFieldValue("changeTopics", [])
+  }
+  const blocked = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const found = check()
+    if (!found) return
+    event.preventDefault()
+    showFound(form, found)
+  }
+  const options = offered.map((topic) => ({ value: topic, label: CHANGE_TOPIC_WORDS[topic][other ? "other" : "own"] }))
+  // Si «No, sigue igual» envió desde aquí y el servidor no lo recibió, se dice aquí, como en las demás pantallas.
+  const submitError = useFormSubmitError(form)
+  const loose = finish && fillContext?.at === "change" ? submitError : null
+  return (
+    <QuestionnaireItem name="change" required>
+      <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
+      <QuestionnaireDescription>
+        {answer === "cambio"
+          ? "Elige qué cambió: solo te preguntamos eso. Lo de antes no se borra."
+          : "Si cambió algo, eliges qué y solo te preguntamos eso. Lo de antes no se borra."}
+      </QuestionnaireDescription>
+      {answer === "cambio" ? (
+        <Labeled name="changeTopics" group label="¿Qué cambió?" hint="Puedes elegir más de uno.">
+          {() => (
+            <MultiChoiceButtons
+              label="¿Qué cambió?"
+              value={topics}
+              options={options}
+              onChange={(value) => form.setFieldValue("changeTopics", value)}
+            />
+          )}
+        </Labeled>
+      ) : null}
+      <Carry />
+      {loose ? (
+        <p role="alert" className="text-sm text-destructive">
+          {loose}
+        </p>
+      ) : null}
+      <QuestionnaireActions>
+        <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
+        {answer === "cambio" ? (
+          <>
+            <Button type="button" variant="ghost" onClick={unchanged}>
+              No, sigue igual
+            </Button>
+            {finish ? (
+              <QuestionnaireSubmit disabled={finish.sending} onClick={blocked}>
+                {finish.label}
+              </QuestionnaireSubmit>
+            ) : null}
+            <QuestionnaireNext onClick={blocked}>Siguiente</QuestionnaireNext>
+          </>
+        ) : (
+          <>
+            <Button type="button" variant="outline" onClick={() => form.setFieldValue("healthCheck", "cambio")}>
+              Sí, cambió
+            </Button>
+            {/* El principal: sigue, o envía si no queda nada más. */}
+            {finish ? (
+              <QuestionnaireSubmit disabled={finish.sending} onClick={unchanged}>
+                No, sigue igual
+              </QuestionnaireSubmit>
+            ) : null}
+            <QuestionnaireNext onClick={unchanged}>No, sigue igual</QuestionnaireNext>
+          </>
+        )}
+      </QuestionnaireActions>
+    </QuestionnaireItem>
+  )
+}
+
+/**
  * Una pantalla del registro: un tema con su título y sus campos, y «Anterior /
  * Saltar / Siguiente». `check` dice qué falta antes de seguir, con el botón o
  * con Enter. Las pantallas de varios campos (`grouped`) llevan una respuesta
@@ -3195,7 +3566,7 @@ function Question({
   disabled = false,
   grouped = false,
   check,
-  onSkip,
+  skips,
   submit,
   sending = false,
   missing,
@@ -3211,7 +3582,11 @@ function Question({
   disabled?: boolean
   grouped?: boolean
   check?: () => Found
-  onSkip?: () => void
+  /**
+   * Lo que «Saltar» deja en blanco. Con algo ya respondido en la pantalla, «Saltar» no se ofrece
+   * (K10): borraría lo escrito sin avisar, y «Siguiente» ya sigue con lo que hay.
+   */
+  skips?: Partial<Draft>
   /** Última pantalla: el texto del botón que envía. */
   submit?: string
   sending?: boolean
@@ -3225,6 +3600,10 @@ function Question({
   if (fillContext && check) fillContext.checks.set(name, check)
   const finish = fillContext?.label ? { label: fillContext.label, sending: fillContext.sending } : null
   const allOptional = grouped && !required
+  const values = useStore(form.store, (state) => state.values)
+  const answered =
+    !!skips &&
+    draftHasWriting(Object.fromEntries(Object.keys(skips).map((key) => [key, values[key as keyof Draft]])) as Partial<Draft>)
   // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de la pantalla desde la que se envía.
   const submitError = useFormSubmitError(form)
   const loose = name === "send" || (finish && fillContext?.at === name) ? submitError : null
@@ -3250,9 +3629,11 @@ function Question({
       required={required}
       multiple={multiple}
       disabled={disabled}
-      invalid={loose !== null}
+      // Lo que rechazó el envío se dice abajo, pero no marca la pantalla: marcada, el cuestionario no deja
+      // volver a enviar hasta cambiar algo, y «Enviar» otra vez no hacía nada.
       onStatusChange={(status) => {
-        if (status === "skipped") onSkip?.()
+        if (status !== "skipped" || !skips) return
+        for (const [key, value] of Object.entries(skips)) form.setFieldValue(key as keyof Draft, value as never)
       }}
       onKeyDown={(event) => {
         const target = event.target
@@ -3295,7 +3676,7 @@ function Question({
       >
         {/* Enter (`advanceOnEnter`) va de la última pregunta a «Siguiente» o «Enviar»: no se detiene en volver ni en saltar. */}
         <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
-        {required ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
+        {required || answered ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
         {submit ?? finish ? (
           <QuestionnaireSubmit
             disabled={submit ? sending : finish?.sending}

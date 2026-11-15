@@ -1,9 +1,11 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
+  ageInYears,
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
   isCurrentMedication,
+  type HealthAtSigning,
   type HealthDeclarant,
   type MedicationClass,
   type MedicineClassAnswer,
@@ -13,6 +15,7 @@ import {
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
+import { clinicToday } from "./inventory"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
@@ -231,17 +234,25 @@ export interface DeclaredHealthGroup {
   pregnancy: boolean
   /** Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (el corazón, la anestesia…). */
   interview?: DeclaredInterviewKey[]
-  /**
-   * Lo del producto que dijo, ya en palabras (odentIA: «de pequeño» de un niño). Opcional: un
-   * servidor anterior no lo manda.
-   */
-  productLines?: Array<{ label: string; value: string }>
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
 
 /** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
-export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
+export type DeclaredInterviewKey =
+  | "corazon"
+  | "antibiotico"
+  | "anestesia"
+  | "sangrado"
+  | "tabaco"
+  | "alcohol"
+  | "lactancia"
+  // Lo de un niño en casa (entrega 7), dato por dato.
+  | "biberon"
+  | "chupon"
+  | "dulcesEntreComidas"
+  | "pastaConFluor"
+  | "quienCepilla"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {
@@ -509,6 +520,8 @@ export interface Encounter {
   prognosis?: string | null
   /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
   consentSkipReason?: string | null
+  /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó; nulo en lo firmado antes de guardarlo. */
+  healthAtSigning?: HealthAtSigning[] | null
   evolution: string | null
   indications: string | null
   finalizedAt: string | null
@@ -774,7 +787,7 @@ export interface EncounterDetail {
    * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8): solo de
    * esa cita, en el borrador y firmada, con quién lo vio al atender. Nulo sin cita o si no contó nada.
    */
-  visitAnswer?: VisitAnswerView | null
+  visitAnswer?: EncounterVisitAnswerView | null
 }
 
 /** Lo que contó antes de su cita, como lo manda el servidor. */
@@ -792,6 +805,15 @@ export interface VisitAnswerView {
   by: HealthDeclarant
   seen: { by: string; at: string } | null
   seenEncounterId: string | null
+}
+
+/** Lo que contó, como lo lee la atención. */
+export interface EncounterVisitAnswerView extends VisitAnswerView {
+  /**
+   * Lo contó para otra cita suya (la de `appointmentStartsAt`): vino sin cita, o antes de la cita
+   * para la que lo contó. La pantalla dice «Para su cita del lun 16 nov…». Ausente en una API anterior.
+   */
+  otherAppointment?: boolean
 }
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
@@ -852,6 +874,7 @@ export type TimelineType =
   | "order"
   | "form"
   | "odontogram_signed"
+  | "visit_answer"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -863,6 +886,8 @@ export interface TimelineItem {
   toothNumbers: number[]
   authorId?: string | null
   refId: string
+  /** `visit_answer`: lo que contó antes de su cita y aún no se leyó en una atención. */
+  told?: VisitAnswerView | null
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
@@ -940,7 +965,9 @@ export interface EncounterBorn {
     fromPerson?: boolean
   }>
   /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
-  told?: VisitAnswerView | null
+  told?: EncounterVisitAnswerView | null
+  /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó en la atención firmada. */
+  healthAtSigning?: HealthAtSigning[]
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
@@ -1155,6 +1182,8 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /** Su «No sé» a las alergias, si es lo último que dijo de ellas: quién y cuándo. No es «no se le preguntó». */
+  allergySaidUnknown?: { by: HealthDeclarant; at: string | null } | null
   /**
    * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
    * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
@@ -1169,18 +1198,20 @@ export function hcLabel(n: number): string {
   return `HC-${String(n).padStart(6, "0")}`
 }
 
-/** Edad en años desde fecha de nacimiento ISO; "" si ausente/inválida. */
-export function ageFrom(birthDate: string | null | undefined): string {
-  if (!birthDate) return ""
-  const born = new Date(birthDate).getTime()
-  if (Number.isNaN(born)) return ""
-  const now = new Date()
-  const b = new Date(born)
-  let age = now.getFullYear() - b.getFullYear()
-  const m = now.getMonth() - b.getMonth()
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1
-  if (age < 0) return ""
-  return `${age}`
+/**
+ * Años cumplidos desde la fecha de nacimiento (AAAA-MM-DD), con el día de la
+ * clínica, como `patientAge` en el servidor: nunca como un instante en UTC ni con
+ * el día del navegador. null si falta, no es una fecha real o es futura.
+ */
+export function ageYears(birthDate: string | null | undefined, today: string = clinicToday()): number | null {
+  const age = ageInYears(birthDate, today)
+  return age === null || age < 0 ? null : age
+}
+
+/** La edad de `ageYears` para mostrarla: "" si no se sabe. */
+export function ageFrom(birthDate: string | null | undefined, today?: string): string {
+  const age = ageYears(birthDate, today)
+  return age === null ? "" : `${age}`
 }
 
 export function statusLabel(status: string): string {
@@ -1265,6 +1296,8 @@ export function timelineTypeLabel(type: string): string {
       return "Ficha"
     case "odontogram_signed":
       return "Odontograma firmado"
+    case "visit_answer":
+      return "Antes de su cita"
     default:
       return type
   }
@@ -1378,6 +1411,14 @@ export function markHealthDeniedApi(
   return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/denied`, {
     method: "POST",
     body: JSON.stringify({ groups }),
+  })
+}
+
+/** «Lo revisé con ella»: lo que dijo queda revisado tal como está (la revisión que vio la pantalla). */
+export function reviewDeclaredHealthApi(patientId: string, expectedRevision: number): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/reviewed`, {
+    method: "POST",
+    body: JSON.stringify({ expectedRevision }),
   })
 }
 

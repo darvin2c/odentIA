@@ -104,3 +104,47 @@ describe("revisar en la ficha la alergia que dijo", () => {
     expect(render(health(false))).not.toContain("Alergias revisadas")
   })
 })
+
+// QA de formularios del 15 nov (K16; clínica A1 de la 6): su madre respondió «No sé» a las alergias y
+// Antecedentes decía «Aún no se le preguntó si tiene alergias».
+describe("su «No sé» a las alergias, en Antecedentes", () => {
+  const dontKnow = (declarations: unknown[]) =>
+    ({
+      revision: 1,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "unknown" },
+      allergies: [],
+      conditions: [],
+      medications: [],
+      bloodGroup: null,
+      reviewedAt: null,
+      reviewedBy: null,
+      latestAnamnesis: null,
+      declared: [],
+      declarations,
+    }) as unknown as PatientHealth
+  const render = (value: PatientHealth) =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <AllergiesCard patientId="p1" patientName="Mateo Ríos" health={value} sex="M" />
+      </QueryClientProvider>,
+    )
+  it("dice que no sabe, quién y cuándo, y sigue ofreciendo «No tiene alergias»", () => {
+    const html = render(
+      dontKnow([
+        {
+          at: "2026-11-13T15:00:00.000Z",
+          enteredAt: "2026-11-13T15:00:00.000Z",
+          via: "enlace",
+          by: { kind: "representative", name: "Rosa Lozano", relation: "Madre" },
+          health: { allergies: { state: "unknown", items: [] } },
+        },
+      ]),
+    )
+    expect(html).toContain("Su madre dijo que no sabe si tiene alergias (13 nov).")
+    expect(html).not.toContain("Aún no se le preguntó")
+    expect(html).toContain("No tiene alergias")
+  })
+  it("sin ningún «No sé», sigue diciendo que no se le preguntó", () => {
+    expect(render(dontKnow([]))).toContain("Aún no se le preguntó si tiene alergias.")
+  })
+})

@@ -1,5 +1,7 @@
+import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
-import { isUnclosed, movedNote, noticeLine, noticeWarning, stepBeforeArrival, visitName } from "./agenda"
+import { invalidateAppointmentQueries, isUnclosed, movedNote, noticeLine, noticeWarning, stepBeforeArrival, visitName } from "./agenda"
+import { beforeVisitKey } from "./before-visit"
 
 /** La cita pasada (mesa de Inicio y Agenda del 10 nov): un nombre y el paso según sea hoy u otro día. */
 describe("la cita que pasó sin cerrarse", () => {
@@ -72,5 +74,18 @@ describe("el aviso de mover una cita", () => {
     // La movió la propia persona: sigue confirmada.
     expect(movedNote({ status: "confirmada", arrivedAt: at }, { status: "confirmada", arrivedAt: null })).toBe("Se quitó «Llegó».")
     expect(movedNote({ status: "programada", arrivedAt: null }, { status: "confirmada", arrivedAt: at })).toBe("Vuelve a figurar que llegó.")
+  })
+})
+
+// QA final de formularios (15 nov, U13): al reservar desde la ficha, «Antes de su cita: por
+// responder» salía recién al recargar.
+describe("reservar, mover o cancelar una cita", () => {
+  it("vuelve a pedir «Antes de su cita» de la ficha, como lo demás de sus citas", async () => {
+    const client = new QueryClient()
+    client.setQueryData(beforeVisitKey("p1"), { data: null })
+    client.setQueryData(["patient-appointments", "p1"], { data: [] })
+    await invalidateAppointmentQueries(client)
+    expect(client.getQueryState(beforeVisitKey("p1"))?.isInvalidated).toBe(true)
+    expect(client.getQueryState(["patient-appointments", "p1"])?.isInvalidated).toBe(true)
   })
 })

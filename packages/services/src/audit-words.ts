@@ -228,6 +228,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "patient-registration.link_created": say("Creó un enlace de registro para un paciente"),
   "health.declared": say("Declaró antecedentes de salud en el registro", "paciente"),
   "health.saved": say("Guardó los antecedentes de salud de un paciente"),
+  "health.reviewed": say("Revisó con el paciente lo que dijo de su salud"),
   "health.allergies_declared": say("Pasó a los antecedentes las alergias que declaró un paciente en un cuestionario"),
   "health.allergy_added": say("Registró una alergia de un paciente"),
   "health.allergy_removed": say("Quitó una alergia de un paciente, con su motivo"),

@@ -7,7 +7,7 @@ import { automationConsent } from "@odentia/db/schema/automation"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
 import { getCaseBrief } from "./agent-case-brief.js"
-import { getPatientHealth, savePatientHealth } from "./clinical.js"
+import { getAnamnesisVersion, getPatientHealth, listAnamnesisVersions, savePatientHealth } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact } from "./contacts.js"
 import { listDataConsents } from "./data-consents.js"
@@ -1614,6 +1614,45 @@ it("el documento manda sobre el celular, y «Es otra persona» nunca le pone a n
   expect(dora).toMatchObject({ displayName: "Dora Tercera", docNumber: "44044231" })
 })
 
+// Auditor, 15 nov (A3): quien se registraba en línea y recepción resolvía con «Es otra persona»
+// quedaba como «alta interna», sin su salud en el registro y sin «Ver declaración original».
+it("«Es otra persona» deja su registro en línea como llegó: por dónde entró, quién lo dijo, su salud y su hora", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  await withOrgContext(appDb, "org_a", (tx) => createContact(tx, "org_a", { displayName: "Olga Celular", phone: "+51987650260" }))
+  const answers: RegistrationAnswers = {
+    demographics: { displayName: "Rita Campos", givenNames: "Rita", familyName: "Campos", birthDate: ADULT_BIRTH, phone: "+51987650260" },
+    respondent: "patient",
+    health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Ibuprofeno", severity: "desconocida" }] } },
+    privacyAccepted: true,
+  }
+  const held = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(tx, "org_a", { kind: "public", entryPoint: "public_link" }, { submissionId: randomUUID(), formVersion: version, answers }),
+  ).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(held).toBeInstanceOf(RegistrationHeld)
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (held as RegistrationHeld).hold))
+  const [task] = await ownerDb
+    .select()
+    .from(crmTask)
+    .where(and(eq(crmTask.kind, "registro_con_documento"), sql`${crmTask.title} like '%Olga Celular%'`))
+  // Lo envió de madrugada; recepción lo resuelve horas después.
+  const sentAt = new Date(Date.now() - 5 * 60 * 60_000)
+  await ownerDb.execute(sql`update registration_hold set created_at = ${sentAt.toISOString()}::timestamptz where task_id = ${task!.id}`)
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  const other = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: false, revision: view.revision }))
+  const rita = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", other.patientId))
+  expect(rita.registration).toMatchObject({ entryPoint: "public_link", respondent: "patient", privacyNotice: NOTICE })
+  expect((rita.registration?.answers as RegistrationAnswers).health?.allergies).toMatchObject({ state: "recorded", items: [{ substance: "Ibuprofeno" }] })
+  // Su registro dice la hora en que lo envió, la misma de su declaración: «Ver declaración original» la muestra.
+  expect(rita.registration?.createdAt.getTime()).toBe(sentAt.getTime())
+  const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", other.patientId))
+  expect(health.declarations.map((row) => [row.via, row.at.getTime()])).toEqual([["registro", sentAt.getTime()]])
+})
+
 it("su contacto de emergencia con el mismo nombre y otro teléfono se actualiza, y quien estaba archivada vuelve al decir que es ella", async () => {
   await seedActor()
   await publishAsking("org_a", { emergencyContactName: "optional", emergencyContactPhone: "optional" })
@@ -1924,19 +1963,25 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
     health: { ...emptyClinical(), conditions: { state: "recorded", items: [{ name: "Asma" }] }, dental: child },
     privacyAccepted: true,
   }
-  // Al niño no se le pregunta si fuma: el servidor no lo acepta.
-  await expect(
-    registerOnline({ ...answers, health: { ...answers.health, medical: { tabaco: "nunca" } } }),
-  ).rejects.toThrow()
+  // Al niño no se le pregunta si fuma: el servidor no lo acepta, y es por el tabaco, no por otro dato
+  // (revisión de la entrega 7, M3 y B7: con `rejects.toThrow()` seguía pasando por el biberón).
+  const smoking = await registerOnline({ ...answers, health: { ...answers.health, medical: { tabaco: "nunca" } } }).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(smoking).toMatchObject({ status: 400 })
+  expect(Object.keys((smoking as { fields?: Record<string, string> }).fields ?? {})).toEqual(["answers.health.medical.tabaco"])
   const result = await registerOnline(answers)
   const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", result.patient!.id))
   expect(health.latestAnamnesis?.answers).toMatchObject({ antecedentesOdontologicos: child })
   expect(health.reviewPending).toBe(true)
-  const said = health.declared.find((group) => group.productLines.length > 0)
+  // Cada dato con quien lo dijo (revisión final del 15 nov, K2): lo de un niño en casa, por dato.
+  const said = health.declared.find((group) => group.interview.includes("biberon"))
   expect(said?.by).toMatchObject({ kind: "representative", name: "Carla Ramos" })
-  expect(said?.productLines).toEqual([
-    { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-    { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-    { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
-  ])
+  expect(said?.interview).toEqual(expect.arrayContaining(Object.keys(child)))
+  // «Ver historial» la cuenta en palabras, como la copia, no con `ya_no` ni `4_o_mas`.
+  const [version] = await withOrgContext(appDb, "org_a", (tx) => listAnamnesisVersions(tx, "org_a", result.patient!.id))
+  const words = await withOrgContext(appDb, "org_a", (tx) => getAnamnesisVersion(tx, "org_a", result.patient!.id, version!.id))
+  expect(words.entries).toContainEqual(expect.objectContaining({ label: "Biberón o pecho para dormir", value: "Ya no toma biberón" }))
+  expect(JSON.stringify(words.entries)).not.toContain("4_o_mas")
 })

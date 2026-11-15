@@ -15,6 +15,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
+import { AriadnaChatsSwitch } from "../../components/arm/ariadna-chats"
 import { ClientName, invalidateArm } from "../../components/arm/hoy-links"
 import { kairosSearchOf } from "../../components/arm/hoy-search"
 import {
@@ -22,6 +23,7 @@ import {
   KairosUnconfirmed,
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
+import { KairosSellsSwitch } from "../../components/arm/kairos-sells"
 import { limaDay } from "../../components/arm/sale-words"
 import { type ProductChoice, ProductFilter } from "../../components/product"
 import {
@@ -141,6 +143,12 @@ function KairosPage() {
             : undefined
         }
       />
+      {isAdmin ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <KairosSellsSwitch />
+          <AriadnaChatsSwitch />
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <ViewTabs
           label="Qué ver de Kairós"

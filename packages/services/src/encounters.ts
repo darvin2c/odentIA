@@ -80,6 +80,7 @@ import {
   listEncounterDocuments,
   type PatientDocumentWithContext,
 } from "./clinical.js"
+import { healthAtSigningOf } from "./health-at-signing.js"
 import {
   type ConsentNeed,
   cancelDerivationTask,
@@ -99,7 +100,7 @@ import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diag
 import { assertAttending } from "./encounter-attending.js"
 import { removableFromEncounter } from "./encounter-plan-remove.js"
 import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
-import { encounterVisitAnswer, type VisitAnswerView } from "./visit-answers.js"
+import { type EncounterVisitAnswer, encounterVisitAnswer } from "./visit-answers.js"
 import {
   checkEncounterVoidBudgets,
   type EncounterVoidPreview,
@@ -329,11 +330,12 @@ export interface EncounterDetailBase {
    */
   visit: EncounterVisit | null
   /**
-   * Lo que contó antes de venir para la cita de esta atención («Antes de tu cita»): solo de esa
-   * cita, en el borrador y después de firmar, con quién lo vio al atender. Nulo sin cita o si no
-   * contó nada. No traba nada: sin él, la atención se firma igual.
+   * Lo que contó antes de venir («Antes de tu cita»): lo de la cita de esta atención o, si vino
+   * sin cita o antes de la cita para la que lo contó, lo de esa otra cita (`otherAppointment`),
+   * en el borrador y después de firmar, con quién lo vio al atender. Nulo si no contó nada. No
+   * traba nada: sin él, la atención se firma igual.
    */
-  visitAnswer: VisitAnswerView | null
+  visitAnswer: EncounterVisitAnswer | null
   /**
    * Tratamientos que esta atención deja por ejecutar: los vinculados y los
    * indicados aquí, sin repetir, que siguen abiertos y la persona no dejó fuera
@@ -3194,7 +3196,7 @@ export async function finalizeEncounter(
   encounterId: string,
   input: FinalizeEncounterInput = {},
 ): Promise<FinalizeEncounterResult> {
-  await requirePatient(tx, orgId, patientId)
+  const person = await requirePatient(tx, orgId, patientId)
   // El cierre participa del mismo bloqueo que los cargos manuales y de
   // presupuesto: consultar cobertura y generar cargos es una sola operación.
   await tx
@@ -3298,6 +3300,7 @@ export async function finalizeEncounter(
     nextDay !== null && !closing.controls.next && !repeats && !stays && !returnsToPlan
       ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
       : null
+  const hooks = await productHooks(tx, orgId)
   const [row] = await tx
     .update(encounter)
     .set({
@@ -3309,6 +3312,12 @@ export async function finalizeEncounter(
       signerTitle: signature.title,
       signerRegistration: signature.registration,
       consentSkipReason,
+      // Lo que dijo de su salud y seguía sin revisar: la constancia del aviso del cierre, que no frena.
+      healthAtSigning: await healthAtSigningOf(tx, orgId, patientId, {
+        sex: person.sex,
+        today: dayKeyIn(now, timezone),
+        interview: hooks.interview,
+      }),
       updatedAt: now,
     })
     .where(eq(encounter.id, encounterId))
@@ -3316,7 +3325,7 @@ export async function finalizeEncounter(
   if (!row) throw notFound("Atención")
   // Lo del producto al firmar (odentIA: deja tratado lo realizado y, en Perú,
   // firma el odontograma con el mismo perfil; NTS 188, 5.3 y 5.10).
-  const product = await (await productHooks(tx, orgId)).encounterFinalized(tx, {
+  const product = await hooks.encounterFinalized(tx, {
     orgId,
     actorUserId,
     patientId,

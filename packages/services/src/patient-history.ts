@@ -2,6 +2,7 @@ import {
   budgetStateText,
   diagnosisCodeLabel,
   doneSessionWords,
+  type HealthAtSigning,
   isRetiredPlanStatus,
   LEFT_OUT_DECISIONS,
   planItemStateText,
@@ -48,7 +49,7 @@ const looseValue = (site: ProductSite, row: Pick<SiteColumns, "siteSystem" | "si
   row.siteSystem === site.system ? site.value(row.siteCode) : null
 import { listTreatmentJourneys } from "./treatment-journey.js"
 import { encounterSessionKey, encounterSessionsOf } from "./to-schedule.js"
-import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
+import { type EncounterVisitAnswer, patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
 const RETIRED_BUDGETS = ["cancelado"] as const
@@ -655,6 +656,9 @@ export const TIMELINE_TYPES = [
   // El odontograma firmado (Perú, NTS 188) es un hecho de la historia: el que
   // firmó el cierre de una atención va dentro de ella; el del botón, aparte.
   "odontogram_signed",
+  // Lo que contó antes de una cita y aún no se leyó en ninguna atención: suelto, el día en que lo
+  // envió (QA final de formularios, 15 nov, H2), como en la copia. Lo leído va dentro de su atención.
+  "visit_answer",
 ] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
 /** Un hecho de la historia; el producto agrega lo suyo (odentIA: el periodontograma de la atención). */
@@ -712,6 +716,8 @@ export interface TimelineItemBase {
   byText?: string | null
   /** Hecho de una atención que sigue en curso (sin firmar): la historia lo dice. */
   openEncounter?: boolean
+  /** Lo que contó antes de su cita (`visit_answer`), con para qué cita, quién y cuándo lo envió. */
+  told?: VisitAnswerView | null
   voidedByName?: string | null
   voidedAt?: Date | null
   /**
@@ -756,10 +762,16 @@ export interface EncounterBorn {
   }>
   followUps: Array<{ id: string; title: string; dueAt: Date; stateText: string; retired: boolean }>
   /**
-   * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8), con
-   * cuándo lo envió y quién lo vio al atender; nulo si no contó nada.
+   * Lo que contó antes de venir (mesa del 13 nov, entrega 8), en la atención en que se leyó: la de
+   * su cita o, si vino sin cita o antes, la de ese día (`otherAppointment`, QA final de formularios,
+   * 15 nov, H2); con cuándo lo envió y quién lo vio al atender. Nulo si no contó nada.
    */
-  told?: VisitAnswerView | null
+  told?: EncounterVisitAnswer | null
+  /**
+   * Lo que se dijo de su salud y seguía sin revisar al firmarla (auditor, 15 nov, A2): quién,
+   * cuándo y qué, como quedó en la atención firmada; sin él, no quedaba nada sin revisar.
+   */
+  healthAtSigning?: HealthAtSigning[]
 }
 
 const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
@@ -778,9 +790,13 @@ async function loadBornForEncounters(
   tx: Db,
   orgId: string,
   patientId: string,
-  encounterIds: string[],
+  /** Las atenciones ya leídas: de ellas sale lo que se guardó al firmar, sin leerlas otra vez. */
+  encounters: ReadonlyArray<Pick<typeof encounter.$inferSelect, "id" | "healthAtSigning" | "appointmentId">>,
+  /** Lo que contó antes de sus citas, leído una vez por quien llama. */
+  visitAnswers: () => ReturnType<typeof patientVisitAnswers> = () => patientVisitAnswers(tx, orgId, patientId),
 ): Promise<Map<string, EncounterBorn>> {
   const out = new Map<string, EncounterBorn>()
+  const encounterIds = encounters.map((row) => row.id)
   if (encounterIds.length === 0) return out
   const site = (await productHooks(tx, orgId)).site
   const of = (id: string): EncounterBorn => {
@@ -870,6 +886,7 @@ async function loadBornForEncounters(
       )
       .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id)),
   ])
+  for (const row of encounters) if (row.healthAtSigning?.length) of(row.id).healthAtSigning = row.healthAtSigning
   for (const item of items) {
     if (!item.sourceEncounterId) continue
     of(item.sourceEncounterId).indicated.push({
@@ -1013,9 +1030,14 @@ async function loadBornForEncounters(
       fromPerson: row.source === "portal",
     })
   }
-  // Lo que contó antes de venir, en la atención de su cita.
-  for (const told of await patientVisitAnswers(tx, orgId, patientId)) {
-    if (told.encounterId && encounterIds.includes(told.encounterId)) of(told.encounterId).told = told
+  // Lo que contó antes de venir, en la atención en que se leyó (la de su cita o, si vino antes, la
+  // de ese día). Una por atención: la que se vio en ella va antes que la de su cita.
+  const appointmentOf = new Map(encounters.map((row) => [row.id, row.appointmentId] as const))
+  for (const told of await visitAnswers()) {
+    if (!told.encounterId || !encounterIds.includes(told.encounterId)) continue
+    const born = of(told.encounterId)
+    if (born.told && born.told.seenEncounterId === told.encounterId) continue
+    born.told = { ...told, otherAppointment: told.appointmentId !== appointmentOf.get(told.encounterId) }
   }
   // Vencido con la misma regla del Plan, el Resumen y «Control vencido».
   const overdue = controls.some((row) => row.status === "pendiente")
@@ -1054,6 +1076,9 @@ export async function getTimeline(
     order?: "desc" | "asc"
   } = {},
 ): Promise<{ data: TimelineItem[]; nextCursor: string | null; timezone: string; locale: string }> {
+  // Lo que contó antes de sus citas se lee una vez: lo usan sus atenciones y lo que quedó suelto.
+  let visitAnswers: ReturnType<typeof patientVisitAnswers> | null = null
+  const toldOnce = () => (visitAnswers ??= patientVisitAnswers(tx, orgId, patientId))
   await requirePatient(tx, orgId, patientId)
   const [profile] = await tx
     .select({ timezone: orgProfile.timezone, locale: orgProfile.locale })
@@ -1120,6 +1145,21 @@ export async function getTimeline(
   if (types.includes("anamnesis") && tooth == null)
     branches.push(
       sql`select id, 'anamnesis'::text as kind, created_at from patient_anamnesis where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
+    )
+  // Lo que contó antes de una cita, el día en que lo envió, mientras no se leyó en una atención viva
+  // (la regla de `patientVisitAnswers`): lo leído va dentro de esa atención. Lo que quedó en blanco no cuenta.
+  if (types.includes("visit_answer") && tooth == null)
+    branches.push(
+      sql`select id, 'visit_answer'::text as kind, submitted_at as created_at from appointment_visit_answer told
+        where told.organization_id = ${orgId} and told.patient_id = ${patientId}::uuid
+          and (nullif(btrim(told.reason), '') is not null or told.pain is not null or nullif(btrim(told.more), '') is not null)
+          ${
+            absorb
+              ? sql`and not exists (select 1 from encounter read_in where read_in.organization_id = told.organization_id
+                  and read_in.patient_id = told.patient_id and read_in.status in ('finalizada', 'borrador')
+                  and (read_in.id = told.seen_encounter_id or read_in.appointment_id = told.appointment_id))`
+              : sql``
+          }`,
     )
   // Los hechos propios del producto (odentIA: hallazgos y odontogramas firmados).
   const hooks = await productHooks(tx, orgId)
@@ -1230,7 +1270,7 @@ export async function getTimeline(
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
       hooks.encounterParts(tx, orgId, encounters),
-      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, encounters) : Promise.resolve(new Map<string, EncounterBorn>()),
+      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, records, toldOnce) : Promise.resolve(new Map<string, EncounterBorn>()),
       diagnosisTitlesOf(tx, [
         ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
         ...notes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
@@ -1352,6 +1392,20 @@ export async function getTimeline(
         toothNumbers: [],
         authorId: row.createdBy,
         encounterId: null,
+      })
+    }
+  const toldIds = ids("visit_answer")
+  if (toldIds.length)
+    for (const told of (await toldOnce()).filter((row) => toldIds.includes(row.id))) {
+      hydrated.set(told.id, {
+        id: told.id,
+        refId: told.id,
+        type: "visit_answer",
+        createdAt: told.submittedAt,
+        title: "Lo que contó antes de su cita",
+        toothNumbers: [],
+        encounterId: null,
+        told,
       })
     }
   const documents = ids("document")

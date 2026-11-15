@@ -1,5 +1,8 @@
 import {
   ALLERGY_SEVERITIES,
+  allergiesSaidUnknownOf,
+  anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -79,13 +82,13 @@ import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
-import { allergyReviewDue } from "./allergies.js"
+import { allergyReviewDue, declaredUnreviewed, markAllergiesReviewed } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { findOrgLocale } from "./locale.js"
-import { requirePatient } from "./patients.js"
+import { type PatientFull, requirePatient } from "./patients.js"
 import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -339,11 +342,6 @@ export interface DeclaredHealthGroup {
    * el corazón, el antibiótico, la anestesia, el tabaco y la lactancia, como el embarazo.
    */
   interview: DeclaredInterviewKey[]
-  /**
-   * Lo del producto que dijo en esta declaración y sigue sin revisar, en palabras
-   * (`ProductInterview.declaredLines`; odentIA: «de pequeño» de un niño).
-   */
-  productLines: Array<{ label: string; value: string }>
   /** Su «No» a un grupo: lo dijo quien declaró, no lo preguntó ni lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
@@ -367,18 +365,62 @@ export function declaredTakesNoMedicine(declared: Pick<DeclaredPatientHealthInpu
 export const DECLARED_INTERVIEW = {
   corazon: { said: ["dental", "corazon", "riesgoEndocarditis"], kept: ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"] },
   antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
+  // La anestesia y el sangrado viven juntos (`problemaAnestesia`) y se comparan cada uno por su lado (H9).
   anestesia: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
+  sangrado: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
   tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
   alcohol: { said: ["medical", "alcohol"], kept: ["habitos", "alcohol"] },
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
+  // Lo de un niño en casa (entrega 7), dato por dato y comparado con lo guardado, como el corazón: lo
+  // que anotó el equipo no lleva la marca de la mamá (revisión final del 15 nov, K2).
+  biberon: { said: ["dental", "biberon"], kept: ["antecedentesOdontologicos", "biberon"] },
+  chupon: { said: ["dental", "chupon"], kept: ["antecedentesOdontologicos", "chupon"] },
+  dulcesEntreComidas: { said: ["dental", "dulcesEntreComidas"], kept: ["antecedentesOdontologicos", "dulcesEntreComidas"] },
+  pastaConFluor: { said: ["dental", "pastaConFluor"], kept: ["antecedentesOdontologicos", "pastaConFluor"] },
+  quienCepilla: { said: ["dental", "quienCepilla"], kept: ["antecedentesOdontologicos", "quienCepilla"] },
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 
-/** Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día. */
-function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
-  if (said === undefined) return false
-  if (key === "lactancia") return isPlainObject(kept) && kept.estado === (said === true ? "si" : said === false ? "no" : undefined)
-  return said === kept
+/**
+ * De qué pregunta de la persona es cada dato de la entrevista guardada (`ProductInterview.record`):
+ * la copia y la atención firmada nombran con él lo que dijo y nadie revisó.
+ */
+export const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
+  "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
+  "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.anestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.sangrado": ["sangrado"],
+  "habitos.tabaco": ["tabaco"],
+  "habitos.alcohol": ["alcohol"],
+  "embarazoLactancia.lactancia": ["lactancia"],
+  // Lo de un niño en casa, dato por dato (revisión final del 15 nov, K2): la copia y la foto al firmar
+  // dicen «sin revisar» en cada uno, como el corazón.
+  "antecedentesOdontologicos.biberon": ["biberon"],
+  "antecedentesOdontologicos.chupon": ["chupon"],
+  "antecedentesOdontologicos.dulcesEntreComidas": ["dulcesEntreComidas"],
+  "antecedentesOdontologicos.pastaConFluor": ["pastaConFluor"],
+  "antecedentesOdontologicos.quienCepilla": ["quienCepilla"],
+}
+
+/**
+ * Si lo que dijo es lo que está en la entrevista (`kept`), para buscarlo entre sus declaraciones: la
+ * lactancia se dice Sí o No y se guarda con su día. La anestesia (con qué pasó) y el sangrado, cada
+ * uno por su lado; lo guardado antes con una sola respuesta para los dos es de la anestesia.
+ */
+function saidAsKept(key: DeclaredInterviewKey, kept: unknown): (said: unknown) => boolean {
+  if (key === "lactancia") {
+    const estado = isPlainObject(kept) ? kept.estado : undefined
+    return (said) => said !== undefined && estado === (said === true ? "si" : said === false ? "no" : undefined)
+  }
+  if (key === "anestesia" || key === "sangrado") {
+    const now = anesthesiaAnswersOf(kept)
+    return (said) => {
+      const told = anesthesiaAnswersOf(said)
+      if (key === "sangrado") return told.bleeding !== null && told.bleeding === now.bleeding
+      return (told.joint ?? told.anesthesia) !== null && told.joint === now.joint && told.anesthesia === now.anesthesia && told.what === now.what
+    }
+  }
+  return (said) => said !== undefined && said === kept
 }
 
 /** Lo que hay en `value` siguiendo `path`, o undefined. */
@@ -546,7 +588,8 @@ function assertNewInterview(answers: Record<string, unknown>): Record<string, un
   return answers
 }
 
-function canonicalJson(value: unknown): string {
+/** El mismo objeto escrito siempre igual, sin importar el orden de sus claves: para comparar o firmar lo dicho. */
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? ""
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   const entries = Object.entries(value as Record<string, unknown>)
@@ -814,12 +857,10 @@ export async function getPatientHealth(
     legacySaidOn = legacyPregnancySaidOn(days)
   }
   const pregnancy = pregnancyToday(latest?.answers, today, { legacySaidOn })
-  const { interview } = await productHooks(tx, orgId)
-  const interviewLines = (said: DeclaredPatientHealthInput) => interview.declaredLines?.(said) ?? []
   return {
     ...health,
     reviewPending,
-    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy, interviewLines }),
+    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy }),
     pregnancy,
     declarations,
     changed: changedHealthOf({
@@ -962,8 +1003,6 @@ function declaredGroupsOf(input: {
   declarations: HealthDeclaration[]
   latest: AnamnesisRow | null
   pregnancy: PregnancyToday | null
-  /** Lo del producto que dijo, en palabras (`ProductInterview.declaredLines`); sin él (solo alergias), nada. */
-  interviewLines?: (health: DeclaredPatientHealthInput) => Array<{ label: string; value: string }>
 }): DeclaredHealthGroup[] {
   const { health, reviewPending, authorship, declarations, latest } = input
   const groups = new Map<string, DeclaredHealthGroup>()
@@ -980,7 +1019,6 @@ function declaredGroupsOf(input: {
         medications: [],
         pregnancy: false,
         interview: [],
-        productLines: [],
         saidNo: { allergies: false, conditions: false, medications: false },
       }
       groups.set(key, group)
@@ -1012,16 +1050,11 @@ function declaredGroupsOf(input: {
         const kept = atPath(latest.answers, where.kept)
         if (kept === undefined) continue
         // Lo que anotó el equipo no lleva la marca de ella aunque ella haya dicho otra cosa.
-        const said = declarations.find((row) => sameInterviewValue(key, atPath(row.health, where.said), kept))
+        const matches = saidAsKept(key, kept)
+        const said = declarations.find((row) => matches(atPath(row.health, where.said)))
         if (said) groupOf(said, latest.createdAt).interview.push(key)
       }
     }
-    // Lo del producto (odentIA: «de pequeño»), de la última declaración que lo dijo, mientras nadie del
-    // equipo haya guardado la entrevista después.
-    const lines = input.interviewLines ?? (() => [])
-    const saidLines = declarations.find((row) => lines(row.health).length > 0)
-    if (saidLines && sinceStaff(saidLines.enteredAt))
-      groupOf(saidLines, saidLines.enteredAt).productLines = lines(saidLines.health)
   }
   // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
   const saidNo = {
@@ -1069,6 +1102,27 @@ export async function allergiesSaidNoByPatient(
   if (!allergiesSaidNo("none", null, authorship)) return null
   const said = (await healthDeclarationsOf(tx, orgId, patientId)).find((row) => row.health.allergies?.state === "none")
   return said ? { by: said.by, at: said.at } : { by: UNKNOWN_DECLARANT, at: authorship.declaredAt }
+}
+
+/**
+ * Su «No sé» a las alergias, para quien ve las alergias (QA del 15 nov, K16): quién lo dijo y
+ * cuándo, si es lo último que dijo de ellas y la ficha no sabe más (`allergiesSaidUnknownOf`). No es
+ * «no se le preguntó». Toma la ficha que ya leyó quien lo pide (`getPatient`) y lee sus
+ * declaraciones solo si la ficha aún no sabe si tiene alergias. null si no. Nada más de su salud.
+ */
+export async function allergiesSaidUnknownByPatient(
+  tx: Db,
+  orgId: string,
+  full: Pick<PatientFull, "patient" | "activeAllergies">,
+): Promise<{ by: HealthDeclarant; at: Date } | null> {
+  const known = {
+    reviewState: String((full.patient.healthReviewStatus as { allergies?: unknown } | null)?.allergies ?? "unknown"),
+    activeAllergies: full.activeAllergies.filter((row) => row.verification !== "descartada").length,
+  }
+  if (known.reviewState !== "unknown" || known.activeAllergies > 0) return null
+  const said = allergiesSaidUnknownOf({ ...known, declarations: await healthDeclarationsOf(tx, orgId, full.patient.id) })
+  // Solo quién y cuándo: la declaración entera es de quien lee la historia.
+  return said ? { by: said.by, at: said.at } : null
 }
 
 /**
@@ -1181,11 +1235,15 @@ export function declarantOfLink(link: {
 export function declarantOfRegistration(answers: Pick<RegistrationAnswers, "respondent" | "representative">): HealthDeclarant {
   if (answers.respondent === "staff") return { kind: "staff", name: null, relation: null }
   if (answers.respondent === "patient") return { kind: "patient", name: null, relation: null }
-  return {
-    kind: "representative",
-    name: answers.representative?.displayName?.trim() || null,
-    relation: answers.representative?.relationshipDetail?.trim().toLocaleLowerCase("es") || null,
-  }
+  return writtenDeclarant(answers.representative?.displayName, answers.representative?.relationshipDetail)
+}
+
+/**
+ * Quien habla por la persona, con su nombre y su vínculo como los escribió: el registro y quien dijo
+ * «Respondo por ella» en su enlace lo guardan igual.
+ */
+export function writtenDeclarant(name: string | null | undefined, relation: string | null | undefined): HealthDeclarant {
+  return { kind: "representative", name: name?.trim() || null, relation: relation?.trim().toLocaleLowerCase("es") || null }
 }
 
 /**
@@ -1248,7 +1306,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "patient"),
         eq(auditEvent.entityId, patientId),
-        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved"]),
+        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved", "health.reviewed"]),
       ),
     )
   const latest = (actions: string[]): Date | null =>
@@ -1261,7 +1319,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
     declaredByPatient: rows.some((row) => row.action === "health.declared" || row.action === "health.allergies_declared"),
     deniedByClinician: denied.length > 0,
     declaredAt: latest(["health.declared", "health.allergies_declared"]),
-    staffSavedAt: latest(["health.saved"]),
+    staffSavedAt: latest(["health.saved", "health.reviewed"]),
     deniedGroups: [
       ...new Set(
         denied.flatMap((row) => {
@@ -1419,8 +1477,9 @@ export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
 
 /**
  * Lo que dijo y cambia una anestesia (QA del 14 nov, causa raíz): el corazón (válvula, problema de
- * nacimiento o endocarditis, antibiótico indicado antes) y un problema con la anestesia o un sangrado
- * tras una extracción, con «Sí» o «No sabe». El cierre lo dice junto a la anestesia; nunca frena.
+ * nacimiento o endocarditis, antibiótico indicado antes), un problema con la anestesia (y qué pasó) y
+ * un sangrado largo tras una extracción, cada uno con «Sí» o «No sabe». El cierre lo dice junto a la
+ * anestesia; nunca frena.
  */
 export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
   const [latest] = await tx
@@ -1431,6 +1490,7 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
     .limit(1)
   const answers = latest?.answers
   const say = (value: unknown, yes: string, unknown: string) => (value === "si" ? [yes] : value === "no_sabe" ? [unknown] : [])
+  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]))
   return [
     ...say(
       atPath(answers, ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"]),
@@ -1442,11 +1502,15 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
       "su médico le indicó antibiótico antes del dentista",
       "no sabe si debe tomar antibiótico antes",
     ),
+    // Lo guardado antes con una sola pregunta para los dos se dice como se preguntó.
+    ...say(joint, "tuvo problemas con la anestesia o sangró tras una extracción", "no sabe si tuvo problemas con la anestesia"),
+    // Por separado (H9): con un anticoagulante, el sangrado no se confunde con una reacción a la anestesia.
     ...say(
-      atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]),
-      "tuvo problemas con la anestesia o sangró tras una extracción",
+      anesthesia,
+      `tuvo problemas con la anestesia${what ? `: ${anesthesiaTroubleWords(what)}` : ""}`,
       "no sabe si tuvo problemas con la anestesia",
     ),
+    ...say(bleeding, "sangró mucho tras una extracción", "no sabe si sangró mucho tras una extracción"),
   ]
 }
 
@@ -1636,6 +1700,54 @@ export async function markHealthDenied(
   await audit(tx, orgId, actorUserId, "health.denied", "patient", patientId, {
     groups: [...groups],
     revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return getPatientHealth(tx, orgId, patientId)
+}
+
+/**
+ * «Lo revisé con ella» (revisión final del 15 nov): lo que dijo la persona (o quien habla por ella)
+ * y nadie revisó queda revisado tal como está, en un toque y sin rearmar sus antecedentes: la
+ * entrevista, sus enfermedades y sus medicinas, como «Revisar y guardar» de Antecedentes, y sus
+ * alergias, como «Alergias revisadas» (`markAllergiesReviewed`), solo si dijo algo de ellas: lo
+ * que nunca se le preguntó no pasa a «no tiene». Nada se borra ni cambia: su «No» sigue siendo lo
+ * que dijo, ya revisado. Para corregir algo está Antecedentes. Con una revisión vieja no pisa lo
+ * que otra persona guardó.
+ */
+export async function reviewDeclaredHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: { expectedRevision: number },
+): Promise<PatientHealth> {
+  const [locked] = await tx
+    .select({
+      revision: patient.healthRevision,
+      reviewStatus: patient.healthReviewStatus,
+      allergiesReviewedAt: patient.allergiesReviewedAt,
+    })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  if (locked.revision !== input.expectedRevision)
+    throw conflict("STALE_HEALTH_REVISION", "Otra sesión guardó antecedentes mientras editabas: recarga y reintenta sin perder lo escrito")
+  // Dijo algo de sus alergias y nadie lo revisó: una que declaró, o su «No» sin revisar (la regla de
+  // `declared` en `getPatientHealth`).
+  const saidNo = (locked.reviewStatus as Record<string, unknown> | null)?.["allergies"] === "none" && !locked.allergiesReviewedAt
+  const allergiesSaid = saidNo || (await declaredUnreviewed(tx, orgId, patientId, locked.allergiesReviewedAt))
+  if (allergiesSaid) await markAllergiesReviewed(tx, orgId, actorUserId, patientId)
+  // «Alergias revisadas» ya avanzó la revisión una vez.
+  const revision = locked.revision + (allergiesSaid ? 1 : 0)
+  await tx
+    .update(patient)
+    .set({ healthRevision: revision + 1, healthReviewedAt: new Date(), healthReviewedBy: actorUserId, updatedAt: new Date() })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // Cuenta como el guardado del equipo (`staffSavedAt`): lo de antes ya no es «sin revisar».
+  await audit(tx, orgId, actorUserId, "health.reviewed", "patient", patientId, {
+    reviewStatus: locked.reviewStatus,
+    revision: { before: locked.revision, after: revision + 1 },
   })
   return getPatientHealth(tx, orgId, patientId)
 }
@@ -2398,7 +2510,10 @@ export async function getAnamnesisVersion(
     )
     .limit(1)
   if (!row) throw notFound("Anamnesis")
-  return row
+  // Cada versión en palabras, como la cuenta la copia de la historia (revisión final del 15 nov, K2):
+  // «Biberón o pecho para dormir: ya no toma biberón», no `ya_no`.
+  const entries = (await productHooks(tx, orgId)).interview.record(row.answers, await clinicToday(tx, orgId, row.createdAt))
+  return { ...row, entries }
 }
 
 // --- Notas de evolución ---

@@ -39,6 +39,19 @@ export interface HealthDeclarant {
 }
 
 /**
+ * Lo que se dijo de su salud y seguía sin revisar al firmar una atención (auditor, 15 nov, A2):
+ * una foto por declaración que la atención firmada guarda y no cambia. Quién lo dijo y cuándo
+ * (sus palabras las pone cada lugar con `saidWhenWords`) y qué, dato por dato, ya en palabras
+ * («Anticoagulante» · «Warfarina 5 mg», «Alergias» · «dijo que no»).
+ */
+export interface HealthAtSigning {
+  by: HealthDeclarant
+  /** Cuándo lo dijo (ISO 8601); nulo si no consta. */
+  at: string | null
+  rows: Array<{ label: string; value: string }>
+}
+
+/**
  * Hay información en los antecedentes (no es solo «No se le preguntó»): una
  * determinación explícita (negación o registro) en algún grupo, o entrevista.
  * La longitud de las listas por sí sola no basta: sangre, un «No» o una

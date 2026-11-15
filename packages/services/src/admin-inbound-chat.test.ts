@@ -215,6 +215,19 @@ describe("ingestInboundChat", () => {
   })
 })
 
+describe("escribir a mano", () => {
+  it("una persona que escribe atiende la conversación: Kairós queda en pausa a su nombre", async () => {
+    const first = await ingestInboundChat(ownerDb, message({ address: phone() }))
+    await prepareChatReply(ownerDb, admin, first.chatId, { body: "Te escribo yo" })
+    const [chat] = await ownerDb
+      .select({ at: saasChat.kairosPausedAt, by: saasChat.kairosPausedBy })
+      .from(saasChat)
+      .where(eq(saasChat.id, first.chatId))
+    expect(chat?.at).not.toBeNull()
+    expect(chat?.by).toBe(admin.userId)
+  })
+})
+
 describe("assignChat", () => {
   it("lo respondido antes de saber de quién era pasa al cliente con su actividad", async () => {
     const address = phone()
