@@ -971,7 +971,7 @@ function StaffResponseDetail({
             <Fragment key={section.id}>
               {sectionIndex > 0 ? <FieldSeparator /> : null}
               <FieldSet className="gap-4">
-                <FieldLegend className="mb-1">
+                <FieldLegend>
                   {twin ? <AnswerLabel field={{ ...twin, label: section.title }} /> : section.title}
                 </FieldLegend>
                 <div className="grid grid-cols-1 items-start gap-x-4 gap-y-6 @lg:grid-cols-6">

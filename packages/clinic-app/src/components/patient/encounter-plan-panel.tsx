@@ -1382,18 +1382,18 @@ function IndicationForm({
     <div ref={rootRef} className="@container flex flex-col gap-5 rounded-xl border p-4">
       {/* Lo que falta se dice en su campo; lo que no es de ninguno, junto al botón. */}
       <div className={ROW}>
-          {site && !editing ? (
-            <form.AppField name="scope">
-              {(field) => (
-                <field.SelectField
-                  id={`${uid}-scope`}
-                  label="Ámbito"
-                  options={SCOPE_OPTIONS}
-                  disabled={blocked}
-                />
-              )}
-            </form.AppField>
-          ) : null}
+        {site && !editing ? (
+          <form.AppField name="scope">
+            {(field) => (
+              <field.SelectField
+                id={`${uid}-scope`}
+                label="Ámbito"
+                options={SCOPE_OPTIONS}
+                disabled={blocked}
+              />
+            )}
+          </form.AppField>
+        ) : null}
         {/* Sin ámbito que elegir (latidIA, o al cambiar), el tratamiento ocupa la fila. */}
         <div className={site && !editing ? undefined : "@2xl:col-span-2"}>
           <form.AppField name="service">
