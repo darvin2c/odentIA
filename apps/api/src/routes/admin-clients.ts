@@ -32,6 +32,7 @@ import {
   acceptedProposalOfOpenSale,
   addActivity,
   addClientContact,
+  altaBoard,
   applyProposalTerms,
   approveSaasProposal,
   archiveClient,
@@ -40,6 +41,8 @@ import {
   CLIENT_VIEWS,
   ClientDuplicateError,
   cancelClientTask,
+  clearDueCargaNow,
+  clearStepNotApplicable,
   clientCreateSchema,
   clientFileKey,
   clientFileUrl,
@@ -70,8 +73,10 @@ import {
   listClients,
   listClientTasks,
   listSaasProposals,
+  markClientFileCarga,
   markInvitationSent,
   markOutreachSent,
+  markStepNotApplicable,
   mergeClients,
   moveClientTask,
   type OrganizationBillingLoaders,
@@ -142,6 +147,8 @@ export interface AdminClientsDeps {
   /** Lo mismo que usa «Alta asistida» en Organizaciones. */
   startTrial?: OrganizationBillingLoaders["startTrial"]
   getBillingSummary?: OrganizationBillingLoaders["getBillingSummary"]
+  /** «Conectar con Facebook» está configurado; sin él, el paso de WhatsApp dice «Espera a Meta». */
+  metaSignupAvailable?: boolean
 }
 
 /** Un documento subido a mano: como los adjuntos de Soporte. */
@@ -423,6 +430,14 @@ const annotateBody = z.strictObject({
     .default({}),
 })
 
+const notApplicableBody = z.strictObject({
+  reason: z
+    .string("Escribe por qué no aplica")
+    .trim()
+    .min(1, "Escribe por qué no aplica")
+    .max(300, "Usa como máximo 300 caracteres"),
+})
+
 /* ---------- Ayudas ---------- */
 
 function staffOf(c: Context): AdminActor {
@@ -525,6 +540,18 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     staffRun(c, 200, (actor) => {
       const query = parse(pipelineQuery, c.req.query())
       return owner((tx) => pipeline(tx, actor, query))
+    }),
+  )
+
+  // El Embudo «Alta»: Soporte entra, pero el servicio le quita «Primer pago» y «Pagó».
+  app.get("/pipeline/alta", (c) =>
+    staffRun(c, 200, (actor) => {
+      const query = parse(pipelineQuery, c.req.query())
+      return owner((tx) =>
+        altaBoard(tx, actor, query, new Date(), {
+          metaSignupAvailable: deps.metaSignupAvailable ?? false,
+        }),
+      )
     }),
   )
 
@@ -680,11 +707,43 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     adminRun(c, 200, async (actor) => {
       const { objectKey } = await owner((tx) => deleteClientFile(tx, actor, c.req.param("fileId")))
       await deps.storage.deleteAttachment(objectKey).catch(() => {
+        // La limpieza solo vuelve a intentar la carga vencida: este objeto queda sin registro.
         console.error(
-          `ARM: no se borró el objeto de un documento (${c.req.param("fileId")}); lo borra la limpieza`,
+          `ARM: no se borró el objeto de un documento (${c.req.param("fileId")}); quedó en el almacenamiento y ninguna limpieza lo vuelve a intentar`,
         )
       })
       return { ok: true }
+    }),
+  )
+
+  /**
+   * «Es la carga de datos» (solo Administración): el adjunto se borra a los 30
+   * días de llegar. Si ya pasaron, se borra ahora, después del commit; si eso
+   * falla, lo borra la limpieza en la vuelta siguiente.
+   */
+  app.post("/files/:fileId/carga", (c) =>
+    adminRun(c, 200, async (actor) => {
+      const now = new Date()
+      const fileId = c.req.param("fileId")
+      const out = await owner((tx) => markClientFileCarga(tx, actor, fileId, now))
+      let deletedNow = false
+      if (out.dueNow)
+        deletedNow = await clearDueCargaNow(
+          deps.ownerDb,
+          deps.storage,
+          out.file.id,
+          out.objectKey,
+          now,
+        ).then(
+          () => true,
+          () => {
+            console.error(
+              `ARM: no se borró ahora la carga vencida (${fileId}); la borra la limpieza en la vuelta siguiente`,
+            )
+            return false
+          },
+        )
+      return { file: out.file, dueNow: out.dueNow, deletedNow }
     }),
   )
 
@@ -1249,8 +1308,42 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
 
   /* ----- Alta, documentos, borradores ----- */
 
+  const onboardingOptions = { metaSignupAvailable: deps.metaSignupAvailable ?? false }
   app.get(`/${ID}/onboarding`, (c) =>
-    staffRun(c, 200, (actor) => owner((tx) => onboardingSteps(tx, actor, c.req.param("id")))),
+    staffRun(c, 200, (actor) =>
+      owner((tx) => onboardingSteps(tx, actor, c.req.param("id"), new Date(), onboardingOptions)),
+    ),
+  )
+
+  // «No aplica» en un paso del alta, con su motivo. Quién puede en cada paso lo decide el
+  // servicio (pacientes, solo Administración); responde con los pasos ya recalculados.
+  app.post(`/${ID}/onboarding/:step/not-applicable`, async (c) => {
+    const raw = await bodyOf(c)
+    return staffRun(c, 200, (actor) => {
+      const body = parse(notApplicableBody, raw)
+      return owner(async (tx) => {
+        const now = new Date()
+        await markStepNotApplicable(
+          tx,
+          actor,
+          c.req.param("id"),
+          c.req.param("step"),
+          body.reason,
+          now,
+        )
+        return onboardingSteps(tx, actor, c.req.param("id"), now, onboardingOptions)
+      })
+    })
+  })
+
+  app.delete(`/${ID}/onboarding/:step/not-applicable`, (c) =>
+    staffRun(c, 200, (actor) =>
+      owner(async (tx) => {
+        const now = new Date()
+        await clearStepNotApplicable(tx, actor, c.req.param("id"), c.req.param("step"), now)
+        return onboardingSteps(tx, actor, c.req.param("id"), now, onboardingOptions)
+      }),
+    ),
   )
 
   app.get(`/${ID}/files`, (c) =>

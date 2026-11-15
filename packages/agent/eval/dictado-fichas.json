@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0187), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. Los usa eval:dictado-fichas.",
+  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. Los usa eval:dictado-fichas.",
   "servicios": ["Consulta", "Control de ortodoncia", "Endodoncia multirradicular", "Profilaxis", "Aplicación de flúor barniz"],
   "fichasPropias": {
     "control-nino-sano": {

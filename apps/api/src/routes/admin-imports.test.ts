@@ -239,8 +239,8 @@ it("los pacientes se ensayan, se cargan por tandas y repetir no duplica", async 
   // Cada pasada es una carga en el registro: la segunda no se suma a la primera.
   const { loads } = await record<{ loads: Array<{ kind: string; by: string | null; summary: string }> }>()
   expect(loads).toEqual([
-    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 ya se habían cargado" },
-    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", summary: "2 personas creadas" },
+    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", byUserId: "u-admin", errors: 0, summary: "2 ya se habían cargado" },
+    { id: expect.any(String), kind: "pacientes", at: expect.any(String), by: "u-admin", byUserId: "u-admin", errors: 0, summary: "2 personas creadas" },
   ])
 })
 

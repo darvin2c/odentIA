@@ -29,7 +29,7 @@ import type { ProductSite } from "./product-hooks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * Clío propone las respuestas de la ficha empezada (entrega 11, ADR 0187): solo
+ * Clío propone las respuestas de la ficha empezada (entrega 11, ADR 0188): solo
  * lo que se dijo, comprobado contra la frase, y nada entra hasta que una
  * persona lo acepta, sin pisar lo que ella escribió.
  */

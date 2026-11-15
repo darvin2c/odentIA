@@ -49,7 +49,7 @@ export const DEFAULT_REPORT_MONTHS: ReportMonths = 6
 
 export interface ReportsSearch {
   /** Sin valor: «Embudo». */
-  pestana?: "ingresos" | "prevision" | undefined
+  pestana?: "alta" | "ingresos" | "prevision" | undefined
   /** Sin valor: 6 meses. */
   meses?: Exclude<ReportMonths, 6> | undefined
 }
@@ -61,7 +61,7 @@ export function reportsSearchOf(search: Record<string, unknown>): ReportsSearch 
     (value) => value === months && value !== DEFAULT_REPORT_MONTHS,
   ) as Exclude<ReportMonths, 6> | undefined
   return {
-    pestana: oneOf(["ingresos", "prevision"] as const, search.pestana),
+    pestana: oneOf(["alta", "ingresos", "prevision"] as const, search.pestana),
     meses,
   }
 }

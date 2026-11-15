@@ -301,7 +301,7 @@ async function ensureDemoOrg(db: Db, id: string, name: string, slug: string): Pr
  * que falta: una base sembrada antes, con la clínica sin perfil ni sede, los
  * recibe en la corrida siguiente, y lo que alguien editó no se toca.
  */
-async function ensureFinishedSignupOrg(
+export async function ensureFinishedSignupOrg(
   db: Db,
   clinic: { id: string; name: string; slug: string; branches: readonly string[] },
 ): Promise<void> {

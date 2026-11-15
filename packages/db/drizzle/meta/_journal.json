@@ -852,8 +852,22 @@
     {
       "idx": 121,
       "version": "7",
-      "when": 1794700538893,
-      "tag": "0121_clio_propone_fichas",
+      "when": 1794700489398,
+      "tag": "0121_kairos_vigila_el_alta",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1794700493913,
+      "tag": "0122_kairos_vigila_el_alta_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1794702102164,
+      "tag": "0123_clio_propone_fichas",
       "breakpoints": true
     }
   ]

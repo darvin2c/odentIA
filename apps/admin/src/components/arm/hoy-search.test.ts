@@ -42,5 +42,6 @@ describe("la dirección de Hoy, Kairós, Reportes y Demos", () => {
     expect(reportsSearchOf({ meses: "3" }).meses).toBe(3)
     expect(reportsSearchOf({ meses: 6 }).meses).toBeUndefined()
     expect(reportsSearchOf({ pestana: "prevision" }).pestana).toBe("prevision")
+    expect(reportsSearchOf({ pestana: "alta" }).pestana).toBe("alta")
   })
 })

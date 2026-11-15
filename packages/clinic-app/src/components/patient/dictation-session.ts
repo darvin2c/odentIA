@@ -62,7 +62,7 @@ const CONTEXT_CHARS = 600
  * Lo que «Confirmar las N listas» lleva de un toque. Una receta no: emitirla
  * es firmarla con la colegiatura y tiene su propio botón (issue 109, fase 2).
  * El descanso médico tampoco (latidIA, issue 229). La respuesta de una ficha
- * tampoco: se confirma en su pregunta, dentro de la ficha (forma B, ADR 0187).
+ * tampoco: se confirma en su pregunta, dentro de la ficha (forma B, ADR 0188).
  */
 export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha"
 /** Lo que se confirma al firmar si está marcado: también las respuestas de ficha. */

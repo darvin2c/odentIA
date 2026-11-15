@@ -434,7 +434,7 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 - [ ] «Dictar» con la ficha abierta no la tapa; al firmar, lo propuesto para la ficha viene marcado y la ficha sigue a medias.
 
 **Ya falló:** la nota dictada borraba lo escrito (PR 418); la cantidad de la receta dictada (PR 416); Clío sin pulpitis (8 nov); lo dictado para la ficha abierta no iba a ningún lado y «Lo dictado» lo resaltaba como usado (mesa del 14 nov, entrega 11).
-**Fuentes:** ADR 0012, 0099, 0100, 0102 y 0187.
+**Fuentes:** ADR 0012, 0099, 0100, 0102 y 0188.
 
 ## P-ODO-20 Quién ve lo clínico
 

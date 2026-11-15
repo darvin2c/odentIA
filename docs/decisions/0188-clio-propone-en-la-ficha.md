@@ -1,4 +1,4 @@
-# 0187 · Clío propone las respuestas de la ficha de consulta empezada
+# 0188 · Clío propone las respuestas de la ficha de consulta empezada
 
 Fecha: 2026-11-14 · Estado: aceptada · Extiende la [0012](0012-asistente-clinico-sugiere-y-el-odontologo-confirma.md) (Clío sugiere y el profesional confirma) y la [0117](0117-consentimientos-activos-y-hoja-editable.md) (su cambio del 13 nov: fichas de consulta)
 

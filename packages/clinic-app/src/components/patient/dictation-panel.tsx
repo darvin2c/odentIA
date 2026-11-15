@@ -265,7 +265,7 @@ export function DictationPanel({
         .map((item) => DICTATION_KIND_LABEL[item.kind]),
     ),
   ]
-  // Lo de una ficha se confirma en la ficha: un enlace por ficha que la abre (forma B, ADR 0187).
+  // Lo de una ficha se confirma en la ficha: un enlace por ficha que la abre (forma B, ADR 0188).
   const formLinks = [
     ...session.suggestions
       .filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))

@@ -1,6 +1,6 @@
 /**
  * Medición de lo que Clío propone en una ficha de consulta empezada
- * (entrega 11, ADR 0187). Uso:
+ * (entrega 11, ADR 0188). Uso:
  *
  *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>]
  *
