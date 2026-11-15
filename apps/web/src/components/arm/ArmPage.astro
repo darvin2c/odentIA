@@ -13,6 +13,11 @@ import ArmVisual from "./ArmVisual.astro"
 
 const title = `ARM vs CRM: por qué ${WORDS.name} es un ARM`
 const description = `Un CRM guarda lo que tu equipo anota. Un ARM (Agentic Relationship Management) hace el trabajo: agentes de IA que responden, agendan y traen de vuelta a tus ${WORDS.patients}. Así se compara ${WORDS.name}.`
+const areas = ofProduct({
+  dental: "la recepción, la consulta y la administración",
+  medical: "la recepción, la consulta y la administración",
+  optical: "la recepción y la administración",
+})
 const agents = ofProduct({ dental: "Sofi, Clío y Argos", medical: "Sofi, Clío y Argos", optical: "Sofi y Argos" })
 
 const reasons = [
@@ -50,10 +55,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
   <PageHero
-    tag="ARM vs CRM"
-    title="Un CRM te pide trabajo."
-    accent="Un ARM lo hace por ti."
-    lead={`Agentic Relationship Management: agentes de IA que conversan, agendan y hacen seguimiento con tus ${WORDS.patients} por todos tus canales. ${WORDS.name} nació así.`}
+    tag="Agentic Relationship Management"
+    title="No somos un CRM."
+    accent="Somos un ARM."
+    lead={`Un CRM te pide trabajo: anotar, buscar y perseguir. Un ARM lo hace por ti. En ${WORDS.name}, agentes de IA trabajan en ${areas} de ${WORDS.yourClinic}, y tú decides hasta dónde llegan. Nacimos así.`}
     secondary={{ href: "#comparacion", label: "Compáralos" }}
   >
     <ArmVisual slot="visual" />
@@ -110,8 +115,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 </Base>
 
 <style>
-  /* En la portada, cada frase del título en su línea: «Un CRM te pide trabajo.» / «Un ARM lo hace por ti.» */
-  :global(.ph h1) { font-size: clamp(36px, 3.5vw, 52px); }
+  /* En la portada, el título grande y cada frase en su línea: «No somos un CRM.» / «Somos un ARM.» */
+  :global(.ph h1) { font-size: clamp(46px, 4.6vw, 64px); }
   :global(.ph h1 .acc) { display: block; }
   .arm { display: flex; flex-direction: column; gap: 40px; }
   .arm-head { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
