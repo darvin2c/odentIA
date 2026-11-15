@@ -21,7 +21,7 @@ export const AGENDA_EQUIPO: readonly HelpMore[] = [
         id: "agenda-cancelar",
         q: "¿Cómo cancelo una cita?",
         a: "Abre la cita y pulsa «Cancelar cita»: eliges el motivo («Lo pidió el paciente», «Lo pidió la clínica» u «Otro motivo») y, si hace falta, dejas una nota. El hueco queda libre y el aviso trae «Reservar otro día». Solo se cancela una cita a la que la persona aún no llegó. Si solo quiere otro día, usa «Reprogramar»: no deja una cita cancelada.",
-        forms: ["anular una cita", "cómo anulo una cita", "el paciente ya no viene a su cita", "como elimino una cita"],
+        forms: ["anular una cita", "el paciente ya no viene a su cita", "como elimino una cita"],
       },
       {
         id: "agenda-arrastrar",

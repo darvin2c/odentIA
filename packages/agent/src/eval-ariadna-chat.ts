@@ -35,6 +35,7 @@ import {
   ariadnaFixedTexts,
   askHelpByChat,
   type HelpDecider,
+  helpTopicLabel,
   helpTopicsFor,
   limaDate,
 } from "@odentia/services"
@@ -117,6 +118,9 @@ function sourceOf(product: ClinicalProduct): string {
     [
       ...topics.flatMap((t) => [
         t.title,
+        // La opción que arma el código cuando duda («¿Qué es Configuración › Horarios y ausencias?»),
+        // como la Ayuda de la app: sale de la guía, no la escribe el modelo.
+        `¿Qué es ${helpTopicLabel(t)}?`,
         t.parent ?? "",
         t.purpose,
         ...(t.faqs ?? []).flatMap((f) => [f.q, f.a]),
