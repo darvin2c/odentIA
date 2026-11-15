@@ -2,10 +2,11 @@
  * Ficha del cliente › Documentos (ARM, ADR 0185): lo que le mandamos (carta,
  * propuestas, presentaciones) y lo que nos mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
  * que se borra. Lo que manda la clínica es solo de Administración; se borra a
- * los 30 días solo lo de la carga de datos (lo promete el contrato de encargo):
- * lo que se sube como «Lo que mandó la clínica» y lo que llegó a soporte@ con
- * adjuntos. Lo demás se guarda. Soporte no ve lo que es
- * solo de Administración y la API tampoco se lo da. Borrar es de
+ * los 30 días de llegar solo lo que Administración dice que es la carga de
+ * datos (lo promete el contrato de encargo): lo que se sube como «Lo que mandó
+ * la clínica» o el adjunto marcado con «Es la carga de datos» (`useMarkCarga`,
+ * también en el correo). Lo demás se guarda. Soporte no ve lo que es solo de
+ * Administración y la API tampoco se lo da. Borrar y marcar la carga es de
  * Administración.
  */
 import { Badge, Button, Input, toast } from "@odentia/ui"
@@ -68,6 +69,14 @@ const fileSchema = z.object({
   source: z.enum(["persona", "kairos", "correo"]).nullable(),
   createdAt: z.string(),
   createdBy: z.object({ userId: z.string(), name: z.string() }).nullable(),
+  /** Cuándo llegó (la hora del correo si vino por correo). */
+  receivedAt: z.string().nullable().default(null),
+  cargaAt: z.string().nullable().default(null),
+  inboundEmailId: z.string().nullable().default(null),
+  /** En un adjunto: el día en que se borraría si se marca ahora como la carga (lo dice el servidor). */
+  cargaDeleteAfter: z.string().nullable().default(null),
+  /** Marcarlo ahora lo borra en el acto. */
+  cargaDueNow: z.boolean().default(false),
 })
 export type ClientFile = z.infer<typeof fileSchema>
 
@@ -112,13 +121,86 @@ function whoWords(file: ClientFile): string {
 }
 
 /** «se borra el jue 12 dic» de un día de Lima. */
-const deleteOnWords = (day: string): string => `se borra el ${limaDayWords(day)}`
+export const deleteOnWords = (day: string): string => `se borra el ${limaDayWords(day)}`
+
+/** Lo que se marca como la carga: un adjunto, con el plazo que dijo el servidor. */
+export interface CargaCandidate {
+  fileId: string
+  filename: string
+  cargaDeleteAfter: string | null
+  cargaDueNow: boolean
+}
+
+/** Lo que dice el diálogo de «Es la carga de datos» antes de marcarlo. */
+export function cargaConfirmWords(file: CargaCandidate): string {
+  if (file.cargaDueNow || !file.cargaDeleteAfter)
+    return `${file.filename} llegó hace más de 30 días: se borra al marcarlo, con el texto del correo en que llegó, como promete el contrato de encargo. No se puede deshacer.`
+  return `${file.filename} pasa a «Lo que mandó la clínica» y se borra el ${limaDayWords(file.cargaDeleteAfter)}, a los 30 días de llegar, con el texto del correo en que llegó. Lo promete el contrato de encargo. No se puede deshacer.`
+}
+
+export const markCargaResultSchema = z.object({
+  file: z.object({ id: z.string(), deleteAfter: z.string().nullable() }),
+  dueNow: z.boolean(),
+  deletedNow: z.boolean(),
+})
+export type MarkCargaResult = z.infer<typeof markCargaResultSchema>
+
+/** Lo que dice el aviso al terminar de marcarlo. */
+export function cargaMarkedWords(filename: string, result: MarkCargaResult): string {
+  if (result.deletedNow) return `${filename} se borró: llegó hace más de 30 días`
+  if (result.dueNow) return `${filename} es la carga de datos: se borra en los próximos minutos`
+  return result.file.deleteAfter
+    ? `${filename} es la carga de datos: ${deleteOnWords(result.file.deleteAfter)}`
+    : `${filename} es la carga de datos`
+}
+
+/**
+ * «Es la carga de datos» (solo Administración): pregunta con la fecha que dice
+ * el servidor y marca. Lo usan Documentos y el correo. Devuelve `ask`, que
+ * abre el diálogo, y `dialog`, para ponerlo en la pantalla. La confirmación se
+ * justifica: es un borrado de datos que no se deshace.
+ */
+export function useMarkCarga(clientId: string | null, onDone?: () => void) {
+  const queryClient = useQueryClient()
+  const [target, setTarget] = useState<CargaCandidate | null>(null)
+  const mark = useMutation({
+    mutationFn: async (file: CargaCandidate) =>
+      markCargaResultSchema.parse(
+        await api<unknown>(`/api/admin/clients/files/${file.fileId}/carga`, { method: "POST" }),
+      ),
+    onSuccess: (result, file) => {
+      toast.success(cargaMarkedWords(file.filename, result))
+      setTarget(null)
+      if (clientId) invalidateClient(queryClient, clientId)
+      onDone?.()
+    },
+  })
+  const dialog = (
+    <ConfirmDialog
+      open={target !== null}
+      title="¿Es la carga de datos?"
+      description={target ? cargaConfirmWords(target) : ""}
+      confirmLabel="Sí, es la carga"
+      pending={mark.isPending}
+      error={mark.isError ? submitErrorMessage(mark.error) : null}
+      onConfirm={() => {
+        if (target) mark.mutate(target)
+      }}
+      onClose={() => {
+        mark.reset()
+        setTarget(null)
+      }}
+    />
+  )
+  return { ask: setTarget, dialog }
+}
 
 export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
   const queryClient = useQueryClient()
   const [uploading, setUploading] = useState(false)
   const [toDelete, setToDelete] = useState<ClientFile | null>(null)
   const files = useClientFiles(clientId)
+  const carga = useMarkCarga(clientId)
   const remove = useMutation({
     mutationFn: (file: ClientFile) =>
       api(`/api/admin/clients/files/${file.id}`, { method: "DELETE" }),
@@ -184,8 +266,15 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
                     </p>
                     <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                       {FILE_KIND_WORDS[file.kind]} · {whoWords(file)} el{" "}
-                      {supportDay(file.createdAt)} · {sizeWords(file.sizeBytes)}
-                      {file.deleteAfter ? ` · ${deleteOnWords(file.deleteAfter)}` : ""}
+                      {supportDay(
+                        file.source === "correo" && file.receivedAt
+                          ? file.receivedAt
+                          : file.createdAt,
+                      )}{" "}
+                      · {sizeWords(file.sizeBytes)}
+                      {file.kind === "archivo_clinica" && file.deleteAfter
+                        ? ` · ${deleteOnWords(file.deleteAfter)}`
+                        : ""}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -197,6 +286,22 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
                       <Download aria-hidden />
                       Descargar
                     </Button>
+                    {isAdmin && file.kind === "correo" ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          carga.ask({
+                            fileId: file.id,
+                            filename: file.filename,
+                            cargaDeleteAfter: file.cargaDeleteAfter,
+                            cargaDueNow: file.cargaDueNow,
+                          })
+                        }
+                      >
+                        Es la carga de datos
+                      </Button>
+                    ) : null}
                     {isAdmin ? (
                       <Button size="sm" variant="ghost" onClick={() => setToDelete(file)}>
                         Borrar
@@ -216,6 +321,7 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
           onClose={() => setUploading(false)}
         />
       ) : null}
+      {carga.dialog}
       <ConfirmDialog
         open={toDelete !== null}
         title={toDelete ? `Borrar ${toDelete.filename}` : "Borrar el documento"}

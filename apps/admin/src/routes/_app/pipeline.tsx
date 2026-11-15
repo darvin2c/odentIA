@@ -25,6 +25,7 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ChevronDown, Filter, KanbanSquare, List } from "lucide-react"
 import * as React from "react"
 import { z } from "zod"
+import { AltaPipeline } from "../../components/arm/alta-pipeline"
 import {
   type PipelineSearch,
   pipelineQueryOf,
@@ -42,6 +43,7 @@ import {
 } from "../../components/arm/sale-words"
 import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import {
+  ALTA_SUBTITLE,
   PIPELINE_BOARD_CLASS,
   PIPELINE_COLUMN_CLASS,
   PIPELINE_SUBTITLE,
@@ -55,7 +57,8 @@ import { useAdminUserId } from "../../lib/session"
 /**
  * El Embudo del ARM (lienzo «Embudo y presentaciones», tablero 1): las ventas
  * abiertas de los tres productos, una tarjeta por cliente en la columna de su
- * etapa, y lo decidido en 30 días plegado. Ninguna tarjeta se arrastra ni se
+ * etapa, y lo decidido en 30 días plegado. La pestaña «Alta» sigue a las que
+ * entraron hasta su primer pago (`components/arm/alta-pipeline.tsx`). Ninguna tarjeta se arrastra ni se
  * mueve a mano: la columna la pone el hecho (la calcula el servidor). Cada
  * tarjeta abre la ficha del cliente en «Venta». Filtros y vista en la dirección.
  */
@@ -101,13 +104,82 @@ const pipelineSchema = z.object({
 
 type Row = Card & { column: ColumnKey }
 
+type ProductCounts = Record<"todos" | ClinicalProduct, number>
+
 function PipelinePage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/pipeline" })
   const myUserId = useAdminUserId()
   const set = (patch: Partial<PipelineSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true })
+  const alta = search.pestana === "alta"
+  const clearFilters = () => set({ producto: undefined, responsable: undefined, origen: undefined })
+  const filtered = Boolean(search.producto || search.responsable || search.origen)
+  // Los mismos filtros en Venta y en Alta; cada pestaña cuenta lo suyo.
+  const filters = ({ counts, owners }: { counts: ProductCounts; owners: Map<string, string> }) => (
+    <div className="flex flex-wrap items-end gap-3">
+      <ProductFilter
+        value={search.producto ?? "todos"}
+        onChange={(value) => set({ producto: value === "todos" ? undefined : value })}
+        counts={counts}
+      />
+      <OwnerFilter
+        value={search.responsable}
+        owners={owners}
+        myUserId={myUserId}
+        onChange={(responsable) => set({ responsable })}
+      />
+      <OriginFilter value={search.origen} onChange={(origen) => set({ origen })} />
+      {filtered ? (
+        <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+          Quitar filtros
+        </Button>
+      ) : null}
+    </div>
+  )
 
+  return (
+    <PageShell className="space-y-5">
+      <PageHeader title="Embudo" subtitle={alta ? ALTA_SUBTITLE : PIPELINE_SUBTITLE} />
+      <div className="flex flex-wrap items-center gap-3">
+        <ViewTabs
+          label="Qué embudo"
+          value={alta ? "alta" : "venta"}
+          options={[
+            { value: "venta", label: "Venta" },
+            { value: "alta", label: "Alta" },
+          ]}
+          onValueChange={(value) => set({ pestana: value === "alta" ? "alta" : undefined })}
+        />
+        <ViewTabs
+          label="Vista"
+          value={search.vista ?? "tablero"}
+          options={[
+            { value: "tablero", label: "Tablero", icon: <KanbanSquare aria-hidden /> },
+            { value: "lista", label: "Lista", icon: <List aria-hidden /> },
+          ]}
+          onValueChange={(value) => set({ vista: value === "lista" ? "lista" : undefined })}
+        />
+      </div>
+      {alta ? (
+        <AltaPipeline search={search} filters={filters} onClearFilters={clearFilters} />
+      ) : (
+        <SalePipeline search={search} filters={filters} onClearFilters={clearFilters} />
+      )}
+    </PageShell>
+  )
+}
+
+/** El cuerpo de la pestaña «Venta». */
+function SalePipeline({
+  search,
+  filters,
+  onClearFilters,
+}: {
+  search: PipelineSearch
+  filters: (input: { counts: ProductCounts; owners: Map<string, string> }) => React.ReactNode
+  onClearFilters: () => void
+}) {
   const query = useQuery({
     queryKey: ["admin", "clients", "pipeline", search.responsable ?? null, search.origen ?? null],
     queryFn: async () => pipelineSchema.parse(await api<unknown>(pipelineQueryOf(search))),
@@ -144,42 +216,8 @@ function PipelinePage() {
   const filtered = Boolean(search.producto || search.responsable || search.origen)
 
   return (
-    <PageShell className="space-y-5">
-      <PageHeader title="Embudo" subtitle={PIPELINE_SUBTITLE} />
-      <ViewTabs
-        label="Vista"
-        value={search.vista ?? "tablero"}
-        options={[
-          { value: "tablero", label: "Tablero", icon: <KanbanSquare aria-hidden /> },
-          { value: "lista", label: "Lista", icon: <List aria-hidden /> },
-        ]}
-        onValueChange={(value) => set({ vista: value === "lista" ? "lista" : undefined })}
-      />
-      <div className="flex flex-wrap items-end gap-3">
-        <ProductFilter
-          value={product}
-          onChange={(value) => set({ producto: value === "todos" ? undefined : value })}
-          counts={counts}
-        />
-        <OwnerFilter
-          value={search.responsable}
-          owners={owners.current}
-          myUserId={myUserId}
-          onChange={(responsable) => set({ responsable })}
-        />
-        <OriginFilter value={search.origen} onChange={(origen) => set({ origen })} />
-        {filtered ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => set({ producto: undefined, responsable: undefined, origen: undefined })}
-          >
-            Quitar filtros
-          </Button>
-        ) : null}
-      </div>
-
+    <>
+      {filters({ counts, owners: owners.current })}
       {query.isPending ? (
         search.vista === "lista" ? (
           <PipelineListSkeleton />
@@ -199,7 +237,7 @@ function PipelinePage() {
             title="Sin ventas con estos filtros"
             description="Prueba con otro producto, responsable u origen."
             actionLabel="Quitar filtros"
-            onAction={() => set({ producto: undefined, responsable: undefined, origen: undefined })}
+            onAction={onClearFilters}
           />
         ) : (
           <EmptyState
@@ -215,7 +253,7 @@ function PipelinePage() {
       ) : (
         <PipelineBoard columns={columns} stale={query.isPlaceholderData} />
       )}
-    </PageShell>
+    </>
   )
 }
 

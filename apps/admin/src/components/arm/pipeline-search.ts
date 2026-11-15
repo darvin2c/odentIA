@@ -2,12 +2,14 @@ import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { CLIENT_ORIGINS, type ClientOrigin } from "./sale-words"
 
 /**
- * Lo que el Embudo lee de la dirección (`/pipeline`): producto, responsable,
- * origen y la vista. Cada clave va siempre, con `undefined` si su valor no
+ * Lo que el Embudo lee de la dirección (`/pipeline`): qué embudo (Venta o Alta),
+ * producto, responsable, origen y la vista. Cada clave va siempre, con `undefined` si su valor no
  * sirve (la trampa de `lib/list-search.ts`: el router junta la búsqueda cruda
  * con la de la ruta y una clave omitida dejaría pasar «?origen=xyz» a la API).
  */
 export interface PipelineSearch {
+  /** Sin valor: el embudo de venta. */
+  pestana: "alta" | undefined
   producto: ClinicalProduct | undefined
   /** «mio», «sin» o el id de una persona del equipo. */
   responsable: string | undefined
@@ -21,6 +23,7 @@ const OWNER = /^[A-Za-z0-9_-]{1,120}$/
 export function pipelineSearchOf(search: Record<string, unknown>): PipelineSearch {
   const owner = typeof search.responsable === "string" ? search.responsable : undefined
   return {
+    pestana: search.pestana === "alta" ? "alta" : undefined,
     producto: isClinicalProduct(search.producto) ? search.producto : undefined,
     responsable: owner && OWNER.test(owner) ? owner : undefined,
     origen:
@@ -38,5 +41,6 @@ export function pipelineQueryOf(search: PipelineSearch): string {
   if (search.responsable) params.set("owner", search.responsable)
   if (search.origen) params.set("origin", search.origen)
   const query = params.toString()
-  return `/api/admin/clients/pipeline${query ? `?${query}` : ""}`
+  const path = search.pestana === "alta" ? "/pipeline/alta" : "/pipeline"
+  return `/api/admin/clients${path}${query ? `?${query}` : ""}`
 }

@@ -8,7 +8,6 @@ import {
   saasOpportunity,
   saasProposal,
 } from "@odentia/db/schema/admin-arm"
-import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
   saasFollowUp,
@@ -18,6 +17,7 @@ import {
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
 import { type SQL, sql } from "drizzle-orm"
+import { enteredAtSql, notDemoOrg } from "./admin-alta-sql.js"
 import {
   CLIENT_ORIGIN_WORDS,
   LOST_REASON_WORDS,
@@ -25,6 +25,12 @@ import {
   proposalOfOpenSaleSql,
 } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
+import {
+  computeOnboarding,
+  ONBOARDING_STEP_KEYS,
+  ONBOARDING_STEP_LABELS,
+  type OnboardingStepKey,
+} from "./admin-onboarding.js"
 import { ServiceError } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 import { monthWords } from "./report-words.js"
@@ -317,12 +323,6 @@ function requireReportsAdmin(actor: AdminActor | null): AdminActor {
   return actor
 }
 
-/** Una organización que no es demo para presentar (ni marcada en su suscripción). */
-function notDemoOrg(orgId: SQL): SQL {
-  return sql`(not exists (select 1 from ${saasDemo} d where d.organization_id = ${orgId})
-    and not exists (select 1 from ${saasSubscription} ds where ds.organization_id = ${orgId} and ds.is_demo))`
-}
-
 type Rows<T> = T[]
 
 async function rowsOf<T>(tx: Db, query: SQL): Promise<Rows<T>> {
@@ -436,9 +436,7 @@ export async function funnelReport(
           (select min(coalesce(p.sent_at, p.decided_at, p.updated_at)) from ${saasProposal} p
             where p.client_id = c.id and p.status in ('enviada', 'aceptada', 'no_aceptada')),
           (select min(r.invited_at) from ${saasWaitlistRequest} r where r.client_id = c.id))`)} as "proposalAt",
-        ${epoch(sql`coalesce(
-          (select min(o.decided_at) from ${saasOpportunity} o where o.client_id = c.id and o.decision = 'entro'),
-          org.created_at)`)} as "enteredAt",
+        ${epoch(enteredAtSql("c", "org"))} as "enteredAt",
         exists (select 1 from ${saasOpportunity} o where o.client_id = c.id and o.decision is null) as "isOpen",
         (select o.decision from ${saasOpportunity} o where o.client_id = c.id and o.decision is not null
           order by o.decided_at desc limit 1) as "lastDecision"
@@ -890,5 +888,172 @@ export async function forecastReport(
       "La cuota mensual que sumarían esas propuestas si todas entran, en su moneda: el precio de lista del plan que quedó en cada una. No es una predicción: no se le pone a nadie una probabilidad. El descuento de una propuesta rige sobre el precio de cada acción, no sobre la cuota, así que no la cambia.",
     ),
     rows: items,
+  }
+}
+
+/* ---------- Alta ---------- */
+
+export interface AltaStallRow {
+  step: OnboardingStepKey
+  label: string
+  count: number
+}
+
+export interface AltaCohort {
+  /** `YYYY-MM` del mes en que entró. */
+  month: string
+  label: string
+  entered: number
+  paid: number
+  conversion: ReportRatio
+}
+
+export interface AltaReport {
+  from: string
+  to: string
+  months: number
+  spanWords: string
+  entered: AdminReportFigure
+  paid: ReportRatio
+  daysToPay: AdminReportFigure<number | null> & { cases: number }
+  /** De las que no pagaron, cuántas tienen cada paso como el primero que les falta. */
+  stalls: AltaStallRow[]
+  stalledMost: { step: OnboardingStepKey; label: string; words: string } | null
+  stallsHowCalculated: string
+  cohorts: AltaCohort[]
+  cohortsHowCalculated: string
+}
+
+const ALTA_HOW = {
+  entered:
+    "Las clínicas que entraron en esos meses (su venta se cerró como «Entró» o, si no hay, abrieron su cuenta), sin demos ni archivadas.",
+  paid: "De las que entraron en esos meses, cuántas tienen confirmado su primer pago. Una con el pago revertido no cuenta.",
+  daysToPay:
+    "La mediana de días entre que entró y su primer pago confirmado, solo de las que ya pagaron: la mitad tardó menos y la otra mitad más.",
+  stalls:
+    "De las que entraron en esos meses y todavía no pagaron, el primer paso del alta que les falta. Un paso marcado «No aplica» no cuenta.",
+  cohorts:
+    "Cada fila es el mes en que la clínica entró. Un mes reciente todavía tiene altas en curso.",
+}
+
+/**
+ * El alta de las clínicas que entraron en los últimos `months` meses de Lima: cuántas pagaron,
+ * en cuántos días y en qué paso se quedan las que no. Cada alta sale de `computeOnboarding` (la
+ * misma verdad del Embudo y la ficha); «Entró» es `enteredAtSql`, igual que en el embudo de
+ * venta. Las canceladas cuentan como que no pagaron.
+ */
+export async function altaReport(
+  tx: Db,
+  actor: AdminActor | null,
+  options: { months?: number } = {},
+  now = new Date(),
+): Promise<AltaReport> {
+  requireReportsAdmin(actor)
+  const months = monthsOption(options.months)
+  const window = monthWindow(now, months)
+  const first = window[0] as LimaMonth
+  const current = window[window.length - 1] as LimaMonth
+  const from = limaMonthStart(first)
+  const rows = await rowsOf<{
+    id: string
+    organizationId: string
+    month: string
+    enteredAt: number
+  }>(
+    tx,
+    sql`select * from (
+        select c.id, c.organization_id as "organizationId",
+          to_char(${enteredAtSql("c", "org")} at time zone 'America/Lima', 'YYYY-MM') as month,
+          (extract(epoch from ${enteredAtSql("c", "org")}) * 1000)::float8 as "enteredAt"
+        from ${saasClient} c
+        join ${organization} org on org.id = c.organization_id
+        where c.archived_at is null and ${notDemoOrg(sql`c.organization_id`)}
+      ) e
+      where e."enteredAt" >= ${from.getTime()} and e."enteredAt" <= ${now.getTime()}
+      order by e.id`,
+  )
+
+  const cohorts = new Map(window.map((value) => [monthKey(value), { entered: 0, paid: 0 }]))
+  const stallCounts = new Map<OnboardingStepKey, number>()
+  const daysToPay: number[] = []
+  let paid = 0
+  for (const row of rows) {
+    const computed = await computeOnboarding(
+      tx,
+      { id: row.id, organizationId: row.organizationId },
+      now,
+    )
+    const paidAt = computed.steps.find((item) => item.key === "primer_pago")?.doneAt ?? null
+    const cohort = cohorts.get(row.month)
+    if (cohort) cohort.entered += 1
+    if (paidAt) {
+      paid += 1
+      if (cohort) cohort.paid += 1
+      daysToPay.push(Math.max(0, (paidAt.getTime() - Number(row.enteredAt)) / DAY_MS))
+    } else if (computed.next) {
+      stallCounts.set(computed.next, (stallCounts.get(computed.next) ?? 0) + 1)
+    }
+  }
+
+  const stalls = ONBOARDING_STEP_KEYS.filter((step) => (stallCounts.get(step) ?? 0) > 0)
+    .map((step) => ({
+      step,
+      label: ONBOARDING_STEP_LABELS[step],
+      count: stallCounts.get(step) ?? 0,
+    }))
+    // De mayor a menor; a igual cantidad, en el orden del alta (el sort es estable).
+    .sort((a, b) => b.count - a.count)
+  const top = stalls[0]
+  const unpaid = rows.length - paid
+  const medianDays = median(daysToPay)
+  const total = rows.length
+  return {
+    from: limaDate(from),
+    to: limaDate(now),
+    months,
+    spanWords:
+      months === 1
+        ? monthLabel(current, current.year)
+        : `${monthLabel(first, current.year)} a ${monthLabel(current, current.year)}`,
+    entered: {
+      value: total,
+      words: plural(total, "clínica", "clínicas"),
+      howCalculated: ALTA_HOW.entered,
+    },
+    paid: reportRatio(paid, total, ALTA_HOW.paid),
+    daysToPay: {
+      value: medianDays === null ? null : Math.round(medianDays),
+      cases: daysToPay.length,
+      words:
+        medianDays === null
+          ? "Sin casos"
+          : `${plural(Math.round(medianDays), "día", "días")}${daysToPay.length < REPORT_FEW_CASES ? ` (${plural(daysToPay.length, "caso", "casos")})` : ""}`,
+      howCalculated: ALTA_HOW.daysToPay,
+    },
+    stalls,
+    stalledMost: top
+      ? {
+          step: top.step,
+          label: top.label,
+          words: `${top.label}: ${top.count} de ${unpaid} que no pagaron`,
+        }
+      : null,
+    stallsHowCalculated: ALTA_HOW.stalls,
+    cohorts: window.map((value) => {
+      const key = monthKey(value)
+      const cohort = cohorts.get(key) ?? { entered: 0, paid: 0 }
+      return {
+        month: key,
+        label: monthLabel(value, current.year),
+        entered: cohort.entered,
+        paid: cohort.paid,
+        conversion: reportRatio(
+          cohort.paid,
+          cohort.entered,
+          "De las clínicas que entraron ese mes, cuántas tienen confirmado su primer pago.",
+        ),
+      }
+    }),
+    cohortsHowCalculated: ALTA_HOW.cohorts,
   }
 }

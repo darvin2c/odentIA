@@ -54,6 +54,12 @@ const envSchema = z.object({
   VAPID_SUBJECT: z.string().default(""),
   META_APP_ID: z.string().default(""),
   META_APP_SECRET: z.string().default(""),
+  /**
+   * Las otras dos de «Conectar con Facebook», las mismas de la API: con las cuatro, el paso
+   * de WhatsApp del alta deja de esperar a Meta (`metaSignupConfigured`). Vacías: espera.
+   */
+  META_LOGIN_CONFIG_ID: z.string().default(""),
+  META_WEBHOOK_VERIFY_TOKEN: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**

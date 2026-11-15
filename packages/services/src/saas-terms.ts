@@ -643,8 +643,11 @@ export interface SaasTrialWatchRow {
   sellerName: string | null
 }
 
+/** Una prueba que termina en estos días o menos está «por vencer» (Hoy y Kairós). */
+export const SAAS_TRIAL_WARN_DAYS = 7
+
 /**
- * Pruebas por vencer (7 días o menos) o con el saldo de prueba en aviso, con
+ * Pruebas por vencer (`SAAS_TRIAL_WARN_DAYS` o menos) o con el saldo de prueba en aviso, con
  * lo que hicieron los agentes: el argumento de la llamada. «En pausa» primero:
  * la clínica ya vio el valor y se le acabó.
  */
@@ -666,7 +669,7 @@ export async function getSaasTrialWatch(tx: Db, now = new Date()): Promise<SaasT
         ? "en_pausa"
         : consumption.priced && used * 100 >= warnPercent
           ? "sin_saldo"
-          : daysLeft !== null && daysLeft <= 7
+          : daysLeft !== null && daysLeft <= SAAS_TRIAL_WARN_DAYS
             ? "por_vencer"
             : null
     if (!state) continue

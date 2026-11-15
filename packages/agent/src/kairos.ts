@@ -226,6 +226,30 @@ export const KAIROS_GOALS: Record<
       `Te escribo porque parte de tu equipo aún no acepta su invitación a ${PRODUCT_LINE[c.product].name}.`,
     close: "Si alguien no encuentra el correo, dime y lo vemos.",
   },
+  recordar_propietaria: {
+    instruction:
+      "Recuerda a la propietaria que su invitación para entrar a su cuenta está esperando y ofrece ayuda para entrar. No hables de precios.",
+    subject: (c) => `Tu invitación a ${PRODUCT_LINE[c.product].name}`,
+    line: (c) =>
+      `Te escribo porque tu invitación para entrar a la cuenta de ${c.name} en ${PRODUCT_LINE[c.product].name} sigue esperando.`,
+    close: "Si el correo no te llegó o algo no funciona al entrar, dime y lo vemos juntos.",
+  },
+  pedir_archivos_otra_vez: {
+    instruction:
+      "Los archivos que nos mandó para cargar sus datos se borraron sin cargarse, como prometemos a los 30 días: pídele con amabilidad que los vuelva a enviar por el medio que ya le indicamos. No pidas datos de pacientes en este mensaje.",
+    subject: () => "Volver a enviar los archivos de tu carga",
+    line: (c) =>
+      `Te escribo porque los archivos para cargar los datos de ${c.name} se borraron sin que alcanzáramos a cargarlos, como prometemos a los 30 días.`,
+    close: "¿Nos los vuelves a enviar? Si tienes dudas sobre qué mandar, dime y te ayudo.",
+  },
+  alta_sin_avanzar: {
+    instruction:
+      "El alta de su cuenta no avanza hace días: recuerda con amabilidad el paso que le toca a la clínica (está en los datos) y ofrece ayuda. Sin presionar y sin hablar de precios.",
+    subject: (c) => `Tu cuenta de ${PRODUCT_LINE[c.product].name}`,
+    line: (c) =>
+      `Te escribo para ver cómo va la puesta en marcha de ${c.name} en ${PRODUCT_LINE[c.product].name}: queda un paso de tu lado.`,
+    close: "Si algo te frena, dime y lo vemos juntos.",
+  },
 }
 
 function clientLines(client: KairosClientFacts): string[] {
