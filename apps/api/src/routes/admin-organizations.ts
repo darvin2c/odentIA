@@ -500,7 +500,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
   })
 
   // O2: cobro y consumo de la clínica (ADR 0031). Precio y prueba son de la administración: soporte no ve importes (ADR 0094).
-  // Con «Pasar a Fundadores» cuando la clínica entró sin la invitación y sigue en prueba (ADR 0190).
+  // Con «Pasar a Fundadores» cuando la clínica entró sin la invitación y sigue en prueba (ADR 0192).
   app.get("/:id/billing", async (c) => {
     const denied = forbidUnlessManager(c, adminContextOf(c))
     if (denied) return denied

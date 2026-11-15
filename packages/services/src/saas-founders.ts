@@ -1290,8 +1290,10 @@ export interface FoundersEntered {
 /**
  * Pasa a Fundadores una clínica que entró sin la invitación (el alta asistida) y sigue en
  * prueba: queda como si hubiera entrado hoy con ella —el plan, su prueba desde ahora y sus
- * meses garantizados— y ocupa uno de sus lugares. Solo Administración. Con el plan
- * bloqueado, como al invitar, dos a la vez no toman el mismo lugar.
+ * meses garantizados— y ocupa uno de sus lugares. Un descuento negociado en el plan de lista
+ * se quita: Fundadores trae sus precios y, al terminar sus meses, vuelve al precio de lista
+ * como una Fundadora invitada. El presupuesto del mes queda como estaba. Solo
+ * Administración. Con el plan bloqueado, como al invitar, dos a la vez no toman el mismo lugar.
  */
 export async function moveClinicToFounders(
   tx: Db,
@@ -1313,8 +1315,23 @@ export async function moveClinicToFounders(
       `Los ${plan.seatLimit} lugares de ${plan.name} están ocupados: sube los lugares del plan para pasarla`,
     )
   }
+  const [before] = await tx
+    .select({ discountBps: saasSubscription.discountBps })
+    .from(saasSubscription)
+    .where(eq(saasSubscription.organizationId, orgId))
+    .limit(1)
   const entered = await enterInvitationPlan(tx, orgId, plan, now)
-  await writeAdminAudit(tx, actor, { action: FOUNDERS_ENTERED_ACTION, organizationId: orgId, metadata: { planId: plan.id } })
+  if (before?.discountBps) {
+    await tx
+      .update(saasSubscription)
+      .set({ discountBps: 0, discountEndsAt: null, updatedAt: now })
+      .where(eq(saasSubscription.organizationId, orgId))
+  }
+  await writeAdminAudit(tx, actor, {
+    action: FOUNDERS_ENTERED_ACTION,
+    organizationId: orgId,
+    metadata: { planId: plan.id, ...(before?.discountBps ? { discountBps: before.discountBps } : {}) },
+  })
   // La clínica abierta ve su plan nuevo sin recargar (Plan y pagos y la franja de avisos).
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "saas.subscription.updated", at: now.toISOString() })})`)
   return { planName: plan.name, ...entered }

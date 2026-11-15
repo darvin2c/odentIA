@@ -1,4 +1,4 @@
-# 0190 · Una clínica que ya existe pasa a Fundadores desde la administración
+# 0192 · Una clínica que ya existe pasa a Fundadores desde la administración
 
 Fecha: 2026-11-15 · Estado: aceptada · Extiende la [0062](0062-fundadores-alta-por-invitacion-y-precios-de-la-administracion.md) (la invitación Fundadores) y sigue a la [0185](0185-el-arm-de-la-administracion.md) (el ARM)
 
@@ -8,7 +8,7 @@ A Fundadores solo se entraba con la invitación de la lista de espera, y esa inv
 
 ## Decisión y motivo
 
-- **«Pasar a Fundadores» en Plan y pagos de la ficha** (`moveClinicToFounders`), solo para el rol Administración. Deja la suscripción como al entrar con la invitación, con la misma operación (`enterInvitationPlan`, la de `completeFounderInvitation`): el plan por invitación de su producto, su prueba desde ese día y sus meses garantizados. La confirmación dice antes qué cambia, hasta cuándo valen las condiciones y que la prueba empieza de nuevo.
+- **«Pasar a Fundadores» en Plan y pagos de la ficha** (`moveClinicToFounders`), solo para el rol Administración. Deja la suscripción como al entrar con la invitación, con la misma operación (`enterInvitationPlan`, la de `completeFounderInvitation`): el plan por invitación de su producto, su prueba desde ese día y sus meses garantizados. Un descuento negociado en el plan de lista se quita: Fundadores trae sus precios, y al terminar sus meses vuelve al precio de lista, como una Fundadora invitada. El presupuesto del mes no cambia. La confirmación dice antes todo eso.
 - **Solo una clínica en prueba, que no es una demo y que nunca fue Fundadora**: ni entró con la invitación ni se la pasó antes, aunque sus condiciones ya terminaran. A una clínica que ya paga no se le reinicia la prueba ni el mes.
 - **Su lugar queda en la auditoría** (`saas.founders_entered` en `admin_audit`, con el plan) y `founderSeats` lo suma a las entradas e invitaciones vigentes de la lista de espera. El plan se bloquea como al invitar: dos a la vez no toman el mismo lugar.
 

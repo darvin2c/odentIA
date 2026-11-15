@@ -2,7 +2,7 @@
  * Ficha de la clínica › Precio y prueba (ADR 0031, tablero O2): prueba y
  * descuento negociados (por encima de lo de siempre queda pedido para
  * aprobar), cada cuánto se factura y «Pasar a Fundadores» para la clínica
- * en prueba que entró sin la invitación (ADR 0190). Lo que hicieron los
+ * en prueba que entró sin la invitación (ADR 0192). Lo que hicieron los
  * agentes y el crédito del mes están en Resumen y Gastos. Solo la
  * administración (ADR 0094).
  */
@@ -94,7 +94,7 @@ interface BillingTerms {
     decidedAt: string | null
   }>
   notices: Array<{ kind: string; sentAt: string | null }>
-  /** «Pasar a Fundadores»: lo que tendría si pasa ahora; null si no puede (ADR 0190). */
+  /** «Pasar a Fundadores»: lo que tendría si pasa ahora; null si no puede (ADR 0192). */
   founders?: FoundersMove | null
 }
 
@@ -167,9 +167,10 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     queryFn: () => api<BillingTerms | null>(`/api/admin/organizations/${organizationId}/billing`),
   })
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "organizations", organizationId] })
-  // Pasar a Fundadores cambia también la ficha del cliente: su historial y lo que muestran Hoy y Kairós.
+  // Pasar a Fundadores cambia también la cabecera de la ficha y la del cliente: su historial y lo que muestran Hoy y Kairós.
   const refreshAll = () => {
     refresh()
+    void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
     for (const key of ["client", "clients", "kairos", "overview"]) void queryClient.invalidateQueries({ queryKey: ["admin", key] })
   }
   // El ciclo se guarda al elegir: es una acción suelta, con su error junto al control.
@@ -210,7 +211,15 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
         {data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura {data.billingCycle === "quincenal" ? halfWords : "cada mes"}
       </p>
 
-      {data.founders ? <FoundersMoveSection organizationId={organizationId} move={data.founders} onChanged={refreshAll} /> : null}
+      {data.founders ? (
+        <FoundersMoveSection
+          organizationId={organizationId}
+          move={data.founders}
+          discountBps={data.discountBps}
+          spendCapCents={data.spendCapCents}
+          onChanged={refreshAll}
+        />
+      ) : null}
 
       {pending.length ? (
         <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm">
@@ -280,23 +289,35 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
 }
 
 /**
- * «Pasar a Fundadores» (ADR 0190): la clínica toma el plan por invitación como si entrara
+ * «Pasar a Fundadores» (ADR 0192): la clínica toma el plan por invitación como si entrara
  * hoy con la invitación. Lo que cambia se dice antes de confirmar; el servidor vuelve a
- * mirar si puede y si queda lugar.
+ * mirar si puede y si queda lugar. Si lo rechaza, el motivo queda en la pregunta y lo de
+ * hoy se vuelve a leer al cerrarla.
  */
 function FoundersMoveSection({
   organizationId,
   move,
+  discountBps,
+  spendCapCents,
   onChanged,
 }: {
   organizationId: string
   move: FoundersMove
+  /** El precio especial negociado que tiene hoy: al pasar se quita. */
+  discountBps: number
+  /** El presupuesto del mes: al pasar queda igual. */
+  spendCapCents: number | null
   onChanged: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const box = useRef<HTMLElement>(null)
   const left = Math.max(0, move.limit - move.used)
   const money = (cents: number) => new Intl.NumberFormat("es-PE", { style: "currency", currency: move.currency }).format(cents / 100)
+  // Cuando la sección se va (pasó, u otra persona ya la pasó), el foco queda en Precio y prueba.
+  const keepFocus = () => {
+    const around = box.current?.parentElement ?? null
+    focusInsideLater(() => around)
+  }
   const enter = useMutation({
     mutationFn: () =>
       api<{ planName: string; guaranteedUntil: string | null }>(`/api/admin/organizations/${organizationId}/billing/founders`, {
@@ -306,18 +327,16 @@ function FoundersMoveSection({
     onSuccess: (result) => {
       toast.success(result.guaranteedUntil ? `Pasó a ${result.planName} hasta el ${shortDay(result.guaranteedUntil)}` : `Pasó a ${result.planName}`)
       setConfirming(false)
-      // Esta sección se va al pasar: el foco queda en Precio y prueba.
-      const around = box.current?.parentElement ?? null
-      focusInsideLater(() => around)
+      keepFocus()
       onChanged()
     },
-    // El motivo queda en la pregunta, y se vuelve a leer lo de hoy: los lugares u otra persona que ya la pasó.
-    onError: onChanged,
   })
   const months = move.guaranteeMonths ?? 0
   const conditions = move.guaranteedUntil
     ? ` Sus condiciones valen ${months} ${months === 1 ? "mes" : "meses"}, hasta el ${shortDay(move.guaranteedUntil)}${move.listPlanName ? `; después pasa al ${move.listPlanName}` : ""}.`
     : ""
+  const discount = discountBps > 0 ? ` Su precio especial de ${discountBps / 100} % se quita: Fundadores trae sus precios.` : ""
+  const cap = spendCapCents !== null ? ` Su presupuesto del mes sigue en ${money(spendCapCents)}.` : ""
   return (
     <section ref={box} aria-labelledby="org-founders" className="flex flex-col gap-2 rounded-lg border p-3">
       <h3 id="org-founders" className="text-sm font-medium">
@@ -335,15 +354,20 @@ function FoundersMoveSection({
       <ConfirmDialog
         open={confirming}
         title="¿Pasar a Fundadores?"
-        description={`Queda en ${move.planName}, con sus precios.${conditions} Su prueba empieza de nuevo hoy: ${move.trialDays} días con ${money(move.trialCreditCents)}. Ocupa uno de los ${move.limit} lugares y no se deshace desde aquí.`}
+        description={`Queda en ${move.planName}, con sus precios.${conditions} Su prueba empieza de nuevo hoy: ${move.trialDays} días con ${money(move.trialCreditCents)}.${discount}${cap} Ocupa uno de los ${move.limit} lugares y no se deshace desde aquí.`}
         confirmLabel="Pasar a Fundadores"
         variant="default"
         pending={enter.isPending}
-        confirmDisabled={!left}
+        // Un rechazo no se reintenta desde la misma pregunta: al cerrarla se lee lo de hoy.
+        confirmDisabled={!left || enter.isError}
         error={enter.isError ? submitErrorMessage(enter.error) : null}
         onConfirm={() => enter.mutate()}
         onClose={() => {
           setConfirming(false)
+          if (enter.isError) {
+            keepFocus()
+            onChanged()
+          }
           enter.reset()
         }}
       />

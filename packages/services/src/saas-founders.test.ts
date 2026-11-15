@@ -251,7 +251,8 @@ describe("la invitación Fundadores", () => {
 describe("pasar a Fundadores desde la administración", () => {
   it("una clínica en prueba que entró sin la invitación pasa con el plan, su prueba desde hoy, sus meses y un lugar", async () => {
     await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
-    const orgId = await clinic()
+    // Con un precio especial negociado en el plan de lista: Fundadores trae sus precios.
+    const orgId = await clinic({ discountBps: 1000, discountEndsAt: new Date(Date.now() + 90 * DAY) })
     const before = await founderSeats(ownerDb, foundersPlanId)
     const now = new Date()
     expect(await getFoundersMove(ownerDb, orgId, now)).toMatchObject({
@@ -266,7 +267,14 @@ describe("pasar a Fundadores desde la administración", () => {
     const entered = await moveClinicToFounders(ownerDb, admin, orgId, now)
     expect(entered.guaranteedUntil?.getUTCFullYear()).toBe(now.getUTCFullYear() + 1)
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
-    expect(sub).toMatchObject({ planId: foundersPlanId, status: "prueba", trialStartedAt: now, guaranteedUntil: entered.guaranteedUntil })
+    expect(sub).toMatchObject({
+      planId: foundersPlanId,
+      status: "prueba",
+      trialStartedAt: now,
+      guaranteedUntil: entered.guaranteedUntil,
+      discountBps: 0,
+      discountEndsAt: null,
+    })
     expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - now.getTime()) / DAY)).toBe(90)
     expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
     // Ya es Fundadora: no se ofrece ni pasa otra vez.
