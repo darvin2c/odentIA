@@ -1,4 +1,6 @@
 import {
+  BONE_MEDICINE_FORMS,
+  BONE_MEDICINE_REASONS,
   type BOTTLE_ANSWERS,
   type BRUSHER_ANSWERS,
   CIGARETTE_BAND_LABELS,
@@ -72,15 +74,20 @@ import {
   Textarea,
 } from "@odentia/ui"
 import {
+  advanceOnEnter,
   BirthDateInput,
+  clinicDateLocale,
   type FieldControl,
   normalizeCountry,
   PhoneInput,
+  readWrittenDate,
   setSubmitErrors,
   submitForm,
   useAppForm,
   useFieldControl,
   useFormSubmitError,
+  writtenDateFormat,
+  writtenDateProblemText,
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
@@ -172,6 +179,10 @@ interface Draft {
   anticoagulantsText: string
   boneMedicines: Declared
   boneMedicinesText: string
+  /** De la medicina para los huesos, con el Sí: si la toma hoy, por qué y cómo (B3, C3). */
+  boneNow: "" | "si" | "no"
+  boneReason: "" | (typeof BONE_MEDICINE_REASONS)[number]
+  boneForm: "" | (typeof BONE_MEDICINE_FORMS)[number]
   medications: Declared
   medicationsText: string
   /** odentIA: el corazón (antibiótico antes de atender) y la anestesia. */
@@ -261,6 +272,9 @@ const EMPTY: Draft = {
   anticoagulantsText: "",
   boneMedicines: "",
   boneMedicinesText: "",
+  boneNow: "",
+  boneReason: "",
+  boneForm: "",
   medications: "",
   medicationsText: "",
   heartRisk: "",
@@ -336,6 +350,12 @@ const TOBACCO_OPTIONS: ReadonlyArray<{ value: Exclude<Draft["tobacco"], "">; lab
   { value: "fuma", label: "Fumo" },
   { value: "dejo", label: "Lo dejé" },
 ]
+/** Cuando responde otra persona, en tercera persona, como la pregunta (B4). */
+const TOBACCO_OPTIONS_OTHER: ReadonlyArray<{ value: Exclude<Draft["tobacco"], "">; label: string }> = [
+  { value: "nunca", label: "Nunca fumó" },
+  { value: "fuma", label: "Fuma" },
+  { value: "dejo", label: "Lo dejó" },
+]
 const CIGARETTE_OPTIONS = CIGARETTE_BANDS.map((value) => ({
   value,
   label: CIGARETTE_BAND_LABELS[value].replace(/^./, (letter) => letter.toLocaleUpperCase("es")),
@@ -390,8 +410,8 @@ const BRUSHING = [
   { value: "3", label: "3 o más" },
 ] as const
 /** Los hábitos que más pesan en la boca, en palabras del paciente. */
+// Sin «Fumar»: el tabaco tiene su propia pregunta, con cuántos al día (QA del 14 nov, B14).
 const HABITS = [
-  "Fumar",
   "Morderse las uñas",
   "Morder lápices u objetos",
   "Respirar por la boca",
@@ -466,10 +486,10 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.dental.quienCepilla", "childhood", "brusher"],
   ["health.dental", "dental"],
   ["health.medical.lactancia", "history", "breastfeeding"],
-  ["health.medical.tabaco", "habits", "tobacco"],
-  ["health.medical.cigarrillos", "habits", "cigarettes"],
-  ["health.medical.alcohol", "habits", "alcohol"],
-  ["health.medical", "habits"],
+  ["health.medical.tabaco", "history", "tobacco"],
+  ["health.medical.cigarrillos", "history", "cigarettes"],
+  ["health.medical.alcohol", "history", "alcohol"],
+  ["health.medical", "history"],
   ["acceptsMessages", "send", "messages"],
   ["privacyAccepted", "send", "privacy"],
   ["visit.reason", "visit", "visitReason"],
@@ -666,8 +686,67 @@ const HEALTH_ITEM_OF_STEP: Record<string, string> = {
   personales: "history",
   odontologicos: "dental",
   ninez: "childhood",
-  habitos: "habits",
+  habitos: "history",
 }
+/**
+ * Lo escrito separado por comas, punto y coma o saltos de línea, en partes. La coma entre dos
+ * números es decimal y no separa: «letrozol 2,5 mg» es uno (QA del 14 nov, C8).
+ */
+export function declaredListItems(text: string): string[] {
+  return text
+    .split(/(?<!\d),|,(?!\d)|[;\n]/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Las alergias que escribió, con «¿Qué te pasó?», que es uno: va con la primera y no se copia a las
+ * demás, porque no se sabe de cuál es (QA del 14 nov, B5).
+ */
+export function declaredAllergyItems(substances: string[], reaction: string) {
+  return substances.map((substance, index) => ({
+    substance,
+    severity: "desconocida" as const,
+    ...(reaction && index === 0 ? { reaction } : {}),
+  }))
+}
+
+/** Una pregunta opcional de la medicina para los huesos, con su etiqueta como grupo. */
+function BoneChoice({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  onChange: (value: string) => void
+}): React.JSX.Element {
+  const id = useId()
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span id={id} className="text-sm">
+        {label} <span className="text-muted-foreground">(opcional)</span>
+      </span>
+      <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
+    </div>
+  )
+}
+
+/** Sin repetir lo mismo escrito dos veces, sin importar mayúsculas ni tildes. */
+export function uniqueByName(values: string[]): string[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const key = value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("es")
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** Las pantallas de su salud en el orden en que se ven (en la lista, los hábitos van antes que la boca). */
+const HEALTH_ITEMS = ["health", "medicines", "history", "dental"] as const
 /** El sexo en lo que llena la persona. */
 const PERSON_SEX_CODES = ["F", "M"] as const
 const PERSON_KEYS = ["givenNames", "familyName", "birthDate", "sex", "nationality", "birthPlace"] as const
@@ -740,11 +819,13 @@ export function RegistrationQuestionnaire({
     if (wants("insuranceType")) return "insurance"
     // Sin nada de sus datos ni de su salud, «Antes de tu cita» es solo «Tu visita».
     if (!fill.health) return fill.visit ? "visit" : "send"
-    // La primera pantalla de su salud con algo que preguntarle.
-    const first = fill.healthKeys
-      ? REGISTRATION_FIELDS.find((field) => field.group === "health" && fill.healthKeys?.has(field.key))
-      : null
-    return (first && HEALTH_ITEM_OF_STEP[first.step]) || "health"
+    // La primera pantalla de su salud con algo que preguntarle, en el orden en que se ven.
+    const wanted = new Set(
+      REGISTRATION_FIELDS.filter((field) => field.group === "health" && fill.healthKeys?.has(field.key)).map(
+        (field) => HEALTH_ITEM_OF_STEP[field.step],
+      ),
+    )
+    return (fill.healthKeys && HEALTH_ITEMS.find((screen) => wanted.has(screen))) || "health"
   })
   // Lo escrito en este celular (entrega 9): se lee ya montada la página (el servidor no
   // lo conoce, y pintarlo distinto rompería la hidratación).
@@ -908,9 +989,12 @@ export function RegistrationQuestionnaire({
   const medicineKeys = ["anticoagulants", "boneMedicines", "medications"] as const
   const medicinesAsked = medicineKeys.some(asked)
   const medicinesRequired = medicineKeys.some((key) => asked(key) && required(key))
-  // A mujeres de 12 a 55 años, y nunca a un niño: lo dice `applies`.
+  // A mujeres de 12 a 55 años, y nunca a un niño; el tabaco y el alcohol, desde los 12: lo dice
+  // `applies`, la misma regla del servidor (B11).
   const pregnancyAsked = asked("personal.embarazo")
   const breastfeedingAsked = asked("medical.lactancia")
+  const tobaccoAsked = asked("medical.tabaco")
+  const alcoholAsked = asked("medical.alcohol")
   // «Thiago de pequeño»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
   const childhoodKeys = [
     "dental.biberon",
@@ -922,6 +1006,8 @@ export function RegistrationQuestionnaire({
   const historyAsked =
     pregnancyAsked ||
     breastfeedingAsked ||
+    tobaccoAsked ||
+    alcoholAsked ||
     (["personal.cirugias", "personal.hospitalizaciones", "personal.transfusiones"] as const).some(
       asked,
     )
@@ -1015,31 +1101,18 @@ export function RegistrationQuestionnaire({
 
     type Health = NonNullable<RegistrationAnswers["health"]>
     const health: Health = {}
-    const listed = (state: Declared, text: string) =>
-      state === "recorded"
-        ? text
-            .split(/[,;\n]/)
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : []
+    const listed = (state: Declared, text: string) => (state === "recorded" ? declaredListItems(text) : [])
     const stateOf = (state: Declared) => state || "unanswered"
     const reaction = d.allergiesReaction.trim()
     if (asked("allergies"))
-      health.allergies = {
-        state: stateOf(d.allergies),
-        items: listed(d.allergies, d.allergiesText).map((substance) => ({
-          substance,
-          severity: "desconocida",
-          ...(reaction ? { reaction } : {}),
-        })),
-      }
+      health.allergies = { state: stateOf(d.allergies), items: declaredAllergyItems(listed(d.allergies, d.allergiesText), reaction) }
     if (asked("conditions"))
       health.conditions = {
         state: stateOf(d.conditions),
-        items: [
-          ...(d.conditions === "recorded" ? d.conditionsPicked : []),
-          ...listed(d.conditions, d.conditionsText),
-        ].map((value) => ({ name: value })),
+        // Lo marcado de la lista y lo escrito en «Otra», sin repetir la misma enfermedad (B8).
+        items: uniqueByName([...(d.conditions === "recorded" ? d.conditionsPicked : []), ...listed(d.conditions, d.conditionsText)]).map(
+          (value) => ({ name: value }),
+        ),
       }
     // «¿Cuál?» va solo con el Sí: la marca de la ficha sale de la respuesta, no del nombre.
     const directed = (state: Declared, text: string): NonNullable<Health["anticoagulants"]> => ({
@@ -1047,7 +1120,13 @@ export function RegistrationQuestionnaire({
       ...(state === "recorded" && text.trim() ? { detail: text.trim() } : {}),
     })
     if (asked("anticoagulants")) health.anticoagulants = directed(d.anticoagulants, d.anticoagulantsText)
-    if (asked("boneMedicines")) health.boneMedicines = directed(d.boneMedicines, d.boneMedicinesText)
+    if (asked("boneMedicines"))
+      health.boneMedicines = {
+        ...directed(d.boneMedicines, d.boneMedicinesText),
+        ...(d.boneMedicines === "recorded" && d.boneNow ? { now: d.boneNow === "si" } : {}),
+        ...(d.boneMedicines === "recorded" && d.boneReason ? { reason: d.boneReason } : {}),
+        ...(d.boneMedicines === "recorded" && d.boneForm ? { form: d.boneForm } : {}),
+      }
     if (asked("medications"))
       health.medications = {
         state: stateOf(d.medications),
@@ -1115,9 +1194,9 @@ export function RegistrationQuestionnaire({
     type Medical = NonNullable<Health["medical"]>
     const medical: Medical = {}
     if (breastfeedingAsked && d.breastfeeding) medical.lactancia = d.breastfeeding === "si"
-    if (asked("medical.tabaco") && d.tobacco) medical.tabaco = d.tobacco
-    if (asked("medical.tabaco") && d.tobacco === "fuma" && d.cigarettes) medical.cigarrillos = d.cigarettes
-    if (asked("medical.alcohol") && d.alcohol) medical.alcohol = d.alcohol
+    if (tobaccoAsked && d.tobacco) medical.tabaco = d.tobacco
+    if (tobaccoAsked && d.tobacco === "fuma" && d.cigarettes) medical.cigarrillos = d.cigarettes
+    if (alcoholAsked && d.alcohol) medical.alcohol = d.alcohol
     if (Object.keys(medical).length) health.medical = medical
     if (Object.keys(health).length) answers.health = health
     if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
@@ -1229,6 +1308,15 @@ export function RegistrationQuestionnaire({
         : null
   const needs = (condition: boolean, field: keyof Draft, message: string): Found =>
     condition ? { field, message } : null
+  /**
+   * Lo que no vale de la fecha escrita, con las palabras del campo («Ese mes tiene 28 días: revisa
+   * el día.»): la pantalla lo dice una sola vez (el campo no lo repite, `problemOutside`).
+   */
+  const birthDateProblem = (): string => {
+    const format = writtenDateFormat(clinicDateLocale(countryCode))
+    const problem = readWrittenDate(draft.birthDate, today, format).problem
+    return problem ? `${writtenDateProblemText(problem, format)}.` : "Revisa la fecha: escribe día, mes y año."
+  }
   /** Lo que la regla de la ficha dice de lo escrito en un campo, con sus mismas palabras. */
   const says = (field: keyof Draft, problem: string | null): Found => (problem ? { field, message: problem } : null)
 
@@ -1330,11 +1418,7 @@ export function RegistrationQuestionnaire({
             needs(wants("givenNames") && !draft.givenNames.trim(), "givenNames", "Escribe los nombres.") ??
             needs(wants("familyName") && !draft.surnames.trim(), "surnames", "Escribe los apellidos.") ??
             needs(wants("birthDate") && !draft.birthDate, "birthDate", "Escribe la fecha de nacimiento.") ??
-            needs(
-              wants("birthDate") && !isRealDate(draft.birthDate),
-              "birthDate",
-              "Revisa la fecha: escribe día, mes y año.",
-            ) ??
+            needs(wants("birthDate") && !isRealDate(draft.birthDate), "birthDate", birthDateProblem()) ??
             needs(
               !fill && !forOther && minor,
               "birthDate",
@@ -1394,6 +1478,7 @@ export function RegistrationQuestionnaire({
                 today={today}
                 country={countryCode}
                 invalid={control.invalid}
+                problemOutside={control.invalid}
                 aria-describedby={control.describedBy}
                 onBlur={control.onBlur}
               />
@@ -1622,6 +1707,8 @@ export function RegistrationQuestionnaire({
               {(control) => (
                 <Input
                   {...control.props}
+                  // El DNI y el certificado de nacido vivo son solo números: el teléfono abre su teclado.
+                  inputMode={draft.docType === "DNI" || draft.docType === "CNV" ? "numeric" : undefined}
                   autoComplete="off"
                   maxLength={20}
                   value={draft.docNumber}
@@ -2024,9 +2111,10 @@ export function RegistrationQuestionnaire({
             <DeclaredField
               name="allergies"
               optional={!required("allergies")}
+              // Sin género: el sexo puede no estar elegido aún, y la pregunta es la misma para todos.
               label={you(
-                "¿Eres alérgico a algún medicamento o material?",
-                `¿${first || "La persona"} es alérgico a algún medicamento o material?`,
+                "¿Tienes alergia a algún medicamento o material?",
+                `¿${first || "La persona"} tiene alergia a algún medicamento o material?`,
               )}
               hint="Por ejemplo, penicilina, anestesia o látex."
               detailLabel="¿A qué? Si son varias cosas, sepáralas con comas."
@@ -2186,6 +2274,9 @@ export function RegistrationQuestionnaire({
               anticoagulantsText: "",
               boneMedicines: "",
               boneMedicinesText: "",
+  boneNow: "",
+  boneReason: "",
+  boneForm: "",
               medications: "",
               medicationsText: "",
             })
@@ -2210,6 +2301,7 @@ export function RegistrationQuestionnaire({
               asked("medications") && required("medications"),
               draft.medications,
               draft.medicationsText,
+              true,
             )
           }
         >
@@ -2224,6 +2316,7 @@ export function RegistrationQuestionnaire({
               hint="Por ejemplo, warfarina, Sintrom, rivaroxabán, apixabán o clopidogrel."
               detailLabel="¿Cuál? (si lo sabes)"
               detailOptional
+              detailMax={200}
               state={draft.anticoagulants}
               text={draft.anticoagulantsText}
               onState={(value) => set({ anticoagulants: value })}
@@ -2241,11 +2334,44 @@ export function RegistrationQuestionnaire({
               hint="Pastillas, como el alendronato, o una inyección."
               detailLabel="¿Cuál y desde cuándo? (si lo sabes)"
               detailOptional
+              detailMax={200}
               state={draft.boneMedicines}
               text={draft.boneMedicinesText}
-              onState={(value) => set({ boneMedicines: value })}
+              onState={(value) => set({ boneMedicines: value, ...(value === "recorded" ? {} : { boneNow: "", boneReason: "", boneForm: "" }) })}
               onText={(value) => set({ boneMedicinesText: value })}
-            />
+            >
+              {/* Opcional: cambian el riesgo antes de una extracción (AAOMS 2022). */}
+              <div className="grid gap-3">
+                <BoneChoice
+                  label={you("¿La tomas ahora?", "¿La toma ahora?")}
+                  value={draft.boneNow}
+                  options={[
+                    { value: "si", label: "Sí" },
+                    { value: "no", label: "Ya no" },
+                  ]}
+                  onChange={(value) => set({ boneNow: value as Draft["boneNow"] })}
+                />
+                <BoneChoice
+                  label="¿Por qué?"
+                  value={draft.boneReason}
+                  options={[
+                    { value: "osteoporosis", label: "Osteoporosis" },
+                    { value: "cancer", label: "Un cáncer" },
+                    { value: "no_sabe", label: "No sé" },
+                  ]}
+                  onChange={(value) => set({ boneReason: value as Draft["boneReason"] })}
+                />
+                <BoneChoice
+                  label="¿Cómo?"
+                  value={draft.boneForm}
+                  options={[
+                    { value: "pastillas", label: "Pastillas" },
+                    { value: "inyeccion", label: "Inyección" },
+                  ]}
+                  onChange={(value) => set({ boneForm: value as Draft["boneForm"] })}
+                />
+              </div>
+            </DeclaredField>
           ) : null}
           {asked("medications") ? (
             <DeclaredField
@@ -2256,7 +2382,8 @@ export function RegistrationQuestionnaire({
                   ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
                   : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
               }
-              detailLabel="¿Cuál? Si son varios, sepáralos con comas."
+              detailLabel="¿Cuál? (si lo sabes) Si son varios, sepáralos con comas."
+              detailOptional
               state={draft.medications}
               text={draft.medicationsText}
               onState={(value) => set({ medications: value })}
@@ -2288,6 +2415,9 @@ export function RegistrationQuestionnaire({
               hospitalizedText: "",
               transfusion: "",
               transfusionText: "",
+              tobacco: "",
+              cigarettes: "",
+              alcohol: "",
             })
           }
         >
@@ -2390,6 +2520,63 @@ export function RegistrationQuestionnaire({
               onAnswer={(value) => set({ transfusion: value })}
               onText={(value) => set({ transfusionText: value })}
             />
+          ) : null}
+          {/* El tabaco y el alcohol, aquí y no en una pantalla aparte (QA del 14 nov, B13). */}
+          {tobaccoAsked ? (
+            <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.tobacco || null}
+                  options={forOther ? TOBACCO_OPTIONS_OTHER : TOBACCO_OPTIONS}
+                  onChange={(value) => set({ tobacco: value, ...(value === "fuma" ? {} : { cigarettes: "" }) })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {tobaccoAsked && draft.tobacco === "fuma" ? (
+            <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.cigarettes || null}
+                  options={CIGARETTE_OPTIONS}
+                  onChange={(value) => set({ cigarettes: value })}
+                  columns={2}
+                />
+              )}
+            </Labeled>
+          ) : null}
+          {alcoholAsked ? (
+            <Labeled
+              name="alcohol"
+              group
+              label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
+              optional
+            >
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.alcohol || null}
+                  options={ALCOHOL_OPTIONS}
+                  onChange={(value) => set({ alcohol: value })}
+                  columns={3}
+                />
+              )}
+            </Labeled>
           ) : null}
         </Question>
 
@@ -2646,72 +2833,6 @@ export function RegistrationQuestionnaire({
         </Question>
 
         <Question
-          name="habits"
-          grouped
-          disabled={!(["medical.tabaco", "medical.alcohol"] as const).some(asked)}
-          title={you("Tus hábitos", `Los hábitos de ${name}`)}
-          description="Nos ayuda a cuidarte mejor."
-          onSkip={() => set({ tobacco: "", cigarettes: "", alcohol: "" })}
-        >
-          {asked("medical.tabaco") ? (
-            <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.tobacco || null}
-                  options={TOBACCO_OPTIONS}
-                  onChange={(value) => set({ tobacco: value, ...(value === "fuma" ? {} : { cigarettes: "" }) })}
-                  columns={3}
-                />
-              )}
-            </Labeled>
-          ) : null}
-          {asked("medical.tabaco") && draft.tobacco === "fuma" ? (
-            <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.cigarettes || null}
-                  options={CIGARETTE_OPTIONS}
-                  onChange={(value) => set({ cigarettes: value })}
-                  columns={2}
-                />
-              )}
-            </Labeled>
-          ) : null}
-          {asked("medical.alcohol") ? (
-            <Labeled
-              name="alcohol"
-              group
-              label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
-              optional
-            >
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.alcohol || null}
-                  options={ALCOHOL_OPTIONS}
-                  onChange={(value) => set({ alcohol: value })}
-                  columns={3}
-                />
-              )}
-            </Labeled>
-          ) : null}
-        </Question>
-
-        <Question
           name="census"
           grouped
           disabled={!censusKeys.some(censusAsked)}
@@ -2955,6 +3076,8 @@ export function RegistrationQuestionnaire({
             {fill.privacy ? (
               <PrivacyAccept
                 clinicName={fill.clinicName ?? null}
+                // Quien responde por otra persona (la mamá de Thiago) acepta por los dos, como en el registro.
+                forName={caregiver ? first || null : null}
                 notice={config.privacyNotice}
                 checked={draft.privacy}
                 onChange={(privacy) => set({ privacy })}
@@ -3129,30 +3252,10 @@ function Question({
           event.preventDefault()
           return
         }
-        if (event.key !== "Enter" || event.nativeEvent.isComposing || !typing) return
-        // En el buscador de país, Enter elige el país; nunca envía el formulario.
-        if (target.getAttribute("role") === "combobox") {
-          event.preventDefault()
-          return
-        }
-        // Enter pasa al campo siguiente; en el último, sigue a la otra pantalla.
-        event.preventDefault()
-        const fields = [
-          ...event.currentTarget.querySelectorAll<HTMLInputElement>(
-            "input:not([hidden]):not([type=hidden]):not([type=radio]):not([type=checkbox]):not(:disabled)",
-          ),
-        ].filter((input) => input.tabIndex !== -1)
-        const next = fields[fields.indexOf(target as HTMLInputElement) + 1]
-        if (next) {
-          next.focus()
-          return
-        }
-        if (!blocked(event.currentTarget))
-          event.currentTarget
-            .querySelector<HTMLButtonElement>(
-              "[data-slot=questionnaire-next]:not([hidden]), [data-slot=questionnaire-submit]:not([hidden])",
-            )
-            ?.click()
+        // Enter (o «Siguiente» del teléfono) pasa a la pregunta siguiente, también a las de
+        // botones (Sí, No, No sé), y en la última lleva a «Siguiente» o «Enviar» sin pulsarlo:
+        // nunca salta de pantalla con preguntas sin ver ni envía. Lo que falta lo dice el botón.
+        advanceOnEnter(event)
       }}
     >
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
@@ -3178,8 +3281,9 @@ function Question({
         // Cuando se envía desde aquí, «Saltar» sobra: todo es opcional y «Enviar» ya lo deja en blanco.
         className={finish ? "has-[>[data-slot=questionnaire-submit]:not([hidden])]:[&>[data-slot=questionnaire-skip]]:hidden" : undefined}
       >
-        <QuestionnairePrevious>Anterior</QuestionnairePrevious>
-        {required ? null : <QuestionnaireSkip>Saltar</QuestionnaireSkip>}
+        {/* Enter (`advanceOnEnter`) va de la última pregunta a «Siguiente» o «Enviar»: no se detiene en volver ni en saltar. */}
+        <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
+        {required ? null : <QuestionnaireSkip data-enter-skip="">Saltar</QuestionnaireSkip>}
         {submit ?? finish ? (
           <QuestionnaireSubmit
             disabled={submit ? sending : finish?.sending}
@@ -3365,6 +3469,7 @@ function DeclaredField({
   hint,
   detailLabel,
   detailOptional = false,
+  detailMax = 600,
   state,
   text,
   onState,
@@ -3378,6 +3483,8 @@ function DeclaredField({
   hint?: string
   detailLabel: string
   detailOptional?: boolean
+  /** Lo que admite el detalle: el mismo tope que el servidor (las dos medicinas guardan 200). */
+  detailMax?: number
   state: Declared
   text: string
   onState: (value: Declared) => void
@@ -3403,12 +3510,15 @@ function DeclaredField({
           {state === "recorded" ? (
             <>
               {before}
+              {/* Una etiqueta que se ve, no solo el ejemplo dentro de la caja (QA del 14 nov, B14). */}
+              <span className="text-sm" aria-hidden>
+                {detailLabel}
+              </span>
               <Input
                 aria-label={detailLabel}
                 aria-describedby={control.describedBy}
-                placeholder={detailLabel}
                 autoComplete="off"
-                maxLength={600}
+                maxLength={detailMax}
                 value={text}
                 aria-invalid={control.invalid && !detailOptional && !text.trim() ? true : undefined}
                 onChange={(event) => onText(event.target.value)}
@@ -3486,11 +3596,14 @@ function Carry() {
  */
 function PrivacyAccept({
   clinicName,
+  forName,
   notice,
   checked,
   onChange,
 }: {
   clinicName: string | null
+  /** De quién más son los datos, si responde por otra persona: «para los datos de Thiago y los míos». */
+  forName?: string | null
   notice: string
   checked: boolean
   onChange: (accepted: boolean) => void
@@ -3513,7 +3626,7 @@ function PrivacyAccept({
             />
             <div className="flex min-w-0 flex-col items-start">
               <label htmlFor={control.id} className="flex min-h-11 cursor-pointer items-center text-sm">
-                {clinicName ? `Acepto el aviso de privacidad de ${clinicName}.` : "Acepto el aviso de privacidad."}
+                {`Acepto el aviso de privacidad${clinicName ? ` de ${clinicName}` : ""}${forName ? ` para los datos de ${forName} y los míos` : ""}.`}
               </label>
               {notice.trim() ? (
                 <Button

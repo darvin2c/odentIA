@@ -103,6 +103,8 @@ const todaySchema = z.object({
           canResend: z.boolean(),
         })
         .optional(),
+      // Lo que dice su botón cuando no es «Hecho» («Revisado»: los que no entraron en una carga).
+      doneLabel: z.string().optional(),
     }),
   ),
   cooling: z.array(
@@ -804,7 +806,7 @@ function TaskItem({
     },
     onSuccess: () => {
       invalidateArm(queryClient, row.clientId)
-      toast.success(`Hecho: ${row.title}`)
+      toast.success(`${row.doneLabel ?? "Hecho"}: ${row.title}`)
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
@@ -860,7 +862,7 @@ function TaskItem({
               disabled={busy}
               onClick={() => done.mutate()}
             >
-              Hecho
+              {row.doneLabel ?? "Hecho"}
             </Button>
           )}
           <DatePickerButton

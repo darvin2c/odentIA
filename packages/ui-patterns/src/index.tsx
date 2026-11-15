@@ -70,7 +70,13 @@ export {
   type WaterfallStep,
 } from "./charts/index.js"
 export { common } from "./common.js"
-export { ConfirmDialog, type ConfirmDialogProps, type ConfirmVariant } from "./confirm-dialog.js"
+export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmVariant,
+  UnsavedDialog,
+  type UnsavedDialogProps,
+} from "./confirm-dialog.js"
 export {
   DataTable,
   type DataTableProps,

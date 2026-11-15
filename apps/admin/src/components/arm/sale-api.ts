@@ -334,7 +334,7 @@ function sendUnknownOf(error: unknown): unknown {
  */
 export async function sendEmailReply(
   emailId: string,
-  body: { body: string; proposalId?: string | null },
+  body: { body: string; proposalId?: string | null; fileIds?: string[] },
 ): Promise<SaleOutreach> {
   try {
     return z

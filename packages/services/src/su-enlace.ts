@@ -81,7 +81,6 @@ import {
   type DeclaredPatientHealthInput,
   getPatientHealth,
   declarantOfContact,
-  knownHealthQuestionsOf,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
 } from "./clinical.js"
@@ -103,7 +102,7 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson } from "./patient-identity.js"
-import { getPatientMissingData, getPatientRegistrationConfig, patientHealthQuestions } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig, patientHealthQuestionsWith } from "./patient-registration.js"
 import { consentsToSign, hasTodo, type PatientTodo, patientTodo } from "./patient-todo.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
@@ -298,7 +297,7 @@ async function missingOf(
 
 /**
  * Lo que se le pregunta de su salud (opcional), dato por dato: lo que la clínica pregunta y nadie
- * anotó ni respondió aún, si nunca envió «Tus datos» (`patientHealthQuestions`, la misma regla que
+ * anotó ni respondió aún, con la regla de `patientHealthQuestions` (la misma que
  * el recordatorio), y solo a quien decide por el paciente. Vacío: nada.
  */
 async function healthQuestionsOf(
@@ -306,8 +305,13 @@ async function healthQuestionsOf(
   orgId: string,
   link: ResolvedPersonalLink,
 ): Promise<RegistrationFieldKey[]> {
-  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return []
-  return patientHealthQuestions(tx, orgId, link.patientId)
+  return (await healthQuestionsWithOf(tx, orgId, link))?.ask ?? []
+}
+
+/** `healthQuestionsOf` con la salud y lo ya sabido que leyó para decidirlo; nulo si este enlace no pregunta su salud. */
+async function healthQuestionsWithOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
+  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return null
+  return patientHealthQuestionsWith(tx, orgId, link.patientId)
 }
 
 async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
@@ -334,22 +338,45 @@ function linkAppointmentId(link: ResolvedPersonalLink): string | null {
   return link.appointment && link.appointment.status !== "cancelada" ? link.appointment.id : null
 }
 
-/** Cuándo fue la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
+/**
+ * La cita de lo que contó: la que muestra el enlace o, si ya empezó, la suya mientras no termina. En la
+ * sala de espera «Lo que nos contaste» sigue diciendo su visita (QA de la entrega 3, también en la 8).
+ */
+async function toldAppointmentId(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
+  const shown = linkAppointmentId(link)
+  if (shown || !link.row.appointmentId) return shown
+  const [own] = await tx
+    .select({ id: appointment.id, status: appointment.status })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.id, link.row.appointmentId),
+        gt(appointment.endsAt, new Date()),
+      ),
+    )
+    .limit(1)
+  return own && own.status !== "cancelada" ? own.id : null
+}
+
+/** Cuándo terminó la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
 async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
+  // Una cita cuenta como pasada al terminar, no al empezar: mientras la persona espera en la sala
+  // (o se atiende), lo que envió para ella sigue siendo de esta cita.
   const [row] = await tx
-    .select({ startsAt: appointment.startsAt })
+    .select({ endsAt: appointment.endsAt })
     .from(appointment)
     .where(
       and(
         eq(appointment.organizationId, orgId),
         eq(appointment.patientId, patientId),
-        lte(appointment.startsAt, new Date()),
+        lte(appointment.endsAt, new Date()),
         sql`${appointment.status} <> 'cancelada'`,
       ),
     )
-    .orderBy(desc(appointment.startsAt))
+    .orderBy(desc(appointment.endsAt))
     .limit(1)
-  return row?.startsAt ?? null
+  return row?.endsAt ?? null
 }
 
 /**
@@ -386,7 +413,7 @@ async function toldOf(
     .map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
   const data = traced.find((row) => (row.fields?.length ?? 0) > 0 || row.renamed)
   const health = traced.find((row) => row.health)
-  const visit = await visitSentOf(tx, orgId, linkAppointmentId(link), link.row.contactId)
+  const visit = await visitSentOf(tx, orgId, await toldAppointmentId(tx, orgId, link), link.row.contactId)
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
@@ -1061,8 +1088,8 @@ async function saveLinkData(
     if (value) patch[key] = value
   }
   // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
-  const asked = input.health ? await healthQuestionsOf(tx, orgId, link) : []
-  const known = asked.length > 0 ? knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)) : null
+  const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link) : null
+  const known = questions && questions.ask.length > 0 ? questions.known : null
   // Ni lo que no le corresponde (a un niño, el embarazo o el tabaco; a uno de 8, el biberón): la misma regla del registro.
   const asker = known ? await requirePatient(tx, orgId, patientId) : null
   const who = { sex: asker?.sex ?? null, age: ageInYears(asker?.birthDate, await patientOrganizationToday(tx, orgId)) }
@@ -1146,7 +1173,7 @@ async function saveLinkData(
         allergies.map((item) => ({ substance: item.substance, reaction: item.reaction ?? null })),
         origin,
       )
-      await addDeclaredHealth(tx, orgId, null, patientId, said, { ...origin, at: new Date(), words: "Lo dijo en su enlace" })
+      await addDeclaredHealth(tx, orgId, null, patientId, said, { ...origin, at: new Date() })
     }
   }
   const person = await requirePatient(tx, orgId, patientId)

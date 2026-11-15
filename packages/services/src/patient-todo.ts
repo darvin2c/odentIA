@@ -6,7 +6,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { schedulableItemsOf } from "./booking-links.js"
 import { type BudgetWithTotals, listBudgets } from "./budgets.js"
 import { type RemoteSignBlock, remoteSignBlock } from "./clinical-forms.js"
-import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
+import { getPatientMissingData, patientHealthQuestionsWith } from "./patient-registration.js"
 import { type VisitAsk, visitAskOf } from "./visit-answers.js"
 
 /**
@@ -18,8 +18,16 @@ import { type VisitAsk, visitAskOf } from "./visit-answers.js"
 export interface PatientTodo {
   /** Lo que falta en su ficha (`getPatientMissingData`); vacío si ya envió «Tus datos». */
   missing: MissingPersonDatum[]
-  /** Su salud, opcional: si la clínica la pregunta, nadie la registró y nunca envió «Tus datos». */
+  /**
+   * Su salud, opcional: si la clínica pregunta algo que nadie anotó ni respondió. A quien ya envió
+   * «Tus datos», solo lo que la lista sumó después (`patientHealthQuestions`).
+   */
   health: boolean
+  /**
+   * Lo único que queda de su salud son esas preguntas nuevas: se le muestran cuando abre su enlace,
+   * pero el aviso al reservar no sale solo por ellas (a quien ya respondió no se le insiste).
+   */
+  healthOnlyNew: boolean
   /** Los consentimientos que se le enviaron a firmar y no firmó, el último enviado primero. */
   consents: Array<{ id: string; title: string; procedureRef: string | null; planItemId: string | null }>
   /**
@@ -115,9 +123,11 @@ export async function patientTodo(
 ): Promise<PatientTodo> {
   const { patientId } = input
   const consents = await consentsToSign(tx, orgId, patientId)
+  const health = input.dataSubmitted ? null : await patientHealthQuestionsWith(tx, orgId, patientId)
   return {
     missing: input.dataSubmitted ? [] : await getPatientMissingData(tx, orgId, patientId),
-    health: !input.dataSubmitted && (await patientHealthToAsk(tx, orgId, patientId)),
+    health: !!health && health.ask.length > 0,
+    healthOnlyNew: !!health && health.ask.length > 0 && health.onlyNew,
     consents,
     signBlock: consents.length > 0 ? await remoteSignBlock(tx, orgId, patientId, input.contactId) : null,
     visit: await visitAskOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
@@ -142,16 +152,20 @@ export function hasTodo(todo: PatientTodo): boolean {
  * Cuántas cosas puede hacer desde su teléfono, una por tarjeta de la página: «Antes de tu cita»
  * (sus datos y su visita, una sola tarjeta), cada consentimiento que firma a distancia, cada
  * presupuesto y lo aceptado por agendar. Un consentimiento que solo se firma en la cita no cuenta.
- * La salud, opcional, cuenta como sus datos solo si `health`; «Tu visita» cuenta cuando se le
- * pregunta: es lo que se le pide antes de cada cita (entrega 8), y con sus datos es una sola cosa.
+ * La salud, opcional, cuenta como sus datos solo si `health`. «Tu visita» es opcional y no cuenta
+ * como algo por hacer (decidido el 14 nov): va en la misma tarjeta que sus datos y, si es lo único
+ * que le queda, el recordatorio de siempre lo ofrece con una línea suave (`visit`).
  */
-export function remoteTodoCount(todo: PatientTodo, options: { health?: boolean } = {}): { data: boolean; total: number } {
-  const data = todo.missing.length > 0 || (options.health === true && todo.health)
+export function remoteTodoCount(
+  todo: PatientTodo,
+  options: { health?: boolean } = {},
+): { data: boolean; total: number; visit: { asksReason: boolean } | null } {
+  const data = todo.missing.length > 0 || (options.health === true && todo.health && !todo.healthOnlyNew)
   const consents = todo.signBlock ? 0 : todo.consents.length
   const total =
-    (data || todo.visit ? 1 : 0) +
+    (data ? 1 : 0) +
     consents +
     todo.budgets.length +
     (todo.toSchedule.length > 0 ? 1 : 0)
-  return { data, total }
+  return { data, total, visit: todo.visit ? { asksReason: todo.visit.questions.reason } : null }
 }

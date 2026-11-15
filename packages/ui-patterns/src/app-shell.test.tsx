@@ -161,7 +161,7 @@ it("la navegación lateral permite cancelar la salida antes de perder cambios", 
       <p>Borrador del caso</p>
       {blocker.status === "blocked" && <div role="alert">
         Cambios sin guardar
-        <button type="button" onClick={blocker.reset}>Continuar editando</button>
+        <button type="button" onClick={blocker.reset}>Seguir aquí</button>
         <button type="button" onClick={blocker.proceed}>Descartar y salir</button>
       </div>}
     </>
@@ -189,7 +189,7 @@ it("la navegación lateral permite cancelar la salida antes de perder cambios", 
   await screen.findByText("Borrador del caso")
   fireEvent.click(screen.getByRole("link", { name: "Destino" }))
   await screen.findByRole("alert")
-  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
   expect(router.state.location.pathname).toBe("/")
   fireEvent.click(screen.getByRole("link", { name: "Destino" }))

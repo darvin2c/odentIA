@@ -1,14 +1,4 @@
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
-} from "@odentia/ui"
-import { useDraftBlocker } from "@odentia/ui-patterns"
+import { UnsavedDialog, useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef } from "react"
 
 export function DraftGuard({ dirty }: { dirty: boolean }) {
@@ -29,31 +19,16 @@ export function DraftGuard({ dirty }: { dirty: boolean }) {
     return () => window.removeEventListener("beforeunload", beforeUnload)
   }, [dirty])
   const blocked = blocker.status === "blocked"
+  // La misma pregunta que al cerrar el formulario con × o Escape.
   return (
-    <AlertDialog
+    <UnsavedDialog
       open={blocked}
-      onOpenChange={(open) => {
-        if (!open && blocked) blocker.reset()
+      onStay={() => {
+        if (blocked) blocker.reset()
       }}
-    >
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Salir sin guardar los cambios</AlertDialogTitle>
-          <AlertDialogDescription>
-            Los cambios de este formulario no se han guardado. Si sales, se perderán.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Continuar editando</AlertDialogCancel>
-          <Button
-            onClick={() => {
-              if (blocked) blocker.proceed()
-            }}
-          >
-            Descartar y salir
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      onDiscard={() => {
+        if (blocked) blocker.proceed()
+      }}
+    />
   )
 }

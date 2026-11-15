@@ -1,5 +1,6 @@
 import type { HealthDeclarant } from "@odentia/clinical"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { setOrgLocale } from "./locale"
 import {
   askWhom,
   declaredGroupOf,
@@ -11,9 +12,18 @@ import {
   saidNoGroupOf,
   saidNoWords,
   shortDay,
+  unreviewedWords,
   whoWords,
 } from "./declared-health"
 import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
+
+// Las fechas en el formato de la clínica, no en el de la máquina que corre la prueba (el CI está en inglés).
+beforeAll(() => {
+  setOrgLocale("es-PE", "America/Lima")
+})
+afterAll(() => {
+  setOrgLocale(undefined, undefined)
+})
 
 const herself: HealthDeclarant = { kind: "patient", name: null, relation: null }
 const mother: HealthDeclarant = { kind: "representative", name: "Carla Paz Soto", relation: "madre" }
@@ -70,6 +80,19 @@ describe("las palabras de lo que dijo el paciente", () => {
     expect(saidNoWords(staff, "F")).toBe("El equipo anotó que no")
   })
 
+  // QA del 14 nov: el registro guarda la opción «Madre, padre o tutor» y la ficha decía «Lo dijo su
+  // madre, padre o tutor, Carla». No se inventa cuál de los tres fue.
+  it("«Madre, padre o tutor» se dice «quien la cuida», sin inventar el parentesco", () => {
+    const chip = { kind: "representative" as const, name: "Carla Ríos", relation: "madre, padre o tutor" }
+    expect(declaredMarkWords(chip, "2026-11-13", "F")).toBe("Lo dijo quien la cuida, Carla, el 13 nov, sin revisar")
+    expect(whoWords(chip, "M")).toBe("quien lo cuida, Carla")
+    expect(whoWords(chip, null)).toBe("su representante, Carla")
+    expect(saidNoWords(chip, "M")).toBe("Quien lo cuida dijo que no")
+    expect(askWhom([{ ...guardian, kinship: null, relationshipDetail: "Madre, padre o tutor" }])).toBe(
+      "su representante (Carla Paz Soto)",
+    )
+  })
+
   it("cada fila se busca en su declaración: con dos fechas o dos personas, cada cosa con la suya", () => {
     const group = (by: HealthDeclarant, at: string, patch: Partial<DeclaredHealthGroup>): DeclaredHealthGroup => ({
       by,
@@ -104,6 +127,10 @@ describe("las palabras de lo que dijo el paciente", () => {
     const current = { state: "vigente", saidOn: "2026-11-13", weeksSaid: 30, weeksToday: 32 } as const
     expect(pregnancyWords(current)).toEqual({ title: "Embarazo · 32 semanas hoy", detail: "30 el 13 nov", confirm: false })
     expect(pregnancyChip(current)).toBe("Embarazo · 32 semanas hoy (30 el 13 nov)")
+    // Dicho esta misma semana: el dato una sola vez.
+    expect(pregnancyChip({ state: "vigente", saidOn: "2026-11-14", weeksSaid: 20, weeksToday: 20 })).toBe(
+      "Embarazo · 20 semanas (lo dijo el 14 nov)",
+    )
     expect(pregnancyChip({ state: "vigente", saidOn: "2026-11-13", weeksSaid: 0, weeksToday: 1 })).toBe(
       "Embarazo · 1 semana hoy (0 el 13 nov)",
     )
@@ -115,5 +142,33 @@ describe("las palabras de lo que dijo el paciente", () => {
     expect(pregnancyChip({ state: "por_confirmar", saidOn: null, weeksSaid: 12, weeksToday: null })).toBe(
       "Embarazo por confirmar · anotado sin fecha",
     )
+  })
+})
+
+// QA del 14 nov (H6 de clínica): al firmar con lo declarado sin revisar, el cierre no lo decía.
+describe("lo que quedó sin revisar, al firmar", () => {
+  const base = {
+    at: "2026-11-13T19:27:00.000Z",
+    allergies: ["a1"],
+    conditions: [],
+    medications: [],
+    pregnancy: false,
+    saidNo: { allergies: false, conditions: false, medications: false },
+  }
+  it("dice quién lo dijo y su día; nada si no queda nada", () => {
+    expect(unreviewedWords([{ ...base, by: { kind: "patient", name: null, relation: null } }], "F")).toBe(
+      "lo que dijo ella de su salud el 13 nov",
+    )
+    expect(
+      unreviewedWords(
+        [
+          { ...base, at: "2026-11-01T15:00:00.000Z", by: { kind: "representative", name: "Carla Paz", relation: "madre" } },
+          { ...base, by: { kind: "patient", name: null, relation: null } },
+        ],
+        "M",
+      ),
+    ).toBe("lo que dijo de su salud su madre, Carla, el 1 nov y lo que dijo él de su salud el 13 nov")
+    expect(unreviewedWords([], "F")).toBeNull()
+    expect(unreviewedWords(undefined, "F")).toBeNull()
   })
 })

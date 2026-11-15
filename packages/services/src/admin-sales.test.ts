@@ -349,6 +349,89 @@ describe("tareas", () => {
     expect(await titles(admin)).toContain("Hecho: Hablar del comprobante")
     expect(await titles(support)).not.toContain("Hecho: Hablar del comprobante")
   })
+
+  it("una tarea solo de Administración, aunque no sea de cobro, Soporte no la ve; las suyas, sí", async () => {
+    const { client } = await newClient()
+    const now = new Date()
+    const hidden = await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "otro", title: "Revisar la carga", dueOn: day(-1, now) },
+      now,
+    )
+    // La marca la pone Kairós (o una regla): aquí, a mano.
+    await ownerDb.update(saasTask).set({ adminOnly: true }).where(eq(saasTask.id, hidden.id))
+    const visible = await createClientTask(
+      ownerDb,
+      support,
+      client.id,
+      { kind: "llamar", title: "Llamar", dueOn: day(1, now) },
+      now,
+    )
+    expect(visible.adminOnly).toBe(false)
+    const forAdmin = await getClient(ownerDb, admin, client.id, now)
+    expect(forAdmin.nextStep?.taskId).toBe(hidden.id)
+    expect(forAdmin.openTasks.map((t) => t.id)).toEqual([hidden.id, visible.id])
+    const forSupport = await getClient(ownerDb, support, client.id, now)
+    expect(forSupport.nextStep?.taskId).toBe(visible.id)
+    expect(forSupport.openTasks.map((t) => t.id)).toEqual([visible.id])
+    const listed = await listClients(ownerDb, support, { view: "todos", q: client.name }, now)
+    expect(listed.items.find((c) => c.id === client.id)?.nextStep?.taskId).toBe(visible.id)
+    expect(
+      (await listClientTasks(ownerDb, support, { clientId: client.id }, now)).map((t) => t.id),
+    ).toEqual([visible.id])
+    for (const attempt of [
+      () => moveClientTask(ownerDb, support, hidden.id, { dueOn: day(2, now) }, now),
+      () => completeClientTask(ownerDb, support, hidden.id),
+      () => cancelClientTask(ownerDb, support, hidden.id),
+    ])
+      await expect(attempt()).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await completeClientTask(ownerDb, admin, hidden.id, {}, now)
+    await completeClientTask(ownerDb, support, visible.id, {}, now)
+    const later = new Date(now.getTime() + 1000)
+    const titles = async (who: typeof admin | typeof support) =>
+      (await clientTimeline(ownerDb, who, client.id, {}, later)).items.map((i) => i.title)
+    expect(await titles(admin)).toEqual(
+      expect.arrayContaining(["Hecho: Revisar la carga", "Hecho: Llamar"]),
+    )
+    expect(await titles(support)).toContain("Hecho: Llamar")
+    expect(await titles(support)).not.toContain("Hecho: Revisar la carga")
+  })
+
+  it("una tarea de cobro no se asigna a Soporte; sin elegir, no va a un responsable de Soporte", async () => {
+    const { client } = await newClient({ ownerUserId: support.userId })
+    const now = new Date()
+    await expect(
+      createClientTask(
+        ownerDb,
+        admin,
+        client.id,
+        { kind: "cobro", title: "x", dueOn: day(0, now), assigneeUserId: support.userId },
+        now,
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      fields: { assigneeUserId: expect.stringContaining("solo de Administración") },
+    })
+    const cobro = await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "cobro", title: "Hablar del pago", dueOn: day(0, now) },
+      now,
+    )
+    expect(cobro).toMatchObject({ adminOnly: true, assignee: { userId: admin.userId } })
+    // Las demás siguen yendo al responsable, aunque sea de Soporte.
+    const call = await createClientTask(
+      ownerDb,
+      admin,
+      client.id,
+      { kind: "llamar", title: "Llamar", dueOn: day(0, now) },
+      now,
+    )
+    expect(call).toMatchObject({ adminOnly: false, assignee: { userId: support.userId } })
+  })
 })
 
 describe("presentaciones", () => {

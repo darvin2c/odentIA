@@ -618,6 +618,8 @@ export interface BudgetPresentation {
     name: string | null
     pros: string | null
     cons: string | null
+    /** La que verá marcada el paciente: «Lo que le proponemos» no la cambia. */
+    isRecommended: boolean
   }>
   lines: Array<{
     id: string

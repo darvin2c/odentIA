@@ -61,6 +61,7 @@ import { DiagnosisSearch } from "./diagnosis-search"
 import { treatmentSiteLabel, useBudgetFormat } from "./plan/budget-parts"
 import { AnsweredBy } from "./plan/budget-response"
 import { BudgetShowActions } from "./plan/budget-show"
+import { RecommendedLine } from "./plan/budget-recommended"
 import { AnswerInPersonButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import {
@@ -1099,6 +1100,8 @@ export function EncounterBudgetSend({
           menu
         />
       </div>
+      {/* «Imprimir y entregar» y «Anotar su respuesta» no pasan por «Revisar antes»: la marca se dice aquí. */}
+      <RecommendedLine patientId={patientId} budgetId={budgetId} />
     </section>
   )
 }

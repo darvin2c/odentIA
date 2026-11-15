@@ -1,6 +1,7 @@
 import { declaredLactationAndTobacco } from "@odentia/clinical"
-import { childhoodLines, dentalHabitsErrors, dentalInterviewErrors } from "@odentia/dental"
+import { childhoodLines, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems } from "@odentia/dental"
 import { fieldsError } from "../errors.js"
+import { civilDay } from "../form-record.js"
 import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
 
 /**
@@ -31,4 +32,17 @@ export const dentalInterview: ProductInterview = {
   },
   // Lo que contó quien cuida a un niño, «de pequeño», se lee sin clics en la atención (mesa del 13 nov, entrega 7).
   declaredLines: (health) => childhoodLines(health.dental),
+  record: (answers, today, reading) => [
+    ...COMMON_INTERVIEW.record(answers, today, reading),
+    ...dentalInterviewEntries(answers),
+    // El corazón, la anestesia, el tabaco, el alcohol y la lactancia, con la clave donde están en la
+    // entrevista: así la copia sabe quién lo dijo (QA de la entrega 6).
+    ...(answers && typeof answers === "object" && !Array.isArray(answers) ? dentalInterviewItems(answers as Record<string, unknown>) : []).map(
+      (item) => {
+        const [label, ...rest] = item.text.split(": ")
+        const day = item.saidOn ? ` (lo dijo el ${civilDay(item.saidOn)})` : ""
+        return { key: item.path, label: label ?? item.key, value: `${rest.join(": ")}${day}` }
+      },
+    ),
+  ],
 }

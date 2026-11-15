@@ -1,6 +1,7 @@
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
+import { useRef } from "react"
 import { apiFetch } from "../../lib/api"
 import {
   declaredFormsOfEncounter,
@@ -50,7 +51,11 @@ export function DeclaredQuestionnaireNotice({
     queryKey: ["form-responses", patientId],
     queryFn: () => fetchFormResponses({ patientId }),
   })
-  const shown: FormResponse[] = declaredFormsOfEncounter(responses.data?.data ?? [], encounterId)
+  // Lo que se mostró en esta pantalla sigue en ella aunque lo revise o descarte otra persona: la caja
+  // dice «Ya lo revisó…» en vez de desaparecer de golpe.
+  const onScreen = useRef(new Set<string>())
+  const shown: FormResponse[] = declaredFormsOfEncounter(responses.data?.data ?? [], encounterId, onScreen.current)
+  for (const response of shown) onScreen.current.add(response.id)
   if (shown.length === 0) return null
   return (
     <div className="flex flex-col gap-3">

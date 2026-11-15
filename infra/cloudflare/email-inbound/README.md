@@ -9,8 +9,9 @@ Qué hace con cada correo lo decide `deliver` (`src/flow.ts`), con las reglas de
 - **Un buzón fijo**: primero **lo reenvía** a `FORWARD_TO`, el buzón de siempre, para no perder
   nada aunque falle lo demás; después **lo manda firmado a la administración**
   (`POST ${API_URL}/api/inbound/email`), que lo liga a su cliente (por la respuesta a un correo
-  nuestro o por el correo exacto) y guarda sus adjuntos como documentos solo de Administración,
-  que se borran a los 30 días. Nadie ni nada los abre ni los manda al modelo. Si fallan el
+  nuestro o por el correo exacto) y guarda sus adjuntos como documentos solo de Administración.
+  Solo lo de la carga de datos (lo que llega a soporte@ con adjuntos) se borra a los 30 días,
+  con su texto; lo demás se guarda. Nadie ni nada los abre ni los manda al modelo. Si fallan el
   reenvío y la API, se rechaza para que quien escribe sepa que no llegó.
 - **La dirección de una persona**: primero va a la API, que dice si es de alguien del equipo.
   Si lo es (2xx), el Worker lo reenvía a su copia (`copyTo`, si la tiene); si no es de nadie

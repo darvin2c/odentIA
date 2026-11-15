@@ -333,3 +333,26 @@ describe("el enlace vencido dice lo que pasó con lo escrito", () => {
     expect(expiredLinkWords(true, offer)).not.toContain("No perdiste nada")
   })
 })
+
+// QA del 14 nov (B15): «Faltan 2: tipo de documento, número de documento; y unas preguntas de tu salud» se leía como 3.
+describe("la tarjeta de sus datos cuenta lo de su salud", () => {
+  it("dos datos y su salud: «Faltan 3»", () => {
+    // Sin cita: con una, va en «Antes de tu cita» (entrega 8), que no cuenta.
+    const [datos] = pendingItems(
+      view({
+        appointment: null,
+        consents: [],
+        toSchedule: [],
+        data: {
+          missing: [
+            { key: "docType", label: "Tipo de documento" },
+            { key: "docNumber", label: "Número de documento" },
+          ],
+          health: true,
+        },
+      }),
+    )
+    expect(datos?.badge).toBe("Faltan 3")
+    expect(datos?.text).toBe("Tipo de documento, número de documento; y unas preguntas de tu salud.")
+  })
+})

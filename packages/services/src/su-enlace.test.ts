@@ -1885,3 +1885,19 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "ya_no", quienCepilla: "adulto" } })
 })
+
+// QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita
+// de hoy, mientras la persona aún esperaba en la sala.
+it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () => {
+  const f = await clinicalFixture()
+  const { visit, link } = await withVisit(f)
+  // Contó a qué viene; la cita empezó hace diez minutos y termina en veinte: está en la sala.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1960-03-04" }, visit: { reason: "Me duele la muela de abajo", pain: "no" } }),
+  )
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000)
+  const told = async () => (await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).told?.items.map((item) => item.what) ?? null
+  expect(await told()).toEqual(["datos", "visita"])
+  await ownerDb.update(appointment).set({ startsAt: minutes(-10), endsAt: minutes(20) }).where(eq(appointment.id, visit))
+  expect(await told()).toEqual(["datos", "visita"])
+})

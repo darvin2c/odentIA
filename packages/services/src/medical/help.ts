@@ -116,7 +116,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             id: faq.id,
             ...(faq.area ? { area: faq.area } : {}),
             q: "¿Puedo ofrecer dos opciones en un presupuesto?",
-            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una va recomendada: nace la primera y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es la que la persona ve marcada, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer" && form !== "dos caminos") } : {}),
           },
         ]
@@ -157,8 +157,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
               ["Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos", "Antecedentes, Signos vitales, Historia y Documentos"],
               [" En el celular, la lista de hallazgos va justo debajo del odontograma.", ""],
               [
-                "(presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
-                "(presupuestos, recetas, descansos médicos, órdenes, consentimientos, formularios, imágenes y otros archivos)",
+                "(presupuestos, recetas, órdenes, consentimientos, fichas, imágenes, otros archivos y, en clínicas de Perú, odontogramas)",
+                "(presupuestos, recetas, descansos médicos, órdenes, consentimientos, fichas, imágenes y otros archivos)",
               ],
             ),
           },
@@ -171,8 +171,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             ...faq,
             a: faq.a
               .replace(
-                "receta, consentimiento, orden, formulario o imagen",
-                "receta, descanso médico, consentimiento, orden, formulario o imagen",
+                "receta, consentimiento, orden, ficha o imagen",
+                "receta, descanso médico, consentimiento, orden, ficha o imagen",
               )
               .replace(
                 "(pieza, diagnóstico, procedimiento y quien atiende)",

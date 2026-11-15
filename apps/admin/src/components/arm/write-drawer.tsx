@@ -16,6 +16,7 @@ import { ExternalLink } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
 import { useIsAdmin } from "../../lib/session"
+import { FORMAT_HINT, FormatTools } from "./formatted-body"
 import {
   resolveOutreach,
   type SaleContact,
@@ -306,12 +307,19 @@ function WriteForm({
                 label="Mensaje"
                 description={
                   values.channel === "correo"
-                    ? writeEmailHint({ proposal: Boolean(proposalId), support: !isAdmin })
+                    ? `${writeEmailHint({ proposal: Boolean(proposalId), support: !isAdmin })} ${FORMAT_HINT}`
                     : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
                 }
                 rows={7}
                 maxLength={5000}
               />
+              {values.channel === "correo" ? (
+                <FormatTools
+                  textareaId="escribir-texto"
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              ) : null}
               <div>
                 <SpeechInput
                   lang="es-PE"

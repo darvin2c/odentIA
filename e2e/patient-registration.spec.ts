@@ -67,7 +67,7 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
 async function advanceTo(page: Page, target: Locator) {
   const progress = page.getByText(/^Paso \d+ de \d+$/)
   for (let step = 0; step < 12 && !(await target.isVisible()); step += 1) {
-    for (const question of [/alérgic/, /alguna enfermedad/, /medicamento todos los días/]) {
+    for (const question of [/alergia a algún/, /alguna de estas enfermedades/, /medicamento todos los días/]) {
       const group = page.getByRole("group", { name: question }).first()
       if ((await group.isVisible()) && (await group.locator('[aria-pressed="true"]').count()) === 0)
         await group.getByRole("button", { name: "No", exact: true }).click()
@@ -103,15 +103,24 @@ async function fillContacto(page: Page, phone: string) {
   await ownPhone(page).fill(maskedPhone(phone))
 }
 
-/** «Tu salud»: alérgico a la penicilina, «No sé» en enfermedades, «No» en medicamentos y O+. */
+/**
+ * «Tu salud»: con alergia a la penicilina, «No sé» en enfermedades y O+; después, en «Tus medicinas»
+ * (su propio paso desde la entrega 6), «No» en «¿Tomas algún otro medicamento todos los días?».
+ */
 async function fillSalud(page: Page) {
-  const allergies = page.getByRole("group", { name: /alérgic/ }).first()
+  const allergies = page.getByRole("group", { name: /alergia a algún/ }).first()
   await advanceTo(page, allergies)
   await allergies.getByRole("button", { name: "Sí", exact: true }).click()
   await page.getByLabel(/^¿A qué\?/).fill("Penicilina")
-  await page.getByRole("group", { name: /alguna enfermedad/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
-  await page.getByRole("group", { name: /medicamento todos los días/ }).first().getByRole("button", { name: "No", exact: true }).click()
+  await page.getByRole("group", { name: /alguna de estas enfermedades/ }).first().getByRole("button", { name: "No sé", exact: true }).click()
   await chooseOption(page.getByRole("combobox", { name: "Grupo sanguíneo" }), { label: "O+" })
+  // «Siguiente», no `advanceTo`: este paso tiene «Saltar», que borraría lo respondido.
+  const atHealth = await page.getByText(/^Paso \d+ de \d+$/).textContent()
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await expect(page.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(atHealth ?? "")
+  const medications = page.getByRole("group", { name: /medicamento todos los días/ }).first()
+  await expect(medications).toBeVisible()
+  await medications.getByRole("button", { name: "No", exact: true }).click()
   const before = await page.getByText(/^Paso \d+ de \d+$/).textContent()
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
   await expect(page.getByText(/^Paso \d+ de \d+$/)).not.toHaveText(before ?? "")
@@ -435,7 +444,7 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
       anon.getByRole("checkbox", { name: /Autorizo el tratamiento de (mis datos|los datos de)/ }),
     ).toBeChecked()
     // La declaración de salud se conserva al retroceder.
-    const allergies = anon.getByRole("group", { name: /alérgic/ }).first()
+    const allergies = anon.getByRole("group", { name: /alergia a algún/ }).first()
     for (let step = 0; step < 6 && !(await allergies.isVisible()); step += 1)
       await anon.getByRole("button", { name: "Anterior", exact: true }).click()
     await expect(allergies.getByRole("button", { name: "Sí", exact: true })).toHaveAttribute("aria-pressed", "true")

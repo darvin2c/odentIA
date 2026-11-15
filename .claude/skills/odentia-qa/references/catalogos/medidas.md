@@ -512,3 +512,27 @@ En todas las tareas de Agenda, además de lo propio:
 - **Red caída al dar y al quitar** (`page.route('**/grants/revoke', abort)`): ¿lo dice con palabras, conserva lo elegido, y el foco queda donde puede reintentar?
 - **Dos pestañas** dando acceso a la vez: ¿el segundo avisa que reemplaza al primero?
 - **Enter y la tecla «Ir»** en cada formulario del celular: ¿pasa a la pregunta siguiente o envía todo?
+
+## Lo que se le pregunta al paciente
+
+### M-FRM-01 Llegar a «Preguntas al paciente» (medida del 14 nov 2026, 1440)
+2 clics desde Inicio (Configuración › Preguntas al paciente); 311 palabras antes de «Su salud». 21 Tab del título a «Entendido»; 42 Tab de «Guardar» al pie. Ver «Tus medicinas» en la vista previa: 5 «Siguiente» y 3 tecleos.
+- [ ] Una barra pegada arriba usa `top-[var(--notice-strip-h,0px)]` y no queda debajo de un aviso superior.
+- [ ] El mensaje «otra persona guardó antes» sale junto al botón que se pulsó.
+- [ ] «Entendido» dice lo que pasó, deja el foco en un lugar con sentido y no borra la marca de lo nuevo mientras se está en la página.
+- [ ] Lo marcado como encendido se distingue a 3:1 de lo apagado.
+**Ya falló:** el aviso de conflicto quedó a 3700 px del «Guardar» que se movió arriba.
+
+### M-FRM-02 «Tus datos y tu salud» en el celular (medida del 14 nov 2026, 390)
+6 pantallas, 22 toques y 5 tecleos (todo «No»: unos 20 toques y 2 tecleos); desde la QA de la entrega 6, 5 pantallas.
+- [ ] Una pantalla no lleva una sola pregunta si cabe en la anterior.
+- [ ] Lo que se escribe en «¿Cuál?» u «Otra» sigue diciendo qué es después de escribir.
+
+### M-FRM-03 Lo que dijo, en la atención (14 nov 2026, 1440 y 390)
+Anticoagulante y huesos: 0 clics en la franja y en «Revisa con ella». Atender sin cita y firmar: 9 clics y 2 tecleos, y nada nuevo frena.
+- [ ] Lo que la paciente responde en su enlace y cambia la cita (anestesia o sangrado, antibiótico antes, lactancia) se ve en la atención, no solo en Antecedentes.
+- [ ] Todo lo que vino de su enlace lleva «lo dijo ella · sin revisar» hasta que se revisa, también en el resumen de la entrevista.
+- [ ] «Ver declaración original» trae todas las respuestas que envió.
+**Ya falló:** «Lactancia: sí» sin el día, cuando el embarazo de al lado sí lo dice.
+
+Gira nueva: «otra persona guardó antes» sin dos personas: se envuelve `fetch` en la página y se responde 409 `STALE_…` al guardar. ¿El aviso sale donde se pulsó? ¿Se conserva lo elegido?

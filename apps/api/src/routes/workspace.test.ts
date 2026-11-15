@@ -1,6 +1,7 @@
 // Testcontainers usa el socket Podman compartido en /mnt/wsl (ver rls.test.ts).
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
+import { REGISTRATION_QUESTIONS_VERSION } from "@odentia/clinical"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { createWorkspaceNotification, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
@@ -95,6 +96,9 @@ beforeAll(async () => {
       ('m-ws-owner', ${ORG}, ${OWNER}, 'owner', now()),
       ('m-ws-reception', ${ORG}, ${RECEPTION}, 'reception', now()),
       ('m-ws-professional', ${ORG}, ${PROFESSIONAL}, 'clinician', now())`)
+  // Una clínica que ya vio la lista de preguntas de hoy: la campana no trae «Hay preguntas nuevas».
+  await ownerDb.execute(sql`
+    insert into "patient_registration_config" ("organization_id", "fields", "questions_version") values (${ORG}, '{}'::jsonb, ${REGISTRATION_QUESTIONS_VERSION})`)
 }, 180_000)
 
 afterAll(async () => {

@@ -57,9 +57,11 @@ import {
   addDeclaredHealth,
   declarantOfContact,
   declarantOfRegistration,
+  hasMeaningfulHealth,
   getPatientHealth,
   initializeDeclaredPatientHealth,
   knownHealthQuestionsOf,
+  type PatientHealth,
   recordHealthDeclaration,
 } from "./clinical.js"
 import {
@@ -200,18 +202,6 @@ async function advisoryExclusive(tx: Db, value: string): Promise<void> {
 
 async function advisoryShared(tx: Db, value: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock_shared(${advisoryKey(value)})`)
-}
-
-function hasMeaningfulHealth(health: NonNullable<RegistrationAnswers["health"]> | undefined): boolean {
-  if (!health) return false
-  if (health.bloodGroup != null) return true
-  for (const group of [health.allergies, health.conditions, health.medications]) {
-    if (group && group.state !== "unanswered") return true
-  }
-  // Lo de la entrevista también cuenta: un registro que solo dice el embarazo no se pierde.
-  return [health.personal, health.dental, health.medical].some((group) =>
-    Object.values(group ?? {}).some((v) => v !== undefined && v !== ""),
-  )
 }
 
 /**
@@ -383,10 +373,30 @@ function spokespersonReachable(orgId: string) {
 /**
  * Lo que su enlace le pregunta de su salud, dato por dato (mesa del 13 nov, entrega 6): lo que la
  * clínica pregunta, que le corresponde (el embarazo y la lactancia, a mujeres de 12 a 55 años) y que
- * nadie anotó ni respondió aún (`healthQuestionsToAsk`). A quien ya envió «Tus datos» no se le insiste:
- * lo que dejó en blanco era opcional. Vacío: nada que preguntarle.
+ * nadie anotó ni respondió aún (`healthQuestionsToAsk`). A quien ya envió «Tus datos» no se le insiste
+ * con lo que dejó en blanco, que era opcional; pero si lo envió con la lista de antes, se le preguntan
+ * las preguntas que la lista sumó después y que nunca vio (`newRegistrationQuestions`), como promete
+ * «Preguntas al paciente». Vacío: nada que preguntarle.
  */
 export async function patientHealthQuestions(tx: Db, orgId: string, patientId: string): Promise<RegistrationFieldKey[]> {
+  return (await patientHealthQuestionsWith(tx, orgId, patientId)).ask
+}
+
+/**
+ * `patientHealthQuestions` con la salud que leyó para decidirlo, para que quien guarda lo que envió
+ * no la vuelva a cargar.
+ */
+export async function patientHealthQuestionsWith(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{
+  ask: RegistrationFieldKey[]
+  /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
+  onlyNew: boolean
+  health: PatientHealth
+  known: Set<RegistrationFieldKey>
+}> {
   const [sent] = await tx
     .select({ id: appointmentBookingLink.id })
     .from(appointmentBookingLink)
@@ -398,19 +408,32 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
       ),
     )
     .limit(1)
-  if (sent) return []
+  const health = await getPatientHealth(tx, orgId, patientId)
+  const known = knownHealthQuestionsOf(health)
+  const product = await orgProduct(tx, orgId)
+  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
+  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
+  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
+  // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
+  // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
+  const responded = !!sent || health.declarations.some((row) => row.via === "registro")
+  const answeredOldList = health.declarations.length > 0 && !sawToday
+  if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
+  const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)
-  return healthQuestionsToAsk(
+  const ask = healthQuestionsToAsk(
     config,
     {
       countryCode: await findOrgCountry(tx, orgId),
-      product: await orgProduct(tx, orgId),
+      product,
       person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
     },
-    knownHealthQuestionsOf(await getPatientHealth(tx, orgId, patientId)),
-  )
+    known,
+  ).filter((key) => !onlyNew || onlyNew.has(key))
+  return { ask, onlyNew: !!onlyNew, health, known }
 }
 
 /** Hay algo de su salud que preguntarle antes de su cita aunque no le falte ningún dato (`patientHealthQuestions`). */
@@ -639,8 +662,9 @@ export async function registrationNoticeSuggested(tx: Db, orgId: string): Promis
 /**
  * Las preguntas que la lista sumó después de la última vez que alguien de la clínica guardó o vio
  * «Preguntas al paciente» (mesa del 13 nov, decisión 10): ya se preguntan como «Opcional» y a quien
- * la administra se le avisa cuáles son. Una clínica sin configuración guardada es de antes de la
- * lista: también se le avisa.
+ * la administra se le avisa cuáles son. Una clínica sin configuración guardada nunca eligió qué
+ * preguntar: no hay nada que la lista le haya cambiado, y una clínica nueva no recibe el aviso
+ * (lo atrapó el e2e: la campana de una clínica recién creada decía «Hay preguntas nuevas»).
  */
 export async function newRegistrationQuestionsOf(
   tx: Db,
@@ -651,11 +675,14 @@ export async function newRegistrationQuestionsOf(
     .from(patientRegistrationConfig)
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
-  return newRegistrationQuestions(row?.seen ?? 1, await orgProduct(tx, orgId))
+  if (!row) return []
+  return newRegistrationQuestions(row.seen, await orgProduct(tx, orgId))
 }
 
 /** «Entendido»: quien administra ya vio las preguntas nuevas, aunque no cambie nada. */
 export async function markRegistrationQuestionsSeen(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+  // Qué preguntas vio: la actividad lo dice (QA del 14 nov, B10).
+  const seen = (await newRegistrationQuestionsOf(tx, orgId)).map((item) => item.label)
   const updated = await tx
     .update(patientRegistrationConfig)
     .set({ questionsVersion: REGISTRATION_QUESTIONS_VERSION })
@@ -670,15 +697,15 @@ export async function markRegistrationQuestionsSeen(tx: Db, orgId: string, actor
       fields: current.fields,
       privacyNotice: current.privacyNotice,
     })
-    return
   }
+  // También sin configuración guardada: «Entendido» es «vio las preguntas nuevas», no «guardó» (B10).
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
     action: "patient-registration.questions_seen",
     entity: "patient_registration_config",
     entityId: orgId,
-    metadata: { version: REGISTRATION_QUESTIONS_VERSION },
+    metadata: { version: REGISTRATION_QUESTIONS_VERSION, questions: seen },
   })
 }
 

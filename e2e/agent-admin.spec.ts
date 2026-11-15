@@ -357,12 +357,12 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   const config = () => call<{ askReminders: boolean; askMessages: boolean }>(page, "GET", "/api/patient-registration/config", org.slug)
   expect(await config()).toMatchObject({ askMessages: true })
   await gotoHydrated(page, tenant(org.slug, "/settings/patient-registration"))
-  // Son casillas del formulario: valen al pulsar «Guardar», que está al final de la página.
+  // Son casillas del formulario: valen al pulsar «Guardar», que está arriba (con un cambio dice «Guardar cambios»).
   await expect(page.getByRole("checkbox", { name: /Recordatorios/ })).toHaveCount(0)
   const others = page.getByRole("checkbox", { name: /Novedades y promociones de la clínica/ })
   await expect(others).toBeChecked()
   await others.click()
-  await page.getByRole("button", { name: "Guardar", exact: true }).click()
+  await page.getByRole("button", { name: "Guardar cambios", exact: true }).click()
   await expect(page.getByText("Preguntas al paciente guardadas", { exact: true })).toBeVisible()
   await expect.poll(config).toMatchObject({ askMessages: false })
 

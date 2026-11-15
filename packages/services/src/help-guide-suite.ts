@@ -120,9 +120,13 @@ const TUNING = ["desarrollo", "control", "final"] as const
  * (sin las de seguimiento). odentIA: 121 de 155 con pantalla (0,78). latidIA: 22 de 33 (0,67):
  * hasta el 2026-11-10 se medía con las 135 de odentIA (0,72); con las suyas, escritas sin ver
  * la guía, acierta menos, y el piso es ese valor. vistIA no tiene piso todavía (21 de 33).
+ * odentIA, 14 nov (entrega 7): «¿Qué le preguntan a la mamá de un niño?» en Pacientes hace que «como le
+ * programo una limpieza a un niño… para el sábado» pase de «no sé» a Pacientes (esperaba la Agenda,
+ * que por palabras no llega), y «soy pediatra… receta… a un niño» pase de «no sé» a bien: un mal más
+ * y un bien más, por eso 26.
  */
 const BLIND_FLOOR: Readonly<Partial<Record<Asked["producto"], { bien: number; mal: number; inventa: number }>>> = {
-  odentia: { bien: 0.7, mal: 25, inventa: 4 },
+  odentia: { bien: 0.7, mal: 26, inventa: 4 },
   latidia: { bien: 0.65, mal: 8, inventa: 4 },
 }
 

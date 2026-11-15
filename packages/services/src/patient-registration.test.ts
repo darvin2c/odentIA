@@ -1487,7 +1487,8 @@ it("QR general con el celular de alguien que ya está: no se crea a nadie y rece
   const healthNotes = JSON.stringify(await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", diego.id)))
   expect(healthNotes).not.toContain("Asma")
   const declaredHealth = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", same.patientId))
-  expect(declaredHealth.conditions.find((row) => row.name === "Asma")?.notes).toMatch(/^Lo declaró en su registro en línea el \d{2}\/\d{2}\/\d{4}\.$/)
+  // De dónde vino lo dice su marca, no sus notas (QA del 14 nov, B9).
+  expect(declaredHealth.conditions.find((row) => row.name === "Asma")?.notes ?? null).toBeNull()
   expect(declaredHealth).toMatchObject({ reviewPending: true, reviewStatus: { conditions: "recorded" } })
   const [quiet] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, third!.id))
   expect(quiet).toMatchObject({ status: "done", settledReason: "Era la misma persona: no se cambió ningún dato" })
@@ -1900,8 +1901,17 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
     pastaConFluor: "si",
     quienCepilla: "solo",
   } as const
+  // Siempre de 6 años: biberón y chupón se preguntan hasta los 6, y `MINOR_BIRTH` los cumple 7 en mayo de 2027.
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 6, birth.getUTCMonth() - 2, 1)
   const answers: RegistrationAnswers = {
-    demographics: { displayName: "Thiago Quispe", givenNames: "Thiago", familyName: "Quispe", birthDate: MINOR_BIRTH, sex: "M" },
+    demographics: {
+      displayName: "Thiago Quispe",
+      givenNames: "Thiago",
+      familyName: "Quispe",
+      birthDate: birth.toISOString().slice(0, 10),
+      sex: "M",
+    },
     respondent: "representative",
     representative: {
       displayName: "Carla Ramos",
@@ -1922,9 +1932,9 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
   const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", result.patient!.id))
   expect(health.latestAnamnesis?.answers).toMatchObject({ antecedentesOdontologicos: child })
   expect(health.reviewPending).toBe(true)
-  const said = health.declared.find((group) => group.interview.length > 0)
+  const said = health.declared.find((group) => group.productLines.length > 0)
   expect(said?.by).toMatchObject({ kind: "representative", name: "Carla Ramos" })
-  expect(said?.interview).toEqual([
+  expect(said?.productLines).toEqual([
     { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
     { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
     { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },

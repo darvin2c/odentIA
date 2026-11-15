@@ -647,6 +647,9 @@ export async function runClinicSetup(
       })
       continue
     }
+    // «Ya está» es el título entero, aquí y en el servicio: uno que solo empieza igual que otro
+    // es otro formulario (`createFormTemplate` ya no los une por la clave recortada a 40). El
+    // mismo título dos veces en el plan tampoco se carga dos veces.
     if (forms.some((f) => fold(f.title) === fold(wanted.title))) {
       items.push({
         area: "Formatos propios",
@@ -662,6 +665,7 @@ export async function runClinicSetup(
         description: wanted.description ?? null,
         schema: wanted.schema,
       })
+      forms.push({ title: wanted.title })
       return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }
     })
   }

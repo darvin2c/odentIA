@@ -26,6 +26,7 @@
     "./lib/org": "./src/lib/org.ts",
     "./lib/orders": "./src/lib/orders.ts",
     "./lib/patient-areas": "./src/lib/patient-areas.ts",
+    "./lib/declared-health": "./src/lib/declared-health.ts",
     "./lib/patients": "./src/lib/patients.ts",
     "./lib/query-client": "./src/lib/query-client.ts",
     "./lib/query-error": "./src/lib/query-error.tsx",
@@ -71,6 +72,7 @@
   },
   "devDependencies": {
     "@odentia/dental": "workspace:*",
+    "@testing-library/react": "^16.3.3",
     "@types/qrcode": "1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

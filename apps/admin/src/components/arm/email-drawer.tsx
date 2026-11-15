@@ -1,6 +1,8 @@
 /**
  * Un correo que llegó (`GET /api/admin/clients/inbound/:emailId`): lo que dice,
- * cuántos adjuntos trae (se leen en Documentos; aquí nunca se abren) y lo que
+ * cuántos adjuntos trae (se leen en Documentos; aquí nunca se abren) y, para
+ * Administración, cada uno con su estado y «Es la carga de datos» (el mismo
+ * diálogo de Documentos, `useMarkCarga`); y lo que
  * ya se le respondió, con «Responder» cuando quien mira puede (Soporte, solo
  * lo de soporte@: lo demás ni lo ve). Responder es el mismo envío de
  * «Escribir»: «Para» el remitente, «Desde» quien firma (lo dice el servidor),
@@ -32,7 +34,10 @@ import { api } from "../../lib/api"
 import { useIsAdmin } from "../../lib/session"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import { deleteOnWords, useMarkCarga } from "./client-files-tab"
+import { FORMAT_HINT, FormatTools, FormattedText } from "./formatted-body"
 import { invalidateArm } from "./hoy-links"
+import { ReplyFiles } from "./reply-files"
 import { resolveOutreach, SendUnknownError, sendEmailReply, useClientProposals } from "./sale-api"
 import { proposalStatusWords } from "./sale-words"
 import { type OutreachCheck, OutreachCheckDrawer } from "./write-drawer"
@@ -45,6 +50,7 @@ const replySchema = z.object({
   body: z.string(),
   createdAt: z.string(),
   sentAt: z.string().nullable(),
+  files: z.array(z.object({ id: z.string(), filename: z.string() })).default([]),
 })
 
 export const inboundEmailSchema = z.object({
@@ -55,7 +61,7 @@ export const inboundEmailSchema = z.object({
   fromName: z.string().nullable(),
   to: z.string(),
   subject: z.string().nullable(),
-  /** Nulo pasados 30 días: el texto se borra. */
+  /** Nulo si era de la carga de datos y pasaron 30 días: el texto se borra. */
   text: z.string().nullable(),
   /** Lo que avisó el correo entrante (adjuntos que no se guardaron), aparte del texto. */
   notice: z.string().nullable().default(null),
@@ -72,8 +78,55 @@ export const inboundEmailSchema = z.object({
   replySignature: z.string().nullable().default(null),
   replySubject: z.string().default(""),
   replies: z.array(replySchema),
+  /** Sus adjuntos uno por uno, solo para Administración (Soporte recibe la lista vacía). */
+  files: z
+    .array(
+      z.object({
+        fileId: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        kind: z.enum(["correo", "archivo_clinica"]),
+        deleteAfter: z.string().nullable(),
+        deleted: z.boolean(),
+        cargaDeleteAfter: z.string().nullable().default(null),
+        cargaDueNow: z.boolean().default(false),
+      }),
+    )
+    .default([]),
 })
 export type InboundEmail = z.infer<typeof inboundEmailSchema>
+export type InboundEmailFile = InboundEmail["files"][number]
+
+/** El tipo de un adjunto en palabras («Excel», «PDF»…). */
+export function attachmentTypeWords(contentType: string): string {
+  const type = contentType.trim().toLowerCase()
+  if (type === "application/pdf") return "PDF"
+  if (type.startsWith("image/")) return "Imagen"
+  if (type === "text/csv") return "CSV"
+  if (type.includes("spreadsheetml")) return "Excel"
+  if (type.includes("wordprocessingml")) return "Word"
+  return "Archivo"
+}
+
+/**
+ * Uno de los tres estados de un adjunto: sin marcar («Adjunto de un correo»,
+ * que se puede marcar), la carga (con el día en que se borra) o ya borrado.
+ */
+export function emailFileState(file: InboundEmailFile): {
+  words: string
+  canMark: boolean
+} {
+  if (file.deleted) return { words: "Se borró", canMark: false }
+  if (file.kind === "archivo_clinica")
+    return {
+      words: file.deleteAfter
+        ? `Lo que mandó la clínica · ${deleteOnWords(file.deleteAfter)}`
+        : "Lo que mandó la clínica",
+      canMark: false,
+    }
+  return { words: "Adjunto de un correo", canMark: true }
+}
 
 /** La clave del correo; toda respuesta o «¿Salió?» la refresca. */
 export const inboundEmailKey = (emailId: string) => ["admin", "correo", emailId] as const
@@ -143,6 +196,14 @@ export function answeredWords(email: InboundEmail): string | null {
  */
 export const canAttachProposal = (email: InboundEmail, isAdmin: boolean, fromKairos: boolean) =>
   isAdmin && email.clientId !== null && email.mailbox !== "soporte" && !fromKairos
+
+/**
+ * Si «Responder» ofrece adjuntar documentos: con un cliente (son sus
+ * Documentos) y fuera de Kairós, cuyo «Enviar» es el sí del borrador tal
+ * como está. Soporte también, con lo que puede ver.
+ */
+export const canAttachFiles = (email: InboundEmail, fromKairos: boolean) =>
+  email.clientId !== null && !fromKairos
 
 /** Lo que quedó sin saber si salió: se resuelve antes de responder otra vez. */
 const unsettled = (email: InboundEmail) =>
@@ -261,8 +322,11 @@ function EmailSurface({
   )
 }
 
-/** Lo que dice el correo, sus adjuntos contados y lo que ya se le respondió. */
+/** Lo que dice el correo, sus adjuntos y lo que ya se le respondió. */
 function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: () => void }) {
+  const isAdmin = useIsAdmin()
+  const carga = useMarkCarga(email.clientId, onResolved)
+  const listed = isAdmin && email.files.length > 0
   return (
     <div className="flex flex-col gap-5">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
@@ -288,15 +352,56 @@ function EmailReading({ email, onResolved }: { email: InboundEmail; onResolved: 
             El texto de este correo se borró a los 30 días de llegar.
           </p>
         )}
-        {email.attachments > 0 ? (
+        {listed ? (
+          <ul aria-label="Adjuntos" className="flex flex-col gap-2">
+            {email.files.map((file) => {
+              const state = emailFileState(file)
+              return (
+                <li
+                  key={file.fileId}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border p-3 text-sm"
+                >
+                  <Paperclip aria-hidden className="size-4 text-muted-foreground" />
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="font-medium [overflow-wrap:anywhere]">{file.filename}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {attachmentTypeWords(file.contentType)} · {state.words}
+                    </p>
+                  </div>
+                  {state.canMark ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        carga.ask({
+                          fileId: file.fileId,
+                          filename: file.filename,
+                          cargaDeleteAfter: file.cargaDeleteAfter,
+                          cargaDueNow: file.cargaDueNow,
+                        })
+                      }
+                    >
+                      Es la carga de datos
+                    </Button>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        ) : email.attachments > 0 ? (
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Paperclip aria-hidden className="size-4" />
             {email.attachments === 1 ? "1 adjunto" : `${email.attachments} adjuntos`}
             {email.clientId
               ? ": están en Documentos de su ficha."
               : ": se guardan al ligarlo a un cliente."}
+            {isAdmin && !email.clientId
+              ? " Para marcar la carga, primero dile de qué cliente es."
+              : ""}
           </p>
         ) : null}
+        {carga.dialog}
         {email.notice ? (
           <PageNotice tone="aviso" label="Adjuntos que no entraron">
             {email.notice}
@@ -348,7 +453,13 @@ function ReplyRow({
           {reply.from ? ` · desde ${reply.from}` : ""}
         </span>
       </div>
-      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{reply.body}</p>
+      <FormattedText text={reply.body} />
+      {reply.files.length > 0 ? (
+        <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <Paperclip aria-hidden className="size-3.5" />
+          {reply.files.map((file) => file.filename).join(" · ")}
+        </p>
+      ) : null}
       {open ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground">¿Salió?</span>
@@ -382,6 +493,7 @@ const replyFormSchema = z.object({
     .min(1, "Escribe la respuesta")
     .max(5000, "Usa como máximo 5000 caracteres"),
   proposalId: z.string(),
+  fileIds: z.array(z.string()).max(5, "Adjunta como máximo 5 documentos"),
 })
 
 function ReplyForm({
@@ -411,7 +523,7 @@ function ReplyForm({
     (proposal) => proposal.displayStatus === "borrador" || proposal.displayStatus === "enviada",
   )
   const form = useAppForm({
-    defaultValues: { body: draft, proposalId: "" },
+    defaultValues: { body: draft, proposalId: "", fileIds: [] as string[] },
     validators: { onSubmit: replyFormSchema },
     onSubmit: async ({ value, formApi }) => {
       const body = value.body.trim()
@@ -425,6 +537,7 @@ function ReplyForm({
         const outreach = await sendEmailReply(email.id, {
           body,
           ...(value.proposalId ? { proposalId: value.proposalId } : {}),
+          ...(value.fileIds.length ? { fileIds: value.fileIds } : {}),
         })
         onSent()
         toast.success(`Respuesta enviada a ${outreach.to}`)
@@ -485,10 +598,16 @@ function ReplyForm({
               <field.TextareaField
                 id="responder-texto"
                 label="Respuesta"
-                description={draftNote ? `${draftNote} ${replyHint(email)}` : replyHint(email)}
+                description={`${draftNote ? `${draftNote} ` : ""}${replyHint(email)} ${FORMAT_HINT}`}
                 rows={8}
                 maxLength={5000}
                 autoFocus
+              />
+              <FormatTools
+                textareaId="responder-texto"
+                value={field.state.value}
+                onChange={field.handleChange}
+                previewNote={`Debajo van ${email.replySignature ? `tu firma («${email.replySignature}») y ` : ""}el correo que respondes.`}
               />
               <div>
                 <SpeechInput
@@ -527,6 +646,23 @@ function ReplyForm({
               />
             )}
           </form.AppField>
+        ) : null}
+        {canAttachFiles(email, Boolean(onSend)) && email.clientId ? (
+          <form.Field name="fileIds">
+            {(field) => (
+              <ReplyFiles
+                clientId={email.clientId ?? ""}
+                isAdmin={isAdmin}
+                value={field.state.value}
+                onChange={field.handleChange}
+                error={
+                  field.state.meta.errors
+                    .map((issue) => (typeof issue === "string" ? issue : issue?.message))
+                    .find(Boolean) ?? null
+                }
+              />
+            )}
+          </form.Field>
         ) : null}
         <details className="rounded-lg border p-3 text-sm">
           <summary className="cursor-pointer font-medium">El correo que respondes</summary>
