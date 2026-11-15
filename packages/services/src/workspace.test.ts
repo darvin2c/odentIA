@@ -33,6 +33,7 @@ import {
 } from "./workspace.js"
 import { insertTestPatients } from "./test-patient.js"
 import { markAppointmentCame, skipAppointmentRecord } from "./appointments.js"
+import { markRegistrationQuestionsSeen } from "./patient-registration.js"
 
 setupTestDb()
 const recipient = randomUUID()
@@ -603,6 +604,9 @@ it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada avi
   await notice("de-otra-persona", "crm.read", { actorUserId: recipient })
   await notice("plantilla", "settings.write")
   await notice("comision", "commissions.read")
+  // Aquí se prueba el permiso de cada aviso: quien administra ya vio las preguntas nuevas del registro,
+  // que si no también llegan a su campana (QA del 14 nov, B10).
+  await withOrgContext(appDb, "org_a", tx => markRegistrationQuestionsSeen(tx, "org_a", colleague))
   const list = (permissions: string[]) => withOrgContext(appDb, "org_a", tx => listWorkspaceNotifications(tx, "org_a", colleague, permissions))
   const titles = async (permissions: string[]) => (await list(permissions)).items.map(item => item.title).sort()
   expect(await titles(["crm.read", "settings.write", "commissions.read"])).toEqual(["Aviso comision", "Aviso de-otra-persona", "Aviso plantilla"])

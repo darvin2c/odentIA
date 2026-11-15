@@ -8,6 +8,12 @@ describe("la guía de latidIA", () => {
   // El nombre fijo de cada respuesta no lo lee nadie en la app: se hereda igual en todos los productos.
   const text = JSON.stringify(MEDICAL_HELP_TOPICS, (key, value) => (key === "id" ? undefined : value))
 
+  it("a la mamá de un niño: lo común sí, «de pequeño» del dentista no", () => {
+    const faq = MEDICAL_HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((item) => item.id === "que-le-preguntan-a-la-mama-de-un-nino")
+    expect(faq?.a).toContain("no se le pregunta embarazo, lactancia, tabaco ni alcohol")
+    expect(faq?.a).not.toContain("biberón")
+  })
+
   it("no habla de lo que un consultorio no tiene", () => {
     for (const word of [
       /odontograma/i,

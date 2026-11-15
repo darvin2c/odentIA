@@ -96,6 +96,13 @@ const INTEGRATIONS = `${SETTINGS} › Integraciones`
  */
 export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
 
+/**
+ * Lo que odentIA le pregunta a quien cuida a un niño, «de pequeño» (pediatría dental): las guías de
+ * latidIA y vistIA lo quitan de su respuesta.
+ */
+export const CHILDHOOD_DENTAL_SENTENCE =
+  " En el paso «De pequeño», con el nombre del niño, se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga en Configuración › Preguntas al paciente, en «Si se atiende un niño»."
+
 const BASE_TOPICS: readonly HelpTopic[] = [
   {
     id: "inicio",
@@ -647,6 +654,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Puedo registrar a un menor si su madre o su padre no trae su documento?",
         a: "Sí. Desde la página de quien lo trae, en Datos › Familia y responsables, «Registrar a alguien a su cargo»: queda como su responsable y su documento es opcional. Si no lo trae, regístralo igual; se le pide cuando firme un consentimiento por el menor, en la misma pantalla de la firma. Sus datos y su salud los completa su responsable en su celular o tú en ese momento.",
         forms: ["menor sin dni de la madre", "registrar a un hijo sin documento", "no trae su dni", "registrar un menor"],
+      },
+      {
+        // Mesa del 13 nov, entrega 7. Lo de «de pequeño» es de odentIA: latidIA y vistIA lo quitan (`BY_ID`).
+        id: "que-le-preguntan-a-la-mama-de-un-nino",
+        q: "¿Qué le preguntan a la mamá de un niño?",
+        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago tiene alergia a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
+        forms: ["que se le pregunta a un niño", "biberón y chupón", "preguntas de salud de un niño"],
       },
       {
         id: "significa-faltan-datos-atencion",

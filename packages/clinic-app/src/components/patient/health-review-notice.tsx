@@ -165,6 +165,8 @@ export function HealthReviewNotice({
     if (interview.length > 0)
       for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? [])
         if (row.keys.some((key) => interview.includes(key))) rows.push({ label: row.label, value: row.value })
+    // Lo del producto, como lo dice el servidor (odentIA: lo de pequeño que contó quien cuida a un niño).
+    for (const row of group.productLines ?? []) rows.push(row)
     return { title: declaredMarkWords(group.by, group.at, sex), rows }
   })
   const shownGroups = saidGroups.filter((group) => group.rows.length > 0)
@@ -190,7 +192,8 @@ export function HealthReviewNotice({
   // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
   const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)
   // Con representante (un niño), se le pregunta a él, como lo dice la ficha; si no, a la persona.
-  const first = askTo ?? patientName.trim().split(/\s+/)[0] ?? patientName
+  const patientFirst = patientName.trim().split(/\s+/)[0] ?? patientName
+  const first = askTo ?? patientFirst
   const topics = [
     allergyRow ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
@@ -199,7 +202,7 @@ export function HealthReviewNotice({
   const title =
     topics.length === 0
       ? declaredHere
-        ? `Revisa con ${first} lo que dijo de su salud`
+        ? `Revisa con ${first} lo que dijo de ${askTo ? `la salud de ${patientFirst}` : "su salud"}`
         : `Pregúntale a ${first} si sigue embarazada`
       : unasked.length === 0
         ? asked

@@ -1,4 +1,4 @@
-import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, healthQuestionsToAsk } from "@odentia/clinical"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
@@ -39,7 +39,105 @@ describe("las preguntas de salud nuevas en el registro y en su enlace", () => {
       },
     })
     expect(html).toContain("para que la sangre no forme coágulos")
-    expect(html).not.toContain("¿Eres alérgico a algún medicamento o material?")
+    expect(html).not.toContain("¿Tienes alergia a algún medicamento o material?")
     expect(html).not.toContain("¿Tienes alguna de estas enfermedades?")
+  })
+})
+
+describe("lo de un niño, para quien lo cuida (C3)", () => {
+  // Lo que el servidor le pregunta a la mamá de un niño (`healthQuestionsToAsk` con su edad).
+  const childLink = (age: number) =>
+    page({
+      fill: {
+        missing: new Set(),
+        health: true,
+        healthKeys: new Set(
+          healthQuestionsToAsk(config, { countryCode: "PE", product: "dental", person: { sex: "M", age } }, new Set()),
+        ),
+        hasRepresentative: true,
+        firstName: "Thiago",
+        age,
+        respondentFirstName: "Carla",
+      },
+    }).replace(/<[^>]+>/g, "|")
+
+  it("a Carla se le pregunta por Thiago, con ejemplos de niño y sin «diabetes, presión alta»", () => {
+    declareProduct(bareProduct("dental"))
+    const html = childLink(6)
+    expect(html).toContain("La salud de Thiago")
+    expect(html).toContain("Lo respondes tú, Carla.")
+    expect(html).toContain("¿Thiago tiene alergia a algún medicamento o material?")
+    expect(html).toContain("¿Thiago tiene alguna de estas enfermedades?")
+    expect(html).toContain("Por ejemplo, asma, convulsiones o problemas de sangrado.")
+    expect(html).not.toMatch(/diabetes, presión alta/i)
+    expect(html).not.toContain("¿Tienes alergia")
+    // Al niño no se le pregunta embarazo ni tabaco.
+    expect(html).not.toContain("embarazada")
+    expect(html).not.toContain("fuma?")
+    expect(html).not.toContain("¿Fumas?")
+  })
+
+  it("«Thiago de pequeño»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
+    declareProduct(bareProduct("dental"))
+    const html = childLink(6)
+    expect(html).toContain("Thiago de pequeño")
+    expect(html).toContain("¿Thiago toma biberón o pecho para dormir?")
+    expect(html).toContain("¿Usa chupón o se chupa el dedo?")
+    expect(html).toContain("¿Cuántas veces al día come dulces o toma jugos entre comidas?")
+    expect(html).toContain("4 o más")
+    expect(html).toContain("¿Su pasta de dientes tiene flúor?")
+    expect(html).toContain("¿Quién le cepilla los dientes?")
+  })
+
+  it("sin representante, el paso de quien lo cuida le habla a ella, con el nombre del niño", () => {
+    declareProduct(bareProduct("dental"))
+    const fill = { missing: new Set<string>(["birthDate"]), health: true, hasRepresentative: false, firstName: "Thiago", respondentFirstName: "Carla" }
+    const child = page({ fill: { ...fill, age: 6 } }).replace(/<[^>]+>/g, "|")
+    expect(child).toContain("Thiago es menor de edad: déjanos tus datos, que respondes por Thiago.")
+    expect(child).not.toContain("Eres menor de edad")
+    expect(child).not.toContain("Tu madre, padre o tutor")
+    // Un adolescente que abre su propio enlace sigue leyéndolo para él (de 12 a 17, fuera de esta entrega).
+    const teen = page({ fill: { ...fill, age: 15, respondentFirstName: null } })
+    expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
+  })
+
+  it("en el enlace de Thiago, la casilla del aviso nombra los datos de Thiago y los de Carla, como el registro", () => {
+    declareProduct(bareProduct("dental"))
+    const fill = { missing: new Set<string>(), health: true, hasRepresentative: true, firstName: "Thiago", age: 6, clinicName: "Dental Smile", privacy: true }
+    const child = page({ fill: { ...fill, respondentFirstName: "Carla" } }).replace(/<[^>]+>/g, "|")
+    expect(child).toContain("Acepto el aviso de privacidad de Dental Smile para los datos de Thiago y los míos.")
+    // Quien abre su propio enlace acepta por sí.
+    const own = page({ fill: { ...fill, firstName: "Marta", age: 40, respondentFirstName: null } }).replace(/<[^>]+>/g, "|")
+    expect(own).toContain("Acepto el aviso de privacidad de Dental Smile.")
+  })
+
+  it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
+    declareProduct(bareProduct("dental"))
+    const html = childLink(8)
+    expect(html).toContain("Thiago de pequeño")
+    expect(html).not.toContain("biberón")
+    expect(html).not.toContain("chupón")
+    expect(html).toContain("¿Quién le cepilla los dientes?")
+  })
+
+  it("latidIA no pregunta lo de pequeño del dentista, y a un niño tampoco el tabaco", () => {
+    declareProduct(bareProduct("medical"))
+    const html = page({
+      fill: {
+        missing: new Set(),
+        health: true,
+        healthKeys: new Set(
+          healthQuestionsToAsk(config, { countryCode: "PE", product: "medical", person: { sex: "M", age: 6 } }, new Set()),
+        ),
+        hasRepresentative: true,
+        firstName: "Thiago",
+        age: 6,
+        respondentFirstName: "Carla",
+      },
+    })
+    expect(html).toContain("¿Thiago tiene alergia")
+    expect(html).not.toContain("¿Quién le cepilla los dientes?")
+    expect(html).not.toContain("biberón")
+    expect(html).not.toContain("fuma?")
   })
 })

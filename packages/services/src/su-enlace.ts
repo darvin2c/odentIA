@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import {
+  ageInYears,
   CONSENT_DECLARATION,
   clinicalProfileFor,
   CONSENT_SIGNATURE_NOTES,
@@ -19,6 +20,7 @@ import {
   REGISTRATION_FIELDS,
   type RegistrationConfig,
   type RegistrationFieldKey,
+  registrationFieldApplies,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
@@ -797,6 +799,13 @@ export interface PersonalLinkDataForm {
   healthQuestions: RegistrationFieldKey[]
   /** Su primer nombre, para saludarla; nulo si no se sabe. */
   firstName: string | null
+  /** Sus años cumplidos hoy, si se saben: a quien cuida a un menor de 12 se le pregunta lo de un niño. */
+  age: number | null
+  /**
+   * El primer nombre de quien abre el enlace cuando no es la persona (su madre, su tutor): a quien
+   * cuida a un niño se le habla a él («Lo respondes tú, Carla»). Nulo si el enlace es de la persona.
+   */
+  respondentFirstName: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va al final, antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }
 }
@@ -812,16 +821,21 @@ export async function getPersonalLinkDataForm(
   const healthQuestions = await healthQuestionsOf(tx, orgId, link)
   const health = healthQuestions.length > 0
   if ((!missing && !health) || !link.patientId) throw linkExpired()
+  const person = await requirePatient(tx, orgId, link.patientId)
+  const today = await patientOrganizationToday(tx, orgId)
+  const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
   return {
     missing: missing ?? [],
     countryCode: await findOrgCountry(tx, orgId),
-    today: await patientOrganizationToday(tx, orgId),
+    today,
+    age: ageInYears(person.birthDate, today),
+    respondentFirstName: self ? null : await linkContactFirstName(tx, orgId, link.row.contactId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
     // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).
     registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
     healthQuestions,
-    firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
+    firstName: firstName(person) || null,
     pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
   }
 }
@@ -1014,11 +1028,16 @@ async function saveLinkData(
   // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
   const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link) : null
   const known = questions && questions.ask.length > 0 ? questions.known : null
+  // Ni lo que no le corresponde (a un niño, el embarazo o el tabaco; a uno de 8, el biberón): la misma regla del registro.
+  const asker = known ? await requirePatient(tx, orgId, patientId) : null
+  const who = { sex: asker?.sex ?? null, age: ageInYears(asker?.birthDate, await patientOrganizationToday(tx, orgId)) }
   const said =
     input.health && known
       ? onlyAskedHealth(
           input.health,
-          REGISTRATION_FIELDS.filter((field) => field.group === "health" && !known.has(field.key)).map((field) => field.key),
+          REGISTRATION_FIELDS.filter(
+            (field) => field.group === "health" && !known.has(field.key) && registrationFieldApplies(field.key, who),
+          ).map((field) => field.key),
         )
       : null
   const withHealth = !!said && declaredHealthAnswered(said)

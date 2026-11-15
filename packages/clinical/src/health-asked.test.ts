@@ -84,6 +84,40 @@ describe("se pregunta solo lo que falta, dato por dato", () => {
   })
 })
 
+describe("el enlace de un niño se lo pregunta a quien lo cuida", () => {
+  it("a los 6 años: «de pequeño» sí, embarazo y tabaco no; a los 8, sin biberón ni chupón", () => {
+    const six = healthQuestionsToAsk(DEFAULT_REGISTRATION_CONFIG, { ...dental, person: { sex: "M", age: 6 } }, new Set())
+    expect(six).toEqual(
+      expect.arrayContaining(["dental.biberon", "dental.chupon", "dental.dulcesEntreComidas", "dental.pastaConFluor", "dental.quienCepilla"]),
+    )
+    expect(six).not.toContain("medical.tabaco")
+    expect(six).not.toContain("personal.embarazo")
+    const eight = healthQuestionsToAsk(DEFAULT_REGISTRATION_CONFIG, { ...dental, person: { sex: "F", age: 8 } }, new Set())
+    expect(eight).not.toContain("dental.biberon")
+    expect(eight).not.toContain("dental.chupon")
+    expect(eight).toContain("dental.quienCepilla")
+    // En latidIA, lo de un niño de odentIA no se pregunta.
+    const medical = healthQuestionsToAsk(
+      DEFAULT_REGISTRATION_CONFIG,
+      { ...dental, product: "medical", person: { sex: "M", age: 6 } },
+      new Set(),
+    )
+    expect(medical.some((key) => key.startsWith("dental."))).toBe(false)
+    expect(medical).not.toContain("medical.tabaco")
+  })
+
+  it("lo que su madre ya contó, o anotó el equipo en la entrevista, no se vuelve a preguntar", () => {
+    const known = knownHealthQuestions({
+      ...nothing,
+      declarations: [{ health: { dental: { dulcesEntreComidas: "1_a_3" } } }],
+      interview: { antecedentesOdontologicos: { quienCepilla: "adulto" } },
+    })
+    expect(known.has("dental.dulcesEntreComidas")).toBe(true)
+    expect(known.has("dental.quienCepilla")).toBe(true)
+    expect(known.has("dental.pastaConFluor")).toBe(false)
+  })
+})
+
 describe("«No se le preguntó» no es «dijo que no»", () => {
   it("cada clase dice si toma, si dijo que no, si no sabe o si nadie se lo preguntó", () => {
     expect(medicineClassAnswers({ ...nothing, current: [] }).anticoagulants).toEqual({ answer: "unasked", said: false })

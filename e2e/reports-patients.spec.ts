@@ -233,7 +233,7 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
     const answered = await progress.textContent()
     await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
     await expect(progress).not.toHaveText(answered ?? "")
-    const consent = anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })
+    const consent = anon.getByRole("checkbox", { name: /Autorizo el tratamiento de (mis datos|los datos de)/ })
     await advanceTo(consent)
     await consent.check()
     await anon.getByRole("button", { name: "Enviar registro", exact: true }).click()

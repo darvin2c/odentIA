@@ -154,8 +154,13 @@ export interface ProductHealthUi {
   /**
    * Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. `marks`: la marca de lo
    * que dijo la persona y sigue sin revisar, por dato («Lo dijo ella el 14 nov, sin revisar»).
+   * `productMark`: la misma marca para lo del producto que dijo (odentIA: «de pequeño» de un niño).
    */
-  Summary(props: { answers: Record<string, unknown>; marks?: Partial<Record<DeclaredInterviewKey, string>> }): ReactNode
+  Summary(props: {
+    answers: Record<string, unknown>
+    marks?: Partial<Record<DeclaredInterviewKey, string>>
+    productMark?: string
+  }): ReactNode
   /**
    * Lo suyo de la entrevista que va arriba de la ficha y de la atención, con la clave de quién lo
    * dijo (`DeclaredInterviewKey`): el corazón, la anestesia, la lactancia. Sin esto, nada.
@@ -180,6 +185,8 @@ export interface InterviewSectionsProps {
   idPrefix: string
   /** El sexo de la ficha: lo gineco-obstétrico no se le pregunta a un hombre. */
   sex: string | null
+  /** Sus años cumplidos hoy, si se saben: lo de un niño solo se le pregunta a quien lo cuida (menores de 12). */
+  age?: number | null
   /**
    * El error de cada dato, junto a él: la clave es «grupo.clave» de la
    * entrevista («habitos.tabaco», «antecedentesOdontologicos.ultimaVisita»;
