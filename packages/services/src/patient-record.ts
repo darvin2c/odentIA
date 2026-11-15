@@ -753,18 +753,17 @@ function saidWords(said: RecordSaid, sex: string | null, zone: Zone): string {
 }
 
 /** «Lo dijo ella el 13 de noviembre de 2026, sin revisar»: la marca de lo que nadie del equipo revisó. */
-/** «dijo que cambió el 14 nov», de lo vigente que no volvió a nombrar; null si no es de eso. */
-function changedRowWords(record: Pick<PatientRecord, "changed">, topic: HealthTopic, id: string, sex: string | null, zone: Zone): string | null {
-  const changed = record.changed
-  if (!changed?.[topic].includes(id)) return null
-  return changedWhenWords(changed.by, dayWords(changed.at, zone), sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))
-}
-
 function unreviewedWords(said: { by: HealthDeclarant; at: Date | null }, sex: string | null, zone: Zone): string {
   return `${saidWhenWords(said.by, said.at ? dayWords(said.at, zone) : "", sex)}, sin revisar`
 }
 
 /** Lo que acompaña a un dato de la entrevista: que sigue sin revisar, o de qué versión anterior viene. */
+/** «Dijo que cambió el 14 nov», de lo vigente que no volvió a nombrar; null si no es de eso. */
+function changedRowWords(record: Pick<PatientRecord, "changed">, topic: HealthTopic, id: string, sex: string | null, zone: Zone): string | null {
+  const changed = record.changed
+  return changed?.[topic].includes(id) ? changedWhenWords(changed.by, dayWords(changed.at, zone), sex) : null
+}
+
 function entryNote(entry: RecordInterview["entries"][number], sex: string | null, zone: Zone): string | null {
   if (entry.unreviewed) return entry.unreviewed.repeatsVersion ? "sin revisar" : unreviewedWords(entry.unreviewed, sex, zone)
   return entry.since ? saidWords(entry.since, sex, zone) : null
@@ -975,7 +974,7 @@ export async function renderPatientRecordPdf(
   const markOf = (topic: HealthTopic, id: string): string | null => {
     // Lo vigente que no volvió a nombrar (entrega 10) lleva esa marca, no la de su declaración.
     const changed = changedRowWords(record, topic, id, p.sex, zone)
-    if (changed) return changed
+    if (changed) return changed.replace(/^./, (letter) => letter.toLocaleLowerCase("es"))
     const group = declaredGroupOf(record, topic, id)
     return group ? unreviewedWords(group, p.sex, zone) : null
   }
@@ -1505,14 +1504,11 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     id: string,
     field: "asserter" | "informationSource",
   ): Record<string, unknown> => {
-    const changed = record.changed?.[topic].includes(id) ? record.changed : null
-    const group = changed ?? declaredGroupOf(record, topic, id)
+    const changed = changedRowWords(record, topic, id, p.sex, record.clinic)
+    const group = changed && record.changed ? record.changed : declaredGroupOf(record, topic, id)
     if (!group) return {}
     const who = asserterOf(group.by, patientRef)
-    const text = changed
-      ? (changedRowWords(record, topic, id, p.sex, record.clinic) as string).replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
-      : unreviewedWords(group, p.sex, record.clinic)
-    return { ...(who ? { [field]: who } : {}), note: [{ text }] }
+    return { ...(who ? { [field]: who } : {}), note: [{ text: changed ?? unreviewedWords(group, p.sex, record.clinic) }] }
   }
   for (const a of record.allergies) {
     const category = fhirCode(ALLERGY_CATEGORY_FHIR, a.category)

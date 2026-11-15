@@ -46,17 +46,12 @@ export function dentalInterviewEntries(answers: unknown): InterviewEntry[] {
     "Hábitos",
     Array.isArray(given.habitos) ? given.habitos.filter((item) => typeof item === "string" && item.trim()).join(", ") : null,
   )
-  // Lo de pequeño que contó quien cuida a un niño (entrega 7), con los nombres de Antecedentes.
-  for (const [key, label] of CHILDHOOD_ENTRY_LABELS) {
-    const value = given[key]
-    const words: Record<string, string> = CHILDHOOD_WORDS[key]
-    const said = typeof value === "string" ? words[value] : undefined
-    add(key, label, said ? said.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) : null)
-  }
+  // Lo de un niño en casa que contó quien lo cuida (entrega 7), con los nombres de Antecedentes.
+  for (const entry of childhoodEntries(given)) add(entry.key, entry.label, entry.value.replace(/^./, (letter) => letter.toLocaleUpperCase("es")))
   return out
 }
 
-/** «De pequeño» en la copia de la historia: cada respuesta con su nombre en Antecedentes. */
+/** Lo de un niño en casa: cada respuesta con su nombre en Antecedentes. */
 const CHILDHOOD_ENTRY_LABELS = [
   ["biberon", "Biberón o pecho para dormir"],
   ["chupon", "Chupón o dedo"],
@@ -133,25 +128,18 @@ export const CHILDHOOD_WORDS = {
 } as const satisfies Record<(typeof CHILDHOOD_CHOICES)[number][0], Record<string, string>>
 
 /**
- * «De pequeño», en palabras y en tres filas, para «Revisa con … lo que dijo» de
- * la atención y el resumen de Antecedentes: «De pequeño» (biberón y chupón),
- * «Dulces o jugos entre comidas» y «Dientes» (flúor y quién le cepilla). Lo que
- * no se respondió no sale.
+ * Lo de un niño en casa, dato por dato y en palabras («Biberón o pecho para dormir: ya no toma
+ * biberón»): la tarjeta de Antecedentes, «Revisa con…» de la atención, «Ver declaración original»
+ * y la copia lo dicen igual. Lo que no se respondió no sale.
  */
-export function childhoodLines(dental: Record<string, unknown> | null | undefined): Array<{ label: string; value: string }> {
-  const said = (key: keyof typeof CHILDHOOD_WORDS): string => {
-    const value = dental?.[key]
+export function childhoodEntries(dental: unknown): Array<{ key: (typeof CHILDHOOD_ENTRY_LABELS)[number][0]; label: string; value: string }> {
+  const given = dental && typeof dental === "object" && !Array.isArray(dental) ? (dental as Record<string, unknown>) : {}
+  return CHILDHOOD_ENTRY_LABELS.flatMap(([key, label]) => {
+    const value = given[key]
     const words: Record<string, string> = CHILDHOOD_WORDS[key]
-    return typeof value === "string" ? (words[value] ?? "") : ""
-  }
-  const rows: Array<{ label: string; value: string }> = []
-  const small = [said("biberon"), said("chupon")].filter(Boolean)
-  if (small.length) rows.push({ label: "De pequeño", value: small.join(" · ") })
-  const sweets = said("dulcesEntreComidas")
-  if (sweets) rows.push({ label: "Dulces o jugos entre comidas", value: sweets })
-  const teeth = [said("pastaConFluor"), said("quienCepilla")].filter(Boolean)
-  if (teeth.length) rows.push({ label: "Dientes", value: teeth.join(" · ") })
-  return rows
+    const said = typeof value === "string" ? words[value] : undefined
+    return said ? [{ key, label, value: said }] : []
+  })
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { childhoodLines, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems, dentalInterviewLines } from "./interview.js"
+import { childhoodEntries, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems, dentalInterviewLines } from "./interview.js"
 
 describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lactancia", () => {
   it("se dice en palabras, y lo que no se respondió no sale", () => {
@@ -27,22 +27,15 @@ describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lac
   })
 })
 
-describe("«de pequeño»: lo que cuenta quien cuida a un niño", () => {
-  it("se lee en tres filas, con sus palabras, y lo que no se respondió no sale", () => {
-    expect(
-      childhoodLines({ biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" }),
-    ).toEqual([
-      { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-      { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-      { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
+describe("lo de un niño en casa: lo que cuenta quien lo cuida", () => {
+  it("se lee dato por dato, con sus palabras, y lo que no se respondió no sale", () => {
+    expect(childhoodEntries({ biberon: "ya_no", dulcesEntreComidas: "4_o_mas", quienCepilla: "solo" })).toEqual([
+      { key: "biberon", label: "Biberón o pecho para dormir", value: "ya no toma biberón" },
+      { key: "dulcesEntreComidas", label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+      { key: "quienCepilla", label: "Quién le cepilla los dientes", value: "se cepilla sin ayuda" },
     ])
-    // A los 8 años no se preguntan el biberón ni el chupón: no hay fila «De pequeño».
-    expect(childhoodLines({ dulcesEntreComidas: "1_a_3", quienCepilla: "adulto" })).toEqual([
-      { label: "Dulces o jugos entre comidas", value: "1 a 3 veces al día" },
-      { label: "Dientes", value: "lo cepilla un adulto" },
-    ])
-    expect(childhoodLines({ bruxismo: true })).toEqual([])
-    expect(childhoodLines(undefined)).toEqual([])
+    expect(childhoodEntries({ bruxismo: true })).toEqual([])
+    expect(childhoodEntries(undefined)).toEqual([])
   })
 
   it("solo se guardan las respuestas de su lista", () => {

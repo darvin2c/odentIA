@@ -158,12 +158,13 @@ export function EncounterContextBody({
   const activeConditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
   const conditions = history.current("conditions", activeConditions)
   const medications = history.current("medications", currentMedications)
-  const beforeLines = (topic: "conditions" | "medications", rows: typeof activeConditions | typeof currentMedications) =>
-    history.alone(topic, rows).map((line) => (
-      <li key={line} className="text-muted-foreground">
-        {line}
-      </li>
-    ))
+  const beforeConditions = history.alone("conditions", activeConditions)
+  const beforeMedications = history.alone("medications", currentMedications)
+  const beforeItem = (piece: (typeof beforeConditions)[number]) => (
+    <li key={piece.line} className="text-muted-foreground">
+      {piece.line}
+    </li>
+  )
   const asa = asaLabel(data.asaClass)
   const showsAsa = productUi().health.showsAsa || asa !== null
   // Lo que dijo la persona y nadie revisó se dice igual que en la franja: su «No» no es un «niega».
@@ -227,7 +228,7 @@ export function EncounterContextBody({
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Enfermedades</h3>
-        {conditions.length === 0 && history.alone("conditions", activeConditions).length === 0 ? (
+        {conditions.length === 0 && beforeConditions.length === 0 ? (
           // Como las alergias: «niega» solo si se le preguntó; si no, se dice que no se preguntó.
           <p className="text-muted-foreground">
             {saidNo("conditions") ??
@@ -246,13 +247,13 @@ export function EncounterContextBody({
                 {unreviewed("conditions", condition.id)}
               </li>
             ))}
-            {beforeLines("conditions", activeConditions)}
+            {beforeConditions.map(beforeItem)}
           </ul>
         )}
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Medicación</h3>
-        {medications.length === 0 && history.alone("medications", currentMedications).length === 0 ? (
+        {medications.length === 0 && beforeMedications.length === 0 ? (
           <p className="text-muted-foreground">
             {saidNo("medications") ??
               (data.reviewStatus.medications === "none"
@@ -275,7 +276,7 @@ export function EncounterContextBody({
                 </li>
               )
             })}
-            {beforeLines("medications", currentMedications)}
+            {beforeMedications.map(beforeItem)}
           </ul>
         )}
       </section>

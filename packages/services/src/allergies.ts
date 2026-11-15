@@ -120,7 +120,7 @@ async function lockHealth(tx: Db, orgId: string, patientId: string) {
  * nov: al agregar la penicilina del equipo, el látex que dijo la paciente perdía
  * su marca sin que nadie lo revisara). Es la regla de `declared` en `getPatientHealth`.
  */
-async function declaredUnreviewed(
+export async function declaredUnreviewed(
   tx: Db,
   orgId: string,
   patientId: string,

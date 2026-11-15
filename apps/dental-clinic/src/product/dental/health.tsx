@@ -6,6 +6,7 @@ import {
 } from "@odentia/clinic-app/product/product-ui"
 import {
   CHILDHOOD_WORDS,
+  childhoodEntries,
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
@@ -461,16 +462,6 @@ const CHILD_FIELDS = [
   { key: "quienCepilla", label: "Quién le cepilla los dientes", early: false },
 ] as const
 
-/** Lo de un niño en casa que está guardado, dato por dato y con su nombre. */
-function childhoodRows(odontologicos: Rec | null | undefined): Array<{ key: (typeof CHILD_FIELDS)[number]["key"]; label: string; value: string }> {
-  return CHILD_FIELDS.flatMap((field) => {
-    const value = odontologicos?.[field.key]
-    const words: Record<string, string> = CHILDHOOD_WORDS[field.key]
-    const said = typeof value === "string" ? words[value] : undefined
-    return said ? [{ key: field.key, label: field.label, value: said }] : []
-  })
-}
-
 /**
  * «Los dientes en casa» (mesa del 13 nov, entrega 7; el nombre, revisión final del 15 nov, K8): lo que cuenta quien cuida a un menor
  * de 12, con las claves de `antecedentesOdontologicos`. Sale para un niño, o si ya
@@ -538,7 +529,7 @@ function DentalHistorySummary({
 }) {
   const items = dentalInterviewItems(answers)
   const raw = answers.antecedentesOdontologicos
-  const childhood = childhoodRows(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
+  const childhood = childhoodEntries(raw)
   if (items.length === 0 && childhood.length === 0) return null
   const heartTitle = isChildAge(age) ? "Corazón y anestesia" : "Corazón, anestesia, tabaco y alcohol"
   return (
@@ -601,15 +592,13 @@ export const dentalHealth: ProductHealthUi = {
       return { keys: item.said as DeclaredInterviewKey[], label: label ?? item.key, value: rest.join(": ") }
     }),
     // Lo de un niño en casa, dato por dato, cada uno con su marca (revisión final del 15 nov, K2).
-    ...childhoodRows(
-      answers.antecedentesOdontologicos && typeof answers.antecedentesOdontologicos === "object" && !Array.isArray(answers.antecedentesOdontologicos)
-        ? (answers.antecedentesOdontologicos as Rec)
-        : null,
-    ).map((row) => ({ keys: [row.key] as DeclaredInterviewKey[], label: row.label, value: row.value })),
+    ...childhoodEntries(answers.antecedentesOdontologicos).map((row) => ({
+      keys: [row.key] as DeclaredInterviewKey[],
+      label: row.label,
+      value: row.value,
+    })),
   ],
   // «Ver declaración original» con lo de un niño en casa, tal como llegó (revisión final del 15 nov, K3).
   declaredRows: (health) =>
-    childhoodRows(health.dental && typeof health.dental === "object" && !Array.isArray(health.dental) ? (health.dental as Rec) : null).map(
-      (row) => ({ label: row.label, value: row.value.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) }),
-    ),
+    childhoodEntries(health.dental).map((row) => ({ label: row.label, value: row.value.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) })),
 }

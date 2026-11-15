@@ -75,7 +75,7 @@ import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
-import { allergyReviewDue, markAllergiesReviewed } from "./allergies.js"
+import { allergyReviewDue, declaredUnreviewed, markAllergiesReviewed } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -1573,25 +1573,26 @@ export async function reviewDeclaredHealth(
   patientId: string,
   input: { expectedRevision: number },
 ): Promise<PatientHealth> {
-  await requirePatient(tx, orgId, patientId)
   const [locked] = await tx
-    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .select({
+      revision: patient.healthRevision,
+      reviewStatus: patient.healthReviewStatus,
+      allergiesReviewedAt: patient.allergiesReviewedAt,
+    })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
     .for("update")
   if (!locked) throw notFound("Paciente")
   if (locked.revision !== input.expectedRevision)
-    throw conflict("STALE_HEALTH_REVISION", "Sus antecedentes cambiaron en otra sesión: recarga antes de revisarlos")
-  const health = await getPatientHealth(tx, orgId, patientId)
-  if (health.declared.some((group) => group.allergies.length > 0 || group.saidNo.allergies))
-    await markAllergiesReviewed(tx, orgId, actorUserId, patientId)
-  const [now] = await tx
-    .select({ revision: patient.healthRevision })
-    .from(patient)
-    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-    .limit(1)
-  const revision = now?.revision ?? locked.revision
+    throw conflict("STALE_HEALTH_REVISION", "Otra sesión guardó antecedentes mientras editabas: recarga y reintenta sin perder lo escrito")
+  // Dijo algo de sus alergias y nadie lo revisó: una que declaró, o su «No» sin revisar (la regla de
+  // `declared` en `getPatientHealth`).
+  const saidNo = (locked.reviewStatus as Record<string, unknown> | null)?.["allergies"] === "none" && !locked.allergiesReviewedAt
+  const allergiesSaid = saidNo || (await declaredUnreviewed(tx, orgId, patientId, locked.allergiesReviewedAt))
+  if (allergiesSaid) await markAllergiesReviewed(tx, orgId, actorUserId, patientId)
+  // «Alergias revisadas» ya avanzó la revisión una vez.
+  const revision = locked.revision + (allergiesSaid ? 1 : 0)
   await tx
     .update(patient)
     .set({ healthRevision: revision + 1, healthReviewedAt: new Date(), healthReviewedBy: actorUserId, updatedAt: new Date() })

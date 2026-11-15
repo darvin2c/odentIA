@@ -207,7 +207,7 @@ describe("lo que dijo que cambió, por dato", () => {
     expect(history.beforeFor("medications", meds[0]!)).toBe("antes warfarina 7.5 mg y warfarina 5 mg, cambió el 14 nov")
     // Una medicina sin clase no se empareja con otra: «omeprazol · antes losartán» diría lo que no dijo.
     expect(history.beforeFor("medications", meds[4]!)).toBeNull()
-    expect(history.alone("medications", meds)).toEqual(["Medicación: antes losartán · dijo que cambió el 14 nov"])
+    expect(history.alone("medications", meds).map((piece) => piece.line)).toEqual(["Medicación: antes losartán · dijo que cambió el 14 nov"])
   })
 
   it("una alergia que no volvió a nombrar sigue siendo una alergia: queda, con su marca", () => {
@@ -221,13 +221,18 @@ describe("lo que dijo que cambió, por dato", () => {
     const history = changedHistoryOf({ ...health, changed: { ...health.changed, medications: ["apix", "w75", "w5"] } })
     expect(history.current("medications", meds).map((row) => row.id)).toEqual(["los", "ome"])
     expect(history.alone("medications", meds)).toEqual([
-      "Anticoagulante: antes apixabán 5 mg, warfarina 7.5 mg y warfarina 5 mg · dijo que cambió el 14 nov",
+      {
+        group: "anticoagulants",
+        label: "Anticoagulante",
+        text: "antes apixabán 5 mg, warfarina 7.5 mg y warfarina 5 mg · dijo que cambió el 14 nov",
+        line: "Anticoagulante: antes apixabán 5 mg, warfarina 7.5 mg y warfarina 5 mg · dijo que cambió el 14 nov",
+      },
     ])
   })
 
   it("con quien habla por ella, lo dice ella", () => {
     const history = changedHistoryOf({ ...health, changed: { ...health.changed, by: mother, conditions: ["hta"] } })
-    expect(history.alone("conditions", health.conditions)[0]).toBe(
+    expect(history.alone("conditions", health.conditions)[0]?.line).toBe(
       "Enfermedades: antes Hipertensión · su madre, Carla, dijo que cambió el 14 nov",
     )
   })

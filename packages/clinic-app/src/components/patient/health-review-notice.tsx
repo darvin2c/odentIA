@@ -1,6 +1,6 @@
 import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf, saidWhenWords, specificKin } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
-import { submitErrorMessage } from "@odentia/ui-patterns"
+import { DetailField, DetailList, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
@@ -109,8 +109,9 @@ export function HealthReviewNotice({
   const [adding, setAdding] = useState(false)
   const [showing, setShowing] = useState(false)
   const detailId = useId()
-  // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto (como «Vino»
-  // en la agenda). Si la pantalla se cierra antes, se guarda en ese momento: no se pierde.
+  // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto: la revisión no
+  // tiene vuelta atrás en el servidor (sella quién y cuándo), así que se deshace antes de enviarla. Si
+  // la pantalla se cierra antes, se guarda en ese momento: no se pierde.
   const [reviewedHere, setReviewedHere] = useState(false)
   const pendingReview = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null)
   useEffect(
@@ -162,21 +163,23 @@ export function HealthReviewNotice({
   const marks = [...new Set(declared.map((group) => declaredMarkWords(group.by, group.at, sex)))]
   const oneMark = marks.length === 1 ? marks[0]! : null
   const rows: Array<{ label: string; short: string; value: string }> = []
-  const push = (label: string, short: string, value: string, groups: typeof declared) => {
-    const own = [
-      ...new Set(
-        groups.map((group) => saidWhenWords(group.by, group.at ? shortDay(group.at) : "", sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))),
-      ),
-    ]
+  const saidWhen = new Map(
+    declared.map((group) => [
+      group,
+      saidWhenWords(group.by, group.at ? shortDay(group.at) : "", sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es")),
+    ]),
+  )
+  /** Un dato, con de quién y cuándo si hay más de una declaración. `short`: su nombre en la línea. */
+  const push = (label: string, value: string, groups: typeof declared, short = label.toLocaleLowerCase("es")) => {
+    const own = [...new Set(groups.map((group) => saidWhen.get(group) ?? ""))]
     rows.push({ label, short, value: oneMark || own.length === 0 ? value : `${value} (${own.join("; ")})` })
   }
   const no = (group: (typeof declared)[number]) => saidNoWords(group.by, sex).toLocaleLowerCase("es")
-  const pregnancyGroups = declared.filter((group) => group.pregnancy)
-  if (pregnancy && pregnancyGroups.length > 0) {
+  const pregnancyPending = declared.some((group) => group.pregnancy)
+  if (pregnancy && pregnancyPending) {
     const words = pregnancyWords(pregnancy)
     push(
       "Embarazo",
-      "embarazo",
       words.confirm
         ? `${words.detail}; pregúntale si sigue embarazada`
         : pregnancy.weeksToday === null
@@ -195,14 +198,14 @@ export function HealthReviewNotice({
   if (saidAllergies.length > 0)
     push(
       "Alergias",
-      saidAllergies.length === 1 ? "alergia" : "alergias",
       saidAllergies
         // El registro no pregunta qué le pasó: sin reacción no se dice «no dijo» (auditor, 14 nov).
         .map((row) => [allergyTitle(row), row.reaction?.trim(), history.allergyMark(row.id)].filter(Boolean).join(" · "))
         .join("; "),
       allergyGroups,
+      saidAllergies.length === 1 ? "alergia" : "alergias",
     )
-  else if (saidNoAllergyGroup) push("Alergias", "alergias", no(saidNoAllergyGroup), [saidNoAllergyGroup])
+  else if (saidNoAllergyGroup) push("Alergias", no(saidNoAllergyGroup), [saidNoAllergyGroup])
   // Lo que toma hoy y dijo; lo de antes va junto a lo de hoy de su clase, nunca como otro vigente.
   const medicationGroups = declared.filter((group) => group.medications.length > 0)
   const saidMedications = history.current(
@@ -215,12 +218,10 @@ export function HealthReviewNotice({
   for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
     const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
     const label = MEDICATION_CLASSES[key].label
-    const short = label.toLocaleLowerCase("es")
-    const alone = aloneMedications.find((line) => line.startsWith(`${label}:`))
+    const alone = aloneMedications.find((piece) => piece.group === key)
     if (inClass.length > 0)
       push(
         label,
-        short,
         // «Anticoagulante · Anticoagulante (no dijo cuál)» se leía dos veces (B9): sin nombre, «no dijo cuál».
         inClass
           .map((row) => {
@@ -231,27 +232,26 @@ export function HealthReviewNotice({
           .join(", "),
         groupsOf(inClass.map((row) => row.id)),
       )
-    else if (alone) push(label, short, alone.slice(label.length + 2), [])
+    else if (alone) push(label, alone.text, [])
     else if (lastGroup && !child) {
       // Su «No» o su «No sé» a la clase también se revisa con ella (B9), en su última declaración. A un
       // niño no se le pregunta (revisión final del 15 nov, K7).
       const known = health.medicineClasses?.[key]
-      if (known?.said && known.answer === "unknown") push(label, short, "no sabe", [lastGroup])
-      else if (known?.said && known.answer === "no") push(label, short, no(lastGroup), [lastGroup])
+      if (known?.said && known.answer === "unknown") push(label, "no sabe", [lastGroup])
+      else if (known?.said && known.answer === "no") push(label, no(lastGroup), [lastGroup])
     }
   }
   const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
-  const aloneOther = aloneMedications.find((line) => line.startsWith("Medicación:"))
+  const aloneOther = aloneMedications.find((piece) => piece.group === null)
   const saidNoMedicationGroup = declared.find((group) => group.saidNo.medications)
   if (otherMedications.length > 0 || aloneOther)
     push(
       "Medicinas",
-      "medicinas",
-      [...otherMedications.map((row) => row.name), ...(aloneOther ? [aloneOther.slice("Medicación: ".length)] : [])].join(", "),
+      [...otherMedications.map((row) => row.name), ...(aloneOther ? [aloneOther.text] : [])].join(", "),
       groupsOf(otherMedications.map((row) => row.id)),
     )
   else if (saidMedications.length === 0 && saidNoMedicationGroup)
-    push("Medicinas", "medicinas", no(saidNoMedicationGroup), [saidNoMedicationGroup])
+    push("Medicinas", no(saidNoMedicationGroup), [saidNoMedicationGroup])
   const conditionGroups = declared.filter((group) => group.conditions.length > 0)
   const activeConditions = health.conditions.filter((row) => row.status === "activa")
   const saidConditions = history.current(
@@ -263,18 +263,17 @@ export function HealthReviewNotice({
   if (saidConditions.length > 0 || aloneConditions.length > 0)
     push(
       "Enfermedades",
-      "enfermedades",
-      [...saidConditions.map((row) => row.name), ...aloneConditions.map((line) => line.slice("Enfermedades: ".length))].join(", "),
+      [...saidConditions.map((row) => row.name), ...aloneConditions.map((piece) => piece.text)].join(", "),
       conditionGroups.filter((group) => saidConditions.some((row) => group.conditions.includes(row.id))),
     )
-  else if (saidNoConditionGroup) push("Enfermedades", "enfermedades", no(saidNoConditionGroup), [saidNoConditionGroup])
+  else if (saidNoConditionGroup) push("Enfermedades", no(saidNoConditionGroup), [saidNoConditionGroup])
   // El corazón, la anestesia, el tabaco, la lactancia y lo de un niño en casa que dijo (QA del 14 nov),
   // una vez cada uno y solo lo que sigue como lo dijo.
   const interviewGroups = declared.filter((group) => (group.interview ?? []).length > 0)
   if (interviewGroups.length > 0)
     for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? []) {
       const groups = interviewGroups.filter((group) => row.keys.some((key) => group.interview?.includes(key)))
-      if (groups.length > 0) push(row.label, row.label.toLocaleLowerCase("es"), row.value, groups)
+      if (groups.length > 0) push(row.label, row.value, groups)
     }
   // Lo que dijo y nadie revisó se decide por declaración (`health.declared`, del servidor), no por si
   // la salud tuvo antes una revisión: un látex que llegó después de revisarla también se marca (QA del
@@ -283,11 +282,9 @@ export function HealthReviewNotice({
   const declaredHere = rows.length > 0 || pending
   // Las alergias que dijo la persona (o su «No») se revisan aquí, con lo demás que dijo: no salen
   // otra vez en una fila «Alergias» aparte ni se dan por vistas con «Sin cambios».
-  const declaredAllergyIds = new Set((health.declared ?? []).flatMap((group) => group.allergies))
-  const saidNoAllergies = (health.declared ?? []).some((group) => group.saidNo.allergies)
-  const allergiesSaid =
-    health.allergies.some((row) => row.isActive && declaredAllergyIds.has(row.id)) || saidNoAllergies
-  const pregnancyPending = (health.declared ?? []).some((group) => group.pregnancy)
+  const declaredAllergyIds = new Set(declared.flatMap((group) => group.allergies))
+  const saidNoAllergies = !!saidNoAllergyGroup
+  const allergiesSaid = saidAllergies.some((row) => row.isActive) || saidNoAllergies
   // Un embarazo que ya pasó su término (o quedó sin fecha) y que ya nadie tiene por revisar: se pide confirmarlo.
   const confirmPregnancy = pregnancy?.state === "por_confirmar" && !(declaredHere && pregnancyPending)
   if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy)) return null
@@ -303,7 +300,7 @@ export function HealthReviewNotice({
   const declarant = askTo ? null : askDeclarant(declared, sex)
   const first = askTo ?? declarant ?? patientFirst
   const talksFor = !!(askTo ?? declarant)
-  const reviewer = talksFor ? (declared.at(-1)?.by ?? null) : null
+  const reviewer = talksFor ? (lastGroup?.by ?? null) : null
   const topics = [
     allergyRow ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
@@ -450,21 +447,19 @@ export function HealthReviewNotice({
                 ) : null}
               </div>
             </div>
-            {/* Apilado: se lee igual a 390 px y con el panel lateral abierto (sin columnas que se aplasten). */}
-            <dl id={detailId} hidden={!showing} className="flex flex-col gap-1 text-sm">
-              {rows.map((row) => (
-                <div key={row.label}>
-                  <dt className="inline text-muted-foreground after:content-[':_']">{row.label}</dt>
-                  <dd className="inline">{row.value}</dd>
-                </div>
-              ))}
-              {saidAllergies.length > 0 && others.length > 0 ? (
-                <div>
-                  <dt className="inline text-muted-foreground after:content-[':_']">Ya tenía anotadas</dt>
-                  <dd className="inline">{others.map((allergy) => allergyTitle(allergy)).join(", ")}</dd>
-                </div>
-              ) : null}
-            </dl>
+            {/* Una columna: se lee igual a 390 px y con el panel lateral abierto (sin columnas que se aplasten). */}
+            <div id={detailId} hidden={!showing}>
+              <DetailList columns={1}>
+                {rows.map((row) => (
+                  <DetailField key={row.label} label={row.label}>
+                    {row.value}
+                  </DetailField>
+                ))}
+                {saidAllergies.length > 0 && others.length > 0 ? (
+                  <DetailField label="Ya tenía anotadas">{others.map((allergy) => allergyTitle(allergy)).join(", ")}</DetailField>
+                ) : null}
+              </DetailList>
+            </div>
           </li>
         ) : null}
         {confirmPregnancy && pregnancy ? (

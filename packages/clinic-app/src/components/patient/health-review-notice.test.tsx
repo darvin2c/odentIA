@@ -98,7 +98,7 @@ describe("«Pregúntale» en la atención", () => {
     // En una línea, con el detalle a un toque (revisión final del 15 nov, ux propuesta 3).
     expect(page).toContain("Lo dijo ella el 13 nov, sin revisar</span>: embarazo, alergia y 2 más")
     expect(page).toContain("Ver lo que dijo")
-    expect(page).toMatch(/<dl[^>]*hidden/)
+    expect(page).toMatch(/<div id="[^"]+" hidden="">/)
     expect(page).toContain("Lo revisé con ella")
     expect(page).not.toContain("no dijo qué le pasó")
     expect(page).toContain("Sulfato ferroso, Ácido fólico")

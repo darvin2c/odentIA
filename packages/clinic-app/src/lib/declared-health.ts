@@ -20,6 +20,7 @@ import {
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
+import { listWords } from "./materials"
 import type { ChangedHealth, DeclaredHealthGroup, PatientContactLink } from "./patients"
 
 export type { HealthDeclarant }
@@ -81,22 +82,19 @@ export function declaredMarkWords(by: HealthDeclarant, at: string | null | undef
   return `${saidWhenWords(by, at ? shortDay(at) : "", sex)}, sin revisar`
 }
 
-/**
- * La marca de lo vigente que la persona volvió a responder sin nombrarlo (entrega 10): «Dijo que
- * cambió el 14 may», «Su madre, Carla, dijo que cambió el 14 may». No se borra: lo decide quien
- * la atiende.
- */
-export function changedMarkWords(by: HealthDeclarant, at: string | null | undefined, sex: Sex): string {
-  return changedWhenWords(by, at ? shortDay(at) : "", sex)
-}
-
 type ChangedRow = { id?: string | undefined; name?: string | null; substance?: string | null; dose?: string | null; atcCode?: string | null }
 
 const TOPIC_WORDS: Record<Topic, string> = { allergies: "Alergias", conditions: "Enfermedades", medications: "Medicación" }
 
-/** «a, b y c». */
-const listOf = (items: string[]): string =>
-  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+/** Lo de antes sin nada de hoy a su lado, de un grupo: «Anticoagulante» y «antes warfarina 5 mg · dijo que cambió el 14 nov». */
+export interface ChangedAlone {
+  /** La clase de medicina; nula para lo demás. */
+  group: MedicationClass | null
+  label: string
+  text: string
+  /** Las dos juntas: «Anticoagulante: antes warfarina 5 mg · dijo que cambió el 14 nov». */
+  line: string
+}
 
 /**
  * Lo que dijo que cambió (entrega 10), por dato y no por declaración (revisión final del 15 nov,
@@ -121,7 +119,8 @@ export function changedHistoryOf(
     medicationClassOf(row.atcCode ?? health.medications?.find((item) => item.id === row.id)?.atcCode)
   const words = (row: ChangedRow) => [row.name ?? row.substance, row.dose].filter(Boolean).join(" ")
   const day = changed?.at ? shortDay(changed.at) : ""
-  const mark = changed ? changedMarkWords(changed.by, changed.at, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es")) : ""
+  // «Dijo que cambió el 14 may», «Su madre, Carla, dijo que cambió el 14 may» (entrega 10), en minúscula.
+  const mark = changed ? changedWhenWords(changed.by, day, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es")) : ""
   /** Lo de antes de un grupo, de una clase (o sin clase con `null`). */
   const beforeIn = (topic: Topic, rows: ReadonlyArray<ChangedRow>, group: MedicationClass | null | undefined) =>
     rows.filter((row) => isBefore(topic, row.id) && (group === undefined || classOf(row) === group))
@@ -139,20 +138,23 @@ export function changedHistoryOf(
       const first = rows.find((item) => !isBefore(topic, item.id) && classOf(item) === group)
       if (first?.id !== row.id) return null
       const before = beforeIn(topic, rows, group)
-      return before.length > 0 ? `antes ${listOf(before.map(words))}, cambió el ${day}` : null
+      return before.length > 0 ? `antes ${listWords(before.map(words))}, cambió el ${day}` : null
     },
-    /** Lo de antes que no tiene nada de hoy a su lado, cada grupo en una línea. */
-    alone: (topic: Topic, rows: ReadonlyArray<ChangedRow>): string[] => {
+    /** Lo de antes que no tiene nada de hoy a su lado, un grupo por pieza. */
+    alone: (topic: Topic, rows: ReadonlyArray<ChangedRow>): ChangedAlone[] => {
       if (!changed) return []
-      const line = (label: string, before: ChangedRow[]) =>
-        before.length > 0 ? [`${label}: antes ${listOf(before.map(words))} · ${mark}`] : []
-      if (topic !== "medications") return line(TOPIC_WORDS[topic], beforeIn(topic, rows, undefined))
+      const piece = (group: MedicationClass | null, label: string, before: ChangedRow[]): ChangedAlone[] => {
+        if (before.length === 0) return []
+        const text = `antes ${listWords(before.map(words))} · ${mark}`
+        return [{ group, label, text, line: `${label}: ${text}` }]
+      }
+      if (topic !== "medications") return piece(null, TOPIC_WORDS[topic], beforeIn(topic, rows, undefined))
       const today = rows.filter((row) => !isBefore(topic, row.id))
       return [
         ...(Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((group) =>
-          today.some((row) => classOf(row) === group) ? [] : line(MEDICATION_CLASSES[group].label, beforeIn(topic, rows, group)),
+          today.some((row) => classOf(row) === group) ? [] : piece(group, MEDICATION_CLASSES[group].label, beforeIn(topic, rows, group)),
         ),
-        ...line(TOPIC_WORDS.medications, beforeIn(topic, rows, null)),
+        ...piece(null, TOPIC_WORDS.medications, beforeIn(topic, rows, null)),
       ]
     },
   }

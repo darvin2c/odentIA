@@ -1,5 +1,5 @@
 import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
+import { DetailField, DetailList, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 import { shortDay } from "../../lib/declared-health"
@@ -87,14 +87,13 @@ export function AnamnesisVersionDialog({
         ) : entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Esta versión no tiene nada respondido.</p>
         ) : (
-          <dl className="flex flex-col gap-1 text-sm">
+          <DetailList>
             {entries.map((entry) => (
-              <div key={entry.key}>
-                <dt className="inline text-muted-foreground after:content-[':_']">{entry.label}</dt>
-                <dd className="inline">{entry.value}</dd>
-              </div>
+              <DetailField key={entry.key} label={entry.label}>
+                {entry.value}
+              </DetailField>
             ))}
-          </dl>
+          </DetailList>
         )}
       </DialogContent>
     </Dialog>

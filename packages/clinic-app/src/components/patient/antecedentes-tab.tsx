@@ -690,7 +690,8 @@ export function AntecedentesTab({
       declaration.via === "enlace" || (declaration.via === "registro" && declaration.enteredAt !== registration?.createdAt),
   )
   const pendingReview = isHealthReviewPending(health)
-  const childPatient = isChildAge(ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday()))
+  const age = ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())
+  const childPatient = isChildAge(age)
   // «Dijo que no · 13 nov», junto al grupo donde se decide: es de quien declaró, no del equipo.
   const saidNoOf = (topic: "conditions" | "medications"): string | undefined => {
     const group = saidNoGroupOf(health.declared, topic)
@@ -777,7 +778,7 @@ export function AntecedentesTab({
           saved={saved}
           pendingReview={pendingReview}
           groups={health.declared}
-          changed={health}
+          health={health}
           // latidIA dice el embarazo en su propia sección, debajo: aquí no se repite.
           pregnancy={productHealth.asksPregnancy ? (health.pregnancy ?? null) : null}
           sex={sex}
@@ -785,7 +786,7 @@ export function AntecedentesTab({
       )}
       <productHealth.Summary
         answers={(health.latestAnamnesis?.answers ?? {}) as Rec}
-        age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
+        age={age}
         // Lo que dijo la persona y nadie revisó, con su marca dato por dato (QA del 14 nov, causa raíz).
         marks={Object.fromEntries(
           (health.declared ?? []).flatMap((group) =>
@@ -1200,7 +1201,7 @@ export function AntecedentesSummary({
   saved,
   pendingReview,
   groups,
-  changed,
+  health,
   pregnancy,
   sex,
 }: {
@@ -1209,7 +1210,7 @@ export function AntecedentesSummary({
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
   /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
-  changed?: Pick<PatientHealth, "changed" | "medications">
+  health?: Pick<PatientHealth, "changed" | "medications">
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
@@ -1217,14 +1218,14 @@ export function AntecedentesSummary({
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
   // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca tres anticoagulantes vigentes
   // (revisión final del 15 nov, dev H2).
-  const history = changedHistoryOf({ changed: changed?.changed, medications: changed?.medications }, sex)
+  const history = changedHistoryOf(health ?? {}, sex)
   const allActiveCon = conditions.filter((r) => r.status === "activa")
   const activeCon = history.current("conditions", allActiveCon)
   // La que toma: sin fin o con fin desde hoy, como en la receta y en la atención.
   const today = clinicToday()
   const activeMed = history.current("medications", medications.filter((r) => r.endDate === "" || r.endDate >= today))
   // Lo de antes se dice con lo guardado (nombre y dosis como la franja), no con el borrador.
-  const savedMed = (changed?.medications ?? []).filter((m) => !m.endDate || m.endDate >= today)
+  const savedMed = (health?.medications ?? []).filter((m) => !m.endDate || m.endDate >= today)
   const beforeCon = history.alone("conditions", allActiveCon)
   const beforeMed = history.alone("medications", savedMed)
   // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo),
@@ -1269,7 +1270,7 @@ export function AntecedentesSummary({
               ...activeCon.map((row) =>
                 rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))),
               ),
-              ...beforeCon,
+              ...beforeCon.map((piece) => piece.line),
             ].join(", ")
           : conditions.length > 0
             ? "Ninguna activa"
@@ -1292,7 +1293,7 @@ export function AntecedentesSummary({
                 )
                 return before ? `${text} · ${before}` : text
               }),
-              ...beforeMed,
+              ...beforeMed.map((piece) => piece.line),
             ].join(", ")
           : medications.length > 0
             ? "Ninguna vigente"

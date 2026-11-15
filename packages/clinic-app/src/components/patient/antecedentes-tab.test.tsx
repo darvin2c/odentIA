@@ -189,7 +189,7 @@ describe("lo que dijo que cambió, en el resumen de Antecedentes", () => {
         }}
         pendingReview
         groups={[]}
-        changed={
+        health={
           {
             medications: meds,
             changed: {

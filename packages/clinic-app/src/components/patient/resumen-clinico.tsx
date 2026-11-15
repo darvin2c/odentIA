@@ -173,7 +173,8 @@ export function ClinicalAlertsCard({
   const history = changedHistoryOf({ changed: health?.changed, medications: currentMedications }, sex)
   const conditions = history.current("conditions", activeConditions)
   const medications = history.current("medications", currentMedications)
-  const before = [...history.alone("conditions", activeConditions), ...history.alone("medications", currentMedications)]
+  const beforeConditions = history.alone("conditions", activeConditions)
+  const beforeMedications = history.alone("medications", currentMedications)
   const allergyState = health?.reviewStatus.allergies ?? "unknown"
   // Lo que dijo la persona y nadie revisó, con la misma marca que la franja (lo decide el servidor).
   // Quién dijo cada cosa y cuándo lo trae su declaración, no quien figure hoy como su representante.
@@ -197,10 +198,10 @@ export function ClinicalAlertsCard({
   const quiet = !health
     ? []
     : [
-    conditions.length === 0 && history.alone("conditions", activeConditions).length === 0
+    conditions.length === 0 && beforeConditions.length === 0
       ? `Enfermedades: ${saidNo("conditions") ?? groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}`
       : null,
-    medications.length === 0 && history.alone("medications", currentMedications).length === 0
+    medications.length === 0 && beforeMedications.length === 0
       ? `Medicación: ${saidNo("medications") ?? groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}`
       : null,
     // ASA en odentIA siempre; en latidIA solo si alguien la clasificó.
@@ -298,8 +299,8 @@ export function ClinicalAlertsCard({
             }
           />
         ))}
-        {before.map((line) => (
-          <Alert key={line} tone="muted" title={line} />
+        {[...beforeConditions, ...beforeMedications].map((piece) => (
+          <Alert key={piece.line} tone="muted" title={piece.line} />
         ))}
         {quiet.length > 0 ? (
           <li className="col-span-full text-sm text-muted-foreground">{quiet.join(" · ")}</li>

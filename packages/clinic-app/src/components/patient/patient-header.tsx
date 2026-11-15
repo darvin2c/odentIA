@@ -260,9 +260,9 @@ export function PatientClinicalStrip({
         ["medications", detail.currentMedications],
       ] as const
     ).flatMap(([topic, rows]) =>
-      history.alone(topic, rows).map((label, index) => ({
+      history.alone(topic, rows).map((piece, index) => ({
         id: `cambio-${topic}-${index}`,
-        label,
+        label: piece.line,
         tone: "warning" as const,
         group: null,
         changed: true,
