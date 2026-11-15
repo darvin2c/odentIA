@@ -516,3 +516,41 @@ it("Lucía, de 3 años: se revisa con su madre, que lo dijo, y sin «Anticoagula
   expect(page).not.toContain("Anticoagulante")
   expect(page).not.toContain("huesos")
 })
+
+// Revisión final del 15 nov (K16, A12): su «No sé» a las alergias es lo que dijo, y lo que saltó del
+// anticoagulante «no respondió», nunca «no se le preguntó».
+it("su «No sé» a las alergias y lo que saltó se dicen como lo que fueron", () => {
+  const paz = {
+    ...health,
+    reviewPending: true,
+    declarations: [
+      {
+        at: "2026-11-13T19:27:00.000Z",
+        enteredAt: "2026-11-13T19:27:00.000Z",
+        via: "registro",
+        by: { kind: "patient", name: null, relation: null },
+        health: { allergies: { state: "unknown" } },
+      },
+    ],
+    medicineClasses: { anticoagulants: { answer: "skipped", said: true }, boneMedicines: { answer: "no", said: true } },
+    declared: [
+      {
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: [],
+        pregnancy: false,
+        saidNo: { allergies: false, conditions: true, medications: false },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Ana Paz" health={paz} sex="F" />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Dijo que no sabe si tiene alergias (13 nov).")
+  expect(page).not.toContain("Nadie las revisó todavía")
+  expect(page).toMatch(/Anticoagulante\|+no respondió/)
+})

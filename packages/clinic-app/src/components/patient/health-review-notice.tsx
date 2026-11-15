@@ -7,6 +7,8 @@ import { useEffect, useId, useRef, useState } from "react"
 import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
+  allergiesSaidUnknown,
+  allergiesUnknownWords,
   changedHistoryOf,
   declaredMarkWords,
   type HealthDeclarant,
@@ -239,6 +241,8 @@ export function HealthReviewNotice({
       const known = health.medicineClasses?.[key]
       if (known?.said && known.answer === "unknown") push(label, "no sabe", [lastGroup])
       else if (known?.said && known.answer === "no") push(label, no(lastGroup), [lastGroup])
+      // Lo saltó: se le preguntó y no respondió (revisión final del 15 nov, A12).
+      else if (known?.answer === "skipped") push(label, "no respondió", [lastGroup])
     }
   }
   const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
@@ -292,6 +296,7 @@ export function HealthReviewNotice({
   // Las que ya tenía, anotadas o revisadas por el equipo: revisar las alergias también las cubre.
   const others = active.filter((allergy) => !declaredAllergyIds.has(allergy.id))
   const allergyRow = allergiesDue && !allergiesSaid
+  const saidUnknownAllergies = allergyRow ? allergiesSaidUnknown(health) : null
   // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
   const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)
   // Con representante (un niño), se le pregunta a él, como lo dice la ficha. Sin uno registrado
@@ -370,7 +375,10 @@ export function HealthReviewNotice({
               <p className="text-sm text-muted-foreground">
                 {health.allergiesReviewedAt
                   ? `Última revisión ${sinceWords(health.allergiesReviewedAt)}${health.allergiesReviewedBy ? `, por ${memberName(health.allergiesReviewedBy)}` : ""}.`
-                  : "Nadie las revisó todavía con el paciente."}
+                  : // Su «No sé» es lo que dijo, no que nadie le preguntó (revisión final del 15 nov, K16).
+                    saidUnknownAllergies
+                    ? allergiesUnknownWords(saidUnknownAllergies, sex)
+                    : "Nadie las revisó todavía con el paciente."}
               </p>
               {active.length > 0 ? (
                 <ul className="flex flex-wrap gap-2">
