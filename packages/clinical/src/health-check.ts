@@ -36,3 +36,12 @@ export function healthCheckDue(lastSaidAt: Date | null, now: Date): boolean {
 /** Por qué llega una declaración de salud: lo primero que dijo, que algo cambió, una corrección o que nada cambió. */
 export const HEALTH_DECLARATION_REASONS = ["cambio", "correccion", "sin_cambios"] as const
 export type HealthDeclarationReason = (typeof HEALTH_DECLARATION_REASONS)[number]
+/**
+ * Por qué llegó, en palabras: el título de «Declaración original» en la ficha y, en la copia de la
+ * historia, el título y el motivo (`Provenance.reason`) de lo que volvió a responder.
+ */
+export const HEALTH_DECLARATION_REASON_LABELS: Record<HealthDeclarationReason, string> = {
+  cambio: "Dijo que algo cambió en su salud o en sus medicinas",
+  correccion: "Corrigió lo que había enviado",
+  sin_cambios: "Dijo que nada cambió en su salud ni en sus medicinas",
+}

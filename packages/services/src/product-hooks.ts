@@ -251,6 +251,11 @@ export interface ProductInterview {
    */
   declaredLines?(health: DeclaredHealth): Array<{ label: string; value: string }>
   /**
+   * Las claves de `record` de lo que dice `declaredLines`: en la copia, cada uno de esos datos lleva
+   * su «sin revisar» si sigue siendo lo que dijo (odentIA: «de pequeño»).
+   */
+  declaredKeys?: readonly string[]
+  /**
    * La entrevista guardada en la copia de la historia, dato por dato y en el
    * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
    * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un

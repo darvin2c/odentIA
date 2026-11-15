@@ -44,6 +44,24 @@ describe("un formulario finalizado dentro de su atención", () => {
     expect(page).toContain("Sin respuesta")
   })
 
+  // Revisión final de formularios (H10): la copia y la atención firmada decían que la llenó una sola persona.
+  it("si la llenó más de una persona, cada respuesta dice quién la escribió, como la copia", () => {
+    const shared: FormRecord = {
+      ...form,
+      byWords: "Lo llenaron Dra. Ana Torres y Dr. Luis Prado · lo finalizó Dra. Ana Torres el 13 de noviembre de 2026, 15:02",
+      sections: [
+        {
+          id: "examen",
+          title: "Examen",
+          items: [{ id: "movilidad", label: "Movilidad", words: "2 mm", writtenBy: "Dr. Luis Prado" }],
+        },
+      ],
+    }
+    const page = renderToStaticMarkup(<FormRecordView form={shared} />)
+    expect(page).toContain("Lo llenaron Dra. Ana Torres y Dr. Luis Prado")
+    expect(page).toContain("Lo escribió Dr. Luis Prado")
+  })
+
   it("sin adendas no anuncia ninguna", () => {
     expect(renderToStaticMarkup(<FormRecordView form={{ ...form, addenda: [] }} />)).not.toContain("Adendas")
   })

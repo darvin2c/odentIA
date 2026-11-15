@@ -207,3 +207,8 @@ export function productWords(product: ClinicalProduct = "dental"): ProductWords 
 export function upperFirst(text: string): string {
   return text.charAt(0).toLocaleUpperCase("es") + text.slice(1)
 }
+
+/** La primera letra en minúscula: «Era otra cosa» dentro de una frase, «era otra cosa». */
+export function lowerFirst(text: string): string {
+  return text.charAt(0).toLocaleLowerCase("es") + text.slice(1)
+}
