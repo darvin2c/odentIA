@@ -879,7 +879,10 @@ async function healthDeclarationsOf(
     // Dos en el mismo envío (lo que faltaba y «nada cambió») entran en el mismo instante: va primero la última que dijo.
     .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
   const rows = limit === null ? await query : await query.limit(limit)
-  return rows.filter((row) => hasMeaningfulHealth(row.health as Parameters<typeof hasMeaningfulHealth>[0])).map((row) => ({
+  // «Nada cambió» (entrega 10) no trae salud y sí es lo que dijo, con su fecha: no se descarta.
+  const said = (row: (typeof rows)[number]) =>
+    row.reason === "sin_cambios" || hasMeaningfulHealth(row.health as Parameters<typeof hasMeaningfulHealth>[0])
+  return rows.filter(said).map((row) => ({
     at: row.saidAt,
     enteredAt: row.createdAt,
     via: row.via,

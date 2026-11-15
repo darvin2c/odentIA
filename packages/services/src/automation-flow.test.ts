@@ -506,7 +506,11 @@ describe("por dónde le llega a cada persona", () => {
 
   // Entrega 10, con lo que decidió el dueño el 14 nov: «¿Cambió algo?» sigue la regla de su visita.
   it("«¿Cambió algo?» no suma como algo por hacer: sale el recordatorio de siempre con «Si algo cambió en tu salud, cuéntanos»", async () => {
+    // Las próximas 10:00 de Lima de lunes a viernes, como la prueba de arriba: con la hora real, de
+    // noche o en fin de semana, el recordatorio no salía.
     const now = new Date()
+    now.setUTCHours(15, 0, 0, 0)
+    while (now.getTime() <= Date.now() || now.getUTCDay() === 0 || now.getUTCDay() === 6) now.setTime(now.getTime() + 24 * HOUR)
     const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
     await ruleOn(c, "recordatorio_cita", new Date(now.getTime() - HOUR), { hoursBefore: [24] })
     const p = await person(c, "Elena Vargas", { consent: ["recordatorio"], openWindow: true })
@@ -514,6 +518,8 @@ describe("por dónde le llega a cada persona", () => {
       .update(contact)
       .set({ givenNames: "Elena", familyName: "Vargas", birthDate: "1958-08-02", sex: "F", phone: "+51987000939" })
       .where(eq(contact.id, p.contactId))
+    // Escribió una hora antes de ese «ahora».
+    await ownerDb.update(conversation).set({ lastInboundAt: new Date(now.getTime() - HOUR) }).where(eq(conversation.id, p.conversationId!))
     // Dijo su salud hace dos meses: pasado el mes, antes de su cita se le pregunta si cambió algo.
     await run(c, (tx) =>
       recordHealthDeclaration(tx, c.orgId, p.patientId, {
