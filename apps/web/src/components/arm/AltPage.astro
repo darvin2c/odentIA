@@ -36,7 +36,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(page.faq)]
     lead={page.lead}
     secondary={{ href: "#fila-por-fila", label: "Compáralos" }}
   >
-    <ArmVisual slot="visual" them={page.them} />
+    <ArmVisual slot="visual" alt={alt.key} />
   </PageHero>
 
   <section class="section section-white" id="fila-por-fila" aria-labelledby="alt-rows">

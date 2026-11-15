@@ -1,19 +1,71 @@
 ---
-// La escena de la portada de /comparar: las mismas tareas de un día en un CRM (pendientes, esperando
-// a alguien del equipo) y en el ARM (los agentes las van marcando como hechas, con su nombre y la
-// hora). Solo tareas que los agentes de cada producto hacen hoy (ver lib/arm.ts). Es CSS: con menos
-// movimiento, todo aparece hecho desde el principio.
+// La escena de la portada de /comparar y de cada /comparar/<alternativa>: las mismas tareas de un día
+// con la alternativa (a la izquierda, cómo quedan con ella) y en el ARM (los agentes las van marcando
+// como hechas, con su nombre y la hora). Cada alternativa cuenta lo suyo y con justicia: el chatbot sí
+// responde, pero no agenda ni sigue; el software espera a que alguien lo use; el cuaderno depende de que
+// alguien se acuerde. Solo tareas que los agentes de cada producto hacen hoy (ver lib/arm.ts). Es CSS:
+// con menos movimiento, todo aparece hecho desde el principio.
+import type { AltKey } from "../../lib/arm"
 import { ofProduct, WORDS } from "../../lib/product"
 
 interface Props {
-  /** La tarjeta de la izquierda: «Tu CRM», «Tu chatbot», «Tu cuaderno»… */
-  them?: string
+  /** La alternativa de la tarjeta de la izquierda; en /comparar, el CRM. */
+  alt?: AltKey
 }
-const { them = "Tu CRM" } = Astro.props
+const { alt = "crm" } = Astro.props
+
+/** Qué clase de tarea es, para decir cómo queda con cada alternativa. */
+type Kind = "reply" | "book" | "note" | "followup" | "remind"
+/** Cómo queda cada tarea con la alternativa; `half` marca lo que sí hace, a medias. */
+const THEM: Record<AltKey, { name: string; status: Record<Kind, string>; half?: Kind[] }> = {
+  crm: {
+    name: "Tu CRM",
+    status: {
+      reply: "Esperando a alguien",
+      book: "Esperando a alguien",
+      note: "Esperando a alguien",
+      followup: "Esperando a alguien",
+      remind: "Esperando a alguien",
+    },
+  },
+  chatbot: {
+    name: "Tu chatbot",
+    status: {
+      reply: "Respondió y lo dejó ahí",
+      book: "Se lo pasó a alguien",
+      note: "No entra a la consulta",
+      followup: "Se olvidó al cerrar el chat",
+      remind: "Se olvidó al cerrar el chat",
+    },
+    half: ["reply"],
+  },
+  software: {
+    name: "Tu software",
+    status: {
+      reply: "En un celular, fuera del sistema",
+      book: "Alguien tiene que anotarla",
+      note: "La escribes al final del día",
+      followup: "Un reporte que nadie leyó",
+      remind: "Alguien tiene que llamar",
+    },
+  },
+  manual: {
+    name: "Tu cuaderno",
+    status: {
+      reply: "Lo verán mañana",
+      book: "En el cuaderno, si alguien se acuerda",
+      note: "En papel",
+      followup: "Se pierde",
+      remind: "Si alguien se acuerda",
+    },
+  },
+}
+const them = THEM[alt]
 
 type Agent = "sofi" | "clio" | "argos"
 interface Task {
   todo: string
+  kind: Kind
   agent: Agent
   done: string
 }
@@ -21,37 +73,37 @@ const NAMES: Record<Agent, string> = { sofi: "Sofi", clio: "Clío", argos: "Argo
 
 const tasks: Task[] = ofProduct<Task[]>({
   dental: [
-    { todo: "Responder a Rosa por WhatsApp", agent: "sofi", done: "Le respondió · 23:40" },
-    { todo: "Agendar su limpieza", agent: "sofi", done: "Agendó con su sí · 23:42" },
-    { todo: "Pasar la nota de la consulta", agent: "clio", done: "Preparó la nota · falta tu sí" },
-    { todo: "Retomar su presupuesto", agent: "argos", done: "Lo retomó · 10:00" },
+    { todo: "Responder a Rosa por WhatsApp", kind: "reply", agent: "sofi", done: "Le respondió · 23:40" },
+    { todo: "Agendar su limpieza", kind: "book", agent: "sofi", done: "Agendó con su sí · 23:42" },
+    { todo: "Pasar la nota de la consulta", kind: "note", agent: "clio", done: "Preparó la nota · falta tu sí" },
+    { todo: "Retomar su presupuesto", kind: "followup", agent: "argos", done: "Lo retomó · 10:00" },
   ],
   medical: [
-    { todo: "Responder a Rosa por WhatsApp", agent: "sofi", done: "Le respondió · 23:40" },
-    { todo: "Agendar su consulta", agent: "sofi", done: "Agendó con su sí · 23:42" },
-    { todo: "Pasar la nota de la consulta", agent: "clio", done: "Ordenó tu dictado · falta tu sí" },
-    { todo: "Recuperar a quien faltó", agent: "argos", done: "Le ofreció otro horario · 10:00" },
+    { todo: "Responder a Rosa por WhatsApp", kind: "reply", agent: "sofi", done: "Le respondió · 23:40" },
+    { todo: "Agendar su consulta", kind: "book", agent: "sofi", done: "Agendó con su sí · 23:42" },
+    { todo: "Pasar la nota de la consulta", kind: "note", agent: "clio", done: "Ordenó tu dictado · falta tu sí" },
+    { todo: "Recuperar a quien faltó", kind: "followup", agent: "argos", done: "Le ofreció otro horario · 10:00" },
   ],
   optical: [
-    { todo: "Responder a Rosa por WhatsApp", agent: "sofi", done: "Le respondió · 23:40" },
-    { todo: "Agendar su examen de la vista", agent: "sofi", done: "Agendó con su sí · 23:42" },
-    { todo: "Recordarle su cita", agent: "argos", done: "Se la recordó un día antes" },
-    { todo: "Invitarla a su control", agent: "argos", done: "La invitó · 10:00" },
+    { todo: "Responder a Rosa por WhatsApp", kind: "reply", agent: "sofi", done: "Le respondió · 23:40" },
+    { todo: "Agendar su examen de la vista", kind: "book", agent: "sofi", done: "Agendó con su sí · 23:42" },
+    { todo: "Recordarle su cita", kind: "remind", agent: "argos", done: "Se la recordó un día antes" },
+    { todo: "Invitarla a su control", kind: "followup", agent: "argos", done: "La invitó · 10:00" },
   ],
 })
 ---
-<div class="av" role="img" aria-label={`Las mismas tareas: con ${them.toLowerCase()} quedan pendientes para tu equipo; en ${WORDS.name}, los agentes las hacen`}>
+<div class="av" role="img" aria-label={`Las mismas tareas: con ${them.name.toLowerCase()} quedan a medias o para tu equipo; en ${WORDS.name}, los agentes las hacen`}>
   <div class="av-card av-crm" aria-hidden="true">
     <div class="av-h">
-      <strong>{them}</strong>
-      <span class="av-count">{tasks.length} pendientes</span>
+      <strong>{them.name}</strong>
+      <span class="av-count">{tasks.filter((t) => !them.half?.includes(t.kind)).length} pendientes</span>
     </div>
     <ul>
       {tasks.map((t) => (
-        <li>
-          <span class="box"></span>
+        <li class:list={{ half: them.half?.includes(t.kind) }}>
+          <span class="box">{them.half?.includes(t.kind) && <svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"></path></svg>}</span>
           <span class="txt">{t.todo}</span>
-          <span class="who">Esperando a alguien</span>
+          <span class="who">{them.status[t.kind]}</span>
         </li>
       ))}
     </ul>
@@ -95,6 +147,9 @@ const tasks: Task[] = ofProduct<Task[]>({
   .box { width: 18px; height: 18px; margin-top: 1px; border-radius: 6px; border: 1.5px solid rgba(255, 255, 255, .22); display: grid; place-items: center; }
   .av-crm .who { color: rgba(255, 255, 255, .35); }
   .av-crm .txt { color: var(--on-night-3); }
+  /* Lo que la alternativa sí hace, a medias: la marca apagada. */
+  .av-crm li.half .box { border-color: rgba(255, 255, 255, .35); }
+  .av-crm li.half svg { width: 12px; height: 12px; fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
   .av-arm li { --c: #4fc3d7; }
   .av-arm li.clio { --c: #6ee7b7; }

@@ -221,8 +221,6 @@ const IMPORT_FAQ: FaqItem = {
 export interface AltPage {
   /** La dirección de su página. */
   path: string
-  /** El nombre de la tarjeta de la izquierda en la escena de la portada («Tu CRM»). */
-  them: string
   /** Lo que la clínica busca en Google: va primero en el título y en la etiqueta de la portada. */
   keyword: string
   seoTitle: string
@@ -239,7 +237,6 @@ const SOFTWARE_KW = ofProduct({ dental: "Software dental", medical: "Software m�
 export const ALT_PAGES: Record<AltKey, AltPage> = {
   crm: {
     path: "/comparar/crm",
-    them: "Tu CRM",
     keyword: `CRM para ${WORDS.audience}`,
     seoTitle: `CRM para ${WORDS.audience}: por qué ${NAME} es un ARM`,
     seoDescription: `Un CRM guarda lo que tu equipo anota y espera. ${NAME} es un ARM: agentes de IA que responden, agendan y traen de vuelta a tus ${P}. Compáralos fila por fila.`,
@@ -250,7 +247,6 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   },
   chatbot: {
     path: "/comparar/chatbot",
-    them: "Tu chatbot",
     keyword: `Chatbot para ${WORDS.audience}`,
     seoTitle: `Chatbot para ${WORDS.audience} vs agentes de IA: ${NAME}`,
     seoDescription: `Un chatbot responde y le pasa el resto a alguien. En ${NAME}, Sofi responde por todos tus canales y agenda con el sí de la persona, y Argos sigue cuando la conversación termina.`,
@@ -271,7 +267,6 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   },
   software: {
     path: "/comparar/software-tradicional",
-    them: "Tu software",
     keyword: SOFTWARE_KW,
     seoTitle: `${SOFTWARE_KW} con agentes de IA: ${NAME} vs el software de siempre`,
     seoDescription: `El software de siempre guarda tu agenda y tus historias, pero todo lo hace tu equipo a mano. ${NAME} trae ${SYSTEM}, y además agentes de IA que responden, agendan y hacen seguimiento.`,
@@ -289,7 +284,6 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   },
   manual: {
     path: "/comparar/whatsapp-y-cuaderno",
-    them: "Tu cuaderno",
     keyword: `Agenda por WhatsApp para ${WORDS.audience}`,
     seoTitle: `Agenda por WhatsApp para ${WORDS.audience}: del cuaderno a ${NAME}`,
     seoDescription: `Mensajes que esperan hasta mañana, citas en un cuaderno y ${P} que no vuelven. Con ${NAME}, Sofi responde y agenda a cualquier hora y Argos recuerda las citas a quien aceptó sus avisos.`,
