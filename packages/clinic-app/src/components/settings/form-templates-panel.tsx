@@ -47,7 +47,6 @@ import {
   fetchFormTemplates,
   fetchSpecialties,
   publishFormTemplate,
-  fetchTemplateReach,
   reuseFormTemplate,
   updateFormTemplate,
   useClinicSpecialties,
@@ -70,7 +69,6 @@ import {
   sameTitleTemplate,
   settleFieldKeys,
   templateGroups,
-  touchesPatients,
   twinDetail,
   uniqueKey,
   versionStatusWords,
@@ -263,29 +261,6 @@ export function FormTemplatesPanel() {
     [listed, unused],
   )
 
-  // A quién le llega hoy y a quién le llegará después del cambio: lo dice el servidor al abrir la
-  // confirmación, solo si el cambio toca un cuestionario del paciente. La pantalla no lo calcula.
-  const changing = publishing
-    ? { template: publishing, change: "publish" as const }
-    : leaving
-      ? { template: leaving, change: "leave" as const }
-      : reusing
-        ? { template: reusing, change: "reuse" as const }
-        : null
-  const asksReach = changing !== null && touchesPatients(changing.template, templates)
-  const reachQuery = useQuery({
-    queryKey: ["form-template-reach", changing?.template.id, changing?.change],
-    queryFn: () => fetchTemplateReach(changing?.template.id ?? "", changing?.change ?? "publish"),
-    enabled: asksReach,
-    // Siempre lo de ahora: otra persona pudo publicar otro cuestionario hace un minuto.
-    staleTime: 0,
-    gcTime: 0,
-    retry: 1,
-  })
-  const reach = asksReach ? (reachQuery.data?.data ?? null) : null
-  // Mientras llega, la confirmación espera; si no se pudo consultar, se confirma igual, sin nombrar a ninguno.
-  const reachLoading = asksReach && reachQuery.isPending
-  const CHECKING = "Comprobando qué cuestionario reciben hoy los pacientes…"
 
   return (
     <div ref={listRef} className="flex flex-col gap-4">
@@ -523,10 +498,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "publish"}
         variant="default"
         title={publishing ? `¿Publicar la versión ${publishing.version} de «${publishing.title}»?` : "Publicar"}
-        // Lo que de verdad pasa: el del paciente dice a quién le llega y a cuál reemplaza, por su nombre.
-        description={publishing ? (reachLoading ? CHECKING : publishWords(publishing, templates, reach)) : ""}
+        description={publishing ? publishWords(publishing, templates) : ""}
         confirmLabel="Publicar"
-        pending={publishMutation.isPending || reachLoading}
+        pending={publishMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "publish" && sending.run(() => publishMutation.mutate(confirm.draft))}
       />
@@ -534,9 +508,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "leave"}
         variant="default"
         title={leaving ? `¿Dejar de usar «${leaving.title}»?` : "Dejar de usar"}
-        description={leaving ? (reachLoading ? CHECKING : leaveWords(leaving, reach)) : ""}
+        description={leaving ? leaveWords(leaving) : ""}
         confirmLabel="Dejar de usar"
-        pending={leaveMutation.isPending || reachLoading}
+        pending={leaveMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "leave" && sending.run(() => leaveMutation.mutate(confirm.current))}
       />
@@ -544,9 +518,9 @@ export function FormTemplatesPanel() {
         open={confirm?.kind === "reuse"}
         variant="default"
         title={reusing ? `¿Volver a usar «${reusing.title}»?` : "Volver a usar"}
-        description={reusing ? (reachLoading ? CHECKING : (reuseWords(reusing, reach) ?? "")) : ""}
+        description={reusing ? (reuseWords(reusing) ?? "") : ""}
         confirmLabel="Volver a usar"
-        pending={reuseMutation.isPending || reachLoading}
+        pending={reuseMutation.isPending}
         onClose={() => setConfirm(null)}
         onConfirm={() => confirm?.kind === "reuse" && sending.run(() => reuseMutation.mutate(confirm.last))}
       />

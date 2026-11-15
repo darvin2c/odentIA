@@ -214,8 +214,10 @@ describe("mientras dura la entrega", () => {
 // QA del 14 nov (B15): «Faltan 2: tipo de documento, número de documento; y unas preguntas de tu salud» se leía como 3.
 describe("la tarjeta de sus datos cuenta lo de su salud", () => {
   it("dos datos y su salud: «Faltan 3»", () => {
+    // Sin cita: con una, va en «Antes de tu cita» (entrega 8), que no cuenta.
     const [datos] = pendingItems(
       view({
+        appointment: null,
         consents: [],
         toSchedule: [],
         data: {
