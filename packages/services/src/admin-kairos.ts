@@ -1009,9 +1009,21 @@ export interface KairosDecision<O extends KairosOutreachPrepared = KairosOutreac
   status: KairosItemStatus
   result: Record<string, unknown> | null
   error: string | null
-  /** Un mensaje aprobado: el envío que la ruta manda después del commit (correo) o abre por enlace (WhatsApp). */
+  /**
+   * Un mensaje aprobado: el envío que la ruta manda después del commit (correo,
+   * o WhatsApp por el número de Sallca) o abre por enlace (wa.me, sin él).
+   */
   outreach?: O
 }
+
+/**
+ * Lo que no se pudo al aprobar pero se arregla en la ficha o en la
+ * conversación y se vuelve a aprobar: el ítem sigue en espera (409 a la
+ * persona) en vez de quedar fallido. Un mensaje por el WhatsApp de Sallca a un
+ * celular que ya escribe como otra clínica, que falta decir de quién es, o
+ * que Soporte no envía (una clínica sin su cuenta).
+ */
+const KEEPS_WAITING = new Set(["CHAT_OTHER_CLIENT", "CHAT_UNASSIGNED", "CHAT_ADMIN_ONLY"])
 
 /** Lo que cada tipo deja cambiar antes de aprobar. */
 const EDITABLE: Record<KairosItemKind, readonly string[]> = {
@@ -1086,8 +1098,9 @@ async function executeItem<O extends KairosOutreachPrepared>(
         proposalId: optText(payload.proposalId),
         kairosItemId: item.id,
       })
-      // Hasta saber si salió: el correo lo envía la ruta después del commit y el
-      // WhatsApp lo confirma la persona («Salió»); nunca se reintenta solo.
+      // Hasta saber si salió: el correo, y el WhatsApp por el número de Sallca, los
+      // envía la ruta después del commit; el de wa.me lo confirma la persona
+      // («Salió»). Nunca se reintenta solo.
       return { status: "incierta", result: { outreachId: outreach.id, channel }, outreach }
     }
     case "dato": {
@@ -1336,6 +1349,8 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
       executeItem(inner as Db, actor, item, payload, executors),
     )
   } catch (error) {
+    // Lo que la persona puede arreglar y volver a aprobar (de quién es el celular) no lo da por fallido.
+    if (error instanceof ServiceError && KEEPS_WAITING.has(error.code)) throw error
     if (error instanceof ServiceError && (error.status === 409 || error.status === 404)) {
       await tx
         .update(kairosItem)

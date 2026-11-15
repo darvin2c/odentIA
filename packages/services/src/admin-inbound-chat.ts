@@ -42,6 +42,7 @@ import {
   saasClientFile,
   saasInboundMessage,
   saasOutreach,
+  saasProposal,
 } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
@@ -51,6 +52,7 @@ import { z } from "zod"
 import { cargaDeleteAfter, cleanFilename, registerClientFile } from "./admin-client-files.js"
 import { outreachAdminOnlySql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { sendableProposal } from "./admin-sales.js"
 import { invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { limaDate } from "./peru-business-days.js"
 
@@ -490,9 +492,17 @@ async function recordReplyActivity(tx: Db, row: OutreachRecord, now: Date): Prom
     direction: "salio",
     contactId: contact?.id ?? null,
     chatId: row.chatId,
+    proposalId: row.proposalId,
     happenedAt: row.sentAt ?? now,
     adminOnly: await outreachIsAdminOnly(tx, row.id),
   })
+  if (row.proposalId) {
+    // Como por correo (`outreachWentOut`): una propuesta ya enviada no cambia su fecha.
+    await tx
+      .update(saasProposal)
+      .set({ status: "enviada", sentAt: now, updatedAt: now })
+      .where(and(eq(saasProposal.id, row.proposalId), eq(saasProposal.status, "borrador")))
+  }
 }
 
 export interface AssignChatInput {
@@ -1093,6 +1103,14 @@ export interface ChatReplyInput {
   adminOnly?: boolean | null
   /** Fuera de las 24 h, solo en WhatsApp: la plantilla con que se retoma. */
   template?: string | null
+  /**
+   * La propuesta de la que habla el texto (solo Administración, lista y
+   * vigente, como en «Escribir»). Por WhatsApp no va el PDF; con la plantilla
+   * no va (la plantilla no la nombra).
+   */
+  proposalId?: string | null
+  /** El mensaje de Kairós del que sale (`mensaje`): su ítem sigue a este envío. */
+  kairosItemId?: string | null
 }
 
 export interface ChatReply {
@@ -1155,6 +1173,25 @@ export async function prepareChatReply(
   }
   // Lo que escribe Soporte nunca es «Solo administración».
   const adminOnly = actor.role === "admin" ? Boolean(input.adminOnly) : false
+  let proposalId: string | null = null
+  if (input.proposalId && !template) {
+    if (!chat.clientId)
+      throw invalidField("proposalId", "Esta conversación no es de un cliente: ligala antes")
+    proposalId = await sendableProposal(tx, actor, chat.clientId, input.proposalId, now)
+  }
+  let kairosItemId: string | null = null
+  if (input.kairosItemId) {
+    if (!UUID.test(input.kairosItemId))
+      throw invalidField("kairosItemId", "Ese borrador de Kairós no existe")
+    const [item] = await tx
+      .select({ id: kairosItem.id, clientId: kairosItem.clientId })
+      .from(kairosItem)
+      .where(eq(kairosItem.id, input.kairosItemId))
+      .limit(1)
+    if (!item || !chat.clientId || item.clientId !== chat.clientId)
+      throw invalidField("kairosItemId", "Ese borrador de Kairós no es de esta conversación")
+    kairosItemId = item.id
+  }
   const [row] = await tx
     .insert(saasOutreach)
     .values({
@@ -1166,6 +1203,8 @@ export async function prepareChatReply(
       chatId: chat.id,
       template,
       adminOnly,
+      proposalId,
+      kairosItemId,
       createdBy: actor.userId,
       createdAt: now,
       updatedAt: now,
@@ -1184,7 +1223,15 @@ export async function prepareChatReply(
     action: "arm.outreach_prepared",
     organizationId: client?.organizationId ?? null,
     entityId: chat.clientId ?? chat.id,
-    metadata: { outreachId: row.id, channel: chat.channel, chatId: chat.id, template, adminOnly },
+    metadata: {
+      outreachId: row.id,
+      channel: chat.channel,
+      chatId: chat.id,
+      template,
+      adminOnly,
+      proposalId,
+      kairosItemId,
+    },
   })
   return {
     outreachId: row.id,
@@ -1195,6 +1242,61 @@ export async function prepareChatReply(
     template,
     templateParams,
   }
+}
+
+export interface ChatMessageInput {
+  /** La persona del cliente: su celular es la conversación. */
+  contactId: string
+  body: string
+  proposalId?: string | null
+  kairosItemId?: string | null
+}
+
+/**
+ * El mensaje que se le escribe primero a una persona del cliente por el
+ * WhatsApp de Sallca (el de Kairós, `mensaje`): la conversación de su celular
+ * (creada si nunca escribió, `openChatForContact`) y la respuesta reservada
+ * (`prepareChatReply`). Dentro de las 24 h sale el texto; fuera, WhatsApp
+ * solo deja empezar con la plantilla `retomar_conversacion` y el texto no
+ * sale (la plantilla no lo lleva): queda dicho en `template`. La ruta lo envía
+ * después del commit, como cualquier respuesta.
+ */
+export async function prepareChatMessage(
+  tx: Db,
+  actor: AdminActor,
+  clientId: string,
+  input: ChatMessageInput,
+  now = new Date(),
+): Promise<ChatReply> {
+  // Una conversación comercial es solo de Administración (D4): Soporte no la abre ni la ve.
+  const client = UUID.test(clientId) ? await clientOf(tx, clientId) : null
+  if (client && !seesChat(actor, client))
+    throw new ServiceError(
+      "CHAT_ADMIN_ONLY",
+      409,
+      "El WhatsApp con una clínica que aún no tiene su cuenta lo envía Administración: pídeselo o escríbele un correo",
+    )
+  const opened = await openChatForContact(
+    tx,
+    actor,
+    { clientId, contactId: input.contactId, channel: "whatsapp" },
+    now,
+  )
+  const [chat] = await tx
+    .select({ lastInboundAt: saasChat.lastInboundAt })
+    .from(saasChat)
+    .where(eq(saasChat.id, opened.chatId))
+    .limit(1)
+  const free = chatFreeWindow(chat?.lastInboundAt ?? null, now).canReplyFreely
+  return prepareChatReply(
+    tx,
+    actor,
+    opened.chatId,
+    free
+      ? { body: input.body, proposalId: input.proposalId, kairosItemId: input.kairosItemId }
+      : { template: "retomar_conversacion", kairosItemId: input.kairosItemId },
+    now,
+  )
 }
 
 /** El envío de una conversación, bloqueado; sin persona (lo anota la ruta o el webhook). */

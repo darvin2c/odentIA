@@ -19,7 +19,7 @@ import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
-import { CHAT_CHANNEL_WORDS, chatChannelOf, momentWords } from "./chat-api"
+import { CHAT_CHANNEL_WORDS, chatChannelOf, momentWords, useChatsConfig } from "./chat-api"
 import { ChatDrawer } from "./chat-drawer"
 import { ChatOwnerDrawer, type ChatOwnerSubject } from "./chat-owner-drawer"
 import { cargaMarkedWords } from "./client-files-tab"
@@ -32,8 +32,9 @@ import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
  * Lo que preparó Kairós y espera el sí de una persona (`/api/admin/kairos`):
  * la tarjeta con su por qué, con qué datos y cuándo vence; Enviar o Aprobar,
  * Cambiar y Ahora no. Aprobar ejecuta la misma operación de la pantalla en el
- * servidor; un correo sale una sola vez y un WhatsApp se abre por su enlace y
- * queda «¿Salió?» hasta que la persona lo dice. Nada se reintenta solo.
+ * servidor; un correo sale una sola vez, y un WhatsApp también, por el número
+ * de Sallca y desde su conversación (sin él configurado, se abre por wa.me y
+ * queda «¿Salió?» hasta que la persona lo dice). Nada se reintenta solo.
  *
  * Los correos: «responder_correo» trae el borrador de la respuesta y se envía
  * (o se cambia en el mismo cajón de «Responder»); «correo_sin_cliente» se
@@ -86,6 +87,11 @@ const decisionSchema = z.object({
       to: z.string().nullable(),
       status: z.string(),
       whatsappUrl: z.string().nullable(),
+      /** Salió por el número de Sallca: su conversación y, fuera de las 24 h, la plantilla. */
+      chatId: z.string().nullable().default(null),
+      template: z.string().nullable().default(null),
+      /** Por qué no salió, si Meta lo rechazó. */
+      why: z.string().nullable().default(null),
     })
     .nullable(),
   emailSent: z.boolean().nullable(),
@@ -134,14 +140,18 @@ const channelOf = (item: Pick<KairosItem, "payload">): "correo" | "whatsapp" | n
 }
 
 /** El botón del sí, en palabras de lo que hace (una carga que ya pasó los 30 días lo dice antes). */
-export function approveLabel(item: Pick<KairosItem, "kind" | "payload">): string {
+export function approveLabel(
+  item: Pick<KairosItem, "kind" | "payload">,
+  /** El WhatsApp de Sallca está configurado: el mensaje sale de ahí, no se abre wa.me. */
+  throughChat = false,
+): string {
   switch (item.kind) {
     case "posible_carga":
       return item.payload.dueNow === true
         ? "Sí, es la carga: se borra al marcarlo"
         : "Sí, es la carga"
     case "mensaje":
-      return channelOf(item) === "whatsapp" ? "Abrir WhatsApp" : "Enviar"
+      return channelOf(item) === "whatsapp" && !throughChat ? "Abrir WhatsApp" : "Enviar"
     case "guion":
       return "Listo"
     case "dato":
@@ -224,6 +234,36 @@ const outreachWords = (item: KairosItem): string | null => {
     : `Por correo${to ? ` a ${to}` : ""}`
 }
 
+/**
+ * Lo que se dice después del sí de un WhatsApp que salió por el número de
+ * Sallca: salió (o la plantilla para retomar, si pasaron 24 h: el texto no
+ * va), no salió con el motivo de Meta, o no se sabe (no se reintenta).
+ */
+export function chatSendWords(outreach: {
+  status: string
+  to: string | null
+  template: string | null
+  why: string | null
+}): { tone: "success" | "error" | "warning"; text: string } {
+  const to = outreach.to ? ` a ${outreach.to}` : ""
+  if (outreach.status === "enviado")
+    return outreach.template
+      ? {
+          tone: "success",
+          text: `Salió por WhatsApp${to} la plantilla para retomar: pasaron 24 horas desde su último mensaje y el texto no va. Cuando responda, sigue en su conversación.`,
+        }
+      : { tone: "success", text: `Salió por WhatsApp${to}. Queda en su historial.` }
+  if (outreach.status === "no_salio")
+    return {
+      tone: "error",
+      text: `No salió por WhatsApp${outreach.why ? `: ${outreach.why}` : ""}`,
+    }
+  return {
+    tone: "warning",
+    text: "No se sabe si salió por WhatsApp: no se reintenta. Revísalo en su historial y di si salió.",
+  }
+}
+
 interface DecideInput {
   item: KairosItem
   action: "aprobar" | "descartar"
@@ -232,9 +272,19 @@ interface DecideInput {
   tab?: Window | null
 }
 
-/** Abre una pestaña vacía en el clic, si el sí va a dar un enlace de WhatsApp. */
-export function tabForWhatsApp(item: KairosItem, action: "aprobar" | "descartar"): Window | null {
-  if (action !== "aprobar" || item.kind !== "mensaje" || channelOf(item) !== "whatsapp") return null
+/** Abre una pestaña vacía en el clic, si el sí va a dar un enlace de WhatsApp (sin el número de Sallca). */
+export function tabForWhatsApp(
+  item: KairosItem,
+  action: "aprobar" | "descartar",
+  throughChat = false,
+): Window | null {
+  if (
+    throughChat ||
+    action !== "aprobar" ||
+    item.kind !== "mensaje" ||
+    channelOf(item) !== "whatsapp"
+  )
+    return null
   try {
     return window.open("about:blank", "_blank")
   } catch {
@@ -290,6 +340,12 @@ export function useKairosDecide() {
         return
       }
       const outreach = decision.outreach
+      if (outreach?.channel === "whatsapp" && outreach.chatId) {
+        tab?.close()
+        const words = chatSendWords(outreach)
+        toast[words.tone](words.text)
+        return
+      }
       if (outreach?.channel === "whatsapp" && outreach.whatsappUrl) {
         const url = outreach.whatsappUrl
         openWhatsApp(url, tab)
@@ -366,8 +422,9 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
   const body = text(item.payload.body)
   const onlyAdmin = ADMIN_KINDS.has(item.kind) && !isAdmin
   const needsClient = item.kind === "correo_sin_cliente" && !text(item.payload.clientId)
+  const throughChat = useChatsConfig().data?.whatsapp === true
   const run = (action: "aprobar" | "descartar") => {
-    const tab = tabForWhatsApp(item, action)
+    const tab = tabForWhatsApp(item, action, throughChat)
     leave.markLeaving()
     decide.mutate(
       { item, action, tab },
@@ -448,7 +505,7 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
             disabled={pending || (DRAFTED.has(item.kind) && !item.ready)}
             onClick={() => run("aprobar")}
           >
-            {approveLabel(item)}
+            {approveLabel(item, throughChat)}
           </Button>
         )}
         {item.kind === "responder_correo" && emailId && item.ready ? (
@@ -847,11 +904,12 @@ function KairosChangeDrawer({
   onApproving: () => void
 }) {
   const decide = useKairosDecide()
+  const throughChat = useChatsConfig().data?.whatsapp === true
   const form = useAppForm({
     defaultValues: valuesOf(item),
     validators: { onSubmit: changeSchema(item.kind) },
     onSubmit: async ({ value, formApi }) => {
-      const tab = tabForWhatsApp(item, "aprobar")
+      const tab = tabForWhatsApp(item, "aprobar", throughChat)
       onApproving()
       await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
       formApi.reset(value)
@@ -869,7 +927,7 @@ function KairosChangeDrawer({
           : "¿De qué cliente es este correo?"
   const submitLabel =
     item.kind === "mensaje"
-      ? channel === "whatsapp"
+      ? channel === "whatsapp" && !throughChat
         ? "Abrir WhatsApp"
         : "Enviar"
       : item.kind === "correo_sin_cliente"
@@ -908,7 +966,9 @@ function KairosChangeDrawer({
             </form.AppField>
             {channel === "whatsapp" ? (
               <p className="text-sm text-muted-foreground">
-                Se abre WhatsApp con este texto; lo envías tú. Después di si salió.
+                {throughChat
+                  ? "Sale una sola vez por el WhatsApp de Sallca y queda en su conversación. Si pasaron 24 horas desde su último mensaje, WhatsApp solo deja retomar con la plantilla: este texto no va."
+                  : "Se abre WhatsApp con este texto; lo envías tú. Después di si salió."}
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -1124,8 +1184,13 @@ function UnconfirmedRow({ item }: { item: KairosItem }) {
           {item.product ? <ProductMark product={item.product} /> : null}
         </p>
         <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
-          {channel === "whatsapp" ? "WhatsApp abierto" : "Correo que no se sabe si salió"} ·{" "}
-          {item.title}
+          {channel === "whatsapp"
+            ? // Por el número de Sallca queda «incierto»; por wa.me, abierto y sin saberse.
+              item.result?.outreachStatus === "incierto"
+              ? "WhatsApp que no se sabe si salió"
+              : "WhatsApp abierto"
+            : "Correo que no se sabe si salió"}{" "}
+          · {item.title}
           {item.decidedAt
             ? ` · ${item.decidedByName ? `lo aprobó ${item.decidedByName} ` : ""}el ${supportDayTime(item.decidedAt)}`
             : ""}

@@ -186,7 +186,7 @@ const sentSchema = z.object({ outreachId: z.string(), status: z.string() })
 /** Responder con texto libre (dentro de las 24 h). */
 export async function sendChatReply(
   chatId: string,
-  body: { body: string; adminOnly?: boolean },
+  body: { body: string; adminOnly?: boolean; proposalId?: string },
 ): Promise<z.infer<typeof sentSchema>> {
   try {
     return sentSchema.parse(

@@ -62,6 +62,11 @@ export interface ChatDrawerProps {
   onClose: () => void
   /** El texto con que empieza la respuesta («Escribir» por WhatsApp lo trae puesto). */
   draft?: string
+  /**
+   * «Enviar la propuesta» por WhatsApp: la primera respuesta que sale la lleva
+   * (queda enviada como por correo); el PDF no va por WhatsApp.
+   */
+  proposalId?: string | null
 }
 
 export function ChatDrawer(props: ChatDrawerProps) {
@@ -76,7 +81,7 @@ type Aside =
   | { kind: "correo"; clientId: string; contactId: string | null }
   | { kind: "otro-chat"; chatId: string }
 
-function ChatSurface({ chatId, onClose, draft = "" }: ChatDrawerProps) {
+function ChatSurface({ chatId, onClose, draft = "", proposalId = null }: ChatDrawerProps) {
   const queryClient = useQueryClient()
   const chat = useChat(chatId)
   const [aside, setAside] = useState<Aside>({ kind: "ninguno" })
@@ -151,6 +156,7 @@ function ChatSurface({ chatId, onClose, draft = "" }: ChatDrawerProps) {
     <Conversation
       chat={data}
       draft={draft}
+      proposalId={proposalId}
       onClose={onClose}
       onAside={setAside}
       onChanged={() => refresh(data.client?.id)}
@@ -181,12 +187,14 @@ function announceSent(status: string, channel: string) {
 function Conversation({
   chat,
   draft,
+  proposalId,
   onClose,
   onAside,
   onChanged,
 }: {
   chat: ChatDetail
   draft: string
+  proposalId: string | null
   onClose: () => void
   onAside: (aside: Aside) => void
   onChanged: () => void
@@ -196,6 +204,8 @@ function Conversation({
   const { undo } = useNotClinic()
   // «Solo administración» solo tiene sentido si Soporte ve la conversación (clínica con su app).
   const canHide = isAdmin && Boolean(chat.client?.hasAccount)
+  // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
+  const [proposal, setProposal] = useState(proposalId)
   const form = useAppForm({
     defaultValues: { body: draft, adminOnly: false },
     validators: { onSubmit: replySchema },
@@ -205,12 +215,15 @@ function Conversation({
         const sent = await sendChatReply(chat.id, {
           body: value.body.trim(),
           ...(canHide ? { adminOnly: value.adminOnly } : {}),
+          ...(proposal ? { proposalId: proposal } : {}),
         })
         announceSent(sent.status, channel)
+        setProposal(null)
         formApi.reset(empty)
       } catch (error) {
         if (error instanceof ChatSendError && error.outcome === "incierto") {
           // Quedó guardado como «No se sabe si salió»: no se vuelve a enviar.
+          setProposal(null)
           formApi.reset(empty)
           toast.warning(error.message)
           return
@@ -341,6 +354,12 @@ function Conversation({
                   />
                 )}
               </form.AppField>
+              {proposal ? (
+                <p className="text-xs text-muted-foreground">
+                  Va como el envío de la propuesta: queda enviada cuando salga. Por WhatsApp no va
+                  el PDF: si hace falta, envíalo por correo.
+                </p>
+              ) : null}
               {canHide ? (
                 <form.AppField name="adminOnly">
                   {(field) => (

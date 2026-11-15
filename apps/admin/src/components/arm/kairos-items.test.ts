@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { approveLabel, discardLabel, kairosItemTab, possibleCargaDoneWords } from "./kairos-items"
+import {
+  approveLabel,
+  chatSendWords,
+  discardLabel,
+  kairosItemTab,
+  possibleCargaDoneWords,
+} from "./kairos-items"
 
 describe("una posible carga de datos en Hoy", () => {
   const item = { kind: "posible_carga", payload: { filename: "pacientes.xlsx", dueNow: false } }
@@ -28,5 +34,31 @@ describe("una posible carga de datos en Hoy", () => {
         deleteAfter: "2026-12-10",
       }),
     ).toMatch(/^pacientes\.xlsx es la carga de datos: se borra el /)
+  })
+})
+
+describe("un mensaje de Kairós por WhatsApp", () => {
+  const item = { kind: "mensaje", payload: { channel: "whatsapp", to: "+51987654321" } }
+
+  it("con el número de Sallca se envía; sin él, se abre wa.me", () => {
+    expect(approveLabel(item, true)).toBe("Enviar")
+    expect(approveLabel(item)).toBe("Abrir WhatsApp")
+  })
+
+  it("dice si salió, si salió la plantilla, si no salió o si no se sabe", () => {
+    const base = { to: "+51987654321", template: null, why: null }
+    expect(chatSendWords({ ...base, status: "enviado" })).toEqual({
+      tone: "success",
+      text: "Salió por WhatsApp a +51987654321. Queda en su historial.",
+    })
+    const template = chatSendWords({ ...base, status: "enviado", template: "retomar_conversacion" })
+    expect(template.tone).toBe("success")
+    expect(template.text).toMatch(/plantilla para retomar: pasaron 24 horas.*el texto no va/)
+    expect(chatSendWords({ ...base, status: "no_salio", why: "Invalid parameter" })).toEqual({
+      tone: "error",
+      text: "No salió por WhatsApp: Invalid parameter",
+    })
+    expect(chatSendWords({ ...base, status: "incierto" }).tone).toBe("warning")
+    expect(chatSendWords({ ...base, status: "pendiente" }).text).toMatch(/^No se sabe si salió/)
   })
 })

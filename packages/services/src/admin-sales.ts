@@ -2169,8 +2169,9 @@ function newMessageId(product: ClinicalProduct): string {
 /**
  * La propuesta que se puede enviar a un cliente: lista (no por aprobar),
  * vigente, sin decidir y la última que salió. Solo la envía Administración.
+ * También la usa la conversación de WhatsApp (`prepareChatReply`).
  */
-async function sendableProposal(
+export async function sendableProposal(
   tx: Db,
   actor: AdminActor,
   clientId: string,

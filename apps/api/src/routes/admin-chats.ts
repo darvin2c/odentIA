@@ -1,10 +1,3 @@
-import {
-  type ChannelAdapter,
-  messengerAdapter,
-  type OutboundMessage,
-  ProviderRejectedError,
-  whatsappCloudApiAdapter,
-} from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import { type SaasChatChannel, saasChat } from "@odentia/db/schema/admin-arm"
 import {
@@ -16,9 +9,6 @@ import {
   invalidField,
   issueFields,
   markChatNotClinic,
-  markChatOutreachFailed,
-  markChatOutreachSent,
-  markChatOutreachUncertain,
   openChatForContact,
   prepareChatReply,
   ServiceError,
@@ -28,6 +18,13 @@ import { eq } from "drizzle-orm"
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
+import {
+  CHAT_CHANNEL_WORDS,
+  chatChannelOff,
+  chatSenderOf,
+  INSTAGRAM_TEXT_BYTES,
+  sendChatOutreach,
+} from "../lib/admin-chat-send.js"
 import { adminContextOf } from "../lib/admin-context.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse } from "./helpers.js"
@@ -64,6 +61,8 @@ const assignBody = z.strictObject({
 const replyBody = z.strictObject({
   body: z.string("Escribe el mensaje").max(5000, "Usa como máximo 5000 caracteres"),
   adminOnly: z.boolean().optional(),
+  /** «Enviar la propuesta» por WhatsApp: el texto habla de ella (el PDF no va). */
+  proposalId: z.uuid("Esa propuesta no es de este cliente").nullish(),
 })
 
 const openBody = z.strictObject({
@@ -71,9 +70,6 @@ const openBody = z.strictObject({
   contactId: z.uuid("Esa persona no es de este cliente"),
   channel: z.literal("whatsapp", "Solo se le escribe primero por WhatsApp"),
 })
-
-/** Instagram corta el texto a 1000 bytes (UTF-8). */
-const INSTAGRAM_TEXT_BYTES = 1000
 
 function staffOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
@@ -103,59 +99,6 @@ function parse<T extends z.ZodType>(schema: T, raw: unknown): z.output<T> {
 
 const bodyOf = (c: Context) => c.req.json().catch(() => null)
 
-const CHANNEL_WORDS: Record<SaasChatChannel, string> = {
-  whatsapp: "WhatsApp",
-  instagram: "Instagram",
-  messenger: "Messenger",
-}
-
-/** Cómo sale por un canal: su adaptador y su configuración; nulo si no está configurado. */
-function senderOf(
-  channels: AdminChannels | undefined,
-  channel: SaasChatChannel,
-): { adapter: ChannelAdapter; config: Record<string, unknown> } | null {
-  if (!channels) return null
-  if (channel === "whatsapp" && channels.whatsapp)
-    return {
-      adapter: whatsappCloudApiAdapter,
-      // `wabaId` solo lo usan las plantillas de la cuenta: enviar no.
-      config: {
-        phoneNumberId: channels.whatsapp.phoneNumberId,
-        wabaId: channels.whatsapp.phoneNumberId,
-        accessToken: channels.whatsapp.accessToken,
-      },
-    }
-  if (channel === "messenger" && channels.messenger)
-    return {
-      adapter: messengerAdapter,
-      config: {
-        pageId: channels.messenger.pageId,
-        pageAccessToken: channels.messenger.accessToken,
-        appSecret: channels.appSecret,
-      },
-    }
-  // Instagram por la página (Messenger Platform para Instagram): `/{page-id}/messages`
-  // con el token de la página y el IGSID como destinatario.
-  if (channel === "instagram" && channels.instagram)
-    return {
-      adapter: messengerAdapter,
-      config: {
-        pageId: channels.instagram.pageId,
-        pageAccessToken: channels.instagram.accessToken,
-        appSecret: channels.appSecret,
-      },
-    }
-  return null
-}
-
-function notConfigured(channel: SaasChatChannel): ServiceError {
-  return new ServiceError(
-    "CHAT_CHANNEL_OFF",
-    409,
-    `El ${CHANNEL_WORDS[channel]} de la administración no está configurado: no se puede enviar`,
-  )
-}
-
 export function createAdminChatsRoute(deps: AdminChatsDeps) {
   const app = new Hono()
   const clock = deps.now ?? (() => new Date())
@@ -181,7 +124,7 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
     const raw = await bodyOf(c)
     return staffRun(c, 200, (actor) => {
       const body = parse(openBody, raw)
-      if (!deps.channels?.whatsapp) throw notConfigured("whatsapp")
+      if (!deps.channels?.whatsapp) throw chatChannelOff("whatsapp")
       const now = clock()
       return owner(async (tx) => {
         const opened = await openChatForContact(tx, actor, body, now)
@@ -221,7 +164,12 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
   const reserveAndSend = async (
     c: Context,
     actor: AdminActor,
-    input: { body?: string | null; adminOnly?: boolean; template?: string },
+    input: {
+      body?: string | null
+      adminOnly?: boolean
+      template?: string
+      proposalId?: string | null
+    },
   ) => {
     const now = clock()
     const { reply, channel } = await owner(async (tx) => {
@@ -232,7 +180,7 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
         .where(eq(saasChat.id, prepared.chatId))
         .limit(1)
       const chatChannel = (chat?.channel ?? "whatsapp") as SaasChatChannel
-      if (!senderOf(deps.channels, chatChannel)) throw notConfigured(chatChannel)
+      if (!chatSenderOf(deps.channels, chatChannel)) throw chatChannelOff(chatChannel)
       if (
         chatChannel === "instagram" &&
         Buffer.byteLength(prepared.body, "utf8") > INSTAGRAM_TEXT_BYTES
@@ -243,47 +191,15 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
     return send(c, reply, channel)
   }
 
-  /** Después del commit: una sola vez, y el resultado anotado. */
+  /** Después del commit: una sola vez, y el resultado anotado (`sendChatOutreach`). */
   const send = async (c: Context, reply: ChatReply, channel: SaasChatChannel) => {
-    const sender = senderOf(deps.channels, channel)
-    if (!sender) throw notConfigured(channel)
-    const message: OutboundMessage = {
-      // WhatsApp: el número sin «+» (con «+» el adaptador lo tomaría por un BSUID).
-      to: channel === "whatsapp" ? reply.to.replace(/^\+/, "") : reply.to,
-      callbackData: reply.outreachId,
-      kind: reply.template
-        ? { type: "template", name: reply.template, language: "es", params: reply.templateParams }
-        : { type: "text", text: reply.body },
-    }
-    let outcome:
-      | { kind: "sent"; externalId: string }
-      | { kind: "rejected"; why: string }
-      | { kind: "unknown" }
-    try {
-      const result = await sender.adapter.sendMessage(sender.config, message, { fetch: fetchImpl })
-      outcome = { kind: "sent", externalId: result.externalId }
-    } catch (error) {
-      outcome =
-        error instanceof ProviderRejectedError
-          ? { kind: "rejected", why: error.message }
-          : { kind: "unknown" }
-      if (outcome.kind === "unknown")
-        console.warn(`[admin-chats] no se sabe si salió el envío ${reply.outreachId}`, error)
-    }
-    const now = clock()
-    let status: string
-    try {
-      const marked = await owner((tx) =>
-        outcome.kind === "sent"
-          ? markChatOutreachSent(tx, reply.outreachId, outcome.externalId, now)
-          : outcome.kind === "rejected"
-            ? markChatOutreachFailed(tx, reply.outreachId, outcome.why, now)
-            : markChatOutreachUncertain(tx, reply.outreachId, now),
-      )
-      status = marked.status
-    } catch (error) {
+    const outcome = await sendChatOutreach(
+      { ownerDb: deps.ownerDb, channels: deps.channels, fetch: fetchImpl, now: clock },
+      reply,
+      channel,
+    )
+    if (outcome.kind === "unrecorded")
       // Salió (o quizá) pero no se pudo anotar: queda pendiente para que una persona diga si salió.
-      console.error(`[admin-chats] no se anotó el resultado del envío ${reply.outreachId}`, error)
       return c.json(
         {
           error: {
@@ -297,7 +213,6 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
         },
         502,
       )
-    }
     if (outcome.kind === "rejected")
       return c.json(
         {
@@ -315,14 +230,14 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
             ...errorBody(
               c,
               "SEND_UNKNOWN",
-              `No se sabe si el mensaje salió por ${CHANNEL_WORDS[channel]}: revisa y marca si salió o no antes de volver a enviarlo`,
+              `No se sabe si el mensaje salió por ${CHAT_CHANNEL_WORDS[channel]}: revisa y marca si salió o no antes de volver a enviarlo`,
             ).error,
             outreachId: reply.outreachId,
           },
         },
         502,
       )
-    return c.json({ data: { outreachId: reply.outreachId, status } }, 201)
+    return c.json({ data: { outreachId: reply.outreachId, status: outcome.status } }, 201)
   }
 
   app.post("/:id/reply", async (c) => {
@@ -333,6 +248,7 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
       return await reserveAndSend(c, actor, {
         body: body.body,
         ...(body.adminOnly !== undefined ? { adminOnly: body.adminOnly } : {}),
+        ...(body.proposalId ? { proposalId: body.proposalId } : {}),
       })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)

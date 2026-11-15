@@ -5,6 +5,7 @@ import {
   saasClientFile,
   saasInboundMessage,
   saasOutreach,
+  saasProposal,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
@@ -25,10 +26,12 @@ import {
   markChatOutreachFailed,
   markChatOutreachSent,
   markChatOutreachUncertain,
+  prepareChatMessage,
   prepareChatReply,
   undoChatNotClinic,
 } from "./admin-inbound-chat.js"
 import { resolveOutreach } from "./admin-sales.js"
+import { createSaasPlan } from "./saas-billing.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** El WhatsApp de la administración: entra como el correo, nunca se liga solo por el teléfono. */
@@ -552,5 +555,85 @@ describe("Instagram y Messenger", () => {
       status: 409,
       fields: { body: expect.stringContaining("Messenger ya no deja responderle") },
     })
+  })
+})
+
+describe("prepareChatMessage: escribirle primero a una persona del cliente", () => {
+  it("dentro de las 24 h, el texto con su propuesta; al salir, la propuesta queda enviada", async () => {
+    const number = phone()
+    const target = await client("Clínica con propuesta (ficticia)")
+    const person = await contact(target, "Rosa Quispe", number)
+    const plan = await createSaasPlan(ownerDb, admin.userId, {
+      code: "wa-plan",
+      name: "Plan WA",
+      currency: "USD",
+      priceCents: 2900,
+      creditCents: 2900,
+      conversationMicros: 500_000,
+      consultationMicros: 400_000,
+      recoveryMicros: 4_000_000,
+      trialCreditCents: 10_000,
+      trialMaxCreditCents: 10_000,
+      trialDays: 30,
+      showOnWeb: false,
+    })
+    const [proposal] = await ownerDb
+      .insert(saasProposal)
+      .values({
+        clientId: target,
+        version: 1,
+        planId: plan.id,
+        listPriceCents: 2900,
+        currency: "USD",
+        validUntil: "2099-12-31",
+      })
+      .returning({ id: saasProposal.id })
+    if (!proposal) throw new Error("sin propuesta")
+    await ingestInboundChat(ownerDb, message({ address: number, waId: number.slice(1) }))
+    // Una propuesta que no es de este cliente no va.
+    await expect(
+      prepareChatMessage(ownerDb, admin, target, {
+        contactId: person,
+        body: "Hola",
+        proposalId: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ fields: { proposalId: expect.any(String) } })
+    const reply = await prepareChatMessage(ownerDb, admin, target, {
+      contactId: person,
+      body: "Le preparé la propuesta",
+      proposalId: proposal.id,
+    })
+    expect(reply).toMatchObject({ template: null, clientId: target, to: number })
+    expect(await outreachOf(reply.outreachId)).toMatchObject({
+      chatId: reply.chatId,
+      proposalId: proposal.id,
+      status: "pendiente",
+    })
+    await markChatOutreachSent(ownerDb, reply.outreachId, `wamid.${crypto.randomUUID()}`)
+    const [after] = await ownerDb
+      .select()
+      .from(saasProposal)
+      .where(eq(saasProposal.id, proposal.id))
+    expect(after?.status).toBe("enviada")
+    const activities = await activitiesOfChat(reply.chatId)
+    expect(activities.at(-1)).toMatchObject({ direction: "salio", proposalId: proposal.id })
+  })
+
+  it("si nunca escribió, la plantilla para retomar, sin la propuesta; Soporte no lo hace en una venta", async () => {
+    const number = phone()
+    const target = await client("Clínica que nunca escribió (ficticia)")
+    const person = await contact(target, "Ana Ruiz", number)
+    const reply = await prepareChatMessage(ownerDb, admin, target, {
+      contactId: person,
+      body: "Hola Ana",
+    })
+    expect(reply).toMatchObject({ template: "retomar_conversacion", templateParams: ["Ada"] })
+    expect(await outreachOf(reply.outreachId)).toMatchObject({
+      template: "retomar_conversacion",
+      proposalId: null,
+    })
+    await expect(
+      prepareChatMessage(ownerDb, support, target, { contactId: person, body: "Hola" }),
+    ).rejects.toMatchObject({ code: "CHAT_ADMIN_ONLY", status: 409 })
   })
 })
