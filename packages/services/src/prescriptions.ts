@@ -2,10 +2,12 @@ import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
   duplicateWarnings,
-  findHabitualMedication,
   findMedication,
   type MedicationCatalog,
+  prescribingAlerts,
+  type PrescribingSituation,
   type TakenMedication,
+  takenMedication,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -23,6 +25,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, isNull, or, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
+import { getLatestAnamnesis } from "./clinical.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
@@ -255,22 +258,23 @@ export async function createPrescription(
       review.errors.join(" "),
       await blockedFields(prescribing, tx, { orgId, patientId, items, weightKg }),
     )
-  // La alergia y lo contraindicado en el embarazo se avisan: decide quien receta, y queda en la
-  // receta que lo vio (ADR 0143). El motivo es opcional.
-  const conflicts = [
-    ...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)),
-    ...review.warnings,
-  ]
+  // Lo que avisa toda receta, en los tres productos (QA final de formularios, Y1): el embarazo y la
+  // lactancia, lo contraindicado en el embarazo y un AINE con un anticoagulante o un antiagregante.
+  const situation = await prescribingSituationOf(tx, orgId, patientId, prescribing.catalog)
+  const others = prescribingAlerts(situation, items, prescribing.catalog.medications).warnings
+  // La alergia y lo demás se avisan: decide quien receta, y queda en la receta que lo vio (ADR 0143).
+  // El motivo es opcional.
+  const conflicts = [...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)), ...others]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
   const shown = input.alertsShown ? new Set(input.alertsShown.map((line) => line.trim())) : null
   // Lo de alergia o embarazo que la pantalla no mostró se muestra antes de emitir: nunca a ciegas.
   const unseen = conflicts.filter((line) => (shown ? !shown.has(line) : !input.acknowledgeAllergies))
   if (unseen.length > 0) {
-    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${unseen.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
+    const message = `${others.length > 0 ? "Aviso" : "Aviso de alergia"}: ${unseen.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
     throw new ServiceError("ALLERGY_CONFLICT", 409, message, { allergyOverrideReason: message })
   }
-  // Lo que ya toma (sus antecedentes vigentes): un duplicado por su código ATC solo informa (ADR 0143).
-  const duplicates = duplicateWarnings(items, await currentMedicationsOf(tx, orgId, patientId, prescribing.catalog), prescribing.catalog)
+  // Un duplicado por su código ATC solo informa (ADR 0143).
+  const duplicates = duplicateWarnings(items, situation.taking, prescribing.catalog)
   // Quedan como vistos los de alergia y embarazo (ya mostrados) y los duplicados que la pantalla
   // mostró; un duplicado que no se mostró no se firma como visto. Se guardan en palabras, como se
   // leyeron: la directiva del MINSA pide guardar el aviso y la respuesta; la exportación FHIR
@@ -354,10 +358,24 @@ export async function currentMedicationsOf(
         or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
       ),
     )
-  return rows.map((row) => ({
-    name: row.name,
-    atcCode: row.atcCode ?? findHabitualMedication(row.genericName ?? row.name, catalog.habitual)?.atc ?? null,
-  }))
+  return rows.map((row) => takenMedication(row, catalog))
+}
+
+/**
+ * Lo de la persona que mira toda receta (`prescribingAlerts`): su última entrevista (el embarazo y la
+ * lactancia), el día de la clínica y lo que toma hoy. Lo mismo para emitir y para lo que dicta Clío.
+ */
+export async function prescribingSituationOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  catalog: MedicationCatalog,
+): Promise<PrescribingSituation> {
+  return {
+    interview: (await getLatestAnamnesis(tx, orgId, patientId))?.answers ?? null,
+    today: await clinicToday(tx, orgId),
+    taking: await currentMedicationsOf(tx, orgId, patientId, catalog),
+  }
 }
 
 export async function listPrescriptions(tx: Db, orgId: string, patientId: string) {

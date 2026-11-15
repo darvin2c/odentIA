@@ -478,10 +478,16 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
   // Se emite con la colegiatura de quien atiende: sin ella no se ofrece «Emitir receta».
   const profile = useQuery({ queryKey: ["professional-profile", "me"], queryFn: fetchMyProfessionalProfile })
   const licensed = profile.data?.data.complete !== false
-  const warnings = items.flatMap((item) => (Array.isArray(item.payload["allergyWarnings"]) ? (item.payload["allergyWarnings"] as string[]) : []))
+  const linesOf = (item: DictationSuggestion, key: string) => (Array.isArray(item.payload[key]) ? (item.payload[key] as string[]) : [])
+  // La alergia, y lo que avisa toda receta (el embarazo, un AINE con un anticoagulante): se revisa en la receta.
+  const allergies = items.flatMap((item) => linesOf(item, "allergyWarnings"))
+  const warnings = [...allergies, ...items.flatMap((item) => linesOf(item, "prescribingWarnings"))]
+  const warningWords = allergies.length ? "Aviso de alergia" : "Aviso"
   // Lo que ya toma del mismo principio o grupo: solo informa, y al emitir queda como visto (ADR 0143).
-  const duplicates = [...new Set(items.flatMap((item) => (Array.isArray(item.payload["duplicateWarnings"]) ? (item.payload["duplicateWarnings"] as string[]) : [])))]
-  const waiting = items.filter((item) => item.status !== "lista" && !(item.payload["allergyWarnings"] as string[] | undefined)?.length)
+  const duplicates = [...new Set(items.flatMap((item) => linesOf(item, "duplicateWarnings")))]
+  const waiting = items.filter(
+    (item) => item.status !== "lista" && linesOf(item, "allergyWarnings").length + linesOf(item, "prescribingWarnings").length === 0,
+  )
   const ready = warnings.length === 0 && waiting.length === 0
   const busy = session.issuePrescription.isPending || session.act.isPending || session.dictating
   const count = items.length === 1 ? "1 medicamento" : `${items.length} medicamentos`
@@ -502,7 +508,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
               <p className="font-medium">Receta · {count}</p>
               <p className="text-muted-foreground">
                 {warnings.length
-                  ? "Aviso de alergia: revísalo en la receta antes de emitirla."
+                  ? `${warningWords}: revísalo en la receta antes de emitirla.`
                   : waiting.length
                     ? (waiting[0]?.note ?? "Falta completarla.")
                     : voiced?.voice
@@ -512,7 +518,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                         : "Para emitirla falta tu colegiatura."}
               </p>
             </div>
-            {warnings.length ? <Badge variant="destructive">Aviso de alergia</Badge> : !ready ? <Badge>Por revisar</Badge> : null}
+            {warnings.length ? <Badge variant="destructive">{warningWords}</Badge> : !ready ? <Badge>Por revisar</Badge> : null}
             {voiced ? (
               <Button type="button" variant="link" size="sm" className="min-h-11 px-1 sm:min-h-8" disabled={busy} onClick={() => session.act.mutate({ item: voiced, action: "undo-voice" })}>
                 Deshacer
@@ -576,7 +582,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
           ) : null}
           {warnings.length ? (
             <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:ml-8">
-              <p className="font-medium">Aviso de alergia</p>
+              <p className="font-medium">{warningWords}</p>
               <ul className="list-disc pl-5">
                 {warnings.map((line) => (
                   <li key={line}>{line}</li>

@@ -21,8 +21,9 @@ async function latestAnswers(tx: Db, orgId: string, patientId: string): Promise<
 
 /**
  * La receta de latidIA (issue 229, decisión 12): la lista de medicina general
- * y, al emitir, los controlados, el embarazo y el peso de un niño, con las
- * mismas reglas que la pantalla (`checkPrescription`).
+ * y, al emitir, los controlados y el peso de un niño, con las mismas reglas que
+ * la pantalla (`checkPrescription`). El embarazo y lo demás que avisa toda receta
+ * lo revisa la receta misma (`prescribingAlerts`).
  */
 export const medicalPrescribing: ProductPrescribing = {
   catalog: MEDICAL_MEDICATION_CATALOG,
@@ -39,6 +40,6 @@ export const medicalPrescribing: ProductPrescribing = {
       items,
       weightKg,
     )
-    return { errors: check.errors, warnings: check.warnings }
+    return { errors: check.errors }
   },
 }

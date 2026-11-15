@@ -601,6 +601,7 @@ export function EncounterPlanPanel({
                         )}
                         {rowActions(item)}
                       </span>
+                      <ExtractionRisks lines={item.extractionRisks} />
                       {fitNotice(item)}
                       {changeForm(item)}
                       {rowError?.itemId === item.id ? (
@@ -819,6 +820,21 @@ function PathQuestionRow({
  * Los caminos de una pieza, uno al lado del otro (apilados en el teléfono). Lo
  * indicado hoy y sin respuesta se puede pasar de un camino a otro.
  */
+/**
+ * Lo que toma y cambia una exodoncia, en su fila, donde se indica (QA final de formularios, Y2): «Toma
+ * warfarina 5 mg (lo dijo ella el 14 nov): pide su INR del día». Lo dice el servidor; no frena nada.
+ */
+function ExtractionRisks({ lines }: { lines: readonly string[] | undefined }): React.JSX.Element | null {
+  if (!lines?.length) return null
+  return (
+    <ul aria-label="Antes de la exodoncia" className="basis-full rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
+      {lines.map((line) => (
+        <li key={line}>{line}</li>
+      ))}
+    </ul>
+  )
+}
+
 function PathsBox({
   patientId,
   group,
@@ -935,6 +951,7 @@ function PathsBox({
                             {planDecisionLabel(item.decisionStatus)}
                           </span>
                         ) : null}
+                        <ExtractionRisks lines={item.extractionRisks} />
                         {first ? rowActions(item) : null}
                         {first ? fitNotice(item) : null}
                         {first ? changeForm(item) : null}
