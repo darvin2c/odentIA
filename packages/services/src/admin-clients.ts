@@ -2405,6 +2405,7 @@ export const TIMELINE_AUDIT_PHRASES: Record<
     category: "cuenta",
     adminOnly: true,
   },
+  "saas.founders_entered": { title: "Pasó a Fundadores", category: "cuenta", adminOnly: true },
   "recovery.case_open": {
     title: "Se abrió una recuperación de la propiedad de la cuenta",
     category: "cuenta",

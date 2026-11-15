@@ -7,7 +7,9 @@ import {
   getClinicAgentCounts,
   type AssistedOrganizationResult,
   approveRecoveryCase,
+  getFoundersMove,
   getOrganizationBillingTerms,
+  moveClinicToFounders,
   setSaasBillingCycle,
   setSaasDiscount,
   setSaasTrialTerms,
@@ -498,10 +500,17 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
   })
 
   // O2: cobro y consumo de la clínica (ADR 0031). Precio y prueba son de la administración: soporte no ve importes (ADR 0094).
+  // Con «Pasar a Fundadores» cuando la clínica entró sin la invitación y sigue en prueba (ADR 0192).
   app.get("/:id/billing", async (c) => {
     const denied = forbidUnlessManager(c, adminContextOf(c))
     if (denied) return denied
-    return runService(c, 200, () => owner((tx) => getOrganizationBillingTerms(tx, c.req.param("id"))))
+    const id = c.req.param("id")
+    return runService(c, 200, () =>
+      owner(async (tx) => {
+        const terms = await getOrganizationBillingTerms(tx, id)
+        return terms ? { ...terms, founders: await getFoundersMove(tx, id) } : null
+      }),
+    )
   })
 
   app.post("/:id/billing/discount", async (c) => {
@@ -567,6 +576,13 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         return { ok: true }
       }),
     )
+  })
+
+  app.post("/:id/billing/founders", async (c) => {
+    const actor = adminContextOf(c)
+    const denied = forbidUnlessManager(c, actor)
+    if (denied) return denied
+    return runService(c, 200, () => owner((tx) => moveClinicToFounders(tx, actor, c.req.param("id"))))
   })
 
   // Ficha completa al final: evita que `/:id` capture rutas literales.
