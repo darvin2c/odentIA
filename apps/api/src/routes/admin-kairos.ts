@@ -4,6 +4,7 @@ import type { KairosItemStatus } from "@odentia/db/schema/admin-arm"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
+  assignChat,
   assignInboundEmail,
   createSaasProposal,
   decideKairosItem,
@@ -133,6 +134,7 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
+    assignChat: (tx, actor, chatId, input) => assignChat(tx, actor, chatId, input, now),
     prepareEmailReply: (tx, actor, emailId, input) =>
       prepareEmailReply(tx, actor, emailId, input, now),
     recordPresentation: (tx, actor, taskId, input) =>

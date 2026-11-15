@@ -31,6 +31,7 @@
 import { isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  kairosItem,
   SAAS_CHAT_CHANNELS,
   type SaasChatChannel,
   type SaasInboundMedia,
@@ -159,6 +160,60 @@ async function lockChat(tx: Db, actor: AdminActor, chatId: string): Promise<Chat
   if (!chat) throw notFound("Conversación")
   if (!seesChat(actor, await clientOf(tx, chat.clientId))) throw notFound("Conversación")
   return chat
+}
+
+/**
+ * Lo que Kairós dejó en Hoy de esta conversación (`chat_sin_cliente`,
+ * `responder_chat`) y ya no hace falta porque una persona lo resolvió aquí:
+ * queda vencido con su motivo y su clave libre, como `Pass.closeItems`. Si
+ * vuelve a hacer falta (escribe otra vez, o la respuesta no salió), la pasada
+ * siguiente lo vuelve a poner. «Lo que hizo» lo cuenta (`kairos.item_closed`).
+ */
+async function closeChatKairosItems(
+  tx: Db,
+  chatId: string,
+  kinds: readonly ("chat_sin_cliente" | "responder_chat")[],
+  why: string,
+  now: Date,
+): Promise<void> {
+  const closed = await tx
+    .update(kairosItem)
+    .set({
+      status: "vencida",
+      error: `Ya no hace falta: ${why}`.slice(0, 500),
+      idempotencyKey: sql`'vencida:' || ${kairosItem.id}::text || ':' || ${kairosItem.idempotencyKey}`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(kairosItem.status, "espera"),
+        inArray(kairosItem.kind, [...kinds]),
+        sql`${kairosItem.payload} ->> 'chatId' = ${chatId}`,
+      ),
+    )
+    .returning({
+      id: kairosItem.id,
+      kind: kairosItem.kind,
+      title: kairosItem.title,
+      clientId: kairosItem.clientId,
+      adminOnly: kairosItem.adminOnly,
+    })
+  for (const item of closed) {
+    const client = await clientOf(tx, item.clientId)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.item_closed",
+      entityId: item.id,
+      organizationId: client?.organizationId ?? null,
+      metadata: {
+        clientId: item.clientId,
+        itemId: item.id,
+        kind: item.kind,
+        title: item.title,
+        why,
+        adminOnly: item.adminOnly,
+      },
+    })
+  }
 }
 
 /** «agenda.xlsx», «2 archivos»: lo que dice la actividad de un mensaje con archivos. */
@@ -515,6 +570,19 @@ export async function assignChat(
       .update(saasClientContact)
       .set({ phone: chat.address, updatedAt: now })
       .where(eq(saasClientContact.id, contact.id))
+  // Ya se dijo de quién es: lo que Kairós pedía decidir sobra. Si se movió a otra
+  // clínica, su «Responder» pasa al cliente nuevo en la pasada siguiente.
+  await closeChatKairosItems(
+    tx,
+    chat.id,
+    previous && previous !== client.id
+      ? ["chat_sin_cliente", "responder_chat"]
+      : ["chat_sin_cliente"],
+    previous && previous !== client.id
+      ? "la conversación pasó a otro cliente"
+      : "ya se dijo de quién es",
+    now,
+  )
   const assigned = { ...chat, clientId: client.id, contactId }
   if (previous === client.id) {
     if (contactId !== chat.contactId)
@@ -642,6 +710,7 @@ export async function markChatNotClinic(
     .update(saasChat)
     .set({ notClinicAt: now, notClinicBy: staff.userId, updatedAt: now })
     .where(eq(saasChat.id, chat.id))
+  await closeChatKairosItems(tx, chat.id, ["chat_sin_cliente"], "no es una clínica", now)
   await writeAdminAudit(tx, staff, {
     action: "chat.not_clinic",
     entityId: chat.id,
@@ -1103,6 +1172,14 @@ export async function prepareChatReply(
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  // Ya se le respondió: Hoy no lo pide más. Si no sale, la pasada siguiente lo vuelve a poner.
+  await closeChatKairosItems(
+    tx,
+    chat.id,
+    ["chat_sin_cliente", "responder_chat"],
+    "ya se le respondió",
+    now,
+  )
   await writeAdminAudit(tx, actor, {
     action: "arm.outreach_prepared",
     organizationId: client?.organizationId ?? null,
