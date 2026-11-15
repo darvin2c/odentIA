@@ -9,6 +9,7 @@ import { ofProduct, WORDS } from "../../lib/product"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
 import PageHero from "../PageHero.astro"
+import ArmVisual from "./ArmVisual.astro"
 
 const title = `ARM vs CRM: por qué ${WORDS.name} es un ARM`
 const description = `Un CRM guarda lo que tu equipo anota. Un ARM (Agentic Relationship Management) hace el trabajo: agentes de IA que responden, agendan y traen de vuelta a tus ${WORDS.patients}. Así se compara ${WORDS.name}.`
@@ -52,9 +53,11 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     tag="ARM vs CRM"
     title="Un CRM te pide trabajo."
     accent="Un ARM lo hace por ti."
-    lead={`ARM es Agentic Relationship Management: la relación con tus ${WORDS.patients} la llevan agentes de IA que conversan, agendan y hacen seguimiento por todos tus canales. ${WORDS.name} nació así, con los agentes en el centro.`}
+    lead={`Agentic Relationship Management: agentes de IA que conversan, agendan y hacen seguimiento con tus ${WORDS.patients} por todos tus canales. ${WORDS.name} nació así.`}
     secondary={{ href: "#comparacion", label: "Compáralos" }}
-  />
+  >
+    <ArmVisual slot="visual" />
+  </PageHero>
 
   <section class="section section-white" id="comparacion" aria-labelledby="arm-cmp">
     <div class="wrap arm">
@@ -107,6 +110,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 </Base>
 
 <style>
+  /* En la portada, cada frase del título en su línea: «Un CRM te pide trabajo.» / «Un ARM lo hace por ti.» */
+  :global(.ph h1) { font-size: clamp(36px, 3.5vw, 52px); }
+  :global(.ph h1 .acc) { display: block; }
   .arm { display: flex; flex-direction: column; gap: 40px; }
   .arm-head { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
   .arm-acc { color: var(--teal); }
