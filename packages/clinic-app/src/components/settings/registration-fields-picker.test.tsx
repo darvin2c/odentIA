@@ -56,4 +56,20 @@ describe("«Preguntas al paciente»: el único lugar donde la clínica decide qu
     expect(page).toContain("Anticoagulantes o aspirina diaria|Nueva")
     expect(page.match(/Nueva/g)).toHaveLength(1)
   })
+
+  it("«Ver las preguntas nuevas» del aviso tiene a dónde llevar: solo la fila nueva lleva la marca", () => {
+    declareProduct(bareProduct("dental"))
+    const markup = renderToStaticMarkup(
+      <RegistrationFieldsPicker
+        fields={DEFAULT_REGISTRATION_CONFIG.fields}
+        onMode={() => {}}
+        disabled={false}
+        showOrigin
+        newKeys={new Set(["anticoagulants"]) as Set<never>}
+      />,
+    )
+    const marked = markup.split("data-new-question").slice(1)
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toContain("Anticoagulantes o aspirina diaria")
+  })
 })
