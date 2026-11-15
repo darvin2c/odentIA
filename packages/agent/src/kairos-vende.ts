@@ -342,6 +342,65 @@ interface TurnState {
   signal: AbortSignal
 }
 
+/** Palabras que dicen qué es, no cómo se llama: «Consultorio dental», «mi óptica». */
+const CLINIC_KIND_WORDS = new Set([
+  "clinica",
+  "clinicas",
+  "consultorio",
+  "consultorios",
+  "dental",
+  "dentales",
+  "dentista",
+  "odontologia",
+  "odontologica",
+  "odontologico",
+  "odontologicos",
+  "optica",
+  "opticas",
+  "medico",
+  "medica",
+  "medicos",
+  "policlinico",
+  "centro",
+  "estudio",
+  "mi",
+  "mis",
+  "su",
+  "nuestra",
+  "nuestro",
+  "el",
+  "la",
+  "los",
+  "las",
+  "de",
+  "del",
+  "y",
+  "en",
+  "para",
+])
+
+function plainWords(text: string): string[] {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+}
+
+/**
+ * El nombre que se registra es uno que dijo la persona: alguna palabra suya que no sea solo
+ * qué es («consultorio», «dental», «mi») está en lo que escribió en la conversación.
+ */
+function clinicNameSaid(name: string, history: KairosSellLine[]): boolean {
+  const own = plainWords(name).filter((word) => !CLINIC_KIND_WORDS.has(word))
+  if (own.length === 0) return false
+  const said = new Set(
+    history.filter((line) => line.who === "persona").flatMap((line) => plainWords(line.text)),
+  )
+  return own.some((word) => said.has(word))
+}
+
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return `No se pudo: ${message.slice(0, 300)}`
@@ -418,6 +477,10 @@ async function runTool(
         return `Guardado: ${[saved.phone ? "WhatsApp" : null, saved.email ? "correo" : null].filter(Boolean).join(" y ") || "nada nuevo"}.`
       }
       case "datos_de_la_clinica": {
+        // Registra el nombre que dijo, no «consultorio dental» de «quiero info para mi consultorio
+        // dental»: un registro así ocupaba la conversación y el nombre de verdad ya no entraba.
+        if (!clinicNameSaid(String(value.clinica), input.history))
+          return "Ese no es el nombre de su clínica: todavía no lo dijo. Pregúntale cómo se llama su clínica y regístrala cuando lo diga."
         const result = await tools.clinicData(
           {
             clinicName: String(value.clinica),
@@ -511,6 +574,16 @@ function deniedIn(text: string, kind: string, value: string): boolean {
       ? clockMinutesIn(sentence).some((readings) => readings.some((m) => minutes.includes(m)))
       : sentence.includes(withoutMeridiemDots(value.toLowerCase()))
   return sentences.some((sentence) => names(sentence) && DENIAL.test(sentence))
+}
+
+/**
+ * Las horas de un texto que no son ninguna de `known` (minutos del día), cada una con sus
+ * lecturas. Se leen con el mismo lector que la comprobación (`clockMinutesIn`): «11:00 a. m.»
+ * es 660 y no también 00:00, «12 m.» es el mediodía. La medición de Kairós cuenta sus horas
+ * no ofrecidas con esta misma función, para no ver una hora que la comprobación no vio.
+ */
+export function sellTimesNotIn(text: string, known: readonly number[]): number[][] {
+  return clockMinutesIn(text).filter((readings) => !readings.some((m) => known.includes(m)))
 }
 
 /** Lo que escribió la persona desde la última respuesta (este turno). */
@@ -607,26 +680,68 @@ const CLAIMS: Array<{ act: "agendar" | "cancelar"; re: RegExp }> = [
   },
 ]
 
-/**
- * Lo que la respuesta da por hecho: agendó o movió («quedó agendada», «te reservé», «la moví»,
- * «listo, el lunes a las 10») o canceló («cancelé»). Solo puede decirlo si la herramienta lo hizo
- * en este turno; si no, es una promesa falsa y va el aviso fijo.
- */
-export function claimedActions(text: string): Set<"agendar" | "cancelar"> {
-  const out = new Set<"agendar" | "cancelar">()
+type ClaimedAct = "agendar" | "cancelar"
+
+/** Cada frase que da algo por hecho, con lo que da por hecho y las horas que nombra. */
+function claimsIn(text: string): Array<{ act: ClaimedAct; times: number[][] }> {
+  const out: Array<{ act: ClaimedAct; times: number[][] }> = []
   const plainText = withoutMeridiemDots(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase())
   for (const sentence of plainText.split(/(?<=[.!?])\s+|\n+/)) {
     if (NOT_A_CLAIM.test(sentence)) continue
-    for (const claim of CLAIMS) if (claim.re.test(sentence)) out.add(claim.act)
+    const times = clockMinutesIn(sentence)
+    const acts = new Set<ClaimedAct>()
+    for (const claim of CLAIMS) if (claim.re.test(sentence)) acts.add(claim.act)
     if (
       /^\s*(?:listo|perfecto|hecho|genial)(?![\p{L}])/u.test(sentence) &&
       DAY_WORD.test(sentence) &&
-      clockMinutesIn(sentence).length > 0 &&
+      times.length > 0 &&
       !OFFER_WORD.test(sentence)
     )
-      out.add("agendar")
+      acts.add("agendar")
+    for (const act of acts) out.push({ act, times })
   }
   return out
+}
+
+/**
+ * Lo que la respuesta da por hecho: agendó o movió («quedó agendada», «te reservé», «la moví»,
+ * «listo, el lunes a las 10») o canceló («cancelé»).
+ */
+export function claimedActions(text: string): Set<ClaimedAct> {
+  return new Set(claimsIn(text).map((claim) => claim.act))
+}
+
+/**
+ * Lo que la respuesta da por hecho y no es cierto en este momento (vacío si todo lo es). Se mira
+ * contra el estado de la conversación, no contra las herramientas del turno: «quedó agendada»
+ * vale si tiene una presentación abierta (agendada antes, o agendada o movida en este turno: la
+ * movida cuenta con su hora nueva) y, si la frase nombra una hora, es la de esa presentación;
+ * «cancelé» vale solo si canceló en este turno. Así, el «sí, perfecto» que sigue a lo agendado
+ * puede recordarlo, y lo que no hizo sigue sin salir.
+ */
+export function falseClaims(
+  text: string,
+  state: {
+    /** Su presentación abierta al empezar el turno (de esta conversación o de su cliente). */
+    presentation: { startsAt: Date } | null
+    /** Lo que agendó o movió en este turno. */
+    booked: { startsAt: Date } | null
+    /** Lo que canceló en este turno. */
+    cancelled: { startsAt: Date } | null
+  },
+): ClaimedAct[] {
+  const open = state.booked ?? (state.cancelled ? null : state.presentation)
+  const openMinutes = open ? clockMinutesIn(sellWhenWords(open.startsAt)).flat() : []
+  const out = new Set<ClaimedAct>()
+  for (const claim of claimsIn(text)) {
+    const holds =
+      claim.act === "cancelar"
+        ? state.cancelled !== null
+        : open !== null &&
+          claim.times.every((readings) => readings.some((m) => openMinutes.includes(m)))
+    if (!holds) out.add(claim.act)
+  }
+  return [...out]
 }
 
 /** Lo que se le dio en el turno, como fuentes de la comprobación. */
@@ -774,15 +889,12 @@ async function runTurn(
           state,
           `La respuesta traía lo que no se le dio (${check.unsupported.join("; ")})`.slice(0, 300),
         )
-      const claimed = claimedActions(text)
-      if (
-        (claimed.has("agendar") && !state.booked) ||
-        (claimed.has("cancelar") && !state.cancelled)
-      )
+      const untrue = falseClaims(text, { ...state, presentation: input.presentation })
+      if (untrue.length)
         return failedTurn(
           input,
           state,
-          `La respuesta daba por hecho lo que no hizo (${[...claimed].join(", ")})`,
+          `La respuesta daba por hecho lo que no hizo (${untrue.join(", ")})`,
         )
       return { kind: "respondio", text: out, booked: state.booked }
     }

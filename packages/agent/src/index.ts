@@ -89,6 +89,7 @@ export {
   claimedActions,
   createKairosSeller,
   fakeSellerModel,
+  falseClaims,
   KAIROS_SELL_FALLBACK,
   KAIROS_SELL_HANDOFF,
   KAIROS_SELL_INTRO,
@@ -105,6 +106,7 @@ export {
   type KairosToolContext,
   SELLER_SYSTEM,
   sellContext,
+  sellTimesNotIn,
   sellWhenWords,
 } from "./kairos-vende.js"
 export {

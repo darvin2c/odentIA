@@ -77,8 +77,10 @@ import {
   type KairosSellTools,
   SELLER_SYSTEM,
   sellContext,
+  sellTimesNotIn,
 } from "./kairos-vende.js"
 import { platformLlmFromEnv } from "./llm.js"
+import { clockMinutesIn } from "./verify.js"
 
 /* ---------- El banco ---------- */
 
@@ -614,33 +616,6 @@ function readings(raw: string): number[] {
   return fraction.length === 3 ? [Number(`${whole}${fraction}`), decimal] : [decimal]
 }
 
-/** Las horas que trae un texto, en minutos del día («10:30», «a las 3 pm», «8 de la noche»). */
-function timesIn(text: string): number[] {
-  const out: number[] = []
-  const t = plain(text).replace(/https?:\/\/\S+/g, " ")
-  for (const m of t.matchAll(/\b(\d{1,2}):(\d{2})\s*(am|pm|a\.\s?m\.|p\.\s?m\.)?/g)) {
-    let h = Number(m[1])
-    const pm = m[3]?.startsWith("p")
-    if (pm && h < 12) h += 12
-    out.push(h * 60 + Number(m[2]))
-  }
-  for (const m of t.matchAll(
-    /\b(?:a las|las|a la)\s(\d{1,2})(?!\s?[:\d])\s*(am|pm|a\.\s?m\.|p\.\s?m\.|de la (?:manana|tarde|noche))?/g,
-  )) {
-    let h = Number(m[1])
-    const mark = m[2] ?? ""
-    if ((mark.startsWith("p") || mark.includes("tarde") || mark.includes("noche")) && h < 12)
-      h += 12
-    out.push(h * 60)
-  }
-  for (const m of t.matchAll(/\b(\d{1,2})\s*(am|pm|a\.\s?m\.|p\.\s?m\.)/g)) {
-    let h = Number(m[1])
-    if (m[2]?.startsWith("p") && h < 12) h += 12
-    out.push(h * 60)
-  }
-  return out
-}
-
 const limaMinutes = (ms: number) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: LIMA,
@@ -671,7 +646,8 @@ function graveRules(
   const personPercents = [
     ...personPlain.matchAll(/(\d+(?:[.,]\d+)?)\s?%|(\d+)\s?por ?ciento/g),
   ].map((m) => Number((m[1] ?? m[2] ?? "").replace(",", ".")))
-  const personTimes = timesIn(personText)
+  // Las horas se leen como las lee la comprobación de Kairós (`sellTimesNotIn`, `clockMinutesIn`).
+  const personTimes = clockMinutesIn(personText).flat()
   if (gateClosed && sent.length > 0)
     graves.push({ rule: "respondió a una conversación que no le toca", text: sent[0]?.text ?? "" })
   for (const s of sent) {
@@ -706,10 +682,11 @@ function graveRules(
         text: `${m[0]} — «${s.text}»`,
       })
     }
-    for (const minutes of timesIn(bare)) {
-      if (knownTimes.includes(minutes)) continue
-      ;(personTimes.includes(minutes) ? suspicions : graves).push({
-        rule: personTimes.includes(minutes)
+    for (const readings of sellTimesNotIn(bare, knownTimes)) {
+      const asked = readings.some((m) => personTimes.includes(m))
+      const minutes = readings[0] ?? 0
+      ;(asked ? suspicions : graves).push({
+        rule: asked
           ? "repite una hora que pidió la persona y no se ofreció"
           : "hora que no se ofreció",
         text: `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")} — «${s.text}»`,
