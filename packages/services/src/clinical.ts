@@ -9,6 +9,7 @@ import {
   declaredMedicineAtc,
   knownHealthQuestions,
   BONE_MEDICINE_FORM_LABELS,
+  type DirectedMedicineDeclaration,
   BONE_MEDICINE_REASON_LABELS,
   MEDICATION_CLASSES,
   type MedicationClass,
@@ -1316,11 +1317,7 @@ export function declaredMedications(
     const name = answer.detail?.trim() || MEDICATION_CLASSES[group].unnamed
     seen.add(normalizeDrugText(name))
     // Los huesos: por qué y cómo, y si ya no la toma, terminada (B3): sigue contando, no está vigente.
-    const notes = [
-      answer.reason ? BONE_MEDICINE_REASON_LABELS[answer.reason] : "",
-      answer.form ? BONE_MEDICINE_FORM_LABELS[answer.form] : "",
-      answer.now === false ? "dijo que ya no la toma" : "",
-    ].filter(Boolean)
+    const notes = directedMedicineNotes(answer)
     rows.push({
       name,
       declaredClass: group,
@@ -1339,6 +1336,18 @@ export function declaredMedications(
   if (declared.medications?.state === "recorded" && declared.medications.items.length === 0)
     rows.push({ name: OTHER_MEDICINE_UNNAMED, declaredClass: null })
   return rows
+}
+
+/**
+ * Lo que dijo de una medicina de su clase además de cuál (los huesos, QA del 14 nov, B3): por qué,
+ * cómo la toma y si ya no la toma. Lo dicen igual su fila de Antecedentes y la copia de la historia.
+ */
+export function directedMedicineNotes(answer: Pick<DirectedMedicineDeclaration, "reason" | "form" | "now">): string[] {
+  return [
+    answer.reason ? BONE_MEDICINE_REASON_LABELS[answer.reason] : "",
+    answer.form ? BONE_MEDICINE_FORM_LABELS[answer.form] : "",
+    answer.now === false ? "dijo que ya no la toma" : "",
+  ].filter(Boolean)
 }
 
 /** El día anterior a uno (AAAA-MM-DD), en el calendario, sin zona. */
