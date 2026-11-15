@@ -168,7 +168,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
               return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
             }),
             segmentId,
-            transcript,
+            // Lo que comprobó Clío: el tramo, con el final del anterior delante si sigue su frase.
+            transcript: extracted.heard,
             formQuestions: ready.forms,
           }),
         )

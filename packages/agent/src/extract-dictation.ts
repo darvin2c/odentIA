@@ -65,12 +65,14 @@ export async function extractDictation(
     return {
       ...profile.demoSegment(transcript, services, now, pending, diagnosisSystem.key),
       model: spec.modelName,
+      // El doble de demostración no lee la frase que corta la pausa.
+      heard: transcript,
     }
 
   const model = deps.createModel
     ? await deps.createModel(spec)
     : await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
-  const { read } = await askDictationModel(
+  const { read, heard } = await askDictationModel(
     model,
     spec,
     {
@@ -96,10 +98,11 @@ export async function extractDictation(
     )
   }
   // La segunda lectura de las fichas: lo que la red avisaría se lee una vez más, en la misma pausa.
+  // La red mira lo mismo que se comprobó: con el final del tramo anterior si lo nuevo sigue su frase.
   const forms = input.forms ?? []
-  const misses = forms.length ? formNetMisses(read.drafts, forms, productHooksFor(product).site, transcript, input.formPending) : []
-  if (!misses.length) return { ...read, model: spec.modelName }
+  const misses = forms.length ? formNetMisses(read.drafts, forms, productHooksFor(product).site, heard, input.formPending) : []
+  if (!misses.length) return { ...read, model: spec.modelName, heard }
   // Si esa lectura falla, la pausa no se pierde: queda lo de la primera y el aviso de la red.
   const reread = await rereadFormSentences(model, spec, misses, forms).catch(() => [])
-  return { ...read, drafts: [...read.drafts, ...reread], model: spec.modelName }
+  return { ...read, drafts: [...read.drafts, ...reread], model: spec.modelName, heard }
 }

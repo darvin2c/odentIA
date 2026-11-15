@@ -327,6 +327,8 @@ export interface DictationPrepared {
   payload: Record<string, unknown>
   status: "lista" | "por_revisar"
   note: string | null
+  /** La frase que se muestra, si no es la que citó Clío (una respuesta de ficha: la del número que se usó). */
+  said?: string
 }
 
 /**
@@ -339,6 +341,11 @@ export interface DictationPrepared {
 export interface ProductDictation {
   /** Las clases de sugerencia propias del producto, además de las comunes. */
   kinds: readonly DictationKind[]
+  /**
+   * Las palabras de lo dicho que dicen dónde y no cuál prestación (odentIA: la
+   * pieza y sus caras): no cuentan al buscarla en el tarifario (`matchService`).
+   */
+  placeWords: readonly string[]
   /** Lo del producto que va en la parte fija de las instrucciones (odentIA: los hallazgos que se dictan). */
   catalogText(): string
   /** Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la variante del hallazgo). */

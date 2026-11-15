@@ -303,6 +303,12 @@ interface DentalDictationContext {
 
 export const DENTAL_DICTATION: ProductDictation = {
   kinds: ["odontograma"],
+  // «la resina de la pieza 36 por oclusal», «la endodoncia de la molar»: la pieza, su tipo, el lado y
+  // la cara dicen dónde, no cuál prestación. «Superior» y «anterior» no: también distinguen servicios.
+  placeWords: [
+    "pieza", "piezas", "diente", "dientes", "muela", "muelas", "molar", "molares", "premolar", "premolares", "incisivo", "incisivos", "canino", "caninos",
+    "derecho", "derecha", "izquierdo", "izquierda", "cara", "caras", "oclusales", ...Object.keys(SPOKEN_SURFACE),
+  ],
   catalogText: dictationFindingsText,
   async context(tx, orgId): Promise<DentalDictationContext> {
     return { strictVariants: await orgStrictVariants(tx, orgId) }

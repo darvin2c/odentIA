@@ -284,6 +284,53 @@ describe("lo que recibe el modelo en cada pausa", () => {
   })
 })
 
+/** Lo que encontró la prueba con voz real del 15 nov (corrida c2), tal como lo oyó Chrome. */
+describe("la prueba con voz del 15 nov", () => {
+  const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, pending: [] }
+  const pause = (transcript: string, context = "") => dictationMessages({ ...base, transcript, context }, DENTAL_DICTATION_PROFILE, false)
+  const endo = formQuestionsOf([
+    { id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} },
+  ])
+  const fixed = String(((pause("x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
+  const before = "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor"
+  const now = "sin respuesta también percusión negativa palpación positiva"
+
+  it("la frase que corta la pausa se lee junta, y lo que cita desde lo anterior vale (v07)", async () => {
+    const human = String(pause(now, before)[1]?.content)
+    expect(human).toContain(`Lo nuevo que dictó (empieza con «frío sin respuesta calor», el final de lo anterior: la pausa cortó ahí la frase):\n«frío sin respuesta calor ${now}»`)
+    // Un tramo que empieza otra frase no lleva ese aviso.
+    expect(String(pause("percusión negativa", before)[1]?.content)).not.toContain("la pausa cortó")
+    // La frase unida se encuentra en lo dictado, con el final de lo anterior delante.
+    const calor = endo.find((item) => item.fieldId === "calor")?.number ?? 0
+    const reply = new AIMessage({ content: "", tool_calls: [{ id: "1", name: "registrar_dictado", args: { fichas: [{ question: calor, answer: "Sin respuesta", dicho: "calor sin respuesta también" }] } }] })
+    const model = { invoke: async () => reply }
+    const ask = { ...base, transcript: now, context: before, forms: endo }
+    const { read, heard } = await askDictationModel(model, { provider: "openai", modelName: "prueba" }, ask, DENTAL_DICTATION_PROFILE)
+    expect(read?.drafts).toEqual([{ kind: "ficha", payload: { question: calor, answer: "Sin respuesta" }, sourceText: "calor sin respuesta también" }])
+    // Con eso mismo comprueban la red y el servidor.
+    expect(heard).toBe(`frío sin respuesta calor ${now}`)
+    // Sin lo anterior, esa frase no se dijo: no se muestra.
+    const alone = await askDictationModel(model, { provider: "openai", modelName: "prueba" }, { ...ask, context: "" }, DENTAL_DICTATION_PROFILE)
+    expect(alone.read?.drafts[0]?.sourceText).toBe("")
+  })
+
+  it("lo que se le indica al paciente va en las indicaciones de la consulta, no en el plan (v03)", () => {
+    expect(fixed).toContain("En `indicaciones` va solo lo que hará la clínica más adelante")
+    expect(fixed).toContain("aunque se diga con «le indico», va en las indicaciones de la consulta (`indications`)")
+  })
+
+  it("el relato no recoge lo que se le dice al paciente ni lo que llora mientras lo atienden, en toda pausa (v08)", () => {
+    expect(fixed).toContain("No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente")
+    expect(fixed).toContain("«tranquila, ya casi terminamos»")
+    expect(fixed).toContain("«¡me duele!», «no quiero», «mamá»")
+  })
+
+  it("el tiempo de enfermedad cuenta desde lo que se fecha, y el diagnóstico de la ficha va también a Diagnóstico (v07)", () => {
+    expect(fixed).toContain("Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años»")
+    expect(dictationFormsText(endo)).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
+  })
+})
+
 describe("las respuestas de una ficha", () => {
   /** La ficha de ortodoncia de odentIA, con sus preguntas numeradas como las ve Clío. */
   const ortho: DictationFormQuestion[] = (() => {

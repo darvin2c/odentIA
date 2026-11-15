@@ -149,6 +149,8 @@ async function draftOf(tx: Db, orgId: string, patientId: string, encounterId: st
 
 export const MEDICAL_DICTATION: ProductDictation = {
   kinds: ["signos", "examen", "descanso"],
+  // Sin «dónde» (decisión 4): todo lo dicho de una prestación dice cuál es.
+  placeWords: [],
   catalogText: examSystemsText,
   context: async () => null,
   // Sin «dónde» (decisión 4): una pieza o una cara que llegue se quita, no se adivina.

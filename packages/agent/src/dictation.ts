@@ -11,6 +11,8 @@ import {
   groundHeard,
   heardVocabularyOf,
   operationAgentSchema,
+  pauseBridge,
+  withPauseBridge,
 } from "@odentia/services"
 import { z } from "zod"
 import { reportReplyUse } from "./ai-usage.js"
@@ -142,9 +144,21 @@ export function appointmentAndBudgetPrompt(booking: string): string[] {
 export function consultaPrompt(examples: string): string[] {
   return [
     `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado.`,
-    "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
-    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato.",
+    "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años», «desde la caída del sábado»), se cuenta desde ahí («hace dos años»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
+    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
+    // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
+    "El relato es lo que cuentan el paciente o quien lo acompaña sobre lo que le pasa. No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente o al asistente mientras se lo atiende («tranquila, ya casi terminamos», «abre grande», «¿te duele cuando comes?», «pásame…») ni lo que el paciente dice o llora mientras lo examinan o lo tratan («¡me duele!», «no quiero», «mamá»): una queja suelta entre eso no es de la historia. Lo que responde sobre lo que le pasa sí es del relato, y lo que el profesional encuentra al examinarlo va donde siempre.",
   ]
+}
+
+/**
+ * Lo que se le indica al paciente para que haga por su cuenta va en las
+ * indicaciones de la consulta, no en el plan (prueba con voz del 15 nov, v03:
+ * «le indico cera de ortodoncia» quedaba como un tratamiento del plan, con su
+ * precio). `examples`: lo que se indica, con las palabras del producto.
+ */
+export function homeCarePrompt(examples: string): string {
+  return `En \`indicaciones\` va solo lo que hará la clínica más adelante: un tratamiento o una prestación. Lo que se le indica al paciente para que haga o use por su cuenta (${examples}), aunque se diga con «le indico», va en las indicaciones de la consulta (\`indications\`), no en \`indicaciones\`.`
 }
 
 /**
@@ -210,7 +224,7 @@ export interface DictationProfile {
     now: Date,
     pending: DictationPending[],
     diagnosisSystem: DiagnosisSystemKey,
-  ): Omit<DictationExtraction, "model">
+  ): Omit<DictationExtraction, "model" | "heard">
 }
 
 /** Lo que se le pregunta al modelo en una pausa del dictado, con lo de la clínica ya leído. */
@@ -289,11 +303,27 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
     "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.",
     "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
     "- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta. Lo demás que dijo (lo que siente el paciente, desde cuándo, lo que se hizo) sí va en la consulta, como siempre.",
+    // Prueba con voz del 15 nov (v07): «necrosis pulpar con absceso apical crónico» llenaba la ficha y no proponía el diagnóstico.
+    "- Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.",
     "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
     `- ${HEARD_HINT} En \`dicho\` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.`,
-    "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte.",
+    "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.",
     ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
   ].join("\n")
+}
+
+/**
+ * Lo nuevo y, si sigue una frase que la pausa cortó (`pauseBridge`; prueba con
+ * voz del 15 nov, v07: «…calor» y después «sin respuesta también»), con el final
+ * de lo anterior delante, como un solo texto: así se lee la frase entera y se
+ * cita como se dijo, y se comprueba con ese mismo texto (`withPauseBridge`),
+ * aquí y en el servidor. Como un aviso aparte, Clío a veces dejaba de leer lo
+ * nuevo o volvía a registrar lo de antes (medido el 15 nov).
+ */
+function newText(context: string, transcript: string): string {
+  const bridge = pauseBridge(context, transcript)
+  if (!bridge) return `Lo nuevo que dictó:\n«${transcript}»`
+  return `Lo nuevo que dictó (empieza con «${bridge}», el final de lo anterior: la pausa cortó ahí la frase):\n«${bridge} ${transcript.trim()}»`
 }
 
 /**
@@ -326,7 +356,7 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
       : "",
     dictationFormsText(input.forms ?? []),
-    `Lo nuevo que dictó:\n«${input.transcript}»`,
+    newText(context, input.transcript),
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -402,7 +432,7 @@ export function readDictation(
   parts: DictationProfile["parts"],
   /** Las preguntas de ficha que se le dieron: una respuesta a otra no existe y se avisa. */
   forms: readonly DictationFormQuestion[] = [],
-): Omit<DictationExtraction, "model"> | null {
+): Omit<DictationExtraction, "model" | "heard"> | null {
   if (!isRecord(args)) return null
   let omitted = 0
   const unused: string[] = []
@@ -522,6 +552,8 @@ export interface DictationExtraction {
   /** Lo que dijo para pedir lo que no se pudo usar, tal cual está en lo dictado: la pantalla lo muestra. */
   unused: string[]
   model: string
+  /** Lo dictado con que se comprobó la pausa (`askDictationModel`): con eso la comprueba también el servidor. */
+  heard: string
 }
 
 const empty = (value: unknown) =>
@@ -741,11 +773,16 @@ export async function askDictationModel(
   ask: DictationAsk,
   profile: DictationProfile,
 ): Promise<{
-  read: Omit<DictationExtraction, "model"> | null
+  read: Omit<DictationExtraction, "model" | "heard"> | null
   reply: AIMessage
   repeated: string[]
   /** Los argumentos tal como llegaron del modelo: la medición los guarda para ver qué respondió. */
   raw: string | null
+  /**
+   * Lo dictado con que se comprueba lo que respondió: el tramo, con el final del anterior delante si
+   * sigue su frase (`withPauseBridge`). La red y el servidor comprueban con lo mismo.
+   */
+  heard: string
 }> {
   const record = tool(async () => "registrado", {
     name: DICTATION_TOOL,
@@ -753,10 +790,12 @@ export async function askDictationModel(
     schema: profile.extraction,
   })
   const { reply, args, repeated, raw } = await callRecorder(model, spec, record, dictationMessages(ask, profile, viaResponses(model)))
+  const heard = withPauseBridge(ask.context, ask.transcript)
   return {
-    read: args === undefined ? null : readDictation(args, ask.transcript, ask.pending.length, profile.parts, ask.forms ?? []),
+    read: args === undefined ? null : readDictation(args, heard, ask.pending.length, profile.parts, ask.forms ?? []),
     reply,
     repeated,
     raw,
+    heard,
   }
 }

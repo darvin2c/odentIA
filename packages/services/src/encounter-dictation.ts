@@ -1,6 +1,7 @@
 import {
   ADMINISTRATION_ROUTES,
   type AllergenEntry,
+  type ClinicalProduct,
   allergenName,
   allergyWarnings,
   duplicateWarnings,
@@ -68,8 +69,10 @@ import {
   withFormTwins,
   withoutFormNotes,
 } from "./dictation-forms.js"
-import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
-import { productHooks, requireDictatingProduct } from "./products.js"
+import type { DictationPrepared, ProductDictation, ProductHooks } from "./product-hooks.js"
+import type { ProductCatalog } from "./product-catalog.js"
+import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
+import { everydayServiceVariants } from "./search-text.js"
 
 /*
  * ---------- Asistente clínico: lo dictado se vuelve sugerencias que el profesional confirma ----------
@@ -291,6 +294,8 @@ interface DictationScope {
   formQuestions: readonly DictationFormQuestion[]
   /** Lo dictado en la pausa: la oración de una respuesta de ficha dice de qué pregunta habla. */
   transcript?: string
+  /** Con qué palabras se busca en el tarifario lo dicho. */
+  serviceWords: ServiceWords
 }
 
 async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
@@ -306,6 +311,7 @@ async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
     choices: hooks.budgetRequired,
     site: hooks.site,
     formQuestions: [],
+    serviceWords: serviceWordsOf(hooks),
   }
 }
 
@@ -315,29 +321,105 @@ const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
 
 /**
- * La prestación del tarifario (o el producto de Inventario) que nombró el
- * odontólogo, o las más parecidas si no hay una sola.
+ * Lo que se dice al nombrar una prestación y no dice cuál es: el artículo, «hoy», «tratamiento», el
+ * cambio de algo («cambio de arco») o el envase de un material («un par de guantes»).
  */
-function matchService<T extends { name: string }>(spoken: string, services: T[]): { match: T | null; candidates: T[] } {
+const NOT_SERVICE_WORDS = new Set([
+  "una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro",
+  "tratamiento", "procedimiento", "cambio", "cambios", "par", "pares", "caja", "cajas", "sobre", "sobres", "unidad", "unidades",
+])
+/** Lo que se hizo, no la prestación: «cambiamos», «hicimos», «le hice», «coloqué». */
+const DONE_VERB = /^(?:[a-z]{3,}(?:amos|emos|imos)|hice|hizo|puse|puso|coloque|termine|realice|cambie|cemente|aplique|saque)$/
+/** Un número dicho («la cinco cinco», «de dos caras»): dice dónde o cuánto, no cuál prestación. */
+const NUMBER_WORD = /^(?:\d+|cero|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/
+
+/**
+ * Con qué palabras se busca en el tarifario lo dicho (`matchService`): las de
+ * todos los días de su catálogo («extracción» es «exodoncia», «arco» es el
+ * control de ortodoncia; las mismas de la búsqueda de servicios) y las que
+ * dicen dónde y no cuál prestación (`ProductDictation.placeWords`).
+ */
+interface ServiceWords {
+  everyday: ProductCatalog["everydayWords"]
+  place: ReadonlySet<string>
+}
+
+const NO_SERVICE_WORDS: ServiceWords = { everyday: {}, place: new Set() }
+
+/** Las palabras con que se buscan en el tarifario las prestaciones dichas en un producto. */
+function serviceWordsOf(hooks: Pick<ProductHooks, "catalog" | "dictation">): ServiceWords {
+  return { everyday: hooks.catalog.everydayWords, place: new Set(hooks.dictation?.placeWords ?? []) }
+}
+
+/**
+ * La misma palabra con otra terminación: «resina» y «resinas», «obturación» y «obturaciones». Una
+ * palabra que solo empieza como otra no es la misma: «cera» no es «cerámica», ni «poste»
+ * «posterior», ni «protector» «prótesis».
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  if (short.length < 4 || long.length - short.length > 3) return false
+  let common = 0
+  while (common < short.length && short[common] === long[common]) common += 1
+  return common >= Math.max(4, short.length - 2)
+}
+
+/**
+ * La prestación del tarifario (o el producto de Inventario) que nombró el
+ * profesional, o las que calzan si no hay una sola (prueba con voz del 15 nov).
+ * Calza la que tiene en su nombre la palabra con que empieza lo dicho, la que
+ * dice qué es («cera» en «cera de ortodoncia», «arco» en «cambiamos el arco»), y
+ * además tiene todo lo demás que dice cuál es, o todo su nombre está en lo dicho
+ * («nebulización con salbutamol» es la nebulización). Lo dicho también se lee con
+ * las palabras de todos los días de su catálogo. Así «cambiamos el arco» no calza
+ * con «Apexificación, cambio de medicación», ni «cera de ortodoncia» con
+ * «Aparatología fija de ortodoncia»: lo que no calza con ninguna no propone
+ * ninguna, porque un servicio lleva precio y nunca se ofrece otro procedimiento.
+ * Lo que calza por otra palabra se ofrece para elegir, nunca se da por bueno.
+ */
+function matchService<T extends { name: string }>(spoken: string, services: T[], lookup: ServiceWords = NO_SERVICE_WORDS): { match: T | null; candidates: T[] } {
   const wanted = normalizeForSearch(spoken)
   const exact = services.filter((service) => normalizeForSearch(service.name) === wanted)
   if (exact.length === 1) return { match: exact[0] ?? null, candidates: [] }
+  const keysOf = (text: string) => words(text).filter((word) => !NOT_SERVICE_WORDS.has(word) && !lookup.place.has(word) && !DONE_VERB.test(word) && !NUMBER_WORD.test(word))
+  const keys = keysOf(spoken)
+  if (!keys.length) return { match: null, candidates: [] }
+  const otherKeys = everydayServiceVariants(spoken, lookup.everyday).map(keysOf)
   const tokens = words(spoken)
   const scored = services
-    .map((service) => {
+    .flatMap((service) => {
       const name = normalizeForSearch(service.name)
-      const own = words(service.name)
-      const shared = tokens.filter((token) => own.some((word) => word.startsWith(token.slice(0, 5)) || token.startsWith(word.slice(0, 5)))).length
-      return { service, shared, contains: name.includes(wanted) || wanted.includes(name) }
+      const own = name.split(" ").filter((word) => word.length >= 3)
+      const nameKeys = keysOf(name)
+      const has = (list: readonly string[], word: string) => list.some((other) => sameWord(word, other))
+      const fits = (keys: string[]) =>
+        keys.length > 0 && has(own, keys[0] ?? "") && (keys.every((key) => has(own, key)) || (nameKeys.length > 0 && nameKeys.every((key) => has(keys, key))))
+      const byName = fits(keys)
+      if (!byName && !otherKeys.some(fits)) return []
+      const shared = tokens.filter((token) => has(own, token)).length
+      // Contiene lo dicho, o está en lo dicho, por palabras enteras (con otra terminación): «guante» está en
+      // «Guantes de nitrilo», pero «cera» no está en «Corona cerámica».
+      const contains = byName && (tokens.every((token) => has(own, token)) || own.every((word) => has(tokens, word)))
+      return [{ service, shared, byName, contains, extra: own.length - shared }]
     })
-    .filter((item) => item.shared > 0 || item.contains)
-    .sort((a, b) => Number(b.contains) - Number(a.contains) || b.shared - a.shared)
+    .sort((a, b) => Number(b.contains) - Number(a.contains) || Number(b.byName) - Number(a.byName) || b.shared - a.shared || a.extra - b.extra)
   const [best, second] = scored
-  // Una sola coincidencia clara se da por buena; si hay varias parecidas, elige el odontólogo.
-  if (best && best.contains && (!second || !second.contains) && best.shared >= Math.min(tokens.length, words(best.service.name).length)) {
+  // Una sola coincidencia clara se da por buena; si hay varias parecidas, elige el profesional.
+  if (best && best.contains && (!second || !second.contains) && best.shared >= Math.min(tokens.length, best.shared + best.extra)) {
     return { match: best.service, candidates: [] }
   }
   return { match: null, candidates: scored.slice(0, SERVICE_CANDIDATES).map((item) => item.service) }
+}
+
+/**
+ * El servicio de lo dicho en un producto (`matchService`), por nombre: el que
+ * se da por bueno o las candidatas. Lo usa la medición del dictado
+ * (`eval:dictado`) para contar los procedimientos que calzan con otro.
+ */
+export function dictatedService(spoken: string, names: readonly string[], product: ClinicalProduct): { match: string | null; candidates: string[] } {
+  const { match, candidates } = matchService(spoken, names.map((name) => ({ name })), serviceWordsOf(productHooksFor(product)))
+  return { match: match?.name ?? null, candidates: candidates.map((item) => item.name) }
 }
 
 /** Formato y zona de la clínica con los que se escribe el resumen de una sugerencia. */
@@ -587,7 +669,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal.
     const { alternatives, ...main } = payload
     const options = scope.choices && Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
-    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, services, dictation)
+    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, services, dictation, scope.serviceWords)
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
@@ -598,24 +680,24 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       return { payload, status: "por_revisar", note: "No entendí para qué día. Dilo otra vez o elige otro horario." }
     }
     if (payload["time"] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(payload["time"]))) delete payload["time"]
-    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services) : {}
+    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services, scope.serviceWords) : {}
     return { payload: { ...payload, ...what }, status: "lista", note: null }
   }
   if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
-  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services) }, status: "lista", note: null }
+  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services, scope.serviceWords) }, status: "lista", note: null }
   return { payload, status: "lista", note: null }
 }
 
 /** Lo que se busca en el tarifario de una prestación dicha: el servicio si hay uno solo, o las candidatas. */
 type PlanChoice = { service?: string; serviceId?: string; serviceName?: string; priceCents?: number; currency?: string; serviceScope?: string | null; candidates?: ServiceOption[] }
 
-function chooseService(choice: PlanChoice, services: ServiceOption[]): PlanChoice {
+function chooseService(choice: PlanChoice, services: ServiceOption[], lookup: ServiceWords): PlanChoice {
   const chosen = typeof choice.serviceId === "string" ? services.find((service) => service.id === choice.serviceId) : undefined
-  const match = chosen ?? matchService(String(choice.service ?? ""), services).match
+  const { match, candidates } = chosen ? { match: chosen, candidates: [] } : matchService(String(choice.service ?? ""), services, lookup)
   if (match) return { service: choice.service ?? match.name, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }
-  return { service: choice.service ?? "", candidates: matchService(String(choice.service ?? ""), services).candidates }
+  return { service: choice.service ?? "", candidates }
 }
 
 const OPTION_LETTER = ["A", "B", "C"]
@@ -626,9 +708,9 @@ const OPTION_LETTER = ["A", "B", "C"]
  * camino busca su servicio en el tarifario como la principal. Queda lista solo
  * si todos tienen su servicio.
  */
-function settlePlan(payload: Record<string, unknown>, services: ServiceOption[], dictation: ProductDictation): Prepared {
+function settlePlan(payload: Record<string, unknown>, services: ServiceOption[], dictation: ProductDictation, lookup: ServiceWords): Prepared {
   const { options: rawOptions, candidates: _candidates, ...rest } = payload
-  const main = chooseService(rest as PlanChoice, services)
+  const main = chooseService(rest as PlanChoice, services, lookup)
   const base = { ...rest, ...main }
   delete base["candidates"]
   const fitted: Prepared = main.serviceId
@@ -641,7 +723,7 @@ function settlePlan(payload: Record<string, unknown>, services: ServiceOption[],
           : `Dijiste «${main.service}» y no está en tus servicios. Elige la prestación.`,
       }
   if (!Array.isArray(rawOptions) || rawOptions.length === 0) return fitted
-  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services))
+  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services, lookup))
   // La elección guarda la pieza y las caras como se dijeron: cada camino toma de ahí lo suyo al
   // confirmarse (`confirmPlanChoice`), y la corona no se queda sin las caras que pide la resina.
   const site = choiceSite(base)
@@ -806,7 +888,7 @@ async function revise(
   let payload: Record<string, unknown> = Object.fromEntries(
     Object.entries({ ...(kind === "receta" ? saidInMedication(current) : current), ...patch }).filter(([, value]) => value !== null && value !== ""),
   )
-  if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, services, dictation)
+  if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, services, dictation, scope.serviceWords)
   // Tocar otro hueco de los que ofrece la tarjeta: se queda ese, si sigue libre.
   if (kind === "cita" && typeof patch["startsAt"] === "string") return { payload: { ...current, startsAt: patch["startsAt"] }, status: "lista", note: null }
   if (kind === "procedimiento") {
@@ -959,7 +1041,7 @@ async function withPatient(
   checks: PatientChecks,
   scope: DictationScope,
 ): Promise<Prepared> {
-  const ready = checkAgainstPatient(kind, prepared, checks, scope.medications, scope.dictation)
+  const ready = checkAgainstPatient(kind, prepared, checks, scope)
   if (kind === "cita") return settleAppointment(tx, orgId, patientId, encounterId, ready, checks)
   if (kind === "presupuesto") return previewBudget(tx, orgId, patientId, encounterId, ready, scope)
   if (kind === "material") return settleMaterial(tx, orgId, encounterId, ready)
@@ -1185,14 +1267,14 @@ const NOT_IN_SERVICES = "No está en tus servicios: queda registrado sin cobro. 
  * le faltaban), de sus servicios o, si no está en ninguno, como acto libre que
  * no se cobra. Lo hecho sí necesita su sitio: si falta, se pregunta.
  */
-function settleDone(prepared: Prepared, checks: PatientChecks, dictation: ProductDictation): Prepared {
+function settleDone(prepared: Prepared, checks: PatientChecks, dictation: ProductDictation, lookup: ServiceWords): Prepared {
   const { planItemId: _item, acceptOnDo: _accept, source: _source, pending: _pending, ...base } = prepared.payload
   const said = placeOf(base)
   const spoken = String(base["service"] ?? "")
   const byService = checks.planItems.filter((item) =>
     typeof base["serviceId"] === "string"
       ? item.serviceId === base["serviceId"]
-      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }]).match !== null,
+      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], lookup).match !== null,
   )
   const fits = byService.filter((item) => said.tooth === null || item.toothNumber === null || item.toothNumber === said.tooth)
   // Con la pieza dicha, la de esa pieza; sin pieza, solo si hay uno: entre dos resinas no se adivina.
@@ -1226,7 +1308,8 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  * queda por revisar con el aviso de siempre (la misma regla que «Emitir
  * receta»), y una elección de caminos que no cabe en su presupuesto espera.
  */
-function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, medications: MedicationCatalog, dictation: ProductDictation): Prepared {
+function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, scope: Pick<DictationScope, "medications" | "dictation" | "serviceWords">): Prepared {
+  const { medications, dictation } = scope
   if (kind === "receta") {
     const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, ...rest } = prepared.payload
     const genericName = String(rest["genericName"] ?? "")
@@ -1261,7 +1344,7 @@ function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: Pa
     const said = dictatedAllergy(payload)
     return checks.allergies.some((row) => sameSubstance(row, said)) ? { ...prepared, payload: { ...payload, known: true } } : { ...prepared, payload }
   }
-  if (kind === "procedimiento") return settleDone(prepared, checks, dictation)
+  if (kind === "procedimiento") return settleDone(prepared, checks, dictation, scope.serviceWords)
   if (kind === "plan" && Array.isArray(prepared.payload["options"])) {
     // `choiceBlocked`: la pantalla la muestra sin elegir nada, porque así no se puede confirmar.
     const { choiceBlocked: _old, ...payload } = prepared.payload
@@ -1281,7 +1364,7 @@ const MAIN_SERVICE_KEYS = ["service", "serviceId", "serviceName", "priceCents", 
  * principal (`serviceId`) o de un camino (`option1ServiceId`, `option2ServiceId`),
  * y «Recomendar» un camino (`recommend`: 1 o 2), que pasa a ser la opción A.
  */
-function revisePlanChoice(current: Record<string, unknown>, patch: Record<string, unknown>, services: ServiceOption[], dictation: ProductDictation): Prepared {
+function revisePlanChoice(current: Record<string, unknown>, patch: Record<string, unknown>, services: ServiceOption[], dictation: ProductDictation, lookup: ServiceWords): Prepared {
   const pick = (id: unknown) => {
     const chosen = services.find((service) => service.id === id)
     if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
@@ -1308,7 +1391,7 @@ function revisePlanChoice(current: Record<string, unknown>, patch: Record<string
   }
   const site = dictation.normalizeSite(rest)
   if (site.invalid) return { payload: { ...rest, ...chosenMain, options }, status: "por_revisar", note: site.invalid }
-  return settlePlan({ ...site.payload, ...chosenMain, options }, services, dictation)
+  return settlePlan({ ...site.payload, ...chosenMain, options }, services, dictation, lookup)
 }
 
 const FIELD_LABEL = Object.fromEntries(
@@ -1632,8 +1715,10 @@ export async function saveDictationSegment(
     const prepared = await prepare(tx, draft, scope)
     outcomes.push({ draft, ready: prepared !== null })
     if (!prepared) continue
-    preparedDrafts.push({ draft, prepared })
-    if (draft.kind === "ficha" && draft.sourceText?.trim()) formSources.push(...formAnswerFragments(draft.sourceText, formQuestionOf(draft)))
+    // Una respuesta de ficha se muestra con la frase del número que se usó, si no es la que citó Clío.
+    const shown = prepared.said ? { ...draft, sourceText: prepared.said } : draft
+    preparedDrafts.push({ draft: shown, prepared })
+    if (draft.kind === "ficha" && shown.sourceText?.trim()) formSources.push(...formAnswerFragments(shown.sourceText, formQuestionOf(draft)))
   }
   // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov,
   // U5), y la oración que nombra una pregunta sin propuesta ni aviso tampoco se pierde en silencio
@@ -2159,7 +2244,7 @@ async function refreshRecipes(tx: Db, orgId: string, patientId: string, encounte
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   for (const row of rows) {
     const { data, meta } = splitMeta(row.payload)
-    const ready = checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope.medications, scope.dictation)
+    const ready = checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope)
     if (ready.status === row.status && ready.note === row.note) continue
     await tx
       .update(encounterDictationSuggestion)

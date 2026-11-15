@@ -29,11 +29,18 @@ const EVERYDAY_WORDS: Record<string, readonly string[]> = {
   calza: ["restauracion", "resina", "obturacion"],
   empaste: ["restauracion", "resina", "obturacion"],
   tapadura: ["restauracion", "resina", "obturacion"],
+  // Lo que se dice de lo mismo con su otro nombre: el dictado también lo busca así (prueba con voz del 15 nov).
+  obturacion: ["restauracion"],
+  restauracion: ["obturacion"],
+  profilaxis: ["limpieza"],
+  fluorizacion: ["fluor"],
   extraccion: ["exodoncia"],
   sacar: ["exodoncia", "extraccion"],
   nervio: ["endodoncia"],
   conducto: ["endodoncia"],
   brackets: ["ortodoncia"],
+  // «Cambiamos el arco» es el control de ortodoncia; sin esto calzaba con «Apexificación, cambio de medicación».
+  arco: ["control de ortodoncia"],
   frenillos: ["ortodoncia"],
   funda: ["corona"],
   placa: ["protesis"],

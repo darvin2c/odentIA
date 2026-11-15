@@ -20,6 +20,7 @@ import {
   dictationItems,
   dictationList,
   dictationSaid,
+  homeCarePrompt,
   materialsPrompt,
 } from "../dictation.js"
 
@@ -130,8 +131,9 @@ export function systemPrompt(input: {
     "El examen físico va en `examen`: un elemento por cada sistema que nombró, con su clave de la lista de sistemas. Si lo dijo normal («pulmones limpios», «abdomen blando, no doloroso») es sin_alteraciones, sin texto; si describió algo anormal es con_hallazgos, con lo que encontró en sus palabras y la parte del cuerpo («amígdalas aumentadas, con placas blanquecinas»). Un sistema que no nombró no se pone: queda como no examinado. Cada hallazgo va en su sistema: si una frase describe dos («amígdalas con placas, adenopatías submandibulares»), son dos elementos (bocaGarganta y cabezaCuello). Una descripción normal también es sin_alteraciones aunque sea larga («ruidos cardiacos rítmicos, sin soplos», «Lasègue negativo»). En una gestante, la altura uterina y los latidos fetales son del abdomen, no del corazón de la paciente. Un hallazgo del examen que no es de ningún sistema de la lista (el dolor a la palpación de la región lumbar) no se pone en el sistema más parecido.",
     `Lista de sistemas (clave, nombre):\n${input.catalog}`,
     "La parte del cuerpo («rodilla derecha», «región lumbar») se escribe con sus palabras en el hallazgo o en la nota del diagnóstico.",
-    `En \`diagnosticos\` van los diagnósticos que nombró, con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Si dice «parece», «probable» o «a descartar», es presuntivo (provisional); si lo da por seguro, es definitivo (confirmed). Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el médico lo revisa. Un diagnóstico que nombró no se deja fuera por la duda.`,
+    `En \`diagnosticos\` van los diagnósticos que nombró, con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Si dice «parece», «probable» o «a descartar», es presuntivo (provisional); si lo da por seguro, es definitivo (confirmed). Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el médico lo revisa. Un diagnóstico que nombró no se deja fuera por la duda, ni porque también responda una pregunta de una ficha abierta: va en los dos lugares.`,
     "En las indicaciones va lo que hace el consultorio (una consulta, un control, una ecografía, una nebulización, un inyectable): pon en `service` la prestación con las palabras del médico; el sistema la busca en los servicios de la clínica. No inventes precios. Un examen que se hace en otro lugar (un hemograma en un laboratorio) no es una prestación del consultorio: va en las indicaciones de la consulta.",
+    homeCarePrompt("«reposo», «líquidos abundantes», «que se tome la presión en casa»"),
     "En `recetas` va cada medicamento que receta, con lo que dijo: la DCI, la concentración con su unidad, la forma, la dosis, la frecuencia y la duración. No completes lo que no dijo: el sistema lo pregunta y calcula la cantidad. Lo recetado no se repite en el texto de la consulta. Cambiar un medicamento pendiente («mejor paracetamol en vez del ibuprofeno») o completarlo («la amoxicilina por diez días») es una corrección de ese medicamento, con la DCI y lo que cambie, no uno nuevo.",
     "En `descanso` va el descanso médico, si lo indicó: los días y, si dijo desde cuándo, el primer día. El diagnóstico no va ahí: la persona decide al emitirlo si figura.",
     input.services.length
@@ -320,7 +322,7 @@ export function demoSegment(
   now: Date,
   pending: DictationPending[],
   diagnosisSystem: DiagnosisSystemKey = "ICD-10",
-): Omit<DictationExtraction, "model"> {
+): Omit<DictationExtraction, "model" | "heard"> {
   // Una frase que corrige o quita algo no es, además, un registro nuevo.
   const order = (sentence: string) => /^(no,? |quita)/.test(plain(sentence))
   const kept = transcript

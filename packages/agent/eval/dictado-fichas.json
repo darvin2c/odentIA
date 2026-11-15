@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. «espera.cambia» es lo que cambia una respuesta ya escrita: queda por revisar con ese valor, nunca lista. Los usa eval:dictado-fichas.",
+  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. «previas» es lo que la pausa anterior dejó propuesto en la ficha (la red no lo avisa otra vez); «espera.diagnosticos», los diagnósticos que también van a Diagnóstico; «espera.dicho», la frase que se muestra en una respuesta. «espera.cambia» es lo que cambia una respuesta ya escrita: queda por revisar con ese valor, nunca lista. Los usa eval:dictado-fichas.",
   "servicios": ["Consulta", "Control de ortodoncia", "Endodoncia multirradicular", "Profilaxis", "Aplicación de flúor barniz"],
   "fichasPropias": {
     "control-nino-sano": {
@@ -597,20 +597,21 @@
       "id": "voz-v07-3",
       "texto": "sin respuesta también percusión negativa palpación positiva sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico",
       "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+      "previas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" },
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
-      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" } }
+      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6|K04.7"] }
     },
     {
       "id": "voz-v08-1",
       "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"] }
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"], "noEnNota": ["dolor", "duele", "tranquil"], "dicho": { "ficha-de-odontopediatria.ceod_e": "uno con extracción indicada" } }
     },
     {
       "id": "voz-v08-2",
       "texto": "riesgo de caries alto y tres colabora pero con miedo mamá bua bua bua no quiero mamá mamá",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.riesgo_caries": "Alto", "ficha-de-odontopediatria.conducta": "3 · Positiva" } }
+      "espera": { "fichas": { "ficha-de-odontopediatria.riesgo_caries": "Alto", "ficha-de-odontopediatria.conducta": "3 · Positiva" }, "noEnNota": ["riesgo", "colabora"] }
     },
     {
       "id": "voz-v09-1",
@@ -653,8 +654,8 @@
       "id": "voz-v11-2",
       "texto": "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
-      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8 } },
-      "ignora": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_p", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_e", "ficha-odontoestomatologica.ceod_o"]
+      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8, "ficha-odontoestomatologica.cpod_p": 2 } },
+      "ignora": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_e", "ficha-odontoestomatologica.ceod_o"]
     },
     {
       "id": "voz-v11-3",
@@ -666,8 +667,7 @@
       "id": "voz-v12-1",
       "texto": "muy buenos días p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor ese Este 0,99",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
-      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_c": 3, "ficha-odontoestomatologica.cpod_p": 1, "ficha-odontoestomatologica.cpod_o": 7 }, "revisar": ["ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o"] },
-      "ignora": ["ficha-odontoestomatologica.ihos"]
+      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_c": 3, "ficha-odontoestomatologica.cpod_p": 1, "ficha-odontoestomatologica.cpod_o": 7 }, "revisar": ["ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o", "ficha-odontoestomatologica.ihos"] }
     },
     {
       "id": "voz-v12-2",
