@@ -1,3 +1,4 @@
+import { canAccess } from "@odentia/auth/permissions"
 import { AGENT_NAMES } from "./agent-names.js"
 import { HELP_MORE } from "./help-guide/index.js"
 import { normalizeForSearch } from "./knowledge.js"
@@ -25,6 +26,13 @@ export interface HelpFaq {
   area?: string
   /** El permiso para hacer lo que explica, si no es el de su tema (basta uno). */
   needs?: string | readonly string[]
+  /**
+   * A quién no se le da, por sus permisos (`helpGuideFor`): `has`, a quien tiene uno de ellos;
+   * `lacks`, a quien no tiene ninguno. Así una misma pregunta tiene la respuesta de cada rol sin
+   * reescribirlas: «¿Puedo ver lo que respondió?» de recepción no le llega a quien lee la historia,
+   * que tiene la suya, ni a caja, que no ve lo que ve recepción (QA de formularios del 15 nov, A8).
+   */
+  notFor?: { has?: string | readonly string[]; lacks?: string | readonly string[] }
   /** Solo de odentIA: las guías de los demás productos no la heredan. */
   own?: boolean
 }
@@ -60,6 +68,11 @@ export interface HelpTopic {
    * persona», no «Pacientes» (QA de la ficha del 9 nov).
    */
   itemLabel?: string
+  /**
+   * Pantallas dentro de una sola cosa de esta lista que se nombran por sí mismas, con su ruta: la
+   * atención de una persona. La Ayuda dice que está ahí, y lo que se hace ahí no la saca a la lista.
+   */
+  itemScreens?: ReadonlyArray<{ path: RegExp; label: string }>
   /** Sección del menú o de Configuración donde está. */
   parent: string | null
   /** Para qué sirve, en una o dos frases. */
@@ -83,6 +96,8 @@ export interface HelpTopicArea {
   id: string
   label: string
   about: string
+  /** Se hace dentro de una sola cosa de la lista (su atención, su plan): desde ahí, «Llévame» no saca a la lista. */
+  inItem?: boolean
 }
 
 const SETTINGS = "Configuración"
@@ -569,23 +584,28 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     alsoAt: ["/patients", "/contacts"],
     title: "Pacientes",
     itemLabel: "la ficha de una persona",
+    itemScreens: [{ path: /^\/patients\/[^/]+\/encounters\/[^/]+$/, label: "la atención" }],
     // El tema más grande de la guía: Jev lo busca por partes (`help.v2`).
     areas: [
       {
         id: "ficha",
         label: "la lista y los datos de la persona",
         about:
-          "La lista de pacientes y contactos, registrar a alguien, buscarlo, archivarlo, sus datos personales, su contacto, su seguro, sus responsables y familia, sus conversaciones, sus citas, sus cobros, sus notas, sus mensajes, su enlace, el portal y los pedidos sobre sus datos.",
+          // Su enlace va antes del corte de 220 caracteres de la categoría: «el enlace para que llene su salud» se
+          // buscaba en Preguntas al paciente (revisión final de formularios del 15 nov, novato H1).
+          "La lista de pacientes y contactos, registrar a alguien, buscarlo, archivarlo, sus datos personales, su enlace para que complete sus datos, su salud y lo de antes de su cita, su contacto, su seguro, sus responsables y familia, sus conversaciones, sus citas, sus cobros, sus notas, sus mensajes, el portal y los pedidos sobre sus datos.",
       },
       {
         id: "clinica",
         label: "la historia clínica y la atención",
+        inItem: true,
         about:
           "Atender a un paciente: la atención y su firma, antecedentes y alergias, el examen, diagnósticos, lo realizado, la historia, las recetas, órdenes, consentimientos, imágenes y demás documentos, y el dictado.",
       },
       {
         id: "plan",
         label: "el plan, el presupuesto y los controles",
+        inItem: true,
         about:
           "Lo que se le va a hacer y lo que cuesta: los tratamientos del plan y sus sesiones, armar, enviar y responder un presupuesto, sus opciones y descuentos, agendar lo aceptado y los controles.",
       },
@@ -1108,11 +1128,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       },
       {
         id: "recepcion-como-le-mando-lo-que-responde",
-        q: "¿Cómo le mando lo que tiene que responder?",
+        // Revisión final de formularios del 15 nov (A9): «antes de su cita» va en la pregunta, o la Ayuda
+        // la llevaba a armar una ficha propia en Configuración.
+        q: "¿Cómo le mando lo que tiene que responder antes de su cita?",
         a: "No hace falta armar nada: su enlace tiene «Antes de tu cita», con sus datos que faltan y lo de su visita, y el recordatorio de su cita se lo lleva cuando le falta algo o lo invita a contar a qué viene. En su página, bajo su próxima cita, ves «Antes de su cita:» con «por responder» y cuándo se le envió su enlace, con «Enviarle su enlace» y «Mostrar su código» ahí mismo; si le faltan datos, también desde «Completar» en la cita de la Agenda. Si no se le puede enviar, «Copiar enlace» o «Mostrar su código». Lo que responde lo lee quien lo atiende: recepción no ve sus respuestas.",
         forms: [
+          "como le mando lo que tiene que responder",
           "como le mando el cuestionario al paciente",
-          "enviarle lo que tiene que responder antes de su cita",
           "como le pido que responda antes de venir",
         ],
       },
@@ -1120,6 +1142,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // Mesa de formularios del 13 nov, entrega 10 (C10).
         id: "recepcion-puedo-ver-lo-que-respondio",
         q: "¿Puedo ver lo que respondió?",
+        // Es la de recepción (revisión final del 15 nov, A8): quien lee la historia tiene la suya, «¿Dónde veo lo
+        // que respondió antes de venir?», y caja no ve esa línea ni sus alergias.
+        notFor: { has: "clinical.read", lacks: "patients.write" },
+        // Junto a la de quien atiende: es la misma pregunta, y cada rol encuentra la suya en la misma parte.
+        area: "clinica",
         a: "No: lo que contó de su salud y de su visita lo lee el equipo clínico. Tú ves si respondió. En su página, bajo su próxima cita, dice «Antes de su cita:» con «respondió» y el día, o «por responder» con cuándo se le envió su enlace y, ahí mismo, «Enviarle su enlace» y «Mostrar su código». Si declaró algo de su salud que nadie revisó todavía, dice «Declaró datos de su salud» con el día, también sin cita por venir: lo revisa quien lo atiende, y tú no ves qué. Sus alergias sí las ves, como siempre. Si no responde, la atención se hace igual.",
         forms: [
           "ya respondio lo de antes de su cita",
@@ -1127,7 +1154,20 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "puedo ver lo que contesto el paciente",
           "recepcion ve las respuestas",
           "sabe si respondio antes de venir",
+          "donde veo si toma anticoagulantes",
         ],
+      },
+      {
+        // Revisión final de formularios del 15 nov (A8 y H8 de desarrollo): a caja se le daba la de recepción, que
+        // le prometía la línea «Antes de su cita» y sus alergias, o la de quien atiende.
+        id: "caja-puedo-ver-lo-que-dijo-de-su-salud",
+        q: "¿Puedo ver lo que dijo de su salud o lo que respondió antes de su cita?",
+        a: "No: lo que dijo de su salud (sus alergias, enfermedades y medicinas) y lo que contó antes de su cita lo lee el equipo que atiende, y tu rol no lo ve, tampoco si respondió. Si no respondió nada, la atención se firma y se cobra igual.",
+        forms: ["puedo ver si toma anticoagulantes", "caja ve las alergias del paciente"],
+        notFor: { has: ["clinical.read", "patients.write"] },
+        // Dice lo que su rol no ve: no lleva a una pantalla ni depende de poder abrirla.
+        general: true,
+        area: "clinica",
       },
       {
         // Mesa de formularios del 13 nov, entrega 9.
@@ -1141,6 +1181,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "se perdieron sus respuestas antes de enviar",
           "puedo recuperar lo que escribio el paciente",
         ],
+      },
+      {
+        // Revisión final de formularios del 15 nov (A19): la Ayuda no conocía «Ya lo enviaste».
+        id: "paciente-envio-su-enlace-dos-veces",
+        q: "El paciente dice que envió su enlace dos veces, ¿se duplicó?",
+        a: "No. Lo que contó para su cita y sus datos se envían una vez: si vuelve a abrir su enlace, dice «Ya lo enviaste» con el día en que lo recibimos, o «Ya está en la clínica», y no deja mandarlo otra vez; lo que quiera cambiar lo cuenta en la cita. Lo que corrige de su salud con «Corregir mi salud o mis medicinas» llega como algo nuevo por revisar, sin borrar lo de antes.",
+        forms: ["mando su enlace dos veces", "el paciente envio dos veces lo de antes de su cita", "que significa ya lo enviaste"],
       },
       {
         id: "doy-acceso-portal",
@@ -1527,6 +1574,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo cobro una atención?",
         a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega en PDF por su chat o su correo, y queda en su portal.",
         forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
+      },
+      {
+        // Revisión final de formularios del 15 nov (A19): a caja la Ayuda no le decía que nada de eso frena el cobro.
+        id: "cobrar-sin-ficha-ni-enlace",
+        q: "¿Puedo cobrar si no llenó su ficha o no respondió su enlace?",
+        a: "Sí. Ninguna ficha de consulta ni lo que el paciente responde antes de su cita frena firmar la atención ni cobrarla: se cobra como cualquier otra, desde «Por cobrar ahora» o con «Cobrar».",
+        forms: ["puedo cobrar si el paciente no lleno su ficha", "cobro aunque no respondio su enlace", "la ficha a medias impide cobrar"],
       },
       {
         id: "vendo-algo-quien-paciente",
@@ -2360,7 +2414,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "preguntar-anticoagulantes",
         q: "¿Cómo le pregunto a mis pacientes si toman anticoagulantes?",
-        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicina para los huesos». La aspirina y el clopidogrel salen como «Antiagregante». A quien ya tiene una medicina anotada por el equipo, su enlace no le pregunta «¿algún otro medicamento?». Si lo escribe solo en «otro medicamento» (por ejemplo, «Sintrom»), no sale la marca: en su página › Antecedentes, cámbialo por el nombre de la lista (acenocumarol) y la marca sale arriba. Recepción no lo pregunta desde Configuración: le manda su enlace o le muestra su código, y el enlace le pregunta lo que falta.",
+        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió con la lista de antes, su enlace le pregunta solo esto, y a quien lo saltó con «Saltar», se lo vuelve a preguntar. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no»; si lo saltó, «no respondió». Lo mismo vale para «Medicina para los huesos». La aspirina y el clopidogrel salen como «Antiagregante». A quien ya tiene una medicina anotada por el equipo, su enlace no le pregunta «¿algún otro medicamento?». Si lo escribe solo en «otro medicamento» (por ejemplo, «Sintrom»), no sale la marca: en su página › Antecedentes, cámbialo por el nombre de la lista (acenocumarol) y la marca sale arriba. Recepción no lo pregunta desde Configuración: le manda su enlace o le muestra su código, y el enlace le pregunta lo que falta.",
         forms: [
           "un paciente toma sintrom como hago para que el sistema me avise",
           "como hago que salga la marca del anticoagulante",
@@ -2371,13 +2425,33 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // QA del 14 nov (auditor H8): a recepción se le daban pasos de Configuración que no puede abrir.
         id: "recepcion-preguntar-su-salud",
         q: "Soy recepción: ¿cómo hago que el paciente me diga si toma anticoagulantes o lo de su salud?",
-        a: "Mándale su enlace desde su página (o muéstrale su código en «Mostrar su código»): le pregunta de su salud solo lo que falta, también si toma anticoagulantes, y lo que diga lo revisa quien lo atiende. Qué se pregunta lo decide quien administra la clínica en Configuración › Preguntas al paciente.",
-        forms: ["soy recepcion como le pregunto su salud", "recepcion quiere saber si toma anticoagulantes", "como le pido sus datos de salud al paciente"],
+        a: "Con su enlace, desde su página: en Datos › Enlace y portal, en «Pendientes» del Resumen si le faltan datos, o bajo su próxima cita, «Enviarle su enlace» se lo manda y «Mostrar su código» se lo muestra para que lo escanee; si no se le puede enviar, «Copiar enlace» para pegarlo cuando escriba. Le pregunta de su salud solo lo que falta, también si toma anticoagulantes, y lo que diga lo revisa quien lo atiende. Qué se pregunta lo decide quien administra la clínica en Configuración › Preguntas al paciente.",
+        forms: [
+          "enlace para que el paciente llene su salud desde su celular",
+          "soy recepcion como le pregunto su salud",
+          "recepcion quiere saber si toma anticoagulantes",
+          "como le pido sus datos de salud al paciente",
+        ],
       },
       {
         id: "preguntas-nuevas",
         q: "¿Por qué dice «Hay preguntas nuevas»?",
-        a: "Porque odentIA sumó preguntas de salud que cambian lo que se hace en la cita. Ya se le preguntan a tus pacientes como «Opcional»: nada es obligatorio ni impide atender. Si no las quieres, márcalas «No preguntar» y guarda; si te parecen bien, «Entendido».",
+        a: "Porque odentIA sumó preguntas de salud que cambian lo que se hace en la cita. Ya se le preguntan a tus pacientes como «Opcional»: nada es obligatorio ni impide atender. «Ver las preguntas nuevas» te lleva a ellas: en la lista dicen «Nueva». Si no las quieres, márcalas «No preguntar» y guarda; si te parecen bien, «Entendido».",
+      },
+      {
+        // Revisión final de formularios del 15 nov (K11): la Ayuda no sabía cómo dejar de preguntarlo.
+        id: "registro-pacientes-dejar-de-preguntar-ninos",
+        q: "¿Cómo dejo de preguntar lo del biberón u otra pregunta de los niños?",
+        a: "En Configuración › Preguntas al paciente, en «Si se atiende un niño», cada pregunta tiene su fila: «Biberón o pecho para dormir», «Chupón o se chupa el dedo», «Dulces o jugos entre comidas», «Pasta de dientes con flúor» y «Quién le cepilla los dientes». Marca «No preguntar» en la que no quieras y guarda: desde ese momento no se le pregunta a quien cuida al niño, ni al registrarlo ni en su enlace, y lo que ya respondieron sigue en su ficha.",
+        forms: ["como dejo de preguntar lo del biberon", "no quiero preguntar lo del chupon", "quitar las preguntas de los ninos"],
+        own: true,
+      },
+      {
+        // Revisión final de formularios del 15 nov (D1 de diseño): dos pantallas que se confunden.
+        id: "registro-pacientes-diferencia-fichas",
+        q: "¿Qué diferencia hay entre «Preguntas al paciente» y «Fichas de consulta»?",
+        a: "«Preguntas al paciente» es lo que responde el paciente, al registrarse y en su enlace: sus datos, su salud y, antes de cada cita, a qué viene; llega arriba de su ficha y a su atención, sin revisar hasta que alguien lo revisa con él. «Fichas de consulta» son las hojas que llena el equipo al atenderlo, con las preguntas de cada especialidad. Las dos están en Configuración: lo que quieres que te cuente antes de venir va en Preguntas al paciente, y lo que anotas tú en la consulta, en una ficha.",
+        forms: ["diferencia entre preguntas al paciente y fichas de consulta", "es lo mismo preguntas al paciente que fichas", "donde pongo una pregunta para el paciente o para mi ficha"],
       },
       {
         id: "falta-una-pregunta",
@@ -2854,9 +2928,62 @@ function wordsOf(text: string): string[] {
 /** Cuántas palabras de la pregunta dicen algo: «¿Dónde veo a Ana?», una. */
 export const helpWordCount = (text: string): number => wordsOf(text).length
 
+/** Un permiso o varios, como lista: `needs`, `notFor` y `writePermission` admiten los dos. */
+export const helpPermissionList = (value: string | readonly string[] | undefined): readonly string[] =>
+  value === undefined ? [] : typeof value === "string" ? [value] : value
+
 /** Los permisos que dejan cambiar cosas en una pantalla: basta uno. */
-export const helpWritePermissions = (topic: HelpTopic): readonly string[] =>
-  typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
+export const helpWritePermissions = (topic: HelpTopic): readonly string[] => helpPermissionList(topic.writePermission)
+
+/** ¿Esta respuesta es para quien pregunta? Lo dice su `notFor`, con sus permisos. */
+export function helpFaqFor(faq: HelpFaq, can: (permission: string) => boolean): boolean {
+  const lacks = helpPermissionList(faq.notFor?.lacks)
+  return !helpPermissionList(faq.notFor?.has).some(can) && (lacks.length === 0 || lacks.some(can))
+}
+
+/** Por guía, los permisos que nombra algún `notFor` y la guía de cada combinación de ellos. */
+const guidesByPermissions = new WeakMap<readonly HelpTopic[], { named: readonly string[]; guides: Map<string, readonly HelpTopic[]> }>()
+
+/**
+ * La guía de quien pregunta: sin las respuestas que no son para su rol (`HelpFaq.notFor`). Con ella
+ * decide todo, también lo escrito igual que en la guía y lo que sugiere su pantalla. Quien tiene los
+ * mismos de esos permisos recibe la misma lista, y el buscador por palabras no rehace su índice
+ * (`guideEntry` lo guarda por lista).
+ */
+export function helpGuideFor(topics: readonly HelpTopic[], can: (permission: string) => boolean): readonly HelpTopic[] {
+  let memo = guidesByPermissions.get(topics)
+  if (!memo) {
+    const named = topics.flatMap((topic) => (topic.faqs ?? []).flatMap((faq) => [...helpPermissionList(faq.notFor?.has), ...helpPermissionList(faq.notFor?.lacks)]))
+    memo = { named: [...new Set(named)], guides: new Map() }
+    guidesByPermissions.set(topics, memo)
+  }
+  const key = memo.named.map((permission) => (can(permission) ? "1" : "0")).join("")
+  const known = memo.guides.get(key)
+  if (known) return known
+  const guide = topics.map((topic) => {
+    const faqs = topic.faqs?.filter((faq) => helpFaqFor(faq, can))
+    return faqs && faqs.length !== topic.faqs?.length ? { ...topic, faqs } : topic
+  })
+  memo.guides.set(key, guide)
+  return guide
+}
+
+/** La guía como la ve un rol de la matriz (`canAccess`), para medir lo que recibe cada uno (`eval:ayuda-pasos`). */
+export const helpGuideForRole = (topics: readonly HelpTopic[], role: string): readonly HelpTopic[] =>
+  helpGuideFor(topics, (permission) => canAccess(role, permission))
+
+/**
+ * Si la pantalla es la página de una sola cosa de ese tema (`itemLabel`), cómo se nombra: la de
+ * `itemScreens` que coincide (`named`, «la atención») o, si no, `itemLabel`. Nulo en la lista o en
+ * otra pantalla.
+ */
+export function helpItemScreen(screen: string, topic: HelpTopic | undefined): { label: string; named: boolean } | null {
+  if (!topic?.itemLabel) return null
+  const clean = screen.replace(/\/+$/, "")
+  if (![topic.path, ...(topic.alsoAt ?? [])].some((base) => clean.startsWith(`${base}/`))) return null
+  const named = topic.itemScreens?.find((item) => item.path.test(clean))
+  return named ? { label: named.label, named: true } : { label: topic.itemLabel, named: false }
+}
 
 /** A una letra de distancia: una que falta, sobra, cambia o dos cambiadas de lugar. */
 function oneTypoAway(a: string, b: string): boolean {

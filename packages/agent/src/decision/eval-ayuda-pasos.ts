@@ -14,6 +14,9 @@
  * - `--redactar`: además llama al modelo que escribe cuando las partes se
  *   completan (cuesta más) y lista lo redactado, para leerlo: aquí no hay juez.
  *   Sin él, solo se cuenta cuántas se habrían redactado.
+ * - Una pregunta con `rol` (un rol de la matriz: `clinician`, `reception`,
+ *   `cashier`…) se decide con la guía de ese rol, como en la Ayuda: sin las
+ *   respuestas que no son para él (`HelpFaq.notFor`).
  *
  * A diferencia de `eval:ayuda` (la pregunta `help.v1` sola, con su curva de
  * umbrales), aquí los umbrales son los del código: cambiar uno es otra corrida.
@@ -29,6 +32,7 @@ import {
   type HelpDecider,
   helpAreaOf,
   helpAreas,
+  helpGuideForRole,
   type HelpOption,
   helpOptions,
   helpScreenName,
@@ -63,7 +67,7 @@ const file = arg("file", "")
 const timeoutMs = Number(process.env.DECISIONS_TIMEOUT_MS ?? 5000)
 const banks = JSON.parse(readFileSync(file || new URL("../../../services/src/help-preguntas.json", import.meta.url), "utf8")) as Record<
   string,
-  Array<Omit<HelpBankItem, "producto"> & { producto?: Product; antes?: { q: string; donde?: string } }>
+  Array<Omit<HelpBankItem, "producto"> & { producto?: Product; antes?: { q: string; donde?: string }; rol?: string }>
 >
 const chosen = arg("banco", "")
   .split(",")
@@ -136,7 +140,9 @@ for (const bank of bankNames) {
     // Lo mismo que hace la Ayuda: a un modelo viaja sin cifras ni correos, o no viaja.
     const forModel = helpTextForModel(item.q)
     const previous = item.antes ? { question: item.antes.q, where: item.antes.donde ?? null } : null
-    const decided = await decideHelp(forModel ?? item.q, item.pantalla ? helpScreenName(item.pantalla, guide.topics) : null, guide.topics, guide.texts, forModel === null ? null : decider, writer, previous)
+    // Con su rol, la guía de ese rol, como la arma la Ayuda (`helpGuideFor`).
+    const topics = item.rol ? helpGuideForRole(guide.topics, item.rol) : guide.topics
+    const decided = await decideHelp(forModel ?? item.q, item.pantalla ? helpScreenName(item.pantalla, topics) : null, topics, guide.texts, forModel === null ? null : decider, writer, previous)
     asked.push({ bank, item, product, decided, calls, ms: Date.now() - startedAt, joined, written })
   }
 }

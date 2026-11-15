@@ -9,7 +9,7 @@ import { helpAsk } from "@odentia/db/schema/workspace"
 import { asc, eq, sql } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
 import { beforeAll, describe, expect, it } from "vitest"
-import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, markHelpNoneFits, rateHelp, sendHelpRequest } from "./help.js"
+import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, helpAskerOf, markHelpNoneFits, rateHelp, sendHelpRequest } from "./help.js"
 import type { AdminActor } from "./admin-core.js"
 import type { AdminAnswer, AdminQuestion } from "./admin-request.js"
 import {
@@ -31,7 +31,7 @@ import {
 } from "./help-decision.js"
 import { agentTextsFor, helpTopicsFor } from "./products.js"
 import { getMySupportCase, listMySupportCases, markSupportCaseSeen, replyToSupportCase, setSupportCaseStatus, supportHelpStats } from "./admin-support.js"
-import { helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
+import { helpGuideFor, helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Ayuda: responde sin inventar; solo el envío explícito conserva la pregunta. */
@@ -557,7 +557,8 @@ describe("con Jev (ADR 0146)", () => {
 })
 
 describe("en dos pasos (ADR 0178)", () => {
-  const OPTIONS = helpOptions(helpTopicsFor("dental"))
+  // La guía de quien pregunta, la dueña: sin las respuestas que son de otro rol (`HelpFaq.notFor`).
+  const OPTIONS = helpOptions(helpGuideFor(helpTopicsFor("dental"), owner.can))
   const TEXTS = agentTextsFor("dental")
   /** Toda la guía, en las tandas en que se le pregunta a Jev. */
   const WHOLE = helpOptionBatches(OPTIONS)
@@ -1008,5 +1009,46 @@ describe("el nombre de la pantalla", () => {
     // Quien administra comisiones las ve de todos: sigue siendo Comisiones.
     const admin = await askHelp(appDb, ORG, owner, question)
     expect(admin.answers[0]).toMatchObject({ topicId: "comisiones", where: "Gestión › Comisiones" })
+  })
+})
+
+// Revisión final de formularios del 15 nov (A8 y A10 del auditor, H8 de desarrollo, pendiente de la entrega 11).
+describe("la respuesta de cada rol, y «Llévame» dentro de una persona", () => {
+  // Como los arma la API, con la matriz de permisos.
+  const cashier = helpAskerOf(USER, "cashier", "dental")
+  const clinician = helpAskerOf(USER, "clinician", "dental")
+
+  it("a quien atiende no le da la respuesta de recepción, ni escrita igual", async () => {
+    const reply = await askHelp(appDb, await clinic(), clinician, { question: "¿Puedo ver lo que respondió?", screen: "/home" })
+    expect(reply.answers.map((answer) => answer.text).join(" ")).not.toContain("Tú ves si respondió")
+  })
+
+  it("a caja no le promete lo clínico: le da la suya, sin «Llévame»", async () => {
+    const org = await clinic()
+    const asked = await askHelp(appDb, org, cashier, { question: "¿Dónde veo lo que respondió antes de venir?", screen: "/home" })
+    expect(asked.answers.map((answer) => answer.restriction)).not.toContain(expect.stringContaining("puede verla"))
+    const own = await askHelp(appDb, org, cashier, { question: "¿Puedo ver lo que dijo de su salud o lo que respondió antes de su cita?", screen: "/home" })
+    expect(own.answers[0]).toMatchObject({ topicId: "pacientes", path: null, restriction: null, text: expect.stringMatching(/^No:/) })
+  })
+
+  it("lo que pide otro permiso que su pantalla lo dice aunque el rol vea la pantalla", async () => {
+    // Caja abre Pacientes pero no escribe la historia: antes le decía «puede verla, pero no cambiarla».
+    const reply = await askHelp(appDb, await clinic(), cashier, { question: "¿Cómo registro o quito una alergia?", screen: "/home" })
+    expect(reply.answers[0]).toMatchObject({ path: "/people", restriction: expect.stringContaining("Tu rol (Caja) no puede hacer esto.") })
+  })
+
+  it("en la atención, lo que se hace ahí la deja ahí; lo de la lista sigue llevando a la lista", async () => {
+    const org = await clinic()
+    const screen = "/patients/p1/encounters/e1"
+    const filling = { question: "¿Cómo lleno y finalizo una ficha de consulta?" }
+    const inside = await askHelp(appDb, org, clinician, { ...filling, screen })
+    expect(inside.answers[0]).toMatchObject({ path: screen, where: "la atención" })
+    expect(inside.basedOn).toBe("El mapa del sistema: Personas › Pacientes.")
+    const fromHome = await askHelp(appDb, org, clinician, { ...filling, screen: "/home" })
+    expect(fromHome.answers[0]).toMatchObject({ path: "/people", where: "Personas › Pacientes" })
+    const onPage = await askHelp(appDb, org, clinician, { ...filling, screen: "/people/p1" })
+    expect(onPage.answers[0]).toMatchObject({ path: "/people/p1", where: "su página" })
+    const list = await askHelp(appDb, org, owner, { question: "¿Cómo registro un paciente nuevo?", screen })
+    expect(list.answers[0]).toMatchObject({ path: "/people" })
   })
 })

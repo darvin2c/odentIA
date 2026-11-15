@@ -266,6 +266,17 @@ function RegistrationSettings() {
     }
   }
 
+  /**
+   * «Ver las preguntas nuevas» (revisión final de formularios del 15 nov, D1 de diseño): lleva a la
+   * primera marcada «Nueva» y deja el foco en su elección, para decidirla sin buscarla.
+   */
+  function showNewQuestions() {
+    const row = document.querySelector<HTMLElement>("[data-new-question]")
+    row?.scrollIntoView({ block: "center" })
+    const choice = row?.querySelector<HTMLElement>('button[aria-pressed="true"]') ?? row?.querySelector<HTMLElement>("button")
+    choice?.focus({ preventScroll: true })
+  }
+
   async function handleCopyLink() {
     try {
       await navigator.clipboard.writeText(publicLink)
@@ -344,16 +355,21 @@ function RegistrationSettings() {
               a tus pacientes como «Opcional» y nada es obligatorio. Si no las quieres, márcalas «No
               preguntar» y guarda.
             </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-h-11 self-start sm:min-h-8"
-              disabled={seenBusy}
-              onClick={() => void handleQuestionsSeen()}
-            >
-              Entendido
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={showNewQuestions}>
+                Ver las preguntas nuevas
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11 sm:min-h-8"
+                disabled={seenBusy}
+                onClick={() => void handleQuestionsSeen()}
+              >
+                Entendido
+              </Button>
+            </div>
           </AlertDescription>
         </Alert>
       ) : seenDone ? (
