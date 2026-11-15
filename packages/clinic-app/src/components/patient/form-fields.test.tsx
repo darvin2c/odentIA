@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import type { FormFieldDef } from "../../lib/clinical-forms"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { AnswerField, AnswerInput } from "./form-fields"
+import { AnswerField, AnswerInput, answerSpan, isAsideNote, sameWords } from "./form-fields"
 
 declareProduct(bareProduct("dental"))
 
@@ -71,5 +71,39 @@ describe("la tecla Enter del teléfono en una respuesta de una línea", () => {
     }
     // En un texto largo Enter es un salto de línea.
     expect(input({ id: "algo", label: "¿Algo más?", type: "texto_largo" }, "next")).not.toContain("enterKeyHint")
+  })
+})
+
+// Pedido del 15 nov: la ficha no seguía el sistema de diseño (casillas sueltas, «Hábitos» › «Hábitos»,
+// todo a lo ancho en un panel angosto).
+describe("la ficha ordenada como los demás formularios", () => {
+  it("cada casilla es un `Field` horizontal con su etiqueta, no una etiqueta suelta", () => {
+    const markup = renderToStaticMarkup(
+      <AnswerInput
+        field={{ id: "mordida", label: "Mordida cruzada", type: "opcion_multiple", options: ["No tiene", "Anterior"] }}
+        value={["Anterior"]}
+        onChange={() => {}}
+      />,
+    )
+    expect(markup.match(/data-slot="field"[^>]*data-orientation="horizontal"/g)).toHaveLength(2)
+    expect(markup).toMatch(/<label[^>]*for="[^"]+-1"[^>]*>Anterior<\/label>/)
+  })
+  it("lo corto va de a pares (también los números) y lo largo a todo el ancho", () => {
+    expect(answerSpan({ id: "a", label: "Clase molar derecha (Angle)", type: "opcion_unica" })).toBe("")
+    expect(answerSpan({ id: "b", label: "Overjet", type: "numero", unit: "mm" })).toBe("")
+    expect(answerSpan({ id: "c", label: "Desviación de la línea media superior", type: "numero", unit: "mm" })).toBe("")
+    expect(answerSpan({ id: "d", label: "Hábitos", type: "opcion_multiple" })).toBe("@md:col-span-2")
+    expect(answerSpan({ id: "e", label: "Observaciones", type: "texto_largo" })).toBe("@md:col-span-2")
+  })
+  it("el título de la sección y la pregunta se reconocen iguales sin contar mayúsculas ni tildes", () => {
+    expect(sameWords("Hábitos", "habitos ")).toBe(true)
+    expect(sameWords("Higiene oral", "Índice de higiene oral")).toBe(false)
+  })
+  it("se pliega «Observaciones» opcional; «Hallazgos» u «Observaciones» obligatoria, no", () => {
+    expect(isAsideNote({ id: "o", label: "Observaciones", type: "texto_largo" })).toBe(true)
+    expect(isAsideNote({ id: "n", label: "Notas", type: "texto_largo" })).toBe(true)
+    expect(isAsideNote({ id: "h", label: "Hallazgos", type: "texto_largo" })).toBe(false)
+    expect(isAsideNote({ id: "r", label: "Observaciones", type: "texto_largo", required: true })).toBe(false)
+    expect(isAsideNote({ id: "t", label: "Observaciones", type: "texto" })).toBe(false)
   })
 })

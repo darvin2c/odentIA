@@ -112,7 +112,7 @@ export function FormViewButton({ patientId, formId, title }: { patientId: string
         Ver
       </Button>
       {open ? (
-        <DetailDrawer open title={title} onClose={close}>
+        <DetailDrawer open size="lg" title={title} onClose={close}>
           {responses.isError ? (
             <p role="alert" className="text-sm text-destructive">
               {responses.error.message}

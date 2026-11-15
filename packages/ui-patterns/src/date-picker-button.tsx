@@ -60,6 +60,13 @@ export interface DatePickerButtonProps
 }
 
 /**
+ * El botón de la fecha visto como campo: mismo alto, borde, relleno y radio que una lista
+ * desplegable (`SelectTrigger`), para que en un formulario no parezca otro control.
+ */
+const DATE_FIELD =
+  "justify-between rounded-3xl border-input-border bg-input/50 px-3 font-normal text-foreground hover:bg-input/60 aria-expanded:bg-input/50 aria-expanded:text-foreground"
+
+/**
  * «Día»: botón que dice la fecha con su año («Jue 20 nov 2026») y abre el
  * calendario estándar, con el mes y el año elegibles en una lista para llegar
  * lejos sin pasar mes a mes. Sustituye al campo de fecha del navegador, que la
@@ -112,7 +119,8 @@ export function DatePickerButton({
           <Button
             type="button"
             variant="outline"
-            className={cn(children ? undefined : "justify-between font-normal", className)}
+            // Sin contenido propio es un campo: con el borde y el relleno de los demás (`SelectTrigger`), no un botón.
+            className={cn(children ? undefined : DATE_FIELD, className)}
             aria-describedby={[describedBy, children ? undefined : valueId].filter(Boolean).join(" ") || undefined}
             {...button}
           />
