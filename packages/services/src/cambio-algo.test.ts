@@ -6,7 +6,9 @@
 import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patient, patientHealthDeclaration } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
+import { agentActionLog } from "@odentia/db/schema/agent"
+import { agentConfig, channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
+import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { branch } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
 import { expect, it, vi } from "vitest"
@@ -262,6 +264,67 @@ it("C8: al día siguiente sabe qué envió y cuándo, y corrige su salud sin ver
   expect(health.medications.map((row) => row.name)).toEqual(expect.arrayContaining(["Warfarina 5 mg", "Warfarina 2,5 mg"]))
   expect(health.changed?.medications).toEqual([health.medications.find((row) => row.name === "Warfarina 5 mg")!.id])
   // Los valores se ven en su portal, con su código: `portal-access.test.ts`.
+})
+
+// Revisión final del 15 nov (dev H7): desde dos pestañas, o al reintentar, quedaban dos correcciones,
+// dos notas y un mensaje cada vez, contado como acción de Sofi.
+it("la misma corrección otra vez deja una sola: una declaración, una nota y un mensaje, sin contarla como acción de Sofi", async () => {
+  const f = await clinicalFixture()
+  const marta = await martaBack(f)
+  await ownerDb
+    .insert(agentConfig)
+    .values({ organizationId: ORG, enabled: true })
+    .onConflictDoUpdate({ target: agentConfig.organizationId, set: { enabled: true } })
+  const [connection] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: ORG, channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA",
+      externalId: `wa-${randomUUID().slice(0, 8)}`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+    })
+    .returning({ id: channelConnection.id })
+  const [identity] = await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: ORG, contactId: marta.personId, channel: "whatsapp", externalUserId: "51987111333", isPrimary: true })
+    .returning({ id: contactIdentity.id })
+  const [chat] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: ORG, contactId: marta.personId, contactIdentityId: identity!.id, channelConnectionId: connection!.id,
+      externalThreadId: "51987111333", lastInboundAt: new Date(),
+    })
+    .returning({ id: conversation.id })
+  await f.run((tx) => submitPersonalLinkData(tx, ORG, marta.link.token, { data: {}, healthCheck: "cambio", health: SAID_BEFORE }, { secretsKey: KEY }))
+  const before = await ownerDb.select({ id: agentActionLog.id }).from(agentActionLog).where(eq(agentActionLog.conversationId, chat!.id))
+
+  const corrected = { ...SAID_BEFORE, anticoagulants: { state: "recorded" as const, detail: "Warfarina 7.5 mg" } }
+  // Dos pestañas con lo mismo (o reintentar tras un corte): la segunda ya llegó.
+  for (let tab = 0; tab < 2; tab++)
+    await f.run((tx) => submitPersonalLinkData(tx, ORG, marta.link.token, { data: {}, correctHealth: true, health: corrected }, { secretsKey: KEY }))
+  const corrections = (await declarationsOf(marta.patientId)).filter((row) => row.reason === "correccion")
+  expect(corrections).toHaveLength(1)
+  const notes = await ownerDb
+    .select({ body: crmNote.body })
+    .from(crmNote)
+    .where(and(eq(crmNote.organizationId, ORG), eq(crmNote.contactId, marta.personId)))
+  expect(notes.filter((note) => note.body.startsWith("Corrigió desde su enlace"))).toHaveLength(1)
+  const thanks = await ownerDb
+    .select({ body: message.body })
+    .from(message)
+    .where(and(eq(message.conversationId, chat!.id), eq(message.senderKind, "agent")))
+  expect(thanks.filter((row) => row.body === "Gracias, ya recibimos tu corrección.")).toHaveLength(1)
+  // Corregir lo ya enviado no es una acción nueva de Sofi.
+  const after = await ownerDb.select({ id: agentActionLog.id }).from(agentActionLog).where(eq(agentActionLog.conversationId, chat!.id))
+  expect(after).toHaveLength(before.length)
+
+  // Otra corrección distinta sí llega: lo de antes no se borra.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, marta.link.token, {
+      data: {},
+      correctHealth: true,
+      health: { ...SAID_BEFORE, anticoagulants: { state: "recorded", detail: "Apixabán 5 mg" } },
+    }),
+  )
+  expect((await declarationsOf(marta.patientId)).filter((row) => row.reason === "correccion")).toHaveLength(2)
 })
 
 it("sin haber contado su salud desde su enlace, no se le ofrece corregirla", async () => {

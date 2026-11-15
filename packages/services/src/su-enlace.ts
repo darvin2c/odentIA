@@ -32,6 +32,7 @@ import {
   appointmentPlanItem,
   patient,
   patientDataConsent,
+  patientHealthDeclaration,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
@@ -1524,6 +1525,11 @@ async function correctLinkHealth(
   }
   const said = await askedHealthOf(tx, orgId, patientId, input.health ?? null, questions)
   if (!said || !declaredHealthAnswered(said)) throw invalidField("health", "Responde al menos una pregunta de tu salud")
+  // La misma corrección otra vez (otra pestaña, o reintentar tras un corte) ya llegó: no deja otra
+  // declaración, otra nota ni otro mensaje (H7). El enlace va bloqueado (`requireLiveLink`), así que
+  // dos envíos a la vez se ven uno al otro.
+  const declarant = await linkDeclarant(tx, orgId, link, patientId, by)
+  if (await repeatsLastCorrection(tx, orgId, patientId, said, declarant)) return { received: true }
   await saveLinkHealth(tx, orgId, link, patientId, said, "correccion", by)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
@@ -1549,14 +1555,50 @@ async function correctLinkHealth(
     {
       note: "Corrigió desde su enlace lo que dijo de su salud.",
       message: "Gracias, ya recibimos tu corrección.",
-      key: `enlace-correccion:${link.row.id}:${Date.now()}`,
+      // Una vez por lo que corrigió: la misma corrección no repite el mensaje.
+      key: `enlace-correccion:${link.row.id}:${createHash("sha256").update(JSON.stringify(said)).digest("hex").slice(0, 16)}`,
       reason: "La persona corrigió su salud desde su enlace",
       kind: "enlace",
       title: "recibió su corrección",
+      // Corregir lo ya enviado no es algo nuevo que hizo Sofi: no cuenta como su acción.
+      agentAction: false,
     },
     deps,
   )
   return { received: true }
+}
+
+/**
+ * Si lo último que dijo de su salud es esta misma corrección, de la misma persona y desde su enlace:
+ * entonces ya llegó. Compara lo guardado como lo guarda la base (`jsonb`), sin importar el orden.
+ */
+async function repeatsLastCorrection(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  said: DeclaredPatientHealthInput,
+  by: HealthDeclarant,
+): Promise<boolean> {
+  const [last] = await tx
+    .select({
+      via: patientHealthDeclaration.via,
+      reason: patientHealthDeclaration.reason,
+      respondent: patientHealthDeclaration.respondent,
+      declarantName: patientHealthDeclaration.declarantName,
+      same: sql<boolean>`${patientHealthDeclaration.health} = ${JSON.stringify(said)}::jsonb`,
+    })
+    .from(patientHealthDeclaration)
+    .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
+    .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
+    .limit(1)
+  return (
+    !!last &&
+    last.same === true &&
+    last.via === "enlace" &&
+    last.reason === "correccion" &&
+    last.respondent === by.kind &&
+    (by.kind !== "representative" || (last.declarantName ?? null) === (by.name?.slice(0, 200) ?? null))
+  )
 }
 
 /** Sin espacios, puntos ni guiones y en mayúsculas: el mismo documento escrito de otra forma. */
@@ -1976,16 +2018,25 @@ async function thankInChat(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
-  input: { note: string; message: string; key: string; reason: string; kind: string; title: string },
+  input: {
+    note: string
+    message: string
+    key: string
+    reason: string
+    kind: string
+    title: string
+    /** `false`: no es algo nuevo que hizo con el enlace de Sofi (una corrección), y no cuenta como su acción. */
+    agentAction?: false
+  },
   deps: { secretsKey?: Buffer },
 ): Promise<void> {
-  const { kind, title, ...said } = input
+  const { kind, title, agentAction, ...said } = input
   const { timezone } = await findOrgLocale(tx, orgId)
   await tellConversation(
     tx,
     orgId,
     link.row,
-    { ...said, done: { kind, title, at: new Date().toISOString(), timeZone: timezone } },
+    { ...said, done: { kind, title, at: new Date().toISOString(), timeZone: timezone, ...(agentAction === false ? { agentAction } : {}) } },
     deps,
   )
 }
