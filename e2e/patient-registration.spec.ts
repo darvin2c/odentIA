@@ -781,7 +781,7 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja en una p
 
     // Con sus datos guardados, la página reserva el horario que ya había elegido; no le queda nada por completar.
     await expect(anon.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible({ timeout: 20_000 })
-    await expect(anon.getByRole("region", { name: "Tu cita" })).toContainText("Confirmada")
+    await expect(anon.getByRole("region", { name: "Tu cita", exact: true })).toContainText("Confirmada")
     await expect(anon.getByRole("region", { name: "Tus datos" })).toHaveCount(0)
     await info.attach("reserva-nuevo-lista", { body: await anon.screenshot({ fullPage: false }), contentType: "image/png" })
   } finally {
