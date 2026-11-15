@@ -127,6 +127,11 @@ const envSchema = z.object({
   ADMIN_META_PAGE_ID: z.string().default(""),
   ADMIN_META_PAGE_ACCESS_TOKEN: z.string().default(""),
   ADMIN_IG_ACCOUNT_ID: z.string().default(""),
+  /**
+   * Solo pruebas (e2e): la Graph API de Meta de los canales de la administración
+   * en un servidor local (`http://127.0.0.1:<puerto>`). Producción no arranca con ella.
+   */
+  ADMIN_META_GRAPH_URL: z.string().default(""),
   /** Versión del Graph API con la que el botón abre la ventana y el servidor llama a Meta. */
   META_GRAPH_VERSION: z
     .string()
@@ -177,6 +182,9 @@ const envSchema = z.object({
     if (channelsLive && data[key] === "fake") {
       ctx.addIssue({ code: "custom", path: [key], message: `${key}=fake sugiere direcciones de demostración: en producción, con canales reales, el servidor no arranca con él` })
     }
+  }
+  if (data.NODE_ENV === "production" && data.ADMIN_META_GRAPH_URL) {
+    ctx.addIssue({ code: "custom", path: ["ADMIN_META_GRAPH_URL"], message: "ADMIN_META_GRAPH_URL es solo de pruebas: en producción los canales de la administración hablan con Meta" })
   }
 })
 

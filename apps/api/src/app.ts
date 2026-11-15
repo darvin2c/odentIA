@@ -219,6 +219,8 @@ export interface AppDeps {
    * y «Escribir» sigue con wa.me.
    */
   adminChannels?: AdminChannels | undefined
+  /** Solo pruebas (e2e): cómo hablan con Meta los canales de la administración. */
+  adminChannelsFetch?: typeof fetch | undefined
 }
 
 // Lo que dice una regla sin mensaje propio, en el español de la interfaz: el
@@ -553,7 +555,14 @@ export function createApp(deps: AppDeps) {
     }),
   )
   // WhatsApp, Instagram y Messenger de la administración (ADR 0188).
-  app.route("/api/admin/chats", createAdminChatsRoute({ ownerDb: deps.ownerDb, channels: deps.adminChannels }))
+  app.route(
+    "/api/admin/chats",
+    createAdminChatsRoute({
+      ownerDb: deps.ownerDb,
+      channels: deps.adminChannels,
+      ...(deps.adminChannelsFetch ? { fetch: deps.adminChannelsFetch } : {}),
+    }),
+  )
   app.route(
     "/api/admin/kairos",
     createAdminKairosRoute({
@@ -783,6 +792,7 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       storage: deps.storage,
       channels: deps.adminChannels,
+      ...(deps.adminChannelsFetch ? { fetch: deps.adminChannelsFetch } : {}),
     }),
   )
   app.route(

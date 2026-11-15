@@ -101,6 +101,13 @@ if (env.NODE_ENV === "production" && !env.INBOUND_EMAIL_SECRET) {
 const adminChannels = adminChannelsFromEnv(env)
 const adminChannelsNotice = adminChannelsWarning(env)
 if (env.NODE_ENV === "production" && adminChannelsNotice) console.warn(adminChannelsNotice)
+/** Solo pruebas (e2e): lo que iría a graph.facebook.com va al servidor local que hace de Meta. */
+const adminChannelsFetch = env.ADMIN_META_GRAPH_URL
+  ? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      return fetch(url.replace(/^https:\/\/graph\.facebook\.com/, env.ADMIN_META_GRAPH_URL), init)
+    }) as typeof fetch
+  : undefined
 
 const app = createApp({
   auth,
@@ -142,6 +149,7 @@ const app = createApp({
   },
   metaSignup: metaSignupFromEnv(env),
   adminChannels,
+  adminChannelsFetch,
   vapidPublicKey: env.VAPID_PUBLIC_KEY,
   embedder: embedderFromEnv(env),
   // `fake`: el proveedor de demostración de dev y e2e (sin red); el entorno lo impide con canales reales.
