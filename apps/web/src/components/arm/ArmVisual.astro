@@ -5,6 +5,12 @@
 // movimiento, todo aparece hecho desde el principio.
 import { ofProduct, WORDS } from "../../lib/product"
 
+interface Props {
+  /** La tarjeta de la izquierda: «Tu CRM», «Tu chatbot», «Tu cuaderno»… */
+  them?: string
+}
+const { them = "Tu CRM" } = Astro.props
+
 type Agent = "sofi" | "clio" | "argos"
 interface Task {
   todo: string
@@ -34,10 +40,10 @@ const tasks: Task[] = ofProduct<Task[]>({
   ],
 })
 ---
-<div class="av" role="img" aria-label={`Las mismas tareas: en un CRM quedan pendientes para tu equipo; en ${WORDS.name}, los agentes las hacen`}>
+<div class="av" role="img" aria-label={`Las mismas tareas: con ${them.toLowerCase()} quedan pendientes para tu equipo; en ${WORDS.name}, los agentes las hacen`}>
   <div class="av-card av-crm" aria-hidden="true">
     <div class="av-h">
-      <strong>Tu CRM</strong>
+      <strong>{them}</strong>
       <span class="av-count">{tasks.length} pendientes</span>
     </div>
     <ul>

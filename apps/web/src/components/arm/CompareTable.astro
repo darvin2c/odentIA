@@ -1,0 +1,52 @@
+---
+// Una alternativa frente al producto, fila por fila: lo que hay que hacer, cómo es con la alternativa y
+// cómo es con nosotros (resaltado). La usan /comparar y cada /comparar/<alternativa>. En el celular cada
+// fila es una tarjeta: la tarea arriba, la alternativa y luego nosotros.
+import type { Alternative } from "../../lib/arm"
+import { WORDS } from "../../lib/product"
+
+interface Props {
+  alt: Alternative
+}
+const { alt } = Astro.props
+---
+<table class="arm-t">
+  <thead>
+    <tr>
+      <th scope="col"><span class="sr-only">Qué</span></th>
+      <th scope="col">{alt.with}</th>
+      <th scope="col" class="us">Con {WORDS.name}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {alt.rows.map((r) => (
+      <tr>
+        <th scope="row">{r.task}</th>
+        <td data-label={alt.with}>{r.them}</td>
+        <td data-label={`Con ${WORDS.name}`} class="us">{r.us}</td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+
+<style>
+  .arm-t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 17px; line-height: 1.5; }
+  .arm-t th, .arm-t td { text-align: left; vertical-align: top; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+  .arm-t thead th { font-size: 14px; font-weight: 800; letter-spacing: .02em; color: var(--muted); border-bottom: 2px solid var(--line); }
+  .arm-t thead th.us { color: var(--teal); background: var(--teal-soft); border-radius: 16px 16px 0 0; }
+  .arm-t tbody th { width: 22%; font-weight: 800; color: var(--ink); }
+  .arm-t td { width: 39%; color: var(--muted); }
+  .arm-t td.us { color: var(--ink); font-weight: 600; background: var(--teal-soft); }
+  .arm-t tbody tr:last-child td.us { border-radius: 0 0 16px 16px; }
+  @media (max-width: 720px) {
+    .arm-t, .arm-t tbody, .arm-t tr, .arm-t th, .arm-t td { display: block; width: auto; }
+    .arm-t thead { display: none; }
+    .arm-t tr { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .arm-t th, .arm-t td { padding: 14px 16px; border-bottom: 0; }
+    .arm-t tbody th { font-size: 18px; width: auto; }
+    .arm-t td { width: auto; }
+    .arm-t td::before { content: attr(data-label); display: block; font-size: 13px; font-weight: 800; color: var(--muted); margin-bottom: 4px; }
+    .arm-t td.us::before { color: var(--teal); }
+    .arm-t tbody tr:last-child td.us { border-radius: 0; }
+  }
+</style>

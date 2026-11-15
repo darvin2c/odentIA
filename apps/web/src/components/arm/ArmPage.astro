@@ -4,22 +4,18 @@
 // fila, en pestañas (sin JavaScript se ven todas). Los textos salen de lib/arm.ts, como «¿Qué es un ARM?»
 // de las portadas.
 import Base from "../../layouts/Base.astro"
-import { ALTERNATIVES, ARM_PATH, armFaq, type Mark, MATRIX } from "../../lib/arm"
+import { ALT_PAGES, ALTERNATIVES, AREAS, ARM_PATH, armFaq, type Mark, MATRIX } from "../../lib/arm"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { ofProduct, WORDS } from "../../lib/product"
 import CtaBand from "../CtaBand.astro"
 import Faq from "../Faq.astro"
 import PageHero from "../PageHero.astro"
 import ArmVisual from "./ArmVisual.astro"
+import CompareTable from "./CompareTable.astro"
 
 const title = `${WORDS.name} frente a un CRM, un chatbot y el software de siempre`
 const description = `${WORDS.name} es un ARM (Agentic Relationship Management): agentes de IA que responden, agendan y traen de vuelta a tus ${WORDS.patients}. Compáralo con un CRM, un chatbot, el software de siempre y WhatsApp con cuaderno.`
 const MARK: Record<Mark, string> = { si: "Sí", medias: "A medias", no: "No" }
-const areas = ofProduct({
-  dental: "la recepción, la consulta y la administración",
-  medical: "la recepción, la consulta y la administración",
-  optical: "la recepción y la administración",
-})
 const agents = ofProduct({ dental: "Sofi, Clío y Argos", medical: "Sofi, Clío y Argos", optical: "Sofi y Argos" })
 
 const reasons = [
@@ -60,7 +56,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     tag="Agentic Relationship Management"
     title="No somos un CRM ni un chatbot."
     accent="Somos un ARM."
-    lead={`Un CRM te pide trabajo, un chatbot solo conversa y el software de siempre espera a que alguien lo use. En ${WORDS.name}, agentes de IA hacen el trabajo en ${areas} de ${WORDS.yourClinic}, y tú decides qué agentes trabajan. Nacimos así.`}
+    lead={`Un CRM te pide trabajo, un chatbot solo conversa y el software de siempre espera a que alguien lo use. En ${WORDS.name}, agentes de IA hacen el trabajo en ${AREAS} de ${WORDS.yourClinic}, y tú decides qué agentes trabajan. Nacimos así.`}
     secondary={{ href: "#comparacion", label: "Compáranos" }}
   >
     <ArmVisual slot="visual" />
@@ -79,7 +75,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
             <tr>
               <th scope="col"><span class="sr-only">Qué</span></th>
               <th scope="col" class="us">{WORDS.name}</th>
-              {ALTERNATIVES.map((a) => <th scope="col">{a.label}</th>)}
+              {ALTERNATIVES.map((a) => <th scope="col"><a class="mx-link" href={ALT_PAGES[a.key].path}>{a.label}</a></th>)}
             </tr>
           </thead>
           <tbody>
@@ -113,24 +109,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       {ALTERNATIVES.map((a) => (
         <div class="alt-panel" role="tabpanel" id={`alt-${a.key}`} aria-labelledby={`tab-${a.key}`}>
           <p class="alt-pitch">{a.pitch}</p>
-          <table class="arm-t">
-            <thead>
-              <tr>
-                <th scope="col"><span class="sr-only">Qué</span></th>
-                <th scope="col">{a.with}</th>
-                <th scope="col" class="us">Con {WORDS.name}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {a.rows.map((r) => (
-                <tr>
-                  <th scope="row">{r.task}</th>
-                  <td data-label={a.with}>{r.them}</td>
-                  <td data-label={`Con ${WORDS.name}`} class="us">{r.us}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <CompareTable alt={a} />
+          <a class="alt-go" href={ALT_PAGES[a.key].path}>Ver {WORDS.name} vs {a.inline} <span aria-hidden="true">→</span></a>
         </div>
       ))}
     </div>
@@ -195,15 +175,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .arm { display: flex; flex-direction: column; gap: 40px; }
   .arm-head { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
   .arm-acc { color: var(--teal); }
-  .arm-t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 17px; line-height: 1.5; }
-  .arm-t th, .arm-t td { text-align: left; vertical-align: top; padding: 20px 24px; border-bottom: 1px solid var(--line); }
-  .arm-t thead th { font-size: 14px; font-weight: 800; letter-spacing: .02em; color: var(--muted); border-bottom: 2px solid var(--line); }
-  .arm-t thead th.us { color: var(--teal); }
-  .arm-t tbody th { width: 22%; font-weight: 800; color: var(--ink); }
-  .arm-t td { width: 39%; color: var(--muted); }
-  .arm-t td.us { color: var(--ink); font-weight: 600; background: var(--teal-soft); }
-  .arm-t tbody tr:last-child td.us { border-radius: 0 0 16px 16px; }
-  .arm-t thead th.us { background: var(--teal-soft); border-radius: 16px 16px 0 0; }
   .arm > * { min-width: 0; }
   .mx-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .mx-t { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; font-size: 16px; line-height: 1.4; }
@@ -241,6 +212,10 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .alt-tabs button:focus-visible { outline: 3px solid color-mix(in srgb, var(--teal) 40%, transparent); outline-offset: 2px; }
   .alt-panel { display: flex; flex-direction: column; gap: 20px; }
   .alt-panel[hidden] { display: none; }
+  .mx-link { color: inherit; text-decoration: none; }
+  .mx-link:hover { color: var(--teal); text-decoration: underline; }
+  .alt-go { align-self: flex-start; font-weight: 800; color: var(--teal); text-decoration: none; }
+  .alt-go:hover { text-decoration: underline; }
   .alt-pitch { font-size: clamp(22px, 2.2vw, 30px); font-weight: 800; letter-spacing: -.02em; color: var(--ink); }
   .arm-why { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
   .arm-r { padding: 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -249,17 +224,5 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .arm-more:hover { text-decoration: underline; }
   @media (max-width: 860px) {
     .arm-why { grid-template-columns: minmax(0, 1fr); }
-  }
-  /* En el celular cada fila es una tarjeta: la tarea arriba, el CRM y luego el ARM. */
-  @media (max-width: 720px) {
-    .arm-t, .arm-t tbody, .arm-t tr, .arm-t th, .arm-t td { display: block; width: auto; }
-    .arm-t thead { display: none; }
-    .arm-t tr { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-    .arm-t th, .arm-t td { padding: 14px 16px; border-bottom: 0; }
-    .arm-t tbody th { font-size: 18px; width: auto; }
-    .arm-t td { width: auto; }
-    .arm-t td::before { content: attr(data-label); display: block; font-size: 13px; font-weight: 800; color: var(--muted); margin-bottom: 4px; }
-    .arm-t td.us::before { color: var(--teal); }
-    .arm-t tbody tr:last-child td.us { border-radius: 0; }
   }
 </style>
