@@ -1901,8 +1901,17 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
     pastaConFluor: "si",
     quienCepilla: "solo",
   } as const
+  // Siempre de 6 años: biberón y chupón se preguntan hasta los 6, y `MINOR_BIRTH` los cumple 7 en mayo de 2027.
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 6, birth.getUTCMonth() - 2, 1)
   const answers: RegistrationAnswers = {
-    demographics: { displayName: "Thiago Quispe", givenNames: "Thiago", familyName: "Quispe", birthDate: MINOR_BIRTH, sex: "M" },
+    demographics: {
+      displayName: "Thiago Quispe",
+      givenNames: "Thiago",
+      familyName: "Quispe",
+      birthDate: birth.toISOString().slice(0, 10),
+      sex: "M",
+    },
     respondent: "representative",
     representative: {
       displayName: "Carla Ramos",
