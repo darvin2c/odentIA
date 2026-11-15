@@ -584,7 +584,9 @@ function labelNamed(question: DictationFormQuestion, said: string, site?: Produc
   // No si también es de sus opciones: «clase» de «Clase molar derecha» está en «Clase II», y «maloclusión clase dos» no es de ella.
   const options = new Set((question.options ?? []).flatMap(stemsOf))
   const distinctive = own.filter((word) => !others.has(word.slice(0, 5)) && !options.has(word.slice(0, 5)))
-  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || distinctive.some(spoken) || proper.some(spoken)
+  // Sola, con sus siete primeras letras: «odontograma» no es «odontológica».
+  const close = (word: string) => words.some((item) => item.startsWith(word.slice(0, 7)) && item.length <= word.length + 3)
+  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || distinctive.some(close) || proper.some(spoken)
 }
 
 /**
@@ -898,10 +900,10 @@ const tokensOf = (text: string) =>
     .filter(Boolean)
 
 /** El primer número desde `from`, saltando hasta dos palabras de enlace en esa dirección. */
-function numberNear(words: string[], from: number, step: 1 | -1): { value: number; next: number } | null {
+function numberNear(words: string[], from: number, step: 1 | -1): { value: number; next: number; at: number } | null {
   for (let at = from, skipped = 0; at >= 0 && at < words.length && skipped <= 2; at += step, skipped += 1) {
     const read = readNumber(words, at)
-    if (read) return read
+    if (read) return { ...read, at }
     if (!LINKS.has(words[at] ?? "")) return null
   }
   return null
@@ -909,14 +911,18 @@ function numberNear(words: string[], from: number, step: 1 | -1): { value: numbe
 
 /**
  * En «pesa 24 kg no 22 perdón» o «de 6 no perdón de 4», el número que va enseguida después del «no»,
- * el «perdón» o el «corrijo». `null` si no se corrigió un número: «8 de 10 no cede» no corrige nada.
+ * el «perdón» o el «corrijo», con su «y medio». Mira también lo que sigue a lo dicho en su oración: el
+ * modelo a veces cita «pesa 24 kg» sin la corrección. `null` si no se corrigió un número: «8 de 10 no
+ * cede» no corrige nada.
  */
-function correctedNumber(said: string): number | null {
-  const words = tokensOf(said)
-  for (let at = words.length - 1; at > 0; at -= 1) {
-    if (!["no", "perdon", "corrijo"].includes(words[at] ?? "")) continue
-    const fixed = numberNear(words, at + 1, 1)
-    if (fixed && saidNumbers(words.slice(0, at).join(" ")).length) return fixed.value
+function correctedNumber(said: string, sentence = ""): number | null {
+  const at = plain(sentence).indexOf(plain(said))
+  const tail = at >= 0 && said.trim() ? tokensOf(plain(sentence).slice(at + plain(said).length)).slice(0, 4).join(" ") : ""
+  const words = tokensOf(`${said} ${tail}`)
+  for (let index = words.length - 1; index > 0; index -= 1) {
+    if (!["no", "perdon", "corrijo"].includes(words[index] ?? "")) continue
+    const fixed = numberNear(words, index + 1, 1)
+    if (fixed && saidNumbers(words.slice(0, index).join(" ")).length) return saidNumbers(words.slice(fixed.at).join(" "))[0] ?? fixed.value
   }
   return null
 }
@@ -959,8 +965,9 @@ function pairedNumber(question: DictationFormQuestion, questions: readonly Dicta
 }
 
 /**
- * Lo dicho cerca de esta pregunta cuando la oración nombra otras del mismo tipo: desde dos palabras
- * antes de lo que la distingue («superior») hasta lo que distingue a otra («inferior»). Sin comas, como
+ * Lo dicho cerca de esta pregunta cuando la oración nombra otras del mismo tipo: desde lo que la
+ * distingue («superior»; un número, también dos palabras antes: «dos perdidos») hasta lo que distingue
+ * a otra («inferior»). Sin comas, como
  * lo oye Chrome, es lo que separa el valor de una del de la otra. Sin nada suyo, la oración entera.
  */
 function spansOf(question: DictationFormQuestion, others: readonly DictationFormQuestion[], said: string): string[] {
@@ -971,7 +978,8 @@ function spansOf(question: DictationFormQuestion, others: readonly DictationForm
   const spans = words.flatMap((word, index) => {
     if (!mine.includes(stem(word))) return []
     let start = index
-    while (start > index - 2 && start > 0 && !theirs.has(stem(words[start - 1] ?? ""))) start -= 1
+    const back = question.type === "numero" || question.type === "escala" ? 2 : 0
+    while (start > index - back && start > 0 && !theirs.has(stem(words[start - 1] ?? ""))) start -= 1
     let end = index + 1
     while (end < words.length && !theirs.has(stem(words[end] ?? ""))) end += 1
     return [words.slice(start, end).join(" ")]
@@ -1102,7 +1110,7 @@ function checkFormAnswer(
       if (question.type !== "pieza" && APPROXIMATE.test(plain(said))) return review(null, `Dijiste «${shortSaid(said)}»: es aproximado. Escríbelo tú.`)
       // Lo que se corrigió («24 kg no 22 perdón») y el orden sin puntuación («uno con extracción indicada dos
       // obturados»): vale el número que lo dicho le da a esta pregunta (prueba con voz del 15 nov).
-      const meant = question.type === "pieza" ? null : ((question.type === "numero" ? pairedNumber(question, questions, sentence || said) : null) ?? correctedNumber(said))
+      const meant = question.type === "pieza" ? null : ((question.type === "numero" ? pairedNumber(question, questions, sentence || said) : null) ?? correctedNumber(said, sentence))
       if (meant !== null) number = meant
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)

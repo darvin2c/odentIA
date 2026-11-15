@@ -528,6 +528,18 @@ describe("lo que la prueba con voz mostró (15 nov): lo que oye Chrome, sin punt
     expect(ask(kid, "peso", "24", "la niña pesa 24 kg no 22 perdón")).toMatchObject({ status: "lista", payload: { value: 22 } })
     expect(ask(ortho, "overjet", "4", "overjat de 6 no perdón de 4 mm")).toMatchObject({ status: "lista", payload: { value: 4 } })
     expect(ask(endo, "dolor_intensidad", "8", "intensidad 8 de 10 no cede con nada")).toMatchObject({ status: "lista", payload: { value: 8 } })
+    // Con su «y medio», y aunque la corrección venga después de lo que citó el modelo.
+    expect(ask(ortho, "overbite", "2.5", "Overbite de tres, no, perdón, de dos y medio")).toMatchObject({ status: "lista", payload: { value: 2.5 } })
+    expect(ask(kid, "peso", "24", "la niña pesa 24 kg", "Okay este la niña pesa 24 kg no 22 perdón succión por favor")).toMatchObject({ status: "lista", payload: { value: 22 } })
+  })
+  it("la red sin falsos avisos: el valor de antes es de la pregunta anterior, y «odontograma» no es «odontológica»", () => {
+    const heard = "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor"
+    const handled = new Set(["dolor", "fistula", "tumefaccion", "frio"].map((fieldId) => at(endo, fieldId)))
+    expect(formSentencesWithoutAnswer(heard, endo, handled, FDI)).toEqual([])
+    const adult = formsOf("ficha-odontoestomatologica")
+    const spoken = "higiene regular riesgo estomatológico moderado en el odontograma caries en la 16 y la 26 oclusales"
+    const done = new Set(["higiene", "riesgo"].map((fieldId) => at(adult, fieldId)))
+    expect(formSentencesWithoutAnswer(spoken, adult, done, FDI)).toEqual([])
   })
   it("cada número va con el término que tiene al lado, en el orden en que se dijo", () => {
     const heard = "beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá"
