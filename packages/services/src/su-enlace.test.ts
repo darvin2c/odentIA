@@ -1886,6 +1886,52 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "ya_no", quienCepilla: "adulto" } })
 })
 
+// Revisión final de formularios (K12): el enlace guardaba lo que la clínica marcó «No se pide».
+it("el enlace guarda solo lo que la clínica pregunta: lo que marcó «No se pide» no entra aunque llegue", async () => {
+  const f = await clinicalFixture()
+  const config = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+  await f.run((tx) =>
+    savePatientRegistrationConfig(tx, ORG, f.actor, {
+      expectedVersion: config.version,
+      enabled: true,
+      fields: { ...config.fields, bloodGroup: "hidden", "personal.hospitalizaciones": "hidden", "dental.biberon": "hidden" },
+      privacyNotice: "Tus datos se usan solo para tu atención.",
+    }),
+  )
+  const lia = await minimal(f, { given: "Lía", surname: "Soto" })
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lia.personId, patientId: lia.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form.healthQuestions).not.toContain("bloodGroup")
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1990-05-05" },
+      health: {
+        allergies: { state: "none", items: [] },
+        bloodGroup: "O+",
+        personal: { hospitalizaciones: "Apendicitis" },
+      },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, lia.patientId))
+  expect(health.bloodGroup).toBeNull()
+  expect(health.declarations[0]?.health).toEqual({ allergies: { state: "none", items: [] } })
+
+  // A la mamá de un niño, «Si se atiende un niño» apagado tampoco entra.
+  const thiago = await minimal(f, { given: "Thiago", surname: "Soto" })
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 4, birth.getUTCMonth() - 2, 1)
+  await ownerDb.update(contact).set({ birthDate: birth.toISOString().slice(0, 10), sex: "M" }).where(eq(contact.id, thiago.personId))
+  const [carla] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Carla Soto", givenNames: "Carla", familyName: "Soto" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: thiago.patientId, contactId: carla!.id, relationship: "guardian", createdBy: f.actor })
+  await f.run((tx) => grantResponsibility(tx, ORG, f.actor, thiago.patientId, { contactId: carla!.id, kind: "representante_legal", startsAt: "2020-01-01" }))
+  const childLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla!.id, patientId: thiago.patientId }, { secretsKey: KEY }))
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, childLink.token, { data: {}, health: { dental: { biberon: "si", quienCepilla: "adulto" } } }),
+  )
+  const child = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(child.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { quienCepilla: "adulto" } })
+})
+
 // QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita
 // de hoy, mientras la persona aún esperaba en la sala.
 it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () => {

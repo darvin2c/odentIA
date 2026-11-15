@@ -17,7 +17,6 @@ import {
   onlyAskedHealth,
   phoneFormatError,
   productWords,
-  REGISTRATION_FIELDS,
   registrationAnswersSchema,
   type RegistrationConfig,
   type RegistrationFieldKey,
@@ -1192,21 +1191,11 @@ async function saveLinkData(
     const value = typeof raw === "string" ? raw.trim() : null
     if (value) patch[key] = value
   }
-  // De su salud, solo lo que aún no se sabía: lo ya anotado o respondido no se le mostró y no lo cambia.
+  // De su salud, solo lo que se le preguntó (`ask`, la lista que mostró la página): lo que la clínica
+  // pregunta en su producto, que le corresponde y que aún no se sabía. Lo que marcó «No se pide», lo
+  // de otro producto o lo ya anotado no se le mostró y no entra aunque llegue (K12).
   const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link) : null
-  const known = questions && questions.ask.length > 0 ? questions.known : null
-  // Ni lo que no le corresponde (a un niño, el embarazo o el tabaco; a uno de 8, el biberón): la misma regla del registro.
-  const asker = known ? await requirePatient(tx, orgId, patientId) : null
-  const who = { sex: asker?.sex ?? null, age: ageInYears(asker?.birthDate, await patientOrganizationToday(tx, orgId)) }
-  const said =
-    input.health && known
-      ? onlyAskedHealth(
-          input.health,
-          REGISTRATION_FIELDS.filter(
-            (field) => field.group === "health" && !known.has(field.key) && registrationFieldApplies(field.key, who),
-          ).map((field) => field.key),
-        )
-      : null
+  const said = input.health && questions && questions.ask.length > 0 ? onlyAskedHealth(input.health, questions.ask) : null
   const withHealth = !!said && declaredHealthAnswered(said)
   const renamed = input.name ? await correctLinkName(tx, orgId, link, patientId, input.name) : null
   const consented = await saveLinkConsents(tx, orgId, link, patientId, input, options.toldWhatsApp)
