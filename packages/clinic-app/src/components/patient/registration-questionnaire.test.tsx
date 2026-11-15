@@ -189,3 +189,17 @@ describe("lo escrito en este celular", () => {
     expect(page({ draftKey: "odentia.borrador.x" })).not.toContain("se guarda en este celular")
   })
 })
+
+// QA de formularios del 15 nov (K15; ux H2 y D3 de la 7): una sola opción «Madre, padre o tutor» no
+// dejaba decir «su madre, Rosa». Tres opciones, con el parentesco que se guarda en el vínculo.
+describe("¿Qué eres de…? con madre, padre y tutor legal por separado", () => {
+  it("el registro ofrece Madre, Padre y Tutor legal, no «Madre, padre o tutor»", () => {
+    declareProduct(bareProduct("dental"))
+    const html = page()
+    expect(html).toContain("¿Qué eres de")
+    expect(html).toContain(">Madre<")
+    expect(html).toContain(">Padre<")
+    expect(html).toContain(">Tutor legal<")
+    expect(html).not.toContain("Madre, padre o tutor")
+  })
+})

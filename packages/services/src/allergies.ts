@@ -38,6 +38,27 @@ export function allergyReviewDue(reviewedAt: Date | null, now: Date = new Date()
 
 export type PatientAllergyRow = typeof patientAllergy.$inferSelect
 
+/**
+ * De cada alergia activa, lo que necesita quien solo ve las alergias (recepción, `clinical.alerts`,
+ * QA del 15 nov): la sustancia (con su lista, para nombrarla) y su severidad (con la criticidad y si
+ * es una intolerancia, que dicen cuánto alerta). Lo que contó de la reacción, quién la anotó y cuándo
+ * son de la historia. La descartada ya no alerta.
+ */
+export function allergyAlertsOf(rows: readonly PatientAllergyRow[]) {
+  return rows
+    .filter((row) => row.verification !== "descartada")
+    .map(({ id, substance, substanceSystem, substanceCode, kind, severity, criticality, isActive }) => ({
+      id,
+      substance,
+      substanceSystem,
+      substanceCode,
+      kind,
+      severity,
+      criticality,
+      isActive,
+    }))
+}
+
 export interface AllergySubstanceInput {
   /** Lo escrito; si viene la lista y el código, se toma el nombre de la lista. */
   substance?: string | null

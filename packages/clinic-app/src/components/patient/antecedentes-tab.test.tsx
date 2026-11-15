@@ -102,6 +102,18 @@ describe("«Ver declaración original»", () => {
     expect(hasOriginalDeclaration(null, [{}])).toBe(true)
     expect(hasOriginalDeclaration(null, [])).toBe(false)
   })
+
+  // QA de formularios del 15 nov (K16): su «No sé» se lee «No sabe», como el resto de lo que dijo.
+  it("su «No sé» a las alergias y al anticoagulante dice «No sabe»", () => {
+    const page = renderToStaticMarkup(
+      <DeclaredHealthSnapshot
+        health={{ allergies: { state: "unknown", items: [] }, anticoagulants: { state: "unknown" } }}
+      />,
+    ).replace(/<[^>]+>/g, "")
+    expect(page).toContain("Alergias · No sabe")
+    expect(page).toContain("Anticoagulantes · No sabe")
+    expect(page).not.toContain("no se le preguntó")
+  })
 })
 
 // Auditor, 14 nov: «Revisado por personal autorizado», sin nadie, al lado de una alergia sin revisar.

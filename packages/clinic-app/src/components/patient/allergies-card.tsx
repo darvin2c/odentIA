@@ -17,7 +17,15 @@ import {
   REMOVAL_REASON_LABELS,
 } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
-import { declaredGroupOf, saidByWords, saidNoGroupOf, saidNoWords, shortDay } from "../../lib/declared-health"
+import {
+  allergiesSaidUnknown,
+  allergiesUnknownWords,
+  declaredGroupOf,
+  saidByWords,
+  saidNoGroupOf,
+  saidNoWords,
+  shortDay,
+} from "../../lib/declared-health"
 import {
   type Allergy,
   addAllergyApi,
@@ -128,6 +136,8 @@ export function AllergiesCard({
   const originText = (allergy: Allergy) => allergyOrigin(allergy, health, sex, memberName)
   // El «No» lo marcó la persona (o quien habla por ella) y nadie se lo preguntó en la clínica.
   const saidNo = saidNoGroupOf(health.declared, "allergies")
+  // Su «No sé»: se le preguntó y no sabe, no es «aún no se le preguntó» (QA del 15 nov, K16).
+  const saidUnknown = allergiesSaidUnknown(health)
   const restore = useRestoreAllergy(patientId)
   const [adding, setAdding] = useState(false)
   const [coding, setCoding] = useState<Allergy | null>(null)
@@ -184,7 +194,9 @@ export function AllergiesCard({
               ? "No tiene alergias: se le preguntó."
               : health.reviewStatus.allergies === "recorded"
                 ? "Sin alergias vigentes."
-                : "Aún no se le preguntó si tiene alergias."}
+                : saidUnknown
+                  ? allergiesUnknownWords(saidUnknown, sex)
+                  : "Aún no se le preguntó si tiene alergias."}
           </p>
           {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
           {canWrite && (health.reviewStatus.allergies === "unknown" || saidNo) ? (

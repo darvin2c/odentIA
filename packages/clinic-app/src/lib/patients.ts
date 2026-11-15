@@ -1,5 +1,6 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
+  ageInYears,
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
@@ -13,6 +14,7 @@ import {
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
+import { clinicToday } from "./inventory"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
@@ -1149,6 +1151,8 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /** Su «No sé» a las alergias, si es lo último que dijo de ellas: quién y cuándo. No es «no se le preguntó». */
+  allergySaidUnknown?: { by: HealthDeclarant; at: string | null } | null
   /**
    * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
    * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
@@ -1163,18 +1167,20 @@ export function hcLabel(n: number): string {
   return `HC-${String(n).padStart(6, "0")}`
 }
 
-/** Edad en años desde fecha de nacimiento ISO; "" si ausente/inválida. */
-export function ageFrom(birthDate: string | null | undefined): string {
-  if (!birthDate) return ""
-  const born = new Date(birthDate).getTime()
-  if (Number.isNaN(born)) return ""
-  const now = new Date()
-  const b = new Date(born)
-  let age = now.getFullYear() - b.getFullYear()
-  const m = now.getMonth() - b.getMonth()
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1
-  if (age < 0) return ""
-  return `${age}`
+/**
+ * Años cumplidos desde la fecha de nacimiento (AAAA-MM-DD), con el día de la
+ * clínica, como `patientAge` en el servidor: nunca como un instante en UTC ni con
+ * el día del navegador. null si falta, no es una fecha real o es futura.
+ */
+export function ageYears(birthDate: string | null | undefined, today: string = clinicToday()): number | null {
+  const age = ageInYears(birthDate, today)
+  return age === null || age < 0 ? null : age
+}
+
+/** La edad de `ageYears` para mostrarla: "" si no se sabe. */
+export function ageFrom(birthDate: string | null | undefined, today?: string): string {
+  const age = ageYears(birthDate, today)
+  return age === null ? "" : `${age}`
 }
 
 export function statusLabel(status: string): string {

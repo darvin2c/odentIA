@@ -94,6 +94,14 @@ describe("las palabras de lo que dijo el paciente", () => {
     )
   })
 
+  // QA del 15 nov (K15): el registro ya separa «Madre», «Padre» y «Tutor legal», y lo dice con su nombre.
+  it("lo que guarda el registro de hoy se dice con su parentesco", () => {
+    const said = (relation: string, name: string) => whoWords({ kind: "representative", name, relation }, "M")
+    expect(said("Madre", "Rosa Lozano")).toBe("su madre, Rosa")
+    expect(said("Padre", "Luis Ríos")).toBe("su padre, Luis")
+    expect(said("Tutor legal", "Ana Vera")).toBe("su tutor legal, Ana")
+  })
+
   it("cada fila se busca en su declaración: con dos fechas o dos personas, cada cosa con la suya", () => {
     const group = (by: HealthDeclarant, at: string, patch: Partial<DeclaredHealthGroup>): DeclaredHealthGroup => ({
       by,

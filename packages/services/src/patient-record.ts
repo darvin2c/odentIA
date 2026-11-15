@@ -335,6 +335,7 @@ const MEDICINE_CLASS_WORDS: Record<MedicineClassAnswer["answer"], string> = {
   took: "la tomó antes, hoy no",
   no: "no toma",
   unknown: "no sabe",
+  skipped: "no respondió",
   unasked: "no se le preguntó",
 }
 /** El estado de FHIR R4 de cada respuesta de una clase (`MedicationStatement.status`). */

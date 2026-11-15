@@ -2,7 +2,7 @@ import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-e
 import { useMemberName } from "@odentia/clinic-app/lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import {
-  ageFrom,
+  ageYears,
   fetchPatientVitals,
   type PatientFull,
   type VitalsReading,
@@ -292,10 +292,9 @@ export function VitalsSection({
         <NewEncounterButton patientId={patientId} detail={record ?? undefined} variant="outline" />
       </div>
     )
-  const age = Number.parseInt(ageFrom(record?.patient.birthDate), 10)
   const measures = measuresFor(
     readings,
-    Number.isNaN(age) ? null : age,
+    ageYears(record?.patient.birthDate),
     bodyMassIndex(latest.vitals),
   )
   return (

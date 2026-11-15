@@ -1,10 +1,11 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, type HealthDeclarant } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
+  allergiesSaidUnknown,
   changedHistoryOf,
   declaredGroupOf,
   pregnancyGroupOf,
@@ -183,12 +184,15 @@ export function ClinicalAlertsCard({
     const group = declaredGroupOf(groups, topic, id)
     return group ? `${saidByWords(group.by, sex)} · sin revisar` : null
   }
+  // «su madre dijo que no (13 nov)», y su «No sé», «dijo que no sabe (13 nov)».
+  const saidWords = (said: { by: HealthDeclarant; at: string | null }, answer?: "no sabe") =>
+    `${saidNoWords(said.by, sex, answer).toLocaleLowerCase("es")}${said.at ? ` (${shortDay(said.at)})` : ""}`
   const saidNo = (topic: "allergies" | "conditions" | "medications"): string | null => {
     const group = saidNoGroupOf(groups, topic)
-    return group
-      ? `${saidNoWords(group.by, sex).toLocaleLowerCase("es")}${group.at ? ` (${shortDay(group.at)})` : ""}`
-      : null
+    return group ? saidWords(group) : null
   }
+  // Su «No sé» a las alergias: se le preguntó y no sabe (QA del 15 nov, K16).
+  const saidUnknown = health ? allergiesSaidUnknown(health) : null
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = health?.pregnancy ? pregnancyWords(health.pregnancy) : null
   const asa = asaLabel(health?.asaClass)
@@ -265,7 +269,9 @@ export function ClinicalAlertsCard({
                 ? `Alergias: ${saidNo("allergies")} · sin revisar`
                 : allergyState === "none"
                   ? "Alergias: niega"
-                  : "Alergias: no preguntado"}
+                  : saidUnknown
+                    ? `Alergias: ${saidWords(saidUnknown, "no sabe")}`
+                    : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />

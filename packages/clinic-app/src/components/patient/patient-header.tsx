@@ -120,6 +120,8 @@ const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, 
   took: () => "la tomó antes, hoy no",
   no: (said) => (said ? "dijo que no" : "no toma"),
   unknown: () => "no sabe",
+  // Se le preguntó y no respondió («Saltar» en «Tus medicinas»): su enlace se lo vuelve a preguntar.
+  skipped: () => "no respondió",
 }
 
 /** Lo declarado que llega a quien solo ve las alergias, como grupos de la franja. */
@@ -168,6 +170,7 @@ export function PatientClinicalStrip({
     | "currentMedications"
     | "allergyReview"
     | "allergySaidNo"
+    | "allergySaidUnknown"
     | "declaredAllergies"
   >
   onAntecedentes?: () => void
@@ -317,7 +320,8 @@ export function PatientClinicalStrip({
       : noAllergies && detail.allergyReview === "none"
         ? "Niega alergias"
         : noAllergies && detail.allergyReview === "unknown"
-          ? "Alergias: no preguntado"
+          ? // Su «No sé» no es «no preguntado», como el del anticoagulante (QA del 15 nov, K16).
+            `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`
           : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =

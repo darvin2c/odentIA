@@ -1,5 +1,6 @@
 import {
   ALLERGY_SEVERITIES,
+  allergiesSaidUnknownOf,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -80,7 +81,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
-import { requirePatient } from "./patients.js"
+import { type PatientFull, requirePatient } from "./patients.js"
 import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -1055,6 +1056,27 @@ export async function allergiesSaidNoByPatient(
   if (!allergiesSaidNo("none", null, authorship)) return null
   const said = (await healthDeclarationsOf(tx, orgId, patientId)).find((row) => row.health.allergies?.state === "none")
   return said ? { by: said.by, at: said.at } : { by: UNKNOWN_DECLARANT, at: authorship.declaredAt }
+}
+
+/**
+ * Su «No sé» a las alergias, para quien ve las alergias (QA del 15 nov, K16): quién lo dijo y
+ * cuándo, si es lo último que dijo de ellas y la ficha no sabe más (`allergiesSaidUnknownOf`). No es
+ * «no se le preguntó». Toma la ficha que ya leyó quien lo pide (`getPatient`) y lee sus
+ * declaraciones solo si la ficha aún no sabe si tiene alergias. null si no. Nada más de su salud.
+ */
+export async function allergiesSaidUnknownByPatient(
+  tx: Db,
+  orgId: string,
+  full: Pick<PatientFull, "patient" | "activeAllergies">,
+): Promise<{ by: HealthDeclarant; at: Date } | null> {
+  const known = {
+    reviewState: String((full.patient.healthReviewStatus as { allergies?: unknown } | null)?.allergies ?? "unknown"),
+    activeAllergies: full.activeAllergies.filter((row) => row.verification !== "descartada").length,
+  }
+  if (known.reviewState !== "unknown" || known.activeAllergies > 0) return null
+  const said = allergiesSaidUnknownOf({ ...known, declarations: await healthDeclarationsOf(tx, orgId, full.patient.id) })
+  // Solo quién y cuándo: la declaración entera es de quien lee la historia.
+  return said ? { by: said.by, at: said.at } : null
 }
 
 /**

@@ -1924,10 +1924,14 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
     health: { ...emptyClinical(), conditions: { state: "recorded", items: [{ name: "Asma" }] }, dental: child },
     privacyAccepted: true,
   }
-  // Al niño no se le pregunta si fuma: el servidor no lo acepta.
-  await expect(
-    registerOnline({ ...answers, health: { ...answers.health, medical: { tabaco: "nunca" } } }),
-  ).rejects.toThrow()
+  // Al niño no se le pregunta si fuma: el servidor no lo acepta, y es por el tabaco, no por otro dato
+  // (revisión de la entrega 7, M3 y B7: con `rejects.toThrow()` seguía pasando por el biberón).
+  const smoking = await registerOnline({ ...answers, health: { ...answers.health, medical: { tabaco: "nunca" } } }).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(smoking).toMatchObject({ status: 400 })
+  expect(Object.keys((smoking as { fields?: Record<string, string> }).fields ?? {})).toEqual(["answers.health.medical.tabaco"])
   const result = await registerOnline(answers)
   const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", result.patient!.id))
   expect(health.latestAnamnesis?.answers).toMatchObject({ antecedentesOdontologicos: child })
