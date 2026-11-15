@@ -1,5 +1,5 @@
 {
- "fecha": "2026-11-15T08:22:03.468Z",
+ "fecha": "2026-11-15T08:51:53.051Z",
  "cuenta": true,
  "banco": "C:\\Users\\WillyCotrina\\orca\\workspaces\\odentIA\\kelp\\packages\\agent\\eval\\ariadna-chat.json",
  "resumen": {
@@ -14,24 +14,24 @@
    "deLaGuia": 4
   },
   "tipoEsperado": 37,
-  "claridad": 3.8292682926829267,
+  "claridad": 3.707317073170732,
   "gasto": {
    "ariadna": {
     "calls": 94,
     "input": 299429,
-    "output": 30743,
-    "micros": 12612,
+    "output": 30745,
+    "micros": 12613,
     "noCost": 0
    },
    "juez": {
     "input": 12256,
     "cached": 0,
-    "output": 5335,
-    "micros": 3897,
+    "output": 5591,
+    "micros": 4024,
     "noCost": 0,
     "calls": 41
    },
-   "totalMicros": 16509
+   "totalMicros": 16637
   }
  },
  "casos": [
@@ -51,7 +51,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende qué hacer y cuándo usar «Reprogramar», aunque tantos detalles seguidos hacen la respuesta algo larga para leer en el celular."
+    "comentario": "Indica claramente qué hacer y qué pasa después, pero incluye varios detalles que hacen la respuesta algo larga para WhatsApp."
    }
   },
   {
@@ -67,7 +67,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Se entiende qué hacer y cómo pedir ayuda, pero incluye demasiados detalles para una consulta breve por WhatsApp."
+    "comentario": "Se entiende qué hacer y ofrece Ayuda o Soporte, pero tanta explicación y detalle dificulta encontrar el siguiente paso en el celular."
    }
   },
   {
@@ -83,7 +83,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y deja claro que Soporte continuará por este chat."
+    "comentario": "Es breve y clara: confirma el pase a Soporte e indica que le escribirán por aquí."
    }
   },
   {
@@ -99,7 +99,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y deja claro que Soporte continuará la atención por este chat."
+    "comentario": "Es breve y deja claro que Soporte le escribirá por este medio."
    }
   },
   {
@@ -115,7 +115,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y claro: indica que no puede ver los datos y señala dónde consultar las citas."
+    "comentario": "Es breve y claro: indica que no puede ver los datos y dónde consultar las citas."
    }
   },
   {
@@ -131,7 +131,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende que Administración atenderá el cobro y que escribirá por aquí; lo de sumar algo o abrir otra sede distrae."
+    "comentario": "Se entiende que Administración lo atenderá y que debe esperar un mensaje por aquí, aunque la lista de otros temas distrae."
    }
   },
   {
@@ -147,7 +147,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende qué hacer y a quién escribir; la explicación inicial sobre Sallca y odentIA es innecesaria y alarga la respuesta."
+    "comentario": "Se entiende qué hacer: escribir directamente a la clínica; la explicación inicial sobre Sallca y odentIA es innecesaria."
    }
   },
   {
@@ -166,7 +166,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica cómo reprogramar, pero acumula detalles y la frase sobre el botón de abajo es poco clara para una consulta sencilla."
+    "comentario": "Indica los pasos, pero añade demasiados detalles y excepciones para una pregunta sencilla."
    }
   },
   {
@@ -185,7 +185,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Se entiende, pero pedir que escriba la pregunta tal cual añade un paso innecesario y no indica cómo seguir con el bloqueo."
+    "comentario": "Se entiende y ofrece opciones, pero pedir que la escriba tal cual añade un paso innecesario y no indica cómo bloquear el horario."
    }
   },
   {
@@ -199,12 +199,12 @@
     ]
    },
    "salio": "oferta",
-   "respuesta": "No estoy segura de qué preguntas. ¿Es alguna de estas? «¿Cómo enciendo el agente?», «¿Cómo invito a alguien a mi equipo?», «¿Cómo le enseño algo al agente?». Escríbela tal cual o, si no es ninguna, te paso con Soporte.",
+   "respuesta": "No estoy segura de qué preguntas. ¿Es alguna de estas? «¿Cómo enciendo el agente?», «¿Cómo invito a alguien a mi equipo?», «¿Qué es Configuración › Equipo?». Escríbela tal cual o, si no es ninguna, te paso con Soporte.",
    "temaCorrecto": false,
    "graves": [],
    "juez": {
-    "claridad": 3,
-    "comentario": "Se entiende cuál opción corresponde, pero podría indicar directamente cómo invitar al asistente en vez de pedir que repita la pregunta."
+    "claridad": 2,
+    "comentario": "Se entiende, pero no responde a cómo agregar a su asistente y le pide reformular una pregunta que ya estaba clara."
    }
   },
   {
@@ -222,8 +222,8 @@
    "temaCorrecto": false,
    "graves": [],
    "juez": {
-    "claridad": 3,
-    "comentario": "Se entiende, pero pide aclarar algo que ya está claro y no indica directamente qué hacer."
+    "claridad": 2,
+    "comentario": "La pregunta ya se entiende; pedir que la escriba tal cual añade confusión y no indica dónde configurar los horarios."
    }
   },
   {
@@ -261,7 +261,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Indica dónde entrar y qué hacer, pero «Por cobrar ahora trae lo atendido» puede resultar confuso."
+    "comentario": "Indica dónde ir y qué hacer, aunque «trae lo atendido» y las dos opciones pueden generar duda."
    }
   },
   {
@@ -280,7 +280,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica qué hacer, pero es un bloque largo para WhatsApp y «La cierran caja» dificulta la lectura."
+    "comentario": "Indica los pasos, pero es densa para WhatsApp y «La cierran caja, propietario y administrador» resulta confuso."
    }
   },
   {
@@ -299,7 +299,7 @@
    "graves": [],
    "juez": {
     "claridad": 2,
-    "comentario": "Es demasiado largo y mezcla varios detalles; cuesta encontrar rápidamente dónde ir y qué tocar para enviarlo por WhatsApp."
+    "comentario": "Es demasiado larga y reúne muchos detalles; el paso para enviarlo queda enterrado entre explicaciones."
    }
   },
   {
@@ -317,8 +317,8 @@
    "temaCorrecto": false,
    "graves": [],
    "juez": {
-    "claridad": 3,
-    "comentario": "Se entiende la opción relacionada, pero pide reformular una pregunta que ya era clara."
+    "claridad": 2,
+    "comentario": "La pregunta del usuario ya es clara; pedirle que la escriba tal cual genera confusión y no indica cómo registrar la caries."
    }
   },
   {
@@ -337,7 +337,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Responde claramente y da pasos concretos, aunque incluye más detalles de los necesarios para una pregunta sencilla."
+    "comentario": "Se entiende que sí y cómo acceder; las opciones de instalación añaden detalle que no hacía falta para responder."
    }
   },
   {
@@ -356,7 +356,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica dónde ir y qué hacer, pero la frase es larga y acumula términos técnicos que dificultan seguir los pasos en el celular."
+    "comentario": "Indica dónde ir y qué hacer, pero concentra muchos pasos y términos técnicos en un solo párrafo, lo que dificulta seguirlo desde el celular."
    }
   },
   {
@@ -370,12 +370,12 @@
     ]
    },
    "salio": "respuesta",
-   "respuesta": "Anota la presión y el peso en el bloque «Examen físico» de la atención.\n\nTe dejo la pantalla: https://clinica.ejemplo.com/people",
+   "respuesta": "Anota la presión arterial y el peso en el bloque «Examen físico» de la atención.\n\nTe dejo la pantalla: https://clinica.ejemplo.com/people",
    "temaCorrecto": true,
    "graves": [],
    "juez": {
-    "claridad": 5,
-    "comentario": "Es breve y directo: indica el bloque donde anotar los datos y comparte la pantalla."
+    "claridad": 4,
+    "comentario": "Es breve y señala dónde anotarlos, aunque el enlace no indica directamente cómo llegar al bloque «Examen físico»."
    }
   },
   {
@@ -394,7 +394,7 @@
    "graves": [],
    "juez": {
     "claridad": 2,
-    "comentario": "Es demasiado larga y mezcla varias formas de registro en una sola frase; cuesta identificar en el celular qué hacer primero."
+    "comentario": "La respuesta es demasiado larga y mezcla varias formas de registro; cuesta identificar en el celular qué hacer primero."
    }
   },
   {
@@ -414,7 +414,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica cómo asignarla, pero no cómo crear la tarea; además, las opciones y excepciones hacen que la respuesta sea densa."
+    "comentario": "Se entiende cómo asignarla, pero no explica cómo crear la tarea y «con su parte del equipo» puede confundir."
    }
   },
   {
@@ -433,7 +433,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Indica claramente qué hacer; podría ser más breve, porque añade detalles secundarios sobre el hueco y la reprogramación."
+    "comentario": "Indica claramente qué hacer y cuándo reprogramar, aunque reúne varios detalles en un mensaje algo largo para WhatsApp."
    }
   },
   {
@@ -449,7 +449,7 @@
    "graves": [],
    "juez": {
     "claridad": 2,
-    "comentario": "La lista de permisos es demasiado larga para el celular; bastaba con ofrecer pasarte con Soporte."
+    "comentario": "La respuesta es larga y enumera muchos roles que no vienen al caso; aunque ofrece pasar a Soporte, cuesta identificar qué hacer."
    }
   },
   {
@@ -465,7 +465,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y deja claro quién lo gestiona y qué pasará después."
+    "comentario": "Es breve y deja claro quién atenderá la solicitud y por dónde responderá."
    }
   },
   {
@@ -481,7 +481,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende y da un siguiente paso claro, aunque la explicación inicial sobre la empresa y el sistema sobra."
+    "comentario": "Se entiende qué hacer, aunque la presentación de Sallca y latidIA sobra y alarga la respuesta."
    }
   },
   {
@@ -500,7 +500,7 @@
    "graves": [],
    "juez": {
     "claridad": 2,
-    "comentario": "Indica dónde emitirla y qué hacer después, pero es una sola frase larga con demasiados detalles, difícil de leer de un vistazo en el celular."
+    "comentario": "Indica qué hacer y dónde encontrarla, pero es demasiado larga y mezcla la receta de lentes con la de contacto, lo que dificulta seguir los pasos en el celular."
    }
   },
   {
@@ -519,7 +519,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica dónde ir y qué hacer, pero acumula demasiados datos y pasos en una sola frase para leerla rápido en el celular."
+    "comentario": "Indica dónde hacerlo y qué sigue, pero concentra demasiados datos y pasos en una sola frase para leerla rápido en el celular."
    }
   },
   {
@@ -538,7 +538,7 @@
    "graves": [],
    "juez": {
     "claridad": 3,
-    "comentario": "Indica los pasos principales, pero acumula detalles y «el botón de abajo dice a dónde la mueves» no se entiende a la primera."
+    "comentario": "Indica cómo empezar, pero acumula detalles en una sola frase y «el botón de abajo dice a dónde la mueves» no se entiende a la primera."
    }
   },
   {
@@ -557,7 +557,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende que Taller solo ve las tareas a su nombre y se incluye el acceso, pero el detalle sobre Ventas distrae."
+    "comentario": "Es breve y responde directamente; «las que llevan su nombre» podría ser algo ambiguo, aunque el enlace ayuda."
    }
   },
   {
@@ -573,7 +573,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende que puede consultar Ayuda o pedir Soporte, aunque explicar lo del rol distrae del error al guardar."
+    "comentario": "Se entiende y ofrece un siguiente paso claro, aunque «qué te falta en esa pantalla» puede resultar algo ambiguo."
    }
   },
   {
@@ -589,7 +589,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Se entiende que debe consultar a su óptica, aunque la explicación sobre Sallca y vistIA sobra para esta pregunta."
+    "comentario": "Se entiende y orienta a contactar a la óptica, aunque podría decirlo de forma más directa y breve."
    }
   },
   {
@@ -605,7 +605,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y claro: indica quién lo gestiona y que Administración responderá por aquí."
+    "comentario": "Es breve y clara: indica quién lo verá y qué sigue."
    }
   },
   {
@@ -621,7 +621,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Es breve y deja claro quién responderá y por dónde, aunque no retoma directamente la pregunta."
+    "comentario": "Es breve y deja claro que Administración responderá por aquí, aunque no explica por qué esa consulta le corresponde."
    }
   },
   {
@@ -636,8 +636,8 @@
    "temaCorrecto": null,
    "graves": [],
    "juez": {
-    "claridad": 5,
-    "comentario": "Es breve y clara: indica quién lo gestiona y qué sigue."
+    "claridad": 4,
+    "comentario": "Se entiende que Administración ya recibió el pedido y responderá por aquí, aunque el paréntesis añade información innecesaria."
    }
   },
   {
@@ -653,7 +653,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y deja claro quién lo atenderá y que debe esperar una respuesta por aquí."
+    "comentario": "Es breve y claro: indica quién lo gestiona y que Administración le escribirá por aquí."
    }
   },
   {
@@ -669,7 +669,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Es breve y da una ruta y un enlace, aunque no indica qué hacer dentro de Reportes para encontrar el teléfono."
+    "comentario": "Es breve y da una ruta clara para seguir, aunque no indica qué buscar dentro de Reportes."
    }
   },
   {
@@ -685,7 +685,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y claro: indica dónde consultar los datos y comparte el enlace directo."
+    "comentario": "Es breve y claro: indica dónde consultar la información y deja el enlace directo."
    }
   },
   {
@@ -701,7 +701,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y claro: explica dónde consultar la información y ofrece un enlace directo."
+    "comentario": "Es breve y clara: indica dónde consultar la información y ofrece un enlace directo."
    }
   },
   {
@@ -717,7 +717,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve y deja claro quién lo verá y qué ocurrirá después."
+    "comentario": "Es breve y deja claro quién lo gestiona y qué pasará después."
    }
   },
   {
@@ -733,7 +733,7 @@
    "graves": [],
    "juez": {
     "claridad": 4,
-    "comentario": "Es breve y se entiende, aunque no queda claro por qué Soporte ayudaría con una receta."
+    "comentario": "Es breve y se entiende qué sigue, aunque ofrece pasar a Soporte para una consulta ajena al sistema."
    }
   },
   {
@@ -749,7 +749,7 @@
    "graves": [],
    "juez": {
     "claridad": 5,
-    "comentario": "Es breve, clara y cierra la conversación dejando claro qué hacer si necesita más ayuda."
+    "comentario": "Es breve y claro: confirma que quedó resuelto e indica cómo pedir ayuda si la necesita."
    }
   }
  ]
