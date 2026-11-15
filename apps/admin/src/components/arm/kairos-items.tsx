@@ -1,5 +1,5 @@
 import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
-import { Badge, Button, Input, Label, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
+import { Badge, Button, toast } from "@odentia/ui"
 import {
   AgentMark,
   common,
@@ -7,20 +7,23 @@ import {
   ExpandableText,
   type FieldControl,
   FormDrawer,
-  LoadingState,
   submitErrorMessage,
   useAppForm,
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import { CHAT_CHANNEL_WORDS, chatChannelOf, momentWords } from "./chat-api"
+import { ChatDrawer } from "./chat-drawer"
+import { ChatOwnerDrawer, type ChatOwnerSubject } from "./chat-owner-drawer"
 import { cargaMarkedWords } from "./client-files-tab"
+import { ClientSearch } from "./client-search"
 import { EmailDrawer } from "./email-drawer"
 import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./hoy-links"
 import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
@@ -90,7 +93,13 @@ const decisionSchema = z.object({
 type Decision = z.infer<typeof decisionSchema>
 
 /** Lo que solo aprueba Administración (precios, ligar personas, fusionar, la carga de datos): el servidor también lo exige. */
-const ADMIN_KINDS = new Set(["propuesta", "vinculo", "duplicado", "posible_carga"])
+const ADMIN_KINDS = new Set([
+  "propuesta",
+  "vinculo",
+  "duplicado",
+  "posible_carga",
+  "chat_sin_cliente",
+])
 
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null
@@ -110,6 +119,7 @@ export function kairosItemTab(kind: string): ClientTab {
       return "contactos"
     case "mensaje":
     case "responder_correo":
+    case "responder_chat":
       return "historial"
     case "posible_carga":
       return "documentos"
@@ -275,6 +285,10 @@ export function useKairosDecide() {
         toast.success("Listo: no se hace")
         return
       }
+      if (item.kind === "chat_sin_cliente") {
+        toast.success("Listo: sus mensajes, los de antes y los que vengan, quedan en su ficha")
+        return
+      }
       const outreach = decision.outreach
       if (outreach?.channel === "whatsapp" && outreach.whatsappUrl) {
         const url = outreach.whatsappUrl
@@ -325,6 +339,14 @@ export function KairosItemCard({
   isAdmin: boolean
   now: Date
 }) {
+  if (CHAT_KINDS.has(item.kind)) return <ChatItemCard item={item} isAdmin={isAdmin} now={now} />
+  return <DecisionCard item={item} isAdmin={isAdmin} now={now} />
+}
+
+/** Lo que llega por WhatsApp, Instagram o Messenger: se decide y se responde en la conversación. */
+const CHAT_KINDS = new Set(["chat_sin_cliente", "responder_chat"])
+
+function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boolean; now: Date }) {
   const decide = useKairosDecide()
   const [changing, setChanging] = useState(false)
   const [replying, setReplying] = useState(false)
@@ -530,6 +552,156 @@ export function KairosItemCard({
           initial={newClientFromEmail(item)}
           onCreated={(clientId) => approveWith({ clientId })}
           onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </li>
+  )
+}
+
+/** «Hoy 09:05»: la hora del mensaje, con mayúscula al empezar la línea. */
+const capitalized = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
+
+/**
+ * Lo que dice debajo del título de una conversación: cuándo escribió y, sin
+ * cliente, que es solo de Administración (WhatsApp) o hasta cuándo se le
+ * puede responder (Instagram y Messenger no dejan retomar con plantilla).
+ */
+export function chatItemMeta(item: Pick<KairosItem, "kind" | "payload">, now: Date): string[] {
+  const channel = chatChannelOf(item.payload.channel)
+  const receivedAt = text(item.payload.receivedAt)
+  const when = receivedAt ? momentWords(receivedAt, now) : null
+  if (item.kind === "responder_chat") return [CHAT_CHANNEL_WORDS[channel], ...(when ? [when] : [])]
+  const until =
+    channel !== "whatsapp" && receivedAt
+      ? `Responde hasta ${momentWords(new Date(Date.parse(receivedAt) + 86_400_000).toISOString(), now)}`
+      : "Solo administración"
+  return [...(when ? [capitalized(when)] : []), until]
+}
+
+/** Lo que se sabe de la conversación sin cliente para «¿De quién es?». */
+export function chatSubjectOf(item: Pick<KairosItem, "payload">): ChatOwnerSubject | null {
+  const chatId = text(item.payload.chatId)
+  if (!chatId) return null
+  const raw = item.payload.suggestion
+  const hint = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null
+  const contactId = text(hint?.contactId)
+  const contactName = text(hint?.contactName)
+  const clientId = text(hint?.clientId)
+  const clientName = text(hint?.clientName)
+  return {
+    chatId,
+    channel: chatChannelOf(item.payload.channel),
+    address: text(item.payload.address) ?? "",
+    displayName: text(item.payload.displayName),
+    lastBody: text(item.payload.lastBody),
+    receivedAt: text(item.payload.receivedAt),
+    suggestion:
+      contactId && contactName && clientId && clientName
+        ? { contactId, contactName, clientId, clientName }
+        : null,
+  }
+}
+
+/**
+ * La tarjeta de una conversación: quién escribió, cuándo, lo que dice y
+ * «Responder»; sin cliente, además «¿De quién es?». Decir de quién es es el sí
+ * del ítem (la misma operación que «Mover a otra clínica»).
+ */
+function ChatItemCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boolean; now: Date }) {
+  const decide = useKairosDecide()
+  const leave = useFocusOnLeave<HTMLLIElement>()
+  const [replying, setReplying] = useState(false)
+  const [deciding, setDeciding] = useState(false)
+  const chatId = text(item.payload.chatId)
+  const subject = item.kind === "chat_sin_cliente" ? chatSubjectOf(item) : null
+  const onlyAdmin = ADMIN_KINDS.has(item.kind) && !isAdmin
+  const body = text(item.payload.lastBody) ?? "Mandó un archivo"
+  const pending = decide.isPending
+  return (
+    <li ref={leave.ref} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <AgentMark size="sm" />
+        <div className="min-w-0 flex-1 basis-48">
+          <p className="font-medium [overflow-wrap:anywhere]">{item.title}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            {chatItemMeta(item, now).map((words, index) => (
+              <span key={words} className="flex items-center gap-x-2">
+                {index > 0 ? <span aria-hidden>·</span> : null}
+                {words}
+              </span>
+            ))}
+            {item.product ? <ProductMark product={item.product} /> : null}
+          </p>
+        </div>
+      </div>
+      <blockquote className="rounded-lg border-l-2 bg-muted p-3 text-sm [overflow-wrap:anywhere]">
+        <ExpandableText
+          text={body}
+          lines={3}
+          label="el mensaje completo"
+          className="whitespace-pre-line"
+        />
+      </blockquote>
+      {item.payload.maybeCarga === true && isAdmin ? (
+        <p className="text-sm text-muted-foreground">
+          Trae un Excel, CSV o Word: puede ser la carga de datos.
+        </p>
+      ) : null}
+      {onlyAdmin ? (
+        <p className="text-sm text-muted-foreground">Esto lo decide Administración.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {chatId ? (
+            <Button type="button" size="sm" disabled={pending} onClick={() => setReplying(true)}>
+              Responder
+            </Button>
+          ) : null}
+          {subject ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setDeciding(true)}
+            >
+              ¿De quién es?
+            </Button>
+          ) : null}
+          {item.clientId ? (
+            <OpenClientButton clientId={item.clientId} tab="historial" label="Abrir ficha" />
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              leave.markLeaving()
+              decide.mutate(
+                { item, action: "descartar" },
+                { onError: (error) => toast.error(submitErrorMessage(error)) },
+              )
+            }}
+          >
+            Ahora no
+          </Button>
+        </div>
+      )}
+      {chatId && replying ? (
+        <ChatDrawer chatId={chatId} open onClose={() => setReplying(false)} />
+      ) : null}
+      {subject && deciding ? (
+        <ChatOwnerDrawer
+          subject={subject}
+          onAssign={async ({ clientId, contactId }) => {
+            leave.markLeaving()
+            await decide.mutateAsync({
+              item,
+              action: "aprobar",
+              edited: { clientId, ...(contactId ? { contactId } : {}) },
+            })
+          }}
+          onClose={() => setDeciding(false)}
         />
       ) : null}
     </li>
@@ -842,13 +1014,7 @@ function KairosChangeDrawer({
   )
 }
 
-const pickedSchema = z.object({
-  items: z.array(
-    z.object({ id: z.string(), name: z.string(), product: z.enum(CLINICAL_PRODUCTS) }),
-  ),
-})
-
-/** Buscar el cliente de un correo que llegó: por nombre de la clínica o de la persona. */
+/** El cliente de un correo que llegó: quién lo escribió y la búsqueda. */
 function EmailClientPicker({
   item,
   control,
@@ -860,20 +1026,6 @@ function EmailClientPicker({
   value: string
   onChange: (clientId: string) => void
 }) {
-  const [query, setQuery] = useState(text(item.payload.fromName) ?? "")
-  const [search, setSearch] = useState(query.trim())
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(query.trim()), 300)
-    return () => window.clearTimeout(timer)
-  }, [query])
-  const found = useQuery({
-    queryKey: ["admin", "clients", "picker", search],
-    enabled: search.length >= 2,
-    queryFn: async () =>
-      pickedSchema.parse(
-        await api<unknown>(`/api/admin/clients?view=todos&limit=8&q=${encodeURIComponent(search)}`),
-      ).items,
-  })
   const from = [text(item.payload.fromName), text(item.payload.from)].filter(Boolean).join(" · ")
   return (
     <div className="flex flex-col gap-4">
@@ -888,49 +1040,13 @@ function EmailClientPicker({
           El correo y sus adjuntos se leen en la ficha, no aquí.
         </p>
       </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="kairos-buscar-cliente">Buscar por nombre</Label>
-        <Input
-          id="kairos-buscar-cliente"
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="La clínica o la persona"
-          autoComplete="off"
-        />
-      </div>
-      {search.length < 2 ? (
-        <p className="text-sm text-muted-foreground">Escribe al menos dos letras.</p>
-      ) : found.isPending ? (
-        <LoadingState message="Buscando clientes…" />
-      ) : found.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {submitErrorMessage(found.error)}
-        </p>
-      ) : found.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Ningún cliente se llama así.</p>
-      ) : (
-        <RadioGroup
-          name={control.name}
-          aria-label="Cliente"
-          aria-invalid={control.invalid || undefined}
-          aria-describedby={control.describedBy}
-          value={value}
-          onValueChange={(next) => onChange(String(next ?? ""))}
-          className="flex flex-col gap-2"
-        >
-          {found.data.map((client) => (
-            <Label
-              key={client.id}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
-            >
-              <RadioGroupItem value={client.id} />
-              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{client.name}</span>
-              <ProductMark product={client.product} />
-            </Label>
-          ))}
-        </RadioGroup>
-      )}
+      <ClientSearch
+        id="kairos-buscar-cliente"
+        initialQuery={text(item.payload.fromName) ?? ""}
+        control={control}
+        value={value}
+        onChange={(clientId) => onChange(clientId)}
+      />
     </div>
   )
 }

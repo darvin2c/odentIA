@@ -54,6 +54,7 @@ import {
   TOOL_WORDS,
   WAITLIST_STAGE_WORDS,
 } from "./sale-words"
+import { WhatsAppWrite } from "./whatsapp-write"
 
 /**
  * Ficha del cliente › Venta (plan §6, lienzo de la ficha y del Embudo): la
@@ -858,14 +859,15 @@ function RequestCard({ clientId, client }: { clientId: string; client: ClientSal
             <Line label="Quién pidió">{`${request.firstName} ${request.lastName}`.trim()}</Line>
             <Line label="Correo">{request.email}</Line>
             <Line label="Celular">
-              <a
-                className="underline"
-                href={`https://wa.me/${request.phone.replace(/^\+/, "")}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {request.phone}
-              </a>
+              <WhatsAppWrite
+                clientId={clientId}
+                contactId={
+                  client.contacts.find((contact) => contact.id && contact.phone === request.phone)
+                    ?.id ?? null
+                }
+                phone={request.phone}
+                fallbackLabel={request.phone}
+              />
             </Line>
             <Line label="Dónde">{request.city}</Line>
             <Line label="Atienden">

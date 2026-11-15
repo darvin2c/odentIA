@@ -12,6 +12,7 @@ import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { inboundAttachmentKey, markClientFileCarga } from "./admin-client-files.js"
+import { clientTimeline } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import {
   applyChatStatus,
@@ -27,6 +28,7 @@ import {
   prepareChatReply,
   undoChatNotClinic,
 } from "./admin-inbound-chat.js"
+import { resolveOutreach } from "./admin-sales.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** El WhatsApp de la administración: entra como el correo, nunca se liga solo por el teléfono. */
@@ -234,6 +236,26 @@ describe("assignChat", () => {
       ["salio", sales],
     ])
     expect(activities[1]).toMatchObject({ authorUserId: admin.userId, adminOnly: true })
+
+    // El Historial abre la conversación desde lo que entró y lo que salió, también desde
+    // una respuesta incierta que una persona marcó «Salió».
+    const unsure = await prepareChatReply(ownerDb, admin, first.chatId, { body: "¿Seguimos?" })
+    await markChatOutreachUncertain(ownerDb, unsure.outreachId)
+    await resolveOutreach(ownerDb, admin, unsure.outreachId, "salio")
+    const timeline = await clientTimeline(ownerDb, admin, sales)
+    const chatRows = timeline.items.filter(
+      (entry) => entry.link?.kind === "chat" && entry.link.id === first.chatId,
+    )
+    expect(chatRows.map((entry) => entry.title).sort()).toEqual([
+      "Le escribimos por WhatsApp",
+      "Le escribimos por WhatsApp",
+      "Nos escribió por WhatsApp",
+    ])
+    // Lo que entró lo escribió quien escribe (sin contacto, el nombre que dio Meta), no un autor perdido.
+    expect(chatRows.find((entry) => entry.title === "Nos escribió por WhatsApp")?.who).toEqual({
+      kind: "clinica",
+      name: "Rosa",
+    })
   })
 
   it("mover a otra clínica mueve actividades, archivos y respuestas, con su auditoría", async () => {

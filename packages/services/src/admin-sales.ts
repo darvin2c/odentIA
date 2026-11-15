@@ -408,6 +408,8 @@ async function insertActivity(
   client: ClientRecord,
   input: ActivityInput,
   now: Date,
+  /** La conversación de la que sale (un envío por WhatsApp, Instagram o Messenger): la abre el Historial. */
+  extra: { chatId?: string | null } = {},
 ): Promise<ActivityRow> {
   if (!(SAAS_ACTIVITY_KINDS as readonly string[]).includes(input.kind))
     throw invalidField("kind", "Elige qué fue")
@@ -443,6 +445,7 @@ async function insertActivity(
       happenedAt,
       adminOnly,
       byKairos: actor === null,
+      chatId: extra.chatId ?? null,
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo anotar la actividad")
@@ -2662,6 +2665,7 @@ async function outreachWentOut(
       ...(row.sentAt ? { happenedAt: row.sentAt } : {}),
     },
     now,
+    { chatId: row.chatId },
   )
   if (row.proposalId) {
     // Una propuesta ya enviada no cambia (reenviarla no mueve su fecha).

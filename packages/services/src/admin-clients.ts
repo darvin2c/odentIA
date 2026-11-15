@@ -2328,7 +2328,7 @@ export interface TimelineEntry {
   detail?: string
   adminOnly: boolean
   link?: {
-    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo"
+    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo" | "chat"
     id: string
   }
 }
@@ -2700,6 +2700,13 @@ export async function clientTimeline(
           (select o.in_reply_to_email_id::text from ${saasOutreach} o join ${saasInboundEmail} e on e.id = o.in_reply_to_email_id
             where o.client_id = ${outer}.client_id and o.status = 'enviado'
               and o.sent_at = ${outer}.happened_at and ${mailboxOk} order by o.id limit 1) end`,
+        // Quién escribió por WhatsApp, Instagram o Messenger: su contacto, el nombre que dio Meta o su número.
+        chatFrom: sql<
+          string | null
+        >`case when ${outer}.chat_id is not null and ${outer}.direction = 'entro' then
+          (select coalesce(nullif(trim(p.name), ''), nullif(trim(ch.display_name), ''), ch.address)
+            from ${saasChat} ch left join ${saasClientContact} p on p.id = coalesce(${outer}.contact_id, ch.contact_id)
+            where ch.id = ${outer}.chat_id) end`,
       })
       .from(saasFollowUp)
       .where(
@@ -2711,7 +2718,7 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const { f, inboundId, inboundFrom, repliedId } of rows) {
+    for (const { f, inboundId, inboundFrom, repliedId, chatFrom } of rows) {
       const kind = f.kind as SaasActivityKind
       const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
       const title = repliedId
@@ -2726,14 +2733,15 @@ export async function clientTimeline(
         id: `actividad:${f.id}`,
         at: f.happenedAt,
         // El correo que entró lo escribió quien lo mandó, aunque lo haya anotado Kairós.
-        who: inboundFrom
-          ? { kind: "clinica", name: inboundFrom }
-          : f.byKairos
-            ? { kind: "kairos", name: "Kairós" }
-            : byUser(f.authorUserId, {
-                kind: "persona",
-                name: "Nota anterior, sin autor registrado",
-              }),
+        who:
+          (inboundFrom ?? chatFrom)
+            ? { kind: "clinica", name: inboundFrom ?? chatFrom ?? "" }
+            : f.byKairos
+              ? { kind: "kairos", name: "Kairós" }
+              : byUser(f.authorUserId, {
+                  kind: "persona",
+                  name: "Nota anterior, sin autor registrado",
+                }),
         category: kind === "presentacion" || kind === "propuesta" ? "venta" : "contactos",
         title,
         detail:
@@ -2741,7 +2749,12 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ") || undefined,
         adminOnly: f.adminOnly,
-        ...(emailId ? { link: { kind: "correo" as const, id: emailId } } : {}),
+        ...(emailId
+          ? { link: { kind: "correo" as const, id: emailId } }
+          : f.chatId
+            ? // Lo que entró o salió por WhatsApp, Instagram o Messenger abre su conversación.
+              { link: { kind: "chat" as const, id: f.chatId } }
+            : {}),
       })
     }
   }
@@ -2902,7 +2915,7 @@ export async function clientTimeline(
         detail: clip(o.subject ?? o.body, 140),
         // El de una propuesta o de algo de Kairós solo de Administración: Soporte no lo ve.
         adminOnly: Boolean(adminOnly),
-        link: { kind: "envio", id: o.id },
+        link: o.chatId ? { kind: "chat", id: o.chatId } : { kind: "envio", id: o.id },
       })
     }
   }
