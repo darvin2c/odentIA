@@ -654,7 +654,7 @@
       "id": "voz-v11-2",
       "texto": "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
-      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8 }, "revisar": ["ficha-odontoestomatologica.cpod_p"] },
+      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8, "ficha-odontoestomatologica.cpod_p": 2 } },
       "ignora": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_e", "ficha-odontoestomatologica.ceod_o"]
     },
     {
