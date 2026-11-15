@@ -339,6 +339,7 @@ function FoundersMoveSection({
         confirmLabel="Pasar a Fundadores"
         variant="default"
         pending={enter.isPending}
+        confirmDisabled={!left}
         error={enter.isError ? submitErrorMessage(enter.error) : null}
         onConfirm={() => enter.mutate()}
         onClose={() => {
