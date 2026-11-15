@@ -2739,9 +2739,19 @@ export async function markOutreachSent(
 }
 
 /**
+ * Cuánto se espera a que un envío de una conversación (WhatsApp, Instagram,
+ * Messenger) deje de estar pendiente por sí solo: la ruta lo anota apenas
+ * Meta responde. Pasado esto, un pendiente es que la API se cayó entre
+ * reservarlo y enviarlo, y una persona puede decir si salió.
+ */
+export const CHAT_OUTREACH_SETTLE_MS = 10 * 60_000
+
+/**
  * Una persona dice si salió: el WhatsApp abierto por su enlace, o un correo
  * incierto (o que quedó pendiente porque la ruta se cortó antes de anotarlo).
  * «Salió» deja la actividad y pasa la propuesta a enviada; «No salió» es final.
+ * Uno de una conversación que sigue pendiente se está enviando: hasta
+ * `CHAT_OUTREACH_SETTLE_MS` no se resuelve a mano (409).
  */
 export async function resolveOutreach(
   tx: Db,
@@ -2755,6 +2765,16 @@ export async function resolveOutreach(
   const row = await lockOutreach(tx, actor, id)
   if (row.status !== "pendiente" && row.status !== "incierto")
     throw new ServiceError("OUTREACH_SETTLED", 409, "Ese envío ya tiene su resultado")
+  if (
+    row.chatId &&
+    row.status === "pendiente" &&
+    now.getTime() - row.createdAt.getTime() < CHAT_OUTREACH_SETTLE_MS
+  )
+    throw new ServiceError(
+      "OUTREACH_IN_FLIGHT",
+      409,
+      "Ese mensaje se está enviando: en unos minutos se sabe si salió",
+    )
   const status: SaasOutreachStatus = outcome === "salio" ? "enviado" : "no_salio"
   const [updated] = await tx
     .update(saasOutreach)

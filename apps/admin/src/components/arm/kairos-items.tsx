@@ -19,7 +19,13 @@ import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
-import { CHAT_CHANNEL_WORDS, chatChannelOf, momentWords, useChatsConfig } from "./chat-api"
+import {
+  CHAT_CHANNEL_WORDS,
+  chatChannelOf,
+  momentWords,
+  unassignedChatOf,
+  useChatsConfig,
+} from "./chat-api"
 import { ChatDrawer } from "./chat-drawer"
 import { ChatOwnerDrawer, type ChatOwnerSubject } from "./chat-owner-drawer"
 import { cargaMarkedWords } from "./client-files-tab"
@@ -407,8 +413,18 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
   const [changing, setChanging] = useState(false)
   const [replying, setReplying] = useState(false)
   const [creating, setCreating] = useState(false)
+  /** El celular del mensaje ya escribió sin decir de quién es: «¿De quién es?» de esa conversación. */
+  const [ownerChatId, setOwnerChatId] = useState<string | null>(null)
   const leave = useFocusOnLeave<HTMLLIElement>()
   const emailId = text(item.payload.emailId)
+  /** Administración dice de quién es la conversación; el mensaje sigue en espera para su sí. */
+  const decideOwnerFirst = (error: unknown): boolean => {
+    const chatId = isAdmin ? unassignedChatOf(error) : null
+    if (!chatId) return false
+    toast.info("Ese celular ya nos escribió: di primero de quién es y vuelve a enviar")
+    setOwnerChatId(chatId)
+    return true
+  }
   /** El sí del ítem con lo que se cambió: lo usan «Responder» (el texto) y «Crear cliente» (el cliente). */
   const approveWith = async (edited: Record<string, unknown>) => {
     leave.markLeaving()
@@ -428,7 +444,11 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
     leave.markLeaving()
     decide.mutate(
       { item, action, tab },
-      { onError: (error) => toast.error(submitErrorMessage(error)) },
+      {
+        onError: (error) => {
+          if (!decideOwnerFirst(error)) toast.error(submitErrorMessage(error))
+        },
+      },
     )
   }
   const pending = decide.isPending
@@ -583,7 +603,11 @@ function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
           open={changing}
           onClose={() => setChanging(false)}
           onApproving={leave.markLeaving}
+          onUnassigned={decideOwnerFirst}
         />
+      ) : null}
+      {ownerChatId ? (
+        <ChatDrawer chatId={ownerChatId} decide open onClose={() => setOwnerChatId(null)} />
       ) : null}
       {emailId && replying ? (
         item.kind === "responder_correo" ? (
@@ -896,12 +920,15 @@ function KairosChangeDrawer({
   open,
   onClose,
   onApproving,
+  onUnassigned,
 }: {
   item: KairosItem
   open: boolean
   onClose: () => void
   /** Al dar el sí la tarjeta se va: el foco pasa a la vecina (`useFocusOnLeave`). */
   onApproving: () => void
+  /** Si el celular ya escribió sin decir de quién es: true si la tarjeta lo abre («¿De quién es?»). */
+  onUnassigned?: (error: unknown) => boolean
 }) {
   const decide = useKairosDecide()
   const throughChat = useChatsConfig().data?.whatsapp === true
@@ -911,7 +938,13 @@ function KairosChangeDrawer({
     onSubmit: async ({ value, formApi }) => {
       const tab = tabForWhatsApp(item, "aprobar", throughChat)
       onApproving()
-      await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
+      try {
+        await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
+      } catch (error) {
+        if (!onUnassigned?.(error)) throw error
+        onClose()
+        return
+      }
       formApi.reset(value)
       onClose()
     },

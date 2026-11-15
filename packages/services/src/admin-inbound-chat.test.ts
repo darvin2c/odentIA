@@ -26,6 +26,7 @@ import {
   markChatOutreachFailed,
   markChatOutreachSent,
   markChatOutreachUncertain,
+  openChatForContact,
   prepareChatMessage,
   prepareChatReply,
   undoChatNotClinic,
@@ -336,10 +337,11 @@ describe("getChat y quién la ve", () => {
     const lonely = await ingestInboundChat(ownerDb, message({ address: phone() }))
     const forSale = await ingestInboundChat(ownerDb, message({ address: phone() }))
     await assignChat(ownerDb, admin, forSale.chatId, { clientId: sales })
+    const appAddress = phone()
     const withApp = await ingestInboundChat(
       ownerDb,
       message({
-        address: phone(),
+        address: appAddress,
         media: [
           {
             objectKey: inboundAttachmentKey("xlsx"),
@@ -351,6 +353,21 @@ describe("getChat y quién la ve", () => {
       }),
     )
     await assignChat(ownerDb, admin, withApp.chatId, { clientId: clinic, contactId: clinicContact })
+    // Lo que llegó antes de decir de quién era quedó de la venta; lo que llega ahora lo ve Soporte.
+    const afterAssign = await ingestInboundChat(
+      ownerDb,
+      message({
+        address: appAddress,
+        media: [
+          {
+            objectKey: inboundAttachmentKey("csv"),
+            mimeType: "text/csv",
+            filename: "agenda.csv",
+            size: 3,
+          },
+        ],
+      }),
+    )
 
     for (const id of [lonely.chatId, forSale.chatId])
       await expect(getChat(ownerDb, support, id)).rejects.toMatchObject({ status: 404 })
@@ -362,7 +379,12 @@ describe("getChat y quién la ve", () => {
     expect(seen.client).toMatchObject({ id: clinic, hasAccount: true })
     expect(seen.contact).toMatchObject({ id: clinicContact, name: "Luis Paredes" })
     expect(seen.files).toEqual([])
-    expect(seen.entries[0]).toMatchObject({ kind: "entro", media: [], mediaCount: 1 })
+    expect(seen.entries[0]).toMatchObject({
+      kind: "entro",
+      id: afterAssign.messageId,
+      media: [],
+      mediaCount: 1,
+    })
 
     // Lo que Administración marca «Solo administración» no le llega a Soporte.
     const hidden = await prepareChatReply(ownerDb, admin, withApp.chatId, {
@@ -379,7 +401,7 @@ describe("getChat y quién la ve", () => {
       hidden.outreachId,
       visible.outreachId,
     ])
-    expect(adminView.files).toHaveLength(1)
+    expect(adminView.files).toHaveLength(2)
     expect(adminView.canReplyFreely).toBe(true)
   })
 
@@ -453,8 +475,9 @@ describe("prepareChatReply y su resultado", () => {
       externalId: "wamid.tarde",
     })
     const activities = await activitiesOfChat(chatId)
+    // Lo que entró antes de saber de quién era es de la venta; la respuesta ya en la clínica con app, no.
     expect(activities.map((row) => [row.direction, row.adminOnly])).toEqual([
-      ["entro", false],
+      ["entro", true],
       ["salio", false],
     ])
     // Un «read» después no deja otra actividad.
@@ -589,7 +612,15 @@ describe("prepareChatMessage: escribirle primero a una persona del cliente", () 
       })
       .returning({ id: saasProposal.id })
     if (!proposal) throw new Error("sin propuesta")
-    await ingestInboundChat(ownerDb, message({ address: number, waId: number.slice(1) }))
+    const wrote = await ingestInboundChat(
+      ownerDb,
+      message({ address: number, waId: number.slice(1) }),
+    )
+    // Ya escribió sin decir de quién es: el celular no la liga; primero se dice en Hoy.
+    await expect(
+      prepareChatMessage(ownerDb, admin, target, { contactId: person, body: "Hola" }),
+    ).rejects.toMatchObject({ code: "CHAT_UNASSIGNED", fields: { chatId: wrote.chatId } })
+    await assignChat(ownerDb, admin, wrote.chatId, { clientId: target, contactId: person })
     // Una propuesta que no es de este cliente no va.
     await expect(
       prepareChatMessage(ownerDb, admin, target, {
@@ -635,5 +666,130 @@ describe("prepareChatMessage: escribirle primero a una persona del cliente", () 
     await expect(
       prepareChatMessage(ownerDb, support, target, { contactId: person, body: "Hola" }),
     ).rejects.toMatchObject({ code: "CHAT_ADMIN_ONLY", status: 409 })
+  })
+})
+
+describe("lo que la revisión encontró", () => {
+  it("ligar un Instagram o un Messenger no pone su id como celular de la persona", async () => {
+    const person = await contact(other, "Sin celular (ficticia)", null)
+    for (const channel of ["instagram", "messenger"] as const) {
+      const { chatId } = await ingestInboundChat(
+        ownerDb,
+        message({ channel, address: `${channel}-${crypto.randomUUID().slice(0, 8)}` }),
+      )
+      await assignChat(ownerDb, admin, chatId, { clientId: other, contactId: person })
+    }
+    const [row] = await ownerDb
+      .select({ phone: saasClientContact.phone })
+      .from(saasClientContact)
+      .where(eq(saasClientContact.id, person))
+    expect(row?.phone).toBeNull()
+    // En WhatsApp sí: el celular es el de la conversación.
+    const address = phone()
+    const { chatId } = await ingestInboundChat(ownerDb, message({ address }))
+    await assignChat(ownerDb, admin, chatId, { clientId: other, contactId: person })
+    const [after] = await ownerDb
+      .select({ phone: saasClientContact.phone })
+      .from(saasClientContact)
+      .where(eq(saasClientContact.id, person))
+    expect(after?.phone).toBe(address)
+  })
+
+  it("el celular nunca liga: si ya escribió sin decir de quién es, 409 con la conversación", async () => {
+    const address = phone()
+    const target = await client("Clínica del celular (ficticia)")
+    const person = await contact(target, "Rosa Celular", address)
+    const { chatId } = await ingestInboundChat(ownerDb, message({ address }))
+    for (const actor of [admin, support]) {
+      const opened = ownerDb.transaction((tx) =>
+        prepareChatMessage(tx, actor, target, { contactId: person, body: "Hola" }),
+      )
+      if (actor === support) {
+        await expect(opened).rejects.toMatchObject({ code: "CHAT_ADMIN_ONLY", status: 409 })
+        continue
+      }
+      await expect(opened).rejects.toMatchObject({
+        code: "CHAT_UNASSIGNED",
+        status: 409,
+        message: "Ese celular ya nos escribió y falta decir de quién es. Dilo primero en Hoy.",
+        fields: { chatId },
+      })
+    }
+    // «No es una clínica» tampoco se deshace solo por el celular.
+    await markChatNotClinic(ownerDb, admin, chatId)
+    await expect(
+      ownerDb.transaction((tx) =>
+        prepareChatMessage(tx, admin, target, { contactId: person, body: "Hola" }),
+      ),
+    ).rejects.toMatchObject({ code: "CHAT_UNASSIGNED", fields: { chatId } })
+    const [row] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
+    expect(row).toMatchObject({ clientId: null, notClinicAt: expect.any(Date) })
+    expect(
+      await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.chatId, chatId)),
+    ).toHaveLength(0)
+  })
+
+  it("lo que llegó o salió antes de ser de una clínica con app no lo ve Soporte después", async () => {
+    const address = phone()
+    const before = await ingestInboundChat(ownerDb, message({ address, body: "Precio, por favor" }))
+    const sale = await prepareChatReply(ownerDb, admin, before.chatId, { body: "Son 29 dólares" })
+    expect((await outreachOf(sale.outreachId)).adminOnly).toBe(true)
+    await assignChat(ownerDb, admin, before.chatId, { clientId: clinic })
+    const after = await ingestInboundChat(ownerDb, message({ address, body: "Ya tengo la app" }))
+    const visible = await prepareChatReply(ownerDb, admin, before.chatId, { body: "¡Genial!" })
+    expect((await outreachOf(visible.outreachId)).adminOnly).toBe(false)
+    const seen = await getChat(ownerDb, support, before.chatId)
+    expect(seen.entries.map((entry) => entry.id)).toEqual([after.messageId, visible.outreachId])
+    const [message0] = await ownerDb
+      .select({ adminOnly: saasInboundMessage.adminOnly })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.id, before.messageId))
+    expect(message0?.adminOnly).toBe(true)
+    // La actividad de lo que llegó antes también es solo de Administración.
+    const activities = await activitiesOfChat(before.chatId)
+    expect(activities.find((row) => row.direction === "entro")?.adminOnly).toBe(true)
+  })
+
+  it("al pasar a un cliente sin app, sus mensajes, respuestas y actividades suben a solo Administración", async () => {
+    const address = phone()
+    const person = await contact(clinic, "Luis Mover (ficticio)", address)
+    const opened = await openChatForContact(ownerDb, admin, {
+      clientId: clinic,
+      contactId: person,
+      channel: "whatsapp",
+    })
+    const inbound = await ingestInboundChat(ownerDb, message({ address }))
+    const reply = await prepareChatReply(ownerDb, admin, opened.chatId, { body: "Hola" })
+    await markChatOutreachSent(ownerDb, reply.outreachId, `wamid.${crypto.randomUUID()}`)
+    expect((await getChat(ownerDb, support, opened.chatId)).entries).toHaveLength(2)
+    await assignChat(ownerDb, admin, opened.chatId, { clientId: sales })
+    const [row] = await ownerDb
+      .select({ adminOnly: saasInboundMessage.adminOnly })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.id, inbound.messageId))
+    expect(row?.adminOnly).toBe(true)
+    expect((await outreachOf(reply.outreachId)).adminOnly).toBe(true)
+    expect((await activitiesOfChat(opened.chatId)).every((entry) => entry.adminOnly)).toBe(true)
+    await expect(getChat(ownerDb, support, opened.chatId)).rejects.toMatchObject({ status: 404 })
+    // Volver a una clínica con app no lo baja.
+    await assignChat(ownerDb, admin, opened.chatId, { clientId: clinic })
+    expect((await getChat(ownerDb, support, opened.chatId)).entries).toHaveLength(0)
+  })
+
+  it("«¿Salió?» no se resuelve en un envío pendiente de menos de 10 minutos", async () => {
+    const { chatId } = await ingestInboundChat(ownerDb, message({ address: phone() }))
+    const now = new Date()
+    const reply = await prepareChatReply(ownerDb, admin, chatId, { body: "Hola" }, now)
+    await expect(
+      resolveOutreach(ownerDb, admin, reply.outreachId, "salio", new Date(now.getTime() + 60_000)),
+    ).rejects.toMatchObject({ code: "OUTREACH_IN_FLIGHT", status: 409 })
+    const settled = await resolveOutreach(
+      ownerDb,
+      admin,
+      reply.outreachId,
+      "no_salio",
+      new Date(now.getTime() + 11 * 60_000),
+    )
+    expect(settled.status).toBe("no_salio")
   })
 })

@@ -1,4 +1,5 @@
 import { kairosItem, saasChat, saasClient, saasClientContact } from "@odentia/db/schema/admin-arm"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -324,10 +325,16 @@ describe("responder_chat", () => {
   it("de una clínica con su app lo ve Soporte, también en Hoy; no se aprueba y se cierra al responder", async () => {
     const address = phone()
     const luis = await contact(clinic, "Luis Paredes", null)
-    const chat = await ingestInboundChat(ownerDb, message({ address, body: "¿Me ayudan?" }), NOW)
+    const chat = await ingestInboundChat(
+      ownerDb,
+      message({ address, receivedAt: new Date(NOW.getTime() - 2 * HOUR) }),
+      NOW,
+    )
     await ownerDb.transaction((tx) =>
       assignChat(tx, admin, chat.chatId, { clientId: clinic, contactId: luis }, NOW),
     )
+    // Lo que llega ya siendo de la clínica con su app lo ve Soporte (lo de antes era de la venta).
+    await ingestInboundChat(ownerDb, message({ address, body: "¿Me ayudan?" }), NOW)
     await pass()
     const [item] = await waiting(chat.chatId, "responder_chat")
     expect(item).toMatchObject({
@@ -374,6 +381,14 @@ describe("responder_chat", () => {
     expect(item).toMatchObject({ adminOnly: true, title: "Ana · Clínica en venta (ficticia)" })
     const listed = await listKairosItems(ownerDb, support, { status: "espera" }, NOW)
     expect(listed.items.some((row) => row.id === item?.id)).toBe(false)
+  })
+
+  it("si el último mensaje llegó cuando era de la venta, tampoco lo ve Soporte", async () => {
+    const chat = await ingestInboundChat(ownerDb, message({ body: "Precio" }), NOW)
+    await ownerDb.transaction((tx) => assignChat(tx, admin, chat.chatId, { clientId: clinic }, NOW))
+    await pass()
+    const [item] = await waiting(chat.chatId, "responder_chat")
+    expect(item?.adminOnly).toBe(true)
   })
 
   it("si la conversación pasa a otra clínica, se retira y sale para la nueva", async () => {
@@ -436,5 +451,79 @@ describe("posible_carga por WhatsApp", () => {
     expect(chatAddressWords("whatsapp", "+51954220318")).toBe("+51 954 220 318")
     expect(chatAddressWords("whatsapp", "+528112345678")).toBe("+528112345678")
     expect(chatAddressWords("instagram", "1784")).toBe("1784")
+  })
+})
+
+describe("lo que la revisión encontró", () => {
+  it("aprobar «¿De quién es?» deja el ítem ejecutado, sin cerrarlo como si ya no hiciera falta", async () => {
+    const chat = await ingestInboundChat(ownerDb, message(), NOW)
+    await pass()
+    const [item] = await waiting(chat.chatId, "chat_sin_cliente")
+    await decide(admin, item?.id ?? "", { action: "aprobar", edited: { clientId: sales } })
+    const [row] = await ownerDb
+      .select()
+      .from(kairosItem)
+      .where(eq(kairosItem.id, item?.id ?? ""))
+    expect(row).toMatchObject({ status: "ejecutada", error: null })
+    expect(row?.idempotencyKey).toBe(item?.idempotencyKey)
+    const closed = await ownerDb
+      .select()
+      .from(adminAudit)
+      .where(
+        and(eq(adminAudit.action, "kairos.item_closed"), eq(adminAudit.entityId, item?.id ?? "")),
+      )
+    expect(closed).toHaveLength(0)
+  })
+
+  it("al mover la conversación, su posible carga pasa al cliente nuevo", async () => {
+    const chat = await ingestInboundChat(ownerDb, message(), NOW)
+    await ownerDb.transaction((tx) => assignChat(tx, admin, chat.chatId, { clientId: sales }, NOW))
+    const [owner] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chat.chatId))
+    await ingestInboundChat(
+      ownerDb,
+      message({
+        address: owner?.address,
+        media: [
+          {
+            objectKey: inboundAttachmentKey("xlsx"),
+            mimeType: XLSX,
+            filename: "agenda.xlsx",
+            size: 10,
+          },
+        ],
+      }),
+      NOW,
+    )
+    await pass()
+    const [before] = await itemsOf(chat.chatId, "posible_carga")
+    expect(before?.clientId).toBe(sales)
+    await ownerDb.transaction((tx) => assignChat(tx, admin, chat.chatId, { clientId: quispe }, NOW))
+    const [after] = await ownerDb
+      .select()
+      .from(kairosItem)
+      .where(eq(kairosItem.id, before?.id ?? ""))
+    expect(after).toMatchObject({ status: "espera", clientId: quispe })
+    await pass()
+    expect(
+      (await itemsOf(chat.chatId, "posible_carga")).filter((item) => item.status === "espera"),
+    ).toHaveLength(1)
+  })
+
+  it("lo viejo no vuelve a Hoy: responder hasta 7 días, decir de quién es hasta 30", async () => {
+    const eightDays = new Date(NOW.getTime() - 8 * DAY)
+    const withClient = await ingestInboundChat(ownerDb, message({ receivedAt: eightDays }), NOW)
+    await ownerDb.transaction((tx) =>
+      assignChat(tx, admin, withClient.chatId, { clientId: sales }, NOW),
+    )
+    const lonely = await ingestInboundChat(ownerDb, message({ receivedAt: eightDays }), NOW)
+    const ancient = await ingestInboundChat(
+      ownerDb,
+      message({ receivedAt: new Date(NOW.getTime() - 31 * DAY) }),
+      NOW,
+    )
+    await pass()
+    expect(await waiting(withClient.chatId, "responder_chat")).toHaveLength(0)
+    expect(await waiting(lonely.chatId, "chat_sin_cliente")).toHaveLength(1)
+    expect(await waiting(ancient.chatId, "chat_sin_cliente")).toHaveLength(0)
   })
 })

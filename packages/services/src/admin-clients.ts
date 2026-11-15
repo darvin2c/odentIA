@@ -263,18 +263,18 @@ export function proposalOfOpenSaleSql(alias = "p"): SQL<boolean> {
 /**
  * ¿Es solo de Administración un envío? Lleva una propuesta, sale de algo de
  * Kairós que solo ve Administración, responde un correo que no llegó a
- * soporte@ (lo comercial: puede hablar de precios), lo marcó así quien
- * respondió (`admin_only`) o sale en una conversación de WhatsApp sin cliente
- * o de un cliente que aún no tiene su cuenta (comercial, como la conversación).
+ * soporte@ (lo comercial: puede hablar de precios) o está marcado
+ * `admin_only`: lo marcó así quien respondió, o salió en una conversación de
+ * WhatsApp, Instagram o Messenger que no era de una clínica con su app. Eso se
+ * fija al reservar el envío (y sube si la conversación pasa a un cliente sin
+ * app), no al leer: lo de la venta no aparece después para Soporte.
  * `o` es el alias de `saas_outreach`.
  */
 export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
   const o = sql.raw(alias)
   return sql<boolean>`(${o}.proposal_id is not null or ${o}.admin_only or exists (select 1 from admin.kairos_item ki
     where ki.id = ${o}.kairos_item_id and ki.admin_only) or exists (select 1 from admin.saas_inbound_email ie
-    where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte') or exists (select 1 from admin.saas_chat ch
-    left join admin.saas_client chc on chc.id = ch.client_id
-    where ch.id = ${o}.chat_id and chc.organization_id is null))`
+    where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte'))`
 }
 
 /**

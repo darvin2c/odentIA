@@ -28,17 +28,19 @@ BEGIN
 END;
 $$;--> statement-breakpoint
 
--- Un envío no cambia lo que se envió ni a quién (0110), ahora tampoco su conversación, su plantilla
--- ni si es solo de Administración (columnas que no se excluyen). El id que devuelve Meta
+-- Un envío no cambia lo que se envió ni a quién (0110), ahora tampoco su conversación ni su plantilla
+-- (columnas que no se excluyen). Si es solo de Administración se decide al reservarlo y solo sube,
+-- de no a sí (la conversación pasa a un cliente sin app); nunca baja. El id que devuelve Meta
 -- (`external_id`) se anota una vez, al salir: de nulo a un valor, y ya no cambia.
 CREATE OR REPLACE FUNCTION admin.saas_outreach_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
   IF (to_jsonb(NEW) - 'status' - 'sent_at' - 'resolved_by' - 'resolved_at' - 'updated_at' - 'client_id'
-        - 'contact_id' - 'proposal_id' - 'kairos_item_id' - 'created_by' - 'external_id')
+        - 'contact_id' - 'proposal_id' - 'kairos_item_id' - 'created_by' - 'external_id' - 'admin_only')
       IS DISTINCT FROM (to_jsonb(OLD) - 'status' - 'sent_at' - 'resolved_by' - 'resolved_at' - 'updated_at' - 'client_id'
-        - 'contact_id' - 'proposal_id' - 'kairos_item_id' - 'created_by' - 'external_id')
+        - 'contact_id' - 'proposal_id' - 'kairos_item_id' - 'created_by' - 'external_id' - 'admin_only')
+    OR (OLD.admin_only AND NOT NEW.admin_only)
     OR (NEW.client_id IS NULL AND OLD.client_id IS NOT NULL)
     OR (NEW.contact_id IS DISTINCT FROM OLD.contact_id AND NEW.contact_id IS NOT NULL)
     OR (NEW.proposal_id IS DISTINCT FROM OLD.proposal_id AND NEW.proposal_id IS NOT NULL)
@@ -62,4 +64,22 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$$;--> statement-breakpoint
+
+-- Un mensaje que entró es solo de Administración desde que llega si su conversación no es de una
+-- clínica con su app; eso no baja nunca (Soporte no ve después lo que era de la venta). Lo demás
+-- del mensaje lo cambian los servicios (sus archivos al pasar a documentos, el texto al borrarse
+-- la carga).
+CREATE OR REPLACE FUNCTION admin.saas_inbound_message_admin_only_up() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF OLD.admin_only AND NOT NEW.admin_only THEN
+    RAISE EXCEPTION 'Lo que es solo de Administración no deja de serlo (%)', OLD.id
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'saas_inbound_message_admin_only_up';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER saas_inbound_message_admin_only_up BEFORE UPDATE ON admin.saas_inbound_message
+  FOR EACH ROW EXECUTE FUNCTION admin.saas_inbound_message_admin_only_up();

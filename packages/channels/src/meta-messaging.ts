@@ -27,7 +27,7 @@ import type {
   WebhookParseResult,
 } from "./protocol.js"
 import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
-import { graphRejectedPart, metaGraphVersion } from "./meta-graph.js"
+import { graphRejectedPart, mediaSignal, metaGraphVersion, readMediaBody } from "./meta-graph.js"
 
 const GRAPH_HOST = "https://graph.facebook.com"
 const IG_HOST = "https://graph.instagram.com"
@@ -347,16 +347,46 @@ async function sendViaGraph(
   return { externalId: id }
 }
 
+/**
+ * Los servidores de donde Meta sirve los adjuntos de Messenger e Instagram. La
+ * URL llega en el aviso: bajar de cualquier otro lado sería pedirle a la API
+ * que abra la dirección que alguien escribió.
+ */
+const MEDIA_HOST_SUFFIXES = [".fbcdn.net", ".fbsbx.com", ".cdninstagram.com", ".facebook.com", ".instagram.com"]
+/** Cuántas redirecciones se siguen, y solo a esos servidores. */
+const MEDIA_MAX_REDIRECTS = 2
+
+export function isMetaMediaUrl(raw: string): boolean {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  const host = url.hostname.toLowerCase()
+  return url.protocol === "https:" && MEDIA_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+}
+
 async function downloadMedia(
   label: string,
   url: string,
   deps: ChannelAdapterDeps,
 ): Promise<{ bytes: Uint8Array; mimeType: string; filename: string }> {
-  const res = await deps.fetch(url)
+  let current = url
+  let res: Response | null = null
+  for (let hop = 0; ; hop++) {
+    if (!isMetaMediaUrl(current)) throw new Error(`${label}: el adjunto no viene de un servidor de Meta`)
+    res = await deps.fetch(current, { redirect: "manual", ...mediaSignal(deps.media) })
+    if (res.status < 300 || res.status >= 400) break
+    const location = res.headers.get("location")
+    await res.body?.cancel().catch(() => {})
+    if (!location || hop >= MEDIA_MAX_REDIRECTS) throw new Error(`${label}: demasiadas redirecciones del adjunto`)
+    current = new URL(location, current).toString()
+  }
   if (!res.ok) throw new Error(`${label} descarga de media falló: ${res.status}`)
   const mimeType = res.headers.get("content-type") ?? "application/octet-stream"
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  const last = url.split("?")[0]?.split("/").at(-1)
+  const bytes = await readMediaBody(res, label, deps.media)
+  const last = current.split("?")[0]?.split("/").at(-1)
   return { bytes, mimeType, filename: last && last.includes(".") ? last : "adjunto" }
 }
 

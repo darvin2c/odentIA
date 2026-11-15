@@ -3,20 +3,23 @@
  * configurado (`GET /api/admin/chats/config`), abre su conversación en la
  * administración (`POST /api/admin/chats/open`, creada si no existe) y sale
  * desde ese número. Sin configurar, o para un celular que no es de ninguna
- * persona del cliente, sigue abriendo wa.me como antes: nada se rompe.
+ * persona del cliente, sigue abriendo wa.me como antes: nada se rompe. Si ese
+ * celular ya escribió sin decir de quién es (409 `CHAT_UNASSIGNED`: el celular
+ * solo no la liga), Administración lo dice ahí mismo en «¿De quién es?»; Soporte,
+ * que no decide de quién es ni ve la venta, sigue por wa.me como antes.
  */
 import { toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { chatKey, openChatWith, useChatsConfig } from "./chat-api"
+import { useIsAdmin } from "../../lib/session"
+import { chatKey, openChatOutcome, openChatWith, useChatsConfig, waMeHref } from "./chat-api"
 import { ChatDrawer } from "./chat-drawer"
+
+export { waMeHref }
 
 const linkClass =
   "underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
-
-/** El enlace de siempre: abre WhatsApp en otra pestaña con ese número. */
-export const waMeHref = (phone: string) => `https://wa.me/${phone.replace(/^\+/, "")}`
 
 /** Si «Escribir por WhatsApp» sale desde la administración o abre wa.me. */
 export const writesThroughChat = (configured: boolean | undefined, contactId: string | null) =>
@@ -37,14 +40,28 @@ export function WhatsAppWrite({
 }) {
   const queryClient = useQueryClient()
   const config = useChatsConfig()
-  const [chatId, setChatId] = useState<string | null>(null)
+  const isAdmin = useIsAdmin()
+  const [opened, setOpened] = useState<{ chatId: string; decide: boolean } | null>(null)
   const open = useMutation({
     mutationFn: () => openChatWith(clientId, contactId ?? ""),
     onSuccess: (chat) => {
       queryClient.setQueryData(chatKey(chat.id), chat)
-      setChatId(chat.id)
+      setOpened({ chatId: chat.id, decide: false })
     },
-    onError: (error) => toast.error(submitErrorMessage(error)),
+    onError: (error) => {
+      const outcome = openChatOutcome(error, isAdmin)
+      if (outcome.kind === "decidir") {
+        toast.info("Ese celular ya nos escribió: di primero de quién es")
+        setOpened({ chatId: outcome.chatId, decide: true })
+        return
+      }
+      if (outcome.kind === "wa.me") {
+        if (outcome.message) toast.info(outcome.message)
+        window.open(waMeHref(phone), "_blank", "noopener")
+        return
+      }
+      toast.error(submitErrorMessage(error))
+    },
   })
   if (!writesThroughChat(config.data?.whatsapp, contactId))
     return (
@@ -65,7 +82,14 @@ export function WhatsAppWrite({
           {open.isPending ? "Abriendo…" : "Escribir por WhatsApp"}
         </button>
       </span>
-      {chatId ? <ChatDrawer chatId={chatId} open onClose={() => setChatId(null)} /> : null}
+      {opened ? (
+        <ChatDrawer
+          chatId={opened.chatId}
+          decide={opened.decide}
+          open
+          onClose={() => setOpened(null)}
+        />
+      ) : null}
     </>
   )
 }

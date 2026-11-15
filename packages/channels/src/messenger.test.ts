@@ -236,3 +236,83 @@ it("validateConnection usa id y nombre de la página", async () => {
     "validate falló",
   )
 })
+
+it("fetchMedia solo baja de los servidores de Meta y sigue hasta 2 redirecciones dentro de ellos", async () => {
+  const pdf = new TextEncoder().encode("%PDF-1.4")
+  const seen: { url: string; redirect: string | undefined }[] = []
+  const stub = (async (url: unknown, init?: RequestInit) => {
+    const href = String(url)
+    seen.push({ url: href, redirect: init?.redirect })
+    if (href === "https://lookaside.fbsbx.com/a")
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://scontent.xx.fbcdn.net/b.pdf" },
+      })
+    if (href === "https://lookaside.fbsbx.com/fuera")
+      return new Response(null, { status: 302, headers: { location: "https://evil.test/c.pdf" } })
+    if (href.startsWith("https://lookaside.fbsbx.com/loop"))
+      return new Response(null, {
+        status: 302,
+        headers: { location: `https://lookaside.fbsbx.com/loop${seen.length}` },
+      })
+    return new Response(pdf, { status: 200, headers: { "content-type": "application/pdf" } })
+  }) as unknown as typeof fetch
+  const got = await messengerAdapter.fetchMedia?.(config, "https://lookaside.fbsbx.com/a", {
+    fetch: stub,
+  })
+  expect(got?.bytes).toEqual(pdf)
+  expect(got?.filename).toBe("b.pdf")
+  expect(seen.every((call) => call.redirect === "manual")).toBe(true)
+  for (const url of [
+    "https://evil.test/x.pdf",
+    "http://scontent.xx.fbcdn.net/x.pdf",
+    "https://fbcdn.net.evil.test/x.pdf",
+    "https://127.0.0.1/x.pdf",
+    "https://lookaside.fbsbx.com/fuera",
+    "https://lookaside.fbsbx.com/loop",
+  ]) {
+    const before = seen.length
+    await expect(messengerAdapter.fetchMedia?.(config, url, { fetch: stub })).rejects.toThrow()
+    expect(
+      seen
+        .slice(before)
+        .some((call) => call.url.includes("evil.test") || call.url.startsWith("http:")),
+    ).toBe(false)
+  }
+})
+
+it("fetchMedia con tope: corta lo que dice o resulta pesar más, y pasa el tiempo límite", async () => {
+  const big = new Uint8Array(40)
+  const signals: (AbortSignal | null | undefined)[] = []
+  const stub = (async (url: unknown, init?: RequestInit) => {
+    signals.push(init?.signal)
+    const href = String(url)
+    if (href.endsWith("/declarado"))
+      return new Response(big, { headers: { "content-length": "999999999" } })
+    // Sin content-length: el cuerpo llega a trozos y se corta al pasar el tope.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 10; i++) controller.enqueue(new Uint8Array(8))
+        controller.close()
+      },
+    })
+    return new Response(stream)
+  }) as unknown as typeof fetch
+  const deps = { fetch: stub, media: { maxBytes: 32, timeoutMs: 20_000 } }
+  await expect(
+    messengerAdapter.fetchMedia?.(config, "https://scontent.xx.fbcdn.net/declarado", deps),
+  ).rejects.toThrow(/pesa más/)
+  await expect(
+    messengerAdapter.fetchMedia?.(config, "https://scontent.xx.fbcdn.net/trozos", deps),
+  ).rejects.toThrow(/pesa más/)
+  expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true)
+  // Sin tope (las clínicas), baja entero.
+  const whole = await messengerAdapter.fetchMedia?.(
+    config,
+    "https://scontent.xx.fbcdn.net/trozos",
+    {
+      fetch: stub,
+    },
+  )
+  expect(whole?.bytes.byteLength).toBe(80)
+})

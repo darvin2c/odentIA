@@ -43,12 +43,14 @@ import {
   entriesByDay,
   freeWindowWords,
   isUnsettled,
+  openChatOutcome,
   openChatWith,
   replyHelpWords,
   sendChatReply,
   sendChatRetomar,
   sentLineWords,
   useChat,
+  waMeHref,
 } from "./chat-api"
 import { ChatOwnerDrawer, useNotClinic } from "./chat-owner-drawer"
 import { useMarkCarga } from "./client-files-tab"
@@ -67,6 +69,11 @@ export interface ChatDrawerProps {
    * (queda enviada como por correo); el PDF no va por WhatsApp.
    */
   proposalId?: string | null
+  /**
+   * Abre directo «¿De quién es?»: «Escribir por WhatsApp» encontró que ese
+   * celular ya escribió sin decir de quién es (409 `CHAT_UNASSIGNED`).
+   */
+  decide?: boolean
 }
 
 export function ChatDrawer(props: ChatDrawerProps) {
@@ -79,12 +86,18 @@ type Aside =
   | { kind: "mover" }
   | { kind: "decidir" }
   | { kind: "correo"; clientId: string; contactId: string | null }
-  | { kind: "otro-chat"; chatId: string }
+  | { kind: "otro-chat"; chatId: string; decide?: boolean }
 
-function ChatSurface({ chatId, onClose, draft = "", proposalId = null }: ChatDrawerProps) {
+function ChatSurface({
+  chatId,
+  onClose,
+  draft = "",
+  proposalId = null,
+  decide = false,
+}: ChatDrawerProps) {
   const queryClient = useQueryClient()
   const chat = useChat(chatId)
-  const [aside, setAside] = useState<Aside>({ kind: "ninguno" })
+  const [aside, setAside] = useState<Aside>(decide ? { kind: "decidir" } : { kind: "ninguno" })
   const refresh = (clientId: string | null | undefined) => {
     void queryClient.invalidateQueries({ queryKey: chatKey(chatId) })
     invalidateArm(queryClient, clientId)
@@ -118,7 +131,15 @@ function ChatSurface({ chatId, onClose, draft = "", proposalId = null }: ChatDra
   const data = chat.data
 
   if (aside.kind === "otro-chat")
-    return <ChatSurface key={aside.chatId} open chatId={aside.chatId} onClose={onClose} />
+    return (
+      <ChatSurface
+        key={aside.chatId}
+        open
+        chatId={aside.chatId}
+        decide={aside.decide}
+        onClose={onClose}
+      />
+    )
   if (aside.kind === "correo")
     return (
       <WriteDrawer
@@ -250,12 +271,25 @@ function Conversation({
     mutationFn: ({ clientId, contactId }: { clientId: string; contactId: string }) =>
       openChatWith(clientId, contactId),
     onSuccess: (opened) => onAside({ kind: "otro-chat", chatId: opened.id }),
-    onError: (error) => toast.error(submitErrorMessage(error)),
+    onError: (error) => {
+      const outcome = openChatOutcome(error, isAdmin)
+      if (outcome.kind === "decidir") {
+        toast.info("Ese celular ya nos escribió: di primero de quién es")
+        onAside({ kind: "otro-chat", chatId: outcome.chatId, decide: true })
+        return
+      }
+      if (outcome.kind === "wa.me" && person?.phone) {
+        if (outcome.message) toast.info(outcome.message)
+        window.open(waMeHref(person.phone), "_blank", "noopener")
+        return
+      }
+      toast.error(submitErrorMessage(error))
+    },
   })
   // El correo y el celular de quien escribe, para seguir por otra vía fuera de las 24 h.
   const sale = useClientSale(chat.client?.id ?? "", Boolean(chat.client) && !chat.canReplyFreely)
   const person = sale.data?.contacts.find((row) => row.id && row.id === chat.contact?.id)
-  const unsettled = chat.entries.filter(isUnsettled).length
+  const unsettled = chat.entries.filter((entry) => isUnsettled(entry, new Date())).length
 
   return (
     <FormDrawer
@@ -513,7 +547,7 @@ function Outbound({
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
-  const unsettled = isUnsettled(entry)
+  const unsettled = isUnsettled(entry, new Date())
   return (
     <li className="ml-8 flex flex-col gap-1.5 self-end rounded-lg rounded-tr-none border bg-card p-3 text-sm sm:ml-16">
       {entry.template ? (

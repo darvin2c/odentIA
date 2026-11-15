@@ -12,8 +12,8 @@ import {
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
-import { type AdminChannels, ingestInboundChat, ServiceError } from "@odentia/services"
-import { eq } from "drizzle-orm"
+import { type AdminChannels, assignChat, ingestInboundChat, ServiceError } from "@odentia/services"
+import { eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { type Context, Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -101,6 +101,11 @@ async function client(phone: string, organizationId: string | null = null) {
 async function message(target: { clientId: string; contactId: string }, phone: string) {
   seq += 1
   const body = "Hola Rosa, ¿le acomoda una llamada mañana?"
+  // Como la pasada: lo último que pasó con el cliente (al ligar su conversación, lo que escribió).
+  const [last] = (await ownerDb.execute(
+    sql`select to_char(max(happened_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at
+      from saas_follow_up where client_id = ${target.clientId}::uuid and not from_note`,
+  )) as unknown as Array<{ at: string | null }>
   const [row] = await ownerDb
     .insert(kairosItem)
     .values({
@@ -117,7 +122,7 @@ async function message(target: { clientId: string; contactId: string }, phone: s
         body,
         draft: { subject: null, body },
       },
-      expectedState: { lastActivityAt: null },
+      expectedState: { lastActivityAt: last?.at ?? null },
       idempotencyKey: `prueba-chat:${seq}`,
       expiresAt: new Date(Date.now() + 48 * HOUR),
     })
@@ -126,10 +131,13 @@ async function message(target: { clientId: string; contactId: string }, phone: s
   return row.id
 }
 
-/** Ese celular escribió hace un rato, sin decirse de quién es. */
-async function wrote(phone: string, ago = 60_000) {
+/**
+ * Ese celular escribió hace un rato, sin decirse de quién es; con `owner`, una
+ * persona ya dijo de quién es (el celular solo no la liga).
+ */
+async function wrote(phone: string, owner?: { clientId: string; contactId: string }, ago = 60_000) {
   seq += 1
-  return ownerDb.transaction((tx) =>
+  const result = await ownerDb.transaction((tx) =>
     ingestInboundChat(tx as Db, {
       channel: "whatsapp",
       address: phone,
@@ -139,6 +147,11 @@ async function wrote(phone: string, ago = 60_000) {
       receivedAt: new Date(Date.now() - ago),
     }),
   )
+  if (owner)
+    await ownerDb.transaction((tx) =>
+      assignChat(tx as Db, { userId: ADMIN, role: "admin" }, result.chatId, owner),
+    )
+  return result
 }
 
 async function itemOf(id: string) {
@@ -217,8 +230,8 @@ describe("el mensaje de Kairós por el WhatsApp de Sallca", () => {
     mode = "ok"
     const phone = "+51900000001"
     const target = await client(phone)
+    await wrote(phone, target)
     const item = await message(target, phone)
-    await wrote(phone)
     const before = calls.length
     const res = await decide(app, item, ADMIN)
     expect(res.status).toBe(200)
@@ -286,8 +299,8 @@ describe("el mensaje de Kairós por el WhatsApp de Sallca", () => {
     mode = "throw"
     const phone = "+51900000003"
     const target = await client(phone)
+    await wrote(phone, target)
     const item = await message(target, phone)
-    await wrote(phone)
     const before = calls.length
     const res = await decide(app, item, ADMIN)
     expect(res.status).toBe(200)
@@ -311,8 +324,8 @@ describe("el mensaje de Kairós por el WhatsApp de Sallca", () => {
     mode = "reject"
     const phone = "+51900000004"
     const target = await client(phone)
+    await wrote(phone, target)
     const item = await message(target, phone)
-    await wrote(phone)
     const body = await read(await decide(app, item, ADMIN))
     expect(body.data).toMatchObject({
       status: "fallida",
@@ -337,6 +350,23 @@ describe("el mensaje de Kairós por el WhatsApp de Sallca", () => {
     expect(calls.length).toBe(before)
     expect((await itemOf(item))?.status).toBe("espera")
     expect(await outreachOf(item)).toHaveLength(0)
+  })
+
+  it("un celular que ya escribió sin decir de quién es: 409 con su conversación, en espera y sin ligarla", async () => {
+    const phone = "+51900000008"
+    const target = await client(phone)
+    const { chatId } = await wrote(phone)
+    const item = await message(target, phone)
+    const before = calls.length
+    const res = await decide(app, item, ADMIN)
+    expect(res.status).toBe(409)
+    expect(await read(res)).toMatchObject({
+      error: { code: "CHAT_UNASSIGNED", fields: { chatId } },
+    })
+    expect(calls.length).toBe(before)
+    expect((await itemOf(item))?.status).toBe("espera")
+    const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
+    expect(chat?.clientId).toBeNull()
   })
 
   it("Soporte no envía por WhatsApp a una clínica sin su cuenta: 409 y sigue en espera", async () => {

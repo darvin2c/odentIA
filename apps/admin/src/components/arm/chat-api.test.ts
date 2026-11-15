@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { ApiError } from "../../lib/api"
 import {
   type ChatEntry,
   chatDetailSchema,
@@ -10,9 +11,11 @@ import {
   freeWindowWords,
   isUnsettled,
   momentWords,
+  openChatOutcome,
   phoneWords,
   replyHelpWords,
   sentLineWords,
+  unassignedChatOf,
 } from "./chat-api"
 import { newClientFromChat } from "./chat-owner-drawer"
 import { chatItemMeta, chatSubjectOf, type KairosItem } from "./kairos-items"
@@ -131,9 +134,17 @@ describe("la conversación", () => {
     const chat = chatDetailSchema.parse(raw)
     const sent = chat.entries[1] as Extract<ChatEntry, { kind: "salio" }>
     expect(sentLineWords(sent)).toBe("Ana Ruiz · 17:42 · Salió")
-    expect(isUnsettled(sent)).toBe(false)
-    expect(isUnsettled({ ...sent, status: "incierto" })).toBe(true)
-    expect(isUnsettled({ ...sent, status: "no_salio" })).toBe(false)
+    expect(isUnsettled(sent, now)).toBe(false)
+    expect(isUnsettled({ ...sent, status: "incierto" }, now)).toBe(true)
+    expect(isUnsettled({ ...sent, status: "no_salio" }, now)).toBe(false)
+  })
+
+  it("«¿Salió?» en uno pendiente solo después de 10 minutos: antes, se está enviando", () => {
+    const chat = chatDetailSchema.parse(raw)
+    const sent = chat.entries[1] as Extract<ChatEntry, { kind: "salio" }>
+    const pending = { ...sent, status: "pendiente", sentAt: null } as const
+    expect(isUnsettled(pending, new Date(Date.parse(pending.at) + 60_000))).toBe(false)
+    expect(isUnsettled(pending, new Date(Date.parse(pending.at) + 10 * 60_000))).toBe(true)
   })
 
   it("dice el estado de cada archivo y solo deja marcar la carga una vez", () => {
@@ -258,6 +269,38 @@ describe("la tarjeta de Hoy", () => {
 })
 
 describe("«Escribir por WhatsApp»", () => {
+  const apiError = (status: number, code: string, fields?: Record<string, string>) =>
+    new ApiError(
+      status,
+      { code, message: "Ese celular ya nos escribió", ...(fields ? { fields } : {}) },
+      {
+        code,
+        ...(fields ? { fields } : {}),
+      },
+    )
+
+  it("si ese celular ya escribió sin decir de quién es, Administración lo dice ahí; Soporte sigue por wa.me", () => {
+    const unassigned = apiError(409, "CHAT_UNASSIGNED", { chatId: "c9" })
+    expect(unassignedChatOf(unassigned)).toBe("c9")
+    expect(openChatOutcome(unassigned, true)).toEqual({ kind: "decidir", chatId: "c9" })
+    expect(openChatOutcome(unassigned, false)).toEqual({
+      kind: "wa.me",
+      message: "Ese celular ya nos escribió",
+    })
+    // Soporte con una clínica que no ve (404) u otro 409: wa.me como antes, sin aviso.
+    expect(openChatOutcome(apiError(404, "NOT_FOUND"), false)).toEqual({
+      kind: "wa.me",
+      message: null,
+    })
+    expect(openChatOutcome(apiError(409, "CHAT_OTHER_CLIENT"), false)).toEqual({
+      kind: "wa.me",
+      message: null,
+    })
+    // Administración con otro error: se dice el error.
+    expect(openChatOutcome(apiError(409, "CHAT_OTHER_CLIENT"), true)).toEqual({ kind: "error" })
+    expect(openChatOutcome(new Error("red"), false)).toEqual({ kind: "error" })
+  })
+
   it("sale desde la administración solo con el número de Sallca y una persona del cliente", () => {
     expect(writesThroughChat(true, "p1")).toBe(true)
     expect(writesThroughChat(false, "p1")).toBe(false)

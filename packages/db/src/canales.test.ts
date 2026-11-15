@@ -160,6 +160,40 @@ describe("lo que sale en una conversación", () => {
     )
   })
 
+  it("«solo administración» se decide al escribirlo y solo sube: en el envío y en el mensaje", async () => {
+    // El envío: de no a sí (pasa a un cliente sin app); nunca de sí a no.
+    await ownerDb.execute(
+      sql`update saas_outreach set admin_only = true where id = ${OUTREACH}::uuid`,
+    )
+    await expect(
+      ownerDb.execute(
+        sql`update saas_outreach set admin_only = false where id = ${OUTREACH}::uuid`,
+      ),
+    ).rejects.toMatchObject(violates("saas_outreach_immutable"))
+    // El mensaje: por omisión es de Administración; lo que lo es no deja de serlo.
+    const [visible] = (await ownerDb.execute(
+      sql`insert into saas_inbound_message (chat_id, external_id, received_at, admin_only)
+        values (${CHAT_B}::uuid, 'wamid.visible', now(), false) returning id`,
+    )) as unknown as Array<{ id: string }>
+    const [hidden] = (await ownerDb.execute(
+      sql`insert into saas_inbound_message (chat_id, external_id, received_at)
+        values (${CHAT_B}::uuid, 'wamid.oculto', now()) returning id, admin_only`,
+    )) as unknown as Array<{ id: string; admin_only: boolean }>
+    expect(hidden?.admin_only).toBe(true)
+    await ownerDb.execute(
+      sql`update saas_inbound_message set admin_only = true where id = ${visible?.id}::uuid`,
+    )
+    await expect(
+      ownerDb.execute(
+        sql`update saas_inbound_message set admin_only = false where id = ${hidden?.id}::uuid`,
+      ),
+    ).rejects.toMatchObject(violates("saas_inbound_message_admin_only_up"))
+    // Lo demás del mensaje lo cambian los servicios (sus archivos, el texto de la carga).
+    await ownerDb.execute(
+      sql`update saas_inbound_message set body = null where id = ${hidden?.id}::uuid`,
+    )
+  })
+
   it("la actividad pasa a otro cliente pero no a otra conversación", async () => {
     await ownerDb.execute(sql`insert into saas_follow_up (id, client_id, body, kind, direction, chat_id)
       values (${FOLLOW_UP}::uuid, ${CLIENT}::uuid, 'Nos escribió', 'whatsapp', 'entro', ${CHAT}::uuid)`)

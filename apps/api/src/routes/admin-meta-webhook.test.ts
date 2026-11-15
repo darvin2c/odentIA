@@ -73,7 +73,7 @@ const fakeFetch = (async (input: string | URL | Request) => {
     return new Response(PDF, { headers: { "content-type": "application/pdf" } })
   if (url === "https://lookaside.test/exe")
     return new Response(new TextEncoder().encode("MZ\x90ejecutable"))
-  if (url.startsWith("https://cdn.messenger.test/"))
+  if (url.startsWith("https://scontent.xx.fbcdn.net/") || url.startsWith("https://evil.test/"))
     return new Response(PDF, { headers: { "content-type": "application/pdf" } })
   if (url.includes("?fields=name,username"))
     return Response.json({ username: "clinica.sonrisa", name: "Clínica" })
@@ -333,7 +333,7 @@ describe("Messenger e Instagram", () => {
           message: {
             mid: "m_archivo",
             attachments: [
-              { type: "file", payload: { url: "https://cdn.messenger.test/lista.pdf" } },
+              { type: "file", payload: { url: "https://scontent.xx.fbcdn.net/v/lista.pdf?oh=1" } },
             ],
           },
         },
@@ -400,5 +400,112 @@ describe("Messenger e Instagram", () => {
       displayName: "@clinica.sonrisa",
     })
     expect(await messagesOf("ig_eco")).toHaveLength(0)
+  })
+})
+
+describe("lo que no se pudo guardar se vuelve a pedir", () => {
+  it("si un mensaje no se guarda, los demás entran y la respuesta es 500; el reintento no duplica", async () => {
+    const failing: Pick<Storage, "putAttachmentAt" | "deleteAttachment"> = {
+      putAttachmentAt: async () => {
+        throw new Error("R2 no respondió")
+      },
+      deleteAttachment: async () => {},
+    }
+    const flaky = new Hono().route(
+      BASE,
+      createAdminMetaWebhookRoute({ ownerDb, storage: failing, channels, fetch: fakeFetch }),
+    )
+    const at = String(Math.floor(Date.now() / 1000))
+    const body = whatsapp({
+      messages: [
+        {
+          id: "wamid.r-pdf",
+          from: "51987650001",
+          timestamp: at,
+          type: "document",
+          document: { id: "media-pdf", mime_type: "application/pdf", filename: "lista.pdf" },
+        },
+        {
+          id: "wamid.r-texto",
+          from: "51987650001",
+          timestamp: at,
+          type: "text",
+          text: { body: "Hola" },
+        },
+      ],
+    })
+    expect((await post(body, { target: flaky })).status).toBe(500)
+    expect(await messagesOf("wamid.r-texto")).toHaveLength(1)
+    expect(await messagesOf("wamid.r-pdf")).toHaveLength(0)
+    // Meta lo vuelve a mandar: entra lo que faltaba, sin repetir lo que ya entró.
+    expect((await post(body)).status).toBe(200)
+    expect(await messagesOf("wamid.r-texto")).toHaveLength(1)
+    const [pdf] = await messagesOf("wamid.r-pdf")
+    expect(pdf?.media).toHaveLength(1)
+  })
+
+  it("si la base falla, 500 también para los estados; lo que se ignora sigue con 200", async () => {
+    const broken = new Proxy(ownerDb, {
+      get(target, prop, receiver) {
+        if (prop === "transaction") return () => Promise.reject(new Error("la base se cayó"))
+        return Reflect.get(target, prop, receiver)
+      },
+    }) as Db
+    const down = new Hono().route(
+      BASE,
+      createAdminMetaWebhookRoute({ ownerDb: broken, storage, channels, fetch: fakeFetch }),
+    )
+    expect(
+      (await post(waText("wamid.caida", "51987650002", "Hola"), { target: down })).status,
+    ).toBe(500)
+    expect(await messagesOf("wamid.caida")).toHaveLength(0)
+    const status = whatsapp({
+      statuses: [
+        { id: "wamid.x", status: "delivered", timestamp: "1", recipient_id: "51987650002" },
+      ],
+    })
+    expect((await post(status, { target: down })).status).toBe(500)
+    const ignored = whatsapp(
+      {
+        messages: [
+          {
+            id: "wamid.ajeno2",
+            from: "51900000000",
+            timestamp: "1",
+            type: "text",
+            text: { body: "x" },
+          },
+        ],
+      },
+      "9999999999",
+    )
+    expect((await post(ignored, { target: down })).status).toBe(200)
+  })
+
+  it("un mensaje que no es válido no pide reenviarlo: 200 y no entra", async () => {
+    const id = `wamid.${"x".repeat(300)}`
+    expect((await post(waText(id, "51987650003", "Hola"))).status).toBe(200)
+    expect(await messagesOf(id)).toHaveLength(0)
+  })
+
+  it("un archivo de Messenger fuera de los servidores de Meta no se baja", async () => {
+    const before = fetchCalls.length
+    const response = await post(
+      messaging("page", PAGE_ID, [
+        {
+          sender: { id: "psid-ssrf" },
+          recipient: { id: PAGE_ID },
+          timestamp: Date.now(),
+          message: {
+            mid: "m_ssrf",
+            attachments: [{ type: "file", payload: { url: "https://evil.test/lista.pdf" } }],
+          },
+        },
+      ]),
+    )
+    expect(response.status).toBe(200)
+    const [row] = await messagesOf("m_ssrf")
+    expect(row?.media).toEqual([])
+    expect(fetchCalls.slice(before).some((url) => url.startsWith("https://evil.test/"))).toBe(false)
   })
 })

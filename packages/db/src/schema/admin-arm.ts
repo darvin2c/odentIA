@@ -649,8 +649,10 @@ export const saasOutreach = adminSchema.table(
     /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
     template: text("template"),
     /**
-     * Lo marcó «Solo administración» quien respondió en una conversación que Soporte también ve.
-     * Lo demás que Soporte no ve lo decide `outreachAdminOnlySql`.
+     * Solo de Administración, fijado al reservar el envío: lo marcó así quien respondió, o salió en
+     * una conversación que no era de una clínica con su app (venta). Solo sube, de no a sí (la
+     * conversación pasa a un cliente sin app). Lo demás que Soporte no ve lo decide
+     * `outreachAdminOnlySql`.
      */
     adminOnly: boolean("admin_only").notNull().default(false),
     createdAt: createdAt(),
@@ -956,6 +958,9 @@ export const saasChat = adminSchema.table(
  * Un mensaje que entró en una conversación, una vez por su `external_id` (el
  * id del mensaje en Meta: `wamid` en WhatsApp, `mid` en Instagram y Messenger). `body` es el texto o el pie de una foto
  * (nulo si solo trae un archivo); `media`, sus archivos, que solo se guardan.
+ * `admin_only` se decide al llegar y no baja nunca: solo lo de una conversación
+ * de una clínica que ya tiene su app lo ve Soporte (sin cliente, o de un cliente
+ * sin app, es venta). Si después pasa a un cliente sin app, sube a sí.
  */
 export const saasInboundMessage = adminSchema.table(
   "saas_inbound_message",
@@ -968,6 +973,8 @@ export const saasInboundMessage = adminSchema.table(
     body: text("body"),
     media: jsonb("media").$type<SaasInboundMedia[]>().notNull().default(sql`'[]'::jsonb`),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    /** Solo de Administración: decidido al llegar; solo pasa de no a sí. */
+    adminOnly: boolean("admin_only").notNull().default(true),
     createdAt: createdAt(),
   },
   (table) => [

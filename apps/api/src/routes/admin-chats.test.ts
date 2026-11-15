@@ -282,4 +282,31 @@ describe("escribir por WhatsApp desde la ficha", () => {
     // Sin cuenta, la ficha es comercial: Soporte no la ve.
     await expectStatus(await call("POST", "/open", SUPPORT, body), 404)
   })
+
+  it("si ese celular ya escribió sin decir de quién es, 409 con su conversación y no la liga", async () => {
+    const [client] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica Celular (ficticia)", product: "dental" })
+      .returning({ id: saasClient.id })
+    const [contact] = await ownerDb
+      .insert(saasClientContact)
+      .values({ clientId: client!.id, name: "Rosa Celular", phone: "+51911000008" })
+      .returning({ id: saasClientContact.id })
+    const chatId = await chatWith("whatsapp", "+51911000008")
+    const res = await call("POST", "/open", ADMIN, {
+      clientId: client!.id,
+      contactId: contact!.id,
+      channel: "whatsapp",
+    })
+    await expectStatus(res, 409)
+    expect(await json(res)).toMatchObject({
+      error: {
+        code: "CHAT_UNASSIGNED",
+        message: "Ese celular ya nos escribió y falta decir de quién es. Dilo primero en Hoy.",
+        fields: { chatId },
+      },
+    })
+    const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
+    expect(chat?.clientId).toBeNull()
+  })
 })

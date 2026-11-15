@@ -152,6 +152,10 @@ test("ARM: cliente a mano, anotar con Kairós, tarea, propuesta por el WhatsApp 
   )
   await shot("enviar-propuesta")
   await write.getByRole("button", { name: "Seguir en la conversación" }).click()
+  // Ese celular ya escribió sin decirse de quién es: el celular solo no lo liga. Primero se dice
+  // de quién es (lo sugiere por el celular) y la conversación sigue con el texto puesto.
+  const whose = surface(page, "¿De quién es este WhatsApp?")
+  await whose.getByRole("button", { name: new RegExp(`^Es de ${person}`) }).click()
   const chat = surface(page, /^WhatsApp con /)
   await expect(chat.getByLabel("Respuesta")).toHaveValue(
     new RegExp(`Le preparé la propuesta para ${clinic}`),

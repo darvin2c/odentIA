@@ -960,3 +960,38 @@ it("el motivo guardado se dice en palabras solo si es uno de los conocidos", () 
   expect(whatsappFailureWords(`ambiguous: ${SIN_FORMA_DE_PAGO}`)).toBeNull()
   expect(whatsappFailureWords(null)).toBeNull()
 })
+
+it("fetchMedia con tope: no baja lo que pasa de él y espera como mucho su tiempo", async () => {
+  const signals: (AbortSignal | null | undefined)[] = []
+  const stub = (async (url: unknown, init?: RequestInit) => {
+    signals.push(init?.signal)
+    if (String(url).includes("graph.facebook.com"))
+      return Response.json({ url: "https://cdn.example.com/m", mime_type: "audio/ogg" })
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 10; i++) controller.enqueue(new Uint8Array(8))
+        controller.close()
+      },
+    })
+    return new Response(stream)
+  }) as unknown as typeof fetch
+  await expect(
+    whatsappCloudApiAdapter.fetchMedia?.(fx.config, "media-1", {
+      fetch: stub,
+      media: { maxBytes: 32, timeoutMs: 20_000 },
+    }),
+  ).rejects.toThrow(/pesa más/)
+  expect(signals.at(-1)).toBeInstanceOf(AbortSignal)
+  const declared = (async (url: unknown) =>
+    String(url).includes("graph.facebook.com")
+      ? Response.json({ url: "https://cdn.example.com/m", mime_type: "audio/ogg" })
+      : new Response("x", {
+          headers: { "content-length": "5000000000" },
+        })) as unknown as typeof fetch
+  await expect(
+    whatsappCloudApiAdapter.fetchMedia?.(fx.config, "media-1", {
+      fetch: declared,
+      media: { maxBytes: 32, timeoutMs: 20_000 },
+    }),
+  ).rejects.toThrow(/pesa más/)
+})

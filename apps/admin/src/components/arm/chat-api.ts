@@ -140,6 +140,38 @@ export async function openChatWith(clientId: string, contactId: string): Promise
   )
 }
 
+/** El enlace de siempre: abre WhatsApp en otra pestaña con ese número. */
+export const waMeHref = (phone: string) => `https://wa.me/${phone.replace(/^\+/, "")}`
+
+/**
+ * Ese celular ya escribió y falta decir de quién es (409 `CHAT_UNASSIGNED`): la
+ * conversación que hay que decidir. El celular solo no la liga.
+ */
+export function unassignedChatOf(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.shape.code !== "CHAT_UNASSIGNED") return null
+  const chatId = error.shape.fields?.chatId
+  return typeof chatId === "string" && chatId ? chatId : null
+}
+
+/**
+ * Qué hacer si «Escribir por WhatsApp» no abre la conversación: Administración
+ * dice de quién es la que ya escribió («¿De quién es?»); Soporte, si no la ve
+ * (404) o no puede abrirla (409), sigue por wa.me como antes, con el aviso si
+ * es eso. Lo demás es un error que se dice.
+ */
+export type OpenChatOutcome =
+  | { kind: "decidir"; chatId: string }
+  | { kind: "wa.me"; message: string | null }
+  | { kind: "error" }
+
+export function openChatOutcome(error: unknown, isAdmin: boolean): OpenChatOutcome {
+  const chatId = unassignedChatOf(error)
+  if (isAdmin) return chatId ? { kind: "decidir", chatId } : { kind: "error" }
+  if (error instanceof ApiError && (error.status === 404 || error.status === 409))
+    return { kind: "wa.me", message: chatId ? (error.shape.message ?? null) : null }
+  return { kind: "error" }
+}
+
 export const assignChatTo = (
   chatId: string,
   body: { clientId: string; contactId?: string | null },
@@ -329,8 +361,20 @@ export const CHAT_SEND_STATUS_WORDS: Record<string, string> = {
 }
 
 /** Lo que espera que una persona diga si salió (nunca se reenvía solo). */
-export const isUnsettled = (entry: ChatEntry) =>
-  entry.kind === "salio" && (entry.status === "pendiente" || entry.status === "incierto")
+/**
+ * Cuánto puede estar pendiente un envío mientras sale (la ruta lo anota apenas
+ * Meta responde): el mismo plazo con que el servidor deja resolverlo a mano.
+ */
+export const CHAT_SEND_SETTLE_MS = 10 * 60_000
+
+/**
+ * Pide «¿Salió?»: lo incierto, o lo pendiente de hace 10 minutos o más (la API
+ * se cortó entre reservarlo y enviarlo). Antes, se está enviando.
+ */
+export const isUnsettled = (entry: ChatEntry, now: Date) =>
+  entry.kind === "salio" &&
+  (entry.status === "incierto" ||
+    (entry.status === "pendiente" && now.getTime() - Date.parse(entry.at) >= CHAT_SEND_SETTLE_MS))
 
 /** «Ana Ruiz · 17:42 · Salió» de un mensaje nuestro. */
 export function sentLineWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {

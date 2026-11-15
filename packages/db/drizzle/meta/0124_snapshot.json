@@ -1,6 +1,6 @@
 {
-  "id": "308b2951-eb79-44c9-99d3-f1ebd5e44f68",
-  "prevId": "817dd729-d085-489c-a939-df5d1999158f",
+  "id": "0f8f975c-f5f4-48a9-b2d3-b0d88469e467",
+  "prevId": "63355ec9-a3c3-4328-9f8e-b8ddf7d98aa1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1845,6 +1845,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "admin_only": {
+          "name": "admin_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",

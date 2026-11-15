@@ -17,8 +17,12 @@
  * Quién ve qué: una conversación sin cliente, o de un cliente que aún no tiene
  * su cuenta, es comercial y solo la ve Administración. La de una clínica que
  * ya tiene su app también la ve Soporte; lo que Administración responde ahí lo
- * ve Soporte salvo que lo marque «Solo administración». Para Soporte, lo que no
- * ve no existe (404).
+ * ve Soporte salvo que lo marque «Solo administración». Se decide al escribirlo
+ * (`admin_only` del mensaje y del envío), no al leerlo: lo que llegó o salió
+ * mientras era venta sigue siendo solo de Administración aunque la clínica
+ * tenga su app después, y si la conversación pasa a un cliente sin app, todo
+ * sube a solo Administración (nunca baja). Para Soporte, lo que no ve no existe
+ * (404).
  *
  * Responder: texto libre solo dentro de las 24 h desde el último mensaje de la
  * persona; después, la plantilla. `prepareChatReply` reserva el envío
@@ -177,6 +181,8 @@ async function closeChatKairosItems(
   kinds: readonly ("chat_sin_cliente" | "responder_chat")[],
   why: string,
   now: Date,
+  /** El ítem que se está aprobando con esta misma operación: no se cierra, lo deja ejecutado su sí. */
+  exceptItemId: string | null = null,
 ): Promise<void> {
   const closed = await tx
     .update(kairosItem)
@@ -191,6 +197,7 @@ async function closeChatKairosItems(
         eq(kairosItem.status, "espera"),
         inArray(kairosItem.kind, [...kinds]),
         sql`${kairosItem.payload} ->> 'chatId' = ${chatId}`,
+        exceptItemId ? sql`${kairosItem.id} <> ${exceptItemId}::uuid` : undefined,
       ),
     )
     .returning({
@@ -218,6 +225,26 @@ async function closeChatKairosItems(
   }
 }
 
+/**
+ * La conversación pasa a un cliente sin app (venta): sus mensajes, respuestas y
+ * actividades suben a solo Administración. Nunca bajan (la base lo impide en
+ * el envío y en el mensaje; la bitácora solo deja de no a sí).
+ */
+async function raiseChatAdminOnly(tx: Db, chatId: string): Promise<void> {
+  await tx
+    .update(saasInboundMessage)
+    .set({ adminOnly: true })
+    .where(and(eq(saasInboundMessage.chatId, chatId), eq(saasInboundMessage.adminOnly, false)))
+  await tx
+    .update(saasOutreach)
+    .set({ adminOnly: true })
+    .where(and(eq(saasOutreach.chatId, chatId), eq(saasOutreach.adminOnly, false)))
+  await tx
+    .update(saasFollowUp)
+    .set({ adminOnly: true })
+    .where(and(eq(saasFollowUp.chatId, chatId), eq(saasFollowUp.adminOnly, false)))
+}
+
 /** «agenda.xlsx», «2 archivos»: lo que dice la actividad de un mensaje con archivos. */
 function mediaWords(count: number): string {
   return count === 1 ? "1 archivo" : `${count} archivos`
@@ -234,14 +261,19 @@ function inboundActivityBody(message: { body: string | null; media: SaasInboundM
 
 /**
  * La actividad de un mensaje que entró. Sin `request_id`: no es un contacto
- * nuestro ni mueve la fecha de volver. Comercial (solo Administración) si el
- * cliente aún no tiene su cuenta.
+ * nuestro ni mueve la fecha de volver. Solo de Administración si el mensaje lo
+ * es (se decidió al llegar) o si el cliente aún no tiene su cuenta.
  */
 async function recordInboundMessageActivity(
   tx: Db,
   chat: ChatRow,
   client: typeof saasClient.$inferSelect,
-  message: { body: string | null; media: SaasInboundMedia[]; receivedAt: Date },
+  message: {
+    body: string | null
+    media: SaasInboundMedia[]
+    receivedAt: Date
+    adminOnly: boolean
+  },
 ): Promise<void> {
   await tx.insert(saasFollowUp).values({
     clientId: client.id,
@@ -252,7 +284,7 @@ async function recordInboundMessageActivity(
     contactId: chat.contactId,
     chatId: chat.id,
     happenedAt: message.receivedAt,
-    adminOnly: !client.organizationId,
+    adminOnly: message.adminOnly || !client.organizationId,
   })
 }
 
@@ -342,6 +374,9 @@ export async function ingestInboundChat(
     fileId: null,
   }))
   const body = trimTo(input.body, BODY_MAX)
+  const client = await clientOf(tx, chat.clientId)
+  // Se decide al llegar: Soporte solo ve lo que entra en una conversación de una clínica con su app.
+  const adminOnly = !client?.organizationId
   const [created] = await tx
     .insert(saasInboundMessage)
     .values({
@@ -350,6 +385,7 @@ export async function ingestInboundChat(
       body,
       media,
       receivedAt: input.receivedAt,
+      adminOnly,
     })
     .onConflictDoNothing({ target: saasInboundMessage.externalId })
     .returning()
@@ -381,7 +417,6 @@ export async function ingestInboundChat(
       updatedAt: now,
     })
     .where(eq(saasChat.id, chat.id))
-  const client = await clientOf(tx, chat.clientId)
   let files = 0
   if (client) {
     const attached = await attachMessageMedia(tx, null, input.channel, client.id, created, now)
@@ -395,6 +430,7 @@ export async function ingestInboundChat(
       body,
       media,
       receivedAt: input.receivedAt,
+      adminOnly,
     })
   }
   await writeAdminAudit(tx, null, {
@@ -509,6 +545,11 @@ export interface AssignChatInput {
   clientId: string
   /** La persona del cliente que escribe; opcional. */
   contactId?: string | null
+  /**
+   * El ítem de Kairós que se aprueba con esto («¿De quién es?» desde Hoy): no se
+   * cierra como «ya no hace falta», queda ejecutado por su sí.
+   */
+  kairosItemId?: string | null
 }
 
 export interface AssignChatResult {
@@ -574,8 +615,9 @@ export async function assignChat(
       updatedAt: now,
     })
     .where(eq(saasChat.id, chat.id))
-  // El celular de la persona: si no tenía, este. Uno que ya tiene no se pisa.
-  if (contact && !contact.phone)
+  // El celular de la persona: si no tenía, este. Uno que ya tiene no se pisa. Solo en WhatsApp:
+  // en Instagram y Messenger la dirección es un id de Meta, no un teléfono.
+  if (contact && !contact.phone && chat.channel === "whatsapp" && E164.test(chat.address))
     await tx
       .update(saasClientContact)
       .set({ phone: chat.address, updatedAt: now })
@@ -592,7 +634,10 @@ export async function assignChat(
       ? "la conversación pasó a otro cliente"
       : "ya se dijo de quién es",
     now,
+    input.kairosItemId ?? null,
   )
+  // Con un cliente sin app, lo de la conversación es de la venta: sube a solo Administración (nunca baja).
+  if (!client.organizationId) await raiseChatAdminOnly(tx, chat.id)
   const assigned = { ...chat, clientId: client.id, contactId }
   if (previous === client.id) {
     if (contactId !== chat.contactId)
@@ -627,6 +672,22 @@ export async function assignChat(
         ),
       )
       .returning({ id: saasClientFile.id })
+    // La posible carga de esos archivos sigue en Hoy, ahora del cliente nuevo (la regla no la
+    // vuelve a poner: es una por archivo).
+    if (files.length > 0)
+      await tx
+        .update(kairosItem)
+        .set({ clientId: client.id, updatedAt: now })
+        .where(
+          and(
+            eq(kairosItem.kind, "posible_carga"),
+            eq(kairosItem.status, "espera"),
+            sql`${kairosItem.payload} ->> 'fileId' in (${sql.join(
+              files.map((file) => sql`${file.id}`),
+              sql`, `,
+            )})`,
+          ),
+        )
     const replies = await tx
       .update(saasOutreach)
       .set({ clientId: client.id, contactId: null, updatedAt: now })
@@ -761,9 +822,11 @@ export interface OpenChatInput {
 /**
  * «Escribir por WhatsApp» desde la ficha: la conversación con el celular de
  * ese contacto, creada (ya ligada a su cliente y contacto) si nunca escribió.
- * Una que ya existe sin cliente la liga Administración (`assignChat`); una de
- * otro cliente no se toca (409): se mueve desde su conversación. Para Soporte,
- * un cliente que no ve no existe.
+ * El celular solo sugiere, nunca liga: una que ya existe sin cliente (o marcada
+ * «No es una clínica») no se toca y da 409 `CHAT_UNASSIGNED` con su `chatId`
+ * en `fields`, para que una persona diga de quién es desde su conversación.
+ * Una de otro cliente tampoco (409): se mueve desde su conversación. Para
+ * Soporte, un cliente que no ve no existe.
  */
 export async function openChatForContact(
   tx: Db,
@@ -811,15 +874,14 @@ export async function openChatForContact(
         409,
         "Ese celular ya escribe como otra clínica: muévelo desde su conversación",
       )
-    // Ya escribió sin saberse de quién: ligarla es decidir de quién es, y eso es de Administración.
-    if (actor.role !== "admin")
-      throw new ServiceError(
-        "CHAT_UNASSIGNED",
-        409,
-        "Ese celular ya escribió y falta decir de quién es: lo decide Administración",
-      )
-    await assignChat(tx, actor, existing.id, { clientId: client.id, contactId: contact.id }, now)
-    return { chatId: existing.id, created: false }
+    // Ya escribió sin saberse de quién: el celular no basta para decirlo (persona única). Lo
+    // decide una persona en «¿De quién es?»; la pantalla la abre con este `chatId`.
+    throw new ServiceError(
+      "CHAT_UNASSIGNED",
+      409,
+      "Ese celular ya nos escribió y falta decir de quién es. Dilo primero en Hoy.",
+      { chatId: existing.id },
+    )
   }
   const [created] = await tx
     .insert(saasChat)
@@ -968,10 +1030,16 @@ export async function getChat(
         .where(eq(saasClientContact.id, chat.contactId))
         .limit(1)
     : []
+  // Soporte no ve lo que llegó o salió mientras era de la venta (`admin_only`, fijado al escribirlo).
   const messages = await tx
     .select()
     .from(saasInboundMessage)
-    .where(eq(saasInboundMessage.chatId, chat.id))
+    .where(
+      and(
+        eq(saasInboundMessage.chatId, chat.id),
+        admin ? undefined : eq(saasInboundMessage.adminOnly, false),
+      ),
+    )
     .orderBy(asc(saasInboundMessage.receivedAt), asc(saasInboundMessage.id))
   const replies = await tx
     .select({
@@ -1171,8 +1239,10 @@ export async function prepareChatReply(
     if (text.length > max) throw invalidField("body", `Usa como máximo ${max} caracteres`)
     body = `${text}\n\n${signature}`
   }
-  // Lo que escribe Soporte nunca es «Solo administración».
-  const adminOnly = actor.role === "admin" ? Boolean(input.adminOnly) : false
+  // Se decide al reservarlo, como el mensaje al llegar: lo de una conversación que no es de una
+  // clínica con su app es de la venta; lo demás, si Administración lo marca. Lo que escribe
+  // Soporte (solo en una clínica con app) nunca lo es.
+  const adminOnly = !client?.organizationId || (actor.role === "admin" && Boolean(input.adminOnly))
   let proposalId: string | null = null
   if (input.proposalId && !template) {
     if (!chat.clientId)

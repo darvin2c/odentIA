@@ -1,5 +1,5 @@
 {
-  "id": "817dd729-d085-489c-a939-df5d1999158f",
+  "id": "63355ec9-a3c3-4328-9f8e-b8ddf7d98aa1",
   "prevId": "5cb11c01-890f-4d99-81d1-432fa88f4d2d",
   "version": "7",
   "dialect": "postgresql",
@@ -1845,6 +1845,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "admin_only": {
+          "name": "admin_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",

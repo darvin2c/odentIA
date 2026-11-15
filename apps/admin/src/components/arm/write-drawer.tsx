@@ -16,7 +16,7 @@ import { ExternalLink } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
 import { useIsAdmin } from "../../lib/session"
-import { openChatWith, useChatsConfig } from "./chat-api"
+import { openChatOutcome, openChatWith, useChatsConfig } from "./chat-api"
 import { ChatDrawer } from "./chat-drawer"
 import { FORMAT_HINT, FormatTools } from "./formatted-body"
 import {
@@ -79,7 +79,14 @@ const OTHER = "__otro"
 
 type Phase =
   | { kind: "form" }
-  | { kind: "chat"; chatId: string; draft: string; proposalId: string | null }
+  | {
+      kind: "chat"
+      chatId: string
+      draft: string
+      proposalId: string | null
+      /** Ese celular ya escribió sin decir de quién es: se abre «¿De quién es?» primero. */
+      decide?: boolean
+    }
   | OutreachCheck
 
 const writeSchema = z
@@ -188,10 +195,25 @@ function WriteForm({
     onSubmit: async ({ value, formApi }) => {
       const other = value.contactId === OTHER
       if (throughChat(value)) {
-        const chat = await openChatWith(clientId, value.contactId)
-        formApi.reset(value)
-        setPhase({ kind: "chat", chatId: chat.id, draft: value.body.trim(), proposalId })
-        return
+        let chatId: string | null = null
+        let decide = false
+        try {
+          chatId = (await openChatWith(clientId, value.contactId)).id
+        } catch (error) {
+          // Ese celular ya escribió sin decir de quién es: Administración lo dice primero (el
+          // texto queda puesto en la conversación). Soporte sigue por wa.me, como antes.
+          const outcome = openChatOutcome(error, isAdmin)
+          if (outcome.kind === "error") throw error
+          if (outcome.kind === "decidir") {
+            chatId = outcome.chatId
+            decide = true
+          } else if (outcome.message) toast.info(outcome.message)
+        }
+        if (chatId) {
+          formApi.reset(value)
+          setPhase({ kind: "chat", chatId, draft: value.body.trim(), proposalId, decide })
+          return
+        }
       }
       try {
         const result = await sendOutreach(clientId, {
@@ -242,6 +264,7 @@ function WriteForm({
         open
         draft={phase.draft}
         proposalId={phase.proposalId}
+        decide={phase.decide}
         onClose={() => {
           invalidate()
           onClose()

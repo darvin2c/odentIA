@@ -1238,9 +1238,11 @@ async function executeItem<O extends KairosOutreachPrepared>(
       const contactId = optText(payload.contactId)
       if (contactId && !UUID.test(contactId))
         throw invalidField("edited.contactId", "Esa persona no es de este cliente")
+      // Con su id: «¿De quién es?» no cierra como «ya no hace falta» el ítem que se está aprobando.
       await executors.assignChat(tx, actor, chatId, {
         clientId: target,
         ...(contactId ? { contactId } : {}),
+        kairosItemId: item.id,
       })
       return {
         status: "ejecutada",
@@ -1376,6 +1378,7 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
     .set({
       status: executed.status,
       result: executed.result,
+      error: null,
       decidedBy: actor.userId,
       decidedAt: now,
       updatedAt: now,
@@ -2156,6 +2159,8 @@ interface ChatPending extends Record<string, unknown> {
   body: string | null
   files: number
   received_at: string
+  /** El último mensaje es solo de Administración (llegó cuando la conversación era de la venta). */
+  admin_only: boolean
   maybe_carga: boolean
 }
 
@@ -2165,20 +2170,20 @@ interface ChatPending extends Record<string, unknown> {
  * de un cliente no archivado. `maybe_carga`: alguno de sus mensajes trae un
  * archivo con pinta de carga (`likelyCargaSql`, sin abrirlo).
  */
-async function pendingChats(tx: Db, withClient: boolean): Promise<ChatPending[]> {
+async function pendingChats(tx: Db, withClient: boolean, since: SQL): Promise<ChatPending[]> {
   return rows<ChatPending>(
     tx,
     sql`select c.id, c.channel, c.address, c.display_name, c.client_id, cl.name as client_name,
       cl.organization_id, ct.name as contact_name,
       ${iso(sql`c.last_inbound_at`)} as last_inbound_at,
       m.id as message_id, m.body, jsonb_array_length(m.media)::int as files,
-      ${iso(sql`m.received_at`)} as received_at,
+      ${iso(sql`m.received_at`)} as received_at, m.admin_only,
       exists (select 1 from saas_inbound_message mm
         cross join lateral (select e ->> 'mimeType' as content_type, e ->> 'filename' as filename
           from jsonb_array_elements(mm.media) e) f
         where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga
     from saas_chat c
-    join lateral (select id, body, media, received_at from saas_inbound_message
+    join lateral (select id, body, media, received_at, admin_only from saas_inbound_message
       where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
     left join saas_client cl on cl.id = c.client_id
     left join saas_client_contact ct on ct.id = c.contact_id
@@ -2188,6 +2193,7 @@ async function pendingChats(tx: Db, withClient: boolean): Promise<ChatPending[]>
         : sql`c.client_id is null and c.not_clinic_at is null`
     }
       and not ${chatRepliedSql}
+      and m.received_at > ${since}
     order by m.received_at asc, c.id asc`,
   )
 }
@@ -2288,7 +2294,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
   for (const row of stale) byWhy.set(row.why, [...(byWhy.get(row.why) ?? []), row.id])
   for (const [why, ids] of byWhy) await pass.closeItems({ ids }, why)
 
-  for (const chat of await pendingChats(tx, false)) {
+  for (const chat of await pendingChats(tx, false, pass.ago(CHAT_OWNER_LOOKBACK_HOURS / 24))) {
     const channel = chatChannelOf(chat.channel)
     const words = CHAT_CHANNEL_WORDS[channel]
     const who = chatWho({ channel, address: chat.address, display_name: chat.display_name })
@@ -2327,7 +2333,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
     })
   }
 
-  for (const chat of await pendingChats(tx, true)) {
+  for (const chat of await pendingChats(tx, true, pass.ago(CHAT_REPLY_LOOKBACK_HOURS / 24))) {
     if (!chat.client_id) continue
     const channel = chatChannelOf(chat.channel)
     const words = CHAT_CHANNEL_WORDS[channel]
@@ -2344,8 +2350,9 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
       fact: `${chat.id}:${chat.message_id}`,
       title: `${person} · ${chat.client_name ?? "Cliente"}`,
       reason: `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y todavía no le respondemos.`,
-      // La conversación de una clínica con su app también la ve Soporte; la de venta, no.
-      adminOnly: !chat.organization_id,
+      // La conversación de una clínica con su app también la ve Soporte; la de venta, no, ni un
+      // mensaje que llegó cuando era de la venta (su `admin_only`).
+      adminOnly: !chat.organization_id || chat.admin_only,
       payload: {
         chatId: chat.id,
         channel,
@@ -2358,6 +2365,17 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
     })
   }
 }
+
+/**
+ * Cuántas horas atrás mira Kairós un mensaje por responder (`responder_chat`):
+ * pasada una semana ya no es «por responder» en Hoy (la conversación sigue en la ficha).
+ */
+const CHAT_REPLY_LOOKBACK_HOURS = 7 * 24
+/**
+ * Cuántas horas atrás mira Kairós una conversación sin cliente (`chat_sin_cliente`): decir de
+ * quién es importa más tiempo que responder, pero no para siempre.
+ */
+const CHAT_OWNER_LOOKBACK_HOURS = 30 * 24
 
 /** Cuántas horas atrás mira Kairós los correos por responder: lo que llegó antes ya no es nuevo. */
 const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS

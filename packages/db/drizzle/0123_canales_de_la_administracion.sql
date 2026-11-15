@@ -29,6 +29,7 @@ CREATE TABLE "admin"."saas_inbound_message" (
 	"body" text,
 	"media" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"received_at" timestamp with time zone NOT NULL,
+	"admin_only" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "saas_inbound_message_text_check" CHECK (length("admin"."saas_inbound_message"."external_id") BETWEEN 1 AND 256
         AND ("admin"."saas_inbound_message"."body" IS NULL OR length("admin"."saas_inbound_message"."body") <= 10000)

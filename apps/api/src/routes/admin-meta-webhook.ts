@@ -18,6 +18,7 @@ import {
   type ChatMetaStatus,
   inboundAttachmentKey,
   ingestInboundChat,
+  ServiceError,
   type Storage,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
@@ -38,8 +39,11 @@ import { allowedInboundAttachment } from "./inbound-email.js"
  * cuenta se ignora con 200. Cada mensaje entra una sola vez por su id de Meta;
  * sus archivos se bajan y se suben antes de la transacción, solo los tipos
  * permitidos por sus bytes, y se borran si el mensaje era repetido o falló. Un
- * mensaje que falla no frena a los demás ni cambia la respuesta: Meta reintenta
- * lo que no recibe un 200, y un reintento ya registrado no entra dos veces.
+ * mensaje que no se pudo guardar (la base o el almacenamiento) no frena a los
+ * demás, pero el aviso responde 500: Meta reintenta lo que no recibe un 200, y
+ * lo que ya entró no entra dos veces (su id de Meta). Un archivo que no se pudo
+ * bajar (pasa de 25 MB, tarda más de 20 s, o en Messenger e Instagram no viene
+ * de un servidor de Meta) no se guarda, y el mensaje entra igual.
  *
  * Estados (solo WhatsApp): por el `wamid` o por `biz_opaque_callback_data`, que
  * lleva el id del envío; resuelven un envío pendiente o incierto.
@@ -62,6 +66,8 @@ const WEBHOOK_BODY_MAX = 2 * 1024 * 1024
 /** Un archivo de más de esto no se guarda (WhatsApp deja hasta 100 MB). */
 export const ADMIN_CHAT_MEDIA_BYTES_MAX = 25 * 1024 * 1024
 const PROFILE_TIMEOUT_MS = 5_000
+/** Cuánto se espera un archivo: lo que tarda más no se guarda (el mensaje sí entra). */
+const MEDIA_TIMEOUT_MS = 20_000
 
 type AttachmentKind = { contentType: string; ext: string }
 
@@ -255,8 +261,13 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
     let fetched: { bytes: Uint8Array; mimeType: string; filename: string }
     try {
       if (!adapter.fetchMedia) return null
-      fetched = await adapter.fetchMedia(config, media.externalId, { fetch: fetchImpl })
+      // Con tope de tamaño y de tiempo: se corta apenas pasa de 25 MB, sin leerlo entero.
+      fetched = await adapter.fetchMedia(config, media.externalId, {
+        fetch: fetchImpl,
+        media: { maxBytes: ADMIN_CHAT_MEDIA_BYTES_MAX, timeoutMs: MEDIA_TIMEOUT_MS },
+      })
     } catch (error) {
+      // No se pudo bajar (venció, pesa demasiado, no es de Meta): el mensaje entra sin él.
       console.warn(`[admin-meta] no se pudo bajar el archivo de ${message.externalId}`, error)
       return null
     }
@@ -474,10 +485,15 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
         }
       }
 
+      // Lo que no se pudo guardar (la base, el almacenamiento) no frena lo demás, pero la
+      // respuesta es 500 para que Meta vuelva a mandar el aviso: lo que ya entró no se repite.
+      let failed = 0
       for (const { adapter, config, message } of pending) {
         try {
           await ingestOne(adapter, config, message, now)
         } catch (error) {
+          // Un mensaje que no es válido (400) no se arregla con otro intento: no pide reenviarlo.
+          if (!(error instanceof ServiceError && error.status === 400)) failed += 1
           console.error(
             `[admin-meta] no entró el mensaje ${message.externalId} de ${message.channel}`,
             error,
@@ -494,12 +510,18 @@ export function createAdminMetaWebhookRoute(deps: AdminMetaWebhookDeps) {
             ),
           )
         } catch (error) {
+          failed += 1
           console.error(
             `[admin-meta] no se aplicó el estado ${status.status} de ${status.id}`,
             error,
           )
         }
       }
+      if (failed > 0)
+        return c.json(
+          errorBody(c, "INTERNAL", "No se pudo guardar todo el aviso: Meta lo vuelve a mandar"),
+          500,
+        )
       return c.json({ ok: true }, 200)
     },
   )
