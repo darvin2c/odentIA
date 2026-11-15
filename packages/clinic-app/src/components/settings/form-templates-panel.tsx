@@ -751,6 +751,11 @@ function TemplateBuilder({
       }
       description="Se guarda como borrador. Para usarla en la atención, publícala desde la lista."
       submitDisabled={!canAdmin}
+      // Formulario largo, con preguntas de dos columnas: el cajón ancho, como Antecedentes. Encima de la
+      // página y no al lado: con el submenú de Configuración, al lado dejaba la lista en 167 px y el
+      // título cortado («Fich…»).
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(40rem,calc(100vw-2rem))]"
+      dock={false}
     >
       <div className="flex flex-col gap-5">
         {isNewVersion && initial ? (
@@ -838,7 +843,7 @@ function TemplateBuilder({
                     <section
                       // biome-ignore lint/suspicious/noArrayIndexKey: las secciones son un arreglo del formulario sin id propio: TanStack Form las nombra por su posición
                       key={si}
-                      className="rounded-xl border p-3"
+                      className="rounded-xl border p-4"
                       // Enter en una pregunta no guarda ni cierra el panel: pasa al campo siguiente.
                       onKeyDown={enterMovesOn}
                     >
@@ -870,7 +875,7 @@ function TemplateBuilder({
                           const fieldErrors = fieldErrorMessages(fieldsField.state.meta.errors)
                           const fieldsErrorId = `${ids}-seccion-${si}-error`
                           return (
-                            <div className="mt-3 flex flex-col gap-3">
+                            <div className="mt-4 flex flex-col gap-3">
                               {section.fields.map((field, fi) => (
                                 <FieldEditor
                                   // biome-ignore lint/suspicious/noArrayIndexKey: las preguntas son un arreglo del formulario sin id propio: TanStack Form las nombra por su posición
@@ -1003,8 +1008,8 @@ function FieldEditor({
   const textAnswer = field.type === "texto" || field.type === "texto_largo"
   const noneWarningId = useId()
   return (
-    <div className="rounded-xl bg-muted/40 p-3">
-      <div className="grid gap-2 sm:grid-cols-2">
+    <div className="flex flex-col gap-4 rounded-xl bg-muted/40 p-4">
+      <div className="grid gap-4 sm:grid-cols-2">
         <form.AppField name={`sections[${si}].fields[${fi}].label`}>
           {(labelField) => (
             <labelField.TextField
@@ -1044,171 +1049,108 @@ function FieldEditor({
           )}
         </form.AppField>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <form.AppField name={`sections[${si}].fields[${fi}].required`}>
-          {(requiredField) => (
-            <FormChoiceField label="Obligatorio" className={CHECK_FIELD}>
-              {(control) => (
-                <Checkbox
-                  id={control.id}
-                  name={control.name}
-                  checked={requiredField.state.value === true}
-                  disabled={disabled}
-                  aria-invalid={control.invalid || undefined}
-                  // El aviso de «No tiene» queda unido a la casilla: se oye al marcarla.
-                  aria-describedby={
-                    [control.describedBy, requiredWithoutNone(field) ? noneWarningId : null].filter(Boolean).join(" ") ||
-                    undefined
-                  }
-                  onCheckedChange={(checked) => {
-                    requiredField.handleChange(checked === true)
-                    requiredField.handleBlur()
-                  }}
-                />
-              )}
-            </FormChoiceField>
+      {textAnswer ? (
+        <form.AppField name={`sections[${si}].fields[${fi}].unit`}>
+          {(unitField) => (
+            <unitField.TextField
+              label="Unidad (opcional)"
+              className="sm:max-w-48"
+              maxLength={20}
+              disabled={disabled}
+            />
           )}
         </form.AppField>
-        {requiredWithoutNone(field) ? (
-          // Avisa sin impedir: sin «No tiene», quien no tiene nada no podría finalizar la ficha.
-          <p id={noneWarningId} role="status" className="w-full rounded-md bg-warning-soft p-2 text-sm">
-            Obligatoria, «sin marcar» ya no vale como respuesta: agrega la opción «No tiene» (o «Ninguno») para que se
-            pueda responder cuando no hay nada.
-          </p>
-        ) : null}
-        {declaresHealth && textAnswer ? (
-          <form.AppField name={`sections[${si}].fields[${fi}].definition`}>
-            {(definitionField) => (
-              <FormChoiceField label="Son alergias: pasan a sus antecedentes" className={CHECK_FIELD}>
+      ) : null}
+      {field.type === "numero" ? (
+        <div className="grid grid-cols-3 gap-4">
+          <form.AppField name={`sections[${si}].fields[${fi}].min`}>
+            {(minField) => (
+              <minField.Control label="Mínimo">
                 {(control) => (
-                  <Checkbox
-                    id={control.id}
-                    name={control.name}
-                    checked={definitionField.state.value === "AllergyIntolerance.code"}
+                  <Input
+                    {...control.props}
+                    placeholder="Sin mínimo"
+                    type="number"
+                    value={minField.state.value ?? ""}
                     disabled={disabled}
-                    aria-invalid={control.invalid || undefined}
-                    aria-describedby={control.describedBy}
-                    onCheckedChange={(checked) => {
-                      definitionField.handleChange(checked === true ? "AllergyIntolerance.code" : null)
-                      definitionField.handleBlur()
-                    }}
+                    onChange={(event) =>
+                      minField.handleChange(event.target.value === "" ? null : Number(event.target.value))
+                    }
                   />
                 )}
-              </FormChoiceField>
+              </minField.Control>
             )}
           </form.AppField>
-        ) : null}
-        {textAnswer ? (
+          <form.AppField name={`sections[${si}].fields[${fi}].max`}>
+            {(maxField) => (
+              <maxField.Control label="Máximo">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    placeholder="Sin máximo"
+                    type="number"
+                    value={maxField.state.value ?? ""}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      maxField.handleChange(event.target.value === "" ? null : Number(event.target.value))
+                    }
+                  />
+                )}
+              </maxField.Control>
+            )}
+          </form.AppField>
           <form.AppField name={`sections[${si}].fields[${fi}].unit`}>
             {(unitField) => (
               <unitField.TextField
                 label="Unidad"
-                hideLabel
-                className="w-32"
-                placeholder="Unidad (opcional)"
+                placeholder="mm, kg…"
                 maxLength={20}
                 disabled={disabled}
               />
             )}
           </form.AppField>
-        ) : null}
-        {field.type === "numero" ? (
-          <>
-            <form.AppField name={`sections[${si}].fields[${fi}].min`}>
-              {(minField) => (
-                <minField.Control label="Mínimo" hideLabel className="w-28">
-                  {(control) => (
-                    <Input
-                      {...control.props}
-                      placeholder="Mín"
-                      type="number"
-                      value={minField.state.value ?? ""}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        minField.handleChange(event.target.value === "" ? null : Number(event.target.value))
-                      }
-                    />
-                  )}
-                </minField.Control>
-              )}
-            </form.AppField>
-            <form.AppField name={`sections[${si}].fields[${fi}].max`}>
-              {(maxField) => (
-                <maxField.Control label="Máximo" hideLabel className="w-28">
-                  {(control) => (
-                    <Input
-                      {...control.props}
-                      placeholder="Máx"
-                      type="number"
-                      value={maxField.state.value ?? ""}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        maxField.handleChange(event.target.value === "" ? null : Number(event.target.value))
-                      }
-                    />
-                  )}
-                </maxField.Control>
-              )}
-            </form.AppField>
-            <form.AppField name={`sections[${si}].fields[${fi}].unit`}>
-              {(unitField) => (
-                <unitField.TextField
-                  label="Unidad"
-                  hideLabel
-                  className="w-32"
-                  placeholder="Unidad"
-                  maxLength={20}
-                  disabled={disabled}
-                />
-              )}
-            </form.AppField>
-          </>
-        ) : null}
-        {field.type === "escala" ? (
-          <>
-            <form.AppField name={`sections[${si}].fields[${fi}].min`}>
-              {(minField) => (
-                <minField.Control label="Extremo inferior de la escala" hideLabel className="w-24">
-                  {(control) => (
-                    <Input
-                      {...control.props}
-                      type="number"
-                      step={1}
-                      value={minField.state.value ?? 0}
-                      disabled={disabled}
-                      onChange={(event) => minField.handleChange(Number(event.target.value))}
-                    />
-                  )}
-                </minField.Control>
-              )}
-            </form.AppField>
-            <span className="text-sm">a</span>
-            <form.AppField name={`sections[${si}].fields[${fi}].max`}>
-              {(maxField) => (
-                <maxField.Control label="Extremo superior de la escala" hideLabel className="w-24">
-                  {(control) => (
-                    <Input
-                      {...control.props}
-                      type="number"
-                      step={1}
-                      value={maxField.state.value ?? 10}
-                      disabled={disabled}
-                      onChange={(event) => maxField.handleChange(Number(event.target.value))}
-                    />
-                  )}
-                </maxField.Control>
-              )}
-            </form.AppField>
-          </>
-        ) : null}
-        <Button type="button" size="sm" variant="ghost" className={ROW_BUTTON} disabled={disabled} onClick={onRemove}>
-          Quitar campo
-        </Button>
-      </div>
+        </div>
+      ) : null}
+      {field.type === "escala" ? (
+        <div className="grid grid-cols-2 gap-4 sm:max-w-sm">
+          <form.AppField name={`sections[${si}].fields[${fi}].min`}>
+            {(minField) => (
+              <minField.Control label="La escala va de">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    type="number"
+                    step={1}
+                    value={minField.state.value ?? 0}
+                    disabled={disabled}
+                    onChange={(event) => minField.handleChange(Number(event.target.value))}
+                  />
+                )}
+              </minField.Control>
+            )}
+          </form.AppField>
+          <form.AppField name={`sections[${si}].fields[${fi}].max`}>
+            {(maxField) => (
+              <maxField.Control label="Hasta">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    type="number"
+                    step={1}
+                    value={maxField.state.value ?? 10}
+                    disabled={disabled}
+                    onChange={(event) => maxField.handleChange(Number(event.target.value))}
+                  />
+                )}
+              </maxField.Control>
+            )}
+          </form.AppField>
+        </div>
+      ) : null}
       {sources.length > 0 || field.showIf ? (
         <form.AppField name={`sections[${si}].fields[${fi}].showIf`}>
           {(conditionField) => (
-            <conditionField.Control label="Mostrar si" hideLabel className="mt-2">
+            <conditionField.Control label="Mostrar si" hideLabel>
               {(control) => (
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span>Mostrar si</span>
@@ -1300,7 +1242,7 @@ function FieldEditor({
       {CHOICE_TYPES.includes(field.type) ? (
         <form.AppField name={`sections[${si}].fields[${fi}].options`}>
           {(optionsField) => (
-            <optionsField.Control label="Nueva opción" hideLabel className="mt-2">
+            <optionsField.Control label="Opciones">
               {(control) => (
                 <OptionsEditor
                   control={control}
@@ -1316,15 +1258,73 @@ function FieldEditor({
       <form.AppField name={`sections[${si}].fields[${fi}].help`}>
         {(helpField) => (
           <helpField.TextField
-            label="Texto de ayuda"
-            hideLabel
-            className="mt-2"
-            placeholder="Texto de ayuda (opcional)"
+            label="Texto de ayuda (opcional)"
+            placeholder="Se ve debajo de la pregunta"
             maxLength={500}
             disabled={disabled}
           />
         )}
       </form.AppField>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <form.AppField name={`sections[${si}].fields[${fi}].required`}>
+            {(requiredField) => (
+              <FormChoiceField label="Obligatorio" className={CHECK_FIELD}>
+                {(control) => (
+                  <Checkbox
+                    id={control.id}
+                    name={control.name}
+                    checked={requiredField.state.value === true}
+                    disabled={disabled}
+                    aria-invalid={control.invalid || undefined}
+                    // El aviso de «No tiene» queda unido a la casilla: se oye al marcarla.
+                    aria-describedby={
+                      [control.describedBy, requiredWithoutNone(field) ? noneWarningId : null].filter(Boolean).join(" ") ||
+                      undefined
+                    }
+                    onCheckedChange={(checked) => {
+                      requiredField.handleChange(checked === true)
+                      requiredField.handleBlur()
+                    }}
+                  />
+                )}
+              </FormChoiceField>
+            )}
+          </form.AppField>
+          {declaresHealth && textAnswer ? (
+            <form.AppField name={`sections[${si}].fields[${fi}].definition`}>
+              {(definitionField) => (
+                <FormChoiceField label="Son alergias: pasan a sus antecedentes" className={CHECK_FIELD}>
+                  {(control) => (
+                    <Checkbox
+                      id={control.id}
+                      name={control.name}
+                      checked={definitionField.state.value === "AllergyIntolerance.code"}
+                      disabled={disabled}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onCheckedChange={(checked) => {
+                        definitionField.handleChange(checked === true ? "AllergyIntolerance.code" : null)
+                        definitionField.handleBlur()
+                      }}
+                    />
+                  )}
+                </FormChoiceField>
+              )}
+            </form.AppField>
+          ) : null}
+        </div>
+        <Button type="button" size="sm" variant="ghost" className={ROW_BUTTON} disabled={disabled} onClick={onRemove}>
+          Quitar campo
+        </Button>
+      </div>
+      {requiredWithoutNone(field) ? (
+        // Avisa sin impedir: sin «No tiene», quien no tiene nada no podría finalizar la ficha.
+        <p id={noneWarningId} role="status" className="w-full rounded-md bg-warning-soft p-2 text-sm">
+          Obligatoria, «sin marcar» ya no vale como respuesta: agrega la opción «No tiene» (o «Ninguno») para que se
+          pueda responder cuando no hay nada.
+        </p>
+      ) : null}
     </div>
   )
 }

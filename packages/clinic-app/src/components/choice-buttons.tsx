@@ -76,7 +76,8 @@ export function ChoiceButtons<T extends string>({
       disabled={disabled}
       spacing={1}
       className={cn(
-        "max-w-full rounded-3xl bg-muted p-1 aria-invalid:ring-1 aria-invalid:ring-destructive",
+        // El borde de los campos (3:1 sobre el fondo, WCAG 1.4.11): sin él, el grupo no se veía como un control.
+        "max-w-full rounded-3xl border border-input-border bg-muted p-1 aria-invalid:ring-1 aria-invalid:ring-destructive",
         columns ? "grid w-full" : "flex-wrap",
         columns === 2 && "grid-cols-2",
         columns === 3 && "grid-cols-3",
@@ -130,7 +131,7 @@ export function MultiChoiceButtons<T extends string>({
       disabled={disabled}
       spacing={1}
       className={cn(
-        "max-w-full rounded-3xl bg-muted p-1",
+        "max-w-full rounded-3xl border border-input-border bg-muted p-1",
         columns ? "grid w-full" : "flex-wrap",
         columns === 2 && "grid-cols-2",
         columns === 3 && "grid-cols-3",
@@ -156,7 +157,9 @@ function itemClass(columns: boolean, tone: "neutral" | "primary"): string {
     "h-auto min-h-9 rounded-3xl px-3.5 py-1.5 text-muted-foreground hover:bg-background/60 aria-pressed:shadow-xs",
     columns ? "w-full whitespace-normal px-1.5 text-center leading-tight" : "",
     tone === "primary"
-      ? "aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary"
-      : "aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:hover:bg-background",
+      ? // El relleno del botón principal, no `bg-primary`: con un color de clínica claro, la letra va oscura.
+        "aria-pressed:bg-primary-fill aria-pressed:text-primary-fill-foreground aria-pressed:hover:bg-primary-fill-hover"
+      : // Lo elegido se ve a 3:1 (WCAG 1.4.11): con el borde de los campos y en negrita, no solo un blanco sobre gris.
+        "aria-pressed:bg-background aria-pressed:font-semibold aria-pressed:text-foreground aria-pressed:ring-1 aria-pressed:ring-input-border aria-pressed:hover:bg-background",
   )
 }

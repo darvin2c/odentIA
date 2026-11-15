@@ -949,11 +949,15 @@ function PrescriptionRow({
  * de quién es y qué se puede hacer («Agregar una corrección», «Marcar como revisado»).
  */
 export function formDetailDescription(
-  response: (Pick<FormResponse, "status"> & Partial<Pick<FormResponse, "source">>) | null,
+  response: (Pick<FormResponse, "status"> & Partial<Pick<FormResponse, "source" | "encounterId" | "encounterStatus">>) | null,
   canWrite: boolean,
 ): string | undefined {
   if (response?.source === "portal") return undefined
-  if (response?.status === "borrador" && canWrite) return "Se guarda sola mientras la llenas."
+  // En una atención en curso no hay «Finalizar…»: se cierra con la firma, y se dice aquí, a la vista.
+  if (response?.status === "borrador" && canWrite)
+    return response.encounterId && response.encounterStatus === "borrador"
+      ? "Se guarda sola mientras la llenas y se finaliza al firmar la atención."
+      : "Se guarda sola mientras la llenas."
   if (response?.status === "finalizado") return "Finalizada: ya no se cambia. Para corregir algo, agrega una adenda."
   return undefined
 }
@@ -1055,6 +1059,9 @@ export function FormDetail({
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Ficha"}
       description={formDetailDescription(response, canWrite)}
+      // 512 px: lo corto de la ficha va de a pares y la atención de al lado conserva el odontograma
+      // entero a 1440 (con 640 bajaba a una arcada a la vez). Quien la quiera más ancha, la estira.
+      size="lg"
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
     >
