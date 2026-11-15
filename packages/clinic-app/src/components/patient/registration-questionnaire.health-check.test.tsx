@@ -139,6 +139,38 @@ describe("¿Cambió algo? dentro del recorrido", () => {
   })
 })
 
+describe("un envío que falló se vuelve a enviar sin cambiar nada", () => {
+  it("«Enviar» otra vez manda lo mismo: el error de antes se dice, pero no bloquea", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    mounted.push({ host, root })
+    let calls = 0
+    await act(async () => {
+      root.render(
+        <RegistrationQuestionnaire
+          config={config}
+          today="2026-11-15"
+          countryCode="PE"
+          fill={{ ...base, healthCheck: null, health: true, healthKeys: new Set(["medications"]) }}
+          submitLabel="Enviar"
+          shortcuts={false}
+          onSubmit={async () => {
+            calls++
+            if (calls === 1) throw new Error("La clínica cambió el registro: revisa tus respuestas y vuelve a enviar.")
+          }}
+        />,
+      )
+    })
+    await press(option(host, "medications", "No"))
+    await press(button(host, "Enviar"))
+    expect(calls).toBe(1)
+    expect(host.textContent).toContain("La clínica cambió el registro")
+    await press(button(host, "Enviar"))
+    expect(calls).toBe(2)
+  })
+})
+
 describe("¿Empezaste o dejaste alguna medicina? en «Tu visita»", () => {
   const visit: RegistrationFill = {
     ...base,

@@ -3491,7 +3491,7 @@ function HealthCheckStep({
   const submitError = useFormSubmitError(form)
   const loose = finish && fillContext?.at === "change" ? submitError : null
   return (
-    <QuestionnaireItem name="change" required invalid={loose !== null}>
+    <QuestionnaireItem name="change" required>
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
       <QuestionnaireDescription>
         {answer === "cambio"
@@ -3629,7 +3629,8 @@ function Question({
       required={required}
       multiple={multiple}
       disabled={disabled}
-      invalid={loose !== null}
+      // Lo que rechazó el envío se dice abajo, pero no marca la pantalla: marcada, el cuestionario no deja
+      // volver a enviar hasta cambiar algo, y «Enviar» otra vez no hacía nada.
       onStatusChange={(status) => {
         if (status !== "skipped" || !skips) return
         for (const [key, value] of Object.entries(skips)) form.setFieldValue(key as keyof Draft, value as never)

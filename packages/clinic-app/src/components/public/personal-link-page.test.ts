@@ -124,6 +124,8 @@ describe("antes de su cita, una sola tarjeta", () => {
 
   // QA final de formularios (15 nov, H4): con la cita de hoy en curso, «Antes de tu cita» hablaba de la del lunes.
   it("con la cita de hoy en curso, la tarjeta es de la de hoy y lo dice, aunque «Tu cita» sea la que viene", () => {
+    // La fecha se dice en el idioma de la clínica, no en el del equipo que corre la prueba.
+    setOrgLocale("es-PE", "America/Lima", "PE")
     const today = { startsAt: "2026-11-10T03:30:00.000Z", timeZone: "America/Lima", professionalName: "Dr. Luis Prado" }
     const card = beforeVisitCard(view({ consents: [], data: null, beforeVisit: today, visit: { purpose: null, questions } }), "odontólogo")
     expect(card).toMatchObject({ title: "Antes de tu cita", at: today.startsAt })
