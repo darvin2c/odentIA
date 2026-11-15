@@ -672,6 +672,100 @@ export async function undoChatNotClinic(
   return { chatId: chat.id }
 }
 
+export interface OpenChatInput {
+  clientId: string
+  contactId: string
+  /** Por ahora solo WhatsApp: Instagram y Messenger no dejan escribir primero. */
+  channel: "whatsapp"
+}
+
+/**
+ * «Escribir por WhatsApp» desde la ficha: la conversación con el celular de
+ * ese contacto, creada (ya ligada a su cliente y contacto) si nunca escribió.
+ * Una que ya existe sin cliente la liga Administración (`assignChat`); una de
+ * otro cliente no se toca (409): se mueve desde su conversación. Para Soporte,
+ * un cliente que no ve no existe.
+ */
+export async function openChatForContact(
+  tx: Db,
+  actor: AdminActor | null,
+  input: OpenChatInput,
+  now = new Date(),
+): Promise<{ chatId: string; created: boolean }> {
+  if (!actor) throw forbidden("Se requiere personal de administración")
+  if (input.channel !== "whatsapp")
+    throw invalidField("channel", "Solo se le escribe primero por WhatsApp")
+  if (!UUID.test(input.clientId ?? "")) throw notFound("Cliente")
+  const client = await clientOf(tx, input.clientId)
+  if (!client || !seesChat(actor, client)) throw notFound("Cliente")
+  if (client.archivedAt) throw invalidField("clientId", "Ese cliente está archivado")
+  if (!UUID.test(input.contactId ?? ""))
+    throw invalidField("contactId", "Esa persona no es de este cliente")
+  const [contact] = await tx
+    .select()
+    .from(saasClientContact)
+    .where(
+      and(eq(saasClientContact.id, input.contactId), eq(saasClientContact.clientId, client.id)),
+    )
+    .limit(1)
+  if (!contact) throw invalidField("contactId", "Esa persona no es de este cliente")
+  const phone = contact.phone?.trim() ?? ""
+  if (!E164.test(phone)) throw invalidField("contactId", "Esa persona no tiene celular")
+  const [existing] = await tx
+    .select()
+    .from(saasChat)
+    .where(and(eq(saasChat.channel, input.channel), eq(saasChat.address, phone)))
+    .for("update")
+    .limit(1)
+  if (existing) {
+    if (existing.clientId === client.id) {
+      if (!existing.contactId)
+        await tx
+          .update(saasChat)
+          .set({ contactId: contact.id, updatedAt: now })
+          .where(eq(saasChat.id, existing.id))
+      return { chatId: existing.id, created: false }
+    }
+    if (existing.clientId)
+      throw new ServiceError(
+        "CHAT_OTHER_CLIENT",
+        409,
+        "Ese celular ya escribe como otra clínica: muévelo desde su conversación",
+      )
+    // Ya escribió sin saberse de quién: ligarla es decidir de quién es, y eso es de Administración.
+    if (actor.role !== "admin")
+      throw new ServiceError(
+        "CHAT_UNASSIGNED",
+        409,
+        "Ese celular ya escribió y falta decir de quién es: lo decide Administración",
+      )
+    await assignChat(tx, actor, existing.id, { clientId: client.id, contactId: contact.id }, now)
+    return { chatId: existing.id, created: false }
+  }
+  const [created] = await tx
+    .insert(saasChat)
+    .values({
+      channel: input.channel,
+      address: phone,
+      displayName: trimTo(contact.name, 200),
+      clientId: client.id,
+      contactId: contact.id,
+      matchedByUser: actor.userId,
+      matchedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: saasChat.id })
+  if (!created) throw new ServiceError("INTERNAL", 500, "No se pudo abrir la conversación")
+  await writeAdminAudit(tx, actor, {
+    action: "chat.opened",
+    entityId: created.id,
+    organizationId: client.organizationId,
+    metadata: { channel: input.channel, clientId: client.id, contactId: contact.id },
+  })
+  return { chatId: created.id, created: true }
+}
+
 /** Un archivo de un mensaje, ya documento del cliente, y si es la carga de datos. */
 export interface ChatFile {
   fileId: string

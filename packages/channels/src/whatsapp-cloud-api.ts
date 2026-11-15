@@ -1164,7 +1164,11 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     // `to` es el externalThreadId del parse (`wa:<phone>`).
     const to = msg.to.startsWith("wa:") ? msg.to.slice("wa:".length) : msg.to
-    const body = buildBody(to, msg.kind, msg.replyToExternalId)
+    const body = {
+      ...buildBody(to, msg.kind, msg.replyToExternalId),
+      // Vuelve en los estados de ese envío; Meta lo limita a 512 caracteres.
+      ...(msg.callbackData ? { biz_opaque_callback_data: msg.callbackData.slice(0, 512) } : {}),
+    }
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/messages`,

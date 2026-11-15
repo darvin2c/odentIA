@@ -114,6 +114,19 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().default(""),
   META_LOGIN_CONFIG_ID: z.string().default(""),
   META_WEBHOOK_VERIFY_TOKEN: z.string().default(""),
+  /**
+   * Los canales de la administración (ADR 0188): la app de Meta propia de
+   * Sallca, con su número de WhatsApp, su página de Facebook (Messenger) y su
+   * cuenta de Instagram. Cada canal se prende con sus variables y las dos
+   * comunes (`adminChannelsFromEnv`); vacías, «Escribir» sigue con wa.me.
+   */
+  ADMIN_META_APP_SECRET: z.string().default(""),
+  ADMIN_META_VERIFY_TOKEN: z.string().default(""),
+  ADMIN_WA_PHONE_NUMBER_ID: z.string().default(""),
+  ADMIN_WA_ACCESS_TOKEN: z.string().default(""),
+  ADMIN_META_PAGE_ID: z.string().default(""),
+  ADMIN_META_PAGE_ACCESS_TOKEN: z.string().default(""),
+  ADMIN_IG_ACCOUNT_ID: z.string().default(""),
   /** Versión del Graph API con la que el botón abre la ventana y el servidor llama a Meta. */
   META_GRAPH_VERSION: z
     .string()

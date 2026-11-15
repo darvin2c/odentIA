@@ -144,6 +144,18 @@ it("envía la plantilla con sus variables y lo que devuelve cada botón", async 
   })
 })
 
+it("el id del envío viaja como biz_opaque_callback_data, y sin él no va", async () => {
+  const { calls, fetch } = fakeFetch({ json: { messages: [{ id: "wamid.cb" }] } }, { json: { messages: [{ id: "wamid.cb2" }] } })
+  await whatsappCloudApiAdapter.sendMessage(
+    fx.config,
+    { to: "wa:1", callbackData: "envio-1", kind: { type: "text", text: "Hola" } },
+    { fetch },
+  )
+  expect(calls[0]?.body).toMatchObject({ type: "text", biz_opaque_callback_data: "envio-1" })
+  await whatsappCloudApiAdapter.sendMessage(fx.config, { to: "wa:1", kind: { type: "text", text: "Hola" } }, { fetch })
+  expect(calls[1]?.body).not.toHaveProperty("biz_opaque_callback_data")
+})
+
 it("una plantilla sin variables no envía un cuerpo vacío", async () => {
   const { calls, fetch } = fakeFetch({ json: { messages: [{ id: "wamid.2" }] } })
   await whatsappCloudApiAdapter.sendMessage(

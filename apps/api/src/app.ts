@@ -9,6 +9,7 @@ import {
   brandMailbox,
   CLINIC_LOGO_MAX_BYTES,
   CLINIC_LOGO_MIME_EXT,
+  type AdminChannels,
   CONVERSATION_STATE_ACTIONS,
   clinicLogoColors,
   clinicLogoFolder,
@@ -63,6 +64,7 @@ import { lockedRecordGuard } from "./lib/record-lock.js"
 import { createAccountRoute } from "./routes/account.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
+import { createAdminChatsRoute } from "./routes/admin-chats.js"
 import { createAdminClientsRoute } from "./routes/admin-clients.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
 import {
@@ -105,6 +107,7 @@ import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
+import { createAdminMetaWebhookRoute } from "./routes/admin-meta-webhook.js"
 import { createInboundEmailRoute } from "./routes/inbound-email.js"
 import { runService, validationError } from "./routes/helpers.js"
 import { createInventoryRoute } from "./routes/inventory.js"
@@ -210,6 +213,12 @@ export interface AppDeps {
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
+  /**
+   * La app de Meta de la administración (ADMIN_META_*, ADMIN_WA_*, ADMIN_IG_*):
+   * WhatsApp, Messenger e Instagram de Sallca. Sin ella no hay dirección de avisos
+   * y «Escribir» sigue con wa.me.
+   */
+  adminChannels?: AdminChannels | undefined
 }
 
 // Lo que dice una regla sin mensaje propio, en el español de la interfaz: el
@@ -543,6 +552,8 @@ export function createApp(deps: AppDeps) {
       metaSignupAvailable: Boolean(deps.metaSignup),
     }),
   )
+  // WhatsApp, Instagram y Messenger de la administración (ADR 0188).
+  app.route("/api/admin/chats", createAdminChatsRoute({ ownerDb: deps.ownerDb, channels: deps.adminChannels }))
   app.route(
     "/api/admin/kairos",
     createAdminKairosRoute({
@@ -765,6 +776,15 @@ export function createApp(deps: AppDeps) {
 
   // Webhooks de proveedor ANTES que los routers con guards: el use("*") de
   // userScoped/guarded también casa /api/webhooks/* y respondería 401.
+  // La app de Meta de la administración: otra app y otra clave que la de las clínicas.
+  app.route(
+    "/api/webhooks/meta/admin",
+    createAdminMetaWebhookRoute({
+      ownerDb: deps.ownerDb,
+      storage: deps.storage,
+      channels: deps.adminChannels,
+    }),
+  )
   app.route(
     "/api/webhooks",
     createWebhooksRoute({

@@ -281,6 +281,12 @@ export interface OutboundMessage {
    * sabe citar lo ignora: el texto sale igual.
    */
   replyToExternalId?: string
+  /**
+   * Lo que vuelve en los estados del envío (WhatsApp `biz_opaque_callback_data`,
+   * hasta 512 caracteres): con él se reconoce un envío que se cortó antes de
+   * saber su id. Quien no lo admite lo ignora.
+   */
+  callbackData?: string
   kind:
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.
