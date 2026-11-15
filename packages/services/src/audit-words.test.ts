@@ -40,3 +40,9 @@ it("dejar de usar y volver a usar una ficha se dicen con las palabras de la pant
   // Archivar es de un borrador: no es lo mismo que dejar de usar el que estaba en uso.
   expect(describeAuditEvent("form_template.archive").what).toBe("Archivó el borrador de una ficha de consulta")
 })
+
+// Revisión final del 15 nov (A14): lo de Clío no se distinguía en la Actividad.
+it("lo que propuso Clío y confirmó una persona lo dice en la Actividad", () => {
+  expect(describeAuditEvent("form_response.update", "clio").what).toBe("Confirmó en una ficha una respuesta que propuso Clío")
+  expect(describeAuditEvent("form_response.update").what).toBe("Editó una ficha de un paciente")
+})

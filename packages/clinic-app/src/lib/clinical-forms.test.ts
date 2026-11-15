@@ -16,6 +16,8 @@ vi.mock("./api", async () => {
 import { ApiError, apiFetch } from "./api"
 import {
   canFillFormInAttention,
+  sectionTotal,
+  writesForm,
   finalizedWords,
   formStateWords,
   startFormResponse,
@@ -52,13 +54,23 @@ it("con la atención en curso se une a ella, y cualquier otro rechazo se dice ta
 
 it("en la atención ya firmada, el formulario a medias se abre para terminarlo", () => {
   // En curso y la lleva quien mira: se llena.
-  expect(canFillFormInAttention(true, false, "borrador")).toBe(true)
+  expect(canFillFormInAttention(true, false, "borrador", true)).toBe(true)
   // En curso, pero no se puede trabajar en ella (la lleva otra persona): no.
-  expect(canFillFormInAttention(true, true, "borrador")).toBe(false)
-  // Firmada: la atención ya no se trabaja, pero su formulario a medias se termina igual.
-  expect(canFillFormInAttention(true, true, "finalizada")).toBe(true)
+  expect(canFillFormInAttention(true, true, "borrador", false)).toBe(false)
+  // Firmada: la atención ya no se trabaja, pero su formulario a medias lo termina quien atendió.
+  expect(canFillFormInAttention(true, true, "finalizada", true)).toBe(true)
+  // Los demás no: la leen y, ya finalizada, le agregan una adenda (revisión final del 15 nov).
+  expect(canFillFormInAttention(true, true, "finalizada", false)).toBe(false)
   // Sin permiso de escribir en la historia, nunca.
-  expect(canFillFormInAttention(false, true, "finalizada")).toBe(false)
+  expect(canFillFormInAttention(false, true, "finalizada", true)).toBe(false)
+})
+
+it("la ficha de una atención la llena quien la lleva; la suelta y lo del paciente, el equipo", () => {
+  const form = { encounterId: "e1", source: "staff" as const, encounterProfessionalUserId: "ana" }
+  expect(writesForm(form, "ana")).toBe(true)
+  expect(writesForm(form, "luis")).toBe(false)
+  expect(writesForm({ ...form, encounterId: null }, "luis")).toBe(true)
+  expect(writesForm({ ...form, source: "portal" }, "luis")).toBe(true)
 })
 
 it("la atención firmada dice qué formularios le quedaron a medias", () => {
@@ -119,4 +131,22 @@ it("la atención anulada dice qué pasó con cada formulario que tenía", () => 
   expect(voidedAttentionFormWords({ ...base, state: "finalizado", finalizedAt: "2026-11-14T04:03:00.000Z" }, at)).toBe(
     "Formulario: Evaluación de endodoncia · finalizado [04:03] · se conserva, marcado como de una atención anulada",
   )
+})
+
+// Revisión final del 15 nov (clínica H5): con 5 + 1 + 0 la ficha no decía ceod = 6.
+it("la sección con total muestra la suma de sus números con lo que ya tiene", () => {
+  const section = {
+    id: "ceod",
+    title: "Índice ceod",
+    total: "ceod",
+    fields: [
+      { id: "ceod_c", label: "c", type: "numero" as const },
+      { id: "ceod_e", label: "e", type: "numero" as const },
+      { id: "ceod_o", label: "o", type: "numero" as const },
+    ],
+  }
+  expect(sectionTotal(section, { ceod_c: 5, ceod_e: 1, ceod_o: 0 })).toBe("ceod: 6")
+  expect(sectionTotal(section, { ceod_c: 5 })).toBe("ceod: 5")
+  expect(sectionTotal(section, {})).toBeNull()
+  expect(sectionTotal({ ...section, total: null }, { ceod_c: 5 })).toBeNull()
 })
