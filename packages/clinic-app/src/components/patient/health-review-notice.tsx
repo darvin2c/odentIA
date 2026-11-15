@@ -381,7 +381,7 @@ export function HealthReviewNotice({
                   : // Su «No sé» es lo que dijo, no que nadie le preguntó (revisión final del 15 nov, K16).
                     saidUnknownAllergies
                     ? allergiesUnknownWords(saidUnknownAllergies, sex)
-                    : "Nadie las revisó todavía con el paciente."}
+                    : "Sin revisar con el paciente."}
               </p>
               {active.length > 0 ? (
                 <ul className="flex flex-wrap gap-2">

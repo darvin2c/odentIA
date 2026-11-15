@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. Los usa eval:dictado-fichas.",
+  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. «espera.cambia» es lo que cambia una respuesta ya escrita: queda por revisar con ese valor, nunca lista. Los usa eval:dictado-fichas.",
   "servicios": ["Consulta", "Control de ortodoncia", "Endodoncia multirradicular", "Profilaxis", "Aplicación de flúor barniz"],
   "fichasPropias": {
     "control-nino-sano": {
@@ -91,7 +91,7 @@
       "id": "orto-8-ya-respondida",
       "texto": "Overjet de seis, overbite de cuatro.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "overjet": 5 } }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.overjet": 6 } }
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 4 }, "cambia": { "ficha-de-ortodoncia.overjet": 6 } }
     },
     {
       "id": "orto-9-nada-de-la-ficha",
@@ -404,7 +404,7 @@
       "id": "orto-20-corrige-respondida",
       "texto": "Corrijo: la clase molar derecha es clase dos división uno.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "clase_molar_derecha": "Clase II división 2" } }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1" } }
+      "espera": { "fichas": {}, "cambia": { "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1" } }
     },
     {
       "id": "orto-21-c15b",
@@ -477,6 +477,24 @@
       "texto": "Pieza cuarenta y seis. Diagnóstico: pulpitis irreversible sintomática con periodontitis apical sintomática.",
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
       "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática", "evaluacion-de-endodoncia.diagnostico_apical": "Periodontitis apical sintomática" } }
+    },
+    {
+      "id": "norma-6-sin-indice",
+      "texto": "En la ficha, cariados tres, perdidos uno, obturados dos. Higiene oral regular. Riesgo estomatológico alto.",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_p": 1, "ficha-odontoestomatologica.higiene": "Regular", "ficha-odontoestomatologica.riesgo": "Alto" }, "revisar": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o"] }
+    },
+    {
+      "id": "endo-17-otra-pieza",
+      "texto": "Pieza cuarenta y seis con dolor espontáneo, intensidad ocho. Diagnóstico pulpitis irreversible sintomática en la cuarenta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia", "respondidas": { "pieza": 36 } }],
+      "espera": { "fichas": {}, "revisar": ["evaluacion-de-endodoncia.dolor", "evaluacion-de-endodoncia.dolor_intensidad", "evaluacion-de-endodoncia.diagnostico_pulpar"], "cambia": { "evaluacion-de-endodoncia.pieza": 46 } }
+    },
+    {
+      "id": "orto-22-escrito-a-mano",
+      "texto": "Overjet de un milímetro. Overbite de dos.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "overjet": 3 } }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2 }, "cambia": { "ficha-de-ortodoncia.overjet": 1 } }
     }
   ]
 }

@@ -225,7 +225,7 @@ export function EncounterContextBody({
               <li key={allergy.id}>
                 <strong>{allergyTitle(allergy)}</strong>
                 {allergy.reaction ? ` · ${allergy.reaction}` : ""}
-                {unreviewed("allergies", allergy.id) || (allergy.source === "paciente" ? " · la dijo el paciente" : "")}
+                {unreviewed("allergies", allergy.id) || (allergy.source === "paciente" ? " · declarada" : "")}
               </li>
             ))}
           </ul>

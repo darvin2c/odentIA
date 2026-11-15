@@ -67,16 +67,16 @@ const storageStub = {
   },
 }
 
-function stubOrg(role: string, orgId: string) {
+function stubOrg(role: string, orgId: string, userId: string) {
   return async (c: Context, next: Next) => {
     c.set("orgId", orgId)
-    c.set("userId", "u-1")
+    c.set("userId", userId)
     c.set("memberRole", role)
     await next()
   }
 }
 
-function buildApp(role: string, orgId = "org_a"): Hono {
+function buildApp(role: string, orgId = "org_a", userId = "u-1"): Hono {
   const deps: CrmDeps = {
     db: appDb,
     secretsKey: KEY,
@@ -85,7 +85,7 @@ function buildApp(role: string, orgId = "org_a"): Hono {
     webhookBaseUrl: "https://api.example.com",
   }
   const app = new Hono()
-  app.use("*", stubOrg(role, orgId))
+  app.use("*", stubOrg(role, orgId, userId))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/contacts", createContactsRoute(deps))
   app.route("/clinical-forms", createClinicalFormsRoute(deps))
@@ -1288,6 +1288,41 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
     reason: "Paciente equivocado",
   })
   expect(discarded.status).toBe(200)
+})
+
+it("formularios: la ficha de una atención la escribe quien la lleva; otra profesional recibe 409 hasta tomar el relevo", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" ("id", "name", "email") values ('u-2', 'Otra doctora', 'otra@test.dev') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-u2-a', 'org_a', 'u-2', 'clinician', now()) on conflict do nothing`,
+  )
+  const draft = await post(app, "/clinical-forms/form-templates", {
+    title: "Ficha de quien atiende",
+    schema: { sections: [{ id: "examen", title: "Examen", fields: [{ id: "movilidad", label: "Movilidad", type: "numero" }] }] },
+  })
+  const templateId = (await json<{ data: { id: string } }>(draft)).data.id
+  expect((await post(app, `/clinical-forms/form-templates/${templateId}/publish`)).status).toBe(201)
+  const patientId = await createPatient()
+  const encounterId = await createEncounter(patientId, "Control")
+  const created = await post(app, "/clinical-forms/form-responses", { templateId, patientId, encounterId, answers: { movilidad: 3 } })
+  expect(created.status).toBe(201)
+  const responseId = (await json<{ data: { id: string } }>(created)).data.id
+  const colleague = buildApp("clinician", "org_a", "u-2")
+  const attempts: Array<[string, Response]> = [
+    ["guardar", await patch(colleague, `/clinical-forms/form-responses/${responseId}`, { answers: { movilidad: 2 } })],
+    ["finalizar", await post(colleague, `/clinical-forms/form-responses/${responseId}/finalize`)],
+    ["descartar", await post(colleague, `/clinical-forms/form-responses/${responseId}/discard`, { reason: "No era" })],
+    ["empezar otra", await post(colleague, "/clinical-forms/form-responses", { templateId, patientId, encounterId, answers: {} })],
+  ]
+  for (const [what, response] of attempts) {
+    expect(response.status, what).toBe(409)
+    expect((await json<ErrorBody>(response)).error.code, what).toBe("NOT_ATTENDING")
+  }
+  // Con el relevo, escribe quien lo tomó.
+  expect((await post(colleague, `/patients/${patientId}/encounters/${encounterId}/take-over`)).status).toBe(200)
+  expect((await patch(colleague, `/clinical-forms/form-responses/${responseId}`, { answers: { movilidad: 2 } })).status).toBe(200)
+  expect((await patch(app, `/clinical-forms/form-responses/${responseId}`, { answers: { movilidad: 4 } })).status).toBe(409)
 })
 
 it("formularios: un id mal escrito responde «no existe» (404), no un error interno", async () => {

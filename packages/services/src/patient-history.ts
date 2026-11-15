@@ -996,7 +996,12 @@ async function loadBornForEncounters(
   }
   // La línea dice también que se le agregó algo después: lo plegado no se lee como si nadie lo
   // hubiera corregido (QA de la entrega 2).
-  const summaries = new Map(records.map((form) => [form.id, [form.summary, addedWords(form)].filter(Boolean).join(" · ")]))
+  // Y cuántas respuestas propuso Clío y confirmó una persona, como cada pregunta lo dice (A14).
+  const clioWords = (form: (typeof records)[number]) => {
+    const count = form.sections.flatMap((section) => section.items).filter((item) => item.clio).length
+    return count === 0 ? "" : count === 1 ? "1 respuesta de Clío" : `${count} respuestas de Clío`
+  }
+  const summaries = new Map(records.map((form) => [form.id, [form.summary, clioWords(form), addedWords(form)].filter(Boolean).join(" · ")]))
   for (const row of forms) {
     if (!row.encounterId) continue
     const finalized = row.status === "finalizado"

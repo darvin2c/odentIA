@@ -46,7 +46,7 @@ export function byFormOrder(a: DictationSuggestion, b: DictationSuggestion): num
 }
 
 
-/** La etiqueta de la lista de Clío de una ficha: la barra del dictado lleva ahí («Ficha de ortodoncia: 3 por confirmar ↓»). */
+/** La etiqueta de la lista de Clío de una ficha: la barra del dictado lleva ahí («Ficha de ortodoncia: 3 respuestas ↓»). */
 export const formNoticeLabel = (title: string) => `Sugerencias de ${CLINICAL_NAME}: ${title}`
 
 /**
@@ -99,10 +99,24 @@ export function formsToStartWords(titles: readonly string[]): string | null {
 export const proposedWords = (item: DictationSuggestion): string => formAnswerWords(item.payload)
 
 /**
+ * La propuesta que cambia una respuesta ya escrita: queda por revisar, se
+ * cambia de a una en su pregunta, no entra con «Confirmar las N» y al firmar
+ * viene desmarcada (revisión final del 15 nov, decisión 2).
+ */
+export const changesWritten = (item: DictationSuggestion): boolean =>
+  item.kind === "ficha" && item.payload["replaces"] !== undefined && item.payload["value"] != null
+
+/** Lo que Clío propone con un valor: lo que se confirma y lo que cambia lo escrito. Lo demás es un aviso. */
+export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || changesWritten(item)
+
+/** «1 respuesta», «3 respuestas». */
+export const answersWords = (count: number): string => (count === 1 ? "1 respuesta" : `${count} respuestas`)
+
+/**
  * El aviso en la fila de la ficha (en «Fichas para esta atención» o en
  * Documentos): solo avisa y abre la ficha, donde se confirma cada respuesta.
  * Lleva el nombre de la ficha en su lista: el enlace de la barra del dictado
- * («Ficha de ortodoncia: 3 por confirmar ↓») la encuentra y la abre.
+ * («Ficha de ortodoncia: 3 respuestas ↓») la encuentra y la abre.
  */
 export function ClioFormNotice({
   responseId,
@@ -115,10 +129,10 @@ export function ClioFormNotice({
 }): React.JSX.Element | null {
   const proposals = proposalsOf(useClioFormProposals(), responseId)
   if (proposals.length === 0) return null
-  const ready = proposals.filter((item) => item.status === "lista").length
+  const proposed = proposals.filter(proposesValue).length
   const words =
-    ready > 0
-      ? `${CLINICAL_NAME} propone ${ready === 1 ? "1 respuesta" : `${ready} respuestas`}`
+    proposed > 0
+      ? `${CLINICAL_NAME} propone ${answersWords(proposed)}`
       : `${CLINICAL_NAME} no pudo llenar ${proposals.length === 1 ? "1 pregunta" : `${proposals.length} preguntas`}: elige tú`
   return (
     <div
