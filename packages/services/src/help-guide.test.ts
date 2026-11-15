@@ -90,6 +90,20 @@ describe("la guía coincide con el código", () => {
 
 describeHelpSearch("odentIA", HELP_TOPICS)
 
+// QA de formularios del 15 nov (K18, B8 de la entrega 7): «niño» en la pregunta de la mamá llevaba a
+// Pacientes cualquier pregunta con un niño. Dicha entera, o con lo que se le pregunta, la sigue encontrando.
+describe("la pregunta de la mamá no se lleva cualquier pregunta con un niño", () => {
+  const top = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]
+  it("«niño» suelto no la responde ni ancla Pacientes", () => {
+    expect(top("le doy una cita a un niño el viernes")?.faq?.id).not.toBe("que-le-preguntan-a-la-mama-de-un-nino")
+    expect(top("le doy una cita a un niño el viernes")?.topic.id).not.toBe("pacientes")
+  })
+  it("lo que se le pregunta a la mamá, sí", () => {
+    for (const question of ["¿Qué le preguntan a la mamá de un niño?", "que le preguntan a la mama de un menor", "biberón y chupón"])
+      expect(top(question)?.faq?.id, question).toBe("que-le-preguntan-a-la-mama-de-un-nino")
+  })
+})
+
 describe("la solo lectura por falta de pago", () => {
   const faqsOf = (topicId: string) => HELP_TOPICS.find((topic) => topic.id === topicId)?.faqs ?? []
   const firstFaq = (question: string) => matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id ?? null

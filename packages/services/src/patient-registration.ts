@@ -27,6 +27,7 @@ import {
   type RegistrationEntryPoint,
   registrationAnswersSchema,
   registrationConfigSchema,
+  registrationFieldApplies,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -92,6 +93,7 @@ import {
   REGISTRATION_NOT_COMPLETED_TEXT,
   RegistrationHeld,
   type RegistrationHold,
+  type RegistrationProvenance,
   requirePatient,
   updatePatient,
 } from "./patients.js"
@@ -382,6 +384,12 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
   return (await patientHealthQuestionsWith(tx, orgId, patientId)).ask
 }
 
+/** Su sexo y sus años de lo que escribió en el mismo envío (la edad, de la fecha que escribió). */
+export interface WrittenPerson {
+  sex?: string | null
+  age?: number | null
+}
+
 /**
  * `patientHealthQuestions` con la salud que leyó para decidirlo, para que quien guarda lo que envió
  * no la vuelva a cargar.
@@ -390,9 +398,24 @@ export async function patientHealthQuestionsWith(
   tx: Db,
   orgId: string,
   patientId: string,
+  options: {
+    /**
+     * Lo que escribió, si su ficha no lo tiene: lo que se le pregunta sale de eso (a un niño, lo de
+     * un niño; B3 de la 7).
+     */
+    written?: WrittenPerson
+    /**
+     * Sin fecha en su ficha, también lo de un niño: la pantalla lo muestra solo si la fecha que
+     * escribe lo hace niño, y el servidor lo acepta con esa misma fecha. Sin fecha no se presume niño.
+     */
+    orChild?: boolean
+  } = {},
 ): Promise<{
   ask: RegistrationFieldKey[]
-  /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
+  /**
+   * Ya respondió: lo que se le pregunta es solo lo que la lista sumó después (respondió con la de antes)
+   * o lo que saltó del anticoagulante y los huesos.
+   */
   onlyNew: boolean
   health: PatientHealth
   known: Set<RegistrationFieldKey>
@@ -410,29 +433,41 @@ export async function patientHealthQuestionsWith(
     .limit(1)
   const health = await getPatientHealth(tx, orgId, patientId)
   const known = knownHealthQuestionsOf(health)
-  const product = await orgProduct(tx, orgId)
-  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
-  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
-  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
-  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
-  // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
-  // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Quien
+  // respondió con la lista de hoy (su declaración trae las dos clases de medicina), o lo dejó todo en
+  // blanco, no ve de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
   const responded = !!sent || health.declarations.some((row) => row.via === "registro")
-  const answeredOldList = health.declarations.length > 0 && !sawToday
-  if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
-  const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
+  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve de
+  // nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
+  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  const stored = await requirePatient(tx, orgId, patientId)
+  const written = options.written ?? {}
+  const person = {
+    sex: stored.sex ?? written.sex ?? null,
+    age: ageInYears(stored.birthDate, await patientOrganizationToday(tx, orgId)) ?? written.age ?? null,
+  }
+  // A un niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.
+  const child = !registrationFieldApplies("anticoagulants", person)
+  const answeredOldList = health.declarations.length > 0 && !sawToday && !child
+  // La excepción: lo que saltó del anticoagulante y los huesos, que cambian la cita. Se le preguntó y no
+  // respondió, así que su enlace le pregunta solo eso (QA del 15 nov, A12 y D3 del auditor).
+  const skipped = child
+    ? []
+    : (Object.keys(health.medicineClasses) as Array<keyof typeof health.medicineClasses>).filter(
+        (key) => health.medicineClasses[key].answer === "skipped",
+      )
+  const product = await orgProduct(tx, orgId)
+  const onlyNew = responded
+    ? new Set<string>([...(answeredOldList ? newRegistrationQuestions(1, product).map((question) => question.key) : []), ...skipped])
+    : null
+  if (onlyNew?.size === 0) return { ask: [], onlyNew: false, health, known }
   const config = await getPatientRegistrationConfig(tx, orgId)
-  const person = await requirePatient(tx, orgId, patientId)
-  const today = await patientOrganizationToday(tx, orgId)
-  const ask = healthQuestionsToAsk(
-    config,
-    {
-      countryCode: await findOrgCountry(tx, orgId),
-      product,
-      person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
-    },
-    known,
-  ).filter((key) => !onlyNew || onlyNew.has(key))
+  const countryCode = await findOrgCountry(tx, orgId)
+  const askOf = (who: typeof person) =>
+    healthQuestionsToAsk(config, { countryCode, product, person: who }, known).filter((key) => !onlyNew || onlyNew.has(key))
+  // Un niño de meses: entra todo lo de un niño, también el biberón y el chupón.
+  const ask =
+    options.orChild && person.age === null ? [...new Set([...askOf(person), ...askOf({ ...person, age: 0 })])] : askOf(person)
   return { ask, onlyNew: !!onlyNew, health, known }
 }
 
@@ -1317,6 +1352,13 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
+  // Lo que queda para recepción en «¿Es la misma persona?»: sus respuestas, el aviso que vio y por
+  // dónde llegó, con los que se registra al decidir.
+  const submitted = {
+    answers,
+    notice: { version: config.version, text: config.privacyNotice },
+    entryPoint: entryPoint === "platform" ? undefined : entryPoint,
+  }
   const docType = demographics.docType || null
   const documentOf = {
     docType,
@@ -1329,8 +1371,7 @@ export async function registerPatient(
     const owner = await findRealPersonByDocument(tx, orgId, documentOf)
     if (owner) {
       const held = await heldByDocument(tx, orgId, owner, demographics)
-      held.hold.answers = answers
-      held.hold.notice = { version: config.version, text: config.privacyNotice }
+      Object.assign(held.hold, submitted)
       throw held
     }
   }
@@ -1346,8 +1387,7 @@ export async function registerPatient(
         ownerPatientId: owner.patientId,
         declared: { displayName: demographics.displayName, phone: demographics.phone ?? null, email: demographics.email ?? null },
         match: "celular",
-        answers,
-        notice: { version: config.version, text: config.privacyNotice },
+        ...submitted,
       })
     }
   }
@@ -1373,10 +1413,7 @@ export async function registerPatient(
     }
     if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
-    if (e instanceof RegistrationHeld && isPublic) {
-      e.hold.answers = answers
-      e.hold.notice = { version: config.version, text: config.privacyNotice }
-    }
+    if (e instanceof RegistrationHeld && isPublic) Object.assign(e.hold, submitted)
     throw e
   }
 
@@ -1790,6 +1827,7 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
     // Sin texto de aviso no hay consentimiento que guardar: se pedirá en la clínica.
     noticeVersion: hold.notice?.text ? hold.notice.version : null,
     noticeText: hold.notice?.text || null,
+    entryPoint: hold.entryPoint ?? null,
   })
 }
 
@@ -1970,6 +2008,18 @@ export async function resolveRegistrationHold(
   const savable = new Set(rows.filter((row) => row.key !== "document" && row.state !== "same" && !row.blocked).map((row) => row.key))
   const apply = input.same ? [...new Set(input.apply ?? [])] : []
   if (apply.some((key) => !savable.has(key))) throw validation("Ese dato no se puede guardar desde aquí")
+  // La ficha que nace aquí viene de su registro en línea, no de un alta del equipo: queda por
+  // dónde entró, quién lo dijo, lo que escribió y cuándo lo envió (auditor, 15 nov, A3: Datos decía
+  // «alta interna» y faltaba «Ver declaración original»). Recepción solo decidió quién es.
+  const provenance: RegistrationProvenance = {
+    // Lo dejado antes de guardar por dónde entró: el código QR, el que nombra su fila.
+    entryPoint: hold.entryPoint ?? "qr",
+    respondent: answers.respondent,
+    formVersion: hold.noticeVersion,
+    answers,
+    privacyNotice: hold.noticeText,
+    createdAt: hold.createdAt,
+  }
   let patientId: string
   if (input.same) {
     const patch = registrationHoldPatch(answers, apply)
@@ -1992,7 +2042,7 @@ export async function resolveRegistrationHold(
           composeDisplayName({ givenNames: text(merged.givenNames), familyName: text(merged.familyName) }) ||
           (text(owner.values.displayName) ?? String(declared.displayName ?? "")),
         contacts: [{ contactId: ownerId, relationship: "self", isPreferred: true }],
-      })
+      }, provenance)
       patientId = created.id
     }
     // Lo que había antes no se pierde: queda dicho en su persona.
@@ -2015,7 +2065,7 @@ export async function resolveRegistrationHold(
       delete own.docNumber
       delete own.docCountry
     }
-    const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3])
+    const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3], provenance)
     patientId = created.id
   }
   // Su salud entra como declarada, solo si nadie la registró antes. Si ya

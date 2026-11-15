@@ -2,6 +2,7 @@ import {
   budgetStateText,
   diagnosisCodeLabel,
   doneSessionWords,
+  type HealthAtSigning,
   isRetiredPlanStatus,
   LEFT_OUT_DECISIONS,
   planItemStateText,
@@ -760,6 +761,11 @@ export interface EncounterBorn {
    * cuándo lo envió y quién lo vio al atender; nulo si no contó nada.
    */
   told?: VisitAnswerView | null
+  /**
+   * Lo que se dijo de su salud y seguía sin revisar al firmarla (auditor, 15 nov, A2): quién,
+   * cuándo y qué, como quedó en la atención firmada; sin él, no quedaba nada sin revisar.
+   */
+  healthAtSigning?: HealthAtSigning[]
 }
 
 const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
@@ -778,9 +784,11 @@ async function loadBornForEncounters(
   tx: Db,
   orgId: string,
   patientId: string,
-  encounterIds: string[],
+  /** Las atenciones ya leídas: de ellas sale lo que se guardó al firmar, sin leerlas otra vez. */
+  encounters: ReadonlyArray<Pick<typeof encounter.$inferSelect, "id" | "healthAtSigning">>,
 ): Promise<Map<string, EncounterBorn>> {
   const out = new Map<string, EncounterBorn>()
+  const encounterIds = encounters.map((row) => row.id)
   if (encounterIds.length === 0) return out
   const site = (await productHooks(tx, orgId)).site
   const of = (id: string): EncounterBorn => {
@@ -870,6 +878,7 @@ async function loadBornForEncounters(
       )
       .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id)),
   ])
+  for (const row of encounters) if (row.healthAtSigning?.length) of(row.id).healthAtSigning = row.healthAtSigning
   for (const item of items) {
     if (!item.sourceEncounterId) continue
     of(item.sourceEncounterId).indicated.push({
@@ -1230,7 +1239,7 @@ export async function getTimeline(
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
       hooks.encounterParts(tx, orgId, encounters),
-      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, encounters) : Promise.resolve(new Map<string, EncounterBorn>()),
+      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, records) : Promise.resolve(new Map<string, EncounterBorn>()),
       diagnosisTitlesOf(tx, [
         ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
         ...notes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),

@@ -17,6 +17,7 @@ import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
 import { FormRecordView } from "./form-record"
+import { HealthAtSigningList } from "./health-at-signing"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -273,6 +274,15 @@ export function EncounterDetailView({
                 {visitSeenWords(detail.visitAnswer) ? (
                   <span className="block text-xs text-muted-foreground">{visitSeenWords(detail.visitAnswer)}</span>
                 ) : null}
+              </dd>
+            </div>
+          ) : null}
+          {encounter.healthAtSigning?.length ? (
+            // Lo que dijo de su salud y seguía sin revisar al firmar: la constancia del aviso del cierre (auditor, 15 nov, A2).
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">Lo que dijo de su salud al firmar</dt>
+              <dd>
+                <HealthAtSigningList patientId={patientId} groups={encounter.healthAtSigning} />
               </dd>
             </div>
           ) : null}

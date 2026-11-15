@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "../../lib/locale"
-import { asaLabel, type PatientHealth } from "../../lib/patients"
+import { asaLabel, type HealthDeclarationView, type PatientHealth } from "../../lib/patients"
 import { bareProduct, declareProduct } from "../../product/product-ui"
 import {
   AntecedentesSummary,
@@ -10,6 +10,7 @@ import {
   DeclaredHealthSnapshot,
   hasOriginalDeclaration,
   healthReviewedWords,
+  laterDeclarationsOf,
 } from "./antecedentes-tab"
 import { EMPTY_HEALTH_FORM } from "./patient-health-fields"
 
@@ -62,21 +63,23 @@ describe("«Revisar antecedentes» con un «No» que dijo la persona", () => {
     ],
   } as unknown as PatientHealth
 
-  it("no llega elegido como «Niega»: queda sin marcar para que el profesional decida", () => {
+  // Revisión final del 15 nov (clínica H1): al guardar por otro motivo (las semanas del embarazo), su
+  // «No» pasaba a «No se le preguntó». Llega con lo que dijo: guardar es revisarlo con ella.
+  it("llega con su «No», nunca como «No se le preguntó»", () => {
     const drafts = buildDrafts(said)
-    expect(drafts.reviewStatus.conditions).toBe("unknown")
-    // El «niega» que anotó el equipo sí se conserva.
+    expect(drafts.reviewStatus.conditions).toBe("none")
+    // El «niega» que anotó el equipo también se conserva.
     expect(drafts.reviewStatus.medications).toBe("none")
   })
 
-  it("junto al grupo dice «Dijo que no» con su día", () => {
+  it("junto al grupo dice «Dijo que no» con su día, sin un «Niega» que nadie preguntó", () => {
     const page = renderToStaticMarkup(
-      <ClinicalGroupCard title="Condiciones" review="unknown" saidNo="Dijo que no · 13 nov · sin revisar" reviewField={null}>
+      <ClinicalGroupCard title="Condiciones" review="none" saidNo="Dijo que no · 13 nov · sin revisar" reviewField={null}>
         {null}
       </ClinicalGroupCard>,
     )
     expect(page).toContain("Dijo que no · 13 nov · sin revisar")
-    expect(page).toContain("No se le preguntó")
+    expect(page).not.toContain("No se le preguntó")
     expect(page).not.toContain("Niega")
   })
 })
@@ -99,6 +102,57 @@ describe("«Ver declaración original»", () => {
     expect(hasOriginalDeclaration({ respondent: "patient", answers: {} }, [])).toBe(true)
     expect(hasOriginalDeclaration(null, [{}])).toBe(true)
     expect(hasOriginalDeclaration(null, [])).toBe(false)
+  })
+
+  // QA de formularios del 15 nov (K16): su «No sé» se lee «No sabe», como el resto de lo que dijo.
+  it("su «No sé» a las alergias y al anticoagulante dice «No sabe»", () => {
+    const page = renderToStaticMarkup(
+      <DeclaredHealthSnapshot
+        health={{ allergies: { state: "unknown", items: [] }, anticoagulants: { state: "unknown" } }}
+      />,
+    ).replace(/<[^>]+>/g, "")
+    expect(page).toContain("Alergias · No sabe")
+    expect(page).toContain("Anticoagulantes · No sabe")
+    expect(page).not.toContain("no se le preguntó")
+  })
+})
+
+// Auditor, 15 nov (A3): quien se registró en línea y recepción resolvió con «Es otra persona» se quedaba
+// sin «Ver declaración original»: su declaración entró con la ficha y su registro no traía su salud.
+describe("lo que se muestra aparte del registro con que se creó su ficha", () => {
+  const patient = { kind: "patient" as const, name: null, relation: null }
+  const declaration = (via: HealthDeclarationView["via"], at: string, enteredAt: string): HealthDeclarationView => ({
+    at,
+    enteredAt,
+    via,
+    by: patient,
+    health: { allergies: { state: "recorded", items: [{ substance: "Ibuprofeno" }] } },
+  })
+  const withHealth = { answers: { health: { allergies: { state: "recorded", items: [{ substance: "Ibuprofeno" }] } } } }
+
+  it("el registro que trae su salud ya la muestra: su declaración no se repite", () => {
+    // Registro en línea directo: entró con la ficha, en el mismo instante.
+    const sameTime = "2026-11-14T08:29:00.000Z"
+    expect(laterDeclarationsOf([declaration("registro", sameTime, sameTime)], { ...withHealth, createdAt: sameTime })).toEqual([])
+    // Recepción lo resolvió después: el registro lleva la hora en que lo envió, la de su declaración.
+    expect(
+      laterDeclarationsOf([declaration("registro", sameTime, "2026-11-14T13:10:00.000Z")], { ...withHealth, createdAt: sameTime }),
+    ).toEqual([])
+  })
+
+  it("si el registro no trae su salud, su declaración se muestra con su hora", () => {
+    // Lo que ya se resolvió antes: el registro quedó del equipo, sin su salud, a la hora de recepción.
+    const resolvedAt = "2026-11-14T13:10:00.000Z"
+    const said = declaration("registro", "2026-11-14T08:29:00.000Z", resolvedAt)
+    expect(laterDeclarationsOf([said], { answers: {}, createdAt: resolvedAt })).toEqual([said])
+  })
+
+  it("lo de su enlace y otro registro posterior siempre van aparte", () => {
+    const link = declaration("enlace", "2026-11-15T10:00:00.000Z", "2026-11-15T10:00:00.000Z")
+    const again = declaration("registro", "2026-11-16T10:00:00.000Z", "2026-11-16T10:05:00.000Z")
+    const form = declaration("formulario", "2026-11-17T10:00:00.000Z", "2026-11-17T10:00:00.000Z")
+    expect(laterDeclarationsOf([link, again, form], { ...withHealth, createdAt: "2026-11-14T08:29:00.000Z" })).toEqual([link, again])
+    expect(laterDeclarationsOf([link], null)).toEqual([link])
   })
 })
 
@@ -167,4 +221,67 @@ describe("la marca de lo que dijo, por dato", () => {
     expect(page).toContain("Losartán 50 mg, warfarina 5 mg (lo dijo ella, sin revisar)")
     expect(page).not.toContain("Lo dijo ella · sin revisar")
   })
+})
+
+// Revisión final del 15 nov (dev H2): con dos correcciones, «Medicación vigente: apixabán 5 mg,
+// warfarina 7.5 mg, warfarina 5 mg», sin marca. Lo de hoy, con su historia.
+describe("lo que dijo que cambió, en el resumen de Antecedentes", () => {
+  it("un solo anticoagulante vigente, con el de antes al lado", () => {
+    const meds = [
+      { id: "apix", name: "apixabán", dose: "5 mg", atcCode: "B01AF02", endDate: null },
+      { id: "w75", name: "warfarina", dose: "7.5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "w5", name: "warfarina", dose: "5 mg", atcCode: "B01AA03", endDate: null },
+    ]
+    const page = renderToStaticMarkup(
+      <AntecedentesSummary
+        saved={{
+          ...EMPTY_HEALTH_FORM,
+          reviewStatus: { conditions: "unknown", medications: "recorded" },
+          medications: meds.map((m) => ({ ...m, endDate: "" })) as unknown as typeof EMPTY_HEALTH_FORM.medications,
+        }}
+        pendingReview
+        groups={[]}
+        health={
+          {
+            medications: meds,
+            changed: {
+              by: { kind: "patient", name: null, relation: null },
+              at: "2026-11-14T22:21:00.000Z",
+              allergies: [],
+              conditions: [],
+              medications: ["w75", "w5"],
+            },
+          } as unknown as Pick<PatientHealth, "changed" | "medications">
+        }
+        pregnancy={null}
+        sex="F"
+      />,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toContain("apixabán 5 mg · antes warfarina 7.5 mg y warfarina 5 mg, cambió el 14 nov")
+    expect(page).not.toContain(", warfarina")
+  })
+})
+
+// Pantalla del 15 nov: el resumen de Antecedentes decía «Dijo que no · sin revisar», sin el día.
+it("el resumen dice su «No» con su día, como el cajón", () => {
+  const page = renderToStaticMarkup(
+    <AntecedentesSummary
+      saved={{ ...EMPTY_HEALTH_FORM, reviewStatus: { conditions: "none", medications: "unknown" } }}
+      pendingReview
+      groups={[
+        {
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: [],
+          conditions: [],
+          medications: [],
+          pregnancy: false,
+          saidNo: { allergies: false, conditions: true, medications: false },
+        },
+      ]}
+      pregnancy={null}
+      sex="F"
+    />,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Dijo que no · 13 nov · sin revisar")
 })

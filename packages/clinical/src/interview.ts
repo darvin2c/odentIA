@@ -4,7 +4,7 @@
  * (los antecedentes personales). Lo de cada producto lo suma su dominio
  * (`@odentia/dental`, `@odentia/medical`) con la misma forma.
  */
-import { type PregnancyReading, pregnancyRecordOf, pregnancyToday } from "./pregnancy.js"
+import { type PregnancyReading, pregnancyRecordOf, pregnancyToday, weeksWords } from "./pregnancy.js"
 
 /**
  * Cómo leer la entrevista para la copia: lo que se sabe de un embarazo sin fecha
@@ -60,7 +60,6 @@ export const PREGNANCY_ENTRY_KEY = "embarazoLactancia.embarazo"
 
 /** «13/11/2026»: un día de calendario, igual en cualquier zona. */
 const dayWords = (day: string): string => day.split("-").reverse().join("/")
-const weeksWords = (weeks: number): string => `${weeks} ${weeks === 1 ? "semana" : "semanas"}`
 
 /**
  * El embarazo en palabras, con la regla común de si sigue en pie

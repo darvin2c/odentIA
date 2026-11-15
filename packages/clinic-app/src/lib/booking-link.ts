@@ -387,8 +387,12 @@ export interface PersonalDataForm {
   firstName: string | null
   /** Sus años cumplidos hoy, si se saben: de un menor de 12 se le pregunta a quien lo cuida. */
   age?: number | null
+  /** Su sexo, solo para concordar las palabras («que la cuidas»); nulo si no se sabe. */
+  sex?: "F" | "M" | null
   /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
   respondentFirstName?: string | null
+  /** «¿Eres Lucía o respondes por ella?» primero: su enlace es suyo y su ficha no dice que sea mayor de edad. */
+  asksWho?: boolean
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */
   pending: { privacy: boolean; promotions: boolean }
   /** «Tu visita», el último paso de «Antes de tu cita»; nulo sin cita o ya respondida. */
@@ -409,6 +413,8 @@ export function fetchPersonalDataForm(slug: string, token: string, mode?: "corre
 
 export interface PersonalDataInput {
   data: Partial<Record<string, string>>
+  /** «Respondo por ella»: lo que dice queda de quien respondió, con su nombre (`representative`). */
+  respondent?: "patient" | "representative"
   representative?: {
     displayName: string
     docType?: string

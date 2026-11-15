@@ -450,7 +450,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const base = {
     expectedRevision: 0,
     reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
-    allergies: [{ substance: "Penicilina", severity: "severa" }],
+    allergies: [{ substance: "Penicilina", severity: "severa", reaction: "Se le cerró la garganta: la llevaron a emergencia" }],
     conditions: [],
     medications: [],
     anamnesis: { expectedVersion: 0, answers: { antecedentesFamiliares: "Ninguno" } },
@@ -477,7 +477,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   type Trimmed = {
     data: {
       registration: unknown
-      activeAllergies: { substance: string }[]
+      activeAllergies: Array<{ substance: string; severity?: string } & Record<string, unknown>>
       activeConditions: unknown[]
       allergyReview: string | null
       allergySaidNo: { by: { kind: string }; at: string | null } | null
@@ -487,6 +487,12 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
   const receptionBody = (await asReception.json()) as Trimmed
   expect(receptionBody.data.activeAllergies.map((item) => item.substance)).toEqual(["Penicilina"])
+  // Recepción ve solo lo que necesita de cada alergia: la sustancia y la severidad, sin lo que contó
+  // de la reacción (QA de formularios del 15 nov, S2 de desarrollo). El odontólogo sí lo recibe.
+  expect(receptionBody.data.activeAllergies[0]).toMatchObject({ substance: "Penicilina", severity: "severa" })
+  expect(receptionBody.data.activeAllergies[0]).not.toHaveProperty("reaction")
+  const asClinician = (await (await buildApp("clinician").request(`/patients/${patientId}`, { method: "GET" })).json()) as Trimmed
+  expect(asClinician.data.activeAllergies[0]?.reaction).toBe("Se le cerró la garganta: la llevaron a emergencia")
   // Del registro le llega lo administrativo, nunca la salud declarada.
   const receptionRegistration = receptionBody.data.registration as { entryPoint: string; answers: Record<string, unknown> } | null
   expect(receptionRegistration?.entryPoint).toBeTruthy()
@@ -1054,14 +1060,35 @@ it("las alergias se agregan y se quitan una por una, solo quien escribe en la hi
   expect(allergy.substance).toBe("Penicilinas (grupo)")
   expect((await post("clinician", "", { substance: "penicilina" })).status).toBe(409)
   expect((await post("reception", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(403)
-  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "otro" })).status).toBe(400)
-  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "error" })).status).toBe(200)
+  // El motivo es libre (auditor, 15 nov, A11), pero no vacío ni sin fin.
+  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "  " })).status).toBe(400)
+  expect((await post("clinician", `/${allergy.id}/remove`, { reason: "x".repeat(501) })).status).toBe(400)
+  const removed = await post("clinician", `/${allergy.id}/remove`, { reason: "Era amoxicilina, no penicilina" })
+  expect(removed.status).toBe(200)
+  expect(((await removed.json()) as { data: { removedReason: string } }).data.removedReason).toBe("Era amoxicilina, no penicilina")
   expect((await post("clinician", `/${allergy.id}/restore`)).status).toBe(200)
   const reviewed = await post("clinician", "/reviewed")
   expect(reviewed.status).toBe(200)
   const health = await buildApp("clinician").request(`/patients/${fresh.id}/health`, { method: "GET" })
   const data = ((await health.json()) as { data: { allergyReviewDue: boolean; allergiesReviewedBy: string } }).data
   expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
+})
+
+// Revisión final del 15 nov: «Lo revisé con ella», en un toque, solo quien escribe en la historia.
+it("«Lo revisé con ella»: solo quien escribe en la historia, con la revisión que vio", async () => {
+  const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Revisión" }))
+  const review = (role: string, body: unknown) =>
+    buildApp(role).request(`/patients/${fresh.id}/health/reviewed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  expect((await review("reception", { expectedRevision: 0 })).status).toBe(403)
+  expect((await review("clinician", {})).status).toBe(400)
+  expect((await review("clinician", { expectedRevision: 7 })).status).toBe(409)
+  const done = await review("clinician", { expectedRevision: 0 })
+  expect(done.status).toBe(200)
+  expect(((await done.json()) as { data: { reviewedAt: string | null } }).data.reviewedAt).not.toBeNull()
 })
 
 it("«Niega enfermedades» y «No toma medicación» desde la atención: solo quien escribe en la historia", async () => {

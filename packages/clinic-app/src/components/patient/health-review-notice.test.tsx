@@ -94,7 +94,12 @@ describe("«Pregúntale» en la atención", () => {
     // El embarazo, con la semana de hoy y lo que dijo ese día.
     expect(page).toContain("32 semanas hoy (dijo 30 el 13 nov)")
     // El registro no pregunta qué le pasó: no se dice que «no dijo» (auditor, 14 nov).
-    expect(page).toContain("<dd>Látex</dd>")
+    expect(page).toContain(">Látex</dd>")
+    // En una línea, con el detalle a un toque (revisión final del 15 nov, ux propuesta 3).
+    expect(page).toContain("Lo dijo ella el 13 nov, sin revisar</span>: embarazo, alergia y 2 más")
+    expect(page).toContain("Ver lo que dijo")
+    expect(page).toMatch(/<div id="[^"]+" hidden="">/)
+    expect(page).toContain("Lo revisé con ella")
     expect(page).not.toContain("no dijo qué le pasó")
     expect(page).toContain("Sulfato ferroso, Ácido fólico")
     // Su «No» es de ella: no se lee «niega».
@@ -137,10 +142,10 @@ describe("«Pregúntale» en la atención", () => {
         />
       </QueryClientProvider>,
     )
-    expect(two).toContain("Lo dijo su madre, Carla, el 1 nov, sin revisar")
-    expect(two).toContain("Lo dijo ella el 13 nov, sin revisar")
-    expect(two.indexOf("Látex")).toBeLessThan(two.indexOf("Lo dijo ella el 13 nov"))
-    expect(two.indexOf("Sulfato ferroso")).toBeGreaterThan(two.indexOf("Lo dijo ella el 13 nov"))
+    // Por dato, no por declaración: cada uno con quién lo dijo y su día (ux R2).
+    expect(two).toContain("Sin revisar</span>: alergia y medicinas")
+    expect(two).toContain("Látex (lo dijo su madre, Carla, el 1 nov)")
+    expect(two).toContain("Sulfato ferroso, Ácido fólico (lo dijo ella el 13 nov)")
   })
   it("un embarazo que ya pasó su término no alarma: pide confirmarlo, sin frenar", () => {
     const past = {
@@ -199,8 +204,8 @@ describe("«Pregúntale» en la atención", () => {
     // Lo que dijo no se da por visto con «Sin cambios»: se revisa a sabiendas, con lo que ya tenía a la vista.
     expect(page).not.toContain("Sin cambios")
     expect(page).not.toContain("alergias nuevas")
-    expect(page).toContain("Alergias revisadas")
-    expect(page).toContain("Ya tenía anotadas: Penicilinas")
+    expect(page).toContain("Lo revisé con ella")
+    expect(page.replace(/<[^>]+>/g, "")).toContain("Ya tenía anotadasPenicilinas")
   })
 
   it("Inés: la alergia que dijo sale una sola vez, en la caja de lo que dijo", () => {
@@ -243,7 +248,8 @@ describe("«Pregúntale» en la atención", () => {
     )
     expect(page).not.toContain("nuevas")
     expect(page).not.toContain("Sin cambios")
-    expect(page).toContain("No tiene alergias")
+    // Se revisa con quien lo dijo, en un toque.
+    expect(page).toContain("Lo revisé con su madre")
     expect(page).toContain("su madre dijo que no")
   })
 })
@@ -288,45 +294,60 @@ describe("«Pregúntale» con representante", () => {
     expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
 
-  it("C3 · la odontóloga lee sin clics lo que dijo la mamá de Thiago, con la marca de quien lo dijo", () => {
-    const thiago = {
-      ...health,
-      allergyReviewDue: false,
-      reviewPending: true,
-      reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
-      conditions: [{ id: "c1", name: "Asma", status: "activa" }],
-      medications: [{ id: "m1", name: "salbutamol inhalador cuando tiene crisis", atcCode: null, endDate: null }],
-      declared: [
-        {
-          by: { kind: "representative", name: "Carla Ramos", relation: "madre" },
-          at: "2026-11-13T19:27:00.000Z",
-          allergies: [],
-          conditions: ["c1"],
-          medications: ["m1"],
-          pregnancy: false,
-          interview: [],
-          productLines: [
-            { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-            { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-            { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
-          ],
-          saidNo: { allergies: true, conditions: false, medications: false },
-        },
-      ],
-    } as unknown as PatientHealth
-    const carla = { ...guardian, displayName: "Carla Ramos", relationshipDetail: "Madre", kinship: "MTH" }
-    const page = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <HealthReviewNotice patientId="p1" patientName="Thiago Quispe" health={thiago} sex="M" askTo={askWhom([carla])} />
-      </QueryClientProvider>,
-    ).replace(/<[^>]+>/g, "|")
-    expect(page).toContain("Revisa con su madre (Carla Ramos) lo que dijo de la salud de Thiago")
-    expect(page).toContain("Lo dijo su madre, Carla, el 13 nov, sin revisar")
-    expect(page).toMatch(/Enfermedades\|+[^|]*Asma/)
-    expect(page).toMatch(/Alergias\|+Su madre dijo que no/i)
-    expect(page).toMatch(/De pequeño\|+[^|]*ya no toma biberón · se chupa el dedo/)
-    expect(page).toMatch(/Dulces o jugos entre comidas\|+[^|]*4 o más veces al día/)
-    expect(page).toMatch(/Dientes\|+[^|]*se cepilla sin ayuda/)
+  // Revisión final del 15 nov (K2, K8): lo de un niño en casa llega dato por dato, por la entrevista,
+  // solo lo que sigue como lo dijo la mamá; el detalle está a un toque, en «Ver lo que dijo».
+  it("C3 · la odontóloga lee lo que dijo la mamá de Thiago, con la marca de quien lo dijo", () => {
+    const base = bareProduct("dental")
+    declareProduct({
+      ...base,
+      health: {
+        ...base.health,
+        saidRows: () => [
+          { keys: ["biberon"], label: "Biberón o pecho para dormir", value: "ya no toma biberón" },
+          { keys: ["dulcesEntreComidas"], label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+          // Lo anotó la doctora: no es de la mamá y no se le atribuye.
+          { keys: ["quienCepilla"], label: "Quién le cepilla los dientes", value: "lo cepilla un adulto" },
+        ],
+      },
+    })
+    try {
+      const thiago = {
+        ...health,
+        allergyReviewDue: false,
+        reviewPending: true,
+        reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
+        latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" },
+        conditions: [{ id: "c1", name: "Asma", status: "activa" }],
+        medications: [{ id: "m1", name: "salbutamol inhalador cuando tiene crisis", atcCode: null, endDate: null }],
+        declared: [
+          {
+            by: { kind: "representative", name: "Carla Ramos", relation: "madre" },
+            at: "2026-11-13T19:27:00.000Z",
+            allergies: [],
+            conditions: ["c1"],
+            medications: ["m1"],
+            pregnancy: false,
+            interview: ["biberon", "dulcesEntreComidas"],
+            saidNo: { allergies: true, conditions: false, medications: false },
+          },
+        ],
+      } as unknown as PatientHealth
+      const carla = { ...guardian, displayName: "Carla Ramos", relationshipDetail: "Madre", kinship: "MTH" }
+      const page = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <HealthReviewNotice patientId="p1" patientName="Thiago Quispe" health={thiago} sex="M" askTo={askWhom([carla])} child />
+        </QueryClientProvider>,
+      ).replace(/<[^>]+>/g, "|")
+      expect(page).toContain("Revisa con su madre (Carla Ramos) lo que dijo de la salud de Thiago")
+      expect(page).toContain("Lo dijo su madre, Carla, el 13 nov, sin revisar")
+      expect(page).toMatch(/Enfermedades\|+[^|]*Asma/)
+      expect(page).toMatch(/Alergias\|+Su madre dijo que no/i)
+      expect(page).toMatch(/Biberón o pecho para dormir\|+[^|]*ya no toma biberón/)
+      expect(page).toMatch(/Dulces o jugos entre comidas\|+[^|]*4 o más veces al día/)
+      expect(page).not.toContain("lo cepilla un adulto")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
   })
 
   it("Marta: el anticoagulante y la medicina para los huesos van cada uno en su fila", () => {
@@ -430,4 +451,106 @@ it("su «No sé» al anticoagulante se revisa con ella, y lo dicho sin nombre di
   expect(page).toMatch(/Anticoagulante\|+[^|]*no sabe/)
   expect(page).toMatch(/Medicina para los huesos\|+[^|]*no dijo cuál/)
   expect(page).not.toContain("(no dijo cuál)")
+})
+
+// Revisión final del 15 nov (dev H2, H6): tres anticoagulantes como tres declaraciones iguales, y la
+// misma clave repetida con dos declaraciones del mismo día.
+it("con dos correcciones, un solo anticoagulante, con su historia, y cada dato una vez", () => {
+  const uno = {
+    ...health,
+    reviewPending: true,
+    medications: [
+      { id: "w5", name: "warfarina", dose: "5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "w75", name: "warfarina", dose: "7.5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "apix", name: "apixabán", dose: "5 mg", atcCode: "B01AF02", endDate: null },
+    ],
+    changed: { by: { kind: "patient", name: null, relation: null }, at: "2026-11-14T22:21:00.000Z", allergies: [], conditions: [], medications: ["w5", "w75"] },
+    declared: ["w5", "w75", "apix"].map((id, index) => ({
+      by: { kind: "patient", name: null, relation: null },
+      at: `2026-11-14T22:2${index}:00.000Z`,
+      allergies: [],
+      conditions: [],
+      medications: [id],
+      pregnancy: false,
+      saidNo: { allergies: false, conditions: false, medications: false },
+    })),
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Uno Medina" health={uno} sex="F" />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Lo dijo ella el 14 nov, sin revisar|: anticoagulante")
+  expect(page).toMatch(/Anticoagulante\|+apixabán 5 mg · antes warfarina 5 mg y warfarina 7\.5 mg, cambió el 14 nov/)
+  expect(page.split("Anticoagulante|").length - 1).toBe(1)
+})
+
+// Revisión final del 15 nov (K5, K7): sin su representante registrado, se revisa con quien lo dijo, no
+// con el niño; y a un niño no se le pregunta el anticoagulante ni los huesos.
+it("Lucía, de 3 años: se revisa con su madre, que lo dijo, y sin «Anticoagulante: dijo que no»", () => {
+  const lucia = {
+    ...health,
+    allergyReviewDue: false,
+    reviewPending: true,
+    reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+    medicineClasses: { anticoagulants: { answer: "no", said: true }, boneMedicines: { answer: "no", said: true } },
+    declared: [
+      {
+        by: { kind: "representative", name: "Carmen Paredes", relation: "madre" },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: [],
+        pregnancy: false,
+        saidNo: { allergies: true, conditions: true, medications: true },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Lucía Paredes" health={lucia} sex="F" child />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Revisa con su madre, Carmen, lo que dijo de la salud de Lucía")
+  expect(page).toContain("Lo revisé con su madre")
+  expect(page).not.toContain("Anticoagulante")
+  expect(page).not.toContain("huesos")
+})
+
+// Revisión final del 15 nov (K16, A12): su «No sé» a las alergias es lo que dijo, y lo que saltó del
+// anticoagulante «no respondió», nunca «no se le preguntó».
+it("su «No sé» a las alergias y lo que saltó se dicen como lo que fueron", () => {
+  const paz = {
+    ...health,
+    reviewPending: true,
+    declarations: [
+      {
+        at: "2026-11-13T19:27:00.000Z",
+        enteredAt: "2026-11-13T19:27:00.000Z",
+        via: "registro",
+        by: { kind: "patient", name: null, relation: null },
+        health: { allergies: { state: "unknown" } },
+      },
+    ],
+    medicineClasses: { anticoagulants: { answer: "skipped", said: true }, boneMedicines: { answer: "no", said: true } },
+    declared: [
+      {
+        by: { kind: "patient", name: null, relation: null },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: [],
+        pregnancy: false,
+        saidNo: { allergies: false, conditions: true, medications: false },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Ana Paz" health={paz} sex="F" />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Dijo que no sabe si tiene alergias (13 nov).")
+  expect(page).not.toContain("Nadie las revisó todavía")
+  expect(page).toMatch(/Anticoagulante\|+no respondió/)
 })

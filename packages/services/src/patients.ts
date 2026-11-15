@@ -10,6 +10,7 @@ import {
   registrationContactInputSchema,
   SEX_CODES,
   validateDemographics,
+  type PublicEntryPoint,
   type RegistrationContactInput,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -136,9 +137,13 @@ export interface CreatePatientInput {
 
 export type { PatientRow } from "./patient-identity.js"
 
+/**
+ * De dónde vino el alta desde fuera. `createdAt`: cuándo lo envió, si recepción lo
+ * decide después («¿Es la misma persona?»); sin él, el instante del alta.
+ */
 export type RegistrationProvenance = Pick<typeof patientRegistration.$inferInsert,
   "submissionId" | "payloadHash" | "entryPoint" | "respondent" | "contextContactId" |
-  "conversationId" | "linkId" | "formVersion" | "answers" | "privacyNotice">
+  "conversationId" | "linkId" | "formVersion" | "answers" | "privacyNotice" | "createdAt">
 
 /** Fecha de referencia del tenant, calculada exclusivamente en servidor. */
 export async function patientOrganizationToday(tx: Db, orgId: string): Promise<string> {
@@ -316,6 +321,8 @@ export interface RegistrationHold {
   answers?: unknown
   /** El aviso de privacidad que vio y aceptó al registrarse: al decidir vale este. */
   notice?: { version: number; text: string }
+  /** Por dónde se registró: al decidir, su registro queda con él. */
+  entryPoint?: PublicEntryPoint
 }
 
 /** Texto neutro para quien se registra: no confirma que el documento exista. */

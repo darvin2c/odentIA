@@ -1,15 +1,18 @@
 import {
+  ageInYears,
   appendDictated,
   type ClinicalProduct,
   formatMoney,
   formatVitals,
   gapWords,
+  isChildAge,
   moneyTotalsText,
   parseVitals,
   VITAL_SIGNS,
   type Vitals,
   vitalsErrors,
 } from "@odentia/clinical"
+import { clinicToday } from "../../lib/inventory"
 import {
   Button,
   cn,
@@ -1722,7 +1725,8 @@ export function EncounterEditor({
           </li>
         ))}
         {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
-        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual.</li> : null}
+        {/* Queda en la atención firmada, con quién lo dijo y cuándo (`healthAtSigningOf`, auditor, 15 nov, A2). */}
+        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual y queda anotado en la atención.</li> : null}
       </ul>
     ) : null
 
@@ -2336,6 +2340,7 @@ export function EncounterEditor({
         onAntecedentes={() => setContextOpen(true)}
         // En la atención se dice también lo que nadie le preguntó de anticoagulantes y huesos.
         medicineClasses={ASKS_MEDICINE_CLASSES[productUi().product]}
+        child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
       />
       {/* Encabezado estándar: el disparador en el teléfono, el nombre, las utilidades y ⋯. Lo demás va en la fila de contexto. */}
       <PageHeader

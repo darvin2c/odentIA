@@ -1,5 +1,5 @@
 import { declaredLactationAndTobacco } from "@odentia/clinical"
-import { CHILDHOOD_ENTRY_KEYS, childhoodLines, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems } from "@odentia/dental"
+import { dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems } from "@odentia/dental"
 import { fieldsError } from "../errors.js"
 import { civilDay } from "../form-record.js"
 import { answeredOf, COMMON_INTERVIEW, type ProductInterview } from "../product-hooks.js"
@@ -30,9 +30,6 @@ export const dentalInterview: ProductInterview = {
       ...(Object.keys(dental).length ? { antecedentesOdontologicos: dental } : {}),
     }
   },
-  // Lo que contó quien cuida a un niño, «de pequeño», se lee sin clics en la atención (mesa del 13 nov, entrega 7).
-  declaredLines: (health) => childhoodLines(health.dental),
-  declaredKeys: CHILDHOOD_ENTRY_KEYS,
   record: (answers, today, reading) => [
     ...COMMON_INTERVIEW.record(answers, today, reading),
     ...dentalInterviewEntries(answers),

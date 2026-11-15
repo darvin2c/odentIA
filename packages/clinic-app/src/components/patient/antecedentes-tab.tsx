@@ -1,4 +1,12 @@
-import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, HEALTH_DECLARATION_REASON_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
+import {
+  ageInYears,
+  CONDITION_STATUSES,
+  FAMILY_KINSHIP_LABELS,
+  HEALTH_DECLARATION_REASON_LABELS,
+  isChildAge,
+  pregnancyRecordOf,
+  type PregnancyToday,
+} from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -36,6 +44,7 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
+  changedHistoryOf,
   declaredGroupOf,
   declaredInterviewRows,
   declaredMarkWords,
@@ -61,6 +70,7 @@ import {
   type PatientFull,
   type PatientHealth,
   type SaveHealthInput,
+  reviewDeclaredHealthApi,
   savePatientHealthApi,
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -176,12 +186,12 @@ const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responde
 
 /**
  * Lo guardado, como lo edita el formulario. El «No» que marcó la persona (o
- * quien habla por ella) y nadie revisó no llega elegido como «Niega»: queda
- * sin marcar hasta que el profesional se lo pregunte (QA del 14 nov, H4a).
+ * quien habla por ella) llega tal cual, con «Dijo que no · sin revisar» al
+ * lado: guardar es revisarlo con ella. Nunca como «No se le preguntó», que al
+ * guardar por otro motivo borraba lo que dijo (revisión final del 15 nov,
+ * clínica H1).
  */
 export function buildDrafts(health: PatientHealth): HealthFormValues {
-  const asked = (topic: "conditions" | "medications"): HealthReviewState =>
-    saidNoGroupOf(health.declared, topic) && health.reviewStatus[topic] === "none" ? "unknown" : health.reviewStatus[topic]
   const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
   const weeks = pregnancyRecordOf(interview)?.semanas
   return {
@@ -223,8 +233,8 @@ export function buildDrafts(health: PatientHealth): HealthFormValues {
       persisted: true,
     })),
     reviewStatus: {
-      conditions: asked("conditions"),
-      medications: asked("medications"),
+      conditions: health.reviewStatus.conditions,
+      medications: health.reviewStatus.medications,
     },
     bloodGroup: health.bloodGroup ?? "",
     interview,
@@ -547,7 +557,10 @@ export function AntecedentesTab({
       )
       sentFamilyRows.current = familyRows
       try {
-        await savePatientHealthApi(patientId, body)
+        // «Revisar y guardar» sin cambiar nada es «Lo revisé con ella»: lo que dijo queda revisado tal
+        // como está, también sus alergias, sin otra versión de la entrevista (revisión final del 15 nov, K6).
+        if (health.reviewPending && !form.state.isDirty) await reviewDeclaredHealthApi(patientId, base.current.revision)
+        else await savePatientHealthApi(patientId, body)
       } catch (error) {
         if (error instanceof ApiError) {
           if (error.shape.code === "STALE_HEALTH_REVISION") setStale(true)
@@ -671,13 +684,10 @@ export function AntecedentesTab({
   const fid = (name: string): string => `${uid}-${name}`
   const registration = patientQuery.data?.data.registration ?? null
   const sex = patientQuery.data?.data.patient.sex
-  // Lo que declaró después del registro con que se creó su ficha (ese ya se muestra entero): lo de su
-  // enlace y un registro en línea posterior. Las alergias de un cuestionario están en el cuestionario.
-  const laterDeclarations = (health.declarations ?? []).filter(
-    (declaration) =>
-      declaration.via === "enlace" || (declaration.via === "registro" && declaration.enteredAt !== registration?.createdAt),
-  )
+  const laterDeclarations = laterDeclarationsOf(health.declarations ?? [], registration)
   const pendingReview = isHealthReviewPending(health)
+  const age = ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())
+  const childPatient = isChildAge(age)
   // «Dijo que no · 13 nov», junto al grupo donde se decide: es de quien declaró, no del equipo.
   const saidNoOf = (topic: "conditions" | "medications"): string | undefined => {
     const group = saidNoGroupOf(health.declared, topic)
@@ -764,6 +774,7 @@ export function AntecedentesTab({
           saved={saved}
           pendingReview={pendingReview}
           groups={health.declared}
+          health={health}
           // latidIA dice el embarazo en su propia sección, debajo: aquí no se repite.
           pregnancy={productHealth.asksPregnancy ? (health.pregnancy ?? null) : null}
           sex={sex}
@@ -771,17 +782,13 @@ export function AntecedentesTab({
       )}
       <productHealth.Summary
         answers={(health.latestAnamnesis?.answers ?? {}) as Rec}
+        age={age}
         // Lo que dijo la persona y nadie revisó, con su marca dato por dato (QA del 14 nov, causa raíz).
         marks={Object.fromEntries(
           (health.declared ?? []).flatMap((group) =>
             (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
           ),
         )}
-        // Lo del producto (odentIA: «de pequeño» de un niño), con la marca de quien lo contó.
-        productMark={(() => {
-          const said = (health.declared ?? []).find((group) => (group.productLines ?? []).length > 0)
-          return said ? declaredMarkWords(said.by, said.at, sex) : undefined
-        })()}
       />
 
       <FormDrawer
@@ -855,10 +862,10 @@ export function AntecedentesTab({
               {(empty) =>
                 empty ? (
                   <p className="text-sm text-muted-foreground">
-                    {reviewStatus.conditions === "none"
-                      ? "Ausencia confirmada en este grupo."
-                      : saidNoOf("conditions")
-                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                    {saidNoOf("conditions")
+                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                      : reviewStatus.conditions === "none"
+                        ? "Ausencia confirmada en este grupo."
                         : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
@@ -877,10 +884,10 @@ export function AntecedentesTab({
               {(empty) =>
                 empty ? (
                   <p className="text-sm text-muted-foreground">
-                    {reviewStatus.medications === "none"
-                      ? "Ausencia confirmada en este grupo."
-                      : saidNoOf("medications")
-                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                    {saidNoOf("medications")
+                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                      : reviewStatus.medications === "none"
+                        ? "Ausencia confirmada en este grupo."
                         : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
@@ -959,7 +966,8 @@ export function AntecedentesTab({
                         />
                       </Field>
                     ))}
-                    {productHealth.asksPregnancy ? (
+                    {/* A un niño no se le pregunta el embarazo; lo ya anotado sí se ve (revisión final del 15 nov, K8). */}
+                    {productHealth.asksPregnancy && (!childPatient || pregnancyRecord) ? (
                       <Field>
                         <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
                         <Select
@@ -1165,6 +1173,8 @@ export function AntecedentesTab({
       <AnamnesisVersionDialog
         patientId={patientId}
         versionId={versionId}
+        versions={versions}
+        onSelect={setVersionId}
         onClose={() => setVersionId(null)}
       />
       <RegistrationSnapshotDialog
@@ -1187,6 +1197,7 @@ export function AntecedentesSummary({
   saved,
   pendingReview,
   groups,
+  health,
   pregnancy,
   sex,
 }: {
@@ -1194,15 +1205,25 @@ export function AntecedentesSummary({
   pendingReview: boolean
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
+  /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
+  health?: Pick<PatientHealth, "changed" | "medications">
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
-  const activeCon = conditions.filter((r) => r.status === "activa")
+  // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca tres anticoagulantes vigentes
+  // (revisión final del 15 nov, dev H2).
+  const history = changedHistoryOf(health ?? {}, sex)
+  const allActiveCon = conditions.filter((r) => r.status === "activa")
+  const activeCon = history.current("conditions", allActiveCon)
   // La que toma: sin fin o con fin desde hoy, como en la receta y en la atención.
   const today = clinicToday()
-  const activeMed = medications.filter((r) => r.endDate === "" || r.endDate >= today)
+  const activeMed = history.current("medications", medications.filter((r) => r.endDate === "" || r.endDate >= today))
+  // Lo de antes se dice con lo guardado (nombre y dosis como la franja), no con el borrador.
+  const savedMed = (health?.medications ?? []).filter((m) => !m.endDate || m.endDate >= today)
+  const beforeCon = history.alone("conditions", allActiveCon)
+  const beforeMed = history.alone("medications", savedMed)
   // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo),
   // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
   // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
@@ -1212,7 +1233,8 @@ export function AntecedentesSummary({
   const capital = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
   const saidWord = (topic: "conditions" | "medications", ids: string[]): string | undefined => {
     const no = saidNoGroupOf(groups, topic)
-    if (no) return `${saidNoWords(no.by, sex)} · sin revisar`
+    // Con su día, como en el cajón: «Dijo que no · 14 nov · sin revisar» (pantalla, 15 nov).
+    if (no) return `${saidNoWords(no.by, sex)}${no.at ? ` · ${shortDay(no.at)}` : ""} · sin revisar`
     // Quien dijo cada fila lo trae su declaración; con dos personas, se nombran las dos.
     const who = [
       ...new Set(ids.flatMap((id) => {
@@ -1240,10 +1262,13 @@ export function AntecedentesSummary({
       lead:
         asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
-        activeCon.length > 0
-          ? activeCon
-              .map((row) => rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))))
-              .join(", ")
+        activeCon.length > 0 || beforeCon.length > 0
+          ? [
+              ...activeCon.map((row) =>
+                rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))),
+              ),
+              ...beforeCon.map((piece) => piece.line),
+            ].join(", ")
           : conditions.length > 0
             ? "Ninguna activa"
             : "Sin registros",
@@ -1253,17 +1278,20 @@ export function AntecedentesSummary({
       state: review.medications,
       said: saidWord("medications", activeMed.flatMap((row) => (row.id ? [row.id] : []))),
       detail:
-        activeMed.length > 0
-          ? activeMed
-              .map((row) =>
-                rowWords(
+        activeMed.length > 0 || beforeMed.length > 0
+          ? [
+              ...activeMed.map((row) => {
+                const before = history.beforeFor("medications", row, savedMed)
+                const text = rowWords(
                   "medications",
                   row.id,
                   [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "),
                   activeMed.flatMap((item) => (item.id ? [item.id] : [])),
-                ),
-              )
-              .join(", ")
+                )
+                return before ? `${text} · ${before}` : text
+              }),
+              ...beforeMed.map((piece) => piece.line),
+            ].join(", ")
           : medications.length > 0
             ? "Ninguna vigente"
             : "Sin registros",
@@ -1355,13 +1383,12 @@ export function ClinicalGroupCard({
                 {saidNo}
               </Badge>
             ) : null}
-            <Badge
-              variant={
-                review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-              }
-            >
-              {HEALTH_REVIEW_LABELS[review]}
-            </Badge>
+            {/* Su «No» sin revisar no es el «Niega» de quien se lo preguntó: solo se dice lo que dijo. */}
+            {saidNo && review === "none" ? null : (
+              <Badge variant={review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"}>
+                {HEALTH_REVIEW_LABELS[review]}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -1478,7 +1505,8 @@ export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.E
           {pregnancy}
         </p>
       ) : null}
-      {declaredInterviewRows(health).map((row) => (
+      {/* Lo común y lo del producto (odentIA: lo de un niño en casa), tal como llegó. */}
+      {[...declaredInterviewRows(health), ...(productUi().health.declaredRows?.(health) ?? [])].map((row) => (
         <p key={row.label}>
           <span className="font-medium">{row.label} · </span>
           {row.value}
@@ -1508,15 +1536,39 @@ export function healthReviewedWords(
   return `Antecedentes revisados${reviewedBy ? ` por ${memberName(reviewedBy)}` : ""}${day ? ` · ${day}` : ""}`
 }
 
+/**
+ * Lo que declaró aparte del registro con que se creó su ficha, que el diálogo ya muestra entero:
+ * lo de su enlace y otro registro en línea. Las alergias de un cuestionario están en el cuestionario.
+ * La declaración de ese registro es la que entró con la ficha o la que dice su misma hora (la que
+ * recepción resolvió en «¿Es la misma persona?» entra después, con la hora en que la envió), y solo
+ * se omite si el registro trae su salud: el que quedó del equipo, sin ella, la deja aparte (auditor,
+ * 15 nov, A3: quien se registró en línea se quedaba sin «Ver declaración original»).
+ */
+export function laterDeclarationsOf(
+  declarations: readonly HealthDeclarationView[],
+  registration: Pick<NonNullable<PatientFull["registration"]>, "answers" | "createdAt"> | null,
+): HealthDeclarationView[] {
+  const shown = registration && hasRegistrationHealth(registration) ? new Date(registration.createdAt).getTime() : null
+  const ofRegistration = (declaration: HealthDeclarationView) =>
+    shown !== null && [declaration.enteredAt, declaration.at].some((at) => new Date(at).getTime() === shown)
+  return declarations.filter(
+    (declaration) => declaration.via === "enlace" || (declaration.via === "registro" && !ofRegistration(declaration)),
+  )
+}
+
+/** Si el registro con que se creó su ficha trae algo de su salud. */
+function hasRegistrationHealth(registration: Pick<NonNullable<PatientFull["registration"]>, "answers">): boolean {
+  const health = ((registration.answers ?? {}) as Rec)["health"]
+  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
+}
+
 export function hasOriginalDeclaration(
   registration: Pick<NonNullable<PatientFull["registration"]>, "respondent" | "answers"> | null,
   later: readonly unknown[],
 ): boolean {
   if (later.length > 0) return true
   if (!registration) return false
-  if (registration.respondent !== "staff") return true
-  const health = ((registration.answers ?? {}) as Rec)["health"]
-  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
+  return registration.respondent !== "staff" || hasRegistrationHealth(registration)
 }
 
 /**
