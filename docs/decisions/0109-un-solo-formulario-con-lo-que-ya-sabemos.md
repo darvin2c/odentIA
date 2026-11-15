@@ -14,7 +14,7 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
 3. **Los permisos van en el mismo paso.**
    - El aviso de privacidad, si aún no lo aceptó.
    - «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.». Queda guardado como su permiso de recordatorios, con su fecha y su origen.
-   - La pregunta de novedades y promociones, que se responde una sola vez por persona. «Sí, quiero» va primero, pero nunca viene marcada.
+   - La pregunta de novedades y promociones, que se responde una sola vez por persona. «Sí, quiero» va primero, pero nunca viene marcada. Se pregunta y se puede dejar sin responder: no frena el envío, ni al reservar ni en «Tus datos» o «Antes de tu cita» (cambio del 14 nov, abajo).
 4. **La cita que elige la persona nace confirmada**, en su enlace o con su sí en el chat. Solo la que da el equipo pide «Confirmar».
 5. **Cada enlace abre lo que dice su mensaje.**
    - Un enlace dado para completar datos deja de ofrecer la reserva que no usó.
@@ -39,6 +39,12 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
 - El enlace con la hora lleva en su dirección el usuario del profesional: el modelo lo copia tal cual, pero nunca lo escribe como dato.
 - Argos cuenta «Confirmó» solo si la cita se confirmó después del recordatorio: la que nació confirmada no cuenta.
 - Revisar si las clínicas reportan que el paso de reservar es largo o que la pregunta de promociones frena la reserva.
+
+## Cambio del 14 nov 2026 (mesa de formularios del 13 nov, decisión 7)
+
+En su enlace, «Tus datos» exigía responder lo de novedades y promociones para enviar su salud, y el registro no: la misma pregunta frenaba en un lugar y no en el otro. Ahora es opcional en los dos: se le pregunta, con «Sí, quiero» primero y sin marcar, y si no responde se envía igual y queda sin respuesta (se le vuelve a ofrecer otra vez, como a quien nunca la respondió). Sigue sin valer como su sí lo que no marcó: el consentimiento para publicidad es previo y expreso. El aviso de privacidad, si aún no lo aceptó, sí se pide para enviar sus datos. En «Antes de tu cita» (sus datos, su salud y su visita en un solo envío) vale lo mismo.
+
+Con la misma entrega, «Tus datos» y el cuestionario de la clínica dejan de ser dos tarjetas: con una cita por venir, su enlace muestra una sola, «Antes de tu cita», con un solo recorrido y un envío (lo que falta de sus datos, su salud y, al final, «Tu visita»: a qué viene, si le duele y algo más, todo opcional). Lo de la visita guarda su cita: una respuesta por cita (`appointment_visit_answer`), y a la cita siguiente se le vuelve a preguntar. El cuestionario que respondía el paciente se dejó de usar: lo que se le pregunta está en «Preguntas al paciente». Sin cita, sigue «Tus datos» como antes. Los enlaces ya enviados que abrían el cuestionario (`abre=cuestionario`) abren la tarjeta.
 
 ## Referencias
 

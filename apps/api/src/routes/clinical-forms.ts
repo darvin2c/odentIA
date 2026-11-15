@@ -23,7 +23,6 @@ import {
   discardFormResponse,
   finalizeFormResponse,
   findOrgCountry,
-  FORM_TEMPLATE_CHANGES,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
   getConsentPrint,
@@ -54,7 +53,6 @@ import {
   markFormTemplateLooked,
   parseConsentDraft,
   prepareEncounterConsents,
-  previewPatientQuestionnaire,
   publishConsentTemplate,
   publishFormTemplate,
   renderConsentPreviewPdf,
@@ -716,20 +714,6 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, (tx) =>
         reuseFormTemplate(tx, orgId, userId, formId(c)),
       ),
-    )
-  })
-
-  // A quién le llega: el cuestionario que hoy reciben los pacientes y el que recibirán después de
-  // publicar, dejar de usar o volver a usar esta plantilla. La confirmación lo dice; no lo calcula.
-  app.get("/form-templates/:id/reach", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración cambia las fichas de consulta")
-    }
-    const change = z.enum(FORM_TEMPLATE_CHANGES).safeParse(c.req.query("change"))
-    if (!change.success) return missingParam(c, "change es publish, leave o reuse")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => previewPatientQuestionnaire(tx, orgId, formId(c), change.data)),
     )
   })
 

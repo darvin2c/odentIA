@@ -1,5 +1,8 @@
 import { withOrgContext } from "@odentia/db"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
+import { appointmentVisitAnswer } from "@odentia/db/schema/clinical-forms"
+import { branch } from "@odentia/db/schema/org"
 import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { portalLink } from "@odentia/db/schema/portal"
@@ -24,13 +27,8 @@ import {
   verifyPasskeyRegistration,
 } from "./portal-access.js"
 import { exchangePortalToken, issuePortalLink, requirePortalSession, revokePortalSession } from "./portal.js"
-import { getPortalQuestionnaire, savePortalQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
-import {
-  createFormTemplate,
-  finalizeFormResponse,
-  listFormResponses,
-  publishFormTemplate,
-} from "./clinical-forms.js"
+import { getPortalVisit, savePortalVisit } from "./portal-visit.js"
+import { saveVisitAnswer } from "./visit-answers.js"
 import { recordPortalPinFailure, upsertPortalPolicy } from "./portal-policy.js"
 import { ServiceError } from "./errors.js"
 import { patientPersonId } from "./patients.js"
@@ -370,27 +368,35 @@ it("passkeys: registro con sesión Bearer; respuestas inválidas no crean nada",
   ).rejects.toThrow()
 })
 
-it("cuestionario previo: lo responde quien tiene la sesión, se envía completo y el equipo lo finaliza", async () => {
-  await withOrgContext(appDb, ORG, async (tx) => {
-    const draft = await createFormTemplate(tx, ORG, ACTOR, {
-      title: "Cuestionario previo",
-      respondent: "portal",
-      schema: {
-        sections: [
-          {
-            id: "salud",
-            title: "Salud",
-            fields: [
-              { id: "alergia", label: "¿Eres alérgica a algún medicamento?", type: "booleano", required: true },
-              { id: "cual", label: "¿A cuál?", type: "texto", required: true, showIf: { field: "alergia", equals: true } },
-              { id: "medicamentos", label: "Medicamentos que tomas", type: "texto_largo" },
-            ],
-          },
-        ],
-      },
+/** Una cita por venir del paciente, en una sede y una unidad dental propias. */
+async function upcomingAppointmentOf(patient: string, daysAhead: number): Promise<string> {
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: ORG, name: `Sede ${randomBytes(3).toString("hex")}`, timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const [room] = await ownerDb
+    .insert(scheduleRoom)
+    .values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental 1" })
+    .returning({ id: scheduleRoom.id })
+  const startsAt = new Date(Date.now() + daysAhead * 86_400_000)
+  const [booked] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: ORG,
+      branchId: site!.id,
+      patientId: patient,
+      professionalUserId: ACTOR,
+      roomId: room!.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
     })
-    await publishFormTemplate(tx, ORG, ACTOR, draft.id)
-  })
+    .returning({ id: appointment.id })
+  return booked!.id
+}
+
+// Mesa de formularios del 13 nov, entrega 8: el portal ya no tiene un cuestionario propio.
+it("antes de su cita, desde el portal: lo responde quien decide, para su próxima cita y una vez", async () => {
   await withOrgContext(appDb, ORG, (tx) =>
     createPortalGrant(tx, ORG, ACTOR, {
       patientId: patient3Id,
@@ -406,36 +412,25 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
   const inPortal = <T>(fn: (tx: typeof appDb, ctx: Awaited<ReturnType<typeof requirePortalSession>>) => Promise<T>) =>
     withOrgContext(appDb, ORG, async (tx) => fn(tx, await requirePortalSession(tx, ORG, opened.sessionToken)))
 
-  const first = await inPortal((tx, ctx) => getPortalQuestionnaire(tx, ctx))
-  expect(first.template?.title).toBe("Cuestionario previo")
+  // Sin una cita por venir no hay nada que contar.
+  expect((await inPortal((tx, ctx) => getPortalVisit(tx, ctx))).visit).toBeNull()
+  const visitId = await upcomingAppointmentOf(patient3Id, 3)
+  const first = await inPortal((tx, ctx) => getPortalVisit(tx, ctx))
   expect(first.respondent).toMatchObject({ name: "Contacto Portal" })
-  expect(first.response).toBeNull()
-  // Guardar avance acepta respuestas parciales.
-  const partial = await inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: true } }))
-  expect(partial.response?.submittedAt).toBeNull()
-  // Enviar exige lo obligatorio visible y nombra el campo.
-  await expect(
-    inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: true }, submit: true })),
-  ).rejects.toThrow(/¿A cuál\?/)
-  const sent = await inPortal((tx, ctx) =>
-    savePortalQuestionnaire(tx, ctx, { answers: { alergia: true, cual: "Penicilina" }, submit: true }),
-  )
-  expect(sent.response?.submittedAt).toBeTruthy()
-  expect(sent.response?.id).toBe(partial.response?.id)
-  expect(
-    await errorCode(
-      inPortal((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: false } })),
-    ),
-  ).toBe("ALREADY_SUBMITTED")
-  // El equipo lo ve como declarado por el portal y lo finaliza tras revisarlo.
-  const responses = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
-  expect(responses[0]).toMatchObject({ source: "portal", respondentContactId: contactId, status: "borrador" })
-  expect(
-    await withOrgContext(appDb, ORG, (tx) => finalizeFormResponse(tx, ORG, ACTOR, responses[0]!.id)),
-  ).toMatchObject({ status: "finalizado" })
+  expect(first.visit).toMatchObject({ appointmentId: visitId, purpose: null, questions: { reason: true, pain: true, more: true } })
+  expect(first.sent).toBeNull()
+  // Cuánto le duele va solo con «Sí, me duele».
+  expect(await errorCode(inPortal((tx, ctx) => savePortalVisit(tx, ctx, { pain: "no", painLevel: 4 })))).toBe("VALIDATION")
+  const sent = await inPortal((tx, ctx) => savePortalVisit(tx, ctx, { reason: "Se me rompió un diente", pain: "si", painLevel: 6 }))
+  expect(sent.visit).toBeNull()
+  expect(sent.sent).toMatchObject({ own: true })
+  // Una vez por cita: lo segundo no pisa lo primero.
+  expect(await errorCode(inPortal((tx, ctx) => savePortalVisit(tx, ctx, { reason: "Otra cosa" })))).toBe("ALREADY_SUBMITTED")
+  const [row] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, visitId))
+  expect(row).toMatchObject({ reason: "Se me rompió un diente", pain: "si", painLevel: 6, submittedVia: "portal", respondentContactId: contactId })
 })
 
-it("el portal y el enlace usan la misma regla para responder el cuestionario", async () => {
+it("el portal y el enlace usan la misma regla: quien no decide por el paciente no lo responde", async () => {
   // Otro vínculo del paciente, que no decide por él.
   const [aunt] = await ownerDb
     .insert(contact)
@@ -444,6 +439,7 @@ it("el portal y el enlace usan la misma regla para responder el cuestionario", a
   await withOrgContext(appDb, ORG, (tx) =>
     tx.insert(patientContact).values({ organizationId: ORG, patientId: patient3Id, contactId: aunt!.id, relationship: "family", createdBy: ACTOR }),
   )
+  const visitId = await upcomingAppointmentOf(patient3Id, 5)
   const { raw } = await insertPendingLink(patient3Id)
   const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
   // La operación decide por sí misma, sin depender de quién abrió la sesión.
@@ -452,30 +448,15 @@ it("el portal y el enlace usan la misma regla para responder el cuestionario", a
       const ctx = await requirePortalSession(tx, ORG, opened.sessionToken)
       return fn(tx, { ...ctx, session: { ...ctx.session, contactId: aunt!.id } })
     })
-  const before = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
-
-  // Como en «Su enlace»: no se le ofrece y, si lo intenta, no se guarda. Por el enlace, igual.
-  const view = await asAunt((tx, ctx) => getPortalQuestionnaire(tx, ctx))
-  expect(view).toMatchObject({ template: null, response: null })
+  expect(await asAunt((tx, ctx) => getPortalVisit(tx, ctx))).toMatchObject({ visit: null, sent: null })
+  expect(await errorCode(asAunt((tx, ctx) => savePortalVisit(tx, ctx, { pain: "no" })))).toBe("PORTAL_FORBIDDEN")
+  // Por la operación que usa su enlace, lo mismo.
   expect(
     await errorCode(
-      asAunt((tx, ctx) => savePortalQuestionnaire(tx, ctx, { answers: { alergia: false }, submit: true })),
+      withOrgContext(appDb, ORG, (tx) => saveVisitAnswer(tx, ORG, { patientId: patient3Id, contactId: aunt!.id }, visitId, { pain: "no" }, "enlace")),
     ),
   ).toBe("PORTAL_FORBIDDEN")
-  expect(
-    await errorCode(
-      withOrgContext(appDb, ORG, (tx) =>
-        submitQuestionnaireFromLink(tx, { orgId: ORG, patientId: patient3Id, contactId: aunt!.id }, { alergia: false }),
-      ),
-    ),
-  ).toBe("PORTAL_FORBIDDEN")
-  const after = await withOrgContext(appDb, ORG, (tx) => listFormResponses(tx, ORG, { patientId: patient3Id }))
-  expect(after.map((row) => row.id)).toEqual(before.map((row) => row.id))
-  // Quien decide sigue respondiendo: a la persona que abrió la sesión sí se le ofrece.
-  const own = await withOrgContext(appDb, ORG, async (tx) =>
-    getPortalQuestionnaire(tx, await requirePortalSession(tx, ORG, opened.sessionToken)),
-  )
-  expect(own.template?.title).toBe("Cuestionario previo")
+  expect(await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, visitId))).toEqual([])
 })
 
 it("el código de 6 dígitos siempre activa el acceso, también para volver a entrar", async () => {

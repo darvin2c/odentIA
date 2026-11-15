@@ -53,6 +53,8 @@ import {
   saidWhenWords,
   SEX_LABELS,
   SEX_TO_FHIR_GENDER,
+  visitAnswerLine,
+  visitPainWords,
   VITAL_SIGNS,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -108,6 +110,7 @@ import { listPlanItems } from "./plan.js"
 import type { ExamObservation, RecordSection, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 import { listDecisionRecipients } from "./responsibilities.js"
+import { patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
 
 /** La pieza y las caras de un diagnóstico o procedimiento, sacadas de su sitio. */
 /** Los tres grupos de antecedentes que se declaran y se revisan. */
@@ -252,6 +255,12 @@ export interface PatientRecord {
   forms: FormRecord[]
   documents: Array<typeof patientDocument.$inferSelect>
   appointments: Array<typeof appointment.$inferSelect>
+  /**
+   * Lo que contó antes de cada cita (mesa del 13 nov, entrega 8), con su cita, cuándo y por dónde lo
+   * envió, quién lo contó y quién lo vio al atender. El PDF lo trae en su apartado y en la atención
+   * en que se vio; FHIR, como un `QuestionnaireResponse` por cita, dicho por quien lo contó.
+   */
+  visitAnswers: Array<VisitAnswerView & { encounterId: string | null }>
 }
 
 /** Cómo respondió a un grupo de su declaración: «No», «No sabe» o lo que anotó; null si no respondió. */
@@ -671,6 +680,7 @@ export async function loadPatientRecord(
     forms,
     documents,
     appointments,
+    visitAnswers: await patientVisitAnswers(tx, orgId, patientId),
   }
 }
 
@@ -855,6 +865,24 @@ function reviewScopes(
 
 
 /** El PDF para leer: todo lo de la persona, en el estilo de sus recetas y consentimientos. */
+/** «Lo contó ella el 13 nov., 9:15 a. m., desde su enlace · lo vio Dra. Ana Torres al atender, el …». */
+function visitToldWords(told: PatientRecord["visitAnswers"][number], zone: Zone, sex: string | null): string {
+  const said = `${saidWhenWords(told.by, dayTimeWords(told.submittedAt, zone), sex)}, desde su ${told.submittedVia === "portal" ? "portal" : "enlace"}`
+  return told.seen ? `${said} · lo vio ${told.seen.by} al atender, el ${dayTimeWords(told.seen.at, zone)}` : said
+}
+
+/** Lo que contó, pregunta por pregunta, sin lo que no respondió. */
+function visitRows(told: PatientRecord["visitAnswers"][number]): Array<[string, string]> {
+  return (
+    [
+      ["Se le dijo que viene a", told.toldPurpose],
+      ["A qué viene", told.reason?.trim() || null],
+      ["Dolor", visitPainWords(told)],
+      ["Algo más", told.more?.trim() || null],
+    ] as Array<[string, string | null]>
+  ).filter((row): row is [string, string] => !!row[1])
+}
+
 export async function renderPatientRecordPdf(
   record: PatientRecord,
   clinic: DocumentClinic,
@@ -1075,6 +1103,19 @@ export async function renderPatientRecordPdf(
     }
   }
 
+  // Lo que contó antes de cada cita (mesa del 13 nov, entrega 8): tal como lo envió, para qué cita,
+  // quién lo contó y por dónde, y quién lo vio al atender.
+  if (record.visitAnswers.length) {
+    section(`Lo que contó antes de cada cita (${record.visitAnswers.length})`)
+    for (const told of record.visitAnswers) {
+      kit.ensure(40)
+      kit.gap(6)
+      kit.text(`Para la cita del ${dayTimeWords(told.appointmentStartsAt, zone)}`, { face: "sansBold", size: SIZE.table })
+      kit.text(`${visitToldWords(told, zone, p.sex)}.`, { size: SIZE.second, tone: "gray" })
+      dataRows(visitRows(told), 140)
+    }
+  }
+
   section(`Atenciones (${record.encounters.length})`)
   if (!record.encounters.length) kit.text("Sin atenciones registradas.")
   for (const { row, diagnoses, procedures, exam, addenda } of record.encounters) {
@@ -1113,6 +1154,11 @@ export async function renderPatientRecordPdf(
         record.forms
           .filter((form) => form.encounterId === row.id)
           .map((form) => `${form.title} (ver «${FORM_SECTION_WORDS[form.source]}»)`),
+      ],
+      // Lo que contó antes de venir a la cita de esta atención (entrega 8); el detalle, en su apartado.
+      [
+        "Lo que contó antes de venir",
+        record.visitAnswers.filter((told) => told.encounterId === row.id).map((told) => visitAnswerLine(told)),
       ],
       ["Evolución", row.evolution],
       ["Plan", row.indications],
@@ -1926,6 +1972,32 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       }),
     )
   })
+  // Lo que contó antes de cada cita: lo dijo quien lo envió (la fuente), no el equipo; la atención
+  // es la de esa cita, si la hubo. La cita no tiene campo en `QuestionnaireResponse` de R4: va en el texto.
+  for (const told of record.visitAnswers)
+    resources.push(
+      questionnaireResponse({
+        id: told.id,
+        title: "Antes de tu cita",
+        authored: told.submittedAt,
+        patientRef,
+        encounterId: told.encounterId,
+        source: asserterOf(told.by, patientRef),
+        groups: [
+          {
+            linkId: "visita",
+            text: `Para la cita del ${dayTimeWords(told.appointmentStartsAt, record.clinic)}`,
+            items: visitRows(told).map(([label, value], index) => ({
+              linkId: `visita-${index + 1}`,
+              text: label,
+              type: "string",
+              answers: [{ valueString: value }],
+            })),
+          },
+        ],
+        notes: [`${visitToldWords(told, record.clinic, p.sex)}.`],
+      }),
+    )
   // El parentesco ya se guarda con su código HL7 v3 RoleCode. `partial`: es lo que se sabe de ese familiar.
   for (const row of record.familyHistory)
     resources.push({

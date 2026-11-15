@@ -636,6 +636,17 @@ export async function runClinicSetup(
     .from(clinicalFormTemplate)
     .where(eq(clinicalFormTemplate.organizationId, orgId))
   for (const wanted of plan.forms) {
+    // Lo que la clínica le pregunta al paciente (su hoja de antes de la cita) no es un formulario: va en
+    // «Preguntas al paciente», también lo de antes de cada cita (mesa del 13 nov, entrega 8). Se dice y no se carga.
+    if (wanted.respondent === "portal") {
+      items.push({
+        area: "Formatos propios",
+        label: `Formulario del paciente: ${wanted.title}`,
+        status: "error",
+        detail: "Lo que responde el paciente va en Preguntas al paciente (también antes de cada cita): no se carga como formulario",
+      })
+      continue
+    }
     // «Ya está» es el título entero, aquí y en el servicio: uno que solo empieza igual que otro
     // es otro formulario (`createFormTemplate` ya no los une por la clave recortada a 40). El
     // mismo título dos veces en el plan tampoco se carga dos veces.
@@ -653,7 +664,6 @@ export async function runClinicSetup(
         title: wanted.title,
         description: wanted.description ?? null,
         schema: wanted.schema,
-        ...(wanted.respondent ? { respondent: wanted.respondent as "staff" | "portal" } : {}),
       })
       forms.push({ title: wanted.title })
       return { status: "nueva", detail: "En borrador: la clínica lo revisa y lo publica" }

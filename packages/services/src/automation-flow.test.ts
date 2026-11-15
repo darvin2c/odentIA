@@ -50,6 +50,7 @@ import {
   UNSUBSCRIBE_WORDS,
   unsubscribeByToken,
 } from "./automation.js"
+import { saveVisitAnswer } from "./visit-answers.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { saveMessageText, sendLinkReceivedNotice } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
@@ -436,12 +437,70 @@ describe("por dónde le llega a cada persona", () => {
     const p = await person(c, "Pedro Ríos", { consent: ["recordatorio"] })
     await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
     await consentSentToSign(c, p.patientId)
-    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1 })
+    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1, visit: null })
     await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
     await deliver(c)
     const [job] = await jobsOf(c)
     // No le dice «2 cosas por hacer»: el consentimiento lo lee en su enlace y lo firma en la cita.
     expect(await messageOf(job!.sentMessageId)).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_datos_v1" })
+  })
+
+  // Mesa de formularios del 13 nov, entrega 8, y lo que decidió el dueño el 14 nov: lo de su visita es
+  // opcional y no es «algo por hacer».
+  it("«Antes de tu cita» no cuenta lo de su visita: sus datos y su visita son una tarjeta, y su visita sola no suma", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
+    const p = await person(c, "Marta Ríos", { consent: ["recordatorio"] })
+    // Una cita de verdad por venir: lo de la visita se pregunta para una cita que aún no llega.
+    const visit = await appointmentFor(c, p.patientId, new Date(Date.now() + 2 * 24 * HOUR))
+    const count = () => run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId, { appointmentId: visit }))
+    // Le falta su fecha de nacimiento: una sola tarjeta, aunque también se le pregunte a qué viene.
+    expect(await count()).toEqual({ data: true, total: 1, visit: { asksReason: true } })
+    await ownerDb
+      .update(contact)
+      .set({ givenNames: "Marta", familyName: "Ríos", birthDate: "1960-03-12", phone: "+51987000937" })
+      .where(eq(contact.id, p.contactId))
+    // Solo su visita: no es algo por hacer.
+    expect(await count()).toEqual({ data: false, total: 0, visit: { asksReason: true } })
+    await run(c, (tx) => saveVisitAnswer(tx, c.orgId, { patientId: p.patientId, contactId: p.contactId }, visit, { pain: "no" }, "enlace"))
+    expect(await count()).toEqual({ data: false, total: 0, visit: null })
+  })
+
+  it("si solo le queda contar a qué viene, sale el recordatorio de siempre con una línea suave; como plantilla, sin ella", async () => {
+    // Las próximas 10:00 de Lima de lunes a viernes: la cita sigue por venir (lo de su visita se pregunta
+    // solo entonces) y el recordatorio sale en el horario de escribir. Con la hora real, de noche o en fin
+    // de semana, no salía.
+    const now = new Date()
+    now.setUTCHours(15, 0, 0, 0)
+    while (now.getTime() <= Date.now() || now.getUTCDay() === 0 || now.getUTCDay() === 6) now.setTime(now.getTime() + 24 * HOUR)
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
+    await ruleOn(c, "recordatorio_cita", new Date(now.getTime() - HOUR), { hoursBefore: [24] })
+    const complete = async (name: string, openWindow: boolean) => {
+      const p = await person(c, name, { consent: ["recordatorio"], openWindow })
+      await ownerDb
+        .update(contact)
+        .set({ givenNames: name.split(" ")[0], familyName: name.split(" ")[1], birthDate: "1960-03-12", phone: `+5198700${randomUUID().replace(/\D/g, "").slice(0, 4).padEnd(4, "0")}` })
+        .where(eq(contact.id, p.contactId))
+      return p
+    }
+    // Escribió hoy: el recordatorio sale como texto y lleva la línea con su enlace.
+    const marta = await complete("Marta Ríos", true)
+    // Escribió una hora antes de ese «ahora».
+    await ownerDb.update(conversation).set({ lastInboundAt: new Date(now.getTime() - HOUR) }).where(eq(conversation.id, marta.conversationId!))
+    await appointmentFor(c, marta.patientId, new Date(now.getTime() + 24 * HOUR))
+    // No escribió en 24 horas: sale la plantilla aprobada del recordatorio, sin línea.
+    const rosa = await complete("Rosa Lima", false)
+    await appointmentFor(c, rosa.patientId, new Date(now.getTime() + 24 * HOUR + 40 * 60_000))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, now))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, new Date(now.getTime() + HOUR)))
+    await deliver(c, new Date(now.getTime() + HOUR))
+    expect(await jobsOf(c)).toHaveLength(2)
+    const sent = await Promise.all((await jobsOf(c)).map((job) => messageOf(job.sentMessageId)))
+    const toMarta = sent.find((row) => row.conversationId === marta.conversationId)
+    expect(toMarta?.body).toMatch(/\n\nSi quieres, cuéntanos a qué vienes: https?:\/\//)
+    expect(toMarta?.body).not.toMatch(/cosa/)
+    const toRosa = sent.find((row) => row.conversationId !== marta.conversationId)
+    expect(toRosa).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_v2" })
+    expect(toRosa?.body).not.toMatch(/cuéntanos|cosa/)
   })
 
   it("«Antes de tu cita» sin aprobar: sale el de sus datos y, si no, el de siempre", async () => {

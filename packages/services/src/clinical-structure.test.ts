@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -37,7 +37,6 @@ import {
 import { createEncounter } from "./encounters.js"
 import { getPatientMissingData, getStaffMissingData } from "./patient-registration.js"
 import { createPatient, getPatient } from "./patients.js"
-import { submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { appDb, container, ownerDb, setupTestDb } from "./test-setup.js"
@@ -665,36 +664,52 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
-  const template = await run(async (tx) => {
-    const draft = await createFormTemplate(tx, "org_a", ACTOR, {
-      title: "Antes de tu cita",
-      respondent: "portal",
-      schema: { sections: [{ id: "salud", title: "Salud", fields }] },
-    })
-    return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
-  })
-  // Lo envía el paciente desde su enlace o el portal: el equipo no crea una respuesta con esta plantilla.
+  // Un cuestionario del paciente ya no se crea (entrega 8): este es uno de los de antes, como quedó.
+  await expect(
+    run((tx) => createFormTemplate(tx, "org_a", ACTOR, { title: "Antes de tu cita", respondent: "portal", schema: { sections: [{ id: "salud", title: "Salud", fields }] } })),
+  ).rejects.toMatchObject({ code: "PATIENT_FORMS_RETIRED" })
+  const [template] = await run((tx) =>
+    tx
+      .insert(clinicalFormTemplate)
+      .values({
+        organizationId: "org_a",
+        key: "antes-de-tu-cita-de-antes",
+        title: "Antes de tu cita",
+        status: "publicado",
+        respondent: "portal",
+        schema: { sections: [{ id: "salud", title: "Salud", fields }] },
+        publishedAt: new Date(),
+      })
+      .returning(),
+  )
+  if (!template) throw new Error("Sin plantilla")
+  // El equipo no crea una respuesta con esta plantilla: la enviaba el paciente.
   await expect(
     run((tx) => createFormResponse(tx, "org_a", ACTOR, { templateId: template.id, patientId: patient.id })),
   ).rejects.toMatchObject({ status: 400 })
-  // Con el envío de verdad (el de «Su enlace»), que valida las respuestas contra la plantilla.
+  // Lo que el paciente envió con ella antes de la entrega 8, tal como quedó: declarado y por revisar.
   const own = (await run((tx) => getPatient(tx, "org_a", patient.id))).contacts.find((link) => link.relationship === "self")
   if (!own) throw new Error("Sin persona propia")
   const declared = async (answers: Record<string, unknown>) => {
-    await run((tx) =>
-      submitQuestionnaireFromLink(tx, { orgId: "org_a", patientId: patient.id, contactId: own.contactId }, answers),
-    )
     const [row] = await ownerDb
-      .select()
-      .from(clinicalFormResponse)
-      .where(and(eq(clinicalFormResponse.patientId, patient.id), eq(clinicalFormResponse.status, "borrador")))
+      .insert(clinicalFormResponse)
+      .values({
+        organizationId: "org_a",
+        templateId: template.id,
+        templateVersion: template.version,
+        templateSnapshot: template.schema,
+        templateTitle: template.title,
+        patientId: patient.id,
+        answers,
+        source: "portal",
+        respondentContactId: own.contactId,
+        submittedAt: new Date(),
+        submittedVia: "enlace",
+      })
+      .returning()
     if (!row) throw new Error("Sin respuesta declarada")
-    expect(row).toMatchObject({ source: "portal", templateId: template.id, respondentContactId: own.contactId })
-    expect(row.submittedAt).toBeInstanceOf(Date)
     return row
   }
-  // Lo que no cumple la plantilla no entra: falta la pregunta obligatoria.
-  await expect(declared({ alergia_cual: "Penicilina" })).rejects.toMatchObject({ status: 400 })
   const response = await declared({ alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" })
   // Mientras no se finaliza, nada pasa a los antecedentes.
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)

@@ -1092,6 +1092,28 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         forms: ["no le puedo enviar su enlace"],
       },
       {
+        // Mesa de formularios del 13 nov, entrega 8.
+        id: "antes-de-cita-que-le-llega",
+        q: "¿Qué le llega al paciente antes de su cita?",
+        a: "En su enlace tiene una sola tarjeta: «Antes de tu cita». Si le faltan datos o tiene algo por firmar, el recordatorio de su cita se lo dice y trae el enlace; si solo le queda contar a qué viene, le llega el recordatorio de siempre y, por WhatsApp si escribió en el día o por correo, una línea para contarlo si quiere. Junta lo que falta de sus datos, su salud y sus medicinas, y al final «Tu visita»: a qué viene, con sus palabras, si le duele y cuánto, y algo más. Lo de la visita es opcional, y si su cita es una sesión o un control se le dice a qué viene, como la segunda sesión de un tratamiento, y solo se le pregunta si le duele. Lo envía de una vez y le dice quién lo lee antes de atenderlo. Se pregunta en cada cita: lo de una visita no se lee como de otra. En su portal ve lo mismo para su próxima cita. Llega a «Hoy viene a…» de la atención de esa cita, con «Usar como motivo». Qué se le pregunta lo eliges en Configuración › Preguntas al paciente, en «Antes de cada cita». Si no responde, la atención se abre, se firma y se cobra igual.",
+        forms: [
+          "que le llega al paciente antes de la cita",
+          "el paciente responde algo antes de venir",
+          "cuestionario antes de la cita",
+          "donde elijo lo que se le pregunta antes de la cita",
+        ],
+      },
+      {
+        id: "recepcion-como-le-mando-lo-que-responde",
+        q: "¿Cómo le mando lo que tiene que responder?",
+        a: "No hace falta armar nada: su enlace tiene «Antes de tu cita», con sus datos que faltan y lo de su visita, y el recordatorio de su cita se lo lleva cuando le falta algo o lo invita a contar a qué viene. Si quieres que lo tenga antes, escríbele con su enlace desde su página o desde su conversación con «Enviarle su enlace»; si le faltan datos, también desde «Completar» en la cita de la Agenda. Si no se le puede enviar, «Copiar enlace» o «Mostrar su código». Lo que responde lo lee quien lo atiende: recepción no ve sus respuestas.",
+        forms: [
+          "como le mando el cuestionario al paciente",
+          "enviarle lo que tiene que responder antes de su cita",
+          "como le pido que responda antes de venir",
+        ],
+      },
+      {
         id: "doy-acceso-portal",
         q: "¿Cómo le doy acceso al portal?",
         a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
@@ -2199,7 +2221,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "alergias-paciente-escribe-cuestionario-llegan-ficha",
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",
-        a: "Sí, si en la pregunta marcas «Son alergias: pasan a sus antecedentes». Cuando el profesional finaliza el cuestionario, cada alergia entra a Antecedentes como declarada, sin confirmar, y la receta avisa al escribir un medicamento que choca. No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
+        a: "Sus alergias se le preguntan en su registro y en su enlace («Antes de tu cita»), y llegan a Antecedentes como «lo dijo él», sin revisar; la receta avisa al escribir un medicamento que choca. Si respondió un cuestionario de los de antes que las preguntaba, entran al «Marcar como revisado». No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
       },
     ],
   },

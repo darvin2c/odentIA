@@ -8,6 +8,7 @@ import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
+import { visitHistoryLine } from "../../lib/visit-answer-words"
 import { productUi } from "../../product/product-ui"
 import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -103,6 +104,12 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
     indicated.length + budgets.length + followUps.length + prescriptions.length + orders.length + retiredForms.length > 0
   return (
     <>
+      {!retired && born.told ? (
+        // Lo que contó antes de venir, en la atención de su cita, con quién lo vio (mesa del 13 nov, entrega 8).
+        <Part label="Lo que contó antes de venir">
+          <p className="text-sm">{visitHistoryLine(born.told)}</p>
+        </Part>
+      ) : null}
       {/* Una ficha finalizada es algo que se anotó en la atención, no que se indicó:
           va aparte, con lo respondido en una línea y «Ver» (QA de formularios del 13 nov). */}
       {noted.length > 0 ? (

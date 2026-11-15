@@ -518,23 +518,6 @@ export function reuseFormTemplate(id: string) {
   return post<FormTemplate>(`${BASE}/form-templates/${id}/reuse`, {})
 }
 
-/** Un cuestionario del paciente, nombrado para decirlo en una confirmación. */
-export interface ReachedQuestionnaire {
-  key: string
-  title: string
-}
-
-/** A quién le llega: el que reciben hoy los pacientes (`now`) y el que recibirán después del cambio (`after`). */
-export interface TemplateReach {
-  now: ReachedQuestionnaire | null
-  after: ReachedQuestionnaire | null
-}
-
-/** Lo dice el servidor, con la regla del enlace y del portal: la pantalla no lo calcula. */
-export function fetchTemplateReach(id: string, change: "publish" | "leave" | "reuse") {
-  return apiFetch<{ data: TemplateReach }>(`${BASE}/form-templates/${id}/reach?change=${change}`)
-}
-
 // --- Capturas ---
 
 export function fetchFormResponses(query: {

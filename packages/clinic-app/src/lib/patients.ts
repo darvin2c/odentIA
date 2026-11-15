@@ -739,6 +739,28 @@ export interface EncounterDetail {
   addenda: ClinicalNote[]
   /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
   visit?: EncounterVisit | null
+  /**
+   * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8): solo de
+   * esa cita, en el borrador y firmada, con quién lo vio al atender. Nulo sin cita o si no contó nada.
+   */
+  visitAnswer?: VisitAnswerView | null
+}
+
+/** Lo que contó antes de su cita, como lo manda el servidor. */
+export interface VisitAnswerView {
+  id: string
+  appointmentId: string
+  appointmentStartsAt: string
+  reason: string | null
+  pain: "si" | "no" | null
+  painLevel: number | null
+  more: string | null
+  toldPurpose: string | null
+  submittedAt: string
+  submittedVia: "enlace" | "portal"
+  by: HealthDeclarant
+  seen: { by: string; at: string } | null
+  seenEncounterId: string | null
 }
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
@@ -886,6 +908,8 @@ export interface EncounterBorn {
     /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
     fromPerson?: boolean
   }>
+  /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
+  told?: VisitAnswerView | null
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 
