@@ -70,6 +70,8 @@ it("la atención firmada dice qué formularios le quedaron a medias", () => {
   expect(unfinishedAfterSigning(forms, "finalizada").map((form) => form.id)).toEqual(["a"])
   // Mientras sigue en curso no es un pendiente aparte: se está llenando.
   expect(unfinishedAfterSigning(forms, "borrador")).toEqual([])
+  // «Finalizarla al firmar»: la que se finalizó con la firma no sale como a medias (verificación del 14 nov).
+  expect(unfinishedAfterSigning(forms, "finalizada", ["a"])).toEqual([])
 })
 
 it("lo finalizado se dice con fecha y hora, y si fue después de firmar su atención", () => {
@@ -93,7 +95,7 @@ it("lo finalizado se dice con fecha y hora, y si fue después de firmar su atenc
 it("el estado de un formulario en la lista dice si quedó a medias al firmar o si es de una atención anulada", () => {
   const row = { status: "borrador" as const, submittedAt: null, encounterStatus: null }
   expect(formStateWords(row)).toBe("Sin finalizar")
-  expect(formStateWords({ ...row, encounterStatus: "finalizada" })).toBe("Quedó a medias al firmar la atención: falta terminarlo")
+  expect(formStateWords({ ...row, encounterStatus: "finalizada" })).toBe("Quedó a medias al firmar la atención: falta terminarla")
   expect(formStateWords({ ...row, submittedAt: "2026-11-13T10:00:00.000Z" })).toBe("Lo declaró la persona · por revisar")
   expect(formStateWords({ ...row, status: "finalizado" })).toBe("Finalizado")
   expect(formStateWords({ ...row, status: "finalizado", encounterStatus: "anulada" })).toBe("Finalizado · de una atención anulada")

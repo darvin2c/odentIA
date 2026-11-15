@@ -242,4 +242,36 @@ describe("lo que recibe el modelo en cada pausa", () => {
     // Un modelo sin caché (el de demostración) recibe el mismo texto, sin marca.
     expect(ask("fake", NOW, "Viene por dolor.")[0]?.content).toBe(((ask("openai", NOW, "x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
   })
+
+  it("las fichas empezadas van en el mensaje de la pausa, nunca en la parte fija; sin ficha, la pausa es la de siempre", () => {
+    const forms = [
+      { number: 1, responseId: "r1", formTitle: "Ficha de ortodoncia", fieldId: "clase", label: "Clase molar derecha (Angle)", type: "opcion_unica" as const, options: ["Clase I", "Clase II división 1"], unit: null, min: null, max: null, order: 0, dependsOn: null },
+      { number: 2, responseId: "r1", formTitle: "Ficha de ortodoncia", fieldId: "overjet", label: "Overjet", type: "numero" as const, options: null, unit: "mm", min: -10, max: 20, order: 1, dependsOn: null },
+    ]
+    const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript: "Overjet de seis.", context: "", pending: [] }
+    const [fixedWith, humanWith] = dictationMessages({ ...base, forms }, DENTAL_DICTATION_PROFILE, false)
+    const [fixedWithout, humanWithout] = dictationMessages(base, DENTAL_DICTATION_PROFILE, false)
+    expect(fixedWith?.content).toEqual(fixedWithout?.content)
+    expect(String(humanWith?.content)).toContain(
+      ["Ficha de ortodoncia:", "1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1", "2. Overjet · número en mm, de -10 a 20"].join("\n"),
+    )
+    expect(String(humanWith?.content)).toContain("el silencio no es «No»")
+    expect(String(humanWithout?.content)).not.toContain("Fichas abiertas")
+  })
+})
+
+describe("las respuestas de una ficha", () => {
+  it("una respuesta a una pregunta que no se le dio no se adivina: se avisa con su frase", () => {
+    const transcript = "Overjet de seis milímetros. Overbite de tres."
+    const read = readWith(
+      { fichas: [{ question: 1, answer: "6", dicho: "Overjet de seis milímetros." }, { question: 3, answer: "3", dicho: "Overbite de tres." }] },
+      transcript,
+      0,
+      DENTAL_DICTATION_PROFILE.parts,
+      2,
+    )
+    expect(read?.drafts).toEqual([{ kind: "ficha", payload: { question: 1, answer: "6" }, sourceText: "Overjet de seis milímetros." }])
+    expect(read?.omitted).toBe(1)
+    expect(read?.unused).toEqual(["Overbite de tres."])
+  })
 })
