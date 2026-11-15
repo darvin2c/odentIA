@@ -14,8 +14,8 @@ import { bringTreatmentApi, chooseVisitControlApi, leaveTreatmentApi } from "../
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
   type EncounterVisit,
+  type EncounterVisitAnswerView,
   treatmentConsentWords,
-  type VisitAnswerView,
   type VisitControl,
   type VisitTreatment,
 } from "../../lib/patients"
@@ -109,8 +109,11 @@ export function EncounterVisitStrip({
   currentReason?: string
   /** La atención es de otro día (una cita pasada que se registra después): no se dice «hoy». */
   past?: boolean
-  /** Lo que contó antes de venir para la cita de esta atención («Antes de tu cita»). */
-  visitAnswer?: VisitAnswerView | null
+  /**
+   * Lo que contó antes de venir («Antes de tu cita»): para la cita de esta atención o, si vino sin
+   * cita o antes, para otra cita suya (`otherAppointment`), dicho con su fecha.
+   */
+  visitAnswer?: EncounterVisitAnswerView | null
   patientFirstName?: string | null
   /**
    * «Usar como motivo» con sus palabras: solo con el motivo vacío, nunca pisa lo escrito (ni lo que
@@ -225,7 +228,8 @@ export function EncounterVisitStrip({
             </li>
           ) : null}
           {visitAnswer ? (
-            // «Antes de tu cita» (mesa del 13 nov, entrega 8): lo de esta cita y de ninguna otra.
+            // «Antes de tu cita» (mesa del 13 nov, entrega 8): lo de esta cita o, si vino sin cita o
+            // antes, lo que contó para otra cita suya, dicho como de esa cita (QA final, 15 nov, H2).
             <li className={row}>
               <span className="flex min-w-0 flex-col">
                 <span className="text-xs text-muted-foreground">{visitToldHeading(visitAnswer, patientFirstName)}:</span>

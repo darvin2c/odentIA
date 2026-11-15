@@ -286,3 +286,33 @@ describe("el registro sin enlace (QR o web) es solo de la pestaña", () => {
     expect(readDeviceDraft(anonymous)).toBeNull()
   })
 })
+
+describe("lo que responde se ve elegido y «Saltar» no lo borra", () => {
+  // Su enlace, con solo «Tus medicinas» por responder: la primera pantalla es esa.
+  const medicines: RegistrationFill = {
+    missing: new Set(),
+    health: true,
+    healthKeys: new Set(["anticoagulants", "medications"]),
+    hasRepresentative: true,
+    firstName: "Marta",
+  }
+  const option = (host: HTMLElement, field: string, label: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>(`[data-field="${field}"] button`)].find((item) => item.textContent === label)
+
+  it("Y1 · lo elegido va con el color de la marca: no queda casi igual que el fondo ni que el cursor encima", async () => {
+    const host = await open({ fill: medicines })
+    const no = option(host, "anticoagulants", "No")
+    await press(no)
+    expect(no?.getAttribute("aria-pressed")).toBe("true")
+    expect(no?.className).toContain("aria-pressed:bg-primary")
+    expect(no?.className).not.toContain("aria-pressed:bg-background")
+  })
+
+  it("K10 · en blanco se puede saltar; con algo respondido, «Saltar» no se ofrece y «Siguiente» sigue con lo escrito", async () => {
+    const host = await open({ fill: medicines })
+    expect(button(host, "Saltar")).toBeDefined()
+    await press(option(host, "anticoagulants", "No"))
+    expect(button(host, "Saltar")).toBeUndefined()
+    expect(option(host, "anticoagulants", "No")?.getAttribute("aria-pressed")).toBe("true")
+  })
+})

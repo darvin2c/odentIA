@@ -8,7 +8,7 @@ import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterBorn, type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
-import { visitHistoryLine } from "../../lib/visit-answer-words"
+import { visitHistoryLine, visitToldLabel } from "../../lib/visit-answer-words"
 import { productUi } from "../../product/product-ui"
 import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -106,8 +106,11 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
   return (
     <>
       {!retired && born.told ? (
-        // Lo que contó antes de venir, en la atención de su cita, con quién lo vio (mesa del 13 nov, entrega 8).
-        <Part label="Lo que contó antes de venir">
+        // Lo que contó antes de venir, en la atención en que se leyó, con quién lo vio (mesa del 13 nov,
+        // entrega 8); si lo contó para otra cita suya, lo dice (QA final de formularios, 15 nov, H2).
+        <Part
+          label={visitToldLabel(born.told)}
+        >
           <p className="text-sm">{visitHistoryLine(born.told)}</p>
         </Part>
       ) : null}

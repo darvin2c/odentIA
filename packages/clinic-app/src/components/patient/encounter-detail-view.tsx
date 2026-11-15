@@ -1,6 +1,6 @@
 import { label } from "../../lib/glossary"
 import { diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText, visitAnswerLine } from "@odentia/clinical"
-import { visitSeenWords } from "../../lib/visit-answer-words"
+import { visitSeenWords, visitToldLabel } from "../../lib/visit-answer-words"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
@@ -268,7 +268,9 @@ export function EncounterDetailView({
           {detail.visitAnswer ? (
             // Después de firmar sigue a la vista lo que contó antes de venir, con quién lo vio (entrega 8).
             <div className="sm:col-span-2">
-              <dt className="text-xs font-medium text-muted-foreground">Lo que contó antes de venir</dt>
+              <dt className="text-xs font-medium text-muted-foreground">
+                {visitToldLabel(detail.visitAnswer)}
+              </dt>
               <dd className="text-sm">
                 {visitAnswerLine(detail.visitAnswer)}
                 {visitSeenWords(detail.visitAnswer) ? (

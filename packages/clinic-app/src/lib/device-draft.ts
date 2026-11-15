@@ -198,9 +198,19 @@ export function writeDeviceDraft<T>(
   }
 }
 
-/** La clave de «Antes de tu cita» (o «Tus datos») de un enlace: también de la cita para la que responde. */
-export function personalLinkDraftKey(clinic: string, token: string, appointmentStartsAt: string | null): string {
-  return deviceDraftKey({ clinic, flow: "enlace", token, extra: appointmentStartsAt ?? "sin-cita" })
+/**
+ * La clave de «Antes de tu cita» (o «Tus datos») de un enlace: también de la cita para la que
+ * responde. «Corregir mi salud o mis medicinas» guarda aparte (`corregir`): es otro recorrido y no
+ * se mezcla con lo de antes de la cita; se borra con lo demás del enlace.
+ */
+export function personalLinkDraftKey(
+  clinic: string,
+  token: string,
+  appointmentStartsAt: string | null,
+  journey: "antes" | "corregir" = "antes",
+): string {
+  const appointment = appointmentStartsAt ?? "sin-cita"
+  return deviceDraftKey({ clinic, flow: "enlace", token, extra: journey === "corregir" ? `corregir:${appointment}` : appointment })
 }
 
 export function clearDeviceDraft(key: string): void {

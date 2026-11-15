@@ -1,8 +1,7 @@
 import { ageInYears, declaredHealthAnswered, isChildAge, type RegistrationAnswers, type VisitAnswerInput } from "@odentia/clinical"
-import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
 import { fetchPersonalDataForm, type PersonalDataForm as PersonalDataFormView, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
@@ -75,6 +74,15 @@ function sendsSomething(input: PersonalDataInput): boolean {
     input.acceptsPromotions !== undefined ||
     !!input.visit
   )
+}
+
+/**
+ * Lo que el cuestionario dice si el envío falla: lo que es de un dato va a su campo (el `ApiError`
+ * tal cual); lo demás, con las palabras del servidor o `fallback` y, sin red, que revise su conexión.
+ */
+function sendFailure(error: unknown, fallback: string): Error {
+  if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) return error
+  return new Error(error instanceof ApiError ? (error.shape.message ?? fallback) : `${fallback} Revisa tu conexión y vuelve a intentarlo.`)
 }
 
 /** «a», «a y b», «a, b y c». */
@@ -164,28 +172,6 @@ export function personalDataSentWords(
   }
 }
 
-/** «13 nov»: el día de su última declaración, como lo dice la página. */
-function shortSince(since: string): string {
-  const date = new Date(since)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toLocaleDateString("es", { day: "numeric", month: "short" }).replace(/\./g, "")
-}
-
-/**
- * «¿Cambió algo en tu salud o en tus medicinas desde tu última visita (13 nov)?» (entrega 10). A
- * quien cuida a un niño se le pregunta por el niño. No lista lo que dijo entonces (decisión 9).
- */
-export function healthCheckQuestion(
-  form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName">,
-  since: string,
-): string {
-  const day = shortSince(since)
-  const when = day ? ` (${day})` : ""
-  return isChildAge(form.age) && form.firstName && form.respondentFirstName
-    ? `¿Cambió algo en la salud o en las medicinas de ${form.firstName} desde su última visita${when}?`
-    : `¿Cambió algo en tu salud o en tus medicinas desde tu última visita${when}?`
-}
-
 /** Lo que dice la página al responder «¿Cambió algo?» o al corregir su salud. */
 export function healthAnswerWords(
   form: Pick<SentFor, "firstName" | "age" | "respondentFirstName" | "forOther">,
@@ -250,8 +236,6 @@ export function PersonalDataForm({
     retry: false,
     mutationFn: (input: PersonalDataInput) => submitPersonalData(slug, token, input),
   })
-  // Su respuesta a «¿Cambió algo?»: hasta elegir, la tarjeta solo pregunta eso.
-  const [check, setCheck] = useState<"sin_cambios" | "cambio" | null>(null)
   const alreadyThere = formQuery.error instanceof ApiError && formQuery.error.shape.code === "BOOKING_LINK_EXPIRED"
   // Ya no está pendiente: lo escrito a medias en este celular ya no sirve y se borra.
   useEffect(() => {
@@ -268,42 +252,9 @@ export function PersonalDataForm({
   const correcting = form.correcting === true
   const visit = correcting ? null : (form.visit ?? null)
   const visitWords = visit ? { reader: reader ?? null, askedReason: visit.questions.reason } : null
+  // «¿Cambió algo?» va dentro del recorrido, después de saber quién responde: lo que diga queda de
+  // quien lo dijo. Con «No, sigue igual» y nada más por responder, ese toque envía.
   const healthCheck = correcting ? null : (form.healthCheck ?? null)
-  // Con «No, sigue igual» y nada más por responder, un toque: se envía ahí mismo.
-  const onlyCheck = !!healthCheck && form.missing.length === 0 && !form.asksHealth && !visit
-  const sendUnchanged = async () => {
-    try {
-      await send.mutateAsync({ data: {}, healthCheck: "sin_cambios" })
-      onSent(healthAnswerWords(form, clinicName, "sin_cambios"))
-    } catch (error) {
-      if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") {
-        onSent(healthAnswerWords(form, clinicName, "sin_cambios"))
-        return
-      }
-      setCheck(null)
-    }
-  }
-  if (healthCheck && check === null)
-    return (
-      <HealthCheckCard
-        question={healthCheckQuestion(form, healthCheck.since)}
-        pending={send.isPending}
-        failed={send.isError}
-        onAnswer={(answer) => {
-          setCheck(answer)
-          if (answer === "sin_cambios" && onlyCheck) void sendUnchanged()
-        }}
-      />
-    )
-  if (healthCheck && check === "sin_cambios" && onlyCheck)
-    return <LoadingState kind="indeterminate" message="Enviando…" />
-  // «Sí, cambió» y «Corregir»: vuelve a responder todo lo de su salud que la clínica pregunta.
-  const changed = check === "cambio" && !!healthCheck
-  const healthKeys = correcting
-    ? (form.healthQuestions ?? [])
-    : changed
-      ? healthCheck.questions
-      : (form.healthQuestions ?? [])
   return (
     <div className="rounded-3xl border bg-card p-5 sm:p-6">
       <RegistrationQuestionnaire
@@ -312,9 +263,12 @@ export function PersonalDataForm({
         countryCode={form.countryCode}
         fill={{
           missing: new Set(form.missing.map((item) => item.key)),
-          health: correcting || changed || form.asksHealth,
-          // De su salud, solo lo que falta: lo que ya se sabe no se le muestra. Si cambió o lo corrige, todo, sin lo de antes.
-          healthKeys: new Set(healthKeys),
+          health: correcting || form.asksHealth,
+          // De su salud, solo lo que falta (si lo corrige, todo): lo que ya se sabe no se le muestra. Si
+          // dijo que cambió, el cuestionario suma lo de lo que eligió en «¿Qué cambió?».
+          healthKeys: new Set(form.healthQuestions ?? []),
+          healthCheck,
+          medicineQuestions: correcting ? [] : (form.medicineQuestions ?? []),
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
           age: form.age ?? null,
@@ -336,7 +290,8 @@ export function PersonalDataForm({
           const said = answeredFor(form, answers, form.today)
           const input: PersonalDataInput = {
             ...toInput(answers, form.pending, extra.visit),
-            ...(healthCheck && check ? { healthCheck: check } : {}),
+            ...(extra.healthCheck ? { healthCheck: extra.healthCheck } : {}),
+            ...(extra.medicinesChanged ? { medicinesChanged: true } : {}),
             ...(correcting ? { correctHealth: true } : {}),
           }
           if (correcting) {
@@ -344,17 +299,18 @@ export function PersonalDataForm({
               await send.mutateAsync(input)
               onSent(healthAnswerWords(said, clinicName, "correccion"))
             } catch (error) {
-              if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
-              throw new Error(
-                error instanceof ApiError
-                  ? (error.shape.message ?? "No pudimos guardar tu corrección.")
-                  : "No pudimos guardar tu corrección. Revisa tu conexión y vuelve a intentarlo.",
-              )
+              throw sendFailure(error, "No pudimos guardar tu corrección.")
             }
             return
           }
           if (input.healthCheck === "sin_cambios" && !sendsSomething(input)) {
-            await sendUnchanged()
+            // Solo «No, sigue igual», con quién lo dijo si respondió por ella.
+            try {
+              await send.mutateAsync(input)
+            } catch (error) {
+              if (!(error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT")) throw sendFailure(error, "No pudimos enviarlo.")
+            }
+            onSent(healthAnswerWords(said, clinicName, "sin_cambios"))
             return
           }
           if (!sendsSomething(input) && !input.healthCheck) {
@@ -364,7 +320,7 @@ export function PersonalDataForm({
             onSent(personalDataSentWords(said, clinicName, "nada"))
             return
           }
-          const withHealth = (form.asksHealth || changed) && !!input.health
+          const withHealth = (form.asksHealth || input.healthCheck === "cambio" || !!input.medicinesChanged) && !!input.health
           try {
             await send.mutateAsync(input)
             onSent(personalDataSentWords(said, clinicName, withHealth ? "con-salud" : "sin-salud", visitWords))
@@ -373,56 +329,10 @@ export function PersonalDataForm({
               onSent(personalDataSentWords(said, clinicName, "ya-enviado"))
               return
             }
-            // Lo que es de un dato, el cuestionario lo dice en su campo.
-            if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
-            throw new Error(
-              error instanceof ApiError
-                ? (error.shape.message ?? "No pudimos guardar lo que enviaste.")
-                : "No pudimos guardar lo que enviaste. Revisa tu conexión y vuelve a intentarlo.",
-            )
+            throw sendFailure(error, "No pudimos guardar lo que enviaste.")
           }
         }}
       />
     </div>
-  )
-}
-
-/**
- * La primera pregunta de la tarjeta (dibujo 15 del lienzo): dos botones grandes, «No, sigue igual»
- * y «Sí, cambió», y qué pasa con cada uno. Un grupo de radios no hace falta: tocar ya responde.
- */
-function HealthCheckCard({
-  question,
-  pending,
-  failed,
-  onAnswer,
-}: {
-  question: string
-  pending: boolean
-  failed: boolean
-  onAnswer: (answer: "sin_cambios" | "cambio") => void
-}) {
-  return (
-    <section aria-labelledby="cambio-algo" className="flex flex-col gap-4 rounded-3xl border bg-card p-5 sm:p-6">
-      <h2 id="cambio-algo" className="font-heading text-lg font-medium">
-        {question}
-      </h2>
-      <div className="flex flex-col gap-2">
-        <Button type="button" size="lg" variant="outline" disabled={pending} onClick={() => onAnswer("sin_cambios")}>
-          No, sigue igual
-        </Button>
-        <Button type="button" size="lg" disabled={pending} onClick={() => onAnswer("cambio")}>
-          Sí, cambió
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Si cambió, vuelves a responder las preguntas de tu salud y tus medicinas. Lo de antes no se borra.
-      </p>
-      {failed ? (
-        <p role="alert" className="text-sm text-destructive">
-          No pudimos enviarlo. Revisa tu conexión y vuelve a intentarlo.
-        </p>
-      ) : null}
-    </section>
   )
 }
