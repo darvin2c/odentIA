@@ -862,6 +862,20 @@
       "when": 1794700493913,
       "tag": "0122_kairos_vigila_el_alta_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1794704360123,
+      "tag": "0123_canales_de_la_administracion",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1794704363580,
+      "tag": "0124_canales_de_la_administracion_reglas",
+      "breakpoints": true
     }
   ]
 }

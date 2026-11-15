@@ -1,0 +1,1171 @@
+/**
+ * Los canales de la administración: lo que le escriben a Sallca por WhatsApp
+ * (su número), Instagram (su cuenta) o Messenger (su página de Facebook)
+ * entra como el correo (`admin-inbound-email.ts`). Lo manda la ruta firmada
+ * del webhook de Meta, después de bajar los archivos; entra una sola vez por
+ * su `wamid` (`external_id`).
+ *
+ * Una conversación (`saas_chat`) es una por remitente. Nunca se liga sola por
+ * el teléfono, ni siquiera si coincide con el celular de un contacto: lo decide
+ * una persona de Administración (`assignChat`), con la sugerencia de
+ * `chatSuggestion` cuando un solo contacto tiene ese número. Con cliente, cada
+ * mensaje deja su actividad («Nos escribió por WhatsApp», por Instagram o por
+ * Messenger) y sus archivos pasan a
+ * ser documentos del cliente, solo de Administración, que se guardan hasta que
+ * Administración marca la carga (`markClientFileCarga`).
+ *
+ * Quién ve qué: una conversación sin cliente, o de un cliente que aún no tiene
+ * su cuenta, es comercial y solo la ve Administración. La de una clínica que
+ * ya tiene su app también la ve Soporte; lo que Administración responde ahí lo
+ * ve Soporte salvo que lo marque «Solo administración». Para Soporte, lo que no
+ * ve no existe (404).
+ *
+ * Responder: texto libre solo dentro de las 24 h desde el último mensaje de la
+ * persona; después, la plantilla. `prepareChatReply` reserva el envío
+ * (`pendiente`) y la ruta lo envía después del commit; el resultado lo anotan
+ * `markChatOutreachSent`, `markChatOutreachFailed` (rechazo explícito de Meta)
+ * o `markChatOutreachUncertain` (no se sabe: nunca se reintenta), y los estados
+ * que llegan después, `applyChatStatus`. Nada de esto viaja al modelo.
+ */
+
+import { isClinicalProduct, productWords } from "@odentia/clinical"
+import type { Db } from "@odentia/db"
+import {
+  SAAS_CHAT_CHANNELS,
+  type SaasChatChannel,
+  type SaasInboundMedia,
+  type SaasOutreachStatus,
+  saasChat,
+  saasClient,
+  saasClientContact,
+  saasClientFile,
+  saasInboundMessage,
+  saasOutreach,
+} from "@odentia/db/schema/admin-arm"
+import { user } from "@odentia/db/schema/auth"
+import { saasFollowUp, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
+import { mailBrandName } from "@odentia/mail"
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { z } from "zod"
+import { cargaDeleteAfter, cleanFilename, registerClientFile } from "./admin-client-files.js"
+import { outreachAdminOnlySql } from "./admin-clients.js"
+import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
+import { limaDate } from "./peru-business-days.js"
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const E164 = /^\+[1-9][0-9]{6,14}$/
+
+/** Cuánto dura la ventana de WhatsApp para responder con texto libre desde el último mensaje. */
+export const CHAT_FREE_REPLY_MS = 24 * 60 * 60_000
+/** Las plantillas con que se retoma una conversación fuera de las 24 h. */
+export const CHAT_TEMPLATES = ["retomar_conversacion"] as const
+export type ChatTemplate = (typeof CHAT_TEMPLATES)[number]
+/** Cuántos archivos trae como mucho un mensaje (Meta manda uno; el tope es de seguridad). */
+export const CHAT_MEDIA_MAX = 10
+const BODY_MAX = 10_000
+const OUTREACH_BODY_MAX = 5000
+const ACTIVITY_MAX = 2000
+
+const mediaSchema = z.strictObject({
+  /** Dónde lo guardó quien llama (`inboundAttachmentKey`). */
+  objectKey: z
+    .string()
+    .regex(/^inbound\/[A-Za-z0-9_.-]{1,200}$/, "La clave del archivo no es de un mensaje entrante"),
+  mimeType: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/, "Tipo de archivo no válido"),
+  filename: z.string().min(1, "Falta el nombre del archivo").max(1000),
+  size: z.number().int("Tamaño no válido").min(0, "Tamaño no válido"),
+})
+
+/** El id de quien escribe en Instagram (IGSID) o Messenger (PSID): texto sin espacios. */
+const META_USER_ID = /^[^\s]{1,128}$/
+
+const inboundSchema = z
+  .strictObject({
+    channel: z.enum(SAAS_CHAT_CHANNELS, "Canal no válido"),
+    /** WhatsApp: el número en E.164; Instagram, el IGSID; Messenger, el PSID. */
+    address: z.string().trim().regex(META_USER_ID, "Falta quién escribe"),
+    /** Solo WhatsApp: el `wa_id` (o BSUID) de quien escribe. */
+    waId: z.string().trim().max(256).nullish(),
+    displayName: z.string().nullish(),
+    externalId: z.string().trim().min(1, "Falta el id del mensaje").max(256, "Id demasiado largo"),
+    body: z.string().nullish(),
+    media: z.array(mediaSchema).max(CHAT_MEDIA_MAX, "Demasiados archivos").default([]),
+    receivedAt: z.date("Fecha de llegada no válida"),
+  })
+  .refine((value) => value.channel !== "whatsapp" || E164.test(value.address), {
+    message: "El número de quien escribe no es E.164",
+    path: ["address"],
+  })
+export type InboundChatInput = z.input<typeof inboundSchema>
+
+export interface InboundChatResult {
+  chatId: string
+  messageId: string
+  /** Ya había llegado (mismo id de Meta): no se registró otra vez. Quien llama borra lo que subió. */
+  duplicate: boolean
+  clientId: string | null
+}
+
+type ChatRow = typeof saasChat.$inferSelect
+type MessageRow = typeof saasInboundMessage.$inferSelect
+type OutreachRecord = typeof saasOutreach.$inferSelect
+
+function forbidden(message: string): ServiceError {
+  return new ServiceError("FORBIDDEN", 403, message)
+}
+
+function requireAdmin(actor: AdminActor | null): AdminActor {
+  if (!actor) throw forbidden("Se requiere personal de administración")
+  if (actor.role !== "admin") throw forbidden("Solo el rol Administración puede hacer esto")
+  return actor
+}
+
+/** Recorta y quita lo que no se imprime al final; vacío es nulo. */
+function trimTo(value: string | null | undefined, max: number): string | null {
+  const clean = (value ?? "").trim()
+  return clean ? clean.slice(0, max) : null
+}
+
+/** Lo que dice llegar en el futuro cuenta desde ahora. */
+function notAfter(at: Date, now: Date): Date {
+  return at.getTime() < now.getTime() ? at : now
+}
+
+/** Si quien mira ve la conversación: Administración siempre; Soporte, solo la de una clínica con su app. */
+function seesChat(actor: AdminActor, client: { organizationId: string | null } | null): boolean {
+  return actor.role === "admin" || Boolean(client?.organizationId)
+}
+
+async function clientOf(tx: Db, clientId: string | null) {
+  if (!clientId) return null
+  const [row] = await tx.select().from(saasClient).where(eq(saasClient.id, clientId)).limit(1)
+  return row ?? null
+}
+
+/** La conversación bloqueada, si quien mira la ve; si no, como si no existiera. */
+async function lockChat(tx: Db, actor: AdminActor, chatId: string): Promise<ChatRow> {
+  if (!UUID.test(chatId)) throw notFound("Conversación")
+  const [chat] = await tx
+    .select()
+    .from(saasChat)
+    .where(eq(saasChat.id, chatId))
+    .for("update")
+    .limit(1)
+  if (!chat) throw notFound("Conversación")
+  if (!seesChat(actor, await clientOf(tx, chat.clientId))) throw notFound("Conversación")
+  return chat
+}
+
+/** «agenda.xlsx», «2 archivos»: lo que dice la actividad de un mensaje con archivos. */
+function mediaWords(count: number): string {
+  return count === 1 ? "1 archivo" : `${count} archivos`
+}
+
+/** El texto de la actividad «Nos escribió por …»: lo que escribió y cuántos archivos trajo. */
+function inboundActivityBody(message: { body: string | null; media: SaasInboundMedia[] }): string {
+  const files = message.media.length > 0 ? mediaWords(message.media.length) : null
+  const text = message.body?.trim()
+  if (!text) return files ? `Mandó ${files}` : "Mandó un mensaje sin texto"
+  const suffix = files ? ` (${files})` : ""
+  return `${text.slice(0, ACTIVITY_MAX - suffix.length)}${suffix}`
+}
+
+/**
+ * La actividad de un mensaje que entró. Sin `request_id`: no es un contacto
+ * nuestro ni mueve la fecha de volver. Comercial (solo Administración) si el
+ * cliente aún no tiene su cuenta.
+ */
+async function recordInboundMessageActivity(
+  tx: Db,
+  chat: ChatRow,
+  client: typeof saasClient.$inferSelect,
+  message: { body: string | null; media: SaasInboundMedia[]; receivedAt: Date },
+): Promise<void> {
+  await tx.insert(saasFollowUp).values({
+    clientId: client.id,
+    authorUserId: null,
+    body: inboundActivityBody(message),
+    kind: chat.channel as SaasChatChannel,
+    direction: "entro",
+    contactId: chat.contactId,
+    chatId: chat.id,
+    happenedAt: message.receivedAt,
+    adminOnly: !client.organizationId,
+  })
+}
+
+/**
+ * Registra los archivos de un mensaje que aún tienen su objeto como
+ * documentos del cliente; devuelve la lista con su `fileId`. Se guardan: solo
+ * se borran si Administración los marca como la carga de datos.
+ */
+async function attachMessageMedia(
+  tx: Db,
+  actor: AdminActor | null,
+  channel: SaasChatChannel,
+  clientId: string,
+  message: Pick<MessageRow, "id" | "receivedAt"> & { media: SaasInboundMedia[] },
+  now: Date,
+): Promise<{ media: SaasInboundMedia[]; fileIds: string[] }> {
+  const fileIds: string[] = []
+  const out: SaasInboundMedia[] = []
+  for (const item of message.media) {
+    if (!item.objectKey || item.fileId) {
+      out.push(item)
+      continue
+    }
+    const file = await registerClientFile(
+      tx,
+      actor,
+      {
+        clientId,
+        kind: "correo",
+        filename: item.filename,
+        objectKey: item.objectKey,
+        contentType: item.mimeType,
+        sizeBytes: item.size,
+        adminOnly: true,
+        deleteAfter: null,
+        source: channel,
+        receivedAt: notAfter(message.receivedAt, now),
+        inboundMessageId: message.id,
+      },
+      now,
+    )
+    fileIds.push(file.id)
+    out.push({ ...item, fileId: file.id })
+  }
+  return { media: out, fileIds }
+}
+
+/**
+ * Registra un mensaje que entró por WhatsApp, Instagram o Messenger, una vez
+ * por su `externalId` (el id del mensaje en Meta). Lo
+ * llama la ruta firmada, sin persona, después de subir los archivos. La
+ * conversación se crea la primera vez que escribe ese número; nunca se liga
+ * a un cliente por el teléfono.
+ */
+export async function ingestInboundChat(
+  tx: Db,
+  raw: InboundChatInput,
+  now = new Date(),
+): Promise<InboundChatResult> {
+  const parsed = inboundSchema.safeParse(raw)
+  if (!parsed.success)
+    throw validation(
+      parsed.error.issues[0]?.message ?? "Mensaje no válido",
+      issueFields(parsed.error.issues),
+    )
+  const input = parsed.data
+  const displayName = trimTo(input.displayName, 200)
+  const waId = input.channel === "whatsapp" ? trimTo(input.waId, 256) : null
+  const [chat] = await tx
+    .insert(saasChat)
+    .values({ channel: input.channel, address: input.address, waId, displayName })
+    .onConflictDoUpdate({
+      target: [saasChat.channel, saasChat.address],
+      set: {
+        waId: sql`coalesce(excluded.wa_id, ${saasChat.waId})`,
+        displayName: sql`coalesce(excluded.display_name, ${saasChat.displayName})`,
+        updatedAt: now,
+      },
+    })
+    .returning()
+  if (!chat) throw new ServiceError("INTERNAL", 500, "No se pudo abrir la conversación")
+  const media: SaasInboundMedia[] = input.media.map((item) => ({
+    objectKey: item.objectKey,
+    mimeType: item.mimeType,
+    filename: cleanFilename(item.filename),
+    size: item.size,
+    fileId: null,
+  }))
+  const body = trimTo(input.body, BODY_MAX)
+  const [created] = await tx
+    .insert(saasInboundMessage)
+    .values({
+      chatId: chat.id,
+      externalId: input.externalId,
+      body,
+      media,
+      receivedAt: input.receivedAt,
+    })
+    .onConflictDoNothing({ target: saasInboundMessage.externalId })
+    .returning()
+  if (!created) {
+    const [existing] = await tx
+      .select({ id: saasInboundMessage.id, chatId: saasInboundMessage.chatId })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.externalId, input.externalId))
+      .limit(1)
+    if (!existing)
+      throw new ServiceError("CONFLICT", 409, "El mensaje se está registrando en otra petición")
+    const [owner] = await tx
+      .select({ clientId: saasChat.clientId })
+      .from(saasChat)
+      .where(eq(saasChat.id, existing.chatId))
+      .limit(1)
+    return {
+      chatId: existing.chatId,
+      messageId: existing.id,
+      duplicate: true,
+      clientId: owner?.clientId ?? null,
+    }
+  }
+  const arrived = notAfter(input.receivedAt, now)
+  await tx
+    .update(saasChat)
+    .set({
+      lastInboundAt: sql`greatest(${saasChat.lastInboundAt}, ${arrived.toISOString()}::timestamptz)`,
+      updatedAt: now,
+    })
+    .where(eq(saasChat.id, chat.id))
+  const client = await clientOf(tx, chat.clientId)
+  let files = 0
+  if (client) {
+    const attached = await attachMessageMedia(tx, null, input.channel, client.id, created, now)
+    files = attached.fileIds.length
+    if (files > 0)
+      await tx
+        .update(saasInboundMessage)
+        .set({ media: attached.media })
+        .where(eq(saasInboundMessage.id, created.id))
+    await recordInboundMessageActivity(tx, chat, client, {
+      body,
+      media,
+      receivedAt: input.receivedAt,
+    })
+  }
+  await writeAdminAudit(tx, null, {
+    action: "inbound.chat_received",
+    entityId: created.id,
+    organizationId: client?.organizationId ?? null,
+    metadata: {
+      channel: input.channel,
+      chatId: chat.id,
+      clientId: client?.id ?? null,
+      media: media.length,
+      files,
+    },
+  })
+  return { chatId: chat.id, messageId: created.id, duplicate: false, clientId: client?.id ?? null }
+}
+
+/** El contacto sugerido para una conversación sin cliente. */
+export interface ChatSuggestion {
+  contactId: string
+  contactName: string
+  clientId: string
+  clientName: string
+}
+
+/**
+ * La sugerencia de «¿De quién es este WhatsApp?» (solo WhatsApp: Instagram y
+ * Messenger no traen teléfono): el único contacto de un
+ * cliente no archivado con exactamente ese celular. Si son dos o más, ninguno:
+ * el teléfono no identifica a nadie, solo sugiere. Nunca liga nada.
+ */
+export async function chatSuggestion(tx: Db, address: string): Promise<ChatSuggestion | null> {
+  if (!E164.test(address)) return null
+  const rows = await tx
+    .select({
+      contactId: saasClientContact.id,
+      contactName: saasClientContact.name,
+      clientId: saasClient.id,
+      clientName: saasClient.name,
+    })
+    .from(saasClientContact)
+    .innerJoin(saasClient, eq(saasClient.id, saasClientContact.clientId))
+    .where(and(eq(saasClientContact.phone, address), isNull(saasClient.archivedAt)))
+    .limit(2)
+  return rows.length === 1 ? (rows[0] ?? null) : null
+}
+
+/** La solicitud más reciente del cliente: lo que respondemos también es de ella (la lista vieja). */
+async function latestRequestId(tx: Db, clientId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: saasWaitlistRequest.id })
+    .from(saasWaitlistRequest)
+    .where(eq(saasWaitlistRequest.clientId, clientId))
+    .orderBy(desc(saasWaitlistRequest.createdAt))
+    .limit(1)
+  return row?.id ?? null
+}
+
+/** Si un envío es solo de Administración (la misma regla que lee Soporte). */
+async function outreachIsAdminOnly(tx: Db, outreachId: string): Promise<boolean> {
+  const [flag] = await tx
+    .select({ adminOnly: outreachAdminOnlySql(`"saas_outreach"`) })
+    .from(saasOutreach)
+    .where(eq(saasOutreach.id, outreachId))
+    .limit(1)
+  return Boolean(flag?.adminOnly)
+}
+
+/**
+ * Salió una respuesta de una conversación con cliente: queda «Le escribimos
+ * por …» (su canal) en su bitácora, con la hora en que salió, de quien la escribió
+ * y con la conversación (para moverla con ella). Solo de Administración si el
+ * envío lo es. Sin cliente no deja nada: lo deja `assignChat` al ligarla.
+ */
+async function recordReplyActivity(tx: Db, row: OutreachRecord, now: Date): Promise<void> {
+  if (!row.clientId) return
+  const [contact] = row.contactId
+    ? await tx
+        .select({ id: saasClientContact.id })
+        .from(saasClientContact)
+        .where(
+          and(
+            eq(saasClientContact.id, row.contactId),
+            eq(saasClientContact.clientId, row.clientId),
+          ),
+        )
+        .limit(1)
+    : []
+  await tx.insert(saasFollowUp).values({
+    clientId: row.clientId,
+    requestId: await latestRequestId(tx, row.clientId),
+    authorUserId: row.createdBy,
+    body: row.body.slice(0, ACTIVITY_MAX),
+    kind: row.channel as SaasChatChannel,
+    direction: "salio",
+    contactId: contact?.id ?? null,
+    chatId: row.chatId,
+    happenedAt: row.sentAt ?? now,
+    adminOnly: await outreachIsAdminOnly(tx, row.id),
+  })
+}
+
+export interface AssignChatInput {
+  clientId: string
+  /** La persona del cliente que escribe; opcional. */
+  contactId?: string | null
+}
+
+export interface AssignChatResult {
+  chatId: string
+  clientId: string
+  contactId: string | null
+  /** El cliente que tenía antes, si se movió a otro. */
+  movedFrom: string | null
+  fileIds: string[]
+}
+
+/**
+ * Una persona de Administración dice de quién es una conversación: el cliente
+ * y, si quiere, el contacto (que recibe este celular si no tenía uno). Lo que
+ * llegó antes pasa al cliente: cada mensaje deja su actividad con su hora, sus
+ * archivos pasan a ser documentos del cliente y las respuestas que salieron
+ * sin cliente quedan suyas. Si ya era de otro cliente («Mover a otra
+ * clínica»), sus actividades, archivos y respuestas se mueven con ella.
+ */
+export async function assignChat(
+  tx: Db,
+  actor: AdminActor | null,
+  chatId: string,
+  input: AssignChatInput,
+  now = new Date(),
+): Promise<AssignChatResult> {
+  const staff = requireAdmin(actor)
+  const chat = await lockChat(tx, staff, chatId)
+  if (!UUID.test(input.clientId ?? "")) throw invalidField("clientId", "Cliente no encontrado")
+  const [client] = await tx
+    .select()
+    .from(saasClient)
+    .where(eq(saasClient.id, input.clientId))
+    .limit(1)
+  if (!client) throw invalidField("clientId", "Cliente no encontrado")
+  if (client.archivedAt) throw invalidField("clientId", "Ese cliente está archivado")
+  let contact: typeof saasClientContact.$inferSelect | null = null
+  if (input.contactId) {
+    if (!UUID.test(input.contactId))
+      throw invalidField("contactId", "Esa persona no es de este cliente")
+    const [row] = await tx
+      .select()
+      .from(saasClientContact)
+      .where(
+        and(eq(saasClientContact.id, input.contactId), eq(saasClientContact.clientId, client.id)),
+      )
+      .for("update")
+      .limit(1)
+    if (!row) throw invalidField("contactId", "Esa persona no es de este cliente")
+    contact = row
+  }
+  const previous = chat.clientId
+  const contactId = contact?.id ?? (previous === client.id ? chat.contactId : null)
+  await tx
+    .update(saasChat)
+    .set({
+      clientId: client.id,
+      contactId,
+      matchedByUser: staff.userId,
+      matchedAt: now,
+      notClinicAt: null,
+      notClinicBy: null,
+      updatedAt: now,
+    })
+    .where(eq(saasChat.id, chat.id))
+  // El celular de la persona: si no tenía, este. Uno que ya tiene no se pisa.
+  if (contact && !contact.phone)
+    await tx
+      .update(saasClientContact)
+      .set({ phone: chat.address, updatedAt: now })
+      .where(eq(saasClientContact.id, contact.id))
+  const assigned = { ...chat, clientId: client.id, contactId }
+  if (previous === client.id) {
+    if (contactId !== chat.contactId)
+      await writeAdminAudit(tx, staff, {
+        action: "chat.contact_set",
+        entityId: chat.id,
+        organizationId: client.organizationId,
+        metadata: { clientId: client.id, contactId },
+      })
+    return { chatId: chat.id, clientId: client.id, contactId, movedFrom: null, fileIds: [] }
+  }
+
+  if (previous) {
+    // Mover a otra clínica: lo que ya era del cliente anterior pasa al nuevo. El contacto del
+    // anterior no es de este: la actividad y la respuesta lo pierden (solo puede pasar a nulo).
+    const activities = await tx
+      .update(saasFollowUp)
+      .set({ clientId: client.id, contactId: null })
+      .where(and(eq(saasFollowUp.chatId, chat.id), eq(saasFollowUp.clientId, previous)))
+      .returning({ id: saasFollowUp.id })
+    const messageIds = tx
+      .select({ id: saasInboundMessage.id })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.chatId, chat.id))
+    const files = await tx
+      .update(saasClientFile)
+      .set({ clientId: client.id })
+      .where(
+        and(
+          inArray(saasClientFile.inboundMessageId, messageIds),
+          eq(saasClientFile.clientId, previous),
+        ),
+      )
+      .returning({ id: saasClientFile.id })
+    const replies = await tx
+      .update(saasOutreach)
+      .set({ clientId: client.id, contactId: null, updatedAt: now })
+      .where(and(eq(saasOutreach.chatId, chat.id), eq(saasOutreach.clientId, previous)))
+      .returning({ id: saasOutreach.id })
+    await writeAdminAudit(tx, staff, {
+      action: "chat.moved",
+      entityId: chat.id,
+      organizationId: client.organizationId,
+      metadata: {
+        from: previous,
+        to: client.id,
+        contactId,
+        activities: activities.length,
+        files: files.length,
+        replies: replies.length,
+      },
+    })
+    return {
+      chatId: chat.id,
+      clientId: client.id,
+      contactId,
+      movedFrom: previous,
+      fileIds: files.map((file) => file.id),
+    }
+  }
+
+  // Primera vez: cada mensaje que llegó deja su actividad y sus archivos, en orden.
+  const messages = await tx
+    .select()
+    .from(saasInboundMessage)
+    .where(eq(saasInboundMessage.chatId, chat.id))
+    .orderBy(asc(saasInboundMessage.receivedAt), asc(saasInboundMessage.id))
+  const fileIds: string[] = []
+  for (const message of messages) {
+    const attached = await attachMessageMedia(
+      tx,
+      staff,
+      chat.channel as SaasChatChannel,
+      client.id,
+      message,
+      now,
+    )
+    if (attached.fileIds.length > 0) {
+      fileIds.push(...attached.fileIds)
+      await tx
+        .update(saasInboundMessage)
+        .set({ media: attached.media })
+        .where(eq(saasInboundMessage.id, message.id))
+    }
+    await recordInboundMessageActivity(tx, assigned, client, message)
+  }
+  // Lo que se le respondió antes de saber de quién era pasa a su cliente.
+  const replies = await tx
+    .update(saasOutreach)
+    .set({ clientId: client.id, updatedAt: now })
+    .where(and(eq(saasOutreach.chatId, chat.id), isNull(saasOutreach.clientId)))
+    .returning()
+  for (const reply of replies)
+    if (reply.status === "enviado") await recordReplyActivity(tx, reply, now)
+  await writeAdminAudit(tx, staff, {
+    action: "chat.assigned",
+    entityId: chat.id,
+    organizationId: client.organizationId,
+    metadata: {
+      clientId: client.id,
+      contactId,
+      messages: messages.length,
+      files: fileIds.length,
+      replies: replies.length,
+    },
+  })
+  return { chatId: chat.id, clientId: client.id, contactId, movedFrom: null, fileIds }
+}
+
+/**
+ * «No es una clínica»: la conversación sale de lo que hay que decidir. Sus
+ * mensajes siguen entrando, sin pedir nada. Una con cliente no se marca así.
+ */
+export async function markChatNotClinic(
+  tx: Db,
+  actor: AdminActor | null,
+  chatId: string,
+  now = new Date(),
+): Promise<{ chatId: string; notClinicAt: Date }> {
+  const staff = requireAdmin(actor)
+  const chat = await lockChat(tx, staff, chatId)
+  if (chat.clientId) throw new ServiceError("CONFLICT", 409, "Esa conversación ya es de un cliente")
+  if (chat.notClinicAt) return { chatId: chat.id, notClinicAt: chat.notClinicAt }
+  await tx
+    .update(saasChat)
+    .set({ notClinicAt: now, notClinicBy: staff.userId, updatedAt: now })
+    .where(eq(saasChat.id, chat.id))
+  await writeAdminAudit(tx, staff, {
+    action: "chat.not_clinic",
+    entityId: chat.id,
+    metadata: { address: chat.address },
+  })
+  return { chatId: chat.id, notClinicAt: now }
+}
+
+/** Deshace «No es una clínica»: vuelve a lo que hay que decidir. */
+export async function undoChatNotClinic(
+  tx: Db,
+  actor: AdminActor | null,
+  chatId: string,
+  now = new Date(),
+): Promise<{ chatId: string }> {
+  const staff = requireAdmin(actor)
+  const chat = await lockChat(tx, staff, chatId)
+  if (!chat.notClinicAt) return { chatId: chat.id }
+  await tx
+    .update(saasChat)
+    .set({ notClinicAt: null, notClinicBy: null, updatedAt: now })
+    .where(eq(saasChat.id, chat.id))
+  await writeAdminAudit(tx, staff, {
+    action: "chat.not_clinic_undone",
+    entityId: chat.id,
+    metadata: { address: chat.address },
+  })
+  return { chatId: chat.id }
+}
+
+/** Un archivo de un mensaje, ya documento del cliente, y si es la carga de datos. */
+export interface ChatFile {
+  fileId: string
+  messageId: string | null
+  filename: string
+  contentType: string
+  size: number
+  kind: "correo" | "archivo_clinica"
+  /** Solo en la carga (`archivo_clinica`): el día de Lima en que se borra. */
+  deleteAfter: string | null
+  deleted: boolean
+  /** En uno sin marcar: el día en que se borraría si se marca ahora. */
+  cargaDeleteAfter: string | null
+  /** Marcarlo ahora lo borra en el acto (llegó hace 30 días o más). */
+  cargaDueNow: boolean
+}
+
+/** Lo que entró o salió en una conversación, en el orden en que pasó. */
+export type ChatEntry =
+  | {
+      kind: "entro"
+      id: string
+      at: Date
+      body: string | null
+      /** Sus archivos; Soporte recibe `[]` (son solo de Administración) y solo `mediaCount`. */
+      media: Array<{ filename: string; mimeType: string; size: number; fileId: string | null }>
+      mediaCount: number
+    }
+  | {
+      kind: "salio"
+      id: string
+      at: Date
+      body: string
+      status: SaasOutreachStatus
+      template: string | null
+      adminOnly: boolean
+      createdBy: { userId: string; name: string } | null
+      sentAt: Date | null
+    }
+
+export interface ChatDetail {
+  id: string
+  channel: SaasChatChannel
+  address: string
+  displayName: string | null
+  client: { id: string; name: string; product: string; hasAccount: boolean } | null
+  contact: { id: string; name: string; phone: string | null } | null
+  notClinicAt: Date | null
+  lastInboundAt: Date | null
+  /** Se puede responder con texto libre: no pasaron 24 h desde su último mensaje. */
+  canReplyFreely: boolean
+  /** Hasta cuándo se puede responder con texto libre; nulo si nunca escribió. */
+  freeUntil: Date | null
+  /** La firma que el envío agrega al final de la respuesta de quien mira. */
+  replySignature: string
+  /** Solo para Administración, sin cliente: el único contacto con ese celular. */
+  suggestion: ChatSuggestion | null
+  entries: ChatEntry[]
+  /** Los archivos como documentos del cliente: solo para Administración (Soporte recibe `[]`). */
+  files: ChatFile[]
+}
+
+/** La ventana de las 24 h desde el último mensaje de la persona. */
+export function chatFreeWindow(
+  lastInboundAt: Date | null,
+  now: Date,
+): { canReplyFreely: boolean; freeUntil: Date | null } {
+  if (!lastInboundAt) return { canReplyFreely: false, freeUntil: null }
+  const freeUntil = new Date(lastInboundAt.getTime() + CHAT_FREE_REPLY_MS)
+  return { canReplyFreely: now.getTime() < freeUntil.getTime(), freeUntil }
+}
+
+/** «Ana», el primer nombre de quien escribe; sin nombre, «El equipo». */
+function firstName(name: string | null | undefined): string {
+  return (name ?? "").trim().split(/\s+/)[0] || "El equipo"
+}
+
+/** «odentIA», «latidIA» o «vistIA» por el producto del cliente; sin cliente, la marca base. */
+function chatBrand(client: { product: string } | null): string {
+  return client && isClinicalProduct(client.product)
+    ? mailBrandName(productWords(client.product).brand)
+    : mailBrandName()
+}
+
+/** «— Ana · odentIA»: la firma de una respuesta en una conversación. */
+export function chatSignature(name: string | null | undefined, client: { product: string } | null) {
+  return `— ${firstName(name)} · ${chatBrand(client)}`
+}
+
+async function userName(tx: Db, userId: string): Promise<string | null> {
+  const [row] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  return row?.name ?? null
+}
+
+/**
+ * Una conversación para leerla y responderla: sus mensajes y respuestas por
+ * hora, de quién es y si se puede responder con texto libre. Soporte solo ve
+ * la de una clínica con su app (las demás no existen para él: 404), sin sus
+ * archivos ni lo que Administración marcó solo para ella.
+ */
+export async function getChat(
+  tx: Db,
+  actor: AdminActor,
+  chatId: string,
+  now = new Date(),
+): Promise<ChatDetail> {
+  if (!UUID.test(chatId)) throw notFound("Conversación")
+  const [chat] = await tx.select().from(saasChat).where(eq(saasChat.id, chatId)).limit(1)
+  if (!chat) throw notFound("Conversación")
+  const client = await clientOf(tx, chat.clientId)
+  if (!seesChat(actor, client)) throw notFound("Conversación")
+  const admin = actor.role === "admin"
+  const [contact] = chat.contactId
+    ? await tx
+        .select({
+          id: saasClientContact.id,
+          name: saasClientContact.name,
+          phone: saasClientContact.phone,
+        })
+        .from(saasClientContact)
+        .where(eq(saasClientContact.id, chat.contactId))
+        .limit(1)
+    : []
+  const messages = await tx
+    .select()
+    .from(saasInboundMessage)
+    .where(eq(saasInboundMessage.chatId, chat.id))
+    .orderBy(asc(saasInboundMessage.receivedAt), asc(saasInboundMessage.id))
+  const replies = await tx
+    .select({
+      row: saasOutreach,
+      adminOnly: outreachAdminOnlySql(`"saas_outreach"`),
+      authorName: user.name,
+    })
+    .from(saasOutreach)
+    .leftJoin(user, eq(user.id, saasOutreach.createdBy))
+    .where(
+      and(
+        eq(saasOutreach.chatId, chat.id),
+        admin ? undefined : sql`not ${outreachAdminOnlySql(`"saas_outreach"`)}`,
+      ),
+    )
+    .orderBy(asc(saasOutreach.createdAt), asc(saasOutreach.id))
+  const entries: ChatEntry[] = [
+    ...messages.map(
+      (message): ChatEntry => ({
+        kind: "entro",
+        id: message.id,
+        at: message.receivedAt,
+        body: message.body,
+        media: admin
+          ? message.media.map((item) => ({
+              filename: item.filename,
+              mimeType: item.mimeType,
+              size: item.size,
+              fileId: item.fileId ?? null,
+            }))
+          : [],
+        mediaCount: message.media.length,
+      }),
+    ),
+    ...replies.map(
+      ({ row, adminOnly, authorName }): ChatEntry => ({
+        kind: "salio",
+        id: row.id,
+        at: row.sentAt ?? row.createdAt,
+        body: row.body,
+        status: row.status as SaasOutreachStatus,
+        template: row.template,
+        adminOnly: Boolean(adminOnly),
+        createdBy: row.createdBy ? { userId: row.createdBy, name: authorName ?? "" } : null,
+        sentAt: row.sentAt,
+      }),
+    ),
+  ].sort((a, b) => a.at.getTime() - b.at.getTime())
+  const today = limaDate(now)
+  const files: ChatFile[] =
+    admin && messages.length > 0
+      ? (
+          await tx
+            .select()
+            .from(saasClientFile)
+            .where(
+              inArray(
+                saasClientFile.inboundMessageId,
+                messages.map((message) => message.id),
+              ),
+            )
+            .orderBy(asc(saasClientFile.createdAt), asc(saasClientFile.id))
+        )
+          .filter((file) => file.kind === "correo" || file.kind === "archivo_clinica")
+          .map((file): ChatFile => {
+            const carga = file.kind === "archivo_clinica"
+            const ifMarked = carga ? null : cargaDeleteAfter(file.receivedAt, now)
+            return {
+              fileId: file.id,
+              messageId: file.inboundMessageId,
+              filename: file.filename,
+              contentType: file.contentType,
+              size: file.sizeBytes,
+              kind: carga ? "archivo_clinica" : "correo",
+              deleteAfter: carga ? file.deleteAfter : null,
+              deleted: file.deletedAt !== null,
+              cargaDeleteAfter: file.deletedAt ? null : ifMarked,
+              cargaDueNow: !file.deletedAt && ifMarked !== null && ifMarked <= today,
+            }
+          })
+      : []
+  return {
+    id: chat.id,
+    channel: chat.channel as SaasChatChannel,
+    address: chat.address,
+    displayName: chat.displayName,
+    client: client
+      ? {
+          id: client.id,
+          name: client.name,
+          product: client.product,
+          hasAccount: Boolean(client.organizationId),
+        }
+      : null,
+    contact: contact ?? null,
+    notClinicAt: chat.notClinicAt,
+    lastInboundAt: chat.lastInboundAt,
+    ...chatFreeWindow(chat.lastInboundAt, now),
+    replySignature: chatSignature(await userName(tx, actor.userId), client),
+    suggestion:
+      admin && !client && chat.channel === "whatsapp"
+        ? await chatSuggestion(tx, chat.address)
+        : null,
+    entries,
+    files,
+  }
+}
+
+/** Por qué no se puede responder con texto libre, en cada canal (pasaron 24 h, o nunca escribió). */
+const CHAT_WINDOW_CLOSED_WORDS: Record<SaasChatChannel, (wrote: boolean) => string> = {
+  whatsapp: (wrote) =>
+    wrote
+      ? "Pasaron 24 horas desde su último mensaje: WhatsApp solo deja retomar con la plantilla"
+      : "Todavía no escribió: WhatsApp solo deja empezar con la plantilla",
+  instagram: (wrote) =>
+    wrote
+      ? "Pasaron 24 horas desde su último mensaje: Instagram ya no deja responderle. Escríbele un correo o por WhatsApp"
+      : "Todavía no escribió por Instagram: escríbele un correo o por WhatsApp",
+  messenger: (wrote) =>
+    wrote
+      ? "Pasaron 24 horas desde su último mensaje: Messenger ya no deja responderle. Escríbele un correo o por WhatsApp"
+      : "Todavía no escribió por Messenger: escríbele un correo o por WhatsApp",
+}
+
+export interface ChatReplyInput {
+  /** Lo que escribe la persona; con plantilla, el texto que se guarda de ella (opcional). */
+  body?: string | null
+  /** Solo Administración: Soporte no lo ve aunque vea la conversación. */
+  adminOnly?: boolean | null
+  /** Fuera de las 24 h, solo en WhatsApp: la plantilla con que se retoma. */
+  template?: string | null
+}
+
+export interface ChatReply {
+  outreachId: string
+  chatId: string
+  clientId: string | null
+  /** El número al que sale. */
+  to: string
+  /** Lo que sale: el texto con su firma, o lo que se guarda de la plantilla. */
+  body: string
+  template: ChatTemplate | null
+  /** Los parámetros de la plantilla, en orden (el primer nombre de quien escribe). */
+  templateParams: string[]
+}
+
+/**
+ * Reserva la respuesta de una conversación (`pendiente`): la ruta la envía
+ * después del commit con el id del envío como `biz_opaque_callback_data` y
+ * anota el resultado. Texto libre solo dentro de las 24 h desde el último
+ * mensaje de la persona (después, 409 con el motivo en `body`: la pantalla
+ * ofrece la plantilla o el correo). Firma con el primer nombre de quien
+ * escribe y la marca del cliente.
+ */
+export async function prepareChatReply(
+  tx: Db,
+  actor: AdminActor,
+  chatId: string,
+  input: ChatReplyInput,
+  now = new Date(),
+): Promise<ChatReply> {
+  const chat = await lockChat(tx, actor, chatId)
+  const client = await clientOf(tx, chat.clientId)
+  let template: ChatTemplate | null = null
+  if (input.template) {
+    if (chat.channel !== "whatsapp")
+      throw invalidField("template", "Solo WhatsApp retoma una conversación con una plantilla")
+    if (!(CHAT_TEMPLATES as readonly string[]).includes(input.template))
+      throw invalidField("template", "Esa plantilla no existe")
+    template = input.template as ChatTemplate
+  }
+  const name = await userName(tx, actor.userId)
+  const signature = chatSignature(name, client)
+  let body: string
+  let templateParams: string[] = []
+  if (template) {
+    templateParams = [firstName(name)]
+    body = trimTo(input.body, OUTREACH_BODY_MAX) ?? `Plantilla «${template}»: ${templateParams[0]}`
+  } else {
+    if (!chatFreeWindow(chat.lastInboundAt, now).canReplyFreely) {
+      const message = CHAT_WINDOW_CLOSED_WORDS[chat.channel as SaasChatChannel](
+        chat.lastInboundAt !== null,
+      )
+      throw new ServiceError("CHAT_WINDOW_CLOSED", 409, message, { body: message })
+    }
+    const text = (input.body ?? "").trim()
+    if (!text) throw invalidField("body", "Escribe el mensaje")
+    const max = OUTREACH_BODY_MAX - signature.length - 2
+    if (text.length > max) throw invalidField("body", `Usa como máximo ${max} caracteres`)
+    body = `${text}\n\n${signature}`
+  }
+  // Lo que escribe Soporte nunca es «Solo administración».
+  const adminOnly = actor.role === "admin" ? Boolean(input.adminOnly) : false
+  const [row] = await tx
+    .insert(saasOutreach)
+    .values({
+      clientId: chat.clientId,
+      contactId: chat.contactId,
+      channel: chat.channel as SaasChatChannel,
+      toAddress: chat.address,
+      body,
+      chatId: chat.id,
+      template,
+      adminOnly,
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  await writeAdminAudit(tx, actor, {
+    action: "arm.outreach_prepared",
+    organizationId: client?.organizationId ?? null,
+    entityId: chat.clientId ?? chat.id,
+    metadata: { outreachId: row.id, channel: chat.channel, chatId: chat.id, template, adminOnly },
+  })
+  return {
+    outreachId: row.id,
+    chatId: chat.id,
+    clientId: chat.clientId,
+    to: chat.address,
+    body,
+    template,
+    templateParams,
+  }
+}
+
+/** El envío de una conversación, bloqueado; sin persona (lo anota la ruta o el webhook). */
+async function lockChatOutreach(
+  tx: Db,
+  where: { outreachId?: string | null; externalId?: string | null },
+): Promise<OutreachRecord | null> {
+  const condition = where.outreachId
+    ? UUID.test(where.outreachId)
+      ? eq(saasOutreach.id, where.outreachId)
+      : null
+    : where.externalId
+      ? eq(saasOutreach.externalId, where.externalId)
+      : null
+  if (!condition) return null
+  const [row] = await tx.select().from(saasOutreach).where(condition).for("update").limit(1)
+  return row?.chatId ? row : null
+}
+
+/** Pasa el envío a su estado nuevo y, si salió, deja la actividad. Una sola vez por cambio. */
+async function settleChatOutreach(
+  tx: Db,
+  row: OutreachRecord,
+  status: "enviado" | "incierto" | "no_salio",
+  now: Date,
+  extra: { externalId?: string | null; why?: string | null; metaStatus?: string | null } = {},
+): Promise<OutreachRecord> {
+  const [updated] = await tx
+    .update(saasOutreach)
+    .set({
+      status,
+      sentAt: status === "enviado" ? now : null,
+      ...(extra.externalId && !row.externalId ? { externalId: extra.externalId } : {}),
+      updatedAt: now,
+    })
+    .where(eq(saasOutreach.id, row.id))
+    .returning()
+  if (!updated) throw notFound("Envío")
+  if (status === "enviado") await recordReplyActivity(tx, updated, now)
+  await writeAdminAudit(tx, null, {
+    action:
+      status === "enviado"
+        ? "arm.outreach_sent"
+        : status === "incierto"
+          ? "arm.outreach_uncertain"
+          : "arm.outreach_failed",
+    entityId: row.clientId ?? row.chatId,
+    metadata: {
+      outreachId: row.id,
+      chatId: row.chatId,
+      from: row.status,
+      ...(extra.why ? { why: extra.why.slice(0, 500) } : {}),
+      ...(extra.metaStatus ? { metaStatus: extra.metaStatus } : {}),
+    },
+  })
+  return updated
+}
+
+export interface ChatOutreachResult {
+  outreachId: string
+  status: SaasOutreachStatus
+  /** Si este aviso cambió algo (uno repetido o tardío no cambia nada). */
+  changed: boolean
+}
+
+function resultOf(row: OutreachRecord, changed: boolean): ChatOutreachResult {
+  return { outreachId: row.id, status: row.status as SaasOutreachStatus, changed }
+}
+
+/**
+ * Meta aceptó el envío: `enviado`, con su `wamid`. También uno incierto, si
+ * Meta responde tarde. Lo ya resuelto no cambia.
+ */
+export async function markChatOutreachSent(
+  tx: Db,
+  outreachId: string,
+  externalId: string,
+  now = new Date(),
+): Promise<ChatOutreachResult> {
+  const row = await lockChatOutreach(tx, { outreachId })
+  if (!row) throw notFound("Envío")
+  const wamid = trimTo(externalId, 256)
+  if (row.status !== "pendiente" && row.status !== "incierto") return resultOf(row, false)
+  return resultOf(await settleChatOutreach(tx, row, "enviado", now, { externalId: wamid }), true)
+}
+
+/** Meta lo rechazó explícitamente: no salió, con el motivo en la auditoría. Es final. */
+export async function markChatOutreachFailed(
+  tx: Db,
+  outreachId: string,
+  why: string | null,
+  now = new Date(),
+): Promise<ChatOutreachResult> {
+  const row = await lockChatOutreach(tx, { outreachId })
+  if (!row) throw notFound("Envío")
+  if (row.status !== "pendiente" && row.status !== "incierto") return resultOf(row, false)
+  return resultOf(await settleChatOutreach(tx, row, "no_salio", now, { why }), true)
+}
+
+/**
+ * Se cortó y no se sabe si salió: `incierto`. Nunca se reintenta; lo resuelve
+ * el estado que mande Meta después o una persona («¿Salió?»).
+ */
+export async function markChatOutreachUncertain(
+  tx: Db,
+  outreachId: string,
+  now = new Date(),
+): Promise<ChatOutreachResult> {
+  const row = await lockChatOutreach(tx, { outreachId })
+  if (!row) throw notFound("Envío")
+  if (row.status !== "pendiente") return resultOf(row, false)
+  return resultOf(await settleChatOutreach(tx, row, "incierto", now), true)
+}
+
+export const CHAT_META_STATUSES = ["sent", "delivered", "read", "failed"] as const
+export type ChatMetaStatus = (typeof CHAT_META_STATUSES)[number]
+
+/**
+ * Un estado que llegó por el webhook de WhatsApp, por el `wamid` del envío o
+ * por su id (`biz_opaque_callback_data`). Solo WhatsApp: Instagram y Messenger
+ * no mandan estados con nuestro id (su incierto lo resuelve una persona). `sent`, `delivered` o `read` dicen que
+ * salió: lo pendiente o incierto pasa a enviado. `failed` solo cambia lo
+ * pendiente o incierto (a no salió): lo que ya salió no vuelve atrás. Lo que no
+ * es de una conversación, o no se reconoce, se ignora (nulo).
+ */
+export async function applyChatStatus(
+  tx: Db,
+  input: { externalId?: string | null; outreachId?: string | null; status: ChatMetaStatus },
+  now = new Date(),
+): Promise<ChatOutreachResult | null> {
+  if (!(CHAT_META_STATUSES as readonly string[]).includes(input.status)) return null
+  const row =
+    (input.externalId ? await lockChatOutreach(tx, { externalId: input.externalId }) : null) ??
+    (input.outreachId ? await lockChatOutreach(tx, { outreachId: input.outreachId }) : null)
+  if (!row || row.channel !== "whatsapp") return null
+  if (row.status !== "pendiente" && row.status !== "incierto") return resultOf(row, false)
+  const next = input.status === "failed" ? "no_salio" : "enviado"
+  return resultOf(
+    await settleChatOutreach(tx, row, next, now, {
+      externalId: input.externalId ?? null,
+      metaStatus: input.status,
+    }),
+    true,
+  )
+}

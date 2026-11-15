@@ -68,6 +68,8 @@ export const SAAS_ACTIVITY_KINDS = [
   "presentacion",
   "propuesta",
   "nota",
+  "instagram",
+  "messenger",
 ] as const
 export type SaasActivityKind = (typeof SAAS_ACTIVITY_KINDS)[number]
 export const SAAS_ACTIVITY_DIRECTIONS = ["salio", "entro"] as const
@@ -106,8 +108,16 @@ export const SAAS_PROPOSAL_STATUSES = [
 export type SaasProposalStatus = (typeof SAAS_PROPOSAL_STATUSES)[number]
 /** Los mismos ciclos que `saas_subscription.billing_cycle`. */
 export const SAAS_PROPOSAL_BILLING_CYCLES = ["mensual", "quincenal"] as const
-export const SAAS_OUTREACH_CHANNELS = ["correo", "whatsapp"] as const
+export const SAAS_OUTREACH_CHANNELS = ["correo", "whatsapp", "instagram", "messenger"] as const
 export type SaasOutreachChannel = (typeof SAAS_OUTREACH_CHANNELS)[number]
+/**
+ * Por dónde sale «Escribir» desde la ficha (correo, o WhatsApp por enlace): Instagram y Messenger
+ * solo salen respondiendo en su conversación (`chat_id`).
+ */
+export const SAAS_WRITE_CHANNELS = [
+  "correo",
+  "whatsapp",
+] as const satisfies readonly SaasOutreachChannel[]
 export const SAAS_OUTREACH_STATUSES = ["pendiente", "enviado", "incierto", "no_salio"] as const
 export type SaasOutreachStatus = (typeof SAAS_OUTREACH_STATUSES)[number]
 export const KAIROS_ITEM_KINDS = [
@@ -122,6 +132,8 @@ export const KAIROS_ITEM_KINDS = [
   "correo_sin_cliente",
   "responder_correo",
   "posible_carga",
+  "chat_sin_cliente",
+  "responder_chat",
 ] as const
 export type KairosItemKind = (typeof KAIROS_ITEM_KINDS)[number]
 export const KAIROS_ITEM_STATUSES = [
@@ -142,7 +154,14 @@ export const SAAS_CLIENT_FILE_KINDS = [
   "otro",
 ] as const
 export type SaasClientFileKind = (typeof SAAS_CLIENT_FILE_KINDS)[number]
-export const SAAS_CLIENT_FILE_SOURCES = ["persona", "kairos", "correo"] as const
+export const SAAS_CLIENT_FILE_SOURCES = [
+  "persona",
+  "kairos",
+  "correo",
+  "whatsapp",
+  "instagram",
+  "messenger",
+] as const
 export type SaasClientFileSource = (typeof SAAS_CLIENT_FILE_SOURCES)[number]
 /**
  * Los pasos del alta que guardan su primera vez (`saas_client_milestone`): copia literal de
@@ -194,6 +213,13 @@ export type SaasInboundMailbox = (typeof SAAS_INBOUND_MAILBOXES)[number]
 /** Cómo se ligó al cliente: por correo exacto (contacto, solicitud, miembro), por respuesta a un envío nuestro (`hilo`) o una persona. */
 export const SAAS_INBOUND_MATCHES = ["contacto", "solicitud", "miembro", "hilo", "persona"] as const
 export type SaasInboundMatch = (typeof SAAS_INBOUND_MATCHES)[number]
+/**
+ * Por dónde le escriben a Sallca en una conversación (`saas_chat`): el número de WhatsApp, la
+ * cuenta de Instagram y la página de Facebook (Messenger). Es también el tipo de su actividad y
+ * el origen de sus archivos.
+ */
+export const SAAS_CHAT_CHANNELS = ["whatsapp", "instagram", "messenger"] as const
+export type SaasChatChannel = (typeof SAAS_CHAT_CHANNELS)[number]
 export const KAIROS_AI_PURPOSES = [
   "borrador",
   "resumen",
@@ -219,6 +245,18 @@ export interface SaasInboundAttachment {
   contentType: string
   size: number
   fileId: string | null
+}
+
+/**
+ * Un archivo de un mensaje que entró por WhatsApp, Instagram o Messenger: solo se guarda, nunca se abre ni va al modelo.
+ * `objectKey` mientras el objeto exista; `fileId` cuando ya es documento del cliente.
+ */
+export interface SaasInboundMedia {
+  objectKey?: string | null
+  mimeType: string
+  filename: string
+  size: number
+  fileId?: string | null
 }
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -569,7 +607,11 @@ export const kairosItem = adminSchema.table(
  * hola@ de la marca) y su propio `Message-ID` (`message_id`), para que una
  * respuesta de la clínica vuelva a su hilo. La respuesta a un correo que llegó
  * (`in_reply_to_email_id`) lleva además la cadena del hilo (`references`) y
- * puede salir sin cliente: solo ella (`saas_outreach_client_check`).
+ * puede salir sin cliente, como la de una conversación de WhatsApp, Instagram o
+ * Messenger (`chat_id`): solo ellas (`saas_outreach_client_check`). Lo de una
+ * conversación sale por la API de Meta: `external_id` se anota una vez, al
+ * salir; en WhatsApp (el `wamid`) con él llegan sus estados. Instagram y
+ * Messenger solo salen en su conversación.
  */
 export const saasOutreach = adminSchema.table(
   "saas_outreach",
@@ -600,6 +642,17 @@ export const saasOutreach = adminSchema.table(
     references: text("references"),
     /** Documentos del cliente que van adjuntos (`saas_client_file`), hasta 5; sin clave foránea, como un arreglo. */
     fileIds: uuid("file_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    /** La conversación de WhatsApp en que sale (la respuesta en el cajón); sin cliente puede salir. */
+    chatId: uuid("chat_id").references((): AnyPgColumn => saasChat.id),
+    /** El id que devolvió Meta (`wamid` en WhatsApp): con él llegan después sus estados. */
+    externalId: text("external_id"),
+    /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
+    template: text("template"),
+    /**
+     * Lo marcó «Solo administración» quien respondió en una conversación que Soporte también ve.
+     * Lo demás que Soporte no ve lo decide `outreachAdminOnlySql`.
+     */
+    adminOnly: boolean("admin_only").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -607,7 +660,9 @@ export const saasOutreach = adminSchema.table(
     index("saas_outreach_client_idx").on(table.clientId, table.createdAt),
     index("saas_outreach_status_idx").on(table.status),
     index("saas_outreach_reply_idx").on(table.inReplyToEmailId),
+    index("saas_outreach_chat_idx").on(table.chatId, table.createdAt),
     uniqueIndex("saas_outreach_message_uidx").on(table.messageId),
+    uniqueIndex("saas_outreach_external_uidx").on(table.externalId),
     check("saas_outreach_channel_check", oneOf(table.channel, SAAS_OUTREACH_CHANNELS)),
     check("saas_outreach_status_check", oneOf(table.status, SAAS_OUTREACH_STATUSES)),
     check(
@@ -617,7 +672,14 @@ export const saasOutreach = adminSchema.table(
     ),
     check(
       "saas_outreach_client_check",
-      sql`${table.clientId} IS NOT NULL OR ${table.inReplyToEmailId} IS NOT NULL`,
+      sql`${table.clientId} IS NOT NULL OR ${table.inReplyToEmailId} IS NOT NULL OR ${table.chatId} IS NOT NULL`,
+    ),
+    check(
+      "saas_outreach_chat_check",
+      sql`(${table.chatId} IS NULL OR ${oneOf(table.channel, SAAS_CHAT_CHANNELS)})
+        AND (${table.channel} NOT IN ('instagram','messenger') OR ${table.chatId} IS NOT NULL)
+        AND (${table.externalId} IS NULL OR length(${table.externalId}) BETWEEN 1 AND 256)
+        AND (${table.template} IS NULL OR (${table.chatId} IS NOT NULL AND ${table.channel} = 'whatsapp' AND ${table.template} ~ '^[a-z0-9_]{1,128}$'))`,
     ),
     check(
       "saas_outreach_mail_check",
@@ -668,6 +730,11 @@ export const saasClientFile = adminSchema.table(
     }),
     /** Cuándo se marcó como la carga de datos; desde ahí cuentan los días para cargarla. */
     cargaAt: timestamp("carga_at", { withTimezone: true }),
+    /** El mensaje de WhatsApp, Instagram o Messenger en que llegó (`source` es su canal). */
+    inboundMessageId: uuid("inbound_message_id").references(
+      (): AnyPgColumn => saasInboundMessage.id,
+      { onDelete: "set null" },
+    ),
     createdAt: createdAt(),
   },
   (table) => [
@@ -675,6 +742,7 @@ export const saasClientFile = adminSchema.table(
     index("saas_client_file_client_idx").on(table.clientId, table.createdAt),
     index("saas_client_file_delete_idx").on(table.deleteAfter),
     index("saas_client_file_email_idx").on(table.inboundEmailId),
+    index("saas_client_file_message_idx").on(table.inboundMessageId),
     check("saas_client_file_kind_check", oneOf(table.kind, SAAS_CLIENT_FILE_KINDS)),
     check(
       "saas_client_file_source_check",
@@ -825,6 +893,91 @@ export const saasInboundEmail = adminSchema.table(
     check(
       "saas_inbound_email_staff_check",
       sql`${table.mailbox} = 'persona' OR ${table.staffUserId} IS NULL`,
+    ),
+  ],
+)
+
+/**
+ * Una conversación con Sallca por WhatsApp, Instagram o Messenger: una por
+ * canal y remitente (`address`: en WhatsApp el número en E.164; en Instagram
+ * el IGSID y en Messenger el PSID, ids de Meta sin formato de teléfono). Un
+ * contacto puede tener varias, una por canal. Nunca se liga sola por el
+ * teléfono: la liga una persona (`matched_by_user`) a un cliente y, si
+ * quiere, a su contacto.
+ * «No es una clínica» (`not_clinic_at`) la saca de lo que hay que decidir;
+ * sus mensajes siguen entrando. Una conversación con cliente no está marcada
+ * así (`saas_chat_not_clinic_check`). `last_inbound_at` abre las 24 h en que
+ * se puede responder con texto libre.
+ */
+export const saasChat = adminSchema.table(
+  "saas_chat",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    channel: text("channel").notNull().default("whatsapp"),
+    /** Quién escribe: en WhatsApp su número (E.164); en Instagram su IGSID; en Messenger su PSID. */
+    address: text("address").notNull(),
+    /** En WhatsApp, el id de quien escribe en Meta (`wa_id`, o su BSUID). */
+    waId: text("wa_id"),
+    /** El nombre o @usuario de su perfil, tal como lo dio Meta: no es su nombre verificado. */
+    displayName: text("display_name"),
+    clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references(() => saasClientContact.id, { onDelete: "set null" }),
+    matchedByUser: text("matched_by_user").references(() => user.id, { onDelete: "set null" }),
+    matchedAt: timestamp("matched_at", { withTimezone: true }),
+    notClinicAt: timestamp("not_clinic_at", { withTimezone: true }),
+    notClinicBy: text("not_clinic_by").references(() => user.id, { onDelete: "set null" }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("saas_chat_address_uidx").on(table.channel, table.address),
+    index("saas_chat_client_idx").on(table.clientId),
+    check("saas_chat_channel_check", oneOf(table.channel, SAAS_CHAT_CHANNELS)),
+    check(
+      "saas_chat_address_check",
+      sql`length(${table.address}) BETWEEN 1 AND 128 AND ${table.address} !~ '\\s'
+        AND (${table.channel} <> 'whatsapp' OR ${table.address} ~ '^\\+[1-9][0-9]{6,14}$')`,
+    ),
+    check(
+      "saas_chat_text_check",
+      sql`(${table.displayName} IS NULL OR length(${table.displayName}) <= 200)
+        AND (${table.waId} IS NULL OR length(${table.waId}) BETWEEN 1 AND 256)`,
+    ),
+    check(
+      "saas_chat_not_clinic_check",
+      sql`(${table.notClinicAt} IS NULL OR ${table.clientId} IS NULL)
+        AND (${table.notClinicAt} IS NOT NULL OR ${table.notClinicBy} IS NULL)`,
+    ),
+  ],
+)
+
+/**
+ * Un mensaje que entró en una conversación, una vez por su `external_id` (el
+ * id del mensaje en Meta: `wamid` en WhatsApp, `mid` en Instagram y Messenger). `body` es el texto o el pie de una foto
+ * (nulo si solo trae un archivo); `media`, sus archivos, que solo se guardan.
+ */
+export const saasInboundMessage = adminSchema.table(
+  "saas_inbound_message",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => saasChat.id, { onDelete: "cascade" }),
+    externalId: text("external_id").notNull(),
+    body: text("body"),
+    media: jsonb("media").$type<SaasInboundMedia[]>().notNull().default(sql`'[]'::jsonb`),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex("saas_inbound_message_external_uidx").on(table.externalId),
+    index("saas_inbound_message_chat_idx").on(table.chatId, table.receivedAt),
+    check(
+      "saas_inbound_message_text_check",
+      sql`length(${table.externalId}) BETWEEN 1 AND 256
+        AND (${table.body} IS NULL OR length(${table.body}) <= 10000)
+        AND jsonb_typeof(${table.media}) = 'array'`,
     ),
   ],
 )

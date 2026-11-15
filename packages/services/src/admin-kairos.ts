@@ -10,7 +10,7 @@ import {
   kairosItem,
   SAAS_CLIENT_PROFESSIONALS,
   SAAS_CLIENT_TOOLS,
-  SAAS_OUTREACH_CHANNELS,
+  SAAS_WRITE_CHANNELS,
   type SaasOutreachChannel,
   type SaasTaskKind,
   saasClient,
@@ -162,6 +162,8 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   correo_sin_cliente: "un correo sin cliente",
   responder_correo: "la respuesta a un correo",
   posible_carga: "una posible carga de datos",
+  chat_sin_cliente: "un mensaje sin cliente",
+  responder_chat: "un mensaje por responder",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -1012,6 +1014,8 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   correo_sin_cliente: ["clientId"],
   responder_correo: ["body"],
   posible_carga: [],
+  chat_sin_cliente: [],
+  responder_chat: [],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -1048,7 +1052,7 @@ async function executeItem<O extends KairosOutreachPrepared>(
   switch (kind) {
     case "mensaje": {
       const channel = str(payload.channel)
-      if (!channel || !(SAAS_OUTREACH_CHANNELS as readonly string[]).includes(channel)) {
+      if (!channel || !(SAAS_WRITE_CHANNELS as readonly string[]).includes(channel)) {
         throw invalidField("edited.channel", "Elige correo o WhatsApp")
       }
       const body = optText(payload.body)
@@ -1190,6 +1194,10 @@ async function executeItem<O extends KairosOutreachPrepared>(
     case "guion":
       // El guion se lee; aprobarlo es «listo», no ejecuta nada.
       return { status: "ejecutada", result: { taskId: str(payload.taskId) } }
+    case "chat_sin_cliente":
+    case "responder_chat":
+      // Se decide y se responde en la conversación (`assignChat`, `prepareChatReply`), no aquí.
+      throw new ServiceError("KAIROS_ITEM_IN_CHAT", 409, "Esto se resuelve en la conversación")
     case "posible_carga": {
       const fileId = optText(payload.fileId)
       if (!fileId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el archivo")

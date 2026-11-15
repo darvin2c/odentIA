@@ -15,10 +15,10 @@ import {
   SAAS_CLIENT_TOOLS,
   SAAS_CONTACT_ROLES,
   SAAS_LOST_REASONS,
-  SAAS_OUTREACH_CHANNELS,
   SAAS_PROPOSAL_BILLING_CYCLES,
   SAAS_TASK_KINDS,
   SAAS_TASK_STATUSES,
+  SAAS_WRITE_CHANNELS,
   type SaasClientFileKind,
   saasClient,
 } from "@odentia/db/schema/admin-arm"
@@ -361,7 +361,7 @@ const proposalDecideBody = z.strictObject({
 })
 
 const outreachBody = z.strictObject({
-  channel: z.enum(SAAS_OUTREACH_CHANNELS, "Elige por dónde sale"),
+  channel: z.enum(SAAS_WRITE_CHANNELS, "Elige por dónde sale"),
   contactId: optionalId("la persona"),
   to: optionalText(254),
   subject: optionalText(200),

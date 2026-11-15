@@ -36,9 +36,9 @@ import {
   SAAS_CLIENT_PROFESSIONALS,
   SAAS_CLIENT_TOOLS,
   SAAS_LOST_REASONS,
-  SAAS_OUTREACH_CHANNELS,
   SAAS_PROPOSAL_BILLING_CYCLES,
   SAAS_TASK_KINDS,
+  SAAS_WRITE_CHANNELS,
   type SaasActivityDirection,
   type SaasActivityKind,
   type SaasInboundMailbox,
@@ -2218,7 +2218,8 @@ export async function prepareOutreach(
   now = new Date(),
 ): Promise<OutreachRow> {
   const client = await lockClient(tx, clientId)
-  if (!(SAAS_OUTREACH_CHANNELS as readonly string[]).includes(input.channel))
+  // Instagram y Messenger solo salen respondiendo en su conversación (`prepareChatReply`).
+  if (!(SAAS_WRITE_CHANNELS as readonly string[]).includes(input.channel))
     throw invalidField("channel", "Elige por dónde sale")
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const body = trimmed("body", input.body, 5000, "el mensaje")
@@ -2652,7 +2653,7 @@ async function outreachWentOut(
     actor,
     client,
     {
-      kind: row.channel === "whatsapp" ? "whatsapp" : "correo",
+      kind: row.channel === "correo" ? "correo" : (row.channel as SaasActivityKind),
       direction: "salio",
       body: (row.subject ? `${row.subject}\n\n${row.body}` : row.body).slice(0, 2000),
       contactId: row.contactId,
