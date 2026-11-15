@@ -85,7 +85,14 @@ export interface PersonalLinkView {
    */
   visit: { purpose: string | null; questions: VisitQuestions } | null
   /** «Lo que nos contaste»: qué envió quien abre y cuándo (en la zona de la clínica). Nunca lo que respondió. */
-  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "visita"; at: string }> } | null
+  told: { timeZone: string; items: Array<{ what: "datos" | "salud" | "sin_cambios" | "visita"; at: string }> } | null
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas desde tu última visita?» antes de la cita de este
+   * enlace (entrega 10); `since`, su última declaración. Nunca lo que dijo entonces.
+   */
+  healthCheck: { since: string } | null
+  /** «Corregir mi salud o mis medicinas»: ya contó su salud desde su enlace y puede volver a responderla. */
+  correctHealth: boolean
   /** Lo que aceptó de su presupuesto y aún no tiene cita: «Lo que aceptaste, por agendar». */
   toSchedule: Array<{ planItemId: string; title: string }>
   /** «Reservar otra» en «Tu cita»: las citas por venir y el tope; nulo si no le corresponde. */
@@ -192,6 +199,8 @@ export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
       why: consent.why ?? null,
     })),
     told: view.told ?? null,
+    healthCheck: view.healthCheck ?? null,
+    correctHealth: view.correctHealth ?? false,
     visit: view.visit ?? null,
     toSchedule: view.toSchedule ?? [],
     another: view.another ?? null,
@@ -384,10 +393,18 @@ export interface PersonalDataForm {
   pending: { privacy: boolean; promotions: boolean }
   /** «Tu visita», el último paso de «Antes de tu cita»; nulo sin cita o ya respondida. */
   visit?: { purpose: string | null; questions: VisitQuestions } | null
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas?», la primera pregunta (entrega 10): `since`, su
+   * última declaración; `questions`, lo que vuelve a responder si dice que sí. Nulo: no se pregunta.
+   */
+  healthCheck?: { since: string; questions: RegistrationFieldKey[] } | null
+  /** «Corregir mi salud o mis medicinas»: solo su salud, entera. */
+  correcting?: boolean
 }
 
-export function fetchPersonalDataForm(slug: string, token: string): Promise<{ data: PersonalDataForm }> {
-  return publicFetch(`${base(slug)}/data?token=${encodeURIComponent(token)}`)
+/** `corregir`: «Corregir mi salud o mis medicinas» (entrega 10). */
+export function fetchPersonalDataForm(slug: string, token: string, mode?: "corregir"): Promise<{ data: PersonalDataForm }> {
+  return publicFetch(`${base(slug)}/data?token=${encodeURIComponent(token)}${mode ? `&modo=${mode}` : ""}`)
 }
 
 export interface PersonalDataInput {
@@ -407,6 +424,10 @@ export interface PersonalDataInput {
   acceptsReminders?: boolean
   /** «Tu visita», en el mismo envío. */
   visit?: VisitAnswerInput | null
+  /** Su respuesta a «¿Cambió algo?»: con `cambio`, lo que volvió a responder va en `health`. */
+  healthCheck?: "sin_cambios" | "cambio" | null
+  /** «Corregir mi salud o mis medicinas». */
+  correctHealth?: boolean
 }
 
 /** «Antes de tu cita» (o «Tus datos», sin cita): solo lo que falta y su visita, una sola vez. */

@@ -51,6 +51,7 @@ import {
   unsubscribeByToken,
 } from "./automation.js"
 import { saveVisitAnswer } from "./visit-answers.js"
+import { recordHealthDeclaration } from "./clinical.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { saveMessageText, sendLinkReceivedNotice } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
@@ -437,7 +438,7 @@ describe("por dónde le llega a cada persona", () => {
     const p = await person(c, "Pedro Ríos", { consent: ["recordatorio"] })
     await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
     await consentSentToSign(c, p.patientId)
-    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1, visit: null })
+    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1, visit: null, healthCheck: false })
     await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
     await deliver(c)
     const [job] = await jobsOf(c)
@@ -454,15 +455,15 @@ describe("por dónde le llega a cada persona", () => {
     const visit = await appointmentFor(c, p.patientId, new Date(Date.now() + 2 * 24 * HOUR))
     const count = () => run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId, { appointmentId: visit }))
     // Le falta su fecha de nacimiento: una sola tarjeta, aunque también se le pregunte a qué viene.
-    expect(await count()).toEqual({ data: true, total: 1, visit: { asksReason: true } })
+    expect(await count()).toEqual({ data: true, total: 1, visit: { asksReason: true }, healthCheck: false })
     await ownerDb
       .update(contact)
       .set({ givenNames: "Marta", familyName: "Ríos", birthDate: "1960-03-12", phone: "+51987000937" })
       .where(eq(contact.id, p.contactId))
     // Solo su visita: no es algo por hacer.
-    expect(await count()).toEqual({ data: false, total: 0, visit: { asksReason: true } })
+    expect(await count()).toEqual({ data: false, total: 0, visit: { asksReason: true }, healthCheck: false })
     await run(c, (tx) => saveVisitAnswer(tx, c.orgId, { patientId: p.patientId, contactId: p.contactId }, visit, { pain: "no" }, "enlace"))
-    expect(await count()).toEqual({ data: false, total: 0, visit: null })
+    expect(await count()).toEqual({ data: false, total: 0, visit: null, healthCheck: false })
   })
 
   it("si solo le queda contar a qué viene, sale el recordatorio de siempre con una línea suave; como plantilla, sin ella", async () => {
@@ -501,6 +502,44 @@ describe("por dónde le llega a cada persona", () => {
     const toRosa = sent.find((row) => row.conversationId !== marta.conversationId)
     expect(toRosa).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_v2" })
     expect(toRosa?.body).not.toMatch(/cuéntanos|cosa/)
+  })
+
+  // Entrega 10, con lo que decidió el dueño el 14 nov: «¿Cambió algo?» sigue la regla de su visita.
+  it("«¿Cambió algo?» no suma como algo por hacer: sale el recordatorio de siempre con «Si algo cambió en tu salud, cuéntanos»", async () => {
+    // Las próximas 10:00 de Lima de lunes a viernes, como la prueba de arriba: con la hora real, de
+    // noche o en fin de semana, el recordatorio no salía.
+    const now = new Date()
+    now.setUTCHours(15, 0, 0, 0)
+    while (now.getTime() <= Date.now() || now.getUTCDay() === 0 || now.getUTCDay() === 6) now.setTime(now.getTime() + 24 * HOUR)
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
+    await ruleOn(c, "recordatorio_cita", new Date(now.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Elena Vargas", { consent: ["recordatorio"], openWindow: true })
+    await ownerDb
+      .update(contact)
+      .set({ givenNames: "Elena", familyName: "Vargas", birthDate: "1958-08-02", sex: "F", phone: "+51987000939" })
+      .where(eq(contact.id, p.contactId))
+    // Escribió una hora antes de ese «ahora».
+    await ownerDb.update(conversation).set({ lastInboundAt: new Date(now.getTime() - HOUR) }).where(eq(conversation.id, p.conversationId!))
+    // Dijo su salud hace dos meses: pasado el mes, antes de su cita se le pregunta si cambió algo.
+    await run(c, (tx) =>
+      recordHealthDeclaration(tx, c.orgId, p.patientId, {
+        via: "enlace",
+        by: { kind: "patient", name: null, relation: null },
+        health: { anticoagulants: { state: "recorded", detail: "warfarina 5 mg" } },
+        saidAt: new Date(now.getTime() - 60 * 24 * HOUR),
+      }),
+    )
+    const visit = await appointmentFor(c, p.patientId, new Date(now.getTime() + 24 * HOUR))
+    const pending = await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId, { appointmentId: visit }))
+    expect(pending).toMatchObject({ data: false, total: 0, healthCheck: true })
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, now))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, new Date(now.getTime() + HOUR)))
+    await deliver(c, new Date(now.getTime() + HOUR))
+    const [job] = await jobsOf(c)
+    const sent = await messageOf(job!.sentMessageId)
+    // Lo de su salud va primero: es una línea, no «tienes 1 cosa por hacer».
+    expect(sent.body).toMatch(/\n\nSi algo cambió en tu salud, cuéntanos: https?:\/\//)
+    expect(sent.body).not.toMatch(/cosa|a qué vienes/)
   })
 
   it("«Antes de tu cita» sin aprobar: sale el de sus datos y, si no, el de siempre", async () => {

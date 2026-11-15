@@ -402,6 +402,13 @@ export const HEALTH_DECLARATION_VIAS = ["enlace", "registro", "formulario"] as c
 export const HEALTH_DECLARATION_RESPONDENTS = ["patient", "representative", "staff"] as const
 
 /**
+ * Por qué llegó, antes de una cita (entrega 10): dijo que algo cambió y volvió a responder, corrigió
+ * lo que había enviado, o dijo que nada cambió (`sin_cambios`, sin salud: `health` vacío). Nulo: lo
+ * primero que dijo, o un registro. La misma lista que `HEALTH_DECLARATION_REASONS` de `@odentia/clinical`.
+ */
+export const HEALTH_DECLARATION_ROW_REASONS = ["cambio", "correccion", "sin_cambios"] as const
+
+/**
  * Cada vez que la persona, o quien habla por ella, declaró algo de su salud:
  * lo que dijo tal como llegó, quién lo dijo y cuándo. Solo se agrega y se lee.
  * Antecedentes guarda lo vigente, que el equipo corrige; esta fila es lo que
@@ -427,6 +434,8 @@ export const patientHealthDeclaration = pgTable(
     /** Su vínculo en palabras («madre», «hermana»); nulo si no se sabe. */
     declarantRelation: text("declarant_relation"),
     health: jsonb("health").$type<NonNullable<RegistrationAnswers["health"]>>().notNull(),
+    /** Por qué llegó (`HEALTH_DECLARATION_ROW_REASONS`); nulo si es lo primero que dijo o un registro. */
+    reason: text("reason").$type<(typeof HEALTH_DECLARATION_ROW_REASONS)[number]>(),
     /** Cuándo lo dijo la persona. */
     saidAt: timestamp("said_at", { withTimezone: true }).notNull().defaultNow(),
     /** Cuándo entró a su ficha: el mismo instante de las filas de Antecedentes que trajo. */
@@ -446,6 +455,11 @@ export const patientHealthDeclaration = pgTable(
     check(
       "patient_health_declaration_respondent_check",
       sql`${table.respondent} IN ('patient','representative','staff')`,
+    ),
+    // «Nada cambió» no trae salud: lo que dijo es eso, y nada más.
+    check(
+      "patient_health_declaration_reason_check",
+      sql`${table.reason} IS NULL OR ${table.reason} IN ('cambio','correccion') OR (${table.reason} = 'sin_cambios' AND ${table.health} = '{}'::jsonb)`,
     ),
   ],
 )

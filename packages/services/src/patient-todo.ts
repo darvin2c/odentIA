@@ -7,6 +7,7 @@ import { schedulableItemsOf } from "./booking-links.js"
 import { type BudgetWithTotals, listBudgets } from "./budgets.js"
 import { type RemoteSignBlock, remoteSignBlock } from "./clinical-forms.js"
 import { getPatientMissingData, patientHealthQuestionsWith } from "./patient-registration.js"
+import { type HealthCheck, healthCheckOf } from "./health-check.js"
 import { type VisitAsk, visitAskOf } from "./visit-answers.js"
 
 /**
@@ -40,6 +41,11 @@ export interface PatientTodo {
    * aún no lo respondió. Va en la misma tarjeta que sus datos: «Antes de tu cita».
    */
   visit: VisitAsk | null
+  /**
+   * «¿Cambió algo en tu salud o en tus medicinas?» antes de la cita a la vista, si su última
+   * declaración tiene más de un mes (entrega 10). Va en la misma tarjeta: «Antes de tu cita».
+   */
+  healthCheck: HealthCheck | null
   /** Los presupuestos que esperan su respuesta, el último enviado primero. */
   budgets: BudgetWithTotals[]
   /** «Lo que aceptaste, por agendar». */
@@ -131,6 +137,7 @@ export async function patientTodo(
     consents,
     signBlock: consents.length > 0 ? await remoteSignBlock(tx, orgId, patientId, input.contactId) : null,
     visit: await visitAskOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
+    healthCheck: await healthCheckOf(tx, orgId, { patientId, appointmentId: input.appointmentId }),
     budgets: await budgetsToAnswer(tx, orgId, patientId),
     toSchedule: await schedulableItemsOf(tx, orgId, patientId),
   }
@@ -143,6 +150,7 @@ export function hasTodo(todo: PatientTodo): boolean {
     todo.health ||
     todo.consents.length > 0 ||
     todo.visit !== null ||
+    todo.healthCheck !== null ||
     todo.budgets.length > 0 ||
     todo.toSchedule.length > 0
   )
@@ -154,12 +162,13 @@ export function hasTodo(todo: PatientTodo): boolean {
  * presupuesto y lo aceptado por agendar. Un consentimiento que solo se firma en la cita no cuenta.
  * La salud, opcional, cuenta como sus datos solo si `health`. «Tu visita» es opcional y no cuenta
  * como algo por hacer (decidido el 14 nov): va en la misma tarjeta que sus datos y, si es lo único
- * que le queda, el recordatorio de siempre lo ofrece con una línea suave (`visit`).
+ * que le queda, el recordatorio de siempre lo ofrece con una línea suave (`visit`). «¿Cambió algo?»
+ * (entrega 10) sigue la misma regla: no cuenta y, si queda, lleva su propia línea (`healthCheck`).
  */
 export function remoteTodoCount(
   todo: PatientTodo,
   options: { health?: boolean } = {},
-): { data: boolean; total: number; visit: { asksReason: boolean } | null } {
+): { data: boolean; total: number; visit: { asksReason: boolean } | null; healthCheck: boolean } {
   const data = todo.missing.length > 0 || (options.health === true && todo.health && !todo.healthOnlyNew)
   const consents = todo.signBlock ? 0 : todo.consents.length
   const total =
@@ -167,5 +176,10 @@ export function remoteTodoCount(
     consents +
     todo.budgets.length +
     (todo.toSchedule.length > 0 ? 1 : 0)
-  return { data, total, visit: todo.visit ? { asksReason: todo.visit.questions.reason } : null }
+  return {
+    data,
+    total,
+    visit: todo.visit ? { asksReason: todo.visit.questions.reason } : null,
+    healthCheck: todo.healthCheck !== null,
+  }
 }

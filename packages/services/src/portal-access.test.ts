@@ -27,7 +27,8 @@ import {
   verifyPasskeyRegistration,
 } from "./portal-access.js"
 import { exchangePortalToken, issuePortalLink, requirePortalSession, revokePortalSession } from "./portal.js"
-import { getPortalVisit, savePortalVisit } from "./portal-visit.js"
+import { getPortalHealth, getPortalVisit, savePortalVisit } from "./portal-visit.js"
+import { recordHealthDeclaration } from "./clinical.js"
 import { saveVisitAnswer } from "./visit-answers.js"
 import { recordPortalPinFailure, upsertPortalPolicy } from "./portal-policy.js"
 import { ServiceError } from "./errors.js"
@@ -428,6 +429,39 @@ it("antes de su cita, desde el portal: lo responde quien decide, para su próxim
   expect(await errorCode(inPortal((tx, ctx) => savePortalVisit(tx, ctx, { reason: "Otra cosa" })))).toBe("ALREADY_SUBMITTED")
   const [row] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, visitId))
   expect(row).toMatchObject({ reason: "Se me rompió un diente", pain: "si", painLevel: 6, submittedVia: "portal", respondentContactId: contactId })
+})
+
+// Mesa de formularios del 13 nov, entrega 10 (C8, decisión 9): lo que su enlace no muestra se lee en su portal.
+it("en su portal ve lo que contó de su salud, tal como lo envió, y que después dijo que nada cambió", async () => {
+  await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: patient3Id,
+      contactId,
+      relationship: "guardian",
+      scope: { appointments: true },
+      verifiedMethod: "presencial_documento",
+      evidenceNote: "DNI revisado en recepción.",
+    }),
+  )
+  const { raw } = await insertPendingLink(patient3Id)
+  const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+  const inPortal = <T>(fn: (tx: typeof appDb, ctx: Awaited<ReturnType<typeof requirePortalSession>>) => Promise<T>) =>
+    withOrgContext(appDb, ORG, async (tx) => fn(tx, await requirePortalSession(tx, ORG, opened.sessionToken)))
+  expect(await inPortal((tx, ctx) => getPortalHealth(tx, ctx))).toEqual({ told: null, unchanged: null })
+  const health = { anticoagulants: { state: "recorded" as const, detail: "Warfarina 5 mg" } }
+  await withOrgContext(appDb, ORG, async (tx) => {
+    // Lo que anotó el equipo no es lo que contó: no sale aquí.
+    await recordHealthDeclaration(tx, ORG, patient3Id, { via: "registro", by: { kind: "staff", name: null, relation: null }, health: { conditions: { state: "none", items: [] } } })
+  })
+  await withOrgContext(appDb, ORG, async (tx) => {
+    await recordHealthDeclaration(tx, ORG, patient3Id, { via: "enlace", by: { kind: "representative", name: "Contacto Portal", relation: "madre" }, health, reason: "correccion" })
+  })
+  await withOrgContext(appDb, ORG, async (tx) => {
+    await recordHealthDeclaration(tx, ORG, patient3Id, { via: "enlace", by: { kind: "representative", name: "Contacto Portal", relation: "madre" }, health: {}, reason: "sin_cambios" })
+  })
+  const seen = await inPortal((tx, ctx) => getPortalHealth(tx, ctx))
+  expect(seen.told).toMatchObject({ reason: "correccion", health })
+  expect(seen.unchanged).not.toBeNull()
 })
 
 it("el portal y el enlace usan la misma regla: quien no decide por el paciente no lo responde", async () => {

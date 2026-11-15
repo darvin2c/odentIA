@@ -2046,7 +2046,7 @@ export async function pendingBeforeAppointment(
   patientId: string,
   contactId: string,
   options: { health?: boolean; appointmentId?: string | null } = {},
-): Promise<{ data: boolean; total: number; visit: { asksReason: boolean } | null }> {
+): Promise<{ data: boolean; total: number; visit: { asksReason: boolean } | null; healthCheck: boolean }> {
   // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella. «Tu
   // visita» (de la cita del aviso) tampoco cuenta como algo por hacer: es opcional.
   const todo = await patientTodo(tx, orgId, { patientId, contactId, appointmentId: options.appointmentId ?? null })
@@ -2074,6 +2074,15 @@ interface LinkedNotice {
 /** La línea suave del recordatorio cuando solo le queda contar lo de su visita (decidido el 14 nov). */
 export function visitInviteLine(asksReason: boolean): { title: string } {
   return { title: asksReason ? "Si quieres, cuéntanos a qué vienes" : "Si quieres, cuéntanos si te duele algo" }
+}
+
+/**
+ * La línea suave cuando le queda «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10, la
+ * misma regla que su visita): no es «tienes 1 cosa por hacer». Va antes que la de su visita: lo de
+ * su salud pesa más, y las dos se responden en la misma tarjeta.
+ */
+export function healthCheckInviteLine(): { title: string } {
+  return { title: "Si algo cambió en tu salud, cuéntanos" }
 }
 
 /**
@@ -2107,8 +2116,8 @@ async function pendingNoticesFor(
   })
   // Un aviso por cita: solo el recordatorio los cuenta (los envíos del equipo salen al momento).
   const many = key === REMINDER_DATA_KEY && pending.total > (pending.data ? 1 : 0)
-  // Solo le queda lo de su visita: el recordatorio de siempre, con la línea suave.
-  const softVisit = key === REMINDER_DATA_KEY && !pending.data && !many && pending.visit !== null
+  // Solo le queda lo de su visita o «¿Cambió algo?» (entrega 10): el recordatorio de siempre, con la línea suave.
+  const softVisit = key === REMINDER_DATA_KEY && !pending.data && !many && (pending.visit !== null || pending.healthCheck)
   if (!pending.data && !many && !softVisit) return []
   const issued = await issuePersonalLink(
     tx,
@@ -2127,15 +2136,15 @@ async function pendingNoticesFor(
       pendientes: thingsWords(pending.total),
     })
   if (pending.data) await add(await currentAutomationMessage(tx, orgId, key))
-  if (softVisit && pending.visit) {
-    // Abre «Antes de tu cita» con solo «Tu visita».
+  if (softVisit) {
+    // Abre «Antes de tu cita» con lo que le queda: «¿Cambió algo?» y «Tu visita».
     const url = await personalLinkMessageUrl(tx, orgId, issued.linkId, "datos")
     if (url)
       notices.push({
         spec: await currentAutomationMessage(tx, orgId, "recordatorio_cita"),
         link: { token: personalLinkRef(issued.linkId), url },
         extra: {},
-        soft: visitInviteLine(pending.visit.asksReason),
+        soft: pending.healthCheck ? healthCheckInviteLine() : visitInviteLine(pending.visit?.asksReason ?? true),
       })
   }
   return notices
