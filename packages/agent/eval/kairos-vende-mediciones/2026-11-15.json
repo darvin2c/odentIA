@@ -1,5 +1,5 @@
 {
- "fecha": "2026-11-15T05:47:12.863Z",
+ "fecha": "2026-11-15T06:32:58.530Z",
  "vendedor": "modelo",
  "cuenta": true,
  "banco": "C:\\Users\\WillyCotrina\\orca\\workspaces\\odentIA\\kelp\\packages\\agent\\eval\\kairos-vende.json",
@@ -7,34 +7,36 @@
  "resumen": {
   "corridas": 72,
   "turnos": 112,
-  "casosConGrave": [],
-  "graves": 0,
-  "avisos": 1,
-  "tasaAvisos": 0.008928571428571428,
+  "casosConGrave": [
+   "k15-ausencia-horas#1"
+  ],
+  "graves": 2,
+  "avisos": 8,
+  "tasaAvisos": 0.07142857142857142,
   "juez": {
-   "tono": 3.702127659574468,
-   "claridad": 3.574468085106383,
-   "responde": 3.5531914893617023,
-   "conversaciones": 47
+   "tono": 3.7551020408163267,
+   "claridad": 3.63265306122449,
+   "responde": 3.6122448979591835,
+   "conversaciones": 49
   },
   "gasto": {
    "vendedor": {
-    "input": 604812,
-    "cached": 328386,
-    "output": 9375,
-    "micros": 35647,
+    "input": 620487,
+    "cached": 336630,
+    "output": 9679,
+    "micros": 36627,
     "noCost": 0,
     "calls": 112
    },
    "juez": {
-    "input": 24620,
+    "input": 25674,
     "cached": 0,
-    "output": 9979,
-    "micros": 7453,
+    "output": 10626,
+    "micros": 7886,
     "noCost": 0,
-    "calls": 47
+    "calls": 49
    },
-   "totalMicros": 43100
+   "totalMicros": 44513
   }
  },
  "casos": [
@@ -55,8 +57,8 @@
    "juez": {
     "tono": 3,
     "claridad": 2,
-    "responde": 1,
-    "comentario": "Suena cordial, pero no da los precios vigentes ni ofrece la presentación; desvía la pregunta hacia cómo se cobran los trabajos."
+    "responde": 2,
+    "comentario": "Da algunos precios y ofrece agendar, pero la respuesta es larga y confusa, y deja pendientes los precios de Clío y Argos."
    },
    "conversacion": [
     {
@@ -65,7 +67,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales, con agentes que atienden consultas, gestionan citas y apoyan al equipo clínico. Hoy se ingresa por invitación al programa Fundadores, sin cuota y con USD 20 de regalo para los agentes durante los primeros 30 días; ¿quieres que te cuente cómo se cobran sus trabajos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales, y hoy se ingresa por invitación al programa Fundadores, sin cuota y con USD 20 de regalo para los agentes durante los primeros 30 días. En Fundadores, Sofi cobra USD 0,10 por informar, USD 0,25 por gestionar una cita y USD 0,50 si la cita se da; ¿quieres que te cuente también los precios de Clío y Argos o prefieres agendar una presentación?"
     }
    ],
    "caracteresPorPaso": [
@@ -81,16 +83,16 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios)"
+    "respondio"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 4,
+    "claridad": 3,
     "responde": 4,
-    "comentario": "Explica que el costo depende del trabajo de los agentes y da sus precios; no estima el gasto mensual, pero ofrece un siguiente paso claro."
+    "comentario": "Responde con precios y explica que se paga según el uso de los agentes, pero mezcla Fundadores y Clínica en una respuesta densa que puede confundir sobre el pago mensual."
    },
    "conversacion": [
     {
@@ -99,7 +101,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA no cobra por cantidad de doctores o recepcionistas: con Fundadores no hay cuota y pagas por el trabajo de los agentes; por ejemplo, Sofi cobra USD 0,10 por responder consultas, USD 0,25 por gestionar una cita y USD 0,50 si la cita se concreta. ¿Quieres que te explique también los demás precios o agendamos una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA no cobra una cuota mensual en el programa Fundadores: pagas por el trabajo de los agentes, con 50 % menos que el precio de lista durante 12 meses; por ejemplo, Sofi cobra USD 0,10 por informar, USD 0,25 por gestionar una cita y USD 0,50 si la cita se da. El plan Clínica cuesta USD 49 al mes y ese monto vuelve como USD 49 de crédito para los agentes; la cantidad de doctores y recepcionistas no cambia el plan. ¿Quieres que te explique los demás cargos o coordinamos una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
@@ -209,9 +211,9 @@
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 4,
-    "responde": 5,
-    "comentario": "Informa con claridad que la hora ya no está libre y ofrece buscar otras para el lunes; el tono es correcto, aunque algo seco."
+    "claridad": 3,
+    "responde": 3,
+    "comentario": "Es amable y explica que la hora ya no está libre, pero no ofrece otras opciones ni indica cuándo las enviará."
    },
    "conversacion": [
     {
@@ -228,7 +230,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La hora de las 09:00 ya no está libre. Voy a revisar otras opciones para el lunes y te las paso."
+     "texto": "Lo siento, esa hora ya no está libre. Voy a revisar otras opciones para el lunes y te las paso."
     }
    ],
    "caracteresPorPaso": [
@@ -250,7 +252,7 @@
    "sospechas": [
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 9:00 o a las 11:00, hora de Lima. ¿Cuál prefieres?»"
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál prefieres para la presentación de odentIA?»"
     }
    ],
    "noCumplio": [],
@@ -258,7 +260,7 @@
     "tono": 4,
     "claridad": 5,
     "responde": 5,
-    "comentario": "Indica que el lunes a las 10 no está disponible y ofrece dos horarios alternativos con un siguiente paso claro; el saludo suena algo guionizado."
+    "comentario": "Aclara que el lunes a las 10 no está disponible y ofrece dos horarios libres; la presentación de odentIA queda clara."
    },
    "conversacion": [
     {
@@ -267,7 +269,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 9:00 o a las 11:00, hora de Lima. ¿Cuál prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál prefieres para la presentación de odentIA?"
     }
    ],
    "caracteresPorPaso": [
@@ -283,25 +285,25 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios, ver_horarios)"
+    "respondio (ver_horarios)"
    ],
    "graves": [],
    "sospechas": [
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; sí puedo ofrecerte el lunes 23 a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Alguna de esas opciones te funciona?»"
+     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 pm. ¿Quieres que busque otros días o prefieres que alguien del equipo te escriba para coordinar la presentación?»"
     },
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; sí puedo ofrecerte el lunes 23 a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Alguna de esas opciones te funciona?»"
+     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 pm. ¿Quieres que busque otros días o prefieres que alguien del equipo te escriba para coordinar la presentación?»"
     }
    ],
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 5,
-    "responde": 5,
-    "comentario": "Ofrece con claridad horarios disponibles y pregunta cuál le funciona; el saludo inicial es algo genérico y no reconoce que la persona atiende pacientes."
+    "claridad": 3,
+    "responde": 2,
+    "comentario": "Es amable y claro, pero no ofrece horarios disponibles, que era lo esperado."
    },
    "conversacion": [
     {
@@ -310,7 +312,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; sí puedo ofrecerte el lunes 23 a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Alguna de esas opciones te funciona?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 pm. ¿Quieres que busque otros días o prefieres que alguien del equipo te escriba para coordinar la presentación?"
     }
    ],
    "caracteresPorPaso": [
@@ -323,24 +325,28 @@
    "repeticion": 1,
    "turnos": 6,
    "turnosCorridos": 6,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t6: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
     "respondio (ver_horarios)",
     "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)",
     "respondio (ver_horarios, proponer_hora)",
     "respondio (mover)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 4,
-    "comentario": "Mantiene un tono claro y profesional, y gestiona el cambio; el último mensaje es redundante porque la presentación ya había quedado movida y confirmada."
+    "responde": 3,
+    "comentario": "La gestión es clara y cordial, pero el aviso genérico tras el «sí, dale» resulta innecesario y confuso."
    },
    "conversacion": [
     {
@@ -349,7 +355,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, el jueves 26 tengo disponibles las 09:00, 11:00 y 15:00 para la presentación de 45 minutos. ¿Cuál te acomoda?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, tengo el jueves 26 a las 09:00, 11:00 o 15:00 para la presentación de 45 minutos por videollamada. ¿Cuál horario te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -357,7 +363,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Te propongo el jueves 26 de noviembre a las 09:00 con Ana Torres. ¿Confirmas esta hora?"
+     "texto": "Te propongo el jueves 26 de noviembre a las 09:00 con Ana Torres. ¿Me confirmas si te queda bien?"
     },
     {
      "quien": "PERSONA",
@@ -365,7 +371,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, tu presentación quedó agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el jueves, 26 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, tu presentación quedó agendada. Te llegará la confirmación con el enlace.\n\nQuedó agendada tu presentación de 45 minutos para el jueves, 26 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -373,7 +379,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Sí, te propongo moverla al viernes 27 de noviembre a las 09:00 con Ana Torres. ¿Confirmas esta hora?"
+     "texto": "Sí, tengo libre el viernes 27 de noviembre a las 09:00 con Ana Torres. Te propongo ese horario para mover tu presentación; ¿me confirmas si te queda bien?"
     },
     {
      "quien": "PERSONA",
@@ -381,7 +387,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Listo, moví tu presentación al viernes 27 de noviembre a las 09:00 con Ana Torres. Te llegará la confirmación con el enlace por WhatsApp.\n\nTu presentación pasó al viernes, 27 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, tu presentación quedó movida al viernes 27 de noviembre a las 09:00. Te llegará la confirmación con el enlace.\n\nTu presentación pasó al viernes, 27 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -389,16 +395,16 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tu presentación ya está agendada para el viernes 27 de noviembre a las 09:00 con Ana Torres. No necesitas confirmarla de nuevo; te llegará la confirmación con el enlace por WhatsApp."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6708,
-    6911,
-    7107,
-    7484,
-    7702,
-    7966
+    6926,
+    7132,
+    7496,
+    7768,
+    8015
    ]
   },
   {
@@ -410,9 +416,9 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
+    "respondio (ver_horarios)",
     "respondio (ver_horarios, proponer_hora)",
-    "respondio (agendar)",
-    "respondio"
+    "respondio (agendar)"
    ],
    "graves": [],
    "sospechas": [],
@@ -420,8 +426,8 @@
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 4,
-    "comentario": "Ofrece un horario y confirma la reserva, aunque repite la confirmación sin necesidad tras el «sí dale»."
+    "responde": 5,
+    "comentario": "Ofrece horarios, confirma la elección y deja la cita agendada; la confirmación aparece repetida."
    },
    "conversacion": [
     {
@@ -430,7 +436,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para la presentación de odentIA, tengo libre el lunes 23 de noviembre a las 09:00, con Ana Torres. ¿Confirmas ese horario?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Para la Clínica Odontológica Huancayo, puedo ofrecerte una presentación de 45 minutos el lunes 23 de noviembre a las 09:00 o a las 11:00, o el martes 24 de noviembre a las 09:00, hora de Lima. ¿Cuál te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -438,7 +444,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Quedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Te propongo el lunes 23 de noviembre a las 09:00, hora de Lima, con Ana Torres. ¿Confirmas?"
     },
     {
      "quien": "PERSONA",
@@ -446,13 +452,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tu presentación ya está agendada para el lunes 23 de noviembre a las 09:00 con Ana Torres. Puedes entrar a la videollamada desde el enlace que te compartimos."
+     "texto": "Perfecto, queda agendada tu presentación. La confirmación con el enlace te llegará por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6693,
-    6977,
-    7204
+    6992,
+    7184
    ]
   },
   {
@@ -464,19 +470,19 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio",
-    "respondio (pedir_contacto, ver_horarios, proponer_hora)",
-    "respondio (agendar)",
-    "respondio"
+    "respondio (datos_de_la_clinica, ver_horarios)",
+    "respondio (pedir_contacto, ver_horarios)",
+    "respondio (ver_horarios, proponer_hora)",
+    "respondio (agendar)"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 5,
+    "claridad": 4,
     "responde": 5,
-    "comentario": "Explica la demo, solicita el contacto antes de agendar y responde a la confirmación; el tono es claro y amable, aunque algo formularizado."
+    "comentario": "Atiende y agenda la demo con claridad; «omnicanal y agéntico» suena técnico y poco natural para una primera explicación."
    },
    "conversacion": [
     {
@@ -485,7 +491,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es un software omnicanal para clínicas dentales, con agentes que apoyan la recepción, la atención clínica y la recuperación de pacientes. Para coordinar una presentación de 45 minutos por videollamada, ¿me compartes tu WhatsApp con código de país o tu correo?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es un software omnicanal y agéntico para clínicas dentales; para coordinar tu presentación de 45 minutos, ¿me compartes tu WhatsApp con código de país o tu correo?"
     },
     {
      "quien": "PERSONA",
@@ -493,7 +499,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tengo tu WhatsApp. ¿Te queda bien la presentación de 45 minutos el lunes 23 de noviembre a las 09:00 con Ana Torres?"
+     "texto": "Gracias, Mariela, ya guardé tu WhatsApp. Para la presentación de odentIA de 45 minutos, tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00, y el martes 24 de noviembre a las 09:00; ¿cuál te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -501,7 +507,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, quedó agendada tu presentación. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Te propongo la presentación el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿La confirmas?"
     },
     {
      "quien": "PERSONA",
@@ -509,14 +515,14 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tu presentación ya está agendada para el lunes 23 de noviembre a las 09:00 con Ana Torres. No necesitas confirmarla nuevamente; puedes entrar a la videollamada desde el enlace que te enviamos."
+     "texto": "Perfecto, tu presentación quedó agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6680,
-    7087,
-    7324,
-    7654
+    6991,
+    7249,
+    7450
    ]
   },
   {
@@ -529,7 +535,7 @@
    "avisosPorque": [],
    "resultados": [
     "respondio (datos_de_la_clinica, pedir_contacto, ver_horarios)",
-    "respondio (datos_de_la_clinica, ver_horarios, proponer_hora)",
+    "respondio (datos_de_la_clinica, pedir_contacto, ver_horarios, proponer_hora)",
     "respondio (agendar)"
    ],
    "graves": [],
@@ -539,7 +545,7 @@
     "tono": 4,
     "claridad": 4,
     "responde": 5,
-    "comentario": "Guarda el correo, ofrece horarios y completa la reserva; «para avisarte» suena algo impreciso."
+    "comentario": "Agendó la presentación y tomó en cuenta el correo; el tono es profesional, aunque «omnicanal y agéntico» suena algo técnico."
    },
    "conversacion": [
     {
@@ -548,7 +554,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Ya registré tu correo para avisarte; tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00, y el martes 24 de noviembre a las 09:00, hora de Lima. ¿Cuál prefieres para la presentación de latidIA?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA es el software omnicanal y agéntico de Sallca para consultorios médicos; podemos verlo en una presentación de 45 minutos por videollamada. Tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00, y el martes 24 de noviembre a las 09:00; ¿cuál prefieres?"
     },
     {
      "quien": "PERSONA",
@@ -556,7 +562,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "¿Confirmas la presentación de latidIA el lunes 23 de noviembre a las 09:00 con Ana Torres?"
+     "texto": "¿Confirmas la presentación para el lunes 23 de noviembre a las 09:00?"
     },
     {
      "quien": "PERSONA",
@@ -564,13 +570,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, quedó agendada la presentación de latidIA. La confirmación con el enlace te llegará por correo.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Quedó agendada tu presentación de latidIA. Te llegará la confirmación con el enlace por correo.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6805,
-    7116,
-    7302
+    7180,
+    7345
    ]
   },
   {
@@ -582,17 +588,17 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios)",
-    "respondio"
+    "respondio",
+    "respondio (ver_horarios)"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
-    "tono": 2,
-    "claridad": 3,
-    "responde": 3,
-    "comentario": "Explica que no puede agendar sin esos datos, pero vuelve a pedirlos después de que la persona ya dijo que no quiere compartirlos."
+    "tono": 4,
+    "claridad": 4,
+    "responde": 4,
+    "comentario": "Explica que no puede coordinar sin un dato de contacto y ofrece una alternativa por Instagram; podría ser más directa al confirmar que no agendará la demo."
    },
    "conversacion": [
     {
@@ -601,7 +607,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para agendar la presentación de odentIA para Dental Arte Cusco, ¿me compartes tu WhatsApp con código de país o tu correo para avisarte? Tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00; dime cuál prefieres."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Para agendar la presentación de odentIA de 45 minutos para Dental Arte Cusco, ¿me compartes tu WhatsApp con código de país o tu correo para avisarte?"
     },
     {
      "quien": "PERSONA",
@@ -609,12 +615,12 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Entiendo, Fiorella. Para agendar la presentación necesitamos un WhatsApp o correo para enviarte los detalles; si prefieres no compartirlos, no puedo coordinarla por aquí. ¿Quieres dejar alguno?"
+     "texto": "Entiendo, Fiorella. Para coordinar la presentación por Instagram necesitamos un WhatsApp o correo donde avisarte; si prefieres no compartirlos, alguien del equipo puede escribirte por aquí para coordinar. ¿Quieres que le pase tu caso al equipo?"
     }
    ],
    "caracteresPorPaso": [
     6669,
-    7015
+    6944
    ]
   },
   {
@@ -626,17 +632,19 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio",
+    "respondio (datos_de_la_clinica)",
     "respondio (datos_de_la_clinica)"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "no registró «santa rosa»"
+   ],
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 2,
-    "comentario": "Explica qué incluye y propone un siguiente paso, pero no reconoce ni registra el nombre de la clínica que la persona acaba de compartir."
+    "responde": 3,
+    "comentario": "Explica qué incluye y ofrece un siguiente paso, pero no reconoce ni registra el nombre y la ubicación de la clínica."
    },
    "conversacion": [
     {
@@ -645,7 +653,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales: atiende mensajes de varios canales y ayuda con recepción, citas, notas clínicas y recuperación de pacientes. ¿Cómo se llama tu clínica?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales: reúne tus canales de atención y cuenta con agentes para recepción, apoyo clínico y recuperación de pacientes. ¿Qué te gustaría conocer: cómo funciona, los precios o agendar una presentación de 45 minutos?"
     },
     {
      "quien": "PERSONA",
@@ -653,12 +661,12 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "odentIA incluye el sistema completo, sin planes con más o menos funciones: Sofi atiende y gestiona citas, Clío prepara notas clínicas para que el profesional las confirme y Argos responde consultas sobre las cifras de tu clínica y ayuda a recuperar pacientes. También reúne WhatsApp, Instagram, Messenger, Telegram, el chat web y el correo en una sola ficha por persona. ¿Quieres que te cuente cómo se cobra o agendamos una presentación de 45 minutos?"
+     "texto": "odentIA incluye atención por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y correo, todo en una sola ficha por persona. También trae a Sofi para recepción y citas, a Clío para preparar notas clínicas que confirma el profesional y a Argos para responder consultas sobre las cifras de tu clínica y recuperar pacientes. ¿Quieres que te cuente los precios o prefieres agendar una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
     6781,
-    7110
+    7082
    ]
   },
   {
@@ -671,7 +679,7 @@
    "avisosPorque": [],
    "resultados": [
     "respondio (datos_de_la_clinica, ver_horarios)",
-    "respondio (datos_de_la_clinica, ver_horarios, proponer_hora)",
+    "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)"
    ],
    "graves": [],
@@ -680,8 +688,8 @@
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 4,
-    "comentario": "Agenda la demo y confirma los datos con claridad, aunque el tecnicismo «agéntico» resta naturalidad y no se hace visible que el registro queda separado."
+    "responde": 2,
+    "comentario": "El tono es cordial y la demo queda agendada, pero no aclara que Carla se registrará aparte del cliente con nombre parecido."
    },
    "conversacion": [
     {
@@ -690,7 +698,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; podemos mostrarte cómo funciona en una presentación de 45 minutos por videollamada. Tengo libre el lunes 23 de noviembre a las 09:00, el lunes 23 a las 11:00 o el martes 24 a las 09:00; ¿cuál te acomoda?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; podemos mostrarte cómo funciona en una presentación de 45 minutos por videollamada. Tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00, y el martes 24 de noviembre a las 09:00; ¿cuál te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -698,7 +706,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Me confirmas si te acomoda?"
+     "texto": "¿Confirmas la presentación por videollamada el lunes 23 de noviembre a las 09:00 con Ana Torres?"
     },
     {
      "quien": "PERSONA",
@@ -706,13 +714,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda agendada tu presentación. Te llegará la confirmación con el enlace.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, tu presentación quedó agendada. Te llegará la confirmación por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6822,
-    7087,
-    7276
+    7090,
+    7282
    ]
   },
   {
@@ -825,21 +833,25 @@
    "repeticion": 1,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
     "respondio (ver_horarios, proponer_hora)",
     "respondio (mover)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
-    "tono": 4,
+    "tono": 3,
     "claridad": 3,
-    "responde": 4,
-    "comentario": "Gestiona el cambio con la misma persona y confirma el horario, pero repite la confirmación de la cita sin necesidad."
+    "responde": 3,
+    "comentario": "La reprogramación quedó clara y con la misma persona, pero el aviso de que alguien responderá pronto no era oportuno tras el «sí»."
    },
    "conversacion": [
     {
@@ -856,7 +868,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, ya quedó movida al miércoles 25 de noviembre a las 09:00 con Ana Torres.\n\nTu presentación pasó al miércoles, 25 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Listo, ya quedó movida al miércoles 25 de noviembre a las 09:00 con Ana Torres.\n\nTu presentación pasó al miércoles, 25 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -864,13 +876,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La presentación ya está agendada para el miércoles 25 de noviembre a las 09:00 con Ana Torres. Nos vemos por videollamada."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6781,
     7086,
-    7291
+    7288
    ]
   },
   {
@@ -889,9 +901,9 @@
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 4,
-    "responde": 4,
-    "comentario": "Confirma la cancelación con claridad y buen tono, pero ofrecer coordinar otra presentación no respeta del todo la indicación de cancelar sin insistir."
+    "claridad": 5,
+    "responde": 5,
+    "comentario": "Cancela con claridad y ofrece coordinar otra fecha sin insistir; la presentación inicial de Kairós era innecesaria."
    },
    "conversacion": [
     {
@@ -900,7 +912,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Ya cancelé tu presentación del martes. Si quieres, puedo ayudarte a coordinar otra; dime qué día te conviene."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Ya cancelé tu presentación del martes. Si quieres, puedo ayudarte a coordinar otra fecha cuando te venga bien."
     }
    ],
    "caracteresPorPaso": [
@@ -959,21 +971,25 @@
    "repeticion": 1,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
     "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
-    "tono": 4,
+    "tono": 3,
     "claridad": 3,
     "responde": 3,
-    "comentario": "Es cálido y confirma la cita, pero repite información y no aclara que Ana sigue siendo la responsable aunque Luis hará la presentación."
+    "comentario": "La agenda con Luis queda clara, pero no se aclara que Ana sigue siendo la responsable y el aviso de que alguien responderá pronto resulta inoportuno tras confirmar la cita."
    },
    "conversacion": [
     {
@@ -998,7 +1014,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, Dra. Paola. Tu presentación ya está agendada para el martes 24 de noviembre a las 15:00 con Luis Paredes; te llegará la confirmación con el enlace de la videollamada."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
@@ -1020,14 +1036,23 @@
     "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)"
    ],
-   "graves": [],
+   "graves": [
+    {
+     "rule": "hora que no se ofreció",
+     "text": "00:00 — «Hola, soy Kairós, el asistente de Sallca. Sí, tengo el lunes a las 11:00 a. m. con Ana Torres. ¿Te confirmo esa hora para la presentación?»"
+    },
+    {
+     "rule": "hora que no se ofreció",
+     "text": "00:00 — «¿Confirmas la presentación el lunes 23 de noviembre a las 11:00 a. m. con Ana Torres?»"
+    }
+   ],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
     "tono": 4,
     "claridad": 4,
     "responde": 5,
-    "comentario": "Ofrece la hora disponible y concreta la cita; el tono es profesional, aunque repite la propuesta antes de confirmar."
+    "comentario": "Ofrece la hora disponible desde las 11 y agenda la presentación; la segunda confirmación añade un paso innecesario."
    },
    "conversacion": [
     {
@@ -1036,7 +1061,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para la demo de odentIA el lunes en la mañana tengo libre a las 11:00 con Ana Torres. ¿Te propongo esa hora?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, tengo el lunes a las 11:00 a. m. con Ana Torres. ¿Te confirmo esa hora para la presentación?"
     },
     {
      "quien": "PERSONA",
@@ -1044,7 +1069,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Te propongo el lunes 23 de noviembre a las 11:00 con Ana Torres. ¿Confirmas?"
+     "texto": "¿Confirmas la presentación el lunes 23 de noviembre a las 11:00 a. m. con Ana Torres?"
     },
     {
      "quien": "PERSONA",
@@ -1052,13 +1077,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Quedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 11:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, tu presentación quedó agendada. La confirmación con el enlace te llegará por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 11:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6681,
-    6870,
-    7051
+    6858,
+    7048
    ]
   },
   {
@@ -1070,12 +1095,17 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "paso (ver_horarios)"
+    "respondio (ver_horarios)"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
-   "juez": null,
+   "juez": {
+    "tono": 4,
+    "claridad": 4,
+    "responde": 3,
+    "comentario": "Es cordial y ofrece pasar la coordinación al equipo, pero no aclara que todo el equipo está ausente estas dos semanas y ofrece buscar otros días pese a ello."
+   },
    "conversacion": [
     {
      "quien": "PERSONA",
@@ -1083,7 +1113,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Gracias por escribir. Eso lo ve alguien del equipo de Sallca, que te escribirá pronto por aquí."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, Dra. Paola: puedo coordinar una presentación de 45 minutos por videollamada para Dental Express Callao, pero no tengo horarios libres para ofrecerte ahora. ¿Quieres que busque otros días o prefieres que alguien del equipo te escriba para coordinarla?"
     }
    ],
    "caracteresPorPaso": [
@@ -1163,10 +1193,10 @@
    "sospechas": [],
    "noCumplio": [],
    "juez": {
-    "tono": 3,
-    "claridad": 2,
-    "responde": 3,
-    "comentario": "Da precios y explica que no hay planes distintos, pero acumula varios detalles en una sola frase y el siguiente paso distrae de la pregunta."
+    "tono": 4,
+    "claridad": 3,
+    "responde": 4,
+    "comentario": "Responde en español y da el precio, pero acumula detalles sobre créditos, prueba e invitación que hacen menos clara la respuesta."
    },
    "conversacion": [
     {
@@ -1175,7 +1205,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA tiene el sistema completo para clínicas dentales, sin planes con más o menos funciones; hoy se entra por invitación con Fundadores, sin cuota y con USD 20 de regalo para los agentes durante los primeros 30 días. Con Fundadores, Sofi cobra USD 0,10 por informar, USD 0,25 por gestionar una cita y USD 0,50 si la cita se da; ¿quieres que te comparta también los precios de Clío y Argos o prefieres agendar una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA tiene el plan Clínica, que cuesta USD 49 al mes y se convierte en USD 49 de crédito para los agentes; la prueba dura 14 días e incluye USD 10 de crédito. Hoy se ingresa por invitación al programa Fundadores, sin cuota y con USD 20 de regalo para los agentes durante los primeros 30 días; puedes solicitarlo en la web y Sallca responde en 3 días hábiles. ¿Quieres que te cuente cómo se cobran los trabajos de los agentes o prefieres agendar una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
@@ -1200,7 +1230,7 @@
     "tono": 4,
     "claridad": 3,
     "responde": 5,
-    "comentario": "Responde y pregunta lo esperado, pero «omnicanal y agéntico» suena técnico y poco claro."
+    "comentario": "Responde y hace las preguntas esperadas, pero «omnicanal y agéntico» suena técnico para un primer contacto."
    },
    "conversacion": [
     {
@@ -1234,7 +1264,7 @@
     "tono": 4,
     "claridad": 4,
     "responde": 3,
-    "comentario": "Pide que escriba lo que necesita, pero debió decir que no puede escuchar el audio, no que no puede ver el archivo."
+    "comentario": "Pide con amabilidad que escriba su consulta, pero dice que no puede ver el archivo en vez de aclarar que no puede escuchar el audio."
    },
    "conversacion": [
     {
@@ -1243,7 +1273,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No puedo ver el archivo que enviaste; cuéntame por escrito qué necesitas saber sobre odentIA para Clínica Dental Puno y te ayudo."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No puedo ver el archivo que enviaste; ¿me escribes qué información querías compartir o consultar?"
     }
    ],
    "caracteresPorPaso": [
@@ -1265,19 +1295,19 @@
    "sospechas": [
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?»"
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m. para la presentación de odentIA; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?»"
     },
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?»"
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m. para la presentación de odentIA; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?»"
     }
    ],
    "noCumplio": [],
    "juez": {
-    "tono": 5,
-    "claridad": 5,
+    "tono": 4,
+    "claridad": 4,
     "responde": 5,
-    "comentario": "Explica que no puede agendar el domingo y ofrece dos alternativas claras para coordinar."
+    "comentario": "Responde que no puede agendar ese horario y ofrece dos opciones claras; el tono es cordial, aunque la presentación suena algo prefabricada."
    },
    "conversacion": [
     {
@@ -1286,7 +1316,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m. para la presentación de odentIA; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?"
     }
    ],
    "caracteresPorPaso": [
@@ -1309,9 +1339,9 @@
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 3,
+    "claridad": 4,
     "responde": 3,
-    "comentario": "Explica el programa y el 50 % de ahorro, pero no indica los precios de la web para mostrar cuánto se ahorra en concreto."
+    "comentario": "Explica el plan y el ahorro del 50 %, pero no indica los precios de lista que preguntaron."
    },
    "conversacion": [
     {
@@ -1320,7 +1350,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Fundadores es el programa por invitación: no tiene cuota e incluye USD 20 para agentes durante los primeros 30 días. Pagas 50 % menos por cada trabajo de los agentes frente al precio de lista durante 12 meses; puedes pedirlo desde la web y Sallca responde en 3 días hábiles."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Fundadores es el plan por invitación, sin cuota, e incluye USD 20 para agentes durante los primeros 30 días; pagas 50 % menos por cada trabajo de los agentes frente al precio de lista durante 12 meses. Si quieres, te cuento cómo se cobra cada agente o te ayudo a pedir una presentación de odentIA."
     }
    ],
    "caracteresPorPaso": [
@@ -1336,16 +1366,16 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio"
+    "respondio (datos_de_la_clinica)"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 3,
+    "claridad": 4,
     "responde": 5,
-    "comentario": "Responde ambas preguntas con detalle, pero concentra demasiada información en una frase y la explicación de precios podría ser más fácil de escanear."
+    "comentario": "Responde ambas preguntas con precios claros y un tono profesional; «para avisarte» deja algo ambiguo qué sigue y no ofrece agendar la presentación."
    },
    "conversacion": [
     {
@@ -1354,7 +1384,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA se paga según el trabajo de sus agentes: hoy se ingresa por invitación con Fundadores, sin cuota, y cada consulta que Clío deja lista con el dictado cuesta USD 0,15 si es simple, USD 0,30 si es estándar y USD 0,50 si es completa; si descartas el borrador, no se cobra. Fundadores también incluye USD 20 de regalo para agentes durante los primeros 30 días y paga 50 % menos que el precio de lista por 12 meses; puedes solicitarlo en la web y Sallca responde en 3 días hábiles. ¿Quieres que te cuente cómo funciona el dictado o agendamos una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA se paga por el trabajo de sus agentes, no por el software; hoy se ingresa por invitación con Fundadores, sin cuota, y tienes USD 20 de regalo para agentes durante los primeros 30 días. Clío cobra por cada consulta que deja lista con el dictado: USD 0,15 si es simple, USD 0,30 si es estándar y USD 0,50 si es completa; si descartas el borrador, no se cobra. Para avisarte, ¿me compartes tu WhatsApp con código de país o tu correo?"
     }
    ],
    "caracteresPorPaso": [
@@ -1367,21 +1397,25 @@
    "repeticion": 1,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
     "respondio (datos_de_la_clinica, ver_horarios, proponer_hora)",
     "respondio (agendar)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
-    "tono": 4,
-    "claridad": 4,
-    "responde": 5,
-    "comentario": "Agenda la demo con claridad y responde al pedido; el último mensaje repite una confirmación que ya había dado."
+    "tono": 3,
+    "claridad": 3,
+    "responde": 3,
+    "comentario": "La demo queda agendada con claridad, pero el aviso final de que alguien responderá pronto es inoportuno y puede hacer pensar que la reserva sigue pendiente."
    },
    "conversacion": [
     {
@@ -1390,7 +1424,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, podemos mostrarte vistIA en una presentación de 45 minutos por videollamada; tengo libre el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Confirmas ese horario?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. vistIA es nuestro software omnicanal para ópticas, con agentes que atienden consultas y gestionan citas. ¿Confirmas la presentación por videollamada de 45 minutos el lunes 23 de noviembre a las 09:00 con Ana Torres?"
     },
     {
      "quien": "PERSONA",
@@ -1398,7 +1432,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda agendada tu presentación de vistIA. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, queda agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -1406,13 +1440,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La presentación ya está agendada para el lunes 23 de noviembre a las 09:00 con Ana Torres. Nos vemos por videollamada en el enlace que te enviamos."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6165,
-    6486,
-    6822
+    6529,
+    6839
    ]
   },
   {
@@ -1462,7 +1496,7 @@
     "tono": 3,
     "claridad": 3,
     "responde": 2,
-    "comentario": "Suena cordial, pero no responde cuánto cuesta: presenta el ingreso y el crédito, y deja los cobros para una pregunta posterior; sí ofrece agendar una presentación."
+    "comentario": "Explica el acceso inicial, pero no da los precios vigentes ni ofrece agendar la presentación; en su lugar pregunta de qué clínica es."
    },
    "conversacion": [
     {
@@ -1471,7 +1505,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales, con agentes que atienden consultas, gestionan citas y apoyan al equipo clínico. Hoy se ingresa por invitación al programa Fundadores, sin cuota y con USD 20 de regalo para los agentes durante los primeros 30 días; ¿quieres que te cuente cómo se cobran sus trabajos o prefieres agendar una presentación?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software de Sallca para clínicas dentales, con agentes que atienden consultas, gestionan citas y apoyan el trabajo clínico. Hoy se entra por invitación con el plan Fundadores: no tiene cuota y trae USD 20 para agentes durante los primeros 30 días; ¿de qué clínica eres para contarte cómo solicitarlo?"
     }
    ],
    "caracteresPorPaso": [
@@ -1484,20 +1518,20 @@
    "repeticion": 2,
    "turnos": 1,
    "turnosCorridos": 1,
-   "avisos": 1,
-   "avisosPorque": [
-    "t1: La respuesta salía demasiado larga"
-   ],
+   "avisos": 0,
+   "avisosPorque": [],
    "resultados": [
-    "fallo"
+    "respondio"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [
-    "no dijo /usd/",
-    "cayó en el aviso fijo"
-   ],
-   "juez": null,
+   "noCumplio": [],
+   "juez": {
+    "tono": 2,
+    "claridad": 3,
+    "responde": 4,
+    "comentario": "Explica que se paga por el trabajo de los agentes y da precios, pero repite casi íntegro el mensaje, lo que suena automático y dificulta la lectura."
+   },
    "conversacion": [
     {
      "quien": "PERSONA",
@@ -1505,7 +1539,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA no cobra una cuota mensual en el programa Fundadores: pagas por el trabajo de los agentes, con 50 % menos que el precio de lista durante 12 meses; por ejemplo, Sofi cobra USD 0,10 por informar, USD 0,25 por gestionar una cita y USD 0,50 si la cita se da. ¿Quieres que te detalle también los precios de Clío y Argos o prefieres agendar una presentación de 45 minutos para verlo funcionando?\nHola, soy Kairós, el asistente de Sallca. En el programa Fundadores no hay cuota mensual: pagas por el trabajo de los agentes y tienes 50 % menos que el precio de lista durante 12 meses. Por ejemplo, Sofi cobra USD 0,10 por informar, USD 0,25 por gestionar una cita y USD 0,50 si la cita se da. ¿Quieres que te detalle también los precios de Clío y Argos o prefieres agendar una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
@@ -1617,7 +1651,7 @@
     "tono": 4,
     "claridad": 3,
     "responde": 3,
-    "comentario": "Comunica con naturalidad que la hora ya no está libre, pero no ofrece otras opciones todavía; solo promete enviarlas."
+    "comentario": "Es amable y explica que la hora ya no está libre, pero no ofrece alternativas concretas en ese momento."
    },
    "conversacion": [
     {
@@ -1634,7 +1668,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La hora de las 09:00 ya no está libre. Voy a revisar otras opciones para el lunes y te las paso."
+     "texto": "Lo siento, la hora de las 09:00 ya no está libre. Voy a revisar otras opciones para el lunes y te las paso."
     }
    ],
    "caracteresPorPaso": [
@@ -1656,15 +1690,15 @@
    "sospechas": [
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál te acomoda?»"
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál prefieres para la presentación?»"
     }
    ],
    "noCumplio": [],
    "juez": {
-    "tono": 5,
+    "tono": 4,
     "claridad": 5,
     "responde": 5,
-    "comentario": "Indica que el horario solicitado no está disponible, ofrece dos alternativas y pregunta cuál le acomoda."
+    "comentario": "Responde que el horario no está disponible y ofrece dos alternativas claras; el saludo introductorio suena algo prefabricado."
    },
    "conversacion": [
     {
@@ -1673,7 +1707,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál te acomoda?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el lunes a las 10:00; sí puedo ofrecerte el lunes 23 de noviembre a las 09:00 o a las 11:00. ¿Cuál prefieres para la presentación?"
     }
    ],
    "caracteresPorPaso": [
@@ -1689,25 +1723,25 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios)"
+    "respondio (ver_horarios, ver_horarios)"
    ],
    "graves": [],
    "sospechas": [
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 p. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?»"
+     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; puedo ofrecerte el lunes 23 de noviembre a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Te sirve alguna de estas opciones?»"
     },
     {
      "rule": "repite una hora que pidió la persona y no se ofreció",
-     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 p. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?»"
+     "text": "20:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; puedo ofrecerte el lunes 23 de noviembre a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Te sirve alguna de estas opciones?»"
     }
    ],
    "noCumplio": [],
    "juez": {
-    "tono": 3,
-    "claridad": 3,
-    "responde": 2,
-    "comentario": "Rechaza el domingo y ofrece alternativas, pero no indica qué horarios sí están disponibles; además mezcla el trato de tú con «pedirle»."
+    "tono": 4,
+    "claridad": 4,
+    "responde": 3,
+    "comentario": "Ofrece horarios disponibles con claridad, pero no reconoce que la persona dijo estar ocupada atendiendo pacientes todo el día entre semana."
    },
    "conversacion": [
     {
@@ -1716,7 +1750,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo disponibilidad este domingo a las 8 p. m.; puedo buscar otros días o pedirle a alguien del equipo que te escriba para coordinar. ¿Qué prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre el domingo a las 8 pm; puedo ofrecerte el lunes 23 de noviembre a las 9:00 o a las 11:00, o el martes 24 a las 9:00. ¿Te sirve alguna de estas opciones?"
     }
    ],
    "caracteresPorPaso": [
@@ -1729,24 +1763,28 @@
    "repeticion": 2,
    "turnos": 6,
    "turnosCorridos": 6,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t6: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
+    "respondio (ver_horarios)",
     "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)",
-    "respondio",
     "respondio (ver_horarios, proponer_hora)",
     "respondio (mover)",
-    "respondio (ver_horarios, proponer_hora)"
+    "fallo (ver_horarios, proponer_hora)"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
     "tono": 3,
-    "claridad": 2,
-    "responde": 2,
-    "comentario": "El tono es correcto, pero tras confirmar que movió la presentación al viernes, contradice esa confirmación y ofrece cambiarla a otra hora sin que se lo pidan."
+    "claridad": 3,
+    "responde": 3,
+    "comentario": "La presentación se movió correctamente, pero el aviso final de que alguien del equipo responderá pronto es confuso e innecesario tras la confirmación."
    },
    "conversacion": [
     {
@@ -1755,7 +1793,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, tengo disponible el jueves 26 de noviembre a las 09:00 con Ana Torres para la presentación de odentIA. ¿Confirmas esa hora?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, el jueves 26 tengo libre a las 09:00, 11:00 o 15:00 para la presentación de 45 minutos por videollamada. ¿Cuál horario prefieres?"
     },
     {
      "quien": "PERSONA",
@@ -1763,7 +1801,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda agendada. Te llegará la confirmación con el enlace de la videollamada.\n\nQuedó agendada tu presentación de 45 minutos para el jueves, 26 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, te propongo el jueves 26 de noviembre a las 09:00 con Ana Torres. ¿Me confirmas si te queda bien?"
     },
     {
      "quien": "PERSONA",
@@ -1771,7 +1809,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tu presentación ya está agendada para el jueves 26 de noviembre a las 09:00 con Ana Torres. No necesitas hacer nada más; te esperamos por videollamada."
+     "texto": "Perfecto, tu presentación quedó agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el jueves, 26 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -1779,7 +1817,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Sí, tengo disponible el viernes 27 de noviembre a las 09:00 con Ana Torres. ¿Confirmas que movamos tu presentación a esa hora?"
+     "texto": "Sí, tengo libre el viernes 27 de noviembre a las 09:00 con Ana Torres. ¿Confirmas que movamos tu presentación a esa hora?"
     },
     {
      "quien": "PERSONA",
@@ -1787,7 +1825,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Listo, moví tu presentación al viernes 27 de noviembre a las 09:00 con Ana Torres. Te llegará la confirmación con el enlace de la videollamada.\n\nTu presentación pasó al viernes, 27 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Listo, moví tu presentación al viernes 27 de noviembre a las 09:00 con Ana Torres. Te llegará la confirmación con el enlace por WhatsApp.\n\nTu presentación pasó al viernes, 27 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -1795,16 +1833,16 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Veo que tu presentación ya está agendada para el viernes 27 a las 09:00, pero no puedo confirmar ese cambio. Tengo disponible el viernes 27 a las 10:00 con Ana Torres; ¿confirmas que la movamos a esa hora?"
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6708,
-    6999,
-    7322,
-    7552,
-    7796,
-    8066
+    6931,
+    7147,
+    7524,
+    7763,
+    8027
    ]
   },
   {
@@ -1816,20 +1854,18 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios)",
-    "respondio",
-    "respondio"
+    "respondio (datos_de_la_clinica, ver_horarios)",
+    "respondio (ver_horarios, proponer_hora)",
+    "respondio (agendar)"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [
-    "no agendó"
-   ],
+   "noCumplio": [],
    "juez": {
-    "tono": 2,
-    "claridad": 2,
-    "responde": 2,
-    "comentario": "Ofrece horarios con claridad, pero tras elegir uno repite que revisará disponibilidad y no confirma si quedó agendado."
+    "tono": 4,
+    "claridad": 4,
+    "responde": 4,
+    "comentario": "Es cordial y claro, pero tras elegir el horario pide una confirmación adicional en vez de dejarlo agendado; el aviso final sí confirma la reserva."
    },
    "conversacion": [
     {
@@ -1838,7 +1874,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para Clínica Odontológica Huancayo, puedo ofrecerte una presentación de 45 minutos el lunes 23 de noviembre a las 09:00 o a las 11:00, o el martes 24 de noviembre a las 09:00, hora de Lima. ¿Cuál te acomoda?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Para la presentación de odentIA, tengo estos horarios: lunes 23 de noviembre a las 09:00 o 11:00, o martes 24 de noviembre a las 09:00. ¿Cuál te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -1846,7 +1882,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Voy a revisar la disponibilidad para proponerte el lunes a las 9."
+     "texto": "Te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Confirmas la presentación?"
     },
     {
      "quien": "PERSONA",
@@ -1854,13 +1890,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Voy a revisar la disponibilidad para proponerte esa hora."
+     "texto": "Quedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6693,
-    6989,
-    7082
+    6935,
+    7128
    ]
   },
   {
@@ -1872,10 +1908,10 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (ver_horarios)",
-    "respondio (pedir_contacto, ver_horarios, proponer_hora)",
-    "respondio (agendar)",
-    "respondio"
+    "respondio (datos_de_la_clinica)",
+    "respondio (pedir_contacto, ver_horarios)",
+    "respondio (ver_horarios, proponer_hora)",
+    "respondio (agendar)"
    ],
    "graves": [],
    "sospechas": [],
@@ -1883,8 +1919,8 @@
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 4,
-    "comentario": "Cálido y claro; pide el contacto antes de agendar y atiende la confirmación, aunque repite que la presentación ya quedó agendada."
+    "responde": 5,
+    "comentario": "Mantiene un tono cálido y profesional, explica cada paso y responde a la solicitud; el flujo de contacto y agenda queda claro."
    },
    "conversacion": [
     {
@@ -1893,7 +1929,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; podemos mostrarte cómo funciona en una presentación de 45 minutos por videollamada. Para avisarte, compárteme tu WhatsApp con código de país o tu correo y te ofrezco un horario."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, podemos coordinar una presentación de odentIA de 45 minutos por videollamada para Centro Odontológico Sonrisas. Como estamos conversando por Instagram, compárteme tu WhatsApp con código de país o tu correo para avisarte y buscar horarios."
     },
     {
      "quien": "PERSONA",
@@ -1901,7 +1937,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Gracias, Mariela. Te propongo la presentación el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Confirmas ese horario?"
+     "texto": "Gracias, Mariela, ya guardé tu WhatsApp. Tengo estos horarios para la presentación de odentIA: lunes 23 de noviembre a las 09:00 o 11:00, o martes 24 de noviembre a las 09:00, hora de Lima; ¿cuál te acomoda?"
     },
     {
      "quien": "PERSONA",
@@ -1909,7 +1945,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda agendada tu presentación. Te llegará la confirmación con el enlace.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, Mariela. Te propongo la presentación el lunes 23 de noviembre a las 09:00, hora de Lima, con Ana Torres. ¿La confirmas?"
     },
     {
      "quien": "PERSONA",
@@ -1917,14 +1953,14 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Tu presentación ya está agendada para el lunes 23 de noviembre a las 09:00 con Ana Torres. La confirmación y el enlace ya te llegaron; no necesitas hacer nada más."
+     "texto": "Perfecto, Mariela. La presentación queda agendada; recibirás la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6680,
-    7075,
-    7318,
-    7635
+    7065,
+    7320,
+    7555
    ]
   },
   {
@@ -1936,8 +1972,8 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (pedir_contacto, datos_de_la_clinica, ver_horarios, pedir_contacto, datos_de_la_clinica, ver_horarios)",
-    "respondio (datos_de_la_clinica, pedir_contacto, ver_horarios, proponer_hora)",
+    "respondio (datos_de_la_clinica, pedir_contacto, ver_horarios)",
+    "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)"
    ],
    "graves": [],
@@ -1947,7 +1983,7 @@
     "tono": 4,
     "claridad": 4,
     "responde": 3,
-    "comentario": "Agenda la presentación, pero no confirma que haya guardado el correo que la persona dejó en su primer mensaje."
+    "comentario": "Guía bien la reserva y confirma la cita, pero no reconoce ni confirma que guardó el correo que la persona dejó."
    },
    "conversacion": [
     {
@@ -1956,7 +1992,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA es el software omnicanal y agéntico de Sallca para consultorios médicos; podemos verlo en una presentación de 45 minutos por videollamada. Tengo estos horarios: lunes 23 de noviembre a las 09:00 o 11:00, y martes 24 de noviembre a las 09:00, con Ana Torres; ¿cuál prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA es el software omnicanal y agéntico de Sallca para consultorios médicos; podemos verlo en una presentación de 45 minutos por videollamada. Tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00, y el martes 24 de noviembre a las 09:00; ¿cuál prefieres?"
     },
     {
      "quien": "PERSONA",
@@ -1964,7 +2000,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Confirmas esta hora?"
+     "texto": "¿Confirmas la presentación el lunes 23 de noviembre a las 09:00 con Ana Torres?"
     },
     {
      "quien": "PERSONA",
@@ -1977,8 +2013,8 @@
    ],
    "caracteresPorPaso": [
     6805,
-    7194,
-    7376
+    7180,
+    7355
    ]
   },
   {
@@ -1991,7 +2027,7 @@
    "avisosPorque": [],
    "resultados": [
     "respondio (ver_horarios)",
-    "respondio"
+    "respondio (ver_horarios)"
    ],
    "graves": [],
    "sospechas": [],
@@ -2000,7 +2036,7 @@
     "tono": 4,
     "claridad": 3,
     "responde": 3,
-    "comentario": "Mantiene un tono amable y no agenda, pero no confirma con claridad si el equipo le escribirá por Instagram y vuelve a preguntarle qué opción prefiere cuando ya expresó su preferencia."
+    "comentario": "Es amable y ofrece un siguiente paso, pero no deja claro que por Instagram no se puede agendar sin WhatsApp o correo."
    },
    "conversacion": [
     {
@@ -2009,7 +2045,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para agendar la presentación de odentIA de 45 minutos, ¿me compartes tu WhatsApp con código de país o tu correo para avisarte? Tengo libre el lunes 23 de noviembre a las 09:00 o a las 11:00; dime cuál prefieres y te pediré confirmarla."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Para agendar la presentación de odentIA de 45 minutos, ¿me compartes tu WhatsApp con código de país o tu correo para avisarte? El lunes 23 de noviembre tengo libre a las 09:00 o a las 11:00; dime cuál prefieres y te pediré confirmarla."
     },
     {
      "quien": "PERSONA",
@@ -2017,7 +2053,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Entiendo, Fiorella. Para coordinar la presentación por Instagram sí necesitamos un WhatsApp con código de país o un correo para avisarte; si prefieres no compartirlos, puedo pedirle al equipo que te escriba para coordinar. ¿Qué opción prefieres?"
+     "texto": "Entiendo, Fiorella. Para agendar la presentación por Instagram sí necesitamos un WhatsApp o correo para avisarte; si prefieres no compartirlos, puedo pedirle al equipo que te escriba por aquí para coordinar. ¿Te parece?"
     }
    ],
    "caracteresPorPaso": [
@@ -2034,17 +2070,19 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio",
+    "respondio (ver_horarios, datos_de_la_clinica)",
     "respondio (datos_de_la_clinica)"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "no registró «santa rosa»"
+   ],
    "juez": {
     "tono": 4,
     "claridad": 4,
     "responde": 3,
-    "comentario": "El tono es profesional y cálido, y explica qué incluye; pero al recibir el nombre de la clínica debía registrarla y no lo hizo."
+    "comentario": "Explica el sistema con un tono claro y natural, pero no confirma ni registra el nombre de la clínica cuando la persona lo comparte."
    },
    "conversacion": [
     {
@@ -2053,7 +2091,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales, con agentes que apoyan en recepción, asistencia clínica y recuperación de pacientes. ¿Cómo se llama tu clínica y qué te gustaría conocer del sistema?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales: reúne la atención en una sola ficha y sus agentes ayudan con recepción, notas clínicas y recuperación de pacientes. ¿Qué te gustaría conocer: cómo funciona, los precios o agendar una presentación de 45 minutos?"
     },
     {
      "quien": "PERSONA",
@@ -2061,12 +2099,12 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "odentIA incluye atención por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y correo, todo en una sola ficha por persona. También trae a Sofi para recepción y citas, a Clío para preparar notas clínicas que confirma el profesional y a Argos para responder consultas sobre las cifras de tu clínica y recuperar pacientes; todas las clínicas tienen el sistema completo. ¿Quieres que te cuente los precios o agendamos una presentación de 45 minutos?"
+     "texto": "odentIA incluye el sistema completo, sin planes con más o menos funciones: reúne WhatsApp, Instagram, Messenger, Telegram, el chat web y el correo en una sola ficha por persona. También trae a Sofi, que responde y gestiona citas; Clío, que prepara notas clínicas para que el profesional las confirme; y Argos, que responde consultas con las cifras de tu clínica y ayuda a recuperar pacientes. ¿Quieres que te cuente también cómo se cobra o prefieres agendar una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
     6781,
-    7145
+    7109
    ]
   },
   {
@@ -2087,9 +2125,9 @@
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 5,
-    "responde": 5,
-    "comentario": "Explica la presentación y la agenda con claridad; el inicio suena algo técnico, pero atiende la solicitud y confirma la cita."
+    "claridad": 4,
+    "responde": 3,
+    "comentario": "Agenda la demo con claridad y buen tono, pero no confirma que el registro de Sonríe Dental se hará aparte pese al nombre similar."
    },
    "conversacion": [
     {
@@ -2106,7 +2144,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Me confirmas si te acomoda?"
+     "texto": "Te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Me confirmas si te queda bien?"
     },
     {
      "quien": "PERSONA",
@@ -2120,7 +2158,7 @@
    "caracteresPorPaso": [
     6822,
     7090,
-    7279
+    7282
    ]
   },
   {
@@ -2233,21 +2271,25 @@
    "repeticion": 2,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
-    "respondio (ver_horarios)",
     "respondio (ver_horarios, proponer_hora)",
-    "respondio (mover)"
+    "respondio (mover)",
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
-    "tono": 4,
-    "claridad": 5,
-    "responde": 5,
-    "comentario": "Ofrece horarios, confirma el cambio con la misma persona y comunica oportunamente los datos de la presentación; el tono es correcto, aunque algo neutro."
+    "tono": 3,
+    "claridad": 3,
+    "responde": 3,
+    "comentario": "La presentación se movió con la misma persona, pero el aviso final de que alguien responderá pronto resulta confuso después de confirmar la cita."
    },
    "conversacion": [
     {
@@ -2256,7 +2298,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, tengo libre el miércoles 25 de noviembre a las 09:00 o a las 11:00, con Ana Torres. ¿Cuál horario prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Sí, podemos pasarla al miércoles; tengo disponible el miércoles 25 de noviembre a las 09:00 con Ana Torres. ¿Confirmas ese horario?"
     },
     {
      "quien": "PERSONA",
@@ -2264,7 +2306,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "¿Confirmas entonces el miércoles 25 de noviembre a las 09:00 con Ana Torres?"
+     "texto": "Perfecto, ya quedó movida tu presentación al miércoles. Te llegará la confirmación con el enlace.\n\nTu presentación pasó al miércoles, 25 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -2272,13 +2314,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, ya quedó movida tu presentación. Te llegará la confirmación por WhatsApp.\n\nTu presentación pasó al miércoles, 25 de noviembre a las 09:00 (hora de Lima), con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6781,
-    6993,
-    7169
+    7086,
+    7306
    ]
   },
   {
@@ -2296,10 +2338,10 @@
    "sospechas": [],
    "noCumplio": [],
    "juez": {
-    "tono": 4,
+    "tono": 5,
     "claridad": 5,
     "responde": 5,
-    "comentario": "Confirma la cancelación con claridad y ofrece reprogramar sin presionar; la presentación inicial era innecesaria."
+    "comentario": "Confirma la cancelación con claridad y ofrece ayuda futura sin insistir."
    },
    "conversacion": [
     {
@@ -2308,7 +2350,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Ya cancelé tu presentación del martes. Si quieres, podemos coordinar otra fecha cuando te quede mejor."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Ya cancelé tu presentación del martes. Si quieres coordinar otra fecha más adelante, escríbeme y te ayudo."
     }
    ],
    "caracteresPorPaso": [
@@ -2367,21 +2409,25 @@
    "repeticion": 2,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
     "respondio (ver_horarios, proponer_hora)",
     "respondio (agendar)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
-    "tono": 3,
+    "tono": 4,
     "claridad": 4,
     "responde": 3,
-    "comentario": "Agenda con Luis y confirma la cita, pero repite la confirmación y no aclara que Ana sigue siendo la responsable."
+    "comentario": "Agenda la presentación con Luis, pero no aclara que Ana sigue siendo la responsable; el aviso final de que alguien responderá pronto tampoco viene al caso."
    },
    "conversacion": [
     {
@@ -2390,7 +2436,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, te propongo la presentación de odentIA para la Clínica Dental Piura el martes 24 de noviembre a las 15:00 con Luis Paredes. ¿La confirmas?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, te propongo la presentación de odentIA para la Clínica Dental Piura el martes 24 de noviembre a las 15:00 con Luis Paredes. ¿Confirmas esta hora?"
     },
     {
      "quien": "PERSONA",
@@ -2398,7 +2444,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda agendada. Te llegará la confirmación con el enlace de la videollamada.\n\nQuedó agendada tu presentación de 45 minutos para el martes, 24 de noviembre a las 15:00 (hora de Lima) con Luis Paredes. Es por videollamada: Luis Paredes te comparte el enlace antes de empezar."
+     "texto": "Perfecto, queda agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el martes, 24 de noviembre a las 15:00 (hora de Lima) con Luis Paredes. Es por videollamada: Luis Paredes te comparte el enlace antes de empezar."
     },
     {
      "quien": "PERSONA",
@@ -2406,13 +2452,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La presentación ya está agendada para el martes 24 de noviembre a las 15:00 con Luis Paredes. Te llegará la confirmación con el enlace de la videollamada."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6689,
-    7012,
-    7331
+    7019,
+    7332
    ]
   },
   {
@@ -2425,20 +2471,17 @@
    "avisosPorque": [],
    "resultados": [
     "respondio (ver_horarios)",
-    "respondio",
-    "respondio (ver_horarios, proponer_hora)"
+    "respondio (ver_horarios, proponer_hora)",
+    "respondio (agendar)"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [
-    "no agendó",
-    "no presenta ana"
-   ],
+   "noCumplio": [],
    "juez": {
-    "tono": 2,
-    "claridad": 2,
-    "responde": 1,
-    "comentario": "El tono es correcto, pero se contradice al decir que no puede confirmar y luego vuelve a pedir confirmación; debía agendar el lunes a las 11."
+    "tono": 4,
+    "claridad": 4,
+    "responde": 5,
+    "comentario": "Ofrece la hora disponible desde las 11 y agenda tras confirmar; el tono es correcto, aunque algo transaccional."
    },
    "conversacion": [
     {
@@ -2447,7 +2490,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Para el lunes en la mañana tengo libre a las 11:00 con Ana Torres para la presentación de odentIA, que dura 45 minutos. ¿Te la confirmo?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Para el lunes en la mañana tengo disponible a las 11:00 con Ana Torres para la presentación de odentIA por videollamada. ¿Confirmas esa hora?"
     },
     {
      "quien": "PERSONA",
@@ -2455,7 +2498,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Lo siento, no puedo confirmar esa hora desde aquí. Te ayudo a coordinar la presentación; ¿quieres que busque otros horarios disponibles?"
+     "texto": "¿Confirmas la presentación de odentIA el lunes 23 de noviembre a las 11:00 con Ana Torres?"
     },
     {
      "quien": "PERSONA",
@@ -2463,13 +2506,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "La presentación de odentIA está disponible el lunes 23 de noviembre a las 11:00 con Ana Torres. ¿Confirmas esa hora?"
+     "texto": "Quedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 11:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     }
    ],
    "caracteresPorPaso": [
     6681,
-    6898,
-    7066
+    6903,
+    7098
    ]
   },
   {
@@ -2481,12 +2524,17 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "paso (ver_horarios)"
+    "respondio (ver_horarios)"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
-   "juez": null,
+   "juez": {
+    "tono": 4,
+    "claridad": 4,
+    "responde": 3,
+    "comentario": "Es cálido y ofrece un siguiente paso, pero no informa que el equipo está ausente estas dos semanas ni deriva la solicitud directamente."
+   },
    "conversacion": [
     {
      "quien": "PERSONA",
@@ -2494,7 +2542,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Gracias por escribir. Eso lo ve alguien del equipo de Sallca, que te escribirá pronto por aquí."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es un software omnicanal para clínicas dentales que reúne la atención y cuenta con agentes para recepción, apoyo clínico y recuperación de pacientes. No tengo horarios libres para ofrecerte ahora; puedo pedirle al equipo que te escriba para coordinar la presentación, ¿te parece?"
     }
    ],
    "caracteresPorPaso": [
@@ -2539,17 +2587,12 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (datos_de_la_clinica)"
+    "paso"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
-   "juez": {
-    "tono": 4,
-    "claridad": 3,
-    "responde": 3,
-    "comentario": "Mantiene un tono profesional y ofrece un siguiente paso, pero no aclara directamente que no puede aprobar un plan gratis de por vida."
-   },
+   "juez": null,
    "conversacion": [
     {
      "quien": "PERSONA",
@@ -2557,7 +2600,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; hoy se ingresa por invitación al programa Fundadores, que no tiene cuota y cobra por el trabajo de los agentes. ¿Quieres que te cuente cómo funciona o prefieres agendar una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Gracias por escribir. Eso lo ve alguien del equipo de Sallca, que te escribirá pronto por aquí."
     }
    ],
    "caracteresPorPaso": [
@@ -2580,9 +2623,9 @@
    "noCumplio": [],
    "juez": {
     "tono": 3,
-    "claridad": 2,
-    "responde": 3,
-    "comentario": "Da el precio, pero mezcla demasiadas condiciones y opciones; habría sido más claro responder primero cuánto cuesta el plan para una clínica pequeña."
+    "claridad": 3,
+    "responde": 2,
+    "comentario": "El tono es correcto, pero usa jerga y no responde cuánto cuesta: ofrece contar el precio después."
    },
    "conversacion": [
     {
@@ -2591,7 +2634,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA tiene el plan Clínica por USD 49 al mes, que vuelven como USD 49 de crédito para los agentes; la prueba es de 14 días con USD 10 de crédito. Hoy se entra por invitación con el plan Fundadores, sin cuota y con USD 20 de regalo para los agentes en los primeros 30 días; puedes pedirlo en la web y Sallca responde en 3 días hábiles. ¿Quieres que te cuente cómo se cobran los agentes o agendamos una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; el precio no depende del tamaño de la clínica, sino del trabajo que hacen los agentes. Hoy se entra por invitación con Fundadores: no tiene cuota y ofrece USD 20 de regalo para los agentes durante los primeros 30 días; ¿quieres que te cuente cuánto cobra cada agente o prefieres agendar una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
@@ -2616,7 +2659,7 @@
     "tono": 4,
     "claridad": 3,
     "responde": 4,
-    "comentario": "Saluda y pregunta qué necesita y de qué clínica es, pero «omnicanal y agéntico» suena técnico y no explica con sencillez qué hace el software."
+    "comentario": "Responde y hace las preguntas esperadas, pero «omnicanal y agéntico» suena técnico y asume que la persona busca un software dental."
    },
    "conversacion": [
     {
@@ -2625,7 +2668,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales; ¿de qué clínica eres y qué te gustaría saber?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. odentIA es el software omnicanal y agéntico de Sallca para clínicas dentales, con agentes que atienden, gestionan citas y apoyan el trabajo clínico. ¿De qué clínica eres y qué te gustaría conocer?"
     }
    ],
    "caracteresPorPaso": [
@@ -2649,8 +2692,8 @@
    "juez": {
     "tono": 4,
     "claridad": 4,
-    "responde": 2,
-    "comentario": "Es amable y pide que lo escriban, pero no reconoce que recibió un audio ni explica que no puede escucharlo."
+    "responde": 4,
+    "comentario": "Es amable y pide que escriban, pero decir que no puede ver el archivo no aclara que no puede escuchar el audio."
    },
    "conversacion": [
     {
@@ -2659,7 +2702,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No puedo ver el archivo que enviaste; ¿me escribes qué información querías compartir sobre Clínica Dental Puno?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No puedo ver el archivo que enviaste; ¿me escribes qué información querías compartir o consultar?"
     }
    ],
    "caracteresPorPaso": [
@@ -2678,13 +2721,22 @@
     "respondio (ver_horarios)"
    ],
    "graves": [],
-   "sospechas": [],
+   "sospechas": [
+    {
+     "rule": "repite una hora que pidió la persona y no se ofreció",
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?»"
+    },
+    {
+     "rule": "repite una hora que pidió la persona y no se ofreció",
+     "text": "10:00 — «Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?»"
+    }
+   ],
    "noCumplio": [],
    "juez": {
     "tono": 4,
-    "claridad": 4,
-    "responde": 4,
-    "comentario": "Rechaza la hora solicitada y ofrece alternativas claras, aunque «no tengo horas libres» suena menos preciso que indicar que no se agenda los domingos."
+    "claridad": 5,
+    "responde": 5,
+    "comentario": "Aclara que no está disponible y ofrece alternativas concretas; el saludo y la presentación son algo innecesarios."
    },
    "conversacion": [
     {
@@ -2693,7 +2745,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo horas libres mañana domingo para la presentación de 45 minutos. ¿Quieres que busque otros días o prefieres que alguien del equipo te escriba para coordinarla?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo libre mañana domingo a las 10 a. m.; puedo buscar otros días o pedirle al equipo que te escriba para coordinar. ¿Qué prefieres?"
     }
    ],
    "caracteresPorPaso": [
@@ -2717,8 +2769,8 @@
    "juez": {
     "tono": 4,
     "claridad": 3,
-    "responde": 2,
-    "comentario": "Explica qué es Fundadores y el 50 % de ahorro, pero no indica los precios de la web para mostrar cuánto se ahorra en concreto."
+    "responde": 3,
+    "comentario": "Explica el beneficio y da un siguiente paso, pero no incluye los precios de la web que la persona pidió."
    },
    "conversacion": [
     {
@@ -2727,7 +2779,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Fundadores es el programa por invitación: no tiene cuota, incluye USD 20 para agentes durante los primeros 30 días y, por 12 meses, pagas 50 % menos por cada trabajo de los agentes frente al precio de lista. Si quieres, te explico cómo se cobra cada agente o coordinamos una presentación de 45 minutos; ¿qué prefieres?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. Fundadores es el plan por invitación, sin cuota, e incluye USD 20 para agentes durante los primeros 30 días; pagas 50 % menos por cada trabajo de los agentes frente al precio de lista durante 12 meses. Si quieres, te cuento cómo se cobra cada agente o te ayudo a pedir una presentación de odentIA."
     }
    ],
    "caracteresPorPaso": [
@@ -2743,16 +2795,16 @@
    "avisos": 0,
    "avisosPorque": [],
    "resultados": [
-    "respondio (datos_de_la_clinica)"
+    "respondio"
    ],
    "graves": [],
    "sospechas": [],
    "noCumplio": [],
    "juez": {
     "tono": 3,
-    "claridad": 3,
-    "responde": 3,
-    "comentario": "Explica cómo cobra Clío, pero no da el precio concreto de latidIA; «trabajo de sus agentes» y «precio de lista» quedan poco claros, y la mención de que ya tienen su WhatsApp puede sentirse invasiva."
+    "claridad": 2,
+    "responde": 4,
+    "comentario": "Responde ambas preguntas, pero acumula detalles del programa Fundadores y deja la explicación del precio poco fácil de escanear."
    },
    "conversacion": [
     {
@@ -2761,7 +2813,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA se paga por el trabajo de sus agentes: hoy se entra por invitación con Fundadores, sin cuota, y recibes USD 20 de regalo para agentes durante los primeros 30 días; además, pagas 50 % menos que el precio de lista por 12 meses. Clío cobra por cada consulta que deja lista con el dictado: USD 0,15 si es simple, USD 0,30 si es estándar y USD 0,50 si es completa; si descartas el borrador, no se cobra. Para avisarte sobre la invitación, ya tenemos tu WhatsApp; ¿quieres que coordinemos una presentación de 45 minutos?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. latidIA se paga según el trabajo de sus agentes: hoy se ingresa por invitación con Fundadores, sin cuota, y cada consulta que Clío deja lista con el dictado cuesta USD 0,15 si es simple, USD 0,30 si es estándar y USD 0,50 si es completa; si descartas el borrador, no se cobra. Fundadores también incluye USD 20 para agentes durante los primeros 30 días y paga 50 % menos que el precio de lista por 12 meses; puedes solicitarlo en la web y Sallca responde en 3 días hábiles. ¿Quieres que te cuente cómo funciona el dictado o agendamos una presentación de 45 minutos?"
     }
    ],
    "caracteresPorPaso": [
@@ -2774,21 +2826,25 @@
    "repeticion": 2,
    "turnos": 3,
    "turnosCorridos": 3,
-   "avisos": 0,
-   "avisosPorque": [],
+   "avisos": 1,
+   "avisosPorque": [
+    "t3: La respuesta daba por hecho lo que no hizo (agendar)"
+   ],
    "resultados": [
-    "respondio (ver_horarios, proponer_hora)",
+    "respondio (datos_de_la_clinica, ver_horarios, proponer_hora)",
     "respondio (agendar)",
-    "respondio"
+    "fallo"
    ],
    "graves": [],
    "sospechas": [],
-   "noCumplio": [],
+   "noCumplio": [
+    "cayó en el aviso fijo"
+   ],
    "juez": {
     "tono": 3,
     "claridad": 3,
-    "responde": 4,
-    "comentario": "Agenda la demo correctamente, pero repite la confirmación tras el aviso del sistema y el «ok, dale» no requería otra respuesta."
+    "responde": 3,
+    "comentario": "La demo quedó agendada con claridad, pero el aviso de que alguien responderá pronto es inoportuno después de confirmar la cita."
    },
    "conversacion": [
     {
@@ -2797,7 +2853,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. Claro, podemos mostrarte vistIA en una presentación de 45 minutos por videollamada; te propongo el lunes 23 de noviembre a las 09:00 con Ana Torres. ¿Confirmas esa hora?"
+     "texto": "Hola, soy Kairós, el asistente de Sallca. vistIA es el software de Sallca para ópticas, con agentes que atienden consultas y gestionan citas. Te propongo una presentación de 45 minutos por videollamada el lunes 23 de noviembre a las 09:00 con Ana Torres; ¿la confirmas?"
     },
     {
      "quien": "PERSONA",
@@ -2805,7 +2861,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, queda confirmada tu presentación de vistIA para el lunes a las 09:00 con Ana Torres. La confirmación con el enlace te llegará por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
+     "texto": "Perfecto, queda agendada. Te llegará la confirmación con el enlace por WhatsApp.\n\nQuedó agendada tu presentación de 45 minutos para el lunes, 23 de noviembre a las 09:00 (hora de Lima) con Ana Torres. Es por videollamada: entra a la hora aquí https://meet.example.com/ana-torres"
     },
     {
      "quien": "PERSONA",
@@ -2813,13 +2869,13 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Perfecto, Dra. Paola. Tu presentación ya está agendada para el lunes 23 de noviembre a las 09:00 con Ana Torres; el enlace de videollamada es https://meet.example.com/ana-torres."
+     "texto": "Gracias por escribir. Alguien del equipo te responde pronto."
     }
    ],
    "caracteresPorPaso": [
     6165,
-    6483,
-    6862
+    6541,
+    6851
    ]
   },
   {
@@ -2840,7 +2896,7 @@
     "tono": 3,
     "claridad": 3,
     "responde": 2,
-    "comentario": "Suena cordial, pero no responde que vistIA no tiene Clío y pide datos para confirmar algo que podía aclarar directamente."
+    "comentario": "Suena cordial, pero no responde que vistIA no tiene Clío y pide datos para consultar."
    },
    "conversacion": [
     {
@@ -2849,7 +2905,7 @@
     },
     {
      "quien": "KAIRÓS",
-     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo información confirmada sobre si vistIA incluye el dictado con Clío; puedo pedirle al equipo que te lo confirme. Déjame tu WhatsApp con código de país o tu correo para avisarte."
+     "texto": "Hola, soy Kairós, el asistente de Sallca. No tengo información confirmada sobre si vistIA incluye el dictado con Clío, así que puedo consultarlo con el equipo. ¿Me compartes tu WhatsApp con código de país o tu correo para avisarte?"
     }
    ],
    "caracteresPorPaso": [
