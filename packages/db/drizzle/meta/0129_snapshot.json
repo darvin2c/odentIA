@@ -1,5 +1,5 @@
 {
-  "id": "ee058652-6642-46f2-8806-9ce8adc198d4",
+  "id": "2e043b9d-8bec-44d4-80c6-cd79d6a51af9",
   "prevId": "256f8ade-66cd-4d19-bf69-a12ec20f90f5",
   "version": "7",
   "dialect": "postgresql",
@@ -19551,7 +19551,7 @@
         },
         "patient_allergy_removed_reason_check": {
           "name": "patient_allergy_removed_reason_check",
-          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR \"patient_allergy\".\"removed_reason\" IN ('ya_no','otra_cosa','error')"
+          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR (btrim(\"patient_allergy\".\"removed_reason\") <> '' AND char_length(\"patient_allergy\".\"removed_reason\") <= 500)"
         },
         "patient_allergy_removed_check": {
           "name": "patient_allergy_removed_check",

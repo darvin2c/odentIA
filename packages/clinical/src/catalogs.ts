@@ -11,12 +11,38 @@ export const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] 
 export type AllergySeverity = (typeof ALLERGY_SEVERITIES)[number]
 
 /**
- * Por qué se quitó una alergia (tablero 7 del lienzo de Pacientes): «ya no es
- * alérgica» (FHIR `clinicalStatus` resolved), «era otra cosa» (refuted) o «se
- * registró por error» (entered-in-error). Quitar nunca borra.
+ * Por qué se quitó una alergia (tablero 7 del lienzo de Pacientes). El motivo se
+ * escribe (auditor, 15 nov, A11: «era naproxeno y no ibuprofeno» no cabía en tres
+ * opciones fijas); los tres de siempre quedan como atajos y se guardan por su
+ * código, que FHIR traduce: «ya no la tiene» (`clinicalStatus` resolved), «era
+ * otra cosa» (refuted) y «se registró por error» (entered-in-error). Lo escrito
+ * se guarda tal cual. Quitar nunca borra.
  */
 export const ALLERGY_REMOVAL_REASONS = ["ya_no", "otra_cosa", "error"] as const
 export type AllergyRemovalReason = (typeof ALLERGY_REMOVAL_REASONS)[number]
+
+/** El largo máximo del motivo con que se quita una alergia, igual en la pantalla y el servidor. */
+export const ALLERGY_REMOVAL_REASON_MAX = 500
+
+/** Cada atajo en palabras: lo que llena el motivo y lo que se lee de lo guardado por su código. */
+export const ALLERGY_REMOVAL_REASON_WORDS: Record<AllergyRemovalReason, string> = {
+  ya_no: "Ya no tiene esa alergia",
+  otra_cosa: "Era otra cosa (malestar, efecto secundario)",
+  error: "Se registró por error",
+}
+
+/** El motivo como se guarda: un atajo, por su código; lo demás, tal como se escribió (sin los espacios de los bordes). */
+export function allergyRemovalReasonOf(text: string): string {
+  const said = text.trim()
+  return ALLERGY_REMOVAL_REASONS.find((code) => code === said || ALLERGY_REMOVAL_REASON_WORDS[code] === said) ?? said
+}
+
+/** El motivo guardado en palabras: el de un atajo por su nombre; lo escrito, tal cual. */
+export function allergyRemovalReasonWords(reason: string): string {
+  return (ALLERGY_REMOVAL_REASONS as readonly string[]).includes(reason)
+    ? ALLERGY_REMOVAL_REASON_WORDS[reason as AllergyRemovalReason]
+    : reason
+}
 
 /** Quién dijo la alergia: el equipo que la registró o el paciente (FHIR `asserter`). */
 export const ALLERGY_SOURCES = ["equipo", "paciente"] as const
