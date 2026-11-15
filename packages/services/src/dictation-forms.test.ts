@@ -24,10 +24,10 @@ import {
   restoreDictationSuggestion,
   saveDictationSegment,
 } from "./encounter-dictation.js"
-import { DENTAL_FORMS } from "./dental/forms.js"
 import { voidEncounter } from "./encounters.js"
 import { loadFormRecords } from "./form-record.js"
 import type { ProductSite } from "./product-hooks.js"
+import { productHooksFor } from "./products.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -212,6 +212,8 @@ describe("lo que el servidor dejaba pasar (QA del 14 nov)", () => {
 })
 
 describe("lo que la revisión final del 15 nov mostró", () => {
+  // La ficha odontoestomatológica de odentIA, por el registro de productos (ADR 0079): tiene CPOD y ceod.
+  const STOMATOLOGIC = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-odontoestomatologica")!.schema
   const ENDO: DictationFormQuestion[] = [
     question(1, { responseId: "endo", formTitle: "Evaluación de endodoncia", fieldId: "pieza", label: "Pieza", type: "pieza", answered: 36 }),
     question(2, { responseId: "endo", formTitle: "Evaluación de endodoncia", fieldId: "dolor", label: "Dolor", type: "opcion_unica", options: ["Sin dolor", "Provocado", "Espontáneo"] }),
@@ -242,7 +244,7 @@ describe("lo que la revisión final del 15 nov mostró", () => {
     expect(prepareFormAnswer(pain, open, FDI, transcript)).toMatchObject({ status: "lista" })
   })
   it("«cariados tres» sin decir de qué índice va a «No pude usar esto» con entre cuáles; «perdidos uno» se propone", () => {
-    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: DENTAL_FORMS.suggestions.find((item) => item.key === "ficha-odontoestomatologica")!.schema, answers: {} }])
+    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: STOMATOLOGIC, answers: {} }])
     const ask = (fieldId: string, answer: string, said: string) => ({ payload: { question: forms.find((item) => item.fieldId === fieldId)?.number, answer }, sourceText: said })
     const transcript = "En la ficha, cariados tres, perdidos uno, obturados dos."
     expect(prepareFormAnswer(ask("cpod_c", "3", "cariados tres"), forms, FDI, transcript)).toBeNull()
@@ -253,7 +255,7 @@ describe("lo que la revisión final del 15 nov mostró", () => {
     expect(prepareFormAnswer(ask("cpod_p", "1", "perdidos uno"), forms, FDI, transcript)).toMatchObject({ status: "lista", payload: { value: 1 } })
   })
   it("lo usado se resalta por dato, no por frase", () => {
-    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: DENTAL_FORMS.suggestions.find((item) => item.key === "ficha-odontoestomatologica")!.schema, answers: {} }])
+    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: STOMATOLOGIC, answers: {} }])
     const of = (fieldId: string) => forms.find((item) => item.fieldId === fieldId)
     expect(formAnswerFragments("cariados tres, perdidos uno, obturados dos", of("cpod_p"))).toEqual(["perdidos uno"])
     expect(formAnswerFragments("higiene oral regular", of("higiene"))).toEqual(["higiene oral regular"])
