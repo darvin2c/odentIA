@@ -450,7 +450,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const base = {
     expectedRevision: 0,
     reviewStatus: { allergies: "recorded", conditions: "none", medications: "none" },
-    allergies: [{ substance: "Penicilina", severity: "severa" }],
+    allergies: [{ substance: "Penicilina", severity: "severa", reaction: "Se le cerró la garganta: la llevaron a emergencia" }],
     conditions: [],
     medications: [],
     anamnesis: { expectedVersion: 0, answers: { antecedentesFamiliares: "Ninguno" } },
@@ -477,7 +477,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   type Trimmed = {
     data: {
       registration: unknown
-      activeAllergies: { substance: string }[]
+      activeAllergies: Array<{ substance: string; severity?: string } & Record<string, unknown>>
       activeConditions: unknown[]
       allergyReview: string | null
       allergySaidNo: { by: { kind: string }; at: string | null } | null
@@ -487,6 +487,12 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
   const receptionBody = (await asReception.json()) as Trimmed
   expect(receptionBody.data.activeAllergies.map((item) => item.substance)).toEqual(["Penicilina"])
+  // Recepción ve solo lo que necesita de cada alergia: la sustancia y la severidad, sin lo que contó
+  // de la reacción (QA de formularios del 15 nov, S2 de desarrollo). El odontólogo sí lo recibe.
+  expect(receptionBody.data.activeAllergies[0]).toMatchObject({ substance: "Penicilina", severity: "severa" })
+  expect(receptionBody.data.activeAllergies[0]).not.toHaveProperty("reaction")
+  const asClinician = (await (await buildApp("clinician").request(`/patients/${patientId}`, { method: "GET" })).json()) as Trimmed
+  expect(asClinician.data.activeAllergies[0]?.reaction).toBe("Se le cerró la garganta: la llevaron a emergencia")
   // Del registro le llega lo administrativo, nunca la salud declarada.
   const receptionRegistration = receptionBody.data.registration as { entryPoint: string; answers: Record<string, unknown> } | null
   expect(receptionRegistration?.entryPoint).toBeTruthy()

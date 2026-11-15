@@ -49,6 +49,7 @@ import {
   getPlanNextStep,
   getPlanNextSteps,
   allergiesSaidNoByPatient,
+  allergyAlertsOf,
   allergiesSaidUnknownByPatient,
   declaredAllergiesByPatient,
   getStaffMissingData,
@@ -911,8 +912,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           // Lo clínico de la ficha (grupo sanguíneo, clase ASA, revisión de salud) es de quien lee la historia.
           patient: clinicalRead ? full.patient : withoutClinical(full.patient),
           registration: full.registration ? { ...full.registration, answers: declared } : null,
-          activeAllergies:
-            clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
+          // Recepción ve de cada alergia solo lo que necesita: la sustancia y su severidad (`allergyAlertsOf`).
+          activeAllergies: clinicalRead
+            ? full.activeAllergies
+            : canAccess(memberRole, "clinical.alerts")
+              ? allergyAlertsOf(full.activeAllergies)
+              : [],
           // Sin alergias registradas no es lo mismo «niega» que «no se le preguntó»: la
           // cabecera lo dice a quien ve las alergias (mesa del 9 nov). Nada más de su salud.
           allergyReview:
