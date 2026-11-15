@@ -27,7 +27,8 @@ import {
 } from "../../lib/clinical-journey"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { usePermission } from "../../lib/crm"
-import type { PatientDocument, PatientFull } from "../../lib/patients"
+import { relationshipText } from "../../lib/people"
+import type { PatientContactLink, PatientDocument, PatientFull } from "../../lib/patients"
 import { type PickedPerson, PersonPicker } from "../person-picker"
 import { ResponsibleRowsSkeleton } from "../skeletons/person-sections"
 
@@ -160,6 +161,26 @@ export function ResponsablesTab({
   const rows = list.data?.data ?? []
   const contacts = patient.data?.data.contacts ?? []
   const evidence = documents.data?.data ?? []
+  // Quien habla por el paciente (su madre, por ejemplo) y aún no tiene ninguna responsabilidad:
+  // también se nombra aquí, para que la sección no diga «Sin responsables» con ella vinculada (QA
+  // del 15 nov, K15). Quién decide no cambia: lo da la responsabilidad, no el vínculo.
+  const unassigned = contacts.filter(
+    (link) =>
+      link.isActive &&
+      link.relationship === "guardian" &&
+      !rows.some((row) => row.contactId === link.contactId && !row.revokedAt),
+  )
+  const openGrant = (link: Pick<PatientContactLink, "contactId" | "displayName"> | undefined) => {
+    grantForm.reset({
+      person: link ? { id: link.contactId, name: link.displayName } : null,
+      kind: "representante_legal",
+      startsAt: todayIso(),
+      endsAt: "",
+      evidenceDocumentId: "",
+      notes: "",
+    })
+    setGrantOpen(true)
+  }
 
   return (
     <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
@@ -175,18 +196,7 @@ export function ResponsablesTab({
           <Button
             type="button"
             size="sm"
-            onClick={() => {
-              const first = contacts.find((link) => link.relationship !== "self")
-              grantForm.reset({
-                person: first ? { id: first.contactId, name: first.displayName } : null,
-                kind: "representante_legal",
-                startsAt: todayIso(),
-                endsAt: "",
-                evidenceDocumentId: "",
-                notes: "",
-              })
-              setGrantOpen(true)
-            }}
+            onClick={() => openGrant(contacts.find((link) => link.relationship !== "self"))}
           >
             Asignar responsabilidad
           </Button>
@@ -197,7 +207,7 @@ export function ResponsablesTab({
         <SkeletonRegion message="Cargando responsables…">
           <ResponsibleRowsSkeleton />
         </SkeletonRegion>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && unassigned.length === 0 ? (
         <EmptyState
           title="Sin responsables"
           description="Asigna quién representa, autoriza o responde económicamente por este paciente."
@@ -242,6 +252,28 @@ export function ResponsablesTab({
                     }}
                   >
                     Revocar
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+          {unassigned.map((link) => (
+            <li key={link.contactId} className="flex flex-col gap-2 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{link.displayName}</span>
+                <span className="text-sm text-muted-foreground">
+                  · {relationshipText(link.relationship, link.relationshipDetail)}
+                </span>
+                <Badge variant="secondary">Aún sin responsabilidad asignada</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Habla en nombre del paciente. Para que también decida sus presupuestos y firme sus
+                consentimientos, asígnale la de representante legal.
+              </p>
+              {canWrite ? (
+                <div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openGrant(link)}>
+                    Asignarle una responsabilidad
                   </Button>
                 </div>
               ) : null}
