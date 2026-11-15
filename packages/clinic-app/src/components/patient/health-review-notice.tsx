@@ -234,7 +234,7 @@ export function HealthReviewNotice({
               <p className="text-sm text-muted-foreground">
                 {health.allergiesReviewedAt
                   ? `Última revisión ${sinceWords(health.allergiesReviewedAt)}${health.allergiesReviewedBy ? `, por ${memberName(health.allergiesReviewedBy)}` : ""}.`
-                  : "Nadie las revisó todavía con el paciente."}
+                  : "Sin revisar con el paciente."}
               </p>
               {active.length > 0 ? (
                 <ul className="flex flex-wrap gap-2">

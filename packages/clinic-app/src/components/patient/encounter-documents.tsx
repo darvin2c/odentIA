@@ -33,7 +33,7 @@ import {
   fetchPrescriptions,
   type Prescription,
 } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
 import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
 import type { MedicalLeave } from "../../lib/medical-leaves"
 import { fetchMedicalLeaves } from "../../lib/medical-leaves"
@@ -261,6 +261,7 @@ export function EncounterDocumentsBlock({
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
+  const me = useMyUserId()
   const docs = useEncounterDocuments(patientId, encounterId, detail)
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<NewDocumentKind | null>(null)
@@ -354,6 +355,8 @@ export function EncounterDocumentsBlock({
   const pendingTitles = docs.toSign.map((doc) => doc.titleSnapshot)
   const signed = detail.encounter.status === "finalizada"
   const unfinished = unfinishedAfterSigning(docs.forms, detail.encounter.status)
+  // La ficha de la atención la llena quien la lleva; los demás la ven (`NOT_ATTENDING`).
+  const fills = canFillFormInAttention(canWrite, disabled, detail.encounter.status, detail.encounter.professionalUserId === me)
 
   return (
     <div className="flex flex-col gap-4">
@@ -400,7 +403,7 @@ export function EncounterDocumentsBlock({
       {/* Firmada con un formulario a medias: sigue a la vista como pendiente, y se termina desde aquí. */}
       <UnfinishedFormsBox
         forms={unfinished}
-        canComplete={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
+        canComplete={fills}
         onOpen={setOpenForm}
       />
 
@@ -677,7 +680,7 @@ export function EncounterDocumentsBlock({
             </div>
             {(() => {
               const action =
-                form.status === "borrador" && canFillFormInAttention(canWrite, disabled, detail.encounter.status)
+                form.status === "borrador" && fills
                   ? "Completar"
                   : "Ver"
               return (
@@ -887,7 +890,7 @@ export function EncounterDocumentsBlock({
         sex={patient.patient.sex ?? null}
         responseId={openForm}
         // Firmada la atención, su formulario a medias se termina igual desde aquí.
-        canWrite={canFillFormInAttention(canWrite, disabled, detail.encounter.status)}
+        canWrite={fills}
         onClose={() => setOpenForm(null)}
         onChanged={refresh}
       />
@@ -978,12 +981,12 @@ export function UnfinishedFormsBox({
     >
       <div className="flex min-w-0 flex-col">
         <span className="text-sm font-medium">
-          {forms.length === 1 ? "Falta terminar una ficha" : `Falta terminar ${forms.length} fichas`}
+          {forms.length === 1 ? "Una ficha quedó a medias" : `${forms.length} fichas quedaron a medias`}
         </span>
         <span className="text-xs text-muted-foreground">
           {forms.length === 1
-            ? "Quedó a medias al firmar la atención. Al terminarla lleva su propia fecha y hora."
-            : "Quedaron a medias al firmar la atención. Al terminarlas, cada una lleva su propia fecha y hora."}
+            ? "No se finalizó con la firma. Al terminarla lleva su propia fecha y hora."
+            : "No se finalizaron con la firma. Al terminarlas, cada una lleva su propia fecha y hora."}
         </span>
       </div>
       <ul className="flex flex-col gap-2">

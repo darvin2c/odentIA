@@ -7,7 +7,7 @@ import type { ProductForms, SuggestedFormTemplate } from "../product-hooks.js"
  * atención y solo la pieza de la endodoncia se pide al finalizar su ficha.
  *
  * Son hojas para anotar: no calculan índices (el CPOD y el IHO-S se escriben ya
- * sumados). La clave es la de su título, así una ficha propia de la clínica con
+ * sumados). Una sección puede mostrar la suma de sus números (`total`, el ceod). La clave es la de su título, así una ficha propia de la clínica con
  * ese mismo título no se duplica. Las claves de las preguntas no cambian: con
  * ellas la atención pone la ficha anterior al lado de la de hoy.
  */
@@ -166,22 +166,49 @@ const ORTHODONTICS: SuggestedFormTemplate = {
   },
 }
 
-/** Sin peso: ya está en los signos vitales de la atención. */
+/**
+ * Con el peso, para la dosis máxima de anestésico local, que en un niño va por
+ * kilo (AAPD, «Use of Local Anesthesia for Pediatric Dental Patients»); con la
+ * higiene oral, porque a un menor de 12 solo se le ofrece esta ficha; y con el
+ * total del ceod a la vista (revisión final del 15 nov, clínica H5 y D4). Es el
+ * texto de partida para las clínicas nuevas: la que ya tiene una clínica no se
+ * toca.
+ */
 // La letra del índice va delante y sin paréntesis: «(c)» se dibuja como «©» con la fuente de la app.
 const PEDIATRIC: SuggestedFormTemplate = {
   key: "ficha-de-odontopediatria",
   title: "Ficha de odontopediatría",
-  description: "ceod, riesgo de caries, conducta (Frankl).",
+  description: "Peso, ceod con su total, higiene oral, riesgo de caries, conducta (Frankl).",
   kind: "odontopediatria",
   schema: {
     sections: [
       {
+        id: "peso",
+        title: "Peso",
+        fields: [{ id: "peso", label: "Peso", type: "numero", unit: "kg", min: 0, max: 100, help: "Para la dosis máxima de anestésico local." }],
+      },
+      {
         id: "ceod",
         title: "Índice ceod",
+        total: "ceod",
         fields: [
           { id: "ceod_c", label: "c, cariados", type: "numero", min: 0, max: 20 },
           { id: "ceod_e", label: "e, con extracción indicada", type: "numero", min: 0, max: 20 },
           { id: "ceod_o", label: "o, obturados", type: "numero", min: 0, max: 20 },
+        ],
+      },
+      {
+        // El IHO-S simplificado, por su condición (Greene y Vermillion).
+        id: "higiene",
+        title: "Higiene oral",
+        fields: [
+          {
+            id: "higiene",
+            label: "Higiene oral",
+            type: "opcion_unica",
+            options: ["Buena", "Regular", "Mala"],
+            help: "Por el IHO-S: buena de 0 a 1,2; regular de 1,3 a 3; mala de 3,1 a 6.",
+          },
         ],
       },
       {

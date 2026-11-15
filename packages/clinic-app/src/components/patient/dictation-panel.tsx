@@ -16,12 +16,13 @@ import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
+import { listWords } from "../../lib/materials"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { formsToStartWords, useFormsToStart } from "./clio-form-proposals"
-import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
+import { answersWords, formsToStartWords, useFormsToStart } from "./clio-form-proposals"
+import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
@@ -44,7 +45,8 @@ function confirmReadyErrorText(session: DictationSession): string | null {
   return `No pude confirmar «${suggestionText(failed).title}» (${DICTATION_KIND_LABEL[failed.kind]}): ${message}`
 }
 
-const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
+/** El botón dice lo que hace: confirma lo de la consulta; lo de una ficha se confirma en la ficha. */
+const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 de la consulta" : `Confirmar las ${ready} de la consulta`)
 
 /**
  * Qué se puede dictar, con una frase de ejemplo por bloque (issue 109): los
@@ -63,7 +65,10 @@ function DictationExamples() {
   )
 }
 
-/** «5 listas y 1 por revisar · 1 quitada por voz», con lo que haya. */
+/** El título de la barra del dictado: ahí vuelve el foco tras confirmar, también desde la barra del teléfono. */
+const DICTATION_TITLE_ID = "dictado-titulo"
+const focusDictationTitle = () => requestAnimationFrame(() => document.getElementById(DICTATION_TITLE_ID)?.focus())
+
 /** Lleva a la lista de sugerencias de un bloque y la deja con el foco. */
 function goToSuggestions(label: string): void {
   const list = document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
@@ -80,24 +85,31 @@ function openFormSuggestions(responseId: string): void {
   notice.querySelector<HTMLButtonElement>("button")?.click()
 }
 
-/** «5 listas y 1 por revisar. Nada entra…»; sin nada de la consulta, solo el aviso, sin un punto suelto. */
-export function readinessLine(counts: string): string {
-  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
+/**
+ * Lo que propone Clío, con una sola palabra (revisión final del 15 nov, propuesta 2): «Clío propone
+ * 5: 2 en la consulta y 3 en la ficha». La receta va aparte: se emite. Sin «listas» ni «por revisar».
+ */
+export function proposesLine(suggestions: readonly Pick<DictationSuggestion, "kind">[]): string {
+  const consult = suggestions.filter((item) => item.kind !== "ficha" && item.kind !== "receta").length
+  const forms = suggestions.filter((item) => item.kind === "ficha").length
+  const prescription = suggestions.some((item) => item.kind === "receta")
+  const parts = [consult > 0 ? `${consult} en la consulta` : "", forms > 0 ? `${forms} en la ficha` : "", prescription ? "1 receta" : ""].filter(Boolean)
+  const total = consult + forms + (prescription ? 1 : 0)
+  return `${CLINICAL_NAME} propone ${parts.length <= 1 ? (parts[0] ?? total) : `${total}: ${listWords(parts)}`}`
 }
 
+/** «A 1 le falta un dato: complétala en su bloque. Nada entra…»; sin nada más, solo el aviso. */
 function readiness(session: DictationSession): string {
-  // La receta no se confirma con las demás: tiene su «Emitir receta». Las de ficha, en su ficha.
-  const prescription = session.suggestions.some((item) => item.kind === "receta")
-  const review = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
+  // Lo de la consulta a lo que le falta un dato se completa en su bloque; la receta tiene su «Emitir receta».
+  const incomplete = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
+  const removed = session.removedByVoice.length
   const counts = [
-    session.ready > 0 ? plural(session.ready, "lista", "listas") : "",
-    review > 0 ? `${review} por revisar` : "",
-    prescription ? "1 receta por emitir" : "",
+    incomplete > 0 ? `${incomplete === 1 ? "A 1 le falta un dato" : `A ${incomplete} les falta un dato`}: complétala${incomplete === 1 ? "" : "s"} en su bloque` : "",
+    removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : "",
   ]
     .filter(Boolean)
-    .join(" y ")
-  const removed = session.removedByVoice.length
-  return [counts, removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : ""].filter(Boolean).join(" · ")
+    .join(" · ")
+  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
 }
 
 /**
@@ -233,6 +245,24 @@ export function DictationPanel({
   onTypingChange: (typing: boolean) => void
 }) {
   const setTyping = onTypingChange
+  // El foco no se pierde: al empezar a dictar va a «Pausar»; tras confirmar, al título de la barra.
+  const pauseRef = useRef<HTMLButtonElement>(null)
+  const [confirmedWords, setConfirmedWords] = useState("")
+  useEffect(() => {
+    const lost = !document.activeElement || document.activeElement === document.body
+    if (session.dictating && lost) pauseRef.current?.focus()
+  }, [session.dictating])
+  // «Escribir en vez de dictar»: el cursor ya queda en el cuadro, con su etiqueta.
+  useEffect(() => {
+    if (typing) requestAnimationFrame(() => document.getElementById("dictado-escrito")?.focus())
+  }, [typing])
+  const confirmReadyNow = () =>
+    session.confirmReady.mutate(undefined, {
+      onSuccess: (done) => {
+        setConfirmedWords(done.length === 1 ? "Confirmada 1 de la consulta." : `Confirmadas las ${done.length} de la consulta.`)
+        focusDictationTitle()
+      },
+    })
   // La primera vez que dicta ve, mientras escucha, qué puede decir; se recuerda al empezar.
   const [firstTime] = useState(() => !examplesSeen())
   useEffect(() => {
@@ -271,11 +301,10 @@ export function DictationPanel({
       .filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))
       .reduce((forms, item) => {
         const id = String(item.payload["responseId"])
-        const form = forms.get(id) ?? { id, title: String(item.payload["formTitle"] ?? "Ficha"), ready: 0, review: 0 }
-        if (item.status === "lista") form.ready += 1
-        else form.review += 1
+        const form = forms.get(id) ?? { id, title: String(item.payload["formTitle"] ?? "Ficha"), count: 0 }
+        form.count += 1
         return forms.set(id, form)
-      }, new Map<string, { id: string; title: string; ready: number; review: number }>())
+      }, new Map<string, { id: string; title: string; count: number }>())
       .values(),
   ]
   // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085, tablero C4).
@@ -344,6 +373,7 @@ export function DictationPanel({
             )}
           </div>
           <Button
+            ref={pauseRef}
             type="button"
             variant={listening ? "outline" : "default"}
             className="min-h-11 max-sm:size-11 sm:min-h-9"
@@ -364,8 +394,8 @@ export function DictationPanel({
           </Button>
         </div>
         <p role="status" className="text-sm">
-          {pending === 0 && !session.organizing ? "Aún no hay sugerencias." : null}
-          {pending > 0 ? plural(pending, "sugerencia", "sugerencias") : null}
+          {pending === 0 && !session.organizing ? `${CLINICAL_NAME} aún no propone nada.` : null}
+          {pending > 0 ? proposesLine(session.suggestions) : null}
           {session.organizing ? (pending > 0 ? " y ordenando lo último que dijiste" : "Ordenando lo que dijiste…") : null}
         </p>
         {firstTime && pending === 0 ? (
@@ -392,17 +422,20 @@ export function DictationPanel({
   }
 
   return (
-    <AgentSurface aria-label={pending > 0 ? "Sugerencias por revisar" : "Dictado de la atención"} className="flex flex-col gap-3">
+    <AgentSurface aria-label={pending > 0 ? `Lo que propone ${CLINICAL_NAME}` : "Dictado de la atención"} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <AgentMark />
         <div className="min-w-0 flex-1 basis-48">
-          <h2 className="font-heading text-base font-semibold">
-            {pending > 0 ? `${CLINICAL_NAME} dejó ${plural(pending, "sugerencia", "sugerencias")} por revisar` : "Dictar la atención"}
+          <h2 id={DICTATION_TITLE_ID} tabIndex={-1} className="font-heading text-base font-semibold outline-none">
+            {pending > 0 ? proposesLine(session.suggestions) : "Dictar la atención"}
           </h2>
+          <p className="sr-only" aria-live="polite">
+            {confirmedWords}
+          </p>
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readinessLine(readiness(session))}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readiness(session)}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>
@@ -451,7 +484,7 @@ export function DictationPanel({
               ))}
               {formLinks.map((form) => (
                 <Button key={form.id} type="button" variant="link" className="h-auto p-0" onClick={() => openFormSuggestions(form.id)}>
-                  {form.title}: {[form.ready > 0 ? `${form.ready} por confirmar` : "", form.review > 0 ? `${form.review} por revisar` : ""].filter(Boolean).join(" y ")} ↓
+                  {form.title}: {answersWords(form.count)} ↓
                 </Button>
               ))}
             </p>
@@ -483,7 +516,7 @@ export function DictationPanel({
             </Button>
           ) : null}
           {ready > 0 ? (
-            <SubmitButton type="button" className="min-h-11 max-sm:hidden sm:min-h-9" pending={session.confirmReady.isPending} onClick={() => session.confirmReady.mutate()}>
+            <SubmitButton type="button" className="min-h-11 max-sm:hidden sm:min-h-9" pending={session.confirmReady.isPending} onClick={confirmReadyNow}>
               {confirmReadyLabel(ready)}
             </SubmitButton>
           ) : null}
@@ -706,7 +739,14 @@ export function DictationMobileBar({
             Firmar
           </Button>
           {session.ready > 0 ? (
-            <SubmitButton type="button" className="h-12 min-w-0 flex-[2]" pending={session.confirmReady.isPending} onClick={() => session.confirmReady.mutate()}>
+            <SubmitButton
+              type="button"
+              className="h-12 min-w-0 flex-[2]"
+              pending={session.confirmReady.isPending}
+              onClick={() =>
+                session.confirmReady.mutate(undefined, { onSuccess: focusDictationTitle })
+              }
+            >
               {confirmReadyLabel(session.ready)}
             </SubmitButton>
           ) : null}

@@ -7,11 +7,12 @@ import {
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import {
   assertFormSchema,
   type ListedFormResponse,
   type FormTemplateRow,
+  hasAnswersSql,
   listFormResponses,
 } from "./clinical-forms.js"
 import { notFound } from "./errors.js"
@@ -231,6 +232,13 @@ export type FormOfferWhy =
   | "edad"
   /** Sin especialidad que venga de la cita: por la de quien atiende. */
   | "profesional"
+  /**
+   * El paciente ya tiene esta ficha de una atención anterior (el control de ortodoncia), aunque
+   * no venga por la cita, la edad ni quien atiende (revisión final del 15 nov, propuesta 5).
+   */
+  | "tiene"
+  /** Se empezó en esta atención con «Otra ficha…»: se sigue desde aquí, como las demás. */
+  | "empezada"
 
 /** Una ficha que la atención ofrece sola. Ofrecer no es pedir: nada la exige. */
 export interface FormOffer {
@@ -238,7 +246,7 @@ export interface FormOffer {
   key: string
   title: string
   why: FormOfferWhy
-  /** La especialidad por la que aparece, con el nombre que le dio la clínica. */
+  /** La especialidad por la que aparece, con el nombre que le dio la clínica; vacía si aparece por otra cosa. */
   specialtyName: string
   /** Con «edad»: el tope de años que la ofrece. */
   underYears: number | null
@@ -297,7 +305,7 @@ interface FinalizedForm {
  * Las fichas del equipo de un paciente que cuentan como anteriores, de la más
  * reciente a la más antigua: las finalizadas y las que quedaron a medias en una
  * atención ya firmada (con la hora de su firma). Las de una atención anulada no
- * cuentan.
+ * cuentan, ni las que no tienen ninguna respuesta.
  */
 async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise<FinalizedForm[]> {
   const rows = await tx
@@ -308,6 +316,7 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
       finalizedAt: clinicalFormResponse.finalizedAt,
       status: clinicalFormResponse.status,
       professionalUserId: clinicalFormResponse.professionalUserId,
+      hasAnswers: sql<boolean>`${hasAnswersSql(sql`${clinicalFormResponse.answers}`)}`,
       encounterStatus: encounter.status,
       encounterFinalizedAt: encounter.finalizedAt,
     })
@@ -328,6 +337,8 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
   return rows
     .flatMap((row) => {
       if (row.encounterStatus === "anulada") return []
+      // «La anterior» es la última con respuestas, no la última empezada (revisión final del 15 nov, U8).
+      if (!row.hasAnswers) return []
       if (row.status === "finalizado" && row.finalizedAt) return [{ ...base(row), finalizedAt: row.finalizedAt, unfinished: false }]
       // A medias en una atención ya firmada: lo respondido también es la vez anterior.
       if (row.status === "borrador" && row.encounterStatus === "finalizada" && row.encounterFinalizedAt)
@@ -384,7 +395,9 @@ function firstOf(
  * 1. las de la especialidad del servicio de su cita;
  * 2. las que el producto ofrece por la edad (odentIA: odontopediatría a menores de 12);
  * 3. si de la cita no sale una especialidad (no tiene servicio, o es una atención sin
- *    cita), las de las especialidades de quien atiende.
+ *    cita), las de las especialidades de quien atiende;
+ * 4. la que el paciente ya tiene de antes, con respuestas (el control de ortodoncia);
+ * 5. la que se empezó aquí con «Otra ficha…».
  * Una ficha sale una vez, con el primer motivo. «Otra ficha…» sigue ofreciendo todas.
  * Ofrecer por servicio queda fuera: con dos fichas de la misma especialidad salen las dos.
  */
@@ -408,16 +421,17 @@ export async function getEncounterFormOffers(
   // Firmada o anulada, la atención ya no empieza fichas: no se ofrece ninguna (la regla es del servidor).
   if (session.status !== "borrador") return []
 
+  // Con su especialidad activa, si la tiene: la que el paciente ya tiene se ofrece aunque no tenga.
   const templates = await tx
     .select({
       id: clinicalFormTemplate.id,
       key: clinicalFormTemplate.key,
       title: clinicalFormTemplate.title,
-      specialtyId: clinicalFormTemplate.specialtyId,
+      specialtyId: orgSpecialty.id,
       specialtyName: orgSpecialty.name,
     })
     .from(clinicalFormTemplate)
-    .innerJoin(
+    .leftJoin(
       orgSpecialty,
       and(
         eq(orgSpecialty.organizationId, clinicalFormTemplate.organizationId),
@@ -479,16 +493,6 @@ export async function getEncounterFormOffers(
     if (ownSpecialties.includes(specialtyId)) return "profesional"
     return null
   }
-  const ORDER: Record<FormOfferWhy, number> = { cita: 0, edad: 1, profesional: 2 }
-  const offered = templates
-    .flatMap((template) => {
-      const why = whyOf(template.specialtyId)
-      return why ? [{ ...template, why }] : []
-    })
-    // Estable: dentro de cada motivo, por título.
-    .sort((a, b) => ORDER[a.why] - ORDER[b.why])
-  if (offered.length === 0) return []
-
   // Lo de esta atención (cualquier versión de la misma ficha) y lo ya finalizado en su historia.
   const inEncounter = await tx
     .select({
@@ -509,6 +513,18 @@ export async function getEncounterFormOffers(
     )
     .orderBy(desc(clinicalFormResponse.createdAt))
   const finals = await finalizedForms(tx, orgId, patientId)
+  // La que el paciente ya tiene de otra atención, y la que se empezó en esta.
+  const had = new Set(finals.filter((form) => form.encounterId !== encounterId).map((form) => form.key))
+  const started = new Set(inEncounter.map((row) => row.key))
+
+  const ORDER: Record<FormOfferWhy, number> = { cita: 0, edad: 1, profesional: 2, tiene: 3, empezada: 4 }
+  const offered = templates
+    .flatMap((template) => {
+      const why = whyOf(template.specialtyId) ?? (had.has(template.key) ? "tiene" : started.has(template.key) ? "empezada" : null)
+      return why ? [{ ...template, specialtyName: template.specialtyName ?? "", why }] : []
+    })
+    // Estable: dentro de cada motivo, por título.
+    .sort((a, b) => ORDER[a.why] - ORDER[b.why])
 
   return offered.map((template) => {
     const today = inEncounter.find((row) => row.key === template.key) ?? null

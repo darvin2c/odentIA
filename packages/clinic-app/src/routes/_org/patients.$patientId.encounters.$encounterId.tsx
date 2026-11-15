@@ -96,6 +96,9 @@ function EncounterPage() {
       ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
     )
     setSignedHere(null)
+    // «Listo» cierra «Atención finalizada» y la atención se ve firmada: el foco no queda en la
+    // página, va al contenido (revisión final del 15 nov, ux U7).
+    requestAnimationFrame(() => document.getElementById("contenido")?.focus())
   }
 
   if (patientQuery.isLoading || encounterQuery.isLoading) return <EncounterLoading />

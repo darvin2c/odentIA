@@ -145,7 +145,7 @@ export function AllergiesCard({
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
   const reviewed = health.allergiesReviewedAt
     ? `Revisadas${health.allergiesReviewedBy ? ` por ${memberName(health.allergiesReviewedBy)}` : ""} · ${allergyDay(health.allergiesReviewedAt)}`
-    : "Nadie las revisó todavía con el paciente"
+    : "Sin revisar con el paciente"
   return (
     <section
       aria-labelledby={titleId}

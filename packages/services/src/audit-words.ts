@@ -620,6 +620,11 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "whatsapp.token_renewed": say("Renovó con Meta la clave de WhatsApp antes de que venciera", "sistema"),
 }
 
+/** Lo que confirmó una persona de lo que propuso Clío (`metadata.by = "clio"`). */
+const CLIO_WORDS: Record<string, string> = {
+  "form_response.update": "Confirmó en una ficha una respuesta que propuso Clío",
+}
+
 /** Lo que hace por su cuenta el agente o el paciente, aunque el código no tenga frase propia. */
 const AUTHOR_OF_SUBJECT: Record<string, AuditAuthor> = {
   automation_job: "agente",
@@ -678,7 +683,9 @@ export interface AuditWords {
  * `patient` (lo que hizo la propia persona, con el actor `contact:<id>`).
  */
 export function describeAuditEvent(action: string, origin?: string | null): AuditWords {
-  const phrase = phraseOf(action)
+  // Lo que propuso Clío y confirmó una persona lo dice: la persona manda, Clío se nombra (A14).
+  const clio = origin === "clio" ? CLIO_WORDS[action] : undefined
+  const phrase = clio ? say(clio) : phraseOf(action)
   const area = auditAreaOf(action)
   return {
     what: phrase.what,

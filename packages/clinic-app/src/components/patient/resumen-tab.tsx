@@ -201,8 +201,8 @@ export function PatientPendingCard({
     if (clinical.health && isHealthReviewPending(clinical.health))
       pending.push({
         id: "health-review",
-        title: "Antecedentes declarados por revisar",
-        detail: "El paciente o su responsable los declaró; falta la validación clínica.",
+        title: "Lo que dijo de su salud, sin revisar",
+        detail: "Lo dijo el paciente o quien responde por él: revísalo con él en la atención.",
         action: open("Revisar", { id: "antecedentes", review: true }),
       })
     for (const consent of pendingConsents) {

@@ -56,6 +56,12 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
 import { whenSaid } from "../agenda/shared"
+import { CLINICAL_NAME } from "../../lib/agent-names"
+import type { FormResponse } from "../../lib/clinical-forms"
+import { answersWords } from "./clio-form-proposals"
+import type { DictationSuggestion } from "./dictation-session"
+import { isOn } from "./dictation-sign-list"
+import { isEmptyAnswer, missingRequired } from "./form-fields"
 
 /**
  * Entre qué horas puede haber terminado la atención, en la zona de la clínica, y
@@ -1101,86 +1107,138 @@ export function AnesthesiaHealthLine({
   )
 }
 
-/** Los formularios de la atención que siguen a medias, dichos al cerrar: título y cuáles. */
-export function openFormsWords(forms: ReadonlyArray<{ title: string }>): { title: string; detail: string } | null {
-  if (forms.length === 0) return null
-  const names = listWords(forms.map((form) => `«${form.title}»`))
-  return forms.length === 1
-    ? {
-        title: "Queda una ficha a medias",
-        detail: `${names}. Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.`,
-      }
-    : {
-        title: `Quedan ${forms.length} fichas a medias`,
-        detail: `${names}. Puedes firmar igual: se terminan después, aquí mismo en la atención, y llevan su propia fecha y hora.`,
-      }
+/**
+ * Una ficha a medias de la atención, como la ve quien firma (revisión final del
+ * 15 nov, propuesta 4): la ficha se cierra con la firma, sin un «Finalizar»
+ * propio mientras la atención está en curso.
+ */
+export interface SignForm {
+  id: string
+  title: string
+  /** Las preguntas con respuesta, contando las de Clío marcadas para entrar con la firma. */
+  answered: number
+  /** Las respuestas de Clío marcadas para entrar con la firma. */
+  clio: number
+  /** Las obligatorias que siguen vacías: sin ellas la ficha no se finaliza y queda a medias. */
+  missing: string[]
+}
+
+/** Lo que ve quien firma de cada ficha a medias: lo respondido con lo que entra de Clío, y lo que falta. */
+export function signFormsOf(
+  open: ReadonlyArray<{ id: string; title: string }>,
+  forms: ReadonlyArray<Pick<FormResponse, "id" | "answers" | "templateSnapshot">>,
+  marked: ReadonlyArray<Pick<DictationSuggestion, "kind" | "payload">>,
+): SignForm[] {
+  return open.map((item) => {
+    const form = forms.find((candidate) => candidate.id === item.id)
+    const clio = marked.filter((suggestion) => suggestion.kind === "ficha" && suggestion.payload["responseId"] === item.id)
+    const answers: Record<string, unknown> = { ...(form?.answers ?? {}) }
+    for (const suggestion of clio) answers[String(suggestion.payload["fieldId"])] = suggestion.payload["value"]
+    return {
+      id: item.id,
+      title: item.title,
+      answered: Object.values(answers).filter((value) => !isEmptyAnswer(value)).length,
+      clio: clio.length,
+      missing: form ? missingRequired(form.templateSnapshot, answers).map((field) => field.label) : [],
+    }
+  })
+}
+
+/** Viene marcada para finalizarse con la firma si tiene al menos una respuesta y ninguna obligatoria vacía. */
+export const finishesByDefault = (form: SignForm): boolean => form.answered > 0 && form.missing.length === 0
+
+/** Las que se finalizan con la firma: las marcadas por omisión, salvo las que quien firma tocó. */
+export function finishingAtSign(forms: readonly SignForm[], toggled: readonly string[]): string[] {
+  return forms.filter((form) => form.missing.length === 0 && isOn(finishesByDefault(form), toggled, form.id)).map((form) => form.id)
+}
+
+/** «3 respuestas, 1 de Clío», «Sin respuestas», y lo que falta para finalizarla. */
+export function signFormWords(form: SignForm): string {
+  const answers =
+    form.answered === 0
+      ? "Sin respuestas"
+      : `${answersWords(form.answered)}${form.clio > 0 ? `, ${form.clio} de ${CLINICAL_NAME}` : ""}`
+  return form.missing.length > 0 ? `${answers} · falta ${listWords(form.missing.map((label) => `«${label}»`))}: queda a medias` : answers
 }
 
 /**
- * Un formulario a medias no frena la firma: el cierre lo avisa con el mismo
- * tono y la misma forma que el de la anestesia, y da su salida («Completar
- * ahora» abre ese formulario ahí mismo). `id`: el diálogo lo anuncia al abrirse.
+ * Las fichas de la atención en la firma, un bloque por ficha: lo que tiene, lo
+ * que propone Clío para ella (`proposals`) y «Finalizarla al firmar», marcada
+ * si tiene respuestas. Nada frena la firma: la que queda a medias se termina
+ * después, aquí mismo. `id`: el diálogo lo anuncia al abrirse.
  */
-export function OpenFormsLine({
+export function FormsAtSign({
   forms,
-  onComplete,
   finishing,
   onFinishToggle,
+  onComplete,
+  proposals,
   disabled = false,
   id,
 }: {
-  forms: ReadonlyArray<{ id: string; title: string }>
-  /** «Completar ahora»: cierra el cierre y abre ese formulario. */
-  onComplete?: (formId: string) => void
-  /** Las que se finalizan con la firma, como quedaron («Finalizarla al firmar»). */
-  finishing?: readonly string[]
+  forms: readonly SignForm[]
+  finishing: readonly string[]
   onFinishToggle?: (formId: string, finish: boolean) => void
+  /** «Completar ahora»: cierra el cierre y abre esa ficha. */
+  onComplete?: (formId: string) => void
+  /** Lo que propone Clío para cada ficha, con sus casillas. */
+  proposals?: (formId: string) => React.ReactNode
   disabled?: boolean
   id?: string
 }): React.JSX.Element | null {
-  const words = openFormsWords(forms)
-  if (!words) return null
+  const titleId = useId()
+  if (forms.length === 0) return null
   return (
-    <div
-      id={id}
-      role="note"
-      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3"
-    >
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">{words.title}</span>
-        <span className="text-xs text-muted-foreground">{words.detail}</span>
-      </div>
-      {onComplete ? (
-        <span className="flex flex-wrap gap-2">
-          {forms.map((form) => (
-            <Button
-              key={form.id}
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={disabled}
-              aria-label={`Completar ahora ${form.title}`}
-              onClick={() => onComplete(form.id)}
-            >
-              {forms.length === 1 ? "Completar ahora" : `Completar «${form.title}»`}
-            </Button>
-          ))}
-        </span>
-      ) : null}
-      {onFinishToggle ? (
-        <span className="flex basis-full flex-col gap-1">
-          {forms.map((form) => {
-            const checked = finishing?.includes(form.id) ?? false
-            return (
-              <label key={form.id} className="flex items-center gap-2 text-sm">
-                <Checkbox checked={checked} disabled={disabled} onCheckedChange={(value) => onFinishToggle(form.id, value === true)} />
-                {forms.length === 1 ? "Finalizarla al firmar, como está" : `Finalizar «${form.title}» al firmar, como está`}
-              </label>
-            )
-          })}
-        </span>
-      ) : null}
-    </div>
+    <section id={id} aria-labelledby={titleId} className="flex flex-col gap-2">
+      <h3 id={titleId} className="font-medium">
+        {forms.length === 1 ? "La ficha de esta atención" : "Las fichas de esta atención"}
+      </h3>
+      <ul className="flex flex-col gap-2">
+        {forms.map((form) => {
+          const checked = finishing.includes(form.id)
+          return (
+            <li key={form.id} className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-medium [overflow-wrap:anywhere]">{form.title}</span>
+                  <span className="text-xs text-muted-foreground">{signFormWords(form)}</span>
+                </span>
+                {onComplete ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="min-h-11 sm:min-h-8"
+                    disabled={disabled}
+                    aria-label={`Completar ahora ${form.title}`}
+                    onClick={() => onComplete(form.id)}
+                  >
+                    Completar ahora
+                  </Button>
+                ) : null}
+              </div>
+              {proposals?.(form.id)}
+              {onFinishToggle ? (
+                <label className="flex items-center gap-2">
+                  <Checkbox
+                    checked={checked}
+                    disabled={disabled || form.missing.length > 0}
+                    aria-label={forms.length === 1 ? "Finalizarla al firmar" : `Finalizar «${form.title}» al firmar`}
+                    onCheckedChange={(value) => onFinishToggle(form.id, value === true)}
+                  />
+                  Finalizarla al firmar
+                </label>
+              ) : null}
+              {!checked ? (
+                <span className="text-xs text-muted-foreground">
+                  Queda a medias: la terminas después, aquí mismo en la atención, con su propia fecha y hora.
+                </span>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -1217,8 +1275,10 @@ export function EncounterClosingDialog({
   healthGaps = [],
   onCompleteHealth,
   onCompleteForm,
+  signForms = [],
   finishingForms,
   onFinishFormToggle,
+  formProposals,
   dictated = null,
 }: {
   open: boolean
@@ -1281,9 +1341,13 @@ export function EncounterClosingDialog({
   onCompleteHealth?: () => void
   /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
   onCompleteForm?: (formId: string) => void
-  /** Las fichas a medias que se finalizan con la firma («Finalizarla al firmar»). */
+  /** Las fichas a medias de la atención, un bloque por ficha (`signFormsOf`). */
+  signForms?: readonly SignForm[]
+  /** Las que se finalizan con la firma («Finalizarla al firmar»). */
   finishingForms?: readonly string[]
   onFinishFormToggle?: (formId: string, finish: boolean) => void
+  /** Lo que propone Clío para cada ficha, dentro de su bloque. */
+  formProposals?: (formId: string) => React.ReactNode
   /** Lo dictado sin confirmar, marcado para entrar con la firma: el mismo cierre, sin otro diálogo. */
   dictated?: React.ReactNode
 }): React.JSX.Element {
@@ -1308,7 +1372,7 @@ export function EncounterClosingDialog({
       {/* Lo de en medio se desplaza; el título y «Finalizar y firmar» quedan siempre a la vista, también en un teléfono. */}
       {/* El aviso del formulario a medias también describe el diálogo: el lector lo dice al abrirlo. */}
       <DialogContent
-        aria-describedby={(closing?.openForms?.length ?? 0) > 0 ? `${ids}-desc ${ids}-forms` : `${ids}-desc`}
+        aria-describedby={signForms.length > 0 ? `${ids}-desc ${ids}-forms` : `${ids}-desc`}
         className="flex max-h-[90dvh] flex-col sm:max-w-lg"
         initialFocus={initialFocus}
       >
@@ -1378,11 +1442,13 @@ export function EncounterClosingDialog({
                 disabled={busy}
               />
               {dictated}
-              <OpenFormsLine
+              <FormsAtSign
                 id={`${ids}-forms`}
-                forms={closing?.openForms ?? []}
+                forms={signForms}
+                finishing={finishingForms ?? []}
                 onComplete={onCompleteForm}
-                {...(onFinishFormToggle ? { finishing: finishingForms ?? [], onFinishToggle: onFinishFormToggle } : {})}
+                proposals={formProposals}
+                {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
                 disabled={busy}
               />
               {consents.map((need) => {

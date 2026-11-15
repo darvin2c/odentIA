@@ -42,7 +42,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { demoSignatureStrokes } from "./demo-signature.js"
 import { DocumentKit, dayWords } from "./document-kit.js"
-import { finalizeEncounter, getEncounterDetail, voidEncounter } from "./encounters.js"
+import { finalizeEncounter, getEncounterDetail, takeOverEncounter, voidEncounter } from "./encounters.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
 import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
@@ -1327,7 +1327,11 @@ it("la ficha dice quién escribió cada respuesta, y en FHIR lo que propuso Clí
     createFormResponse(tx, "org_a", f.actor, { templateId: template.id, patientId: f.patient.id, encounterId: f.encounter.id, answers: {} }),
   )
   await run((tx) => updateFormResponseDraft(tx, "org_a", f.actor, response.id, { answers: ANSWERS }))
+  // La ficha la escribe quien lleva la atención: la otra profesional toma el relevo, escribe y la
+  // doctora lo retoma para finalizarla.
+  await run((tx) => takeOverEncounter(tx, "org_a", other, f.patient.id, f.encounter.id))
   await run((tx) => updateFormResponseDraft(tx, "org_a", other, response.id, { answers: { ...ANSWERS, sangrado: 20 } }))
+  await run((tx) => takeOverEncounter(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
   // Clío propuso «Intensidad 8» y lo confirmó quien atiende.
   await ownerDb.insert(encounterDictationSuggestion).values({
     organizationId: "org_a",
