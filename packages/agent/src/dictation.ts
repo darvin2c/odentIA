@@ -333,16 +333,24 @@ const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
 export function groundSource(said: string | undefined, transcript: string): string {
   // La puntuación del final no es lo dicho: el modelo cierra con punto lo que en el dictado seguía con coma.
   const bare = (text: string) => text.trim().replace(/[\s.,;:!?…]+$/u, "")
+  const heard = loose(transcript)
+  const ground = (fragment: string) => {
+    if (heard.includes(loose(fragment))) return fragment
+    if (bare(fragment).length >= 3 && heard.includes(loose(bare(fragment)))) return bare(fragment)
+    return fragment
+      .split(/(?<=[.;!?])\s+/)
+      .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
+      .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
+      .join(" ")
+  }
   const fragment = (said ?? "").trim()
   if (!fragment) return ""
-  const heard = loose(transcript)
-  if (heard.includes(loose(fragment))) return fragment
-  if (bare(fragment).length >= 3 && heard.includes(loose(bare(fragment)))) return bare(fragment)
-  return fragment
-    .split(/(?<=[.;!?])\s+/)
-    .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
-    .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
-    .join(" ")
+  const found = ground(fragment)
+  if (found) return found
+  // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
+  // tres»): sin ellas era lo dicho. Medido el 15 nov: 5 de 9 respuestas de ficha perdidas eran eso.
+  const unquoted = fragment.replace(/[«»“”"]/gu, "").trim()
+  return unquoted && unquoted !== fragment ? ground(unquoted) : ""
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
