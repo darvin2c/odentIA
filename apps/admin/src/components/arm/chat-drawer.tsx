@@ -245,8 +245,8 @@ function Conversation({
     onError: (error) => toast.error(submitErrorMessage(error)),
     onSettled: onChanged,
   })
-  // Mientras Kairós atiende, la respuesta a mano espera a «Lo atiendo yo»: no responden los dos.
-  const canWrite = chat.canReplyFreely && kairos?.kind !== "kairos"
+  // Escribir a mano también es «Lo atiendo yo»: al enviar, el servidor pausa a Kairós aquí.
+  const canWrite = chat.canReplyFreely
   // «Solo administración» solo tiene sentido si Soporte ve la conversación (clínica con su app).
   const canHide = isAdmin && Boolean(chat.client?.hasAccount)
   // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
@@ -417,7 +417,7 @@ function Conversation({
             }
           >
             {kairos.kind === "kairos"
-              ? "Responde lo de las webs y los precios, y agenda presentaciones. Nunca ofrece descuentos. Para escribir tú, toca «Lo atiendo yo»."
+              ? "Responde lo de las webs y los precios, y agenda presentaciones. Nunca ofrece descuentos. Si escribes tú, deja de responder aquí."
               : kairos.kind === "paso"
                 ? `${kairos.why ? `${kairos.why}. ` : ""}Respóndele tú; Kairós no vuelve a escribir aquí hasta que lo devuelvas.`
                 : kairos.words}
@@ -443,9 +443,10 @@ function Conversation({
           <p className="text-sm text-muted-foreground">{freeWindowWords(chat)}</p>
           {kairos?.kind === "kairos" ? (
             <p className="text-sm text-muted-foreground">
-              Kairós está respondiendo. Para escribir tú, toca «Lo atiendo yo» arriba.
+              Kairós está respondiendo aquí. Si envías tú, lo atiendes tú y Kairós deja de responder.
             </p>
-          ) : chat.canReplyFreely ? (
+          ) : null}
+          {chat.canReplyFreely ? (
             <>
               <form.AppField name="body">
                 {(field) => (

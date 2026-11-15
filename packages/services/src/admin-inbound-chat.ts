@@ -1327,7 +1327,20 @@ export async function prepareChatReply(
   // Se decide al reservarlo, como el mensaje al llegar: lo de una conversación que no es de una
   // clínica con su app es de la venta; lo demás, si Administración lo marca. Lo que escribe
   // Soporte (solo en una clínica con app) nunca lo es.
-  const adminOnly = !client?.organizationId || (actor.role === "admin" && Boolean(input.adminOnly))
+  // Escribir a mano es atenderla: Kairós deja de responder solo aquí, como con «Lo atiendo yo».
+  // Así una persona puede escribir primero (la propuesta, un seguimiento) sin que respondan los dos.
+  if (!chat.kairosPausedAt) {
+    await tx
+      .update(saasChat)
+      .set({ kairosPausedAt: now, kairosPausedBy: actor.userId, updatedAt: now })
+      .where(eq(saasChat.id, chat.id))
+    await writeAdminAudit(tx, actor, {
+      action: "chat.kairos_paused",
+      entityId: chat.id,
+      metadata: { chatId: chat.id, alEscribir: true },
+    })
+  }
+  const adminOnly =!client?.organizationId || (actor.role === "admin" && Boolean(input.adminOnly))
   let proposalId: string | null = null
   if (input.proposalId && !template) {
     if (!chat.clientId)
