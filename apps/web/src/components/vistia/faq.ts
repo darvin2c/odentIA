@@ -1,11 +1,13 @@
 // Las preguntas del inicio de vistIA. Las usa la página y sus datos estructurados (FAQPage en
 // index.astro). El regalo sale del plan que se muestra, nunca del código.
+import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
 import { trialFaq } from "../../lib/offer"
 import type { Pricing } from "../../lib/pricing"
 
 export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
+    armFaq,
     {
       q: "¿Sirve para una óptica que solo vende?",
       a: "Sí. La agenda, las conversaciones con Sofi, la caja, el inventario y los pedidos de lentes sirven igual: transcribes la receta que trae tu cliente y vendes con ella. El examen de la vista lo usas cuando examinas.",

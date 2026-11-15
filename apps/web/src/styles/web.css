@@ -407,6 +407,90 @@ details.q p {
   opacity: 1;
   transition: opacity 0.4s ease var(--rv-d, 0s);
 }
+/* El distintivo «ARM» de las portadas de las tres webs: la sigla grande en el color de la marca y,
+   al lado, el nombre completo y para quién es. */
+.arm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 16px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--sky) 45%, transparent);
+  background: color-mix(in srgb, var(--sky) 10%, transparent);
+  box-shadow: 0 0 32px -8px color-mix(in srgb, var(--sky) 60%, transparent);
+}
+.arm-badge b {
+  flex: none;
+  font: 800 18px/1 var(--font);
+  letter-spacing: 0.04em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--sky);
+  color: var(--night);
+}
+.arm-badge span {
+  font: 600 13px/1.3 var(--font);
+  color: var(--on-night);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arm-badge span i {
+  font-style: normal;
+  color: var(--on-night-3);
+}
+@media (max-width: 520px) {
+  .arm-badge b { font-size: 16px; padding: 7px 12px; }
+  .arm-badge span { font-size: 12px; }
+  .arm-badge span i { display: none; }
+}
+
+/* Las áreas de la clínica donde trabaja cada agente, debajo del título de las portadas: el área en
+   versalitas y el agente con su color. */
+.arm-pitch {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.arm-areas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.arm-areas li {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--on-night-2);
+}
+.arm-areas .area {
+  font: 700 11.5px/1 var(--agent-font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--on-night-3);
+}
+.arm-areas b { font-weight: 800; }
+.arm-areas .sofi { color: #4fc3d7; }
+.arm-areas .clio { color: #6ee7b7; }
+.arm-areas .argos { color: #f5c46b; }
+.arm-cmp {
+  align-self: flex-start;
+  font-weight: 700;
+  color: var(--sky-2);
+  text-underline-offset: 3px;
+}
+@media (max-width: 520px) {
+  .arm-areas li { grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: 16px; }
+}
+
 @media print {
   [data-rv] {
     opacity: 1;

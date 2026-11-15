@@ -3,6 +3,11 @@
     "serves": [
       "/",
       "/agentes",
+      "/comparar",
+      "/comparar/crm",
+      "/comparar/chatbot",
+      "/comparar/software-tradicional",
+      "/comparar/whatsapp-y-cuaderno",
       "/agentes/recepcion",
       "/agentes/asistente-clinico",
       "/agentes/administrador",
@@ -35,6 +40,11 @@
     "serves": [
       "/",
       "/agentes",
+      "/comparar",
+      "/comparar/crm",
+      "/comparar/chatbot",
+      "/comparar/software-tradicional",
+      "/comparar/whatsapp-y-cuaderno",
       "/agentes/recepcion",
       "/agentes/administrador",
       "/agenda-para-opticas",

@@ -6,6 +6,7 @@
 // Ninguna cifra de precio vive aquí: salen de Astro.locals.pricing; los soles son del tarifario de
 // ejemplo del consultorio de la demo.
 import { giftOf, shownPlan } from "../../../lib/pricing"
+import { ARM_PATH } from "../../../lib/arm"
 import { contactHref, ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import AgentMini from "./AgentMini"
@@ -118,12 +119,19 @@ const trust = [
   <section class="hero lh" data-lh-hero>
     <div class="wrap lh-in">
       <div class="lh-copy">
-        <span class="tag tag-d lh-tag">[ Para consultorios médicos ]</span>
-        <h1 class="lh-h1">Tú atiendes.<br /><span>Tus agentes</span> hacen el resto.</h1>
+        <span class="arm-badge"><b>ARM</b><span>Agentic Relationship Management <i>· consultorios médicos</i></span></span>
+        <h1 class="lh-h1">Más pacientes que vuelven.<br /><span>Menos trabajo para tu equipo.</span></h1>
+        <div class="arm-pitch">
         <p class="lh-lead">
-          WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por persona. Y tres agentes de IA:{" "}
-          <b class="c-sofi">Sofi</b> agenda, <b class="c-clio">Clío</b> ordena la consulta que dictas y <b class="c-argos">Argos</b> trae de vuelta a tus pacientes.
+          <b>latidIA es un ARM: agentes de IA que hacen el trabajo de tu consultorio, no solo conversan.</b>
         </p>
+        <ul class="arm-areas">
+          <li><span class="area">Recepción</span><span><b class="sofi">Sofi</b> responde y agenda.</span></li>
+          <li><span class="area">Consulta</span><span><b class="clio">Clío</b> ordena lo que dictas, con la receta y el descanso.</span></li>
+          <li><span class="area">Administración</span><span><b class="argos">Argos</b> trae de vuelta a quien no volvió.</span></li>
+        </ul>
+        <a class="arm-cmp" href={ARM_PATH}>Compáranos con lo que usas hoy <span aria-hidden="true">→</span></a>
+        </div>
         <div class="lh-ctas">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
           <a class="btn btn-g" href="#caso">Ver cómo funciona</a>
@@ -169,7 +177,7 @@ const trust = [
   <section class="ls" id="agentes">
     <div class="wrap ls-in">
       <div class="ls-head wide">
-        <span class="tag">[ Tres agentes ]</span>
+        <span class="tag">[ Así trabaja un ARM ]</span>
         <h2>Uno en la recepción, uno en la consulta, uno en la administración.</h2>
         <p>No conversan por conversar: hacen el trabajo, dentro de lo que tú les permites.</p>
       </div>
@@ -403,7 +411,7 @@ const trust = [
   .lh-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
   .lh-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
   .lh-tag { font-size: 13px; letter-spacing: .12em; }
-  .lh-h1 { font-size: clamp(44px, 4.7vw, 66px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
+  .lh-h1 { font-size: clamp(40px, 3.9vw, 56px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
   .lh-h1 span { color: var(--sky); }
   .lh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); max-width: 520px; }
   .lh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
