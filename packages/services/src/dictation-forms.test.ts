@@ -403,6 +403,32 @@ describe("lo que la medición del 14 nov mostró que se perdía", () => {
   })
 })
 
+describe("lo que la medición del 15 nov mostró que se perdía en silencio", () => {
+  // Las fichas de odentIA por el registro de productos (ADR 0079), con su clave como id.
+  const formsOf = (keys: string[], answers: Record<string, Record<string, unknown>> = {}) =>
+    formQuestionsOf(
+      keys.map((key) => {
+        const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === key)!
+        return { id: key, title: form.title, snapshot: form.schema, answers: answers[key] ?? {} }
+      }),
+    )
+  const endo = formsOf(["evaluacion-de-endodoncia"])
+  const numberOf = (forms: DictationFormQuestion[], fieldId: string) => forms.find((item) => item.fieldId === fieldId)!.number
+  const ask = (fieldId: string, answer: string, said: string) => prepareFormAnswer({ payload: { question: numberOf(endo, fieldId), answer }, sourceText: said }, endo, FDI, said)
+
+  it("«dolor a la percusión» y «dolor a la palpación» son «Positiva»; con una negación, no", () => {
+    expect(ask("percusion", "Positiva", "Dolor a la percusión")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("palpacion", "Positiva", "duele a la palpación en el fondo de vestíbulo")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("palpacion", "Positiva", "dolor al palpar")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("percusion", "Positiva", "no hay dolor a la percusión")).toBeNull()
+    expect(ask("percusion", "Negativa", "sin dolor a la percusión")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
+    // «ni» también niega: «sin dolor a la percusión ni a la palpación».
+    expect(ask("palpacion", "Negativa", "ni a la palpación")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
+    // El dolor a la percusión no dice nada de la palpación.
+    expect(ask("palpacion", "Positiva", "dolor a la percusión")).toBeNull()
+  })
+})
+
 setupTestDb()
 const ORG = "org_a"
 

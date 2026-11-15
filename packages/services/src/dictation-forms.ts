@@ -267,11 +267,32 @@ function containsAll(said: number[], wanted: number[]): boolean {
 const optionNumbers = (option: string) => saidNumbers(option, { roman: "todos" })
 
 /** «No», «sin», «niega»…: un «No» solo se propone si se negó en voz alta. El silencio no es «No». */
-const NEGATION = /\b(no|sin|niega|niegan|negativ[oa]s?|ausente|ausencia|ningun[oa]?|nunca|tampoco|descarta)\b/
+const NEGATION = /\b(no|ni|sin|niega|niegan|negativ[oa]s?|ausente|ausencia|ningun[oa]?|nunca|tampoco|descarta)\b/
 /** ¿Se negó algo en la frase? «sin embargo» no niega nada. */
 const denies = (said: string) => NEGATION.test(plain(said).replace(/\bsin embargo\b/g, ""))
 /** Una opción que dice que no hay nada: «No», «No tiene», «Negativa», «Ninguno», «Ausente». */
 const isNegativeOption = (option: string) => /^(no|sin|ningun[oa]?|nada|negativ[oa]|ausente)\b/.test(plain(option))
+/** La opción de una prueba que dio positiva: «Positiva», «Positivo». */
+const isPositiveOption = (option: string) => /^positiv[oa]\b/.test(plain(option))
+
+/**
+ * «Dolor a la percusión», «duele a la palpación», «dolor al palpar»: esa prueba
+ * es positiva, como se dice en la clínica (medición del 15 nov). Solo si lo que
+ * sigue al dolor es la pregunta («dolor a la percusión» no dice nada de la
+ * palpación) y no se negó nada en la frase.
+ */
+function painOnTest(question: DictationFormQuestion, said: string): boolean {
+  if (denies(said)) return false
+  return [...plain(said).matchAll(PAIN_ON)].some((match) => isTestOf(question, match[1]))
+}
+
+/** El dolor a algo, sobre lo dicho sin tildes: «(sin) dolor a la percusión», «duele al palpar». */
+const PAIN_ON = /\b(?:sin\s+)?(?:dolor|duele)\s+al?\s+(?:la\s+)?([a-z]+)/g
+/** ¿Esa palabra es la de la pregunta? («percusión» de «Percusión», «palpar» de «Palpación».) */
+const isTestOf = (question: DictationFormQuestion, word: string | undefined) => {
+  const stem = stemsOf(word ?? "")[0]
+  return !!stem && labelStems(question.label).includes(stem)
+}
 
 /** Palabras que no distinguen una pregunta ni una opción. */
 const FILLER = new Set(["del", "las", "los", "con", "por", "para", "que", "una", "uno", "angle", "mas", "unos", "unas", "casi", "cerca", "alrededor", "aproximadamente", "aprox"])
@@ -721,6 +742,7 @@ function checkFormAnswer(
    */
   const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string } | null => {
     if (isNegativeOption(value)) return denies(said) && labelSaid ? { ok: true } : null
+    if (isPositiveOption(value) && painOnTest(question, said)) return { ok: true }
     const numbers = optionNumbers(value)
     if (numbers.length) {
       if (containsAll(heardForOptions, numbers)) return { ok: true }
