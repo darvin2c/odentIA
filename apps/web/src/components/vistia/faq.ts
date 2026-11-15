@@ -1,15 +1,13 @@
 // Las preguntas del inicio de vistIA. Las usa la página y sus datos estructurados (FAQPage en
 // index.astro). El regalo sale del plan que se muestra, nunca del código.
+import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
 import { trialFaq } from "../../lib/offer"
 import type { Pricing } from "../../lib/pricing"
 
 export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
-    {
-      q: "¿Qué es un ARM?",
-      a: "ARM es Agentic Relationship Management. Un CRM guarda lo que tu equipo anota y espera a que alguien haga el resto. En un ARM, los agentes hacen el trabajo: Sofi atiende por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo y agenda el examen de la vista, y Argos recuerda los controles y trae de vuelta a tus clientes, todo en una sola ficha por cliente y siempre dentro de lo que tú les permites. vistIA nació así; no es un CRM al que le agregaron IA.",
-    },
+    armFaq,
     {
       q: "¿Sirve para una óptica que solo vende?",
       a: "Sí. La agenda, las conversaciones con Sofi, la caja, el inventario y los pedidos de lentes sirven igual: transcribes la receta que trae tu cliente y vendes con ella. El examen de la vista lo usas cuando examinas.",

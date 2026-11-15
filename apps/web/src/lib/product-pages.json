@@ -3,6 +3,7 @@
     "serves": [
       "/",
       "/agentes",
+      "/arm-vs-crm",
       "/agentes/recepcion",
       "/agentes/asistente-clinico",
       "/agentes/administrador",
@@ -35,6 +36,7 @@
     "serves": [
       "/",
       "/agentes",
+      "/arm-vs-crm",
       "/agentes/recepcion",
       "/agentes/administrador",
       "/agenda-para-opticas",

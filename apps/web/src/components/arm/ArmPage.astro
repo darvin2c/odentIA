@@ -1,0 +1,142 @@
+---
+// /arm-vs-crm, la misma en las tres webs: qué es un ARM, la comparación con un CRM fila por fila y
+// por qué este producto es uno. Los textos de la comparación y la pregunta «¿Qué es un ARM?» salen de
+// lib/arm.ts, los mismos que usan las portadas.
+import Base from "../../layouts/Base.astro"
+import { ARM_PATH, ARM_ROWS, armFaq } from "../../lib/arm"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { ofProduct, WORDS } from "../../lib/product"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import PageHero from "../PageHero.astro"
+
+const title = `ARM vs CRM: por qué ${WORDS.name} es un ARM`
+const description = `Un CRM guarda lo que tu equipo anota. Un ARM (Agentic Relationship Management) hace el trabajo: agentes de IA que responden, agendan y traen de vuelta a tus ${WORDS.patients}. Así se compara ${WORDS.name}.`
+const agents = ofProduct({ dental: "Sofi, Clío y Argos", medical: "Sofi, Clío y Argos", optical: "Sofi y Argos" })
+
+const reasons = [
+  {
+    title: "Nació con agentes",
+    text: `${agents} no son un chat pegado encima: hacen el cambio en tu agenda y tus seguimientos, y queda registrado quién lo hizo.`,
+  },
+  {
+    title: ofProduct({ dental: "Una persona, una historia", medical: "Una persona, una historia", optical: "Una persona, una ficha" }),
+    text: `WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo llegan a la misma ficha. Nada de fichas repetidas por canal.`,
+  },
+  {
+    title: "Tú tienes el control",
+    text: `Cada tarea se prende o se apaga con un toque. Lo que un agente no puede resolver, se lo deja a una persona de ${WORDS.yourClinic} y le dice por qué.`,
+  },
+]
+
+const faq: FaqItem[] = [
+  armFaq,
+  {
+    q: "¿Los agentes deciden por mí?",
+    a: `No. Hacen lo que tú les permites, y lo clínico lo decide siempre el ${WORDS.clinician}. Lo que no pueden resolver se lo dejan a tu equipo, con el resumen de lo que pasó.`,
+  },
+  {
+    q: "¿En qué se diferencia de un chatbot?",
+    a: `Un chatbot responde y deja el resto para una persona. Los agentes de ${WORDS.name} hacen el cambio en tu sistema, y queda registrado quién lo hizo.`,
+  },
+]
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["ARM vs CRM", ARM_PATH],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <PageHero
+    tag="ARM vs CRM"
+    title="Un CRM te pide trabajo."
+    accent="Un ARM lo hace por ti."
+    lead={`ARM es Agentic Relationship Management: la relación con tus ${WORDS.patients} la llevan agentes de IA que conversan, agendan y hacen seguimiento por todos tus canales. ${WORDS.name} nació así, con los agentes en el centro.`}
+    secondary={{ href: "#comparacion", label: "Compáralos" }}
+  />
+
+  <section class="section section-white" id="comparacion" aria-labelledby="arm-cmp">
+    <div class="wrap arm">
+      <div class="arm-head">
+        <span class="tag">[ Fila por fila ]</span>
+        <h2 class="h2" id="arm-cmp">Lo mismo de cada día, <span class="arm-acc">hecho por tus agentes.</span></h2>
+        <p class="lead">Un CRM ordena el trabajo de tu equipo. Un ARM lo hace, y tu equipo queda libre para atender.</p>
+      </div>
+      <table class="arm-t">
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Qué</span></th>
+            <th scope="col">Con un CRM</th>
+            <th scope="col" class="us">Con {WORDS.name}, un ARM</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ARM_ROWS.map((r) => (
+            <tr>
+              <th scope="row">{r.task}</th>
+              <td data-label="Con un CRM">{r.crm}</td>
+              <td data-label={`Con ${WORDS.name}`} class="us">{r.arm}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="arm-why">
+    <div class="wrap arm">
+      <div class="arm-head">
+        <span class="tag">[ Por qué {WORDS.name} es un ARM ]</span>
+        <h2 class="h2" id="arm-why">No le agregamos IA a un CRM. <span class="arm-acc">Nacimos agénticos.</span></h2>
+      </div>
+      <div class="arm-why">
+        {reasons.map((r) => (
+          <div class="card arm-r">
+            <h3 class="h3">{r.title}</h3>
+            <p>{r.text}</p>
+          </div>
+        ))}
+      </div>
+      <a class="arm-more" href="/agentes">Conoce a tus agentes <span aria-hidden="true">→</span></a>
+    </div>
+  </section>
+
+  <Faq items={faq} />
+  <CtaBand title={`Deja de perseguir. Que tus agentes trabajen por ${WORDS.yourClinic}.`} />
+</Base>
+
+<style>
+  .arm { display: flex; flex-direction: column; gap: 40px; }
+  .arm-head { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+  .arm-acc { color: var(--teal); }
+  .arm-t { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 17px; line-height: 1.5; }
+  .arm-t th, .arm-t td { text-align: left; vertical-align: top; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+  .arm-t thead th { font-size: 14px; font-weight: 800; letter-spacing: .02em; color: var(--muted); border-bottom: 2px solid var(--line); }
+  .arm-t thead th.us { color: var(--teal); }
+  .arm-t tbody th { width: 22%; font-weight: 800; color: var(--ink); }
+  .arm-t td { width: 39%; color: var(--muted); }
+  .arm-t td.us { color: var(--ink); font-weight: 600; background: var(--teal-soft); }
+  .arm-t tbody tr:last-child td.us { border-radius: 0 0 16px 16px; }
+  .arm-t thead th.us { background: var(--teal-soft); border-radius: 16px 16px 0 0; }
+  .arm-why { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .arm-r { padding: 28px; display: flex; flex-direction: column; gap: 12px; }
+  .arm-r p { color: var(--muted); line-height: 1.55; }
+  .arm-more { font-weight: 800; color: var(--teal); text-decoration: none; }
+  .arm-more:hover { text-decoration: underline; }
+  @media (max-width: 860px) {
+    .arm-why { grid-template-columns: minmax(0, 1fr); }
+  }
+  /* En el celular cada fila es una tarjeta: la tarea arriba, el CRM y luego el ARM. */
+  @media (max-width: 720px) {
+    .arm-t, .arm-t tbody, .arm-t tr, .arm-t th, .arm-t td { display: block; width: auto; }
+    .arm-t thead { display: none; }
+    .arm-t tr { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .arm-t th, .arm-t td { padding: 14px 16px; border-bottom: 0; }
+    .arm-t tbody th { font-size: 18px; width: auto; }
+    .arm-t td { width: auto; }
+    .arm-t td::before { content: attr(data-label); display: block; font-size: 13px; font-weight: 800; color: var(--muted); margin-bottom: 4px; }
+    .arm-t td.us::before { color: var(--teal); }
+    .arm-t tbody tr:last-child td.us { border-radius: 0; }
+  }
+</style>

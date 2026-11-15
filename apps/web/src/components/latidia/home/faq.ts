@@ -1,15 +1,13 @@
 // Las preguntas del inicio de latidIA (lienzo «Inicio», sección 9). Las usa la página y sus datos
 // estructurados (FAQPage en index.astro). El regalo sale del plan que se muestra, nunca del código.
+import { armFaq } from "../../../lib/arm"
 import type { FaqItem } from "../../../lib/faq"
 import { trialFaq } from "../../../lib/offer"
 import type { Pricing } from "../../../lib/pricing"
 
 export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
-    {
-      q: "¿Qué es un ARM?",
-      a: "ARM es Agentic Relationship Management. Un CRM guarda lo que tu equipo anota y espera a que alguien haga el resto. En un ARM, los agentes hacen el trabajo: Sofi atiende por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo y agenda, Clío ordena la consulta que dictas y Argos trae de vuelta a tus pacientes, todo en una sola ficha por persona y siempre dentro de lo que tú les permites. latidIA nació así; no es un CRM al que le agregaron IA.",
-    },
+    armFaq,
     {
       q: "¿Para qué especialidades sirve?",
       a: "Para medicina general, medicina familiar, medicina interna, pediatría y ginecología y obstetricia. Tu consultorio empieza con sus servicios y un tarifario que ajustas a tus precios.",

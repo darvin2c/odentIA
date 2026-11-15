@@ -6,6 +6,7 @@
 // Ninguna cifra de precio vive aquí: salen de Astro.locals.pricing; los soles son del tarifario de
 // ejemplo del consultorio de la demo.
 import { giftOf, shownPlan } from "../../../lib/pricing"
+import { ARM_PATH } from "../../../lib/arm"
 import { contactHref, ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import AgentMini from "./AgentMini"
@@ -121,9 +122,10 @@ const trust = [
         <span class="tag tag-d lh-tag">[ Para consultorios médicos ]</span>
         <h1 class="lh-h1">No es un CRM con&nbsp;IA.<br /><span>Es un ARM.</span></h1>
         <p class="lh-lead">
-          <b>ARM: la relación con tus pacientes, gestionada por agentes.</b> Tú atiendes; ellos hacen el resto.
+          <b>ARM: la relación con tus pacientes, gestionada por agentes.</b>{" "}
           WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo en una sola ficha por persona. Y tres agentes de IA:{" "}
-          <b class="c-sofi">Sofi</b> agenda, <b class="c-clio">Clío</b> ordena la consulta que dictas y <b class="c-argos">Argos</b> trae de vuelta a tus pacientes.
+          <b class="c-sofi">Sofi</b> agenda, <b class="c-clio">Clío</b> ordena la consulta que dictas y <b class="c-argos">Argos</b> trae de vuelta a tus pacientes.{" "}
+          <a class="lh-arm" href={ARM_PATH}>Compara un ARM con un CRM <span aria-hidden="true">→</span></a>
         </p>
         <div class="lh-ctas">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
@@ -407,6 +409,7 @@ const trust = [
   .lh-h1 { font-size: clamp(44px, 4.7vw, 66px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
   .lh-h1 span { color: var(--sky); }
   .lh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); max-width: 520px; }
+  .lh-arm { color: var(--sky); font-weight: 700; white-space: nowrap; text-underline-offset: 3px; }
   .lh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
   .lh-note { font-size: 15px; line-height: 1.5; color: var(--on-night-3); }
   .lh-specs { list-style: none; margin: 0; padding: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }

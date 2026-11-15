@@ -138,6 +138,12 @@
 .home .hh-title span {
   color: #7fd6e4;
 }
+.home .hh-arm {
+  color: #7fd6e4;
+  font-weight: 700;
+  white-space: nowrap;
+  text-underline-offset: 3px;
+}
 .home .hh-lead {
   margin: 0;
   font-size: clamp(18px, 1.45vw, 20px);

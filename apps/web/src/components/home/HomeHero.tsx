@@ -14,6 +14,7 @@ import {
 } from "react"
 import { AGENTS, CHANS, DAY, type DayEvent, dir, type SceneHost, ToothScene, via } from "@odentia/brand-scene"
 import { pauseStore, useInterval, useNarrow, usePaused, useReducedMotion } from "./motion"
+import { ARM_PATH } from "../../lib/arm"
 
 type Props = {
   ctaHref: string
@@ -412,7 +413,10 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
           <p className="hh-lead rise d2">
             <b>ARM: la relación con tus pacientes, gestionada por agentes.</b> Un CRM solo guarda lo
             que anotas; aquí tus agentes agendan, documentan y traen de vuelta a tus pacientes mientras
-            tu equipo atiende. WhatsApp, Instagram, correo y más llegan a una sola ficha por persona.
+            tu equipo atiende. WhatsApp, Instagram, correo y más llegan a una sola ficha por persona.{" "}
+            <a className="hh-arm" href={ARM_PATH}>
+              Compara un ARM con un CRM <span aria-hidden="true">→</span>
+            </a>
           </p>
           <div className="hh-ctas rise d3">
             <a className="btn btn-p" href={ctaHref}>

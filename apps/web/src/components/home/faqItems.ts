@@ -1,4 +1,5 @@
 // Preguntas del inicio (sección 09). Los textos vienen del lienzo aprobado.
+import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
 import { offerOf, trialFaq } from "../../lib/offer"
 import { hours, type Pricing } from "../../lib/pricing"
@@ -11,10 +12,7 @@ export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] =
   const { founder } = offerOf(pricing)
   const terms = pricing.terms
   return [
-  {
-    q: "¿Qué es un ARM?",
-    a: "ARM es Agentic Relationship Management. Un CRM guarda lo que tu equipo anota y espera a que alguien haga el resto. En un ARM, los agentes hacen el trabajo: atienden por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, todo en una sola ficha por persona, y agendan, mueven citas, preparan la nota, recuerdan y retoman presupuestos, siempre dentro de lo que tú les permites. odentIA nació así; no es un CRM al que le agregaron IA.",
-  },
+  armFaq,
   {
     q: "¿Cuánto voy a pagar al mes?",
     // ADR 0085: también se suman los paquetes de preguntas a Argos y el espacio que pasa de lo incluido.
