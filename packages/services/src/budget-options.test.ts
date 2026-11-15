@@ -29,6 +29,7 @@ import {
   deliverBudget,
   duplicateBudgetOption,
   getBudgetDetail,
+  getBudgetPresentation,
   listBudgets,
   recommendBudgetOption,
   removeBudgetItems,
@@ -512,4 +513,27 @@ it("la revisión de un camino elegido sigue con ese y no suma el otro", async ()
 
   const revision = await f.run((tx) => reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id], reason: "Cambio" }))
   expect(revision.items.map((line) => line.planItemId)).toEqual([resina.id])
+})
+
+// El texto «Lo que le proponemos» es libre y la recomendada es una marca aparte: el
+// cajón donde se escribe tiene que decir cuál va marcada, que es la que verá el paciente.
+it("lo que explica dice cuál opción es la recomendada, y cambia al marcar otra", async () => {
+  const { f, items } = await withItems(1)
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [items[0]!.id] }))
+  const copy = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const optionB = copy.options[1]!
+  const recommendedOf = async () =>
+    (await f.run((tx) => getBudgetPresentation(tx, "org_a", f.patient.id, draft.id, { clinicalAccess: true }))).options.map(
+      (option) => [option.label, option.isRecommended],
+    )
+  // Nace recomendada la primera; la copia, sin marca.
+  expect(await recommendedOf()).toEqual([
+    ["Opción A", true],
+    ["Opción B", false],
+  ])
+  await f.run((tx) => recommendBudgetOption(tx, ...f.args, draft.id, optionB.id))
+  expect(await recommendedOf()).toEqual([
+    ["Opción A", false],
+    ["Opción B", true],
+  ])
 })

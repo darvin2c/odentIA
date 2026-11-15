@@ -1,8 +1,10 @@
 /**
  * Ficha del cliente › Documentos (ARM, ADR 0185): lo que le mandamos (carta,
  * propuestas, presentaciones) y lo que nos mandó la clínica, con su tipo, quién lo dejó, cuándo y, si lo hay, el día en
- * que se borra. Lo que manda la clínica es solo de Administración y se borra a
- * los 30 días (lo promete el contrato de encargo); Soporte no ve lo que es
+ * que se borra. Lo que manda la clínica es solo de Administración; se borra a
+ * los 30 días solo lo de la carga de datos (lo promete el contrato de encargo):
+ * lo que se sube como «Lo que mandó la clínica» y lo que llegó a soporte@ con
+ * adjuntos. Lo demás se guarda. Soporte no ve lo que es
  * solo de Administración y la API tampoco se lo da. Borrar es de
  * Administración.
  */
@@ -51,8 +53,8 @@ export const FILE_KIND_WORDS: Record<ClientFileKind, string> = {
 
 /** Lo que solo maneja Administración (lo que trae datos de la clínica); el servidor lo exige. */
 const ADMIN_KINDS: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica", "correo"])
-/** Lo que manda la clínica: siempre solo de Administración y se borra a los 30 días. */
-const CLINIC_SENT: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica", "correo"])
+/** Lo de la carga que se sube a mano: solo de Administración y se borra a los 30 días. */
+const CLINIC_SENT: ReadonlySet<ClientFileKind> = new Set(["archivo_clinica"])
 
 const fileSchema = z.object({
   id: z.string(),
@@ -67,7 +69,7 @@ const fileSchema = z.object({
   createdAt: z.string(),
   createdBy: z.object({ userId: z.string(), name: z.string() }).nullable(),
 })
-type ClientFile = z.infer<typeof fileSchema>
+export type ClientFile = z.infer<typeof fileSchema>
 
 const filesSchema = z.object({
   items: z.array(fileSchema),
@@ -77,6 +79,21 @@ const filesSchema = z.object({
 })
 
 export const clientFilesKey = (clientId: string) => ["admin", "client", clientId, "files"] as const
+
+/** Los documentos vigentes del cliente (los que quien mira puede ver). */
+export function useClientFiles(clientId: string, enabled = true) {
+  return useQuery({
+    queryKey: clientFilesKey(clientId),
+    enabled,
+    queryFn: async () =>
+      filesSchema.parse(await api<unknown>(`/api/admin/clients/${clientId}/files`)),
+  })
+}
+
+/** Lo que se puede subir: lo mismo que entra por correo (el servidor lo revisa por sus bytes). */
+export const CLIENT_FILE_ACCEPT =
+  "application/pdf,image/jpeg,image/png,image/webp,image/gif,.xlsx,.docx,.csv,text/csv"
+export const CLIENT_FILE_TYPES_HINT = "PDF, imagen, Excel, CSV o Word; hasta 10 MB"
 
 /** El enlace de descarga: la API responde con la dirección firmada de 15 minutos y deja auditoría. */
 export const clientFileHref = (fileId: string) => `${API_URL}/api/admin/clients/files/${fileId}`
@@ -101,11 +118,7 @@ export function ClientFilesTab({ clientId, isAdmin }: ClientTabProps) {
   const queryClient = useQueryClient()
   const [uploading, setUploading] = useState(false)
   const [toDelete, setToDelete] = useState<ClientFile | null>(null)
-  const files = useQuery({
-    queryKey: clientFilesKey(clientId),
-    queryFn: async () =>
-      filesSchema.parse(await api<unknown>(`/api/admin/clients/${clientId}/files`)),
-  })
+  const files = useClientFiles(clientId)
   const remove = useMutation({
     mutationFn: (file: ClientFile) =>
       api(`/api/admin/clients/files/${file.id}`, { method: "DELETE" }),
@@ -293,12 +306,12 @@ export function ClientFileUploadDrawer({
       </form.AppField>
       <form.AppField name="file">
         {(field) => (
-          <field.Control id="client-file" label="Archivo (PDF, JPG, PNG o WebP; hasta 10 MB)">
+          <field.Control id="client-file" label={`Archivo (${CLIENT_FILE_TYPES_HINT})`}>
             {(control) => (
               <Input
                 {...control.props}
                 type="file"
-                accept="application/pdf,image/jpeg,image/png,image/webp"
+                accept={CLIENT_FILE_ACCEPT}
                 onChange={(event) => {
                   field.handleChange(event.target.files?.[0] ?? null)
                   field.handleBlur()
@@ -311,7 +324,7 @@ export function ClientFileUploadDrawer({
       {isAdmin ? (
         CLINIC_SENT.has(chosen) ? (
           <p className="text-sm text-muted-foreground">
-            Lo que manda la clínica queda solo para Administración y se borra a los 30 días, como
+            Lo de la carga de datos queda solo para Administración y se borra a los 30 días, como
             dice el contrato de encargo.
           </p>
         ) : (

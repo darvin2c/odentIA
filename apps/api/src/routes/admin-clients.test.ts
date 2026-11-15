@@ -215,7 +215,8 @@ beforeAll(async () => {
       kairos,
       startTrial: startSaasTrial,
       panelUrlOf: () => "https://app.odentia.localhost",
-      invitationReplyToOf: (product) => `hola@${product === "dental" ? "odentia32.com" : "otra.test"}`,
+      invitationReplyToOf: (product) =>
+        `hola@${product === "dental" ? "odentia32.com" : "otra.test"}`,
       mailer: {
         send: async (message) => {
           mailAttempts += 1
@@ -866,6 +867,57 @@ describe("documentos", () => {
 
     expect((await call("DELETE", `/files/${file.id}`, ADMIN)).status).toBe(200)
     expect(objects.has(row?.objectKey ?? "")).toBe(false)
+  })
+
+  it("acepta lo mismo que llega por correo y lo adjunta a una respuesta, que sale con él", async () => {
+    const clientId = await newClient("Clínica Adjuntos (ficticia)", "adjuntos@andes.test")
+    const csv = new FormData()
+    csv.set("file", new File(["nombre;cita\nRosa;lunes\n"], "agenda.csv", { type: "text/csv" }))
+    const uploaded = await call("POST", `/${clientId}/files`, ADMIN, csv)
+    await expectStatus(uploaded, 201)
+    const file = (await json(uploaded)).data
+    expect(file).toMatchObject({ filename: "agenda.csv", contentType: "text/csv" })
+    // Un ZIP cualquiera con nombre de Excel no pasa.
+    const zip = new FormData()
+    zip.set(
+      "file",
+      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])], "lista.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    )
+    await expectStatus(await call("POST", `/${clientId}/files`, ADMIN, zip), 400)
+
+    const inbound = await ownerDb.transaction((tx) =>
+      ingestInboundEmail(tx as Db, {
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<adjuntos@andes.test>",
+        from: "adjuntos@andes.test",
+        fromName: "Luis Mamani",
+        to: "hola@odentia32.com",
+        subject: "¿Me mandan la agenda?",
+        text: "Hola",
+        receivedAt: new Date(),
+        senderVerified: true,
+      }),
+    )
+    expect(inbound.clientId).toBe(clientId)
+    const reply = await call("POST", `/inbound/${inbound.id}/reply`, ADMIN, {
+      body: "Va **adjunta**.",
+      fileIds: [file.id],
+    })
+    await expectStatus(reply, 201)
+    expect(sent.at(-1)?.attachments).toEqual([
+      { filename: "agenda.csv", content: expect.any(Uint8Array), contentType: "text/csv" },
+    ])
+    expect(sent.at(-1)?.html).toContain("<strong>adjunta</strong>")
+    await expectStatus(
+      await call("POST", `/inbound/${inbound.id}/reply`, ADMIN, {
+        body: "Otra",
+        fileIds: Array.from({ length: 6 }, () => file.id),
+      }),
+      400,
+    )
   })
 
   it("un archivo que no es lo que dice, uno muy grande o uno sin cliente no queda guardado", async () => {

@@ -175,6 +175,27 @@ describe("ingestInboundEmail", () => {
     ])
   })
 
+  it("lo que llega a hola@ con adjuntos se guarda: no es la carga", async () => {
+    const key = inboundAttachmentKey("pdf")
+    const result = await ingestInboundEmail(
+      ownerDb,
+      mail({
+        mailbox: "hola",
+        to: "hola@odentia32.com",
+        from: "rosa@contacto.test",
+        subject: "Contrato firmado",
+        attachments: [
+          { filename: "contrato.pdf", contentType: "application/pdf", size: 120, fileKey: key },
+        ],
+      }),
+    )
+    const [file] = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, result.fileIds[0] ?? ""))
+    expect(file).toMatchObject({ kind: "correo", adminOnly: true, deleteAfter: null })
+  })
+
   it("el mismo Message-ID entra una sola vez", async () => {
     const input = mail({ from: "rosa@contacto.test", subject: "Repetido" })
     const first = await ingestInboundEmail(ownerDb, input)

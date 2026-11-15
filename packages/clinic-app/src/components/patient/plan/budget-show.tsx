@@ -17,6 +17,7 @@ import { ChevronDown } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { apiFetchBytes } from "../../../lib/api"
 import { budgetPdfUrl, deliverBudgetApi, PLAN_QUERY_KEYS } from "../../../lib/budgets"
+import { RecommendedLine } from "./budget-recommended"
 import { BudgetSendButton } from "./budget-send"
 import { AnswerInPersonButton, BudgetAnswerDrawer } from "./next-step-action"
 
@@ -171,6 +172,7 @@ export function BudgetShowActions({
               Lo mismo que recibirá en su PDF. Mostrarlo no le envía nada. Si anotas su respuesta, queda entregado en
               consulta.
             </DialogDescription>
+            <RecommendedLine patientId={patientId} budgetId={budgetId} className="text-sm" />
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-muted/30">
             {pdf ? (

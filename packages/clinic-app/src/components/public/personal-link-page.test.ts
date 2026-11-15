@@ -210,3 +210,24 @@ describe("mientras dura la entrega", () => {
     expect(() => whatFollows(old as PersonalLinkView, { key: "datos", at: THURSDAY })).toThrow()
   })
 })
+
+// QA del 14 nov (B15): «Faltan 2: tipo de documento, número de documento; y unas preguntas de tu salud» se leía como 3.
+describe("la tarjeta de sus datos cuenta lo de su salud", () => {
+  it("dos datos y su salud: «Faltan 3»", () => {
+    const [datos] = pendingItems(
+      view({
+        consents: [],
+        toSchedule: [],
+        data: {
+          missing: [
+            { key: "docType", label: "Tipo de documento" },
+            { key: "docNumber", label: "Número de documento" },
+          ],
+          health: true,
+        },
+      }),
+    )
+    expect(datos?.badge).toBe("Faltan 3")
+    expect(datos?.text).toBe("Tipo de documento, número de documento; y unas preguntas de tu salud.")
+  })
+})

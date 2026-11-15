@@ -7,7 +7,7 @@ import { surface } from "./surface"
 /** La lista de Configuración: cuatro grupos con nombre y dos entradas sueltas al final. */
 const SETTINGS_GROUPS: Array<[string, string[]]> = [
   ["La clínica", ["Datos de la clínica", "Sedes", "Equipo", "Horarios y ausencias", "Protección de datos"]],
-  ["Atención", ["Especialidades", "Consentimientos"]],
+  ["Atención", ["Especialidades", "Consentimientos", "Fichas de consulta"]],
   ["Pacientes", ["Preguntas al paciente", "Portal del paciente"]],
   ["Ventas y cobros", ["Medios de pago y ticket", "Comisiones por profesional", "Etapas de venta"]],
   // Solo para quien ve Facturación (ADR 0065); la dueña la ve.

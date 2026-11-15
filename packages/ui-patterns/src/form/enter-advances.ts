@@ -15,7 +15,10 @@ const NOT_TYPED = new Set(["button", "submit", "reset", "checkbox", "radio", "fi
  * - En una respuesta de una línea, Enter no envía nunca, tampoco mientras el
  *   teclado compone una palabra (ahí solo la confirma y el foco no se mueve).
  * - En una opción de un grupo de radios, Enter no la marca (se marca con
- *   Espacio o con las flechas): sigue a la pregunta siguiente.
+ *   Espacio o con las flechas): sigue a la pregunta siguiente. Lo mismo en una
+ *   opción que es un botón que se queda apretado (`aria-pressed`: Sí, No, No sé,
+ *   Sexo del registro): un Enter repetido nunca contesta por la persona; se
+ *   elige tocándola o con Espacio.
  * - La parada siguiente es la de Tab, salvo lo marcado con `data-enter-skip`
  *   (un «Quitar respuesta»): Enter repetido no cae en un botón que cambie algo.
  * - En un texto largo Enter sigue siendo un salto de línea, y en un botón, su
@@ -24,7 +27,7 @@ const NOT_TYPED = new Set(["button", "submit", "reset", "checkbox", "radio", "fi
 export function advanceOnEnter(event: React.KeyboardEvent<HTMLElement>): void {
   const target = event.target
   if (event.key !== "Enter" || !(target instanceof HTMLElement)) return
-  const radio = target.getAttribute("role") === "radio"
+  const radio = target.getAttribute("role") === "radio" || target.hasAttribute("aria-pressed")
   if (!radio) {
     // Lo que ya atendió su propio control (un buscador que elige de su lista) no se toca.
     if (event.defaultPrevented) return

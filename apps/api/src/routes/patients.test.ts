@@ -481,6 +481,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
       activeConditions: unknown[]
       allergyReview: string | null
       allergySaidNo: { by: { kind: string }; at: string | null } | null
+      declaredAllergies: unknown[]
     }
   }
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
@@ -495,6 +496,8 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(receptionBody.data.allergyReview).toBe("recorded")
   // Y si un «No» lo dijo la persona, con quién fue: aquí las registró el equipo, así que no hay ninguno.
   expect(receptionBody.data.allergySaidNo).toBeNull()
+  // Lo que dijo la persona y nadie revisó, solo las alergias: aquí ninguna, porque las anotó el equipo.
+  expect(receptionBody.data.declaredAllergies).toEqual([])
   const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
     method: "GET",
   })
@@ -504,6 +507,7 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(cashierBody.data.activeAllergies).toEqual([])
   expect(cashierBody.data.allergyReview).toBeNull()
   expect(cashierBody.data.allergySaidNo).toBeNull()
+  expect(cashierBody.data.declaredAllergies).toEqual([])
 
   // Motivo/examen/diagnóstico ya no pertenecen a la entrevista.
   const forbidden = await app.request(`/patients/${patientId}/health`, {

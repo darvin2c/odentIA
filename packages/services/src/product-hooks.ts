@@ -1,12 +1,15 @@
 import {
   CORE_VITAL_KEYS,
   checkInterviewPregnancy,
+  commonInterviewEntries,
   declaredPregnancy,
   DENTAL_IMAGING_TYPES,
   DENTAL_MEDICATION_CATALOG,
   type DiagnosisSystemKey,
   type ImagingType,
+  type InterviewEntry,
   type MedicationCatalog,
+  type InterviewReading,
   type RegistrationAnswers,
   SUGGESTED_CONSENT_TEMPLATES,
   type SuggestedConsentTemplate,
@@ -15,6 +18,7 @@ import {
 import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
+import type { FormSchemaDef } from "./clinical-forms.js"
 import type { DocumentCheckFacts } from "./document-check.js"
 import { invalidField, validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
@@ -246,6 +250,13 @@ export interface ProductInterview {
    * dijo» de la atención (odentIA: «de pequeño» de un niño). Sin él, nada.
    */
   declaredLines?(health: DeclaredHealth): Array<{ label: string; value: string }>
+  /**
+   * La entrevista guardada en la copia de la historia, dato por dato y en el
+   * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
+   * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un
+   * embarazo guardado sin fecha y el día que la copia ya dice arriba. Vacío si nada se respondió.
+   */
+  record(answers: unknown, today: string, reading?: InterviewReading): InterviewEntry[]
 }
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
@@ -281,6 +292,7 @@ export const COMMON_INTERVIEW: ProductInterview = {
       ...(statement ? { embarazoLactancia: { embarazo: statement } } : {}),
     }
   },
+  record: commonInterviewEntries,
 }
 
 /** Lo que el producto revisa al emitir una receta, además de las alergias. */
@@ -377,6 +389,32 @@ export interface ProductDictation {
   ): Promise<string | null>
 }
 
+/** Una ficha de consulta que viene con el producto: la clínica nace con su copia, ya en uso. */
+export interface SuggestedFormTemplate {
+  /** La clave de su título: una ficha propia de la clínica con ese título no se duplica. */
+  key: string
+  title: string
+  /** Lo que anota, en una línea: se lee en «Fichas de consulta». */
+  description: string
+  /** El tipo de tratamiento cuya especialidad la ofrece en la atención (odentIA: «ortodoncia»). */
+  kind: string
+  schema: FormSchemaDef
+}
+
+/** Las fichas de consulta del producto (el formulario que llena el equipo en la atención). */
+export interface ProductForms {
+  /** Con las que nace cada clínica (odentIA: endodoncia, ortodoncia, odontopediatría y la de la norma). */
+  suggestions: readonly SuggestedFormTemplate[]
+  /**
+   * Las que se ofrecen por la edad: a quien tiene menos de `underYears` años, las de la
+   * especialidad que recibe `kind` (odentIA: odontopediatría a menores de 12). null: no ofrece por edad.
+   */
+  byAge: { underYears: number; kind: string } | null
+}
+
+/** Un producto que no trae fichas ni ofrece por edad. */
+export const NO_FORMS: ProductForms = { suggestions: [], byAge: null }
+
 export interface ProductHooks {
   /** El «dónde» del producto. */
   site: ProductSite
@@ -391,6 +429,8 @@ export interface ProductHooks {
   imagingStudy: string | null
   /** Los consentimientos que sugiere a la clínica, como borrador (odentIA: anestesia, exodoncia…). */
   consentSuggestions: readonly SuggestedConsentTemplate[]
+  /** Las fichas de consulta con que nace la clínica y las que ofrece por la edad. */
+  forms: ProductForms
   /** La «Entrevista de salud»: lo del producto. */
   interview: ProductInterview
   /** El examen físico de la atención. */
@@ -562,6 +602,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   imaging: DENTAL_IMAGING_TYPES,
   imagingStudy: "tomografia",
   consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
+  forms: NO_FORMS,
   interview: COMMON_INTERVIEW,
   examination: NO_EXAMINATION,
   vitals: CORE_VITAL_KEYS,

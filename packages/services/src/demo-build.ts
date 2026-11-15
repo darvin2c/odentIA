@@ -32,6 +32,7 @@ import { createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
 import { ensureClinicConsents, setProfessionalSpecialties } from "./clinical-forms.js"
+import { ensureClinicForms } from "./consultation-forms.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { reopenIfClosed } from "./conversations.js"
 import {
@@ -529,6 +530,8 @@ export async function buildDemo(
   )
   // Con sus consentimientos activos, como toda clínica nueva.
   await ensureClinicConsents(tx, orgId, demo.presenterUserId)
+  // Y con las fichas de consulta de su producto, sin mirar todavía.
+  await ensureClinicForms(tx, orgId)
   // Registro en línea activo, como lo tendría una clínica que presenta: sin él, a quien
   // escribe por primera vez Sofi no puede mandarle su enlace para reservar (ADR 0097).
   await savePatientRegistrationConfig(tx, orgId, demo.presenterUserId, {

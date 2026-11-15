@@ -778,8 +778,10 @@ describe("en dos pasos (ADR 0178)", () => {
     for (const previous of [null, "¿hay tareas por paciente?", { where: "Tareas" }, { question: 12 }, { question: "   " }]) {
       expect(await stateWith(previous), JSON.stringify(previous)).toBe("Pantalla: Inicio\nPregunta: ¿y cómo la creo?")
     }
-    // Sin los ids: uno al azar puede traer «987».
-    expect(JSON.stringify(await logOf(org), (key, value) => (/id$/i.test(key) ? undefined : value))).not.toMatch(/Elena|987|correo|tareas por paciente/)
+    // Sin los ids ni la hora: un id o los milisegundos de `createdAt` («…32.987Z») pueden traer «987» al azar.
+    expect(
+      JSON.stringify(await logOf(org), (key, value) => (/id$/i.test(key) || key === "createdAt" ? undefined : value)),
+    ).not.toMatch(/Elena|987|correo|tareas por paciente/)
   })
 
   it("cifras: la pregunta viaja a Jev y a quien redacta sin el monto, y no queda guardado", async () => {

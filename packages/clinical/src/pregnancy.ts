@@ -179,7 +179,10 @@ export function checkInterviewPregnancy(
   if (raw === undefined || raw === null) return { ok: true, value: answers }
   if (!isRec(raw) || (raw.estado !== "si" && raw.estado !== "no"))
     return { ok: false, error: "Embarazo: el estado es sí o no", field: `${at}.estado` }
-  if (!isDay(raw.fecha)) return { ok: false, error: "Embarazo: falta la fecha en que se dijo", field: `${at}.fecha` }
+  if (raw.fecha === undefined || raw.fecha === null || raw.fecha === "")
+    return { ok: false, error: "Embarazo: falta la fecha en que se dijo", field: `${at}.fecha` }
+  // Escrita pero imposible (un 30 de febrero): no es que falte, es que ese día no existe.
+  if (!isDay(raw.fecha)) return { ok: false, error: "Embarazo: esa fecha no existe", field: `${at}.fecha` }
   if (raw.fecha > today) return { ok: false, error: "Embarazo: la fecha no puede ser futura", field: `${at}.fecha` }
   const withWeeks = raw.estado === "si" && raw.semanas !== undefined && raw.semanas !== null && raw.semanas !== ""
   if (withWeeks && !isWeeks(raw.semanas))

@@ -246,6 +246,17 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** la paciente puso dolor 8; un clic del equipo lo dejó en 6 y la atención mostró «¿Cuánto te duele? 6 · desde su enlace» (mesa del 13 nov).
 **Caso:** el 13 de marzo la paciente responde dolor 8 y «alérgica a la penicilina» en texto libre. El 14 el odontólogo pulsa «Pasar a Antecedentes»: la atención, Documentos y la Historia dicen 8, y el aviso no afirma haber pasado una alergia que no pasó.
 
+## V-DAT-07 La copia de la historia dice cuándo se dijo, cuándo se revisó y quién corrigió
+**Aparece en:** el PDF y el FHIR de «Descargar historia» (`S/patient-record.ts`, `S/form-record.ts`), la Historia (`S/patient-history.ts`), Antecedentes y la franja.
+**A mano:** por cada dato declarado, tres momentos: dicho (`submitted_at` o `said_at`), revisado (quién y cuándo) y corregido (quién, cuándo, qué y por qué). El PDF y el FHIR de la misma copia dan las mismas horas.
+- [ ] `QuestionnaireResponse.authored` es la hora en que la persona respondió, no la de la revisión, y coincide con el PDF y con la Historia.
+- [ ] La copia dice quién revisó los antecedentes y cuándo, como la ficha.
+- [ ] Un «dijo que no» sigue en la copia después de revisar.
+- [ ] Una medicina suspendida dice hasta cuándo la tomó en el PDF, como en el FHIR.
+
+**Ya falló:** el FHIR fechaba el cuestionario a la hora de su revisión; tras «Revisar antecedentes», el «no» de la paciente a enfermedades desaparecía de la copia (QA de la entrega 2, 14 nov).
+**Caso:** se registra el 13 con «enfermedades: no» y un cuestionario a las 09:32; el 14 a las 09:35 se revisa. Las dos copias dicen respondió 13/09:32, revisó 14/09:35, y «Enfermedades: no se le preguntó en la clínica; dijo que no el 13…».
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.
@@ -338,3 +349,13 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 - [ ] (V-RAS-05) La línea de Actividad dice con qué alcance se dio (qué rol, cuánto tiempo), no una frase igual para todos.
 - [ ] «¿Cómo le doy…?» y «¿Cómo le quito…?» de una misma función reciben cada una su respuesta también sin el modelo (con el buscador de respaldo).
 - [ ] Un aviso de la franja que debe ver todo el equipo no queda plegado detrás de otro aviso de mayor nivel sin decirlo en la línea visible.
+
+## V-DAT-07 Lo que dijo el paciente, en todas partes (QA de la entrega 6, 14 nov 2026)
+- [ ] Cada pregunta del registro y del enlace aparece en «Ver declaración original» con las mismas palabras; ningún título queda vacío.
+- [ ] Lo que «Preguntas al paciente» dice que «sale arriba de su ficha y de la atención» sale en las dos, también el corazón y la anestesia.
+- [ ] Lo que el paciente dijo de la entrevista (corazón, anestesia, tabaco, lactancia) lleva «lo dijo ella · sin revisar» en Antecedentes, como alergias, enfermedades y medicinas.
+- [ ] Unir un registro repetido con «Sí, sin cambios» no cambia la salud sin decirlo, y lo que entra queda como dicho por el paciente, no por quien pulsó.
+- [ ] Una pregunta «¿tomas o tomaste…?» no deja una medicina vigente a quien dijo «ya no».
+- [ ] Cambiar «Preguntas al paciente» deja qué pregunta pasó de qué a qué.
+- [ ] La Ayuda distingue lo que respondió al registrarse o en su enlace del cuestionario de «Fichas de consulta».
+- **Caso:** el 14 el equipo anota «fuma, 10 o más». El mismo día la paciente responde por su enlace lactancia «Sí» y, minutos después, se registra otra vez diciendo «Lo dejé» y lactancia «No». Recepción pulsa «Sí, sin cambios». La ficha dice quién dijo cada cosa y cuándo, y la atención lo muestra.

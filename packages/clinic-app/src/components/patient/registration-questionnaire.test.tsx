@@ -39,7 +39,7 @@ describe("las preguntas de salud nuevas en el registro y en su enlace", () => {
       },
     })
     expect(html).toContain("para que la sangre no forme coágulos")
-    expect(html).not.toContain("¿Eres alérgico a algún medicamento o material?")
+    expect(html).not.toContain("¿Tienes alergia a algún medicamento o material?")
     expect(html).not.toContain("¿Tienes alguna de estas enfermedades?")
   })
 })
@@ -66,11 +66,11 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     const html = childLink(6)
     expect(html).toContain("La salud de Thiago")
     expect(html).toContain("Lo respondes tú, Carla.")
-    expect(html).toContain("¿Thiago es alérgico a algún medicamento o material?")
+    expect(html).toContain("¿Thiago tiene alergia a algún medicamento o material?")
     expect(html).toContain("¿Thiago tiene alguna de estas enfermedades?")
     expect(html).toContain("Por ejemplo, asma, convulsiones o problemas de sangrado.")
     expect(html).not.toMatch(/diabetes, presión alta/i)
-    expect(html).not.toContain("¿Eres alérgico")
+    expect(html).not.toContain("¿Tienes alergia")
     // Al niño no se le pregunta embarazo ni tabaco.
     expect(html).not.toContain("embarazada")
     expect(html).not.toContain("fuma?")
@@ -101,6 +101,16 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
   })
 
+  it("en el enlace de Thiago, la casilla del aviso nombra los datos de Thiago y los de Carla, como el registro", () => {
+    declareProduct(bareProduct("dental"))
+    const fill = { missing: new Set<string>(), health: true, hasRepresentative: true, firstName: "Thiago", age: 6, clinicName: "Dental Smile", privacy: true }
+    const child = page({ fill: { ...fill, respondentFirstName: "Carla" } }).replace(/<[^>]+>/g, "|")
+    expect(child).toContain("Acepto el aviso de privacidad de Dental Smile para los datos de Thiago y los míos.")
+    // Quien abre su propio enlace acepta por sí.
+    const own = page({ fill: { ...fill, firstName: "Marta", age: 40, respondentFirstName: null } }).replace(/<[^>]+>/g, "|")
+    expect(own).toContain("Acepto el aviso de privacidad de Dental Smile.")
+  })
+
   it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(8)
@@ -125,7 +135,7 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
         respondentFirstName: "Carla",
       },
     })
-    expect(html).toContain("¿Thiago es alérgico")
+    expect(html).toContain("¿Thiago tiene alergia")
     expect(html).not.toContain("¿Quién le cepilla los dientes?")
     expect(html).not.toContain("biberón")
     expect(html).not.toContain("fuma?")

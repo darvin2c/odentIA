@@ -110,8 +110,13 @@ describe("el embarazo declarado, con la semana de hoy y su caducidad", () => {
     })
     expect(checkInterviewPregnancy({ embarazoLactancia: { embarazo: { estado: "si" } } }, "2026-11-13")).toMatchObject({
       ok: false,
+      error: "Embarazo: falta la fecha en que se dijo",
       field: "embarazoLactancia.embarazo.fecha",
     })
+    // Un 30 de febrero no falta: no existe (QA del 14 nov).
+    expect(
+      checkInterviewPregnancy({ embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-02-30" } } }, "2026-11-13"),
+    ).toMatchObject({ ok: false, error: "Embarazo: esa fecha no existe", field: "embarazoLactancia.embarazo.fecha" })
     expect(
       checkInterviewPregnancy({ embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-11-14" } } }, "2026-11-13"),
     ).toMatchObject({ ok: false, field: "embarazoLactancia.embarazo.fecha" })

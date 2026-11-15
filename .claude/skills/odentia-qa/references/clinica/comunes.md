@@ -74,6 +74,10 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 **Ya falló:** la declaración no se veía en el enlace y faltaba la pieza (PR 479); un documento mandado por enlace en vez del PDF (PR 501).
 **Fuentes:** ADR 0037, 0101, 0116, 0148 y 0156; Ley 27337, Título Preliminar, art. I (niño hasta cumplir 12 años; por verificar); política sobre chupones de la AAPD (dejar la succión no nutritiva hacia los 36 meses; por verificar).
 
+**Sumado por la QA de la entrega 6 (14 nov 2026):**
+- [ ] Quien responde por otra persona lee también las respuestas en tercera persona («Nunca fumó», «Fuma», «Lo dejó»).
+- [ ] A un menor de 12 no se le pregunta si fuma ni si toma alcohol. Caso: «Mateo, 7 años, registrado por su mamá».
+
 ## P-COM-05 Papeles emitidos y su comprobación
 
 **Dónde:** las rutas de impresión (`R/_org/patients.$patientId.*.print.tsx`: consentimiento, receta, orden y descanso; el odontograma en `apps/dental-clinic`), la tabla `issued_paper` y `R/public/comprobar.$token.tsx`.
@@ -94,6 +98,7 @@ Lo que rodea a la atención y es igual en odentIA, latidIA y vistIA: lo que hay 
 - [ ] Un pedido de la persona (copia, corrección o borrado) se atiende y deja rastro.
 - [ ] La historia bloqueada no se abre. Administración la abre con motivo, para leer durante una hora y sin cambiar nada, y queda en la auditoría.
 - [ ] «Vuelve a atenderse» desbloquea la ficha entera y queda registrado.
+- [ ] La copia lleva la filiación que pide la NTS 139 (domicilio incluido, si está guardado), la hora de emisión y quién la entregó.
 
 **Ya falló:** lo de permisos y datos no se escribe aquí, porque el repositorio es público: está en los informes privados de `~/odentia-qa/`.
 **Fuentes:** Ley 29733 (protección de datos personales) y su reglamento; NTS 139-MINSA; ADR 0080.
@@ -206,12 +211,15 @@ No tiene camino en el código.
 - [ ] Lo declarado se puede corregir aparte antes de marcarlo revisado.
 - [ ] La atención firmada muestra el formulario con sus respuestas (no «Sin registrar: documentos») y la Historia lo lista como hecho, no bajo «Se indicó».
 - [ ] La Historia deja leer las respuestas sin ir a Documentos.
-- [ ] La copia de la historia (PDF) y la exportación FHIR traen los formularios finalizados con sus preguntas y respuestas. Hoy no los traen.
+- [ ] La copia de la historia (PDF) y la exportación FHIR traen las fichas finalizadas con sus preguntas y respuestas.
+- [ ] Lo enviado por la persona y aún no revisado sale en la copia marcado «sin revisar»: no se pierde entre «declaración» y «formulario».
+- [ ] La corrección de lo que envió la persona lleva su motivo, si se dijo, en la ficha, la copia y el FHIR (`Provenance.reason`).
 - [ ] El formulario se puede imprimir o llevar en PDF con la hoja de la clínica.
 - [ ] Lo que se anota ahí (la pieza, la vitalidad, la clase de Angle) no queda aislado: la pieza del formulario aparece en la historia de esa pieza, y en la atención siguiente se ve el último formulario de ese tipo.
 - [ ] Un formulario que se repite (el control de ortodoncia) puede empezar con las respuestas del anterior.
 - [ ] Una escala con puntaje (ansiedad dental de 5 preguntas, índice de higiene) muestra su total.
 
+**Caso:** gestante de 24 semanas, alérgica a penicilina, con aspirina, registrada sola. Atención con evaluación de endodoncia, adenda, cuestionario del enlace corregido con motivo y revisado, una atención anulada con su ficha, y la copia. En la copia se distingue lo dicho, lo revisado, lo corregido y lo anulado.
 **Fuentes:** NTS 139-MINSA/2018/DGAIN (5.3.3: nada se elimina, la corrección es un registro nuevo con su motivo); HL7 FHIR R4 `Questionnaire` y `QuestionnaireResponse`, y SDC para la extracción a `AllergyIntolerance`, `Condition` y `MedicationStatement`; formulario de historia de salud de la ADA (actualizar en cada visita).
 
 ## P-COM-18 Sospecha de violencia o maltrato
