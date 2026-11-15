@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { byFormOrder, changesWritten, proposesValue, signOrder } from "./clio-form-proposals"
+import { byFormOrder, changesWritten, type FormTarget, proposesValue, reread, signOrder } from "./clio-form-proposals"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
@@ -70,8 +70,11 @@ export const confirmable = (item: DictationSuggestion) => item.status === "lista
  * escrito, que viene desmarcada (`markedByDefault`).
  */
 export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && proposesValue(item))
-/** Al firmar viene marcado lo que se puede confirmar, menos lo que cambia lo escrito a mano: eso lo decide una persona. */
-export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && !changesWritten(item)
+/**
+ * Al firmar viene marcado lo que se puede confirmar, menos lo que cambia lo escrito a mano y lo de la
+ * segunda lectura, que quedó por revisar: eso lo decide una persona.
+ */
+export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && !changesWritten(item) && !reread(item)
 /** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
 const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
 /**
@@ -133,6 +136,8 @@ interface SegmentResponse {
     unused: string[]
     /** Por qué no se usó una frase, cuando se sabe (lo de una ficha lo dice el servidor). */
     unusedWhy?: Record<string, string>
+    /** La pregunta de la ficha que nombra cada frase: «Usar en Percusión». */
+    unusedFor?: Record<string, FormTarget[]>
     /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
     alreadyOnFile?: string[]
     alreadyDone?: string[]
@@ -147,9 +152,11 @@ export interface UnusedDictation {
   unnamed: boolean
   /** Por qué no se usó cada frase, cuando se sabe. */
   why: Record<string, string>
+  /** La pregunta de la ficha que nombra cada frase, para abrirla con la frase al lado. */
+  targets: Record<string, FormTarget[]>
 }
 
-const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false, why: {} }
+const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false, why: {}, targets: {} }
 
 export type DictationMode = "off" | "listening" | "paused"
 
@@ -277,6 +284,7 @@ export function useDictationSession({
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
           unnamed: current.unnamed || data.unused.length === 0,
           why: { ...current.why, ...(data.unusedWhy ?? {}) },
+          targets: { ...current.targets, ...(data.unusedFor ?? {}) },
         }))
       }
       await refresh()

@@ -1,7 +1,7 @@
 import { Button, Checkbox } from "@odentia/ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { productUi } from "../../product/product-ui"
-import { changesWritten, proposedWords, signOrder } from "./clio-form-proposals"
+import { changesWritten, proposedWords, reread, signOrder } from "./clio-form-proposals"
 import {
   confirmableAtSign,
   DICTATION_KIND_LABEL,
@@ -141,7 +141,7 @@ export function DictationSignList({
                     {/* Una respuesta de ficha dice de cuál ficha es (puede haber dos) y lo que se dijo. */}
                     {form && typeof item.payload["formTitle"] === "string" ? item.payload["formTitle"] : DICTATION_KIND_LABEL[item.kind]}
                     {form && item.sourceText ? ` · dijiste «${item.sourceText}»` : ""}
-                    {can && !checked ? (changesWritten(item) ? " · cambia lo que ya escribiste: márcala solo si va" : " · desmarcada: no entra") : ""}
+                    {can && !checked ? (changesWritten(item) ? " · cambia lo que ya escribiste: márcala solo si va" : reread(item) ? " · por revisar: márcala solo si va" : " · desmarcada: no entra") : ""}
                   </span>
                   {can && checked && session.noteAddsTo(item) ? <span className="text-muted-foreground">{session.noteAddsTo(item)}</span> : null}
                   {can && item.note ? <span className="text-warning">{item.note}</span> : null}

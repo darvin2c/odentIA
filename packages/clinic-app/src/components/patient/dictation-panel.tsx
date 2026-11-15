@@ -21,7 +21,7 @@ import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { answersWords, formsToStartWords, useFormsToStart } from "./clio-form-proposals"
+import { answersWords, formsToStartWords, useClioFormProposals, useFormsToStart } from "./clio-form-proposals"
 import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type DictationSuggestion, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
@@ -576,12 +576,17 @@ export function DictationPanel({
 /** Cuántas frases no usadas se muestran en el aviso; el resto sigue marcado en «Lo dictado». */
 const UNUSED_SHOWN = 3
 
+/** El rótulo de una pregunta sin lo de entre paréntesis, para el botón: «Usar en Clase molar derecha». */
+const shortLabel = (label: string) => label.replace(/\s*\([^)]*\)/g, "").trim() || label
+
 /**
  * «No pude usar esto»: lo que el asistente no pudo ordenar de lo dictado, con
  * la frase tal cual (issue 135). Se queda hasta «Entendido»; lo de las pausas
- * siguientes se suma.
+ * siguientes se suma. La frase que parece de una pregunta de la ficha lleva
+ * «Usar en…»: abre esa pregunta con la frase al lado, sin llenar nada.
  */
-function UnusedNotice({ session }: { session: DictationSession }) {
+export function UnusedNotice({ session }: { session: Pick<DictationSession, "unused" | "dismissUnused"> }) {
+  const clio = useClioFormProposals()
   const { phrases, unnamed } = session.unused
   if (phrases.length === 0 && !unnamed) return null
   const rest = phrases.length - UNUSED_SHOWN
@@ -593,11 +598,33 @@ function UnusedNotice({ session }: { session: DictationSession }) {
           <p className="font-semibold text-warning">
             {phrases.length ? "No pude usar esto de lo que dictaste" : "No pude usar una parte de lo que dictaste"}
           </p>
-          {phrases.slice(0, UNUSED_SHOWN).map((phrase) => (
-            <p key={phrase} className="[overflow-wrap:anywhere]">
-              «{phrase}»{session.unused.why[phrase] ? <span className="text-muted-foreground"> · {session.unused.why[phrase]}</span> : null}
-            </p>
-          ))}
+          {phrases.slice(0, UNUSED_SHOWN).map((phrase) => {
+            const targets = clio ? (session.unused.targets[phrase] ?? []) : []
+            return (
+              <div key={phrase} className="flex flex-col gap-1">
+                <p className="[overflow-wrap:anywhere]">
+                  «{phrase}»{session.unused.why[phrase] ? <span className="text-muted-foreground"> · {session.unused.why[phrase]}</span> : null}
+                </p>
+                {targets.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {targets.map((target) => (
+                      <Button
+                        key={`${target.responseId}:${target.fieldId}`}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-auto min-h-11 whitespace-normal text-left sm:min-h-8"
+                        aria-label={`Usar «${phrase}» en «${target.label}»`}
+                        onClick={() => clio?.openAt({ ...target, said: phrase })}
+                      >
+                        Usar en {shortLabel(target.label)}
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
           {rest > 0 ? <p className="text-muted-foreground">y {plural(rest, "frase más", "frases más")}</p> : null}
           <p className="text-warning">Dilo de nuevo o regístralo a mano. {phrases.length ? "Sigue marcado en «Lo dictado»." : "Sigue en «Lo dictado»."}</p>
         </div>
