@@ -7,6 +7,7 @@
  * deduce quién fue por quién figura hoy como su representante.
  */
 import {
+  changedWhenWords,
   type HealthDeclarant,
   KINSHIP_LABELS,
   MEDICATION_CLASSES,
@@ -86,11 +87,7 @@ export function declaredMarkWords(by: HealthDeclarant, at: string | null | undef
  * la atiende.
  */
 export function changedMarkWords(by: HealthDeclarant, at: string | null | undefined, sex: Sex): string {
-  const day = at ? shortDay(at) : ""
-  const when = day ? ` el ${day}` : ""
-  if (by.kind !== "representative") return `Dijo que cambió${when}`
-  const who = whoWords(by, sex)
-  return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+  return changedWhenWords(by, at ? shortDay(at) : "", sex)
 }
 
 type ChangedRow = { id?: string | undefined; name?: string | null; substance?: string | null; dose?: string | null; atcCode?: string | null }

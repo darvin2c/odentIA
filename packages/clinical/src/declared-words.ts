@@ -62,6 +62,18 @@ export function saidWhenWords(by: HealthDeclarant, day: string, sex: Sex): strin
 }
 
 /**
+ * Lo vigente que volvió a responder sin nombrarlo (entrega 10): «Dijo que cambió el 14 nov», «Su
+ * madre, Carla, dijo que cambió el 14 nov». Las mismas palabras en la ficha y en la copia.
+ * `day`: el día ya en palabras, o vacío si no consta.
+ */
+export function changedWhenWords(by: HealthDeclarant, day: string, sex: Sex): string {
+  const when = day ? ` el ${day}` : ""
+  if (by.kind !== "representative") return `Dijo que cambió${when}`
+  const who = whoWords(by, sex)
+  return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+}
+
+/**
  * El «No» que marcó quien declaró: «Dijo que no», «Su madre dijo que no». No es
  * el «niega» que anota un profesional cuando se lo pregunta.
  */

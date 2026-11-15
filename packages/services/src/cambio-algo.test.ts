@@ -9,7 +9,7 @@ import { patient, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import { createRoom } from "./appointments.js"
 import { beforeVisitStatus, healthToReviewOf, receptionHealthStatus } from "./before-visit.js"
 import { issuePersonalLink } from "./booking-links.js"
@@ -22,7 +22,9 @@ import {
   recordHealthDeclaration,
   savePatientHealth,
 } from "./clinical.js"
+import { DocumentKit } from "./document-kit.js"
 import { healthCheckOf } from "./health-check.js"
+import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
 import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { createPatient, patientPersonId } from "./patients.js"
 import { personalLinkRef } from "./personal-link-token.js"
@@ -356,4 +358,32 @@ it("lo que anotó el equipo no sale como «Declaró datos de su salud»", async 
     await initializeDeclaredPatientHealth(tx, ORG, ana.id, SAID_BEFORE, f.actor)
   })
   expect(await f.run((tx) => healthToReviewOf(tx, ORG, ana.id))).toBeNull()
+})
+
+// Revisión final del 15 nov (dev H2): la copia daba los anticoagulantes de antes como «Medicamento…
+// activo». Lo que no volvió a nombrar sale como «Antes», con quién dijo que cambió; en FHIR, `unknown`.
+it("la copia no da lo de antes como vigente: «Antes: Warfarina 5 mg · dijo que cambió»", async () => {
+  const f = await clinicalFixture()
+  const marta = await martaBack(f)
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, marta.link.token, {
+      data: {},
+      healthCheck: "cambio",
+      health: { ...SAID_BEFORE, anticoagulants: { state: "recorded", detail: "Apixabán 5 mg" } },
+    }),
+  )
+  const record = await f.run((tx) => loadPatientRecord(tx, ORG, marta.patientId))
+  const lay = vi.spyOn(DocumentKit.prototype, "lay")
+  await renderPatientRecordPdf(record, record.clinic)
+  const printed = JSON.stringify(lay.mock.calls.map((call) => call[0]))
+  lay.mockRestore()
+  expect(printed).toMatch(/Antes: Warfarina 5 mg[^"]* · dijo que cambió el /)
+  expect(printed).not.toContain("Medicamento: Warfarina 5 mg")
+  expect(printed).toContain("Medicamento: Apixabán 5 mg")
+  const statements = (patientRecordFhirBundle(record) as { entry: Array<{ resource: Record<string, unknown> }> }).entry
+    .map((entry) => entry.resource)
+    .filter((resource) => resource.resourceType === "MedicationStatement")
+  const warfarin = statements.find((resource) => (resource.medicationCodeableConcept as { text?: string })?.text === "Warfarina 5 mg")
+  expect(warfarin?.status).toBe("unknown")
+  expect(JSON.stringify(warfarin?.note)).toContain("Dijo que cambió el ")
 })
