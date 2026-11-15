@@ -256,7 +256,7 @@ Su catálogo es `catalogos/medidas.md`: las tareas frecuentes con sus pasos medi
 
 **Cuenta y ancho:** los de cada tarea que revisa.
 
-Entra al final y trabaja sobre lo que a las otras voces les costó. Lee sus informes y capturas y elige de 3 a 5 tareas con más tropiezos. Repite cada una y mide:
+Entra al final. Recorre todas las pantallas que tocó el cambio o el área, de punta a punta y en cada ancho que corresponda. Además lee los informes y capturas de las otras voces y repite las 3 a 5 tareas con más tropiezos. En cada tarea mide:
 
 - Pantallas, pestañas, cajones y clics hasta terminar.
 - Cuántas veces la persona sale de donde estaba y vuelve.
@@ -269,6 +269,7 @@ Después revisa la tarea contra esta lista, y cada falla es un hallazgo:
 - **Fluido:** ¿algo interrumpe la atención, obliga a cambiar de pantalla o pide decidir sin necesidad?
 - **Intuitivo:** ¿lo frecuente se descubre sin explicación? ¿Lo poco frecuente está a mano sin estorbar? ¿Las palabras son las de quien lo usa?
 - **Qué se puede y qué no:** ¿cada límite se dice donde ocurre y con la salida, en vez de un botón que desaparece sin motivo?
+- **En su sitio:** jerarquía visual (lo importante arriba y a la vista), alineación, espaciado, densidad, agrupación y orden en que se lee. ¿Cada cosa está donde la persona la busca? ¿Algo sobra o compite?
 - **Estados:** vacío, cargando, error, a medias y hecho. ¿Cada uno se ve y se distingue? ¿Lo pendiente se distingue de lo confirmado?
 - **Recuperación:** ¿se conserva el borrador? ¿Se puede deshacer o corregir sin rehacer todo?
 - **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral. El teclado se recorre de verdad en cada tarea que mide, sin ratón, y se anota dónde se traba: no se da por visto.
@@ -280,7 +281,7 @@ Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra 
 - **Posible de verdad.** Antes de proponerla, comprueba en el código que el rol tiene el permiso y que el servicio ya existe. Si algo falta, lo dice.
 - **Menos, no más.** Quita pasos, decisiones o ruido. No agrega botones por agregar.
 
-Devuelve hasta 5 propuestas. Cada una dice la tarea y quién la hace; cómo es hoy, con pasos, saltos y captura; la propuesta, con dónde va y qué componente usa; cuánto cambia («de 4 pantallas a 1», «de 14 clics a 3»); si es chica o mediana; y qué voz tropezó ahí. Si la tarea ya es simple, lo dice y no propone nada.
+Siempre devuelve entre 3 y 5 propuestas de mejora de diseño, aunque todo funcione: flujo, jerarquía, textos, estados o pulido visual. Van ordenadas por valor sobre costo. Cada una dice la tarea y quién la hace; cómo es hoy, con pasos, saltos y captura; la propuesta, con dónde va y qué componente usa; cuánto cambia («de 4 pantallas a 1», «de 14 clics a 3»); si es chica o mediana; y qué voz tropezó ahí. Si un área ya está muy bien, igual propone el pulido que la llevaría a mejor. Volver sin propuestas es un hallazgo sobre la propia revisión, no un resultado.
 
 ### En la mesa
 
@@ -291,4 +292,4 @@ No lee servicios ni permisos: eso es de desarrollo, y lo que su propuesta supong
 - **Entre las dos vueltas, arma la propuesta.** Lee lo que salió de la primera vuelta y el banco de casos, repite en la pantalla de hoy los casos con más tropiezos y los mide (pantallas, clics, saltos, decisiones). Devuelve una o dos formas de resolverlo. Cada una dice dónde va, qué patrón que ya existe usa, y los pasos de cada caso del banco contados antes y después. Dice cuál recomienda y qué pierde la otra. Sus giras: la del teclado, siempre, y la del error o la de la interrupción.
 - **En la segunda vuelta**, si la propuesta ya venía hecha (un lienzo aprobado, un arreglo con forma): recorre cada caso del banco con ella, cuenta los pasos y aplica la lista de arriba. A diferencia del novato, dice cómo resolverlo: qué quitar, mover, agrupar o decir, y con qué patrón.
 
-Si la tarea ya es simple, lo dice y no propone nada.
+Igual que en la app: si la tarea ya es simple, propone el pulido que la mejoraría; sin propuestas es un hallazgo sobre la revisión.
