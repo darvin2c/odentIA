@@ -19,6 +19,7 @@ vi.mock("../../lib/clinical-forms", async (original) => ({
 }))
 
 const { ResponseDetail } = await import("./formularios-tab")
+const { ClioFormProposalsContext } = await import("./clio-form-proposals")
 
 beforeAll(() => {
   window.ResizeObserver ??= class {
@@ -162,6 +163,91 @@ describe("salir de un formulario que se guarda solo", () => {
     await screen.findByText("Cerrado")
     await waitFor(() => expect(update).toHaveBeenCalledTimes(2))
     expect(update.mock.calls[1]?.[1].answers.intensidad).toBe(7)
+  })
+})
+
+// QA de la entrega 11 (14 nov): tras confirmar lo que propuso Clío, la respuesta siguiente a mano daba
+// 409 «Otra pestaña guardó…» y no se guardaba: la base del guardado no tenía lo confirmado.
+describe("lo que entra a la ficha desde fuera del panel", () => {
+  it("lo confirmado de Clío pasa a la base del guardado: lo siguiente a mano se guarda sin chocar", async () => {
+    update.mockImplementation(async (_id: string, body: { answers: Record<string, unknown> }) => ({ data: { ...response, answers: body.answers, rejected: {} } }))
+    const empty = { ...response, answers: { intensidad: null, hallazgos: null } }
+    const { rerender } = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResponseDetail response={empty} canWrite onChanged={async () => {}} />
+      </QueryClientProvider>,
+    )
+    await screen.findByLabelText(/Intensidad del dolor/)
+    // Clío propuso 6 y se confirmó: la lista trae la ficha con el 6.
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResponseDetail response={{ ...empty, answers: { intensidad: 6, hallazgos: null } }} canWrite onChanged={async () => {}} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect((screen.getByLabelText(/Intensidad del dolor/) as HTMLInputElement).value).toBe("6"))
+    fireEvent.change(screen.getByLabelText("Hallazgos"), { target: { value: "Percusión positiva" } })
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    expect(update.mock.calls[0]?.[1].baseAnswers).toMatchObject({ intensidad: 6 })
+    expect(update.mock.calls[0]?.[1].answers).toMatchObject({ intensidad: 6, hallazgos: "Percusión positiva" })
+  })
+})
+
+// Verificación de la entrega 11 (14 nov): la corrección por voz de una respuesta ya escrita se
+// descartaba sola al abrir la ficha, y el doble toque en «Confirmar» llegaba dos veces al servidor.
+describe("lo que propone Clío en la ficha", () => {
+  const proposal = (payload: Record<string, unknown>) => ({
+    id: "s1",
+    kind: "ficha" as const,
+    payload: { responseId: "r1", fieldId: "intensidad", ...payload },
+    sourceText: "corrijo, la intensidad es seis",
+    status: "lista" as const,
+    note: null,
+    summary: "",
+    voice: null,
+    removal: null,
+  })
+  const withClio = (items: ReturnType<typeof proposal>[], clio: { accept?: () => Promise<void>; discard?: () => void } = {}) => {
+    const value = {
+      items,
+      accept: clio.accept ?? (async () => {}),
+      discard: clio.discard ?? (() => {}),
+      restore: () => {},
+      busy: false,
+      setFormOpen: () => {},
+    }
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ClioFormProposalsContext.Provider value={value}>
+          <ResponseDetail response={response} canWrite onChanged={async () => {}} />
+        </ClioFormProposalsContext.Provider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it("la que corrige lo ya escrito no se descarta sola: dice lo que hay y «Confirmar» la cambia", async () => {
+    const discard = vi.fn()
+    withClio([proposal({ value: 6, replaces: 8 })], { discard })
+    await screen.findByText(/ya dice «8»/)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(discard).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /Confirmar 6 en/ })).toBeTruthy()
+  })
+
+  it("lo que otra persona escribió después sí la descarta", async () => {
+    const discard = vi.fn()
+    withClio([proposal({ value: 6, replaces: 5 })], { discard })
+    await waitFor(() => expect(discard).toHaveBeenCalledTimes(1))
+  })
+
+  // El doble toque real (dos clics antes de volver a pintar) no se reproduce aquí: lo ve el verificador.
+  it("el doble toque en «Confirmar» confirma una vez", async () => {
+    const accept = vi.fn(() => new Promise<void>(() => {}))
+    withClio([proposal({ fieldId: "hallazgos", value: 6 })], { accept })
+    const button = await screen.findByRole("button", { name: /Confirmar 6 en/ })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(accept).toHaveBeenCalledTimes(1)
   })
 })
 

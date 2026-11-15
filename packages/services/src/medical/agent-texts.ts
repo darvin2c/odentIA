@@ -75,6 +75,14 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
           tools: [],
         },
         {
+          id: "fichas",
+          label: "Fichas de consulta",
+          description:
+            "En la ficha que ya empezó, propone las respuestas que dictó (sí o no, una opción o un número). Cada una se confirma en su pregunta; lo que no alcanza para elegir lo elige el médico, y lo ya escrito no lo cambia.",
+          fixed: true,
+          tools: [],
+        },
+        {
           id: "descanso",
           label: "Descanso médico",
           description:
@@ -83,9 +91,9 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
           tools: [],
         },
       ],
-      sees: "Lo que el médico dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Los servicios de la clínica y la lista de diagnósticos, para reconocer lo dictado.",
+      sees: "Lo que el médico dicta en esa atención. Las sugerencias de ese dictado que aún no decide, para entender una corrección dicha en voz alta. Las preguntas de las fichas que ya empezó en esa atención y lo que ya dicen. Los servicios de la clínica y la lista de diagnósticos, para reconocer lo dictado.",
       notSees:
-        "El resto de la historia clínica ni las atenciones anteriores. Conversaciones ni caja.",
+        "El resto de la historia clínica, las fichas de otras atenciones ni las atenciones anteriores. Conversaciones ni caja.",
       never:
         "Guardar sin que el médico confirme. Firmar o cerrar la atención. Diagnosticar por su cuenta. Escuchar sin que el médico pulse «Dictar». Tocar atenciones de otros profesionales.",
       confirms: "El médico que lleva la atención: confirma cada sugerencia y firma.",

@@ -396,6 +396,31 @@ it("en el control, la ficha de hoy trae la anterior del mismo tipo, aunque la pl
   expect(offer?.previous?.responseId).toBe(initial.id)
 })
 
+// QA del 14 nov (E25): la ficha que quedó a medias al firmar también es «la anterior» del control.
+it("la ficha que quedó a medias en una atención firmada es la anterior del control, y se dice", async () => {
+  const c = await clinic()
+  const template = async () =>
+    (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find((row) => row.key === "ficha-de-ortodoncia")!
+  const first = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  const halfDone = await c.run(async (tx) =>
+    createFormResponse(tx, c.orgId, c.actor, {
+      templateId: (await template()).id,
+      patientId: c.patient.id,
+      encounterId: first.id,
+      answers: { overjet: 6 },
+    }),
+  )
+  // El control: la primera se firma con la ficha a medias.
+  const control = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  const [offer] = await c.offers(control.id)
+  expect(offer?.previous).toMatchObject({ responseId: halfDone.id, unfinished: true })
+  const today = await c.run(async (tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: (await template()).id, patientId: c.patient.id, encounterId: control.id }),
+  )
+  const listed = await c.run((tx) => listPatientFormResponses(tx, c.orgId, { patientId: c.patient.id }))
+  expect(listed.find((row) => row.id === today.id)).toMatchObject({ previousId: halfDone.id })
+})
+
 it("la ficha finalizada en una atención que después se anuló no se pone al lado", async () => {
   const c = await clinic()
   const template = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find(

@@ -1,5 +1,5 @@
 -- Antes de cada cita, en una sola tarjeta (mesa de formularios del 13 nov, entrega 8): lo que TS no
--- declara. La tabla `appointment_visit_answer` (una respuesta por cita) la generó 0123.
+-- declara. La tabla `appointment_visit_answer` (una respuesta por cita) la generó 0124.
 
 -- Lo que la persona cuenta de su visita es de la clínica, con su RLS. La aplicación lo agrega y lo
 -- lee; de lo enviado solo anota, una vez, quién lo vio al atender (ADR 0063).

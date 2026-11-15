@@ -16,6 +16,7 @@ import {
   type DictationProfile,
   demoMaterial,
   dictationEdits,
+  dictationFormAnswers,
   dictationItems,
   dictationList,
   dictationSaid,
@@ -91,6 +92,7 @@ export const extraction = z.object({
     .optional()
     .describe("El descanso médico, solo si lo indicó."),
   materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
+  fichas: dictationFormAnswers(),
   ...dictationEdits("temperatura"),
 })
 
@@ -108,6 +110,7 @@ const DRAFT_PARTS = [
   { key: "presupuesto", kind: "presupuesto", single: true },
   { key: "descanso", kind: "descanso", single: true },
   { key: "materiales", kind: "material" },
+  { key: "fichas", kind: "ficha" },
 ] as const
 
 export function systemPrompt(input: {
