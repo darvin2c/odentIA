@@ -440,7 +440,7 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
               </li>
             </ul>
             <a className="arm-cmp" href={ARM_PATH}>
-              ¿Usas un CRM? Compáralo <span aria-hidden="true">→</span>
+              Compáranos con lo que usas hoy <span aria-hidden="true">→</span>
             </a>
           </div>
           <div className="hh-ctas rise d3">

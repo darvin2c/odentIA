@@ -135,7 +135,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los tres agentes" },
-        { href: ARM_PATH, label: "ARM vs CRM" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
         { href: "/agentes/administrador", label: "Argos · administración" },
@@ -176,7 +176,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los tres agentes" },
-        { href: ARM_PATH, label: "ARM vs CRM" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
         { href: "/agentes/administrador", label: "Argos · administración" },
@@ -211,7 +211,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los dos agentes" },
-        { href: ARM_PATH, label: "ARM vs CRM" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/administrador", label: "Argos · administración" },
       ],
