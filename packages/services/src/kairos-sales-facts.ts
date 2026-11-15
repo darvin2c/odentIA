@@ -13,7 +13,7 @@
 import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { productDomainOf, publicLinksConfigured } from "./public-links.js"
-import { getPublicPricing, type PublicPlanPrices } from "./saas-founders.js"
+import { getPublicPricing, type PublicPlanPrices, type PublicPricing } from "./saas-founders.js"
 
 /** Lo que Kairós sabe de un producto para vender. */
 export interface KairosSalesFacts {
@@ -157,8 +157,17 @@ function planPrices(
  */
 export async function kairosSalesFacts(tx: Db, product: string): Promise<KairosSalesFacts> {
   const known: ClinicalProduct = isClinicalProduct(product) ? product : "dental"
+  return kairosSalesFactsOf(known, await getPublicPricing(tx, known))
+}
+
+/**
+ * Lo mismo con los precios ya leídos: sin base. Lo usa la medición
+ * (`eval:kairos-vende`) con los planes fijos de su banco, para que Kairós lea
+ * exactamente el texto de producción.
+ */
+export function kairosSalesFactsOf(product: string, pricing: PublicPricing): KairosSalesFacts {
+  const known: ClinicalProduct = isClinicalProduct(product) ? product : "dental"
   const line = LINES[known]
-  const pricing = await getPublicPricing(tx, known)
   const amounts: Array<{ value: number; currency: string }> = []
   const percents: number[] = []
   const prices: string[] = []
