@@ -130,8 +130,10 @@ export function dictationFormAnswers() {
  */
 export function appointmentAndBudgetPrompt(booking: string): string[] {
   return [
-    `En \`citas\` va la próxima cita solo si pide reservarla («cítalo en quince días», «que vuelva el jueves a las cuatro», ${booking}): el día en \`date\`, contado desde la fecha de hoy, la hora en \`time\` solo si la dijo, y para qué en \`service\`. Decir cuándo hay que volver a verlo sin pedir reservar («control en seis meses») es un control, no una cita. Si dudas, es un control.`,
-    "En `presupuesto` va un pedido de armar el presupuesto ahora («arma el presupuesto», «prepárale el presupuesto para enseñárselo»), con `show` si pidió mostrárselo. Pedir enviarlo no lo envía: es el mismo pedido de armarlo.",
+    // Prueba con voz del 15 nov (c3, v10): «hoy solo hacemos adaptación y profilaxis y los citamos en una semana»
+    // dejaba la cita «para» lo de hoy y un presupuesto que nadie pidió.
+    `En \`citas\` va la próxima cita solo si pide reservarla («cítalo en quince días», «que vuelva el jueves a las cuatro», ${booking}): el día en \`date\`, contado desde la fecha de hoy, la hora en \`time\` solo si la dijo, y en \`service\` para qué vuelve, solo si lo dijo: lo que se hace hoy no es para qué vuelve. Decir cuándo hay que volver a verlo sin pedir reservar («control en seis meses») es un control, no una cita. Si dudas, es un control.`,
+    "En `presupuesto` va un pedido de armar el presupuesto ahora («arma el presupuesto», «prepárale el presupuesto para enseñárselo»), con `show` si pidió mostrárselo. Pedir enviarlo no lo envía: es el mismo pedido de armarlo. Sin ese pedido no va nada: reservar una cita, indicar un tratamiento o contar lo que se hizo no lo piden.",
   ]
 }
 
@@ -169,7 +171,9 @@ export function homeCarePrompt(examples: string): string {
 export function allergyAndDonePrompt(clinician: string, done: string): string[] {
   return [
     "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si dice que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. Un medicamento que toma o que se receta no es una alergia.",
-    `En \`procedimientos\` va lo que el ${clinician} ya hizo hoy en esta atención, contado como hecho (${done}), con \`service\` en sus palabras: el sistema lo busca en el plan del paciente y en los servicios. Lo que queda por hacer es una indicación, aunque lo diga en la misma frase. Si no queda claro si ya lo hizo, es una indicación. Contarlo en la evolución está bien: además va en \`procedimientos\`.`,
+    // «Hoy hacemos…» también es de hoy (prueba con voz del 15 nov, c3, v10: la profilaxis de «hoy solo hacemos
+    // adaptación y profilaxis» quedaba en el plan, en la cita o en ninguna parte).
+    `En \`procedimientos\` va lo que el ${clinician} hizo o hace hoy en esta atención, contado como hecho (${done}) o como lo de hoy («hoy hacemos…», «hoy solo…»), uno por prestación y con \`service\` en sus palabras: el sistema lo busca en el plan del paciente y en los servicios. Lo que queda para otro día es una indicación, aunque lo diga en la misma frase. Si no queda claro si es de hoy, es una indicación. Contarlo en la evolución está bien: además va en \`procedimientos\`.`,
   ]
 }
 
