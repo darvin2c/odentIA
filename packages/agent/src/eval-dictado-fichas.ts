@@ -2,7 +2,7 @@
  * Medición de lo que Clío propone en una ficha de consulta empezada
  * (entrega 11, ADR 0188). Uso:
  *
- *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>]
+ *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>[,<id>…]] [--crudo=<archivo>]
  *
  * Pasa cada dictado por el modelo real con la misma llamada que la atención
  * (`askDictationModel`), con las preguntas de sus fichas armadas con la misma
@@ -17,11 +17,18 @@
  *   - lo que el modelo respondió y la comprobación del servidor paró.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
+ *
+ * De cada dictado que pierde o inventa algo guarda lo que respondió el modelo,
+ * tal cual, y qué hizo el servidor con cada respuesta, en un archivo de la
+ * corrida fuera del repositorio (`--crudo=<archivo>`, o uno nuevo en la carpeta
+ * temporal): así la causa se lee, no se supone.
  */
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
 import {
   type DictationFormQuestion,
+  formAnswerDropReason,
   formQuestionsOf,
   prepareFormAnswer,
   productHooksFor,
@@ -89,10 +96,27 @@ const same = (a: unknown, b: unknown) =>
   Array.isArray(a) && Array.isArray(b) ? JSON.stringify([...a].sort()) === JSON.stringify([...b].sort()) : JSON.stringify(a) === JSON.stringify(b)
 
 const only = arg("producto", "")
-const solo = arg("solo", "")
+const solo = arg("solo", "").split(",").filter(Boolean)
 const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
 const now = new Date()
-const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo || item.id === solo))
+const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo.length || solo.includes(item.id)))
+/** Lo crudo de cada dictado con algo perdido o inventado, una línea JSON por dictado. */
+const rawFile = resolve(arg("crudo", join(tmpdir(), "odentia-eval", `dictado-fichas-${now.toISOString().replace(/[:.]/g, "-")}.jsonl`)))
+let rawSaved = 0
+function saveRaw(entry: Record<string, unknown>) {
+  mkdirSync(dirname(rawFile), { recursive: true })
+  appendFileSync(rawFile, `${JSON.stringify(entry)}\n`)
+  rawSaved += 1
+}
+/** Lo que respondió el modelo, leído si es JSON; si no, el texto tal cual. */
+function rawOf(raw: string | null, content: unknown): unknown {
+  if (raw === null) return { sinHerramienta: content }
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
 
 for (const dictation of cases) {
   const productKey = dictation.producto ?? "odentia"
@@ -105,7 +129,7 @@ for (const dictation of cases) {
     }),
   )
   if (questions.length) totals.conFichas += 1
-  const { read, reply } = await askDictationModel(
+  const { read, reply, raw } = await askDictationModel(
     await modelOf(product.profile),
     spec,
     {
@@ -134,6 +158,7 @@ for (const dictation of cases) {
   else totals.costo += cost
   if (!read) {
     console.log(`✗ ${dictation.id}: el modelo no respondió con la herramienta`)
+    saveRaw({ id: dictation.id, texto: dictation.texto, notas: ["no respondió con la herramienta"], crudo: rawOf(raw, reply.content) })
     continue
   }
   // Como el servidor: el diagnóstico que también pregunta una ficha va a los dos lugares, y la nota
@@ -217,7 +242,31 @@ for (const dictation of cases) {
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   const shown = [...listed].map(([key, value]) => `${key.split(".").at(-1)}=${JSON.stringify(value)}`).join(", ")
   console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
-  if (solo) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
+  if (notes.length) {
+    const labelOf = (number: unknown) => {
+      const question = questions.find((item) => item.number === number)
+      return question ? `${question.formTitle}: ${question.label}` : `pregunta ${String(number)} (no existe)`
+    }
+    saveRaw({
+      id: dictation.id,
+      texto: dictation.texto,
+      notas: notes,
+      preguntas: questions.map((item) => `${item.number}. ${item.formTitle}: ${item.label}`),
+      crudo: rawOf(raw, reply.content),
+      // Qué hizo el servidor con cada respuesta de ficha que leyó del modelo.
+      servidor: prepared.map(({ draft, ready }) => ({
+        pregunta: labelOf(draft.payload["question"]),
+        respuesta: draft.payload["answers"] ?? draft.payload["answer"],
+        dicho: draft.sourceText ?? "",
+        ...(twins.has(draft) ? { gemela: true } : {}),
+        queda: ready ? ready.status : "parada",
+        ...(ready?.note ? { motivo: ready.note } : {}),
+        ...(ready ? {} : { aviso: formAnswerDropReason(draft, questions, { site: product.site, transcript: dictation.texto }) }),
+      })),
+      noUsado: read.unused,
+    })
+  }
+  if (solo.length === 1) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")
@@ -230,3 +279,4 @@ console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${t
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
 console.log(`Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`)
+if (rawSaved) console.log(`Lo que respondió el modelo en los ${rawSaved} dictados con algo perdido o inventado: ${rawFile}`)

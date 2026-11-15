@@ -629,7 +629,13 @@ export async function askDictationModel(
   spec: Pick<LlmSpec, "provider" | "modelName">,
   ask: DictationAsk,
   profile: DictationProfile,
-): Promise<{ read: Omit<DictationExtraction, "model"> | null; reply: AIMessage; repeated: string[] }> {
+): Promise<{
+  read: Omit<DictationExtraction, "model"> | null
+  reply: AIMessage
+  repeated: string[]
+  /** Los argumentos tal como llegaron del modelo: la medición los guarda para ver qué respondió. */
+  raw: string | null
+}> {
   const record = tool(async () => "registrado", {
     name: DICTATION_TOOL,
     description: profile.toolDescription,
@@ -663,5 +669,6 @@ export async function askDictationModel(
       : null,
     reply,
     repeated: parsed?.repeated ?? [],
+    raw,
   }
 }
