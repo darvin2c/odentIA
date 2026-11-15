@@ -633,10 +633,8 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
   if (response.status === "finalizado")
     return response.encounterStatus === "anulada" ? "Finalizado · de una atención anulada" : "Finalizado"
   if (response.status === "descartado") return "Descartado"
-  if (response.submittedAt) return "Lo declaró la persona · por revisar"
-  return response.encounterStatus === "finalizada"
-    ? "Quedó a medias al firmar la atención: falta terminarla"
-    : "Sin finalizar"
+  if (response.submittedAt) return "Lo declaró la persona · sin revisar"
+  return response.encounterStatus === "finalizada" ? "A medias: no se finalizó al firmar la atención" : "A medias"
 }
 
 /**
@@ -855,8 +853,9 @@ export const FIELD_TYPE_LABELS: Record<FormFieldType, string> = {
   adjunto: "Archivo del paciente",
 }
 
+// Una palabra por estado (revisión final del 15 nov, propuesta 2): la ficha sin finalizar está «a medias».
 export const FORM_RESPONSE_STATUS_LABELS: Record<FormResponse["status"], string> = {
-  borrador: "Borrador",
+  borrador: "A medias",
   finalizado: "Finalizado",
   descartado: "Descartado",
 }

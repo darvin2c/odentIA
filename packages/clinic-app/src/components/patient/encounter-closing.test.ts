@@ -7,7 +7,9 @@ import {
   continuingAfterSign,
   controlBesideAccepted,
   needsNextControlDay,
-  openFormsWords,
+  finishingAtSign,
+  signFormsOf,
+  signFormWords,
 } from "./encounter-closing"
 
 const values = (over: Partial<ClosingValues> = {}): ClosingValues => ({
@@ -98,17 +100,36 @@ describe("el control que se pide junto a la corona ya ofrecida (QA del 9 nov)", 
   })
 })
 
-describe("un formulario a medias al cerrar", () => {
-  it("lo avisa con su nombre y dice que se puede firmar igual y dónde se termina", () => {
-    expect(openFormsWords([])).toBeNull()
-    const one = openFormsWords([{ title: "Evaluación de endodoncia" }])
-    expect(one?.title).toBe("Queda una ficha a medias")
-    // El camino más corto ya no es «Documentos de la ficha»: se termina en la misma atención.
-    expect(one?.detail).toBe(
-      "«Evaluación de endodoncia». Puedes firmar igual: se termina después, aquí mismo en la atención, y lleva su propia fecha y hora.",
-    )
-    const two = openFormsWords([{ title: "Evaluación de endodoncia" }, { title: "Ficha periodontal" }])
-    expect(two?.title).toBe("Quedan 2 fichas a medias")
-    expect(two?.detail).toContain("«Evaluación de endodoncia» y «Ficha periodontal». Puedes firmar igual")
+describe("la ficha se cierra con la firma (revisión final del 15 nov, propuesta 4)", () => {
+  const schema = {
+    sections: [
+      {
+        id: "s",
+        title: "Examen",
+        fields: [
+          { id: "pieza", label: "Pieza", type: "pieza" as const, required: true },
+          { id: "dolor", label: "Dolor", type: "opcion_unica" as const, options: ["Provocado", "Espontáneo"] },
+        ],
+      },
+    ],
+  }
+  const forms = [
+    { id: "endo", answers: { pieza: 46 }, templateSnapshot: schema },
+    { id: "vacia", answers: {}, templateSnapshot: { sections: [] } },
+    { id: "sin-pieza", answers: { dolor: "Provocado" }, templateSnapshot: schema },
+  ]
+  const open = [
+    { id: "endo", title: "Evaluación de endodoncia" },
+    { id: "vacia", title: "Ficha de ortodoncia" },
+    { id: "sin-pieza", title: "Evaluación de endodoncia" },
+  ]
+  const clio = [{ kind: "ficha" as const, payload: { responseId: "endo", fieldId: "dolor", value: "Espontáneo" } }]
+
+  it("un bloque por ficha: con respuestas viene marcada; sin respuestas, o sin una obligatoria, queda a medias", () => {
+    const signForms = signFormsOf(open, forms, clio)
+    expect(signForms.map(signFormWords)).toEqual(["2 respuestas, 1 de Clío", "Sin respuestas", "1 respuesta · falta «Pieza»: queda a medias"])
+    expect(finishingAtSign(signForms, [])).toEqual(["endo"])
+    // Desmarcarla la deja a medias; marcar la vacía la finaliza; la que no tiene su obligatoria, nunca.
+    expect(finishingAtSign(signForms, ["endo", "vacia", "sin-pieza"])).toEqual(["vacia"])
   })
 })

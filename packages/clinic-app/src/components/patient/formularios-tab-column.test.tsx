@@ -11,7 +11,7 @@ import { bareProduct, declareProduct } from "../../product/product-ui"
 declareProduct(bareProduct("dental"))
 
 const update = vi.hoisted(() => vi.fn())
-vi.mock("../../lib/crm", () => ({ useMemberName: () => () => "Dra. Ana", useOrgMembers: () => [] }))
+vi.mock("../../lib/crm", () => ({ useMemberName: () => () => "Dra. Ana", useOrgMembers: () => [], useMyUserId: () => "u-ana" }))
 vi.mock("../../lib/clinical-forms", async (original) => ({
   ...(await original<typeof import("../../lib/clinical-forms")>()),
   updateFormResponse: update,

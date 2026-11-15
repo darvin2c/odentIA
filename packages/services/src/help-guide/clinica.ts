@@ -100,7 +100,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha",
         q: "¿Clío puede llenar la ficha de consulta mientras dicto?",
-        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención», u «Otra ficha…» si no se te ofrece) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia: si dictas otra cosa para una pregunta ya respondida, queda por revisar y la cambias tú. Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar» y la ficha sigue a medias, salvo que marques «Finalizarla al firmar». Dicta y confirma quien lleva la atención.",
+        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención», u «Otra ficha…» si no se te ofrece) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia solo: si dictas otra cosa para una pregunta ya respondida, Clío lo propone en esa pregunta con «Cambiar a…», fuera de «Confirmar las N». Si la ficha ya tiene su pieza y dictas otra, no propone nada en esa ficha y te lo dice. Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar», en el bloque de su ficha (lo que cambia lo ya escrito viene desmarcado). Dicta, confirma y llena la ficha quien lleva la atención o toma el relevo.",
         forms: ["clio puede llenar la ficha", "dictar la ficha de ortodoncia", "llenar la ficha con el dictado", "que significa clio propone en la ficha"],
         area: "clinica",
         needs: "clinical.write",
@@ -116,7 +116,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha-revisar",
         q: "¿Cómo reviso lo que Clío dejó propuesto en la ficha?",
-        a: "En la ficha. Ábrela desde la barra del dictado (el enlace con el nombre de la ficha) o con «Revisar lo de Clío» en su fila. En cada pregunta sale «Clío:» con lo que dijiste: «Confirmar» la escribe y la × la descarta, con «Deshacer». Arriba, «Confirmar las N» confirma juntas las que están listas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma. Si firmas sin revisarlas, vienen marcadas en «Finalizar y firmar». Dicta y confirma quien lleva la atención.",
+        a: "En la ficha. Ábrela desde la barra del dictado (el enlace con el nombre de la ficha) o con «Revisar lo de Clío» en su fila. En cada pregunta sale «Clío:» con lo que dijiste: «Confirmar» la escribe y la × la descarta, con «Deshacer». Arriba, «Confirmar las N» confirma juntas las que propone; la que cambia lo que ya escribiste se cambia en su pregunta, con «Cambiar a…». Las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma. Si firmas sin revisarlas, vienen marcadas en «Finalizar y firmar», en el bloque de su ficha. Dicta y confirma quien lleva la atención o toma el relevo.",
         forms: [
           "alguien dicto y quedaron propuestas sin revisar como las reviso",
           "como reviso las propuestas de clio",
@@ -130,7 +130,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-barra-ficha",
         q: "¿La barra del dictado también llena la ficha?",
-        a: "No. La barra dice cuántas respuestas propone Clío en cada ficha y su enlace abre la ficha: ahí se confirma cada una, con «Confirmar» o «Confirmar las N». «Confirmar las N listas» de la barra confirma lo demás de la consulta, no lo de las fichas.",
+        a: "No. La barra dice cuántas respuestas propone Clío en cada ficha y su enlace abre la ficha: ahí se confirma cada una, con «Confirmar» o «Confirmar las N». «Confirmar las N de la consulta» de la barra confirma lo de la consulta, no lo de las fichas.",
         forms: ["la barra del dictado confirma lo de la ficha", "confirmar las listas tambien llena la ficha"],
         area: "clinica",
         needs: "clinical.write",
@@ -151,7 +151,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-firmar-sin-decidir",
         q: "¿Cómo firmo si Clío dejó algo sin confirmar?",
-        a: "Como siempre, con «Finalizar y firmar»: trae lo dictado sin confirmar en «Lo dictado sin confirmar», marcado. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). La ficha sigue a medias y se termina después, salvo que marques «Finalizarla al firmar, como está».",
+        a: "Como siempre, con «Finalizar y firmar»: trae lo que propone Clío en «Lo que propone Clío», marcado, y lo de cada ficha en el bloque de esa ficha. Lo marcado entra con la firma; desmarca lo que no va (al desmarcar una pregunta de la ficha, se desmarcan las que dependen de ella). Lo que cambia lo que ya escribiste viene desmarcado: márcalo solo si va. Lo que quedó por revisar se elige en su ficha («Abrir la ficha»). Cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; desmárcala para terminarla después.",
         forms: ["como firmo si clio dejo algo sin confirmar", "firmar con propuestas de clio pendientes", "clio dejo sugerencias y quiero firmar", "que pasa con lo propuesto si firmo"],
         area: "clinica",
         needs: "clinical.write",
@@ -289,7 +289,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo una ficha de consulta?",
-        a: "En la atención, las de su especialidad aparecen solas en «Fichas para esta atención»: «Empezar la de hoy». Cualquier otra, en «Otra ficha…» o en «Nuevo» › «Ficha», eliges cuál y «Empezar»: se guarda sola mientras la llenas, y una a medias se retoma con «Completar» en Documentos. Al terminar, «Finalizar…»; queda con quién la finalizó. Finalizada ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo. Lo que contó el paciente antes de venir no se llena aquí: está en «Hoy viene a…» de su atención.",
+        a: "En la atención, las de su especialidad aparecen solas en «Fichas para esta atención»: «Empezar la de hoy». En el control también aparece la que ya tiene de antes, con «Usar lo de la anterior» para copiar lo de la última con respuestas. Cualquier otra, en «Otra ficha…» o en «Nuevo» › «Ficha», eliges cuál y «Empezar»: se guarda sola mientras la llenas. En una atención en curso se finaliza al firmar la atención («Finalizarla al firmar» viene marcada si tiene respuestas); suelta o después de firmar, con «Finalizar…». La llena quien lleva la atención o toma el relevo; queda con quién la finalizó. Finalizada ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», con su motivo. Lo que contó el paciente antes de venir no se llena aquí: está en «Hoy viene a…» de su atención.",
         forms: ["como finalizo un formulario", "descartar un formulario en borrador", "retomar un formulario en borrador", "como lleno la ficha en la consulta"],
         area: "clinica",
         needs: "clinical.write",
@@ -297,7 +297,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-formulario-terminar-tras-firmar",
         q: "Firmé la atención y me quedó una ficha a medias, ¿qué hago?",
-        a: "Termínala cuando puedas: firmar la atención no la cierra. El cierre te lo avisa sin frenarte, con «Completar ahora» por si prefieres terminarla antes de firmar. Ya firmada, «Atención finalizada» la nombra con «Completar», y en la atención, en Documentos, sale arriba «Falta terminar una ficha». También está en Documentos, en la página del paciente, como «Borrador», con «Completar». Ábrela, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, las fichas del equipo a medias se descartan con el motivo de la anulación: dejan de salir en Documentos, y la Historia lo dice en la atención anulada, bajo «Anulado ese día». Lo que envió el paciente no se descarta: sigue en Documentos, «Por revisar».",
+        a: "Al firmar, cada ficha con respuestas trae «Finalizarla al firmar» marcada y se finaliza con la firma; la que no tiene respuestas, o a la que le falta una obligatoria, queda a medias, sin frenarte, con «Completar ahora» por si prefieres terminarla antes. Ya firmada, en la atención, en Documentos, sale arriba «Una ficha quedó a medias» con «Completar»; la termina quien atendió. Ábrela, completa lo que falta y «Finalizar…»: queda con su propia fecha y hora, y cada pregunta respondida después dice que fue después de firmar la atención. Si en vez de firmarla anulas la atención, las fichas del equipo a medias se descartan con el motivo de la anulación: dejan de salir en Documentos, y la Historia lo dice en la atención anulada, bajo «Anulado ese día». Lo que envió el paciente no se descarta: sigue en Documentos, «Por revisar».",
         forms: ["firme la atencion y quedo un formulario a medias", "terminar un formulario despues de firmar", "desde donde termino el formulario que deje a medias"],
         area: "clinica",
         needs: "clinical.write",

@@ -1,14 +1,26 @@
 import { Button, Checkbox } from "@odentia/ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { productUi } from "../../product/product-ui"
-import { signOrder } from "./clio-form-proposals"
-import { confirmableAtSign, DICTATION_KIND_LABEL, type DictationSession, type DictationSuggestion, dictationErrorText, suggestionText } from "./dictation-session"
+import { changesWritten, proposedWords, signOrder } from "./clio-form-proposals"
+import {
+  confirmableAtSign,
+  DICTATION_KIND_LABEL,
+  type DictationSession,
+  type DictationSuggestion,
+  dictationErrorText,
+  markedByDefault,
+  suggestionText,
+} from "./dictation-session"
 import { AppointmentChoices, BudgetLines } from "./dictation-suggestions"
 
-/** Lo dictado que entra con la firma: lo que se puede confirmar y nadie desmarcó, en el orden de la ficha. */
-export function markedAtSign(session: DictationSession, unmarked: readonly string[]): string[] {
+/**
+ * Lo dictado que entra con la firma, en el orden de la ficha: lo que se puede confirmar y viene
+ * marcado, salvo que se haya tocado. `toggled`: lo que quien firma cambió de como venía (desmarcó lo
+ * marcado, o marcó lo que cambia lo escrito, que viene desmarcado).
+ */
+export function markedAtSign(session: DictationSession, toggled: readonly string[]): string[] {
   return signOrder(session.suggestions)
-    .filter((item) => confirmableAtSign(item) && !unmarked.includes(item.id))
+    .filter((item) => confirmableAtSign(item) && markedByDefault(item) !== toggled.includes(item.id))
     .map((item) => item.id)
 }
 
@@ -42,45 +54,51 @@ const parentOf = (items: readonly DictationSuggestion[], item: DictationSuggesti
 export function DictationSignList({
   session,
   busy,
-  unmarked,
-  onUnmarkedChange,
+  toggled,
+  onToggledChange,
   onComplete,
   onOpenForm,
+  responseId,
 }: {
   session: DictationSession
   busy: boolean
-  unmarked: string[]
-  onUnmarkedChange: (next: string[]) => void
+  /** Lo que quien firma cambió de como venía (`markedAtSign`). */
+  toggled: string[]
+  onToggledChange: (next: string[]) => void
   /** Abre una sugerencia que no se puede confirmar tal cual, para completarla. */
   onComplete: (id: string) => void
   /** «Abrir la ficha»: la respuesta por revisar se elige en su pregunta. */
   onOpenForm: (responseId: string) => void
+  /**
+   * Solo lo de esa ficha, dentro de su bloque de la firma (`FormsAtSign`). Sin ella, lo de la
+   * consulta: lo de cada ficha va en su bloque.
+   */
+  responseId?: string
 }) {
-  const items = signOrder(session.suggestions)
-  const marked = markedAtSign(session, unmarked)
+  const all = signOrder(session.suggestions)
+  const items = all.filter((item) => (responseId ? item.kind === "ficha" && item.payload["responseId"] === responseId : item.kind !== "ficha"))
+  const marked = markedAtSign(session, toggled)
   const Choices = productUi().dictation?.SuggestionChoices
   const confirmError = dictationErrorText(session.confirmMany.error, "No pude confirmar alguna. Revísala y vuelve a firmar.")
   // La que no se pudo confirmar lleva el aviso en su fila; lo demás, al pie del cierre.
   const failedId = confirmError ? (session.confirmManyFailed?.id ?? null) : null
   if (items.length === 0) return null
-  const toggle = (item: DictationSuggestion, value: boolean) => {
-    if (value) {
-      // Marcar la que depende de otra marca también esa: sin ella, no se escribe.
-      const parent = parentOf(items, item)
-      onUnmarkedChange(unmarked.filter((id) => id !== item.id && id !== parent?.id))
-    } else {
-      onUnmarkedChange([...new Set([...unmarked, item.id, ...dependentsOf(items, item).map((other) => other.id)])])
-    }
+  // Deja una como se quiere: «toggled» guarda solo lo que difiere de como venía.
+  const set = (next: Set<string>, item: DictationSuggestion, value: boolean) => {
+    if (markedByDefault(item) === value) next.delete(item.id)
+    else next.add(item.id)
   }
-  return (
-    <section aria-labelledby="firmar-dictado" className="flex flex-col gap-2">
-      <div>
-        <h3 id="firmar-dictado" className="font-medium">
-          Lo dictado sin confirmar
-        </h3>
-        <p className="text-xs text-muted-foreground">Lo marcado entra con la firma. Desmarca lo que no va.</p>
-      </div>
-      <ul aria-label="Lo dictado sin confirmar" className="flex flex-col gap-2">
+  const toggle = (item: DictationSuggestion, value: boolean) => {
+    const next = new Set(toggled)
+    set(next, item, value)
+    // Marcar la que depende de otra marca también esa; desmarcarla desmarca las que dependen de ella.
+    const parent = parentOf(all, item)
+    if (value && parent) set(next, parent, true)
+    if (!value) for (const other of dependentsOf(all, item)) set(next, other, false)
+    onToggledChange([...next])
+  }
+  const list = (
+      <ul aria-label={responseId ? `Lo que propone ${CLINICAL_NAME} en esta ficha` : `Lo que propone ${CLINICAL_NAME}`} className="flex flex-col gap-2">
         {items.map((item) => {
           const { title } = suggestionText(item)
           const can = confirmableAtSign(item)
@@ -111,13 +129,17 @@ export function DictationSignList({
                 />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <label htmlFor={`firmar-${item.id}`} className={`font-medium ${checked ? "" : "text-muted-foreground"}`}>
-                    {form && can ? `${CLINICAL_NAME} propuso: ${title}` : title}
+                    {form && changesWritten(item)
+                      ? `${CLINICAL_NAME} propone cambiar a ${proposedWords(item)}: ${String(item.payload["label"] ?? title)}`
+                      : form && can
+                        ? `${CLINICAL_NAME} propone: ${title}`
+                        : title}
                   </label>
                   <span className="text-muted-foreground [overflow-wrap:anywhere]">
                     {/* Una respuesta de ficha dice de cuál ficha es (puede haber dos) y lo que se dijo. */}
                     {form && typeof item.payload["formTitle"] === "string" ? item.payload["formTitle"] : DICTATION_KIND_LABEL[item.kind]}
                     {form && item.sourceText ? ` · dijiste «${item.sourceText}»` : ""}
-                    {can && !checked ? " · desmarcada: no entra" : ""}
+                    {can && !checked ? (changesWritten(item) ? " · cambia lo que ya escribiste: márcala solo si va" : " · desmarcada: no entra") : ""}
                   </span>
                   {can && checked && session.noteAddsTo(item) ? <span className="text-muted-foreground">{session.noteAddsTo(item)}</span> : null}
                   {can && item.note ? <span className="text-warning">{item.note}</span> : null}
@@ -154,6 +176,18 @@ export function DictationSignList({
           )
         })}
       </ul>
+  )
+  // Dentro del bloque de su ficha, sin otro título: la ficha ya lo dice.
+  if (responseId) return list
+  return (
+    <section aria-labelledby="firmar-dictado" className="flex flex-col gap-2">
+      <div>
+        <h3 id="firmar-dictado" className="font-medium">
+          Lo que propone {CLINICAL_NAME}
+        </h3>
+        <p className="text-xs text-muted-foreground">Lo marcado entra con la firma. Desmarca lo que no va.</p>
+      </div>
+      {list}
     </section>
   )
 }

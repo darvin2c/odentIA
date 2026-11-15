@@ -11,7 +11,7 @@ import { bareProduct, declareProduct } from "../../product/product-ui"
 declareProduct(bareProduct("dental"))
 
 const update = vi.hoisted(() => vi.fn())
-vi.mock("../../lib/crm", () => ({ useMemberName: () => () => "Dra. Ana", useOrgMembers: () => [] }))
+vi.mock("../../lib/crm", () => ({ useMemberName: () => () => "Dra. Ana", useOrgMembers: () => [], useMyUserId: () => "u-ana" }))
 vi.mock("../../lib/clinical-forms", async (original) => ({
   ...(await original<typeof import("../../lib/clinical-forms")>()),
   updateFormResponse: update,
@@ -200,7 +200,7 @@ describe("lo que propone Clío en la ficha", () => {
     kind: "ficha" as const,
     payload: { responseId: "r1", fieldId: "intensidad", ...payload },
     sourceText: "corrijo, la intensidad es seis",
-    status: "lista" as const,
+    status: "lista" as "lista" | "por_revisar",
     note: null,
     summary: "",
     voice: null,
@@ -224,13 +224,15 @@ describe("lo que propone Clío en la ficha", () => {
     )
   }
 
-  it("la que corrige lo ya escrito no se descarta sola: dice lo que hay y «Confirmar» la cambia", async () => {
+  // Revisión final del 15 nov (dev H5): lo escrito a mano lo cambia una persona, de a una y fuera de «Confirmar las N».
+  it("la que corrige lo ya escrito queda por revisar: dice lo que hay, se cambia en su pregunta y no entra con «Confirmar las N»", async () => {
     const discard = vi.fn()
-    withClio([proposal({ value: 6, replaces: 8 })], { discard })
+    withClio([{ ...proposal({ value: 6, replaces: 8 }), status: "por_revisar" as const }, { ...proposal({ fieldId: "otra", value: 2 }), id: "s2" }, { ...proposal({ fieldId: "mas", value: 3 }), id: "s3" }], { discard })
     await screen.findByText(/ya dice «8»/)
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(discard).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: /Confirmar 6 en/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Cambiar «.+» a 6/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Confirmar las 2" })).toBeTruthy()
   })
 
   it("lo que otra persona escribió después sí la descarta", async () => {
