@@ -513,6 +513,174 @@
       "texto": "El diagnóstico es maloclusión clase dos división uno.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
       "espera": {}
+    },
+    {
+      "id": "voz-v01-1",
+      "texto": "ya a ver ficha de ortodoncia overjaget de 4 mm over byte de 2 mm",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4, "ficha-de-ortodoncia.overbite": 2 } }
+    },
+    {
+      "id": "voz-v01-2",
+      "texto": "clase 1 molar derecha y clase 1 molar izquierda",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_molar_derecha": "Clase I", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I" } }
+    },
+    {
+      "id": "voz-v02-1",
+      "texto": "Okay este seguimos con la ficha overjat de 6 no perdón de 4 mm Pásame el espejo por favor abre un poquito más ya así over byte de Point de tres molar derecha clase 2 división 1 la izquierda clase 1",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4, "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I" } },
+      "ignora": ["ficha-de-ortodoncia.overbite"]
+    },
+    {
+      "id": "voz-v02-2",
+      "texto": "caninos el derecho clase 2 El izquierdo clase 1 línea Media Superior centrada la inferior desviada a la derecha eh medio milímetro",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase I", "ficha-de-ortodoncia.linea_media_superior": "Centrada", "ficha-de-ortodoncia.linea_media_inferior": "Desviada a la derecha", "ficha-de-ortodoncia.linea_media_inferior_mm": 0.5 }, "noEnNota": ["canino", "línea media"] }
+    },
+    {
+      "id": "voz-v02-3",
+      "texto": "apiñamiento leve mmm en el sector antero inferior",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.apinamiento": "Leve" } }
+    },
+    {
+      "id": "voz-v03-1",
+      "texto": "Sí señor este paciente que viene a su control de ortodoncia va en el primer año de tratamiento prefiere que hace como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overjet": 7, "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"] }, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha", "ficha-de-ortodoncia.clase_molar_izquierda"], "noEnNota": ["te duele"] }
+    },
+    {
+      "id": "voz-v03-2",
+      "texto": "le indico cera de ortodoncia y que regrese en un mes no hay problema me confirma su número de dni",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": {} }
+    },
+    {
+      "id": "voz-v04-1",
+      "texto": "pieza 3 6 dolor espontáneo 8 de 10 prueba de frío aumentada que persiste percusión positiva palpación negativa",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.dolor": "Espontáneo", "evaluacion-de-endodoncia.dolor_intensidad": 8, "evaluacion-de-endodoncia.frio": "Aumentada, persiste", "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.palpacion": "Negativa" } }
+    },
+    {
+      "id": "voz-v04-2",
+      "texto": "no hay fístula ni tumefacción",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.fistula": false, "evaluacion-de-endodoncia.tumefaccion": "No tiene" } }
+    },
+    {
+      "id": "voz-v05-1",
+      "texto": "Buenos días la 36 no perdón la 46 te duele acá sí ahí doctor ya dolor a la percusión abre un poquito más por favor frío aumentado pero cede al retirar el estímulo calor normal movilidad grado uno la mejor sondaje de 3 mm no de cuatro intensidad digamos 6 de 10 dolor provocado",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.frio": "Aumentada, cede al retirar el estímulo", "evaluacion-de-endodoncia.calor": "Normal", "evaluacion-de-endodoncia.movilidad": "Grado 1", "evaluacion-de-endodoncia.sondaje": 4, "evaluacion-de-endodoncia.dolor_intensidad": 6, "evaluacion-de-endodoncia.dolor": "Provocado" }, "noEnNota": ["te duele"] }
+    },
+    {
+      "id": "voz-v06-1",
+      "texto": "ya a ver paciente de 42 años viene porque le duele la muela de abajo del lado izquierdo refiere que empezó Hace 3 días el dolor es espontáneo no la deja dormir y tomó ibuprofeno pero no le calma este 10 a 36 intensidad 9 de 10 a la inspección caries profunda ocluso distal tumefacción no tiene fístula tampoco Pásame el algodón con el frío por favor prueba de frío aumentada que persiste o sea se queda doliendo como 10 segundos calor también aumentado persiste percusión positiva palpación negativa movilidad fisiológica grado 0 sondaje 2 mm En la radiografía se ve ensanchamiento del ligamento periodontal sin radio lucidez diagnóstico pulpar pulpitis Irreversible sintomática apical periodontitis apical sintomática plan endodoncia de la 36 y luego Corona hoy hacemos la apertura y la pulpectomía",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.dolor": "Espontáneo", "evaluacion-de-endodoncia.dolor_intensidad": 9, "evaluacion-de-endodoncia.tumefaccion": "No tiene", "evaluacion-de-endodoncia.fistula": false, "evaluacion-de-endodoncia.frio": "Aumentada, persiste", "evaluacion-de-endodoncia.calor": "Aumentada, persiste", "evaluacion-de-endodoncia.percusion": "Positiva", "evaluacion-de-endodoncia.palpacion": "Negativa", "evaluacion-de-endodoncia.movilidad": "Grado 0 (fisiológica)", "evaluacion-de-endodoncia.sondaje": 2, "evaluacion-de-endodoncia.hallazgo_radiografico": ["Ensanchamiento del ligamento periodontal"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Pulpitis irreversible sintomática", "evaluacion-de-endodoncia.diagnostico_apical": "Periodontitis apical sintomática" } }
+    },
+    {
+      "id": "voz-v07-1",
+      "texto": "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 21 } }
+    },
+    {
+      "id": "voz-v07-2",
+      "texto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" } }
+    },
+    {
+      "id": "voz-v07-3",
+      "texto": "sin respuesta también percusión negativa palpación positiva sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico",
+      "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" } }
+    },
+    {
+      "id": "voz-v08-1",
+      "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" } },
+      "ignora": ["ficha-de-odontopediatria.ceod_c"]
+    },
+    {
+      "id": "voz-v08-2",
+      "texto": "riesgo de caries alto y tres colabora pero con miedo mamá bua bua bua no quiero mamá mamá",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.riesgo_caries": "Alto", "ficha-de-odontopediatria.conducta": "3 · Positiva" } }
+    },
+    {
+      "id": "voz-v09-1",
+      "texto": "Okay este la niña pesa 24 kg no 22 perdón succión por favor cariados 4 obturados uno extracción indicada 0 te duele cuando muerdes ya higiene buena la mamá le ayuda con el cepillado",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 22, "ficha-de-odontopediatria.ceod_c": 4, "ficha-de-odontopediatria.ceod_o": 1, "ficha-de-odontopediatria.ceod_e": 0, "ficha-de-odontopediatria.higiene": "Buena" } }
+    },
+    {
+      "id": "voz-v09-2",
+      "texto": "riesgo de caries moderado conducta francol 4 definitivamente positiva hoy le aplicamos flúor barniz",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.riesgo_caries": "Moderado", "ficha-de-odontopediatria.conducta": "4 · Definitivamente positiva" } }
+    },
+    {
+      "id": "voz-v10-1",
+      "texto": "niño de 4 años primera consulta la mamá refiere que le duelen las muelitas cuando come dulces peso 15 kg y medio sé o d cinco cariados dos con extracción indicada ser obturados",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 15.5, "ficha-de-odontopediatria.ceod_c": 5, "ficha-de-odontopediatria.ceod_e": 2 } },
+      "ignora": ["ficha-de-odontopediatria.ceod_o"]
+    },
+    {
+      "id": "voz-v10-2",
+      "texto": "higiene mala mucha placa riesgo alto llora no deja trabajar Franco 2",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": { "ficha-de-odontopediatria.higiene": "Mala", "ficha-de-odontopediatria.riesgo_caries": "Alto", "ficha-de-odontopediatria.conducta": "2 · Negativa" } }
+    },
+    {
+      "id": "voz-v10-3",
+      "texto": "hoy solo hacemos adaptación y profilaxis y los citamos en una semana",
+      "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
+      "espera": { "fichas": {} }
+    },
+    {
+      "id": "voz-v11-1",
+      "texto": "Sí sí paciente adulta viene para una evaluación general no refiere molestias",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": {} }
+    },
+    {
+      "id": "voz-v11-2",
+      "texto": "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8 } },
+      "ignora": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_p", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_e", "ficha-odontoestomatologica.ceod_o"]
+    },
+    {
+      "id": "voz-v11-3",
+      "texto": "higiene regular riesgo estomatológico moderado Muchas gracias que tengan en el odontograma caries en la 16 y la 26 oclusales para las curaciones no hay problema me confirma su número de dni por favor",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.higiene": "Regular", "ficha-odontoestomatologica.riesgo": "Moderado" } }
+    },
+    {
+      "id": "voz-v12-1",
+      "texto": "muy buenos días p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor ese Este 0,99",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_p": 1 }, "revisar": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o"] },
+      "ignora": ["ficha-odontoestomatologica.ihos"]
+    },
+    {
+      "id": "voz-v12-2",
+      "texto": "Así que hoy le damos el alta básica",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.alta_basica": true } }
+    },
+    {
+      "id": "voz-v12-3",
+      "texto": "y profilaxis",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": {} }
     }
   ]
 }

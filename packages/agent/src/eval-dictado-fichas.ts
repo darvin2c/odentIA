@@ -49,7 +49,11 @@ interface FormCase {
   id: string
   producto?: "odentia" | "latidia"
   texto: string
+  /** Lo dictado en la pausa anterior, como lo recibe Clío («lo último ya ordenado»): una frase partida por una pausa. */
+  contexto?: string
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
+  /** Preguntas que no se cuentan: lo que el reconocimiento de voz oyó mal y no se puede saber de lo oído. */
+  ignora?: string[]
   /**
    * `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones).
    * `cambia`: lo que cambia una respuesta ya escrita, que queda por revisar con ese valor.
@@ -146,7 +150,7 @@ for (const dictation of cases) {
       zone: { locale: "es-PE", timezone: "America/Lima" },
       now,
       transcript: dictation.texto,
-      context: "",
+      context: dictation.contexto ?? "",
       pending: [],
       forms: questions,
     },
@@ -203,7 +207,12 @@ for (const dictation of cases) {
   const noticedKeys = keysOf(notices.filter((item) => item.by === "motivo"))
   const caughtKeys = keysOf(net)
   // Lo que la red nombra y el dictado no espera de esa pregunta: un aviso de más, que se lee a mano.
-  const wanted = new Set([...Object.keys(dictation.espera.fichas ?? {}), ...(dictation.espera.revisar ?? []), ...Object.keys(dictation.espera.cambia ?? {})])
+  const wanted = new Set([
+    ...Object.keys(dictation.espera.fichas ?? {}),
+    ...(dictation.espera.revisar ?? []),
+    ...Object.keys(dictation.espera.cambia ?? {}),
+    ...(dictation.ignora ?? []),
+  ])
   totals.avisosRed += net.length
   for (const item of net) {
     if ([...keysOf([item])].some((key) => wanted.has(key))) continue
@@ -242,7 +251,7 @@ for (const dictation of cases) {
   for (const [key, value] of listed) {
     if (key in expected && same(expected[key], value)) continue
     // Cambia lo escrito y quedó lista: el error de la decisión 2, contado aparte.
-    if (key in changes) continue
+    if (key in changes || dictation.ignora?.includes(key)) continue
     // Varias opciones, solo parte de lo esperado: se perdió una, no se inventó nada (ya cuenta como perdida).
     const want = expected[key]
     if (Array.isArray(want) && Array.isArray(value) && value.length > 0 && value.every((item) => want.includes(item))) {
