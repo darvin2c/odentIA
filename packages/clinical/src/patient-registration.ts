@@ -677,12 +677,19 @@ export function declaredLactationAndTobacco(
   return out
 }
 
-/** Lo que no se le pregunta a un niño (menor de 12): lo de un adulto. */
+/**
+ * Lo que no se le pregunta a un niño (menor de 12): lo de un adulto. Sus medicinas son una sola
+ * pregunta, «¿Toma alguna medicina, aunque sea a veces?» (el inhalador de rescate se usa cuando lo
+ * necesita, no todos los días; GINA): sin la del anticoagulante ni la de los huesos, que son de
+ * adulto (K7).
+ */
 const NOT_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set([
   "personal.embarazo",
   "medical.lactancia",
   "medical.tabaco",
   "medical.alcohol",
+  "anticoagulants",
+  "boneMedicines",
 ])
 /** Lo que solo se le pregunta a quien cuida a un niño: «de pequeño». */
 const ONLY_FOR_CHILDREN: ReadonlySet<RegistrationFieldKey> = new Set(
@@ -695,7 +702,8 @@ const EARLY_CHILDHOOD: ReadonlySet<RegistrationFieldKey> = new Set(["dental.bibe
  * A quién se le pregunta cada dato de salud: el embarazo y la lactancia, solo a
  * mujeres de 12 a 55 años (sin el sexo o la edad en la ficha se pregunta: no se
  * supone). A un niño (menor de 12) no se le pregunta lo de un adulto (embarazo,
- * lactancia, tabaco ni alcohol); a quien lo cuida, «de pequeño», con biberón y
+ * lactancia, tabaco, alcohol, anticoagulantes ni medicinas para los huesos: sus
+ * medicinas son una sola pregunta); a quien lo cuida, «de pequeño», con biberón y
  * chupón solo hasta los 6 años. Sin la edad, «de pequeño» no se pregunta: no se
  * supone que es un niño. Una sola regla para el registro, «Su enlace» y lo que
  * el servidor cuenta como «falta preguntar».

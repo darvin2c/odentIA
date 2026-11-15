@@ -198,7 +198,7 @@ describe("los datos de salud nuevos", () => {
     expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 66 })).toBe(false)
     expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 11 })).toBe(false)
     expect(registrationFieldApplies("personal.embarazo", { sex: null, age: null })).toBe(true)
-    expect(registrationFieldApplies("anticoagulants", { sex: "M", age: 8 })).toBe(true)
+    expect(registrationFieldApplies("anticoagulants", { sex: "M", age: 30 })).toBe(true)
     expect(ageInYears("1960-11-14", "2026-11-13")).toBe(65)
     expect(ageInYears("1960-11-13", "2026-11-13")).toBe(66)
     expect(ageInYears("sin fecha", "2026-11-13")).toBeNull()
@@ -250,6 +250,20 @@ describe("lo de un niño, para quien lo cuida (menores de 12)", () => {
     }
     // De 12 a 17 sigue como hasta hoy (fuera de esta entrega).
     expect(registrationFieldApplies("medical.tabaco", { sex: "M", age: 15 })).toBe(true)
+  })
+
+  it("K7 · a quien cuida a un menor de 12, una sola pregunta de medicinas: sin anticoagulantes ni huesos", () => {
+    for (const key of ["anticoagulants", "boneMedicines"] as const) {
+      expect(registrationFieldApplies(key, { sex: "M", age: 4 })).toBe(false)
+      expect(registrationFieldApplies(key, { sex: "F", age: 11 })).toBe(false)
+      expect(registrationFieldApplies(key, { sex: "F", age: 12 })).toBe(true)
+      // Sin la edad no se supone que es un niño.
+      expect(registrationFieldApplies(key, { sex: null, age: null })).toBe(true)
+    }
+    expect(registrationFieldApplies("medications", { sex: "M", age: 4 })).toBe(true)
+    // El servidor no lo acepta aunque llegue.
+    const withAnticoagulant = { ...thiago, health: { ...thiago.health, anticoagulants: { state: "none" as const } } }
+    expect(validateRegistrationAnswers(config, withAnticoagulant, publicContext)).toHaveProperty("health.anticoagulants")
   })
 
   it("biberón y chupón, solo hasta los 6 años: a un niño de 8 no se le preguntan", () => {

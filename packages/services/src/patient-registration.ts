@@ -27,6 +27,7 @@ import {
   type RegistrationEntryPoint,
   registrationAnswersSchema,
   registrationConfigSchema,
+  registrationFieldApplies,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -390,6 +391,11 @@ export async function patientHealthQuestionsWith(
   tx: Db,
   orgId: string,
   patientId: string,
+  /**
+   * Su sexo y su fecha de nacimiento, si los escribió en el mismo envío y su ficha no los tenía:
+   * lo que se le pregunta sale de lo que escribió (a un niño, lo de un niño), no de lo guardado.
+   */
+  written: { sex?: string | null; birthDate?: string | null } = {},
 ): Promise<{
   ask: RegistrationFieldKey[]
   /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
@@ -411,9 +417,18 @@ export async function patientHealthQuestionsWith(
   const health = await getPatientHealth(tx, orgId, patientId)
   const known = knownHealthQuestionsOf(health)
   const product = await orgProduct(tx, orgId)
+  const stored = await requirePatient(tx, orgId, patientId)
+  const today = await patientOrganizationToday(tx, orgId)
+  const person = {
+    sex: stored.sex ?? written.sex ?? null,
+    age: ageInYears(stored.birthDate ?? written.birthDate, today),
+  }
   // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
-  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
-  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después. A un
+  // niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.
+  const sawToday =
+    !registrationFieldApplies("anticoagulants", person) ||
+    health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
   // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
   // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
   // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
@@ -422,17 +437,9 @@ export async function patientHealthQuestionsWith(
   if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
   const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
-  const person = await requirePatient(tx, orgId, patientId)
-  const today = await patientOrganizationToday(tx, orgId)
-  const ask = healthQuestionsToAsk(
-    config,
-    {
-      countryCode: await findOrgCountry(tx, orgId),
-      product,
-      person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
-    },
-    known,
-  ).filter((key) => !onlyNew || onlyNew.has(key))
+  const ask = healthQuestionsToAsk(config, { countryCode: await findOrgCountry(tx, orgId), product, person }, known).filter(
+    (key) => !onlyNew || onlyNew.has(key),
+  )
   return { ask, onlyNew: !!onlyNew, health, known }
 }
 

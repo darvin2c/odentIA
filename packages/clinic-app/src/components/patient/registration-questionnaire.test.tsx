@@ -77,6 +77,17 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).not.toContain("¿Fumas?")
   })
 
+  it("K7 · a Carla, una sola pregunta de medicinas con palabras de niño: sin warfarina ni osteoporosis", () => {
+    declareProduct(bareProduct("dental"))
+    const html = childLink(4)
+    expect(html).toContain("Las medicinas de Thiago")
+    expect(html).toContain("¿Thiago toma alguna medicina, aunque sea a veces?")
+    expect(html).toContain("Por ejemplo, inhalador, medicina para las convulsiones o jarabe, todos los días o cuando lo necesita.")
+    expect(html).not.toContain("warfarina")
+    expect(html).not.toContain("osteoporosis")
+    expect(html).not.toContain("todos los días?")
+  })
+
   it("«Thiago de pequeño»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(6)

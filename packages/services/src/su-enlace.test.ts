@@ -61,12 +61,12 @@ import {
   publishFormTemplate,
 } from "./clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { getPatientHealth, savePatientHealth } from "./clinical.js"
+import { getPatientHealth, recordHealthDeclaration, savePatientHealth } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
 import { getPatientSummary } from "./patient-history.js"
 import { addPlanItem } from "./plan.js"
-import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
+import { getPatientRegistrationConfig, patientHealthQuestions, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
@@ -1930,6 +1930,24 @@ it("el enlace guarda solo lo que la clínica pregunta: lo que marcó «No se pid
   )
   const child = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   expect(child.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { quienCepilla: "adulto" } })
+})
+
+// K7: a un niño ya no se le preguntan las dos clases de medicina; que no estén no dice que lo
+// respondió con la lista de antes.
+it("la mamá que registró a su niño con la lista de hoy no recibe otra vez lo que dejó en blanco", async () => {
+  const f = await clinicalFixture()
+  const mateo = await minimal(f, { given: "Mateo", surname: "Vera" })
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 5, birth.getUTCMonth() - 2, 1)
+  await ownerDb.update(contact).set({ birthDate: birth.toISOString().slice(0, 10), sex: "M" }).where(eq(contact.id, mateo.personId))
+  await f.run((tx) =>
+    recordHealthDeclaration(tx, ORG, mateo.patientId, {
+      via: "registro",
+      by: { kind: "representative", name: "Rosa Vera", relation: "madre" },
+      health: { allergies: { state: "none", items: [] }, medications: { state: "unanswered", items: [] } },
+    }),
+  )
+  expect(await f.run((tx) => patientHealthQuestions(tx, ORG, mateo.patientId))).toEqual([])
 })
 
 // QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita

@@ -2390,10 +2390,15 @@ export function RegistrationQuestionnaire({
               name="medications"
               optional={!required("medications")}
               label={
-                asked("anticoagulants") || asked("boneMedicines")
-                  ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
-                  : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
+                // A quien cuida a un niño, una sola pregunta: el inhalador de rescate se usa cuando lo
+                // necesita, y «todos los días» lo dejaba fuera (K7).
+                child
+                  ? `¿${first || "La persona"} toma alguna medicina, aunque sea a veces?`
+                  : asked("anticoagulants") || asked("boneMedicines")
+                    ? you("¿Tomas algún otro medicamento todos los días?", `¿${first || "La persona"} toma algún otro medicamento todos los días?`)
+                    : you("¿Tomas algún medicamento todos los días?", `¿${first || "La persona"} toma algún medicamento todos los días?`)
               }
+              hint={child ? "Por ejemplo, inhalador, medicina para las convulsiones o jarabe, todos los días o cuando lo necesita." : undefined}
               detailLabel="¿Cuál? (si lo sabes) Si son varios, sepáralos con comas."
               detailOptional
               state={draft.medications}
