@@ -60,7 +60,7 @@ const NIGHT: Record<BrandId, CSSProperties> = {
   },
 }
 
-/** Etiqueta y titular del lado de la marca, con la voz de la web («[ Tu clínica ]», «Omnicanal y agéntica.»). */
+/** Etiqueta y titular del lado de la marca, con la voz de la web («[ ARM · Agentic Relationship Management ]», «Tu clínica es un ARM.»). */
 export function AuthAside({
   tag,
   title,

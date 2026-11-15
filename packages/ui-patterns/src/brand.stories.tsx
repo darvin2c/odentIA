@@ -30,7 +30,7 @@ export const Acceso: Story = {
     <AuthSplit
       title="Buenas tardes, Carmen."
       description="Clínica Dental Sonrisa"
-      aside={<AuthAside tag="Tu clínica" title="Omnicanal" accent="y agéntica."><p>Tus agentes siguieron trabajando mientras no estabas.</p></AuthAside>}
+      aside={<AuthAside tag="ARM · Agentic Relationship Management" title="Tu clínica" accent="es un ARM."><p>Tus agentes siguieron trabajando mientras no estabas.</p></AuthAside>}
       footer={<span>carmen@sonrisa.pe · <u>¿No eres tú?</u></span>}
     >
       <PasswordInput id="pw" value="" onChange={() => {}} autoComplete="current-password" />
@@ -92,7 +92,7 @@ export const AccesoLatidia: Story = {
         title="Buenas noches."
         description="Qué bueno verte. Entra a tu consultorio."
         aside={
-          <AuthAside tag="Tu consultorio" title="Omnicanal" accent="y agéntica.">
+          <AuthAside tag="ARM · Agentic Relationship Management" title="Tu consultorio" accent="es un ARM.">
             <p>Tus agentes siguieron trabajando mientras no estabas.</p>
           </AuthAside>
         }
