@@ -276,6 +276,15 @@ export function whatFollows(
 }
 
 /**
+ * Ya no le queda nada que escribir en este enlace: ni sus datos, ni su visita, ni «¿Cambió algo?»,
+ * ni corregir su salud. Entonces lo escrito a medias en su celular ya no sirve y se borra; mientras
+ * le quede algo, se guarda (también lo de «Corregir», H3).
+ */
+export function nothingLeftToWrite(view: PersonalLinkView): boolean {
+  return view.status !== "abierto" || (!view.data && !view.visit && !view.healthCheck && !view.correctHealth)
+}
+
+/**
  * Quien lee lo que envía antes de atenderla: «el Dr. Luis Prado», o «tu odontólogo» si la cita
  * no dice con quién es.
  */
@@ -696,10 +705,9 @@ export function PersonalLinkPage({
   // Lo escrito a medias en «Antes de tu cita» vive en este celular (entrega 9): es de esta
   // clínica, de este enlace y de la cita para la que responde.
   const draftAppointment = booked ?? view?.appointment ?? null
-  const draftKey =
-    slug && token
-      ? personalLinkDraftKey(slug, token, draftAppointment && !draftAppointment.cancelled ? draftAppointment.startsAt : null)
-      : undefined
+  const draftStartsAt = draftAppointment && !draftAppointment.cancelled ? draftAppointment.startsAt : null
+  const draftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt) : undefined
+  const correctionDraftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt, "corregir") : undefined
   const [draftOnDevice, setDraftOnDevice] = useState<DraftOnDevice | null>(null)
   // Se mira al hidratar y cada vez que cambia de pantalla (pudo escribir en el recorrido).
   // biome-ignore lint/correctness/useExhaustiveDependencies: `screenKey` es el momento de volver a mirar, no un dato.
@@ -713,7 +721,7 @@ export function PersonalLinkPage({
   const linkGone =
     (viewQuery.error instanceof ApiError &&
       (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")) ||
-    (!!view && (view.status !== "abierto" || (!view.data && !view.visit)))
+    (!!view && nothingLeftToWrite(view))
   // Si borró algo, la pantalla del enlace vencido lo dice en vez de «No perdiste nada».
   const [draftDropped, setDraftDropped] = useState(false)
   useEffect(() => {
@@ -1074,6 +1082,8 @@ export function PersonalLinkPage({
           token={token}
           clinicName={view.clinicName}
           mode="corregir"
+          // Lo escrito a medias también queda en su celular, aparte de «Antes de tu cita» (H3).
+          draftKey={correctionDraftKey}
           onSent={(words) => {
             refresh()
             setDone({ key: "datos", screen: title, ...words, at: activeAppointment?.startsAt ?? null })

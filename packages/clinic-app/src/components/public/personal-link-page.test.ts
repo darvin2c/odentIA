@@ -8,6 +8,7 @@ import {
   beforeVisitCard,
   type DraftOnDevice,
   expiredLinkWords,
+  nothingLeftToWrite,
   pendingItems,
   toldWords,
   validatePersonalLinkSearch,
@@ -387,5 +388,24 @@ describe("la tarjeta de sus datos cuenta lo de su salud", () => {
     )
     expect(datos?.badge).toBe("Faltan 3")
     expect(datos?.text).toBe("Tipo de documento, número de documento; y unas preguntas de tu salud.")
+  })
+})
+
+describe("«Corregir mi salud o mis medicinas» guarda lo escrito en su celular (H3)", () => {
+  it("con solo «Corregir» o «¿Cambió algo?» por hacer, lo escrito a medias no se borra al abrir", () => {
+    expect(nothingLeftToWrite(view({ data: null, visit: null, correctHealth: true }))).toBe(false)
+    expect(nothingLeftToWrite(view({ data: null, visit: null, healthCheck: { since: THURSDAY } }))).toBe(false)
+    // Sin nada que escribir, sí: ya no sirve.
+    expect(nothingLeftToWrite(view({ data: null, visit: null }))).toBe(true)
+    expect(nothingLeftToWrite(view({ status: "vencido", correctHealth: true }))).toBe(true)
+  })
+
+  it("la corrección guarda aparte de «Antes de tu cita», en el mismo enlace y la misma cita", () => {
+    const token = "token-de-uno"
+    const before = personalLinkDraftKey("dental-smile", token, THURSDAY)
+    const correcting = personalLinkDraftKey("dental-smile", token, THURSDAY, "corregir")
+    expect(correcting).not.toBe(before)
+    // Del mismo enlace: cuando el enlace ya no sirve, se borra con lo demás.
+    expect(correcting.slice(0, correcting.lastIndexOf(".") + 1)).toBe(before.slice(0, before.lastIndexOf(".") + 1))
   })
 })
