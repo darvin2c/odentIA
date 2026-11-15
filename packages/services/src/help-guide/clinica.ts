@@ -116,8 +116,9 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha-revisar",
         q: "¿Cómo reviso lo que Clío dejó propuesto en la ficha?",
-        a: "En la ficha. Ábrela desde la barra del dictado (el enlace con el nombre de la ficha) o con «Revisar lo de Clío» en su fila. En cada pregunta sale «Clío:» con lo que dijiste: «Confirmar» la escribe y la × la descarta, con «Deshacer». Arriba, «Confirmar las N» confirma juntas las que propone; la que cambia lo que ya escribiste se cambia en su pregunta, con «Cambiar a…». Las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma. Si firmas sin revisarlas, vienen marcadas en «Finalizar y firmar», en el bloque de su ficha. Dicta y confirma quien lleva la atención o toma el relevo.",
+        a: "En la ficha. Ábrela desde la barra del dictado (el enlace con el nombre de la ficha) o con «Revisar lo de Clío» en su fila. En cada pregunta sale «Clío:» con lo que dijiste: «Confirmar» la escribe y la × la descarta, con «Deshacer». Arriba, «Confirmar las N» confirma juntas las que propone; la que cambia lo que ya escribiste se cambia en su pregunta, con «Cambiar a…». Las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma. Lo que confirmas queda con «Clío · confirmó…», tu nombre y la hora; lo que escribiste tú no lleva esa marca. Si firmas sin revisarlas, vienen marcadas en «Finalizar y firmar», en el bloque de su ficha. Dicta y confirma quien lleva la atención o toma el relevo.",
         forms: [
+          "como se que respuestas de la ficha propuso clio y cuales escribi yo",
           "alguien dicto y quedaron propuestas sin revisar como las reviso",
           "como reviso las propuestas de clio",
           "quedaron propuestas de clio sin revisar",
@@ -157,6 +158,19 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        // Revisión final de formularios del 15 nov (A19): confirmar solo respuestas de la ficha también cuenta
+        // (`countConsultationAction` cuenta toda sugerencia confirmada, también las de la ficha).
+        id: "pacientes-dictado-cuenta-consulta",
+        q: "¿Cuándo cuenta como una consulta de Clío?",
+        a: "Al cerrar la atención, si confirmaste algo de lo que propuso Clío: una sugerencia de la consulta o una respuesta de la ficha, aunque sea solo eso. Cuenta una por atención, aunque dictes varias veces. Si no confirmas nada, o nadie dicta, no cuenta ni cuesta.",
+        forms: [
+          "cuenta como consulta de clio si solo confirme respuestas de la ficha",
+          "que cuenta como una consulta de clio",
+          "se cobra el dictado si no confirmo nada",
+        ],
+        area: "clinica",
+      },
+      {
         id: "pacientes-dictado-tercera-ficha",
         q: "¿Por qué una de mis fichas quedó vacía si dicté para ella?",
         a: "Clío lee las dos fichas que tocaste último y la que tienes abierta. Si tenías tres a medias (por ejemplo endodoncia, odontopediatría y la odontoestomatológica), la que no tocaste último no recibió nada: ábrela antes de dictar o responde algo en ella para que pase al frente. Lo que dictaste no se pierde: lo ves en «Ver lo dictado».",
@@ -177,8 +191,13 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-alergia-registrar-quitar",
         q: "¿Cómo registro o quito una alergia?",
-        a: "En su página › Clínica › Antecedentes, «Agregar alergia»: eliges la «Sustancia» de la lista, qué tan fuerte fue (leve, moderada, severa o no se sabe) y qué le pasó. Una alergia escrita a mano solo avisa al recetar si el medicamento se escribe igual: pásala a la lista con «Elegir de la lista». Se quita desde su menú, «Quitar», con el motivo; no se borra: queda en «Alergias quitadas» con «Volver a ponerla». Lo hace quien escribe en la historia clínica.",
-        forms: ["donde pongo que es alergica a la penicilina", "como agrego una alergia", "puse una alergia por error como la quito"],
+        a: "En su página › Clínica › Antecedentes, «Agregar alergia»: eliges la «Sustancia» de la lista, qué tan fuerte fue (leve, moderada, severa o no se sabe) y qué le pasó. Una alergia escrita a mano solo avisa al recetar si el medicamento se escribe igual: pásala a la lista con «Elegir de la lista». Se quita desde su menú, con el motivo escrito (los de siempre están a un toque): «Quitar» en la que anotó el equipo y, en la que dijo la persona, «Agregar una corrección», con lo que pasó (por ejemplo, «era naproxeno y no ibuprofeno»); lo que dijo sigue en «Ver declaración original», y si era otra sustancia, agrégala con «Agregar alergia». No se borra: queda en «Alergias quitadas», con quién la quitó y su motivo, y «Volver a ponerla». Lo hace quien escribe en la historia clínica.",
+        forms: [
+          "donde pongo que es alergica a la penicilina",
+          "como agrego una alergia",
+          "puse una alergia por error como la quito",
+          "el paciente puso mal su alergia en el enlace",
+        ],
         area: "clinica",
         needs: "clinical.write",
       },
@@ -202,7 +221,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-antecedentes-declaracion-original",
         q: "¿Dónde veo lo que declaró al registrarse y si ya se revisó?",
-        a: "En su página › Clínica › Antecedentes: «Ver declaración original» muestra lo que envió desde su enlace, tal como llegó, y el registro con que se creó su ficha, con quién y cuándo; no se edita. Arriba dice «Antecedentes revisados por…», con quién y el día, o, si nadie de la clínica los revisó, quién lo dijo y cuándo: «Lo dijo ella… sin revisar», o «Lo dijo quien lo cuida, Carla…» si respondió quien habla por ella; con dos fechas o dos personas, una marca por cada una. Esa misma marca sale arriba de su ficha y de la atención, en una caja con solo lo que sigue sin revisar. Las alergias se revisan aparte: su tarjeta dice quién las revisó, y «Alergias revisadas» confirma las que dijo. Un «No» que marcó la persona se lee «Dijo que no · sin revisar»: no es «niega» hasta que alguien de la clínica se lo pregunta; al revisar los antecedentes ese grupo llega sin marcar, para que elijas «Niega…» si lo confirma. «Ver historial» abre las versiones anteriores.",
+        a: "En su página › Clínica › Antecedentes: «Ver declaración original» muestra lo que envió desde su enlace, tal como llegó, y el registro con que se creó su ficha, con quién y cuándo; no se edita. Arriba dice «Antecedentes revisados por…», con quién y el día, o, si nadie de la clínica los revisó, quién lo dijo y cuándo: «Lo dijo ella… sin revisar», o «Lo dijo quien lo cuida, Carla…» si respondió quien habla por ella; con dos fechas o dos personas, una marca por cada una. Esa misma marca sale arriba de su ficha y de la atención, en una caja con solo lo que sigue sin revisar. Las alergias: su tarjeta dice quién las revisó, y «Alergias revisadas» confirma las que dijo; en la atención, «Lo revisé con ella» revisa todo junto. Un «No» que marcó la persona se lee «Dijo que no · sin revisar»: no es «niega» hasta que alguien de la clínica se lo pregunta; al revisar los antecedentes llega tal cual, con esa marca al lado, y guardar es revisarlo con ella. «Ver historial» abre las versiones anteriores.",
         forms: [
           "declaracion original del registro",
           "que significa sin revisar en antecedentes",
@@ -305,7 +324,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-cuestionario-respondio-antes-de-venir",
         q: "¿Dónde veo lo que respondió antes de venir?",
-        a: "Lo que contó de esa visita (a qué viene, si le duele y cuánto) sale en «Hoy viene a…», arriba de la atención de su cita, con quién lo envió y cuándo, y «Usar como motivo» pone sus palabras en el motivo sin teclear. Es solo de esa cita: lo de otra visita no sale. El sistema anota que lo viste al abrir la atención, y después de firmar sigue ahí y en la Historia. Lo que dijo de su salud (alergias, enfermedades, medicinas, embarazo) está arriba de su ficha, en su caja «Lo dijo ella… sin revisar», y en la atención, en «Revisa con… lo que dijo de su salud» (o en «Pregúntale a…», si además falta preguntarle algo). Si respondió un cuestionario de los de antes, está en su página › Clínica › Documentos, como «Por revisar», con «Ver». Es para leer: lo que escribió no se cambia. «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta, como dichas por ella y sin confirmar. Mientras la atención sigue abierta, lo revisado queda a la vista en ella; después de firmarla, y si lo revisaste desde Documentos, se ve en Documentos (con «Ver») y en la Historia, dentro de esa atención.",
+        a: "Lo que contó de esa visita (a qué viene, si le duele y cuánto) sale en «Hoy viene a…», arriba de la atención de su cita, con quién lo envió y cuándo, y «Usar como motivo» pone sus palabras en el motivo sin teclear. Es solo de esa cita: lo de otra visita no sale. El sistema anota que lo viste al abrir la atención, y después de firmar sigue ahí y en la Historia. Lo que dijo de su salud (alergias, enfermedades, medicinas, embarazo) está arriba de su ficha, en su caja «Lo dijo ella… sin revisar», y en la atención, en «Revisa con… lo que dijo de su salud» (o en «Pregúntale a…», si además falta preguntarle algo): «Ver lo que dijo» lo abre y «Lo revisé con ella» lo deja revisado en un toque. Si respondió un cuestionario de los de antes, está en su página › Clínica › Documentos, como «Por revisar», con «Ver»: lo que escribió no se cambia, y ahí «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta, como dichas por ella y sin confirmar. Mientras la atención sigue abierta, lo revisado queda a la vista en ella; después de firmarla, y si lo revisaste desde Documentos, se ve en Documentos (con «Ver») y en la Historia, dentro de esa atención.",
         forms: [
           "donde veo el cuestionario que respondio antes de venir",
           "lo que respondio antes de venir",
@@ -317,6 +336,23 @@ export const CLINICA: readonly HelpMore[] = [
         ],
         area: "clinica",
         needs: "clinical.read",
+        // Recepción y caja tienen la suya (revisión final de formularios del 15 nov, A8 y H8 de desarrollo).
+        notFor: { lacks: "clinical.read" },
+      },
+      {
+        // Revisión final de formularios del 15 nov (H10 de clínica): la Ayuda mandaba a «Marcar como revisado», que es
+        // de los cuestionarios de antes, y no a «Lo revisé con ella».
+        id: "pacientes-salud-lo-revise-con-ella",
+        q: "¿Cómo anoto que revisé con el paciente lo que dijo de su salud?",
+        a: "En la atención, en «Revisa con… lo que dijo de su salud»: pregúntaselo y toca «Lo revisé con ella» (o con él, o con quien habla por él). Sus alergias, enfermedades y medicinas quedan revisadas tal como las dijo, con tu nombre y la hora, y arriba de su ficha y en Antecedentes deja de decir «sin revisar»; mientras se ve el aviso, «Deshacer» lo vuelve atrás. Si algo no es así, «Corregir algo» abre sus antecedentes para cambiarlo. En su página, en Antecedentes, «Revisar antecedentes» y «Revisar y guardar» sin cambiar nada hace lo mismo. Si firmas sin revisarlo, el cierre lo dice («Sin revisar:» con lo que falta) y se firma igual: queda anotado en la atención, con quién lo dijo y cuándo. «Marcar como revisado» no es esto: es de los cuestionarios de antes, en Documentos.",
+        forms: [
+          "como anoto que reviso lo que dijo de su salud",
+          "que diferencia hay entre marcar como revisado y lo revise con ella",
+          "para que sirve lo revise con ella",
+          "como quito el sin revisar",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
       },
       {
         // QA del 14 nov (auditor H7): la Ayuda mandaba a una caja y a Documentos, que no traen esto.
@@ -335,9 +371,20 @@ export const CLINICA: readonly HelpMore[] = [
         own: true,
       },
       {
+        // Revisión final de formularios del 15 nov: el aviso de la exodoncia (Y2 de clínica, `extractionRisksOf`).
+        id: "pacientes-exodoncia-aviso-medicinas",
+        q: "¿Por qué la exodoncia dice «pide su INR del día» o «riesgo de osteonecrosis»?",
+        a: "Porque toma algo que cambia una extracción: en la atención, en el plan, la fila de la exodoncia por hacer lo dice con quién lo contó y cuándo. Con warfarina o acenocumarol, «pide su INR del día»; con otro anticoagulante o un antiagregante, «riesgo de sangrado»; con una medicina para los huesos (alendronato y los de su grupo), «riesgo de osteonecrosis de los maxilares», también si ya la dejó. Sale de sus antecedentes y de lo que dijo. Es un aviso: no frena indicarla ni hacerla. Un anticoagulante que ya dejó no sale: termínalo en sus antecedentes.",
+        forms: ["por que la exodoncia me dice que pida su inr", "aviso de warfarina en la extraccion", "riesgo de osteonecrosis en la exodoncia"],
+        area: "plan",
+        needs: "clinical.read",
+        own: true,
+      },
+      {
         id: "pacientes-cuestionario-corregir-lo-que-puso",
         q: "El paciente puso algo mal en lo que respondió, ¿cómo lo corrijo?",
-        a: "Lo que escribió no se cambia. Ábrelo, en la caja de la atención o en Documentos con «Ver», y toca «Agregar una corrección»: escribes lo correcto, si quieres el «Motivo (opcional)» (por qué se corrige, por ejemplo «lo confirmó en consulta»), y «Guardar corrección». Queda aparte, debajo de lo que dijo, con tu nombre, la hora y su motivo, antes o después de «Marcar como revisado», y así sale en la copia de la historia. Para que su ficha diga otra cosa, corrígelo también en sus antecedentes. Si llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",
+        // Revisión final de formularios del 15 nov (A10 y A11): lo de su salud no se corrige como un cuestionario.
+        a: "Lo que dijo no se cambia: se corrige aparte, con tu nombre, la hora y el motivo. De su salud, una alergia que dijo y no tiene, o que era otra, se corrige en su página › Clínica › Antecedentes, en el menú de esa alergia, con «Agregar una corrección» (por ejemplo, «era naproxeno y no ibuprofeno»), y la que sí tiene se suma con «Agregar alergia». Sus enfermedades y medicinas, en la atención con «Corregir algo» o en Antecedentes con «Revisar antecedentes». Lo que dijo sigue en «Ver declaración original». Si lo contó desde su enlace para su próxima cita, ella misma puede volver a responderlo ahí con «Corregir mi salud o mis medicinas»: llega como algo nuevo por revisar, sin borrar lo de antes. En un cuestionario de los de antes, ábrelo (en la caja de la atención o en Documentos con «Ver») y toca «Agregar una corrección»: escribes lo correcto, si quieres el «Motivo (opcional)», y «Guardar corrección»; queda debajo de lo que dijo, antes o después de «Marcar como revisado», y así sale en la copia de la historia. Si un cuestionario llegó repetido, es de otra persona o no se puede revisar, «Descartar…» lo saca con su motivo: no se borra, queda descartado.",
         forms: [
           "el paciente puso algo mal como lo corrijo",
           "el paciente puso algo mal",
@@ -351,6 +398,7 @@ export const CLINICA: readonly HelpMore[] = [
           "como descarto un cuestionario que envio el paciente",
           "tengo que poner el motivo de la correccion",
           "donde pongo por que corrijo lo que dijo el paciente",
+          "la paciente se equivoco en la dosis que envio como lo corrige ella",
         ],
         area: "clinica",
         needs: "clinical.write",
@@ -387,6 +435,7 @@ export const CLINICA: readonly HelpMore[] = [
         q: "Me pregunta «¿Salir sin guardar?» en un formulario, ¿se perdió lo que llené?",
         a: "Arriba del formulario dice cómo va. «Guardado»: todo está guardado y salir no pregunta. «Cambios sin guardar» o «Guardando…»: se está guardando, y si sales se guarda igual al cerrar. «Guardado, menos lo marcado»: quedó guardado todo menos la respuesta marcada en rojo, que no vale (un 15 en una escala de 0 a 10); bajo ella dice qué sigue guardado. «No se guardó»: tus últimos cambios no llegaron. Solo en esos dos casos, al salir con ×, Escape o el menú, pregunta «¿Salir sin guardar?» y dice qué se pierde. «Seguir aquí» te deja corregirlo; «Descartar y salir» sale sin guardar eso ni lo último que cambiaste, y lo que ya estaba guardado se queda.",
         forms: [
+          "puse un numero fuera de rango en la ficha se pierde lo demas",
           "me dice que salga sin guardar aunque ya guarde se perdio",
           "que significa guardado menos lo marcado",
           "que pasa si le doy descartar y salir",
@@ -541,9 +590,11 @@ export const CLINICA: readonly HelpMore[] = [
       },
       {
         id: "formularios-formulario-propio-crear-publicar",
-        q: "¿Cómo hago una ficha propia o un cuestionario para antes de la cita?",
+        // Sin «antes de la cita» (revisión final del 15 nov, A9): a recepción, que manda lo de antes de la cita, la
+        // traía aquí. Lo que responde el paciente antes de su cita no es una ficha.
+        q: "¿Cómo hago una ficha propia, además de las que ya vienen?",
         a: "En Configuración › Fichas de consulta, «Nueva ficha»: pones el título y armas las preguntas con «Agregar sección» y «Agregar campo», cada una con su «Tipo de respuesta», «Obligatorio» y, si depende de otra, «Mostrar si». La llena el equipo, en la ficha o en la atención. No se usa hasta que tocas «Publicar». Una versión publicada ya no se edita: se prepara la siguiente, y lo ya respondido conserva su título y sus preguntas. Lo que se le pregunta al paciente antes de su cita no es una ficha: está en Configuración › Preguntas al paciente, en «Antes de cada cita» (a qué viene, si le duele y algo más), y le llega en su enlace con lo que falta de sus datos.",
-        forms: ["como publico un formulario", "cuestionario para que el paciente llene antes de venir", "pregunta que sale solo si responde que si", "nueva plantilla de formulario"],
+        forms: ["como publico un formulario", "como hago un cuestionario propio", "pregunta que sale solo si responde que si", "nueva plantilla de formulario"],
       },
       {
         id: "formularios-formulario-dejar-de-usar",
@@ -554,7 +605,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "formularios-formulario-volver-a-usar",
         q: "¿Cómo vuelvo a usar una ficha que dejé de usar?",
-        a: "En Configuración › Fichas de consulta, enciende su interruptor: pasa de «Sin usar» a «En uso» con la misma versión y las mismas preguntas, sin crear otra; lo ya llenado no cambia. Si lo responde el paciente, antes pide confirmar y dice a qué cuestionario reemplaza. Una ficha que se dejó de usar antes de que existiera el interruptor está abajo, en «Ya no se usan», con «Volver a usar».",
+        a: "En Configuración › Fichas de consulta, enciende su interruptor: pasa de «Sin usar» a «En uso» con la misma versión y las mismas preguntas, sin crear otra; lo ya llenado no cambia. Una ficha que se dejó de usar antes de que existiera el interruptor está abajo, en «Ya no se usan», con «Volver a usar». Un cuestionario que respondía el paciente ya no vuelve a usarse: dice «Lo respondía el paciente · ya no se usa», lo que respondió sigue en cada paciente, y lo que se le pregunta antes de su cita se elige en Configuración › Preguntas al paciente.",
         forms: ["volver a usar un formulario que deje de usar", "recuperar un formulario que ya no se usa", "donde estan los formularios que deje de usar"],
       },
       {

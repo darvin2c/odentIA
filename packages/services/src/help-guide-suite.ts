@@ -2,7 +2,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { type HelpTopic, matchHelpTopics } from "./help-guide.js"
+import { ORG_ROLES } from "@odentia/auth/permissions"
+import { helpGuideForRole, type HelpTopic, matchHelpTopics } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
 
 /**
@@ -51,6 +52,8 @@ const COMPOSED = new Set([
   "y en agosto",
   // Su paso y su total salen de lo que dejó escrito en su celular (`draftResumeWords`).
   "Vas en el paso 3 de 6",
+  // Dice con quién: «Lo revisé con ella», «con él» o «con su madre» (`reviewWho`).
+  "Lo revisé con ella",
 ])
 
 /** Lo que una guía cita entre comillas y no aparece en ninguna pantalla ni servicio. */
@@ -92,6 +95,11 @@ interface Asked {
   repite?: "desarrollo" | "control" | "final"
   /** Pide dos cosas a la vez y su respuesta está repartida: `faqs` y `temas` llevan las partes, y ninguna la responde sola. */
   partes?: boolean
+  /**
+   * El rol de la matriz que pregunta (`clinician`, `reception`, `cashier`…): `eval:ayuda-pasos` decide con la
+   * guía de ese rol, sin lo que no es para él (`HelpFaq.notFor`). Sin rol, con la guía entera.
+   */
+  rol?: string
   /**
    * Es una pregunta de seguimiento: sola no se entiende («¿y cómo la creo?»). `q` es la pregunta
    * anterior y `donde`, la pantalla de su respuesta, como en el menú. Está etiquetada sabiendo la anterior.
@@ -141,11 +149,21 @@ export function helpBankLabelProblems(product: Asked["producto"], topics: readon
   /** Cómo se llama cada pantalla en el menú: lo que vale en `antes.donde`. */
   const screens = new Set(topics.flatMap((topic) => [topic.title, ...(topic.menuLabel ? [topic.menuLabel] : [])]))
   const asked =(bank: string) => new Set((helpBanks[bank as keyof typeof helpBanks] ?? []).map((item) => normalizeForSearch(item.q)))
+  // Con rol, lo que la responde tiene que ser para ese rol: si no, Jev nunca podría elegirla.
+  const byRole = new Map<string, Set<string> | undefined>()
+  const faqsOfRole = (role: string) => {
+    if (!byRole.has(role)) {
+      const known = (ORG_ROLES as readonly string[]).includes(role)
+      byRole.set(role, known ? new Set(helpGuideForRole(topics, role).flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.q))) : undefined)
+    }
+    return byRole.get(role)
+  }
   const problems: string[] = []
   for (const [bank, items] of Object.entries(helpBanks)) {
     for (const item of items) {
       if (!PRODUCTS.has(item.producto)) problems.push(`[${bank}] «${item.q}»: el producto «${String(item.producto)}» no existe (odentia, latidia o vistia)`)
       if (item.es !== undefined && !NOT_IN_GUIDE.has(item.es)) problems.push(`[${bank}] «${item.q}»: «es» vale ninguna o datos, no «${String(item.es)}»`)
+      if (item.rol !== undefined && !faqsOfRole(item.rol)) problems.push(`[${bank}] «${item.q}»: el rol «${item.rol}» no existe en la matriz`)
       if (item.repite !== undefined && (!TUNING.includes(item.repite) || !asked(item.repite).has(normalizeForSearch(item.q)))) {
         problems.push(`[${bank}] «${item.q}»: no está repetida en «${String(item.repite)}»`)
       }
@@ -153,6 +171,8 @@ export function helpBankLabelProblems(product: Asked["producto"], topics: readon
       const answers = (item.faqs?.length ?? 0) + (item.temas?.length ?? 0)
       if ((answers > 0) === (item.es !== undefined)) problems.push(`[${bank}] «${item.q}»: lleva una respuesta o «es», solo uno`)
       for (const q of item.faqs ?? []) if (!faqs.has(q)) problems.push(`[${bank}] «${item.q}»: la guía no tiene la pregunta frecuente «${q}»`)
+      const theirs = item.rol === undefined ? undefined : faqsOfRole(item.rol)
+      for (const q of item.faqs ?? []) if (theirs && faqs.has(q) && !theirs.has(q)) problems.push(`[${bank}] «${item.q}»: «${q}» no es para el rol ${item.rol}`)
       for (const id of item.temas ?? []) if (!ids.has(id)) problems.push(`[${bank}] «${item.q}»: la guía no tiene la pantalla «${id}»`)
       for (const id of item.expected) if (!ids.has(id)) problems.push(`[${bank}] «${item.q}»: «expected» nombra la pantalla «${id}», que la guía no tiene`)
       if (item.partes !== undefined && (item.partes !== true || answers < 2)) problems.push(`[${bank}] «${item.q}»: «partes» es true y lleva al menos dos respuestas`)
