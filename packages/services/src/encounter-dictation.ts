@@ -68,7 +68,7 @@ import {
   withFormTwins,
   withoutFormNotes,
 } from "./dictation-forms.js"
-import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
+import type { DictationPrepared, ProductDictation, ServiceSynonyms } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
 
 /*
@@ -314,30 +314,74 @@ const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "
 
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
 
+/** Lo que se dice al nombrar una prestación y no dice cuál es: el artículo, la pieza, la cara, «hoy». */
+const NOT_SERVICE_WORDS = new Set([
+  "una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro",
+  "pieza", "piezas", "diente", "dientes", "muela", "muelas", "tratamiento", "procedimiento",
+  "cara", "caras", "oclusal", "oclusales", "mesial", "distal", "vestibular", "palatina", "palatino", "lingual", "incisal",
+])
+/** Lo que se hizo, no la prestación: «cambiamos», «hicimos», «le hice», «coloqué». */
+const DONE_VERB = /^(?:[a-z]{3,}(?:amos|emos|imos)|hice|hizo|puse|puso|coloque|termine|realice|cambie|cemente|aplique|saque)$/
+
+/** Las palabras que dicen cuál prestación es. */
+const serviceKeys = (text: string) => words(text).filter((word) => !NOT_SERVICE_WORDS.has(word) && !DONE_VERB.test(word) && !/^\d+$/.test(word))
+
+/** La misma palabra con otra terminación: «resina» y «resinas», «flúor» y «fluorización». */
+const sameWord = (a: string, b: string) =>
+  a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a) || (a.slice(0, 5) === b.slice(0, 5) && Math.abs(a.length - b.length) <= 3)))
+
+/** Las formas de decir un servicio que no son su nombre (`ProductDictation.serviceSynonyms`). */
+function saidAs(name: string, synonyms: ServiceSynonyms): string[] {
+  const plain = normalizeForSearch(name)
+  return synonyms.flatMap((item) => (plain.includes(item.name) ? item.said.map((said) => plain.replace(item.name, said)) : []))
+}
+
 /**
  * La prestación del tarifario (o el producto de Inventario) que nombró el
- * odontólogo, o las más parecidas si no hay una sola.
+ * profesional, o las que calzan si no hay una sola. Calza la que tiene en su
+ * nombre, o en una forma de decirlo del producto (`synonyms`), cada palabra de
+ * lo dicho que dice cuál es (prueba con voz del 15 nov): «cambiamos el arco» no
+ * calza con «Apexificación, cambio de medicación» (no dice «arco», y
+ * «cambiamos» es lo que se hizo), ni «cera de ortodoncia» con «Aparatología
+ * fija de ortodoncia». Lo que no calza con ninguna no propone ninguna: un
+ * servicio lleva precio, y nunca se ofrece otro procedimiento. Lo exportan los
+ * servicios para la medición (`dictatedService`).
  */
-function matchService<T extends { name: string }>(spoken: string, services: T[]): { match: T | null; candidates: T[] } {
+function matchService<T extends { name: string }>(spoken: string, services: T[], synonyms: ServiceSynonyms = []): { match: T | null; candidates: T[] } {
   const wanted = normalizeForSearch(spoken)
   const exact = services.filter((service) => normalizeForSearch(service.name) === wanted)
   if (exact.length === 1) return { match: exact[0] ?? null, candidates: [] }
+  const keys = serviceKeys(spoken)
+  if (!keys.length) return { match: null, candidates: [] }
   const tokens = words(spoken)
   const scored = services
-    .map((service) => {
+    .flatMap((service) => {
       const name = normalizeForSearch(service.name)
+      const fits = (said: string) => keys.every((key) => words(said).some((word) => sameWord(key, word)))
+      const byName = fits(name)
+      if (!byName && !saidAs(service.name, synonyms).some(fits)) return []
       const own = words(service.name)
-      const shared = tokens.filter((token) => own.some((word) => word.startsWith(token.slice(0, 5)) || token.startsWith(word.slice(0, 5)))).length
-      return { service, shared, contains: name.includes(wanted) || wanted.includes(name) }
+      const shared = tokens.filter((token) => own.some((word) => sameWord(token, word))).length
+      // Por una forma de decirlo, no por su nombre: se ofrece para elegir, nunca se da por buena.
+      return [{ service, shared, byName, contains: byName && (name.includes(wanted) || wanted.includes(name)), extra: own.length - shared }]
     })
-    .filter((item) => item.shared > 0 || item.contains)
-    .sort((a, b) => Number(b.contains) - Number(a.contains) || b.shared - a.shared)
+    .sort((a, b) => Number(b.contains) - Number(a.contains) || Number(b.byName) - Number(a.byName) || b.shared - a.shared || a.extra - b.extra)
   const [best, second] = scored
-  // Una sola coincidencia clara se da por buena; si hay varias parecidas, elige el odontólogo.
+  // Una sola coincidencia clara se da por buena; si hay varias parecidas, elige el profesional.
   if (best && best.contains && (!second || !second.contains) && best.shared >= Math.min(tokens.length, words(best.service.name).length)) {
     return { match: best.service, candidates: [] }
   }
   return { match: null, candidates: scored.slice(0, SERVICE_CANDIDATES).map((item) => item.service) }
+}
+
+/**
+ * El servicio de lo dicho (`matchService`), por nombre: el que se da por bueno
+ * o las candidatas. Lo usa la medición del dictado (`eval:dictado`) para contar
+ * los procedimientos que calzan con otro.
+ */
+export function dictatedService(spoken: string, names: readonly string[], synonyms: ServiceSynonyms = []): { match: string | null; candidates: string[] } {
+  const { match, candidates } = matchService(spoken, names.map((name) => ({ name })), synonyms)
+  return { match: match?.name ?? null, candidates: candidates.map((item) => item.name) }
 }
 
 /** Formato y zona de la clínica con los que se escribe el resumen de una sugerencia. */
@@ -598,24 +642,25 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       return { payload, status: "por_revisar", note: "No entendí para qué día. Dilo otra vez o elige otro horario." }
     }
     if (payload["time"] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(payload["time"]))) delete payload["time"]
-    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services) : {}
+    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services, dictation.serviceSynonyms) : {}
     return { payload: { ...payload, ...what }, status: "lista", note: null }
   }
   if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
-  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services) }, status: "lista", note: null }
+  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services, dictation.serviceSynonyms) }, status: "lista", note: null }
   return { payload, status: "lista", note: null }
 }
 
 /** Lo que se busca en el tarifario de una prestación dicha: el servicio si hay uno solo, o las candidatas. */
 type PlanChoice = { service?: string; serviceId?: string; serviceName?: string; priceCents?: number; currency?: string; serviceScope?: string | null; candidates?: ServiceOption[] }
 
-function chooseService(choice: PlanChoice, services: ServiceOption[]): PlanChoice {
+function chooseService(choice: PlanChoice, services: ServiceOption[], synonyms: ServiceSynonyms): PlanChoice {
   const chosen = typeof choice.serviceId === "string" ? services.find((service) => service.id === choice.serviceId) : undefined
-  const match = chosen ?? matchService(String(choice.service ?? ""), services).match
+  const found = chosen ? { match: chosen, candidates: [] } : matchService(String(choice.service ?? ""), services, synonyms)
+  const match = found.match
   if (match) return { service: choice.service ?? match.name, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }
-  return { service: choice.service ?? "", candidates: matchService(String(choice.service ?? ""), services).candidates }
+  return { service: choice.service ?? "", candidates: found.candidates }
 }
 
 const OPTION_LETTER = ["A", "B", "C"]
@@ -628,7 +673,7 @@ const OPTION_LETTER = ["A", "B", "C"]
  */
 function settlePlan(payload: Record<string, unknown>, services: ServiceOption[], dictation: ProductDictation): Prepared {
   const { options: rawOptions, candidates: _candidates, ...rest } = payload
-  const main = chooseService(rest as PlanChoice, services)
+  const main = chooseService(rest as PlanChoice, services, dictation.serviceSynonyms)
   const base = { ...rest, ...main }
   delete base["candidates"]
   const fitted: Prepared = main.serviceId
@@ -641,7 +686,7 @@ function settlePlan(payload: Record<string, unknown>, services: ServiceOption[],
           : `Dijiste «${main.service}» y no está en tus servicios. Elige la prestación.`,
       }
   if (!Array.isArray(rawOptions) || rawOptions.length === 0) return fitted
-  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services))
+  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services, dictation.serviceSynonyms))
   // La elección guarda la pieza y las caras como se dijeron: cada camino toma de ahí lo suyo al
   // confirmarse (`confirmPlanChoice`), y la corona no se queda sin las caras que pide la resina.
   const site = choiceSite(base)
@@ -1192,7 +1237,7 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
   const byService = checks.planItems.filter((item) =>
     typeof base["serviceId"] === "string"
       ? item.serviceId === base["serviceId"]
-      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }]).match !== null,
+      : matchService(spoken, [{ id: item.id, name: item.title, priceCents: 0, currency: "", scope: item.scope }], dictation.serviceSynonyms).match !== null,
   )
   const fits = byService.filter((item) => said.tooth === null || item.toothNumber === null || item.toothNumber === said.tooth)
   // Con la pieza dicha, la de esa pieza; sin pieza, solo si hay uno: entre dos resinas no se adivina.
@@ -1632,8 +1677,10 @@ export async function saveDictationSegment(
     const prepared = await prepare(tx, draft, scope)
     outcomes.push({ draft, ready: prepared !== null })
     if (!prepared) continue
-    preparedDrafts.push({ draft, prepared })
-    if (draft.kind === "ficha" && draft.sourceText?.trim()) formSources.push(...formAnswerFragments(draft.sourceText, formQuestionOf(draft)))
+    // Una respuesta de ficha se muestra con la frase del número que se usó, si no es la que citó Clío.
+    const shown = prepared.said ? { ...draft, sourceText: prepared.said } : draft
+    preparedDrafts.push({ draft: shown, prepared })
+    if (draft.kind === "ficha" && shown.sourceText?.trim()) formSources.push(...formAnswerFragments(shown.sourceText, formQuestionOf(draft)))
   }
   // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov,
   // U5), y la oración que nombra una pregunta sin propuesta ni aviso tampoco se pierde en silencio

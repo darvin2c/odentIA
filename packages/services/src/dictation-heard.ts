@@ -181,3 +181,48 @@ export function groundHeard(said: string, transcript: string, vocabulary: HeardV
   }
   return ""
 }
+
+/*
+ * ---------- La frase que corta una pausa ----------
+ *
+ * El dictado se ordena por tramos, cortados en las pausas de quien dicta, y una
+ * pausa a veces cae a mitad de frase: «…frío sin respuesta calor» y, en el
+ * tramo siguiente, «sin respuesta también percusión negativa…» (prueba con voz
+ * del 15 nov, v07). Leído solo, el tramo nuevo no dice de qué es «sin
+ * respuesta», y el anterior no dice nada de «calor»: se perdía sin aviso. Si el
+ * nuevo sigue la frase, Clío y el servidor leen juntos el final del anterior y
+ * el comienzo del nuevo.
+ */
+
+/** Cuántas palabras del final del tramo anterior se leen con el nuevo: lo que nombra la pregunta cortada. */
+const BRIDGE_WORDS = 4
+
+/**
+ * Cómo empieza un tramo que sigue una frase: sin sujeto, con lo que se dice de
+ * algo ya nombrado («sin respuesta», «positiva», «grado uno», «también»,
+ * «igual») o con un número.
+ */
+const CONTINUES =
+  /^(?:(?:este|eh+|m+|bueno|ya)\s+)*(?:tambi[eé]n|igual|tampoco|y|o|ni|pero|con|sin|de|del|que|en|a|al|m[aá]s|menos|positiv[oa]s?|negativ[oa]s?|normal(?:es)?|aumentad[oa]s?|disminuid[oa]s?|ausentes?|presentes?|leves?|moderad[oa]s?|sever[oa]s?|grado|\d+(?:[.,]\d+)?)(?=[\s,.;]|$)/i
+
+/**
+ * El final del tramo anterior que se lee con el nuevo, si el nuevo sigue su
+ * frase: sus últimas palabras, desde el último punto. Vacío si el anterior
+ * cerró su frase o el nuevo empieza otra.
+ */
+export function pauseBridge(context: string, transcript: string): string {
+  const before = context.trim()
+  if (!before || /[.?!…]$/.test(before) || !CONTINUES.test(transcript.trim())) return ""
+  const tail = before.split(/(?<=[.;?!…])\s+/).at(-1) ?? ""
+  return tail.split(/\s+/).filter(Boolean).slice(-BRIDGE_WORDS).join(" ")
+}
+
+/**
+ * Lo dictado en la pausa con el final del tramo anterior delante, si el nuevo
+ * sigue su frase (`pauseBridge`): con eso se comprueban las frases que cita
+ * Clío y mira la red de las fichas.
+ */
+export function withPauseBridge(context: string | undefined, transcript: string): string {
+  const bridge = pauseBridge(context ?? "", transcript)
+  return bridge ? `${bridge} ${transcript.trim()}` : transcript
+}

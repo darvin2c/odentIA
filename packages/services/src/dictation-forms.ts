@@ -450,6 +450,8 @@ export interface PreparedFormAnswer {
   payload: Record<string, unknown>
   status: "lista" | "por_revisar"
   note: string | null
+  /** La frase que se muestra, si no es la que citó Clío: la del número que se usó (`numberPhrase`). */
+  said?: string
 }
 
 const shortSaid = (said: string) => (said.length > 80 ? `${said.slice(0, 77)}…` : said)
@@ -476,7 +478,7 @@ export function prepareFormAnswer(
   // La segunda lectura de una oración de la red: solo un valor que calza, y siempre por revisar.
   // Sin valor no se propone: el aviso de la red se queda.
   if (checked.payload["value"] == null) return null
-  return { payload: { ...checked.payload, reread: true }, status: "por_revisar", note: checked.note ?? REREAD_NOTE }
+  return { ...checked, payload: { ...checked.payload, reread: true }, status: "por_revisar", note: checked.note ?? REREAD_NOTE }
 }
 
 /** La respuesta de ficha que propone Clío, con la frase de la que sale. */
@@ -508,6 +510,7 @@ function checkWithWritten(draft: FormAnswerDraft, questions: readonly DictationF
   // pregunta sigue diciendo lo que decía (`replaces`); si no, gana lo escrito.
   const now = formAnswerWords({ value: question.answered, unit: question.unit })
   return {
+    ...proposed,
     payload: { ...proposed.payload, replaces: question.answered },
     status: "por_revisar",
     note: `Ya dice «${now}».`,
@@ -922,26 +925,37 @@ export function withoutFormPhrases(text: string, formPhrases: readonly string[])
   const kept = sentences.filter((sentence) => {
     const said = plain(sentence).replace(/[.;,]+$/, "").trim()
     if (!said) return false
-    if (CORRECTION.test(said)) return false
-    // Lo que se le preguntó al paciente («¿Te duele cuando comes?») no es de la historia (prueba con voz del 15 nov).
-    if (said.startsWith("¿") || said.endsWith("?")) return false
+    if (CORRECTION.test(said) || asked(said)) return false
     const hits = phrases.filter((phrase) => said.includes(phrase) || phrase.includes(said))
     // Lo de la ficha dicho con otras palabras («Canino derecho clase 2» por «caninos el derecho clase 2»): casi
     // todas sus palabras son de lo que fue para la ficha.
     const words = meaningful(said)
     if (!hits.length) return !(words.length >= 2 && words.filter((word) => covered.has(word.slice(0, 5))).length >= Math.ceil(0.8 * words.length))
     const used = new Set(hits.flatMap(meaningful))
-    return meaningful(said).filter((word) => !used.has(word)).length >= 2
+    // Lo que sigue a esa frase también puede ser de otra respuesta de la ficha («Presenta riesgo de caries
+    // alto y colabora pero con miedo», prueba con voz del 15 nov, v08): cuenta solo lo que no es de ninguna.
+    return words.filter((word) => !used.has(word) && !covered.has(word.slice(0, 5))).length >= 2
   })
   return kept.join(" ").trim()
 }
+
+/** Lo que se le preguntó al paciente («¿Te duele cuando comes?») no es de la historia (prueba con voz del 15 nov). */
+const asked = (said: string) => said.startsWith("¿") || said.endsWith("?")
+
+/** El texto de la consulta sin lo que se le preguntó al paciente, en toda pausa, con ficha o sin ella. */
+const withoutAsked = (text: string) =>
+  sentencesOf(text)
+    .filter((sentence) => !asked(plain(sentence).replace(/[.;,]+$/, "").trim()))
+    .join(" ")
+    .trim()
 
 /**
  * Lo dicho de una pausa con el texto de la consulta limpio de lo que fue para
  * una ficha: lo que quedó como propuesta o va a «No pude usar esto» con su
  * motivo. Lo que la ficha no tomó ni avisa se queda en la consulta, para no
- * perderlo. Una nota que queda vacía no se propone. Solo con fichas empezadas:
- * sin ellas, lo de siempre. Lo usan el servidor y la medición.
+ * perderlo. Una nota que queda vacía no se propone. Sin fichas empezadas solo
+ * se quita lo que se le preguntó al paciente: eso no es de la historia en
+ * ninguna pausa. Lo usan el servidor y la medición.
  */
 export function withoutFormNotes<T extends FormDraftLike>(
   drafts: readonly T[],
@@ -949,7 +963,7 @@ export function withoutFormNotes<T extends FormDraftLike>(
   site: ProductSite,
   transcript?: string,
 ): T[] {
-  if (!questions.length) return [...drafts]
+  if (!questions.length) return drafts.flatMap((draft) => (draft.kind === "nota" ? cleanNote(draft, withoutAsked) : [draft]))
   // De la frase de una ficha, las oraciones que nombran su pregunta: si la frase abarca otra cosa
   // («… Se cementan brackets»), eso sigue siendo de la consulta.
   const phrases = drafts
@@ -963,15 +977,15 @@ export function withoutFormNotes<T extends FormDraftLike>(
       const label = labelStems(question.label)
       return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
     })
-  return drafts.flatMap((draft) => {
-    if (draft.kind !== "nota") return [draft]
-    const payload = Object.fromEntries(
-      Object.entries(draft.payload).map(([key, value]) => [key, typeof value === "string" ? withoutFormPhrases(value, phrases) : value]),
-    )
-    const empty = Object.values(payload).every((value) => typeof value !== "string" || value === "")
-    if (empty) return []
-    return [{ ...draft, payload: Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== "")) }]
-  })
+  return drafts.flatMap((draft) => (draft.kind === "nota" ? cleanNote(draft, (text) => withoutFormPhrases(text, phrases)) : [draft]))
+}
+
+/** Una nota con cada texto limpio; si queda vacía, no se propone. */
+function cleanNote<T extends FormDraftLike>(draft: T, clean: (text: string) => string): T[] {
+  const payload = Object.fromEntries(Object.entries(draft.payload).map(([key, value]) => [key, typeof value === "string" ? clean(value) : value]))
+  const empty = Object.values(payload).every((value) => typeof value !== "string" || value === "")
+  if (empty) return []
+  return [{ ...draft, payload: Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== "")) }]
 }
 
 /** Una respuesta de ficha que nace de otra cosa dicha (un diagnóstico), no del modelo. */
@@ -1073,9 +1087,15 @@ function correctedNumber(said: string, sentence = ""): number | null {
  * como «tres cariados uno con extracción indicada dos obturados» (número y término) o «cariados 4
  * obturados uno» (término y número); vale el orden con el que más términos tienen su número. Solo entre
  * preguntas de número de la misma ficha y unidad, por la palabra que es solo de cada una. `null` si no
- * hay dos términos dichos o los dos órdenes empatan.
+ * hay dos términos dichos.
+ *
+ * `sure`: el orden lo dijeron los términos. Si los dos órdenes empatan («para confirmarse 6 perdidos 2
+ * obturados 4 simplificado 1,8», prueba con voz del 15 nov: Chrome oyó mal «cariados»), vale el que
+ * no deja un número suelto en el borde de lo dicho, donde ningún término mal oído pudo ir con él
+ * (el 1,8 del final no tiene término después: el orden es término y número). Ese orden se deduce:
+ * no es seguro, y si no da el número que propuso Clío, queda por revisar. `order`: con cuál se leyó.
  */
-function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberTerms): number | null {
+function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberTerms): PairedNumber | null {
   const mine = terms.findIndex((term) => term.item === question)
   if (terms.length < 2 || mine < 0) return null
   const before = terms.map((term) => numberNear(words, term.start - 1, -1))
@@ -1086,8 +1106,33 @@ function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberT
     return fixed ?? read
   })
   const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
-  if (counted(before) === counted(after)) return null
-  return (counted(before) > counted(after) ? before : after)[mine]?.value ?? null
+  const read = (order: "antes" | "despues", sure: boolean): PairedNumber => ({ value: (order === "antes" ? before : after)[mine]?.value ?? null, sure, order })
+  if (counted(before) !== counted(after)) return read(counted(before) > counted(after) ? "antes" : "despues", true)
+  // Los números que ningún término toma en un orden, y si alguno queda en el borde del lado de su
+  // término: sin nada dicho de ese lado, salvo palabras de enlace.
+  const numbers: Array<{ at: number; next: number }> = []
+  for (let at = 0; at < words.length; ) {
+    const number = readNumber(words, at)
+    if (number) numbers.push({ at, next: number.next })
+    at = number ? number.next : at + 1
+  }
+  const bare = (list: string[]) => list.every((word) => LINKS.has(word))
+  const looseAtEdge = (taken: Array<{ at: number } | null>, side: -1 | 1) =>
+    numbers.some((number) => !taken.some((item) => item?.at === number.at) && bare(side === -1 ? words.slice(0, number.at) : words.slice(number.next)))
+  const beforeLoose = looseAtEdge(before, 1)
+  const afterLoose = looseAtEdge(after, -1)
+  if (beforeLoose !== afterLoose) return read(beforeLoose ? "despues" : "antes", false)
+  // Sin orden: solo un número a su lado es el suyo; con uno a cada lado, no se sabe.
+  const sides = [before[mine], after[mine]].filter((item) => item !== null)
+  return { value: sides.length === 1 ? (sides[0]?.value ?? null) : null, sure: false, order: before[mine] ? "antes" : "despues" }
+}
+
+/** El número de una pregunta por su lugar en lo dicho (`pairedNumber`). */
+interface PairedNumber {
+  value: number | null
+  sure: boolean
+  /** Si el número va antes de su término («dos obturados») o después («obturados dos»). */
+  order: "antes" | "despues"
 }
 
 /**
@@ -1101,16 +1146,46 @@ function numberTerms(question: DictationFormQuestion, questions: readonly Dictat
   const ownOf = (item: DictationFormQuestion) =>
     wordsOf(item).filter((word) => !group.some((other) => other !== item && wordsOf(other).some((theirs) => theirs.slice(0, 5) === word.slice(0, 5))))
   const words = tokensOf(text)
-  const matches = (token: string | undefined, term: string[]) => !!token && term.some((word) => token.slice(0, 5) === word.slice(0, 5) && token.length <= word.length + 3)
   const terms = group.flatMap((item) => {
     const term = ownOf(item)
-    const start = words.findIndex((token) => matches(token, term))
+    const start = words.findIndex((token) => termWord(token, term))
     if (start < 0) return []
     let end = start
-    while (matches(words[end + 1], term)) end += 1
+    while (termWord(words[end + 1], term)) end += 1
     return [{ item, start, end }]
   })
   return { words, terms, own: ownOf(question) }
+}
+
+/** ¿Es la palabra del término («extraccion» de «extracción indicada»), con otra terminación? */
+const termWord = (token: string | undefined, term: readonly string[]) => !!token && term.some((word) => token.slice(0, 5) === word.slice(0, 5) && token.length <= word.length + 3)
+
+/** Cuántos decimales lleva un número dictado sin revisar: los índices y las medidas de una ficha llevan uno. */
+const NUMBER_DECIMALS = 1
+
+/**
+ * El tramo de lo dictado, tal cual, con el número y su término juntos en el orden en que se dijeron
+ * («uno con extracción indicada»). `null` si no se encuentra así: se muestra lo que citó Clío.
+ */
+function numberPhrase(text: string, value: number, term: readonly string[], order: PairedNumber["order"]): string | null {
+  const found = [...text.matchAll(/[\p{L}\p{N}]+(?:[.,]\p{N}+)*/gu)]
+  const words = found.map((match) => plain(match[0]).replace(/(\d),(\d)/g, "$1.$2"))
+  for (let at = 0; at < words.length; at += 1) {
+    const number = readNumber(words, at)
+    if (!number || Math.abs(number.value - value) > 1e-9) continue
+    const step = order === "antes" ? 1 : -1
+    // Del lado del término, saltando hasta dos palabras de enlace («uno con extracción»).
+    let near = order === "antes" ? number.next : at - 1
+    for (let skipped = 0; skipped < 2 && near >= 0 && near < words.length && LINKS.has(words[near] ?? ""); skipped += 1) near += step
+    if (!termWord(words[near], term)) continue
+    while (termWord(words[near + step], term)) near += step
+    const [first, last] = order === "antes" ? [at, near] : [near, number.next - 1]
+    const start = found[first]
+    const end = found[last]
+    if (start?.index === undefined || end?.index === undefined) return null
+    return text.slice(start.index, end.index + end[0].length)
+  }
+  return null
 }
 
 type NumberTerms = ReturnType<typeof numberTerms>
@@ -1283,7 +1358,9 @@ function checkFormAnswer(
       // El número de otro término dicho no es de esta pregunta, si su término no se oyó.
       const terms = question.type === "numero" ? numberTerms(question, questions, sentence || said) : null
       if (terms && numberOfAnother(question, terms, number)) return null
-      const meant = question.type === "pieza" ? null : ((terms ? pairedNumber(question, terms) : null) ?? correctedNumber(said, sentence))
+      const proposed = number
+      const paired = terms ? pairedNumber(question, terms) : null
+      const meant = question.type === "pieza" ? null : (paired?.value ?? correctedNumber(said, sentence))
       if (meant !== null) number = meant
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)
@@ -1296,7 +1373,20 @@ function checkFormAnswer(
         const range = min !== null && max !== null ? `Va de ${min} a ${max}` : min !== null ? `Es de ${min} o más` : `Es de ${max} o menos`
         return review(null, `${range}${whole ? ", en números enteros" : ""}: dijiste ${String(number).replace(".", ",")}. Escríbelo tú.`)
       }
-      return ready(number)
+      // La frase que se muestra es la del número que se usó: «uno con extracción indicada», no la que
+      // citó Clío con el número de al lado (prueba con voz del 15 nov, v08).
+      const shown = paired?.value != null && terms && !containsAll(heard, [paired.value]) ? numberPhrase(heardSentence || dictated, paired.value, terms.own, paired.order) : null
+      const withShown = (prepared: PreparedFormAnswer): PreparedFormAnswer => (shown ? { ...prepared, said: shown } : prepared)
+      // Listo solo si el número va pegado a su término en el orden en que se dijo (prueba con voz del 15
+      // nov, v11: «para confirmarse 6 perdidos 2» no dejó claro si perdidos es 6 o 2). Si el orden se
+      // dedujo y no da lo que propuso Clío, o ninguno está pegado, la propone por revisar.
+      if (paired && (paired.value === null || (!paired.sure && paired.value !== proposed)))
+        return withShown(review(number, `Dijiste «${shortSaid(shown ?? dictated)}»: no queda claro qué número es de «${question.label}». Revísala.`))
+      // Chrome a veces escribe una cifra de más («0,99» por «cero coma nueve», v12): un número dictado
+      // con más de un decimal se propone por revisar.
+      if (question.type === "numero" && (String(number).split(".")[1]?.length ?? 0) > NUMBER_DECIMALS)
+        return withShown(review(number, `Dijiste «${shortSaid(dictated)}»: revisa los decimales.`))
+      return withShown(ready(number))
     }
   }
 }

@@ -20,7 +20,7 @@ import { and, eq } from "drizzle-orm"
 import { updateEncounterDraft } from "../encounters.js"
 import { ServiceError } from "../errors.js"
 import { normalizeForSearch } from "../knowledge.js"
-import type { DictationPrepared, ProductDictation } from "../product-hooks.js"
+import type { DictationPrepared, ProductDictation, ServiceSynonyms } from "../product-hooks.js"
 
 /*
  * ---------- Lo que Clío dicta de latidIA: los signos vitales, el examen por sistemas y el descanso ----------
@@ -147,8 +147,15 @@ async function draftOf(tx: Db, orgId: string, patientId: string, encounterId: st
   return row
 }
 
+/** Cómo dice el médico lo que hizo o indica, cuando no es el nombre del servicio. Lista corta y revisable. */
+const MEDICAL_SERVICE_SYNONYMS: ServiceSynonyms = [
+  { name: "inyectable", said: ["inyeccion", "ampolla"] },
+  { name: "electrocardiograma", said: ["ekg", "ecg"] },
+]
+
 export const MEDICAL_DICTATION: ProductDictation = {
   kinds: ["signos", "examen", "descanso"],
+  serviceSynonyms: MEDICAL_SERVICE_SYNONYMS,
   catalogText: examSystemsText,
   context: async () => null,
   // Sin «dónde» (decisión 4): una pieza o una cara que llegue se quita, no se adivina.
