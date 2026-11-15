@@ -392,10 +392,10 @@ export async function patientHealthQuestionsWith(
   orgId: string,
   patientId: string,
   /**
-   * Su sexo y su fecha de nacimiento, si los escribió en el mismo envío y su ficha no los tenía:
-   * lo que se le pregunta sale de lo que escribió (a un niño, lo de un niño), no de lo guardado.
+   * Su sexo y sus años, si su ficha no los tiene y los escribió en el mismo envío (la edad, de la
+   * fecha que escribió): lo que se le pregunta sale de eso (a un niño, lo de un niño; B3 de la 7).
    */
-  written: { sex?: string | null; birthDate?: string | null } = {},
+  written: { sex?: string | null; age?: number | null } = {},
 ): Promise<{
   ask: RegistrationFieldKey[]
   /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
@@ -419,10 +419,7 @@ export async function patientHealthQuestionsWith(
   const product = await orgProduct(tx, orgId)
   const stored = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)
-  const person = {
-    sex: stored.sex ?? written.sex ?? null,
-    age: ageInYears(stored.birthDate ?? written.birthDate, today),
-  }
+  const person = { sex: stored.sex ?? written.sex ?? null, age: ageInYears(stored.birthDate, today) ?? written.age ?? null }
   // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
   // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después. A un
   // niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.

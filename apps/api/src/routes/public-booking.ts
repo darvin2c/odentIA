@@ -91,6 +91,8 @@ const dataBody = z.strictObject({
   // «¿Cambió algo en tu salud o en tus medicinas?» y «Corregir mi salud» (entrega 10).
   healthCheck: z.enum(["sin_cambios", "cambio"]).nullish(),
   correctHealth: z.boolean().optional(),
+  // «¿Eres Lucía o respondes por ella?»: el servidor lo acepta solo donde lo pregunta.
+  respondent: z.enum(["patient", "representative"]).optional(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),

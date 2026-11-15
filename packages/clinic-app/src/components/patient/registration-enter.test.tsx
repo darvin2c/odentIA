@@ -4,7 +4,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, expect, it, vi } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { declaredAllergyItems, declaredListItems, RegistrationQuestionnaire, uniqueByName } from "./registration-questionnaire"
+import { declaredAllergyItems, declaredListItems, RegistrationQuestionnaire, shownConditions, uniqueByName } from "./registration-questionnaire"
 
 declareProduct(bareProduct("dental"))
 
@@ -174,4 +174,10 @@ it("«¿Qué te pasó?» va con la primera alergia y no se copia a las demás (B
     { substance: "Penicilina", severity: "desconocida", reaction: "Ronchas" },
     { substance: "Látex", severity: "desconocida" },
   ])
+})
+
+// B6 de la 7: lo marcado con la lista de adulto queda oculto si la fecha lo vuelve niño, y no se envía.
+it("las enfermedades que se envían son las de la lista que se ve", () => {
+  expect(shownConditions(["Presión alta", "Asma"], true)).toEqual(["Asma"])
+  expect(shownConditions(["Epilepsia o convulsiones", "Diabetes"], false)).toEqual(["Diabetes"])
 })

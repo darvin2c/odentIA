@@ -127,7 +127,8 @@ import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
  *
  * «Nombres» y «Apellidos» son dos campos (ADR 0058).
  */
-type Respondent = "patient" | "representative"
+/** `""`: aún no respondió «¿Eres Lucía o respondes por ella?» en su enlace. */
+type Respondent = "" | "patient" | "representative"
 type Declared = "" | "none" | "recorded" | "unknown"
 type Relation = "" | "guardian" | "family" | "other"
 type YesNo = "" | "si" | "no"
@@ -669,6 +670,11 @@ export interface RegistrationFill {
   age?: number | null
   /** Su sexo, solo para concordar las palabras («que la cuidas», «respondes por ella»); nulo si no se sabe. */
   sex?: "F" | "M" | null
+  /**
+   * «¿Eres Lucía o respondes por ella?» primero (K1): su enlace es suyo y su ficha no dice que sea
+   * mayor de edad. Si responde por ella, la pantalla le habla a quien responde y le pide su nombre.
+   */
+  asksWho?: boolean
   /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
   respondentFirstName?: string | null
   /** Aún no aceptó el aviso de privacidad (registrada por teléfono, por ejemplo): se pide al final. */
@@ -740,6 +746,12 @@ function BoneChoice({
       <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
     </div>
   )
+}
+
+/** De lo marcado, lo que está en la lista que se ve: la de un niño o la de un adulto (B6 de la 7). */
+export function shownConditions(picked: readonly string[], child: boolean): string[] {
+  const list: readonly string[] = child ? DECLARED_CHILD_CONDITION_OPTIONS : DECLARED_CONDITION_OPTIONS
+  return picked.filter((value) => list.includes(value))
 }
 
 /** Sin repetir lo mismo escrito dos veces, sin importar mayúsculas ni tildes. */
@@ -819,6 +831,8 @@ export function RegistrationQuestionnaire({
   const phoneCountry = normalizeCountry(countryCode)
   const [item, setItem] = useState(() => {
     if (!fill) return ownRecord ? "person" : "respondent"
+    // «¿Eres Lucía o respondes por ella?» va primero: decide a quién le habla todo lo demás (K1).
+    if (fill.asksWho) return "respondent"
     const wants = (key: string) => fillWants(fill, key)
     if (PERSON_KEYS.some(wants)) return "person"
     if (wants("docType")) return "document"
@@ -852,7 +866,8 @@ export function RegistrationQuestionnaire({
   // La pantalla desde la que se envió: si falla, el error se dice solo ahí.
   const [sentFrom, setSentFrom] = useState<string | null>(null)
   const form = useRegistrationForm(
-    { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
+    // Donde el enlace pregunta quién responde, nada viene elegido: no se supone (K1).
+    { ...EMPTY, respondent: ownRecord ? "representative" : fill?.asksWho ? "" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
       await onSubmit(buildAnswers(), { visit: buildVisit() })
@@ -947,6 +962,10 @@ export function RegistrationQuestionnaire({
   const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
+  // Su celular y su documento se piden si queda como su responsable (el registro) o si recepción lo
+  // registra después (un menor sin representante, en su enlace). A quien solo responde por la
+  // persona en su enlace, basta su nombre y qué es de ella (K1).
+  const repToRegister = !fill || (repInFill && minor)
   const docTypes = profile.documentTypes.map(({ code }) => ({
     value: code,
     label: DOC_TYPE_LABELS[code],
@@ -959,11 +978,16 @@ export function RegistrationQuestionnaire({
   // A quien cuida a un niño se le habla a él, también en «Su enlace»: «¿Thiago tiene…?».
   const aboutOther = forOther || (!!fill && child)
   const you = (self: string, other: string) => (aboutOther ? other : self)
-  // «la» o «lo» según su sexo: «que la cuidas». Sin saberlo, la frase va sin pronombre (K8).
+  // «la» o «lo», «ella» o «él», según su sexo: «que la cuidas». Sin saberlo, la frase va sin pronombre (K8).
   const pronoun = sexNow === "F" ? "la" : sexNow === "M" ? "lo" : null
-  // Quien responde por el niño: «Lo respondes tú, Carla».
-  const caregiver = fill ? (fill.respondentFirstName?.trim() ?? "") : (draft.repName.trim().split(/\s+/)[0] ?? "")
-  const answeredBy = child
+  const subject = sexNow === "F" ? "ella" : sexNow === "M" ? "él" : null
+  // Quien responde por la persona: «Lo respondes tú, Carla». En su enlace, quien lo abrió o, si dijo
+  // «Respondo por ella», el nombre que escribió (K1).
+  const repFirst = draft.repName.trim().split(/\s+/)[0] ?? ""
+  const caregiver = fill ? fill.respondentFirstName?.trim() || (forOther ? repFirst : "") : repFirst
+  // A quien responde por otra persona en su enlace se le dice que lo responde ella, sea niño o adulto.
+  const speaksToCaregiver = child || (!!fill && forOther)
+  const answeredBy = speaksToCaregiver
     ? caregiver
       ? `Lo respondes tú, ${caregiver}.`
       : pronoun
@@ -1105,7 +1129,7 @@ export function RegistrationQuestionnaire({
 
     const answers: RegistrationAnswers = {
       demographics: demographics as RegistrationAnswers["demographics"],
-      respondent: d.respondent,
+      respondent: d.respondent || "patient",
       privacyAccepted: d.privacy,
     }
     if (forOther || (repInFill && minor && d.repName.trim())) {
@@ -1129,8 +1153,12 @@ export function RegistrationQuestionnaire({
     if (asked("conditions"))
       health.conditions = {
         state: stateOf(d.conditions),
-        // Lo marcado de la lista y lo escrito en «Otra», sin repetir la misma enfermedad (B8).
-        items: uniqueByName([...(d.conditions === "recorded" ? d.conditionsPicked : []), ...listed(d.conditions, d.conditionsText)]).map(
+        // Lo marcado de la lista que se ve y lo escrito en «Otra», sin repetir la misma enfermedad (B8). Lo
+        // marcado con la otra lista (la fecha cambió de adulto a niño) ya no se ve y no se envía (B6 de la 7).
+        items: uniqueByName([
+          ...(d.conditions === "recorded" ? shownConditions(d.conditionsPicked, child) : []),
+          ...listed(d.conditions, d.conditionsText),
+        ]).map(
           (value) => ({ name: value }),
         ),
       }
@@ -1221,9 +1249,9 @@ export function RegistrationQuestionnaire({
     if (Object.keys(health).length) answers.health = health
     if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
     // Se le dijo que le escribiremos por WhatsApp a ese número sobre sus citas: va con lo que
-    // envía para que quede guardado. En «Su enlace», quien responde por un menor aún no tiene
-    // ficha en la que guardarlo.
-    if (forOther ? !fill && !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
+    // envía para que quede guardado. En «Su enlace», quien responde por ella no tiene ficha en la
+    // que guardarlo: vale el celular de la persona, si lo escribió.
+    if (forOther && !fill ? !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
   }
 
@@ -1402,8 +1430,16 @@ export function RegistrationQuestionnaire({
         <Question
           name="respondent"
           required
-          disabled={ownRecord || !!fill}
-          title="¿Para quién es el registro?"
+          disabled={ownRecord || (!!fill && !fill.asksWho)}
+          // En su enlace, con el nombre de su ficha (K1): «¿Eres Lucía o respondes por ella?». Sin
+          // saber su sexo, sin pronombre.
+          title={
+            fill?.asksWho
+              ? first && subject
+                ? `¿Eres ${first} o respondes por ${subject}?`
+                : "¿Quién responde?"
+              : "¿Para quién es el registro?"
+          }
         >
           <QuestionnaireChoices>
             <QuestionnaireChoice
@@ -1411,16 +1447,20 @@ export function RegistrationQuestionnaire({
               checked={draft.respondent === "patient"}
               onChange={() => set({ respondent: "patient" })}
             >
-              Para mí
+              {fill?.asksWho ? (first ? `Soy ${first}` : "Soy quien se atenderá") : "Para mí"}
             </QuestionnaireChoice>
             <QuestionnaireChoice
               value="representative"
               checked={draft.respondent === "representative"}
               onChange={() => set({ respondent: "representative" })}
             >
-              Para otra persona
+              {fill?.asksWho ? `Respondo por ${subject ?? (first || "otra persona")}` : "Para otra persona"}
               <QuestionnaireChoiceDescription>
-                Un hijo, un familiar o alguien a tu cargo
+                {fill?.asksWho
+                  ? pronoun
+                    ? `Eres su madre, su padre o quien ${pronoun} cuida`
+                    : "Eres su madre, su padre o un familiar"
+                  : "Un hijo, un familiar o alguien a tu cargo"}
               </QuestionnaireChoiceDescription>
             </QuestionnaireChoice>
           </QuestionnaireChoices>
@@ -1584,15 +1624,18 @@ export function RegistrationQuestionnaire({
           name="rep"
           grouped
           required
-          disabled={fill ? !(repInFill && minor) : !forOther}
-          // En «Su enlace» de un niño lo llena quien lo cuida: se le habla a ella, con el nombre del niño. Quién
-          // queda como representante no cambia: lo registra la clínica con su documento.
-          title={fill ? (child ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
+          // En «Su enlace» lo llena quien responde por la persona (un niño, o quien dijo «Respondo por ella»,
+          // K1): se le habla a ella, con el nombre de la persona. Desde el enlace no se registra a nadie: de
+          // un menor sin representante, la clínica lo registra con su documento.
+          disabled={fill ? !(forOther || (repInFill && minor)) : !forOther}
+          title={fill ? (child || forOther ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
           description={
             fill
-              ? child
-                ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
-                : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
+              ? repInFill && minor
+                ? child || forOther
+                  ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
+                  : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
+                : `Así sabemos quién respondió por ${name}.`
               : `Quedas como quien habla por ${name} con la clínica.`
           }
           check={() =>
@@ -1603,15 +1646,11 @@ export function RegistrationQuestionnaire({
               "repRelation",
               `${first || "La persona"} es menor de edad: lo registra su madre, padre o tutor.`,
             ) ??
-            phoneFound(
-              "repPhone",
-              draft.repPhone,
-              draft.repPhoneDigits,
-              true,
-              "Escribe tu celular.",
-            ) ??
-            needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.") ??
-            says("repDoc", minor ? identityDocumentError(repDocType, draft.repDoc) : null)
+            (repToRegister
+              ? phoneFound("repPhone", draft.repPhone, draft.repPhoneDigits, true, "Escribe tu celular.") ??
+                needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.") ??
+                says("repDoc", minor ? identityDocumentError(repDocType, draft.repDoc) : null)
+              : null)
           }
         >
           <Labeled name="repName" label="Tu nombre y apellidos">
@@ -1640,6 +1679,7 @@ export function RegistrationQuestionnaire({
               />
             )}
           </Labeled>
+          {repToRegister ? (
           <Labeled
             name="repPhone"
             label="Tu celular"
@@ -1660,7 +1700,8 @@ export function RegistrationQuestionnaire({
               />
             )}
           </Labeled>
-          {minor ? (
+          ) : null}
+          {minor && repToRegister ? (
             <Labeled
               name="repDoc"
               label={`Tu ${DOC_TYPE_LABELS[repDocType]}`}
@@ -1817,9 +1858,12 @@ export function RegistrationQuestionnaire({
             label={you("Tu celular", "Su celular")}
             optional={!phoneRequired}
             hint={
-              forOther
+              // En su enlace no se registra a quien responde por ella: sus avisos van a este número.
+              forOther && !fill
                 ? "Si no tiene, sus avisos te llegan a ti."
-                : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
+                : forOther
+                  ? `Le escribiremos por WhatsApp a este número sobre las citas de ${name}: la confirmación, los recordatorios y los cambios.`
+                  : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
             }
           >
             {(control) => (
@@ -2075,7 +2119,7 @@ export function RegistrationQuestionnaire({
           disabled={!healthAsked}
           title={you("Tu salud", `La salud de ${name}`)}
           description={
-            child
+            speaksToCaregiver
               ? fill
                 ? `${answeredBy} ${healthRequired ? "" : "Es opcional; "}${healthRequired ? "Lo" : "lo"} revisan contigo en la cita.`
                 : `${answeredBy} Así quien atiende a ${name} lo sabe antes de empezar.`

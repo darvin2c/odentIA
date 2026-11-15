@@ -101,16 +101,21 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).toContain("¿Quién le cepilla los dientes?")
   })
 
-  it("sin representante, el paso de quien lo cuida le habla a ella, con el nombre del niño", () => {
+  // «Sin representante, el paso de quien lo cuida le habla a ella» se prueba con la fecha escrita en
+  // `registration-dates.test.tsx`: aquí usaba un estado que el servidor no da (B7 de la 7).
+  it("K1 · el enlace sin fecha pregunta quién responde, con el género de la ficha o sin él", () => {
     declareProduct(bareProduct("dental"))
-    const fill = { missing: new Set<string>(["birthDate"]), health: true, hasRepresentative: false, firstName: "Thiago", respondentFirstName: "Carla" }
-    const child = page({ fill: { ...fill, age: 6 } }).replace(/<[^>]+>/g, "|")
-    expect(child).toContain("Thiago es menor de edad: déjanos tus datos, que respondes por Thiago.")
-    expect(child).not.toContain("Eres menor de edad")
-    expect(child).not.toContain("Tu madre, padre o tutor")
-    // Un adolescente que abre su propio enlace sigue leyéndolo para él (de 12 a 17, fuera de esta entrega).
-    const teen = page({ fill: { ...fill, age: 15, respondentFirstName: null } })
-    expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
+    const link = (sex: "F" | "M" | null, asksWho = true) =>
+      page({
+        fill: { missing: new Set(["birthDate"]), health: true, hasRepresentative: false, firstName: "Lucía", sex, asksWho },
+      }).replace(/<[^>]+>/g, "|")
+    expect(link("F")).toContain("¿Eres Lucía o respondes por ella?")
+    expect(link("F")).toContain("Respondo por ella|Eres su madre, su padre o quien la cuida")
+    expect(link("M")).toContain("¿Eres Lucía o respondes por él?")
+    expect(link(null)).toContain("¿Quién responde?")
+    expect(link(null)).toContain("Respondo por Lucía|Eres su madre, su padre o un familiar")
+    // Con la fecha en su ficha, el servidor no lo pregunta.
+    expect(link("F", false)).not.toContain("o respondes por")
   })
 
   it("en el enlace de Thiago, la casilla del aviso nombra los datos de Thiago y los de Carla, como el registro", () => {
