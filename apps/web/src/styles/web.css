@@ -453,14 +453,14 @@ details.q p {
 .arm-pitch {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
 }
 .arm-areas {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 12px;
 }
 .arm-areas li {
   display: grid;
