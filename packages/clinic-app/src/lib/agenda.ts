@@ -19,6 +19,9 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
       "agenda-availability",
       "agenda-resources",
       "agenda-search",
+      // «Antes de su cita: por responder» de la cabecera de la ficha: su cita cambia al reservar,
+      // mover o cancelar (QA final de formularios, 15 nov, U13: salía recién al recargar).
+      "before-visit",
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
