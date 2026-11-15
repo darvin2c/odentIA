@@ -14,7 +14,11 @@
  *   - perdidas: lo esperado que no quedó listo. Callar es el error barato;
  *   - lo que cambia una respuesta ya escrita: tiene que quedar por revisar, con
  *     el valor dicho, y nunca lista (revisión final del 15 nov, decisión 2);
- *   - lo que el modelo respondió y la comprobación del servidor paró.
+ *   - lo que el modelo respondió y la comprobación del servidor paró;
+ *   - de lo perdido, si el profesional lo ve en «No pude usar esto» (por el
+ *     motivo de lo parado o por la red de la oración,
+ *     `formSentencesWithoutAnswer`) o se perdió en silencio, y cuántos avisos
+ *     da la red sobre preguntas que el dictado no espera.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
  *
@@ -30,6 +34,7 @@ import {
   type DictationFormQuestion,
   formAnswerDropReason,
   formQuestionsOf,
+  formSentencesWithoutAnswer,
   prepareFormAnswer,
   productHooksFor,
   withDiagnosisFormAnswers,
@@ -97,7 +102,9 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "").split(",").filter(Boolean)
-const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0 }
+/** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
+const netExtra: string[] = []
 const now = new Date()
 const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo.length || solo.includes(item.id)))
 /** Lo crudo de cada dictado con algo perdido o inventado, una línea JSON por dictado. */
@@ -182,6 +189,30 @@ for (const dictation of cases) {
   const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
   const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
+  // Como el servidor: lo parado con motivo va a «No pude usar esto», y la red avisa de la oración que
+  // nombra una pregunta sin propuesta ni aviso (`formSentencesWithoutAnswer`).
+  const reasons = new Map<number, string>()
+  for (const { draft, ready } of prepared) {
+    if (ready || twins.has(draft) || !draft.sourceText?.trim()) continue
+    const why = formAnswerDropReason(draft, questions, { site: product.site, transcript: dictation.texto })
+    if (why) reasons.set(Number(draft.payload["question"]), why)
+  }
+  const handled = new Set([...prepared.filter((item) => item.ready).map((item) => Number(item.draft.payload["question"])), ...reasons.keys()])
+  const net = formSentencesWithoutAnswer(dictation.texto, questions, handled, product.site)
+  const keyOfQuestion = (number: number) => {
+    const question = questions.find((item) => item.number === number)
+    return question ? `${question.responseId}.${question.fieldId}` : ""
+  }
+  const noticed = (key: string) => [...reasons.keys()].some((number) => keyOfQuestion(number) === key)
+  const caught = (key: string) => net.some((item) => item.questions.some((number) => keyOfQuestion(number) === key))
+  // Lo que la red nombra y el dictado no espera de esa pregunta: un aviso de más, que se lee a mano.
+  const wanted = new Set([...Object.keys(dictation.espera.fichas ?? {}), ...(dictation.espera.revisar ?? []), ...Object.keys(dictation.espera.cambia ?? {})])
+  totals.avisosRed += net.length
+  for (const item of net) {
+    if (item.questions.some((number) => wanted.has(keyOfQuestion(number)))) continue
+    totals.avisosRedDeMas += 1
+    netExtra.push(`${dictation.id}: «${item.said}» → ${item.why}`)
+  }
   for (const [index, { draft, ready }] of prepared.entries()) {
     if (!ready) {
       if (!twins.has(draft)) totals.paradas += 1
@@ -198,7 +229,11 @@ for (const dictation of cases) {
     if (listed.has(key) && same(listed.get(key), value)) totals.bien += 1
     else {
       totals.perdidas += 1
-      notes.push(`perdió ${key}`)
+      // ¿Lo supo el profesional? Por el motivo de lo parado, por la red, o en silencio.
+      const how = noticed(key) ? "con aviso" : caught(key) ? "con aviso de la red" : "en silencio"
+      if (how === "con aviso") totals.perdidasAvisadas += 1
+      else if (how === "con aviso de la red") totals.perdidasRed += 1
+      notes.push(`perdió ${key} (${how})`)
     }
   }
   const changes = dictation.espera.cambia ?? {}
@@ -263,6 +298,7 @@ for (const dictation of cases) {
         ...(ready?.note ? { motivo: ready.note } : {}),
         ...(ready ? {} : { aviso: formAnswerDropReason(draft, questions, { site: product.site, transcript: dictation.texto }) }),
       })),
+      red: net.map(({ said, why }) => ({ said, why })),
       noUsado: read.unused,
     })
   }
@@ -275,6 +311,10 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 // La línea que cuenta que el camino nuevo corrió: sin pausas con fichas ni respuestas leídas, la medición no dice nada.
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
+console.log(
+  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed} en silencio`,
+)
+console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMas} de preguntas que el dictado no espera${netExtra.length ? `:\n  ${netExtra.join("\n  ")}` : ""}`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)

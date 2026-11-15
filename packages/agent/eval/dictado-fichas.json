@@ -495,6 +495,24 @@
       "texto": "Overjet de un milímetro. Overbite de dos.",
       "fichas": [{ "ficha": "ficha-de-ortodoncia", "respondidas": { "overjet": 3 } }],
       "espera": { "fichas": { "ficha-de-ortodoncia.overbite": 2 }, "cambia": { "ficha-de-ortodoncia.overjet": 1 } }
+    },
+    {
+      "id": "endo-18-dolor-a-la-palpacion",
+      "texto": "Dolor a la palpación en el fondo de vestíbulo de la treinta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.palpacion": "Positiva" } }
+    },
+    {
+      "id": "endo-19-sin-dolor-a-la-percusion",
+      "texto": "Pieza cuarenta y seis. Sin dolor a la percusión ni a la palpación.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 46, "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Negativa" } }
+    },
+    {
+      "id": "orto-23-el-diagnostico-no-es-la-clase",
+      "texto": "El diagnóstico es maloclusión clase dos división uno.",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": {}
     }
   ]
 }
