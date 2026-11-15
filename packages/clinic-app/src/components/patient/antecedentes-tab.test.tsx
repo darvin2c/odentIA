@@ -62,21 +62,23 @@ describe("«Revisar antecedentes» con un «No» que dijo la persona", () => {
     ],
   } as unknown as PatientHealth
 
-  it("no llega elegido como «Niega»: queda sin marcar para que el profesional decida", () => {
+  // Revisión final del 15 nov (clínica H1): al guardar por otro motivo (las semanas del embarazo), su
+  // «No» pasaba a «No se le preguntó». Llega con lo que dijo: guardar es revisarlo con ella.
+  it("llega con su «No», nunca como «No se le preguntó»", () => {
     const drafts = buildDrafts(said)
-    expect(drafts.reviewStatus.conditions).toBe("unknown")
-    // El «niega» que anotó el equipo sí se conserva.
+    expect(drafts.reviewStatus.conditions).toBe("none")
+    // El «niega» que anotó el equipo también se conserva.
     expect(drafts.reviewStatus.medications).toBe("none")
   })
 
-  it("junto al grupo dice «Dijo que no» con su día", () => {
+  it("junto al grupo dice «Dijo que no» con su día, sin un «Niega» que nadie preguntó", () => {
     const page = renderToStaticMarkup(
-      <ClinicalGroupCard title="Condiciones" review="unknown" saidNo="Dijo que no · 13 nov · sin revisar" reviewField={null}>
+      <ClinicalGroupCard title="Condiciones" review="none" saidNo="Dijo que no · 13 nov · sin revisar" reviewField={null}>
         {null}
       </ClinicalGroupCard>,
     )
     expect(page).toContain("Dijo que no · 13 nov · sin revisar")
-    expect(page).toContain("No se le preguntó")
+    expect(page).not.toContain("No se le preguntó")
     expect(page).not.toContain("Niega")
   })
 })

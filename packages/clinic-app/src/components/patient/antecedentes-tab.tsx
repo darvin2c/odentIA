@@ -176,12 +176,12 @@ const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responde
 
 /**
  * Lo guardado, como lo edita el formulario. El «No» que marcó la persona (o
- * quien habla por ella) y nadie revisó no llega elegido como «Niega»: queda
- * sin marcar hasta que el profesional se lo pregunte (QA del 14 nov, H4a).
+ * quien habla por ella) llega tal cual, con «Dijo que no · sin revisar» al
+ * lado: guardar es revisarlo con ella. Nunca como «No se le preguntó», que al
+ * guardar por otro motivo borraba lo que dijo (revisión final del 15 nov,
+ * clínica H1).
  */
 export function buildDrafts(health: PatientHealth): HealthFormValues {
-  const asked = (topic: "conditions" | "medications"): HealthReviewState =>
-    saidNoGroupOf(health.declared, topic) && health.reviewStatus[topic] === "none" ? "unknown" : health.reviewStatus[topic]
   const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
   const weeks = pregnancyRecordOf(interview)?.semanas
   return {
@@ -223,8 +223,8 @@ export function buildDrafts(health: PatientHealth): HealthFormValues {
       persisted: true,
     })),
     reviewStatus: {
-      conditions: asked("conditions"),
-      medications: asked("medications"),
+      conditions: health.reviewStatus.conditions,
+      medications: health.reviewStatus.medications,
     },
     bloodGroup: health.bloodGroup ?? "",
     interview,
@@ -855,10 +855,10 @@ export function AntecedentesTab({
               {(empty) =>
                 empty ? (
                   <p className="text-sm text-muted-foreground">
-                    {reviewStatus.conditions === "none"
-                      ? "Ausencia confirmada en este grupo."
-                      : saidNoOf("conditions")
-                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                    {saidNoOf("conditions")
+                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                      : reviewStatus.conditions === "none"
+                        ? "Ausencia confirmada en este grupo."
                         : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
@@ -877,10 +877,10 @@ export function AntecedentesTab({
               {(empty) =>
                 empty ? (
                   <p className="text-sm text-muted-foreground">
-                    {reviewStatus.medications === "none"
-                      ? "Ausencia confirmada en este grupo."
-                      : saidNoOf("medications")
-                        ? "Pregúntale y, si lo confirma, elige «Niega antecedentes de este tipo»."
+                    {saidNoOf("medications")
+                      ? "Pregúntale: al guardar, lo que dijo queda revisado."
+                      : reviewStatus.medications === "none"
+                        ? "Ausencia confirmada en este grupo."
                         : "Sin registros. Agrega filas o confirma la ausencia."}
                   </p>
                 ) : null
@@ -1355,13 +1355,12 @@ export function ClinicalGroupCard({
                 {saidNo}
               </Badge>
             ) : null}
-            <Badge
-              variant={
-                review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"
-              }
-            >
-              {HEALTH_REVIEW_LABELS[review]}
-            </Badge>
+            {/* Su «No» sin revisar no es el «Niega» de quien se lo preguntó: solo se dice lo que dijo. */}
+            {saidNo && review === "none" ? null : (
+              <Badge variant={review === "recorded" ? "default" : review === "none" ? "secondary" : "outline"}>
+                {HEALTH_REVIEW_LABELS[review]}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
