@@ -1,5 +1,7 @@
 import {
   ALLERGY_SEVERITIES,
+  ANESTHESIA_TROUBLE_WORDS,
+  anesthesiaAnswersOf,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -362,17 +364,32 @@ export function declaredTakesNoMedicine(declared: Pick<DeclaredPatientHealthInpu
 export const DECLARED_INTERVIEW = {
   corazon: { said: ["dental", "corazon", "riesgoEndocarditis"], kept: ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"] },
   antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
+  // La anestesia y el sangrado viven juntos (`problemaAnestesia`) y se comparan cada uno por su lado (H9).
   anestesia: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
+  sangrado: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
   tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
   alcohol: { said: ["medical", "alcohol"], kept: ["habitos", "alcohol"] },
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 
-/** Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día. */
+/**
+ * Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día.
+ * La anestesia (con qué pasó) y el sangrado, cada uno por su lado; lo guardado antes con una sola
+ * respuesta para los dos es de la anestesia.
+ */
 function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
   if (said === undefined) return false
   if (key === "lactancia") return isPlainObject(kept) && kept.estado === (said === true ? "si" : said === false ? "no" : undefined)
+  if (key === "anestesia" || key === "sangrado") {
+    const part = (value: unknown) => {
+      const answers = anesthesiaAnswersOf(value)
+      if (key === "sangrado") return answers.bleeding
+      return answers.joint ?? (answers.anesthesia ? `${answers.anesthesia}:${answers.what ?? ""}` : null)
+    }
+    const told = part(said)
+    return told !== null && told === part(kept)
+  }
   return said === kept
 }
 
@@ -1406,8 +1423,9 @@ export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
 
 /**
  * Lo que dijo y cambia una anestesia (QA del 14 nov, causa raíz): el corazón (válvula, problema de
- * nacimiento o endocarditis, antibiótico indicado antes) y un problema con la anestesia o un sangrado
- * tras una extracción, con «Sí» o «No sabe». El cierre lo dice junto a la anestesia; nunca frena.
+ * nacimiento o endocarditis, antibiótico indicado antes), un problema con la anestesia (y qué pasó) y
+ * un sangrado largo tras una extracción, cada uno con «Sí» o «No sabe». El cierre lo dice junto a la
+ * anestesia; nunca frena.
  */
 export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
   const [latest] = await tx
@@ -1418,6 +1436,7 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
     .limit(1)
   const answers = latest?.answers
   const say = (value: unknown, yes: string, unknown: string) => (value === "si" ? [yes] : value === "no_sabe" ? [unknown] : [])
+  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]))
   return [
     ...say(
       atPath(answers, ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"]),
@@ -1429,11 +1448,15 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
       "su médico le indicó antibiótico antes del dentista",
       "no sabe si debe tomar antibiótico antes",
     ),
+    // Lo guardado antes con una sola pregunta para los dos se dice como se preguntó.
+    ...say(joint, "tuvo problemas con la anestesia o sangró tras una extracción", "no sabe si tuvo problemas con la anestesia"),
+    // Por separado (H9): con un anticoagulante, el sangrado no se confunde con una reacción a la anestesia.
     ...say(
-      atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]),
-      "tuvo problemas con la anestesia o sangró tras una extracción",
+      anesthesia,
+      `tuvo problemas con la anestesia${what ? `: ${ANESTHESIA_TROUBLE_WORDS[what].read}` : ""}`,
       "no sabe si tuvo problemas con la anestesia",
     ),
+    ...say(bleeding, "sangró mucho tras una extracción", "no sabe si sangró mucho tras una extracción"),
   ]
 }
 

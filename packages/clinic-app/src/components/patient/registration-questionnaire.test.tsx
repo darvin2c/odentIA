@@ -20,6 +20,9 @@ describe("las preguntas de salud nuevas en el registro y en su enlace", () => {
     expect(html).toContain("¿Tomas algún otro medicamento todos los días?")
     expect(html).toContain("tuviste una infección en el corazón (endocarditis)?")
     expect(html).toContain("¿Tuviste algún problema con la anestesia del dentista")
+    // La anestesia y el sangrado, dos preguntas (H9).
+    expect(html).toContain("¿Sangraste mucho después de una extracción?")
+    expect(html).not.toContain("o sangraste mucho")
     expect(html).toContain("¿Tienes alguna de estas enfermedades?")
     expect(html).toContain("¿Fumas?")
     // El corazón y la anestesia son del dentista: el consultorio de latidIA no los pregunta.

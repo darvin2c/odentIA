@@ -98,10 +98,10 @@ it("Enter repetido después de «¿A qué?» recorre las preguntas sin contestar
   const what = await screen.findByLabelText(/¿A qué\?/)
   fireEvent.change(what, { target: { value: "penicilina" } })
   enterLikeBrowser(what)
-  // «¿Qué te pasó?», las enfermedades, el corazón, el antibiótico y la anestesia: hasta el grupo sanguíneo.
-  for (let i = 0; i < 6; i++) enterLikeBrowser(document.activeElement as Element)
+  // «¿Qué te pasó?», las enfermedades, el corazón, el antibiótico, la anestesia y el sangrado: hasta el grupo sanguíneo.
+  for (let i = 0; i < 7; i++) enterLikeBrowser(document.activeElement as Element)
   expect((document.activeElement as HTMLElement | null)?.dataset.slot).toBe("select-trigger")
-  for (const name of [/alguna de estas enfermedades/, /válvula del corazón/, /antibiótico antes de ir al dentista/, /problema con la anestesia/]) {
+  for (const name of [/alguna de estas enfermedades/, /válvula del corazón/, /antibiótico antes de ir al dentista/, /problema con la anestesia/, /Sangraste mucho/]) {
     expect(answered(name), String(name)).toEqual([])
   }
 }, 20_000)
@@ -175,6 +175,29 @@ it("«¿Qué te pasó?» va con la primera alergia y no se copia a las demás (B
     { substance: "Látex", severity: "desconocida" },
   ])
 })
+
+// Revisión final de formularios (H9, novato H3): una sola pregunta para la anestesia y el sangrado no
+// decía cuál de las dos fue, ni qué pasó con la anestesia.
+it("la anestesia y el sangrado se preguntan por separado y, con el Sí a la anestesia, «¿Qué pasó?»", async () => {
+  const onSubmit = healthOnly()
+  await screen.findAllByRole("group", { name: /problema con la anestesia/ })
+  expect(screen.queryAllByRole("group", { name: /^¿Qué pasó\?/ })).toEqual([])
+  answer(/problema con la anestesia/, "Sí")
+  await screen.findAllByRole("group", { name: /^¿Qué pasó\?/ })
+  answer(/^¿Qué pasó\?/, "Me desmayé o me bajó la presión")
+  answer(/Sangraste mucho/, "No")
+  const active = () => document.querySelector<HTMLElement>("[data-slot=questionnaire-item][data-active]")
+  const title = () => active()?.querySelector("[data-slot=questionnaire-title]")?.textContent
+  fireEvent.click(active()?.querySelector("[data-slot=questionnaire-next]") as HTMLElement)
+  await waitFor(() => expect(title()).toBe("Tus medicinas"), { timeout: 5000 })
+  fireEvent.click(active()?.querySelector("[data-slot=questionnaire-next]") as HTMLElement)
+  await waitFor(() => expect(title()).toBe("Algo más sobre tu salud"), { timeout: 5000 })
+  fireEvent.click(active()?.querySelector("[data-slot=questionnaire-submit]") as HTMLElement)
+  await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 5000 })
+  expect((onSubmit.mock.calls[0] as unknown[])[0]).toMatchObject({
+    health: { dental: { problemaAnestesia: { anestesia: "si", quePaso: "desmayo", sangrado: "no" } } },
+  })
+}, 30_000)
 
 // B6 de la 7: lo marcado con la lista de adulto queda oculto si la fecha lo vuelve niño, y no se envía.
 it("las enfermedades que se envían son las de la lista que se ve", () => {

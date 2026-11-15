@@ -6,7 +6,7 @@ import { clinicalFormAddendum, clinicalFormResponse, clinicalFormTemplate } from
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
-import { expect, it } from "vitest"
+import { expect, it, onTestFinished } from "vitest"
 import { addPatientAllergy, markAllergiesReviewed } from "./allergies.js"
 import { issuePersonalLink } from "./booking-links.js"
 import {
@@ -24,6 +24,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   addDeclaredHealth,
   allergiesSaidNoByPatient,
+  anesthesiaRisksOf,
   declaredAllergiesByPatient,
   getPatientHealth,
   markHealthDenied,
@@ -33,6 +34,7 @@ import {
 import { ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { getTimeline } from "./patient-history.js"
+import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, setPatientContact } from "./patients.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -594,6 +596,23 @@ it("lo que el equipo cambió antes de este cambio no se presenta como intacto", 
 it("el embarazo declarado se guarda con el día en que se dijo, dice la semana de hoy y la fecha no cambia al editar otro dato", async () => {
   const f = await clinicalFixture()
   const lucero = await person(f, "Lucero", "Vega")
+  // La clínica pregunta el embarazo (nace en «No se pide»): su enlace guarda solo lo que pregunta (K12).
+  const config = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+  const notice = config.privacyNotice || "Tus datos se usan solo para tu atención."
+  await f.run((tx) =>
+    savePatientRegistrationConfig(tx, ORG, f.actor, {
+      expectedVersion: config.version,
+      enabled: config.enabled,
+      fields: { ...config.fields, "personal.embarazo": "optional" },
+      privacyNotice: notice,
+    }),
+  )
+  onTestFinished(async () => {
+    const now = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+    await f.run((tx) =>
+      savePatientRegistrationConfig(tx, ORG, f.actor, { expectedVersion: now.version, enabled: config.enabled, fields: config.fields, privacyNotice: notice }),
+    )
+  })
   const link = await f.run((tx) =>
     issuePersonalLink(tx, ORG, { contactId: lucero.personId, patientId: lucero.patientId }, { secretsKey: KEY }),
   )
@@ -865,6 +884,46 @@ it("si dice que dejó de fumar, lo que anotó el equipo se queda, lo que faltaba
     .orderBy(desc(patientAnamnesis.version))
     .limit(1)
   expect(version?.createdBy).toBeNull()
+})
+
+// Revisión final de formularios (H9, novato H3): una sola pregunta para la anestesia y el sangrado no
+// decía cuál de las dos fue; con una warfarina, el dato clave es el sangrado.
+it("la anestesia y el sangrado se dicen por separado, cada uno con su marca, y el cierre los nombra por separado", async () => {
+  const f = await clinicalFixture()
+  const elsa = await person(f, "Elsa", "Warfarina")
+  const declared = {
+    dental: { problemaAnestesia: { anestesia: "si" as const, quePaso: "desmayo" as const, sangrado: "si" as const } },
+  }
+  await f.run(async (tx) => {
+    await addDeclaredHealth(tx, ORG, null, elsa.patientId, declared, {
+      entity: "registration_hold",
+      entityId: elsa.patientId,
+      at: new Date(),
+    })
+    await recordHealthDeclaration(tx, ORG, elsa.patientId, {
+      via: "registro",
+      by: { kind: "patient", name: null, relation: null },
+      health: declared,
+    })
+  })
+  const said = await f.run((tx) => getPatientHealth(tx, ORG, elsa.patientId))
+  expect([...(said.declared[0]?.interview ?? [])].sort()).toEqual(["anestesia", "sangrado"])
+  expect(await f.run((tx) => anesthesiaRisksOf(tx, ORG, elsa.patientId))).toEqual([
+    "tuvo problemas con la anestesia: se desmayó o le bajó la presión",
+    "sangró mucho tras una extracción",
+  ])
+  // Lo guardado antes con la pregunta doble se sigue diciendo como entonces.
+  const rosa = await person(f, "Rosa", "Antes")
+  await f.run((tx) =>
+    addDeclaredHealth(tx, ORG, null, rosa.patientId, { dental: { problemaAnestesia: "si" } }, {
+      entity: "registration_hold",
+      entityId: rosa.patientId,
+      at: new Date(),
+    }),
+  )
+  expect(await f.run((tx) => anesthesiaRisksOf(tx, ORG, rosa.patientId))).toEqual([
+    "tuvo problemas con la anestesia o sangró tras una extracción",
+  ])
 })
 
 // QA del 14 nov (causa raíz): el corazón, la anestesia, el tabaco y la lactancia que dijo iban a la

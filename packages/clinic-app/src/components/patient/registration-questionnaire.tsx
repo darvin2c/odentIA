@@ -1,4 +1,7 @@
 import {
+  ANESTHESIA_TROUBLE_WORDS,
+  ANESTHESIA_TROUBLES,
+  type AnesthesiaTrouble,
   BONE_MEDICINE_FORMS,
   BONE_MEDICINE_REASONS,
   type BOTTLE_ANSWERS,
@@ -186,10 +189,12 @@ interface Draft {
   boneForm: "" | (typeof BONE_MEDICINE_FORMS)[number]
   medications: Declared
   medicationsText: string
-  /** odentIA: el corazón (antibiótico antes de atender) y la anestesia. */
+  /** odentIA: el corazón (antibiótico antes de atender), la anestesia (y qué pasó) y el sangrado tras una extracción. */
   heartRisk: YesNoUnknown
   heartAntibiotic: YesNoUnknown
   anesthesia: YesNoUnknown
+  anesthesiaWhat: "" | AnesthesiaTrouble
+  bleeding: YesNoUnknown
   bloodGroup: string
   pregnant: YesNoUnknown
   pregnancyWeeks: string
@@ -281,6 +286,8 @@ const EMPTY: Draft = {
   heartRisk: "",
   heartAntibiotic: "",
   anesthesia: "",
+  anesthesiaWhat: "",
+  bleeding: "",
   bloodGroup: "",
   pregnant: "",
   pregnancyWeeks: "",
@@ -466,6 +473,8 @@ const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
   ["health.medications", "medicines", "medications"],
   ["health.bloodGroup", "health", "bloodGroup"],
   ["health.dental.corazon", "health", "heartRisk"],
+  ["health.dental.problemaAnestesia.sangrado", "health", "bleeding"],
+  ["health.dental.problemaAnestesia.quePaso", "health", "anesthesiaWhat"],
   ["health.dental.problemaAnestesia", "health", "anesthesia"],
   ["health.personal.embarazo", "history", "pregnant"],
   ["health.personal.semanasEmbarazo", "history", "pregnant"],
@@ -1231,7 +1240,13 @@ export function RegistrationQuestionnaire({
         ...(d.heartRisk ? { riesgoEndocarditis: INTERVIEW_OF[d.heartRisk] } : {}),
         ...(d.heartAntibiotic ? { antibioticoPrevio: INTERVIEW_OF[d.heartAntibiotic] } : {}),
       }
-    if (asked("dental.problemaAnestesia") && d.anesthesia) dental.problemaAnestesia = INTERVIEW_OF[d.anesthesia]
+    // La anestesia (con qué pasó, solo con el Sí) y el sangrado, cada uno con su respuesta (H9).
+    if (asked("dental.problemaAnestesia") && (d.anesthesia || d.bleeding))
+      dental.problemaAnestesia = {
+        ...(d.anesthesia ? { anestesia: INTERVIEW_OF[d.anesthesia] } : {}),
+        ...(d.anesthesia === "si" && d.anesthesiaWhat ? { quePaso: d.anesthesiaWhat } : {}),
+        ...(d.bleeding ? { sangrado: INTERVIEW_OF[d.bleeding] } : {}),
+      }
     // «Los dientes de Thiago en casa», con las claves de la entrevista de odentIA.
     if (asked("dental.biberon") && d.bottle) dental.biberon = d.bottle
     if (asked("dental.chupon") && d.pacifier) dental.chupon = d.pacifier
@@ -2141,6 +2156,8 @@ export function RegistrationQuestionnaire({
               heartRisk: "",
               heartAntibiotic: "",
               anesthesia: "",
+              anesthesiaWhat: "",
+              bleeding: "",
               bloodGroup: "",
             })
           }
@@ -2164,7 +2181,7 @@ export function RegistrationQuestionnaire({
               "Elige una respuesta.",
             ) ??
             needs(
-              asked("dental.problemaAnestesia") && required("dental.problemaAnestesia") && !draft.anesthesia,
+              asked("dental.problemaAnestesia") && required("dental.problemaAnestesia") && !draft.anesthesia && !draft.bleeding,
               "anesthesia",
               "Elige una respuesta.",
             ) ??
@@ -2282,29 +2299,76 @@ export function RegistrationQuestionnaire({
             </>
           ) : null}
           {asked("dental.problemaAnestesia") ? (
-            <Labeled
-              name="anesthesia"
-              group
-              label={you(
-                "¿Tuviste algún problema con la anestesia del dentista, o sangraste mucho después de una extracción?",
-                `¿${first || "La persona"} tuvo algún problema con la anestesia del dentista, o sangró mucho después de una extracción?`,
-              )}
-              optional={!required("dental.problemaAnestesia")}
-            >
-              {(control) => (
-                <ChoiceButtons
-                  id={control.id}
-                  aria-labelledby={control.labelId}
-                  aria-describedby={control.describedBy}
-                  invalid={control.invalid}
-                  onBlur={control.onBlur}
-                  value={draft.anesthesia || null}
-                  options={YES_NO_UNKNOWN}
-                  onChange={(value) => set({ anesthesia: value })}
-                  columns={3}
-                />
-              )}
-            </Labeled>
+            // La anestesia y el sangrado, por separado: son dos riesgos distintos (H9). Con el Sí a la
+            // anestesia, «¿Qué pasó?»; con el No, ningún paso más.
+            <>
+              <Labeled
+                name="anesthesia"
+                group
+                label={you(
+                  "¿Tuviste algún problema con la anestesia del dentista?",
+                  `¿${first || "La persona"} tuvo algún problema con la anestesia del dentista?`,
+                )}
+                optional={!required("dental.problemaAnestesia")}
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.anesthesia || null}
+                    options={YES_NO_UNKNOWN}
+                    onChange={(value) => set({ anesthesia: value, ...(value === "si" ? {} : { anesthesiaWhat: "" }) })}
+                    columns={3}
+                  />
+                )}
+              </Labeled>
+              {draft.anesthesia === "si" ? (
+                <Labeled name="anesthesiaWhat" group label="¿Qué pasó?" optional>
+                  {(control) => (
+                    <ChoiceButtons
+                      id={control.id}
+                      aria-labelledby={control.labelId}
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      onBlur={control.onBlur}
+                      value={draft.anesthesiaWhat || null}
+                      options={ANESTHESIA_TROUBLES.map((value) => ({
+                        value,
+                        label: aboutOther ? ANESTHESIA_TROUBLE_WORDS[value].other : ANESTHESIA_TROUBLE_WORDS[value].said,
+                      }))}
+                      onChange={(value) => set({ anesthesiaWhat: value })}
+                    />
+                  )}
+                </Labeled>
+              ) : null}
+              <Labeled
+                name="bleeding"
+                group
+                label={you(
+                  "¿Sangraste mucho después de una extracción?",
+                  `¿${first || "La persona"} sangró mucho después de una extracción?`,
+                )}
+                hint={you("Cuando te sacaron una muela o un diente.", "Cuando le sacaron una muela o un diente.")}
+                optional={!required("dental.problemaAnestesia")}
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.bleeding || null}
+                    options={YES_NO_UNKNOWN}
+                    onChange={(value) => set({ bleeding: value })}
+                    columns={3}
+                  />
+                )}
+              </Labeled>
+            </>
           ) : null}
           {asked("bloodGroup") ? (
             <Labeled name="bloodGroup" group label="Grupo sanguíneo" optional={!required("bloodGroup")}>

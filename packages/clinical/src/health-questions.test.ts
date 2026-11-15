@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { declaredMedicineAtc, HABITUAL_MEDICATIONS, MEDICATION_CLASSES, medicationClassOf } from "./allergens.js"
 import {
   ageInYears,
+  anesthesiaAnswersOf,
   DEFAULT_REGISTRATION_CONFIG,
   declaredHealthAnswered,
   isChildAge,
@@ -202,6 +203,22 @@ describe("los datos de salud nuevos", () => {
     expect(ageInYears("1960-11-14", "2026-11-13")).toBe(65)
     expect(ageInYears("1960-11-13", "2026-11-13")).toBe(66)
     expect(ageInYears("sin fecha", "2026-11-13")).toBeNull()
+  })
+
+  it("H9 · la anestesia y el sangrado se responden por separado; lo de antes, una sola respuesta, sigue valiendo", () => {
+    const apart = withHealth({ dental: { problemaAnestesia: { anestesia: "si", quePaso: "desmayo", sangrado: "no" } } })
+    expect(validateRegistrationAnswers(config, apart, publicContext)).toEqual({})
+    expect(registrationAnswersSchema.safeParse(withHealth({ dental: { problemaAnestesia: "si" } })).success).toBe(true)
+    // «¿Qué pasó?» va solo con el Sí, y de las tres opciones.
+    expect(
+      registrationAnswersSchema.safeParse(withHealth({ dental: { problemaAnestesia: { anestesia: "no", quePaso: "alergia" } } })).success,
+    ).toBe(false)
+    expect(registrationAnswersSchema.safeParse(withHealth({ dental: { problemaAnestesia: { anestesia: "si", quePaso: "otro" } } } as never)).success).toBe(false)
+    expect(anesthesiaAnswersOf({ anestesia: "si", quePaso: "alergia" })).toEqual({ joint: null, anesthesia: "si", what: "alergia", bleeding: null })
+    expect(anesthesiaAnswersOf({ sangrado: "no_sabe" })).toEqual({ joint: null, anesthesia: null, what: null, bleeding: "no_sabe" })
+    // Lo guardado con la pregunta doble no se parte: no se sabe cuál de las dos fue.
+    expect(anesthesiaAnswersOf("si")).toEqual({ joint: "si", anesthesia: null, what: null, bleeding: null })
+    expect(anesthesiaAnswersOf(undefined)).toEqual({ joint: null, anesthesia: null, what: null, bleeding: null })
   })
 
   it("decir solo que no toma anticoagulantes ya es una declaración", () => {

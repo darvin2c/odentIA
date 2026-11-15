@@ -343,6 +343,8 @@ const MEDICINE_CLASS_FHIR: Partial<Record<MedicineClassAnswer["answer"], string>
 const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
   "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
   "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.anestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.sangrado": ["sangrado"],
   "habitos.tabaco": ["tabaco"],
   "habitos.alcohol": ["alcohol"],
   "embarazoLactancia.lactancia": ["lactancia"],

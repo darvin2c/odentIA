@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { setOrgLocale } from "./locale"
 import {
   askWhom,
+  declaredInterviewRows,
   declaredGroupOf,
   declaredMarkWords,
   pregnancyChip,
@@ -170,5 +171,18 @@ describe("lo que quedó sin revisar, al firmar", () => {
     ).toBe("lo que dijo de su salud su madre, Carla, el 1 nov y lo que dijo él de su salud el 13 nov")
     expect(unreviewedWords([], "F")).toBeNull()
     expect(unreviewedWords(undefined, "F")).toBeNull()
+  })
+})
+
+// Revisión final de formularios (H9): la anestesia y el sangrado se preguntan por separado.
+describe("«Ver declaración original»: la anestesia y el sangrado", () => {
+  it("trae la anestesia con qué pasó y el sangrado por separado; lo de antes, con su pregunta doble", () => {
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: { anestesia: "si", quePaso: "alergia", sangrado: "no" } } })).toEqual([
+      { label: "Problema con la anestesia", value: "Sí, alergia o ronchas" },
+      { label: "Sangrado largo tras una extracción", value: "No" },
+    ])
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: "no_sabe" } })).toEqual([
+      { label: "Problema con la anestesia o sangrado tras una extracción", value: "No sabe" },
+    ])
   })
 })
