@@ -59,7 +59,20 @@ export const ALLERGY_CATEGORY_FHIR = {
   ambiental: "environment",
 } as const
 export const ALLERGY_SEVERITY_FHIR = { leve: "mild", moderada: "moderate", severa: "severe" } as const
+/**
+ * Una alergia que se quitó, según por qué (`ALLERGY_REMOVAL_REASONS`): «ya no es alérgica» queda
+ * resuelta; «era otra cosa», refutada e inactiva (R4 pide `clinicalStatus` salvo en
+ * `entered-in-error`, invariante ait-1); «se registró por error», `entered-in-error` y sin
+ * `clinicalStatus` (ait-2). Lo que no cambia se queda como estaba (su verificación).
+ */
+export const ALLERGY_REMOVAL_FHIR = {
+  ya_no: { clinicalStatus: "resolved", verificationStatus: null },
+  otra_cosa: { clinicalStatus: "inactive", verificationStatus: "refuted" },
+  error: { clinicalStatus: null, verificationStatus: "entered-in-error" },
+} as const
 export const FHIR_ALLERGY_CLINICAL_SYSTEM = "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical"
+/** La clasificación ATC de la OMS, como sistema de un código (medicamentos y sus grupos). */
+export const FHIR_ATC_SYSTEM = "http://www.whocc.no/atc"
 export const FHIR_ALLERGY_VERIFICATION_SYSTEM = "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification"
 
 /** MedicationRequest.status desde `prescription.status`. */

@@ -14,7 +14,7 @@ const { legalOnly = false } = Astro.props
   {legalOnly ? null : <div class="wrap grid">
     <div class="brand">
       <span class="name">{WORDS.name}</span>
-      <span>Omnicanal y agéntica, para {WORDS.audience} de habla hispana.</span>
+      <span>El <abbr title="Agentic Relationship Management">ARM</abbr> para {WORDS.audience} de habla hispana: tus agentes atienden, agendan y hacen seguimiento.</span>
       <a class="enter" href={loginUrl}>¿Ya usas {WORDS.name}? Ingresar <span aria-hidden="true">→</span></a>
     </div>
     {footerGroups.map((g) => (

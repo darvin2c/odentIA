@@ -65,6 +65,12 @@ const CHILDHOOD_ENTRY_LABELS = [
   ["quienCepilla", "Quién le cepilla los dientes"],
 ] as const
 
+/**
+ * Las claves de «de pequeño» en la copia (`dentalInterviewEntries`): lo que `childhoodLines` dice
+ * en la atención. Con ellas la copia marca cada dato «sin revisar», como la ficha (B4 de la entrega 7).
+ */
+export const CHILDHOOD_ENTRY_KEYS: readonly string[] = CHILDHOOD_ENTRY_LABELS.map(([key]) => `antecedentesOdontologicos.${key}`)
+
 /** Cuántos hábitos se registran como mucho. */
 export const DENTAL_HABITS_MAX = 10
 /** Cepillados al día: de 0 a este número. */

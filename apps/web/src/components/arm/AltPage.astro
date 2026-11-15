@@ -1,0 +1,95 @@
+---
+// /comparar/<alternativa>, la misma en las tres webs: el producto frente a una sola alternativa (un CRM,
+// un chatbot, el software de siempre o WhatsApp con cuaderno), con su título para buscadores, la escena
+// de las tareas, la comparación fila por fila, sus preguntas y las demás comparaciones. Los textos salen
+// de lib/arm.ts, los mismos de /comparar.
+import Base from "../../layouts/Base.astro"
+import { ALT_PAGES, ALTERNATIVES, type AltKey, ARM_PATH } from "../../lib/arm"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import { WORDS } from "../../lib/product"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import PageHero from "../PageHero.astro"
+import ArmVisual from "./ArmVisual.astro"
+import CompareTable from "./CompareTable.astro"
+
+interface Props {
+  alt: AltKey
+}
+const alt = ALTERNATIVES.find((a) => a.key === Astro.props.alt)
+if (!alt) throw new Error(`Comparación desconocida: ${Astro.props.alt}`)
+const page = ALT_PAGES[alt.key]
+const others = ALTERNATIVES.filter((a) => a.key !== alt.key)
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Compara", ARM_PATH],
+  [alt.label, page.path],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(page.faq)]
+---
+<Base title={page.seoTitle} description={page.seoDescription} jsonLd={jsonLd}>
+  <PageHero
+    tag={`Compara · ${page.keyword}`}
+    title={page.title}
+    accent={page.accent}
+    lead={page.lead}
+    secondary={{ href: "#fila-por-fila", label: "Compáralos" }}
+  >
+    <ArmVisual slot="visual" alt={alt.key} />
+  </PageHero>
+
+  <section class="section section-white" id="fila-por-fila" aria-labelledby="alt-rows">
+    <div class="wrap alt">
+      <div class="alt-head">
+        <span class="tag">[ Fila por fila ]</span>
+        <h2 class="h2" id="alt-rows">{alt.pitch}</h2>
+      </div>
+      <CompareTable alt={alt} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="alt-more">
+    <div class="wrap alt">
+      <div class="alt-head">
+        <span class="tag">[ Más comparaciones ]</span>
+        <h2 class="h2" id="alt-more">Frente a todo lo demás, <span class="alt-acc">{WORDS.name} también gana.</span></h2>
+      </div>
+      <div class="alt-cards">
+        {others.map((o) => (
+          <a class="card alt-card" href={ALT_PAGES[o.key].path}>
+            <span class="alt-card-t">{WORDS.name} vs {o.inline}</span>
+            <span class="alt-card-p">{o.pitch}</span>
+            <span class="alt-card-go" aria-hidden="true">→</span>
+          </a>
+        ))}
+      </div>
+      <a class="alt-all" href={ARM_PATH}>Ver la tabla con todas <span aria-hidden="true">→</span></a>
+    </div>
+  </section>
+
+  <Faq items={page.faq} />
+  <CtaBand title={`Deja de perseguir. Que tus agentes trabajen por ${WORDS.yourClinic}.`} />
+</Base>
+
+<style>
+  /* En la portada, cada frase del título en su línea. */
+  :global(.ph h1) { font-size: clamp(42px, 4.2vw, 60px); }
+  :global(.ph h1 .acc) { display: block; }
+  .alt { display: flex; flex-direction: column; gap: 40px; }
+  .alt > * { min-width: 0; }
+  .alt-head { display: flex; flex-direction: column; gap: 16px; max-width: 800px; }
+  .alt-acc { color: var(--teal); }
+  .alt-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .alt-card { position: relative; padding: 28px 28px 56px; display: flex; flex-direction: column; gap: 10px; color: inherit; text-decoration: none; transition: transform .2s ease, box-shadow .2s ease; }
+  .alt-card:hover { transform: translateY(-2px); }
+  .alt-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--teal) 40%, transparent); outline-offset: 3px; }
+  .alt-card-t { font-size: 20px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
+  .alt-card-p { color: var(--muted); line-height: 1.5; }
+  .alt-card-go { position: absolute; left: 28px; bottom: 22px; font-size: 20px; font-weight: 800; color: var(--teal); }
+  .alt-all { font-weight: 800; color: var(--teal); text-decoration: none; }
+  .alt-all:hover { text-decoration: underline; }
+  @media (max-width: 860px) {
+    .alt-cards { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
