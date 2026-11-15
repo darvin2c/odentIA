@@ -1124,6 +1124,9 @@ function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberT
   })
   const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
   const pick = (order: PairedNumber["order"], sure: boolean): PairedNumber => ({ value: (order === "antes" ? before : after)[mine]?.value ?? null, sure, order })
+  // Ningún término con un número al lado («la inferior desviada a la izquierda dos milímetros»): el
+  // orden no dice nada y vale lo que leyó Clío.
+  if (!counted(before) && !counted(after)) return null
   if (counted(before) !== counted(after)) return pick(counted(before) > counted(after) ? "antes" : "despues", true)
   // Los números que ningún término toma en un orden, y si alguno queda en el borde del lado de su
   // término: sin nada dicho de ese lado, salvo palabras de enlace.
@@ -1142,13 +1145,15 @@ function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberT
   if (beforeLoose !== afterLoose) return pick(beforeLoose ? "despues" : "antes", false)
   // Sin orden: solo un número a su lado es el suyo; con uno a cada lado, no se sabe.
   if (Boolean(before[mine]) !== Boolean(after[mine])) return pick(before[mine] ? "antes" : "despues", false)
-  return { value: null, sure: false, order: "antes" }
+  return { value: null, sure: false, order: "antes", ambiguous: before[mine] !== null }
 }
 
 /** El número de una pregunta por su lugar en lo dicho (`pairedNumber`). */
 interface PairedNumber {
   value: number | null
   sure: boolean
+  /** Sin orden, con un número a cada lado de su término: no se sabe cuál es el suyo. */
+  ambiguous?: boolean
   /** Si el número va antes de su término («dos obturados») o después («obturados dos»). */
   order: "antes" | "despues"
 }
@@ -1392,12 +1397,13 @@ function checkFormAnswer(
       // La frase que se muestra es la del número que se usó: «uno con extracción indicada», no la que
       // citó Clío con el número de al lado (prueba con voz del 15 nov, v08).
       const shown = paired?.value != null && terms && !containsAll(heard, [paired.value]) ? numberPhrase(heardSentence || dictated, paired.value, terms.own, paired.order) : null
-      // Listo solo si el número va pegado a su término en el orden en que se dijo (prueba con voz del 15
-      // nov, v11: «para confirmarse 6 perdidos 2» no dejó claro si perdidos es 6 o 2). Si el orden se
-      // dedujo y no da lo que propuso Clío, o ninguno está pegado, la propone por revisar. Chrome a veces
-      // escribe una cifra de más («0,99» por «cero coma nueve», v12): con más de un decimal, también.
+      // Cuando lo dicho junta números y términos, el número va pegado a su término en el orden en que se
+      // dijo (prueba con voz del 15 nov, v11: «para confirmarse 6 perdidos 2» no dejó claro si perdidos
+      // es 6 o 2). Si ese orden se dedujo y no da lo que propuso Clío, o hay un número a cada lado, la
+      // propone por revisar. Chrome a veces escribe una cifra de más («0,99» por «cero coma nueve», v12):
+      // con más de un decimal, también.
       const prepared =
-        paired && (paired.value === null || (!paired.sure && paired.value !== proposed))
+        paired && (paired.ambiguous || (!paired.sure && paired.value !== null && paired.value !== proposed))
           ? review(number, `Dijiste «${shortSaid(shown ?? dictated)}»: no queda claro qué número es de «${question.label}». Revísala.`)
           : (String(number).split(".")[1]?.length ?? 0) > NUMBER_DECIMALS
             ? review(number, `Dijiste «${shortSaid(dictated)}»: revisa los decimales.`)

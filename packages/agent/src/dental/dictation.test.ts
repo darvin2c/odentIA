@@ -297,7 +297,7 @@ describe("la prueba con voz del 15 nov", () => {
 
   it("la frase que corta la pausa se lee junta, y lo que cita desde lo anterior vale (v07)", async () => {
     const human = String(pause(now, before)[1]?.content)
-    expect(human).toContain("Lo nuevo sigue una frase que la pausa cortó; lo anterior terminó así: «frío sin respuesta calor»")
+    expect(human).toContain(`Lo nuevo que dictó (empieza con «frío sin respuesta calor», el final de lo anterior: la pausa cortó ahí la frase):\n«frío sin respuesta calor ${now}»`)
     // Un tramo que empieza otra frase no lleva ese aviso.
     expect(String(pause("percusión negativa", before)[1]?.content)).not.toContain("la pausa cortó")
     // La frase unida se encuentra en lo dictado, con el final de lo anterior delante.

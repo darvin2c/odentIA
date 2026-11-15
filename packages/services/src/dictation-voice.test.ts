@@ -25,6 +25,7 @@ const formsOf = (key: string): DictationFormQuestion[] => {
 const endo = formsOf("evaluacion-de-endodoncia")
 const kid = formsOf("ficha-de-odontopediatria")
 const adult = formsOf("ficha-odontoestomatologica")
+const ortho = formsOf("ficha-de-ortodoncia")
 const at = (forms: DictationFormQuestion[], fieldId: string) => forms.find((item) => item.fieldId === fieldId)?.number ?? 0
 const ask = (forms: DictationFormQuestion[], fieldId: string, answer: string, said: string, transcript = said) =>
   prepareFormAnswer({ payload: { question: at(forms, fieldId), answer }, sourceText: said }, forms, FDI, transcript)
@@ -135,6 +136,13 @@ describe("un número mal oído no queda listo", () => {
     // Lo dicho en orden sigue listo.
     expect(ask(adult, "cpod_p", "1", "perdidos uno", heard)).toMatchObject({ status: "lista", payload: { value: 1 } })
     expect(ask(adult, "ihos", "1.8", "IHO-S 1,8")).toMatchObject({ status: "lista", payload: { value: 1.8 } })
+  })
+
+  it("si ningún número va al lado de un término, vale lo que leyó Clío", () => {
+    const heard = "Línea media superior centrada, la inferior desviada a la izquierda dos milímetros."
+    expect(ask(ortho, "linea_media_inferior_mm", "2", "la inferior desviada a la izquierda dos milímetros", heard)).toMatchObject({ status: "lista", payload: { value: 2 } })
+    const voice = "caninos el derecho clase 2 El izquierdo clase 1 línea Media Superior centrada la inferior desviada a la derecha eh medio milímetro"
+    expect(ask(ortho, "linea_media_inferior_mm", "0.5", "la inferior desviada a la derecha eh medio milímetro", voice)).toMatchObject({ status: "lista", payload: { value: 0.5 } })
   })
 
   it("sin un orden que lo diga, el número con otro a cada lado de su término queda por revisar", () => {

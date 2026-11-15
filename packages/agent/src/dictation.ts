@@ -145,7 +145,7 @@ export function consultaPrompt(examples: string): string[] {
   return [
     `En la consulta, el motivo (\`reason\`) es una sola línea con la queja principal o para qué viene, como lo diría el paciente (${examples}): sin el tiempo ni lo examinado.`,
     "El tiempo de enfermedad (`illnessDuration`) es cuánto lleva así, solo si se dijo y tal como se dijo («tres días», «desde el sábado»). Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años», «desde la caída del sábado»), se cuenta desde ahí («hace dos años»). El plazo de un control o de algo por venir («su control de seis meses», «la boda en dos meses») no es tiempo de enfermedad.",
-    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato.",
+    "El relato (`presentIllness`) cuenta cómo empezó y siguió, qué lo alivia o empeora, qué tomó antes de venir y lo que niega. Lo que se receta ahora va en `recetas`, aunque se diga suelto, nunca en el relato. En un control o una revisión sin molestias no hay tiempo de enfermedad: queda vacío, y lo que se diga del paciente (que no tiene molestias, lo que toma) va en el relato. Si en un control cuenta una molestia nueva («desde hace una semana le molesta»), el tiempo es desde cuándo la tiene.",
     // Prueba con voz del 15 nov (v08): el llanto de fondo y lo que se le dijo a la niña terminaban en el relato.
     "El relato es lo que cuentan el paciente o quien lo acompaña sobre lo que le pasa. No son el motivo ni el relato lo que se le dice, pregunta o pide al paciente o al asistente mientras se lo atiende («tranquila, ya casi terminamos», «abre grande», «¿te duele cuando comes?», «pásame…») ni lo que el paciente dice o llora mientras lo examinan o lo tratan («¡me duele!», «no quiero», «mamá»): una queja suelta entre eso no es de la historia. Lo que responde sobre lo que le pasa sí es del relato, y lo que el profesional encuentra al examinarlo va donde siempre.",
   ]
@@ -313,13 +313,17 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
 }
 
 /**
- * Lo nuevo sigue una frase que la pausa cortó (`pauseBridge`; prueba con voz del
- * 15 nov, v07: «…calor» y después «sin respuesta también»): se lee junto con el
- * final de lo anterior, y la frase unida vale como «lo dicho», porque se
- * comprueba con ese final delante (`withPauseBridge`), aquí y en el servidor.
+ * Lo nuevo y, si sigue una frase que la pausa cortó (`pauseBridge`; prueba con
+ * voz del 15 nov, v07: «…calor» y después «sin respuesta también»), con el final
+ * de lo anterior delante, como un solo texto: así se lee la frase entera y se
+ * cita como se dijo, y se comprueba con ese mismo texto (`withPauseBridge`),
+ * aquí y en el servidor. Como un aviso aparte, Clío a veces dejaba de leer lo
+ * nuevo o volvía a registrar lo de antes (medido el 15 nov).
  */
-function bridgeText(bridge: string): string {
-  return `Lo nuevo sigue una frase que la pausa cortó; lo anterior terminó así: «${bridge}». Léelas juntas: lo que la frase unida dice y no se registró antes va ahora, y en \`dicho\` copia la frase unida tal como llegó, desde lo anterior (si lo anterior terminó en «…la movilidad» y lo nuevo empieza «grado uno también», es «la movilidad grado uno también»).`
+function newText(context: string, transcript: string): string {
+  const bridge = pauseBridge(context, transcript)
+  if (!bridge) return `Lo nuevo que dictó:\n«${transcript}»`
+  return `Lo nuevo que dictó (empieza con «${bridge}», el final de lo anterior: la pausa cortó ahí la frase):\n«${bridge} ${transcript.trim()}»`
 }
 
 /**
@@ -345,16 +349,14 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     dateStyle: "full",
   }).format(input.now)
   const context = input.context.trim().slice(-600)
-  const bridge = pauseBridge(context, input.transcript)
   const human = [
     `Hoy es ${today}, ${input.now.toISOString()} (zona ${input.zone.timezone}).`,
     context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
-    bridge ? bridgeText(bridge) : "",
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
       : "",
     dictationFormsText(input.forms ?? []),
-    `Lo nuevo que dictó:\n«${input.transcript}»`,
+    newText(context, input.transcript),
   ]
     .filter(Boolean)
     .join("\n\n")
