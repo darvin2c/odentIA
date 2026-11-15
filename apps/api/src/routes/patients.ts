@@ -71,6 +71,7 @@ import {
   makeImageThumbnail,
   markAllergiesReviewed,
   markHealthDenied,
+  reviewDeclaredHealth,
   operationBodySchema,
   operationBodyShape,
   PATIENT_AVATAR_MAX_BYTES,
@@ -239,6 +240,7 @@ const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
 const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
+const healthReviewedInput = z.object({ expectedRevision: z.number().int().min(0) }).strict()
 const healthDeniedInput = z
   .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })
   .strict()
@@ -1091,6 +1093,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) =>
         markHealthDenied(tx, orgId, userId, c.req.param("id"), [...new Set(parsed.data.groups)]),
       ),
+    )
+  })
+  // «Lo revisé con ella»: lo que dijo queda revisado tal como está, sin rearmar los antecedentes.
+  app.post("/:id/health/reviewed", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = healthReviewedInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => reviewDeclaredHealth(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
   })
   app.post("/:id/health/allergies/reviewed", async (c) => {

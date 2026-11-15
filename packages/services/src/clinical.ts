@@ -75,7 +75,7 @@ import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
-import { allergyReviewDue } from "./allergies.js"
+import { allergyReviewDue, markAllergiesReviewed } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -1243,7 +1243,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "patient"),
         eq(auditEvent.entityId, patientId),
-        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved"]),
+        inArray(auditEvent.action, ["health.declared", "health.allergies_declared", "health.denied", "health.saved", "health.reviewed"]),
       ),
     )
   const latest = (actions: string[]): Date | null =>
@@ -1256,7 +1256,7 @@ async function healthAuthorshipOf(tx: Db, orgId: string, patientId: string): Pro
     declaredByPatient: rows.some((row) => row.action === "health.declared" || row.action === "health.allergies_declared"),
     deniedByClinician: denied.length > 0,
     declaredAt: latest(["health.declared", "health.allergies_declared"]),
-    staffSavedAt: latest(["health.saved"]),
+    staffSavedAt: latest(["health.saved", "health.reviewed"]),
     deniedGroups: [
       ...new Set(
         denied.flatMap((row) => {
@@ -1562,6 +1562,53 @@ export async function markHealthDenied(
   await audit(tx, orgId, actorUserId, "health.denied", "patient", patientId, {
     groups: [...groups],
     revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return getPatientHealth(tx, orgId, patientId)
+}
+
+/**
+ * «Lo revisé con ella» (revisión final del 15 nov): lo que dijo la persona (o quien habla por ella)
+ * y nadie revisó queda revisado tal como está, en un toque y sin rearmar sus antecedentes: la
+ * entrevista, sus enfermedades y sus medicinas, como «Revisar y guardar» de Antecedentes, y sus
+ * alergias, como «Alergias revisadas» (`markAllergiesReviewed`), solo si dijo algo de ellas: lo
+ * que nunca se le preguntó no pasa a «no tiene». Nada se borra ni cambia: su «No» sigue siendo lo
+ * que dijo, ya revisado. Para corregir algo está Antecedentes. Con una revisión vieja no pisa lo
+ * que otra persona guardó.
+ */
+export async function reviewDeclaredHealth(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: { expectedRevision: number },
+): Promise<PatientHealth> {
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  if (locked.revision !== input.expectedRevision)
+    throw conflict("STALE_HEALTH_REVISION", "Sus antecedentes cambiaron en otra sesión: recarga antes de revisarlos")
+  const health = await getPatientHealth(tx, orgId, patientId)
+  if (health.declared.some((group) => group.allergies.length > 0 || group.saidNo.allergies))
+    await markAllergiesReviewed(tx, orgId, actorUserId, patientId)
+  const [now] = await tx
+    .select({ revision: patient.healthRevision })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  const revision = now?.revision ?? locked.revision
+  await tx
+    .update(patient)
+    .set({ healthRevision: revision + 1, healthReviewedAt: new Date(), healthReviewedBy: actorUserId, updatedAt: new Date() })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // Cuenta como el guardado del equipo (`staffSavedAt`): lo de antes ya no es «sin revisar».
+  await audit(tx, orgId, actorUserId, "health.reviewed", "patient", patientId, {
+    reviewStatus: locked.reviewStatus,
+    revision: { before: locked.revision, after: revision + 1 },
   })
   return getPatientHealth(tx, orgId, patientId)
 }

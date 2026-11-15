@@ -1368,6 +1368,14 @@ export function markHealthDeniedApi(
   })
 }
 
+/** «Lo revisé con ella»: lo que dijo queda revisado tal como está (la revisión que vio la pantalla). */
+export function reviewDeclaredHealthApi(patientId: string, expectedRevision: number): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/reviewed`, {
+    method: "POST",
+    body: JSON.stringify({ expectedRevision }),
+  })
+}
+
 export function markAllergiesReviewedApi(patientId: string): Promise<{ data: { reviewedAt: string } }> {
   return apiFetch<{ data: { reviewedAt: string } }>(`/api/patients/${patientId}/health/allergies/reviewed`, {
     method: "POST",

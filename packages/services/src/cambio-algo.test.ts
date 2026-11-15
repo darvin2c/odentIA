@@ -20,6 +20,7 @@ import {
   type HealthDeclaration,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
+  reviewDeclaredHealth,
   savePatientHealth,
 } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
@@ -386,4 +387,35 @@ it("la copia no da lo de antes como vigente: «Antes: Warfarina 5 mg · dijo que
   const warfarin = statements.find((resource) => (resource.medicationCodeableConcept as { text?: string })?.text === "Warfarina 5 mg")
   expect(warfarin?.status).toBe("unknown")
   expect(JSON.stringify(warfarin?.note)).toContain("Dijo que cambió el ")
+})
+
+// Revisión final del 15 nov (ux propuesta 3, K6): «Lo revisé con ella» resuelve en un toque lo que
+// dijo (la entrevista, sus enfermedades, sus medicinas y sus alergias), tal como está: nada se borra
+// ni cambia, su «No» sigue siendo «No», y la franja y Antecedentes ya no dicen «sin revisar».
+it("«Lo revisé con ella» deja revisado lo que dijo, tal como está, en un toque", async () => {
+  const f = await clinicalFixture()
+  const marta = await martaBack(f)
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, marta.link.token, {
+      data: {},
+      healthCheck: "cambio",
+      health: { ...SAID_BEFORE, anticoagulants: { state: "recorded", detail: "Apixabán 5 mg" } },
+    }),
+  )
+  const before = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
+  expect(before.declared.length).toBeGreaterThan(0)
+  expect(before.changed).not.toBeNull()
+  // Con una revisión vieja no pisa lo que otra persona guardó.
+  await expect(
+    f.run((tx) => reviewDeclaredHealth(tx, ORG, f.actor, marta.patientId, { expectedRevision: before.revision - 1 })),
+  ).rejects.toMatchObject({ code: "STALE_HEALTH_REVISION" })
+  const after = await f.run((tx) => reviewDeclaredHealth(tx, ORG, f.actor, marta.patientId, { expectedRevision: before.revision }))
+  expect(after.declared).toEqual([])
+  expect(after.changed).toBeNull()
+  expect(after.reviewPending).toBe(false)
+  expect(after.allergiesReviewedAt).not.toBeNull()
+  // Tal como estaba: las mismas filas y su «No» a las enfermedades.
+  expect(after.reviewStatus.conditions).toBe(before.reviewStatus.conditions)
+  expect(after.medications.map((row) => row.id).sort()).toEqual(before.medications.map((row) => row.id).sort())
+  expect(after.allergies.filter((row) => row.isActive).map((row) => row.substance)).toEqual(["Penicilina"])
 })

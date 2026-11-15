@@ -1064,6 +1064,23 @@ it("las alergias se agregan y se quitan una por una, solo quien escribe en la hi
   expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
 })
 
+// Revisión final del 15 nov: «Lo revisé con ella», en un toque, solo quien escribe en la historia.
+it("«Lo revisé con ella»: solo quien escribe en la historia, con la revisión que vio", async () => {
+  const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Revisión" }))
+  const review = (role: string, body: unknown) =>
+    buildApp(role).request(`/patients/${fresh.id}/health/reviewed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  expect((await review("reception", { expectedRevision: 0 })).status).toBe(403)
+  expect((await review("clinician", {})).status).toBe(400)
+  expect((await review("clinician", { expectedRevision: 7 })).status).toBe(409)
+  const done = await review("clinician", { expectedRevision: 0 })
+  expect(done.status).toBe(200)
+  expect(((await done.json()) as { data: { reviewedAt: string | null } }).data.reviewedAt).not.toBeNull()
+})
+
 it("«Niega enfermedades» y «No toma medicación» desde la atención: solo quien escribe en la historia", async () => {
   const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Antecedentes" }))
   const deny = (role: string, body: unknown) =>

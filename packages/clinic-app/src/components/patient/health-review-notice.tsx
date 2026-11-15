@@ -1,18 +1,27 @@
-import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf } from "@odentia/clinical"
+import { MEDICATION_CLASSES, type MedicationClass, medicationClassOf, saidWhenWords, specificKin } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { allergyTitle, bySeverity, sinceWords } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
-import { declaredMarkWords, pregnancyWords, saidNoWords } from "../../lib/declared-health"
+import {
+  changedHistoryOf,
+  declaredMarkWords,
+  type HealthDeclarant,
+  pregnancyWords,
+  saidNoWords,
+  shortDay,
+  whoWords,
+} from "../../lib/declared-health"
 import { clinicToday } from "../../lib/inventory"
 import {
   isCurrentMedication,
   markAllergiesReviewedApi,
   markHealthDeniedApi,
   type PatientHealth,
+  reviewDeclaredHealthApi,
   unaskedHealthGroups,
 } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
@@ -23,6 +32,30 @@ import { useOpenWide } from "./wide-section"
 function listWords(items: string[]): string {
   if (items.length <= 1) return items[0] ?? ""
   return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+}
+
+/** El tiempo para «Deshacer» «Lo revisé con ella», como los demás «Deshacer» de la app. */
+const REVIEW_UNDO_MS = 10_000
+
+/** «alergia, anticoagulante y 6 más». */
+function summaryOf(items: string[]): string {
+  if (items.length <= 3) return listWords(items)
+  return `${items.slice(0, 2).join(", ")} y ${items.length - 2} más`
+}
+
+/** Con quién se revisó: «ella», «él», «su madre»; sin saberlo, «la persona». */
+function reviewWho(by: HealthDeclarant | null, sex: string | null | undefined): string {
+  if (by?.kind === "representative") return `su ${specificKin(by.relation) ?? "representante"}`
+  return sex === "F" ? "ella" : sex === "M" ? "él" : "la persona"
+}
+
+/**
+ * A quién preguntarle cuando lo dijo quien habla por la persona y todavía no figura como su
+ * representante (el enlace de un niño): «su madre, Carla». Nulo si lo dijo ella o si fueron varios.
+ */
+function askDeclarant(groups: ReadonlyArray<{ by: HealthDeclarant }>, sex: string | null | undefined): string | null {
+  const people = [...new Set(groups.filter((group) => group.by.kind === "representative").map((group) => whoWords(group.by, sex)))]
+  return people.length === 1 ? people[0]! : null
 }
 
 // A quién se le pregunta cuando la persona tiene representante: la misma regla que dice quién lo dijo.
@@ -54,6 +87,7 @@ export function HealthReviewNotice({
   disabled = false,
   askTo = null,
   sex,
+  child = false,
 }: {
   patientId: string
   patientName: string
@@ -63,6 +97,8 @@ export function HealthReviewNotice({
   askTo?: string | null
   /** El sexo registrado del paciente, para decir «ella» o «él»; sin él no se supone. */
   sex?: string | null
+  /** Un menor de 12: no se le preguntan anticoagulantes ni medicinas para los huesos (K7). */
+  child?: boolean
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -71,6 +107,21 @@ export function HealthReviewNotice({
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
   const [adding, setAdding] = useState(false)
+  const [showing, setShowing] = useState(false)
+  const detailId = useId()
+  // «Lo revisé con ella» se guarda pasados unos segundos, con «Deshacer» mientras tanto (como «Vino»
+  // en la agenda). Si la pantalla se cierra antes, se guarda en ese momento: no se pierde.
+  const [reviewedHere, setReviewedHere] = useState(false)
+  const pendingReview = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null)
+  useEffect(
+    () => () => {
+      const waiting = pendingReview.current
+      if (!waiting) return
+      clearTimeout(waiting.timer)
+      waiting.send()
+    },
+    [],
+  )
   const refresh = async () => {
     await Promise.all(
       [
@@ -101,80 +152,138 @@ export function HealthReviewNotice({
   const unasked = unaskedHealthGroups(health, clinicToday())
   const today = clinicToday()
   const pregnancy = health.pregnancy ?? null
-  // Una lista por declaración: cada cosa con quien la dijo y su día, sin juntar lo de dos fechas.
-  const lastGroup = (health.declared ?? []).at(-1)
-  const saidGroups = (health.declared ?? []).map((group) => {
-    const no = saidNoWords(group.by, sex).toLocaleLowerCase("es")
-    const rows: Array<{ label: string; value: string }> = []
-    if (pregnancy && group.pregnancy) {
-      const words = pregnancyWords(pregnancy)
-      rows.push({
-        label: "Embarazo",
-        value: words.confirm
-          ? `${words.detail}; pregúntale si sigue embarazada`
-          : pregnancy.weeksToday === null
-            ? words.detail
-            : pregnancy.weeksSaid === pregnancy.weeksToday
-              ? // Sin una semana de diferencia, el dato se dice una vez: «20 semanas (lo dijo el 14 nov)».
-                `${words.title.replace("Embarazo · ", "")} (${words.detail})`
-              : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
-      })
-    }
-    const saidAllergies = health.allergies.filter((row) => group.allergies.includes(row.id))
-    if (saidAllergies.length > 0)
-      rows.push({
-        label: "Alergias",
-        value: saidAllergies
-          // El registro no pregunta qué le pasó: sin reacción no se dice «no dijo» (auditor, 14 nov).
-          .map((row) => [allergyTitle(row), row.reaction?.trim()].filter(Boolean).join(" · "))
-          .join("; "),
-      })
-    else if (group.saidNo.allergies) rows.push({ label: "Alergias", value: no })
-    const saidMedications = health.medications.filter(
-      (row) => group.medications.includes(row.id) && isCurrentMedication(row, today),
+  // Lo que dijo, por dato y no por declaración (revisión final del 15 nov, ux R2): cada dato una vez,
+  // con lo de hoy y su historia; de quién y cuándo, en la línea si fue una sola declaración, y si no,
+  // en cada dato.
+  const declared = health.declared ?? []
+  const lastGroup = declared.at(-1)
+  const currentMedications = health.medications.filter((row) => isCurrentMedication(row, today))
+  const history = changedHistoryOf({ changed: health.changed, medications: currentMedications }, sex)
+  const marks = [...new Set(declared.map((group) => declaredMarkWords(group.by, group.at, sex)))]
+  const oneMark = marks.length === 1 ? marks[0]! : null
+  const rows: Array<{ label: string; short: string; value: string }> = []
+  const push = (label: string, short: string, value: string, groups: typeof declared) => {
+    const own = [
+      ...new Set(
+        groups.map((group) => saidWhenWords(group.by, group.at ? shortDay(group.at) : "", sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))),
+      ),
+    ]
+    rows.push({ label, short, value: oneMark || own.length === 0 ? value : `${value} (${own.join("; ")})` })
+  }
+  const no = (group: (typeof declared)[number]) => saidNoWords(group.by, sex).toLocaleLowerCase("es")
+  const pregnancyGroups = declared.filter((group) => group.pregnancy)
+  if (pregnancy && pregnancyGroups.length > 0) {
+    const words = pregnancyWords(pregnancy)
+    push(
+      "Embarazo",
+      "embarazo",
+      words.confirm
+        ? `${words.detail}; pregúntale si sigue embarazada`
+        : pregnancy.weeksToday === null
+          ? words.detail
+          : pregnancy.weeksSaid === pregnancy.weeksToday
+            ? // Sin una semana de diferencia, el dato se dice una vez: «20 semanas (lo dijo el 14 nov)».
+              `${words.title.replace("Embarazo · ", "")} (${words.detail})`
+            : `${pregnancy.weeksToday} ${pregnancy.weeksToday === 1 ? "semana" : "semanas"} hoy (dijo ${words.detail})`,
+      // El embarazo ya dice cuándo lo dijo.
+      [],
     )
-    // Lo que tiene marca (anticoagulante, huesos) va en su propia fila, como arriba de la ficha.
-    for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
-      const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
-      const label = key === "anticoagulants" ? "Anticoagulante" : "Medicina para los huesos"
-      if (inClass.length > 0)
-        rows.push({
-          label,
-          // «Anticoagulante · Anticoagulante (no dijo cuál)» se leía dos veces (B9): sin nombre, «no dijo cuál».
-          value: inClass
-            .map((row) => (row.name === MEDICATION_CLASSES[key].unnamed ? "no dijo cuál" : [row.name, row.dose].filter(Boolean).join(" ")))
-            .join(", "),
-        })
-      else if (group === lastGroup) {
-        // Su «No» o su «No sé» a la clase también se revisa con ella (B9), en su última declaración.
-        const known = health.medicineClasses?.[key]
-        if (known?.said && known.answer === "unknown") rows.push({ label, value: "no sabe" })
-        else if (known?.said && known.answer === "no") rows.push({ label, value: no })
-      }
+  }
+  const allergyGroups = declared.filter((group) => group.allergies.length > 0)
+  const saidAllergies = health.allergies.filter((row) => allergyGroups.some((group) => group.allergies.includes(row.id)))
+  const saidNoAllergyGroup = declared.find((group) => group.saidNo.allergies)
+  if (saidAllergies.length > 0)
+    push(
+      "Alergias",
+      saidAllergies.length === 1 ? "alergia" : "alergias",
+      saidAllergies
+        // El registro no pregunta qué le pasó: sin reacción no se dice «no dijo» (auditor, 14 nov).
+        .map((row) => [allergyTitle(row), row.reaction?.trim(), history.allergyMark(row.id)].filter(Boolean).join(" · "))
+        .join("; "),
+      allergyGroups,
+    )
+  else if (saidNoAllergyGroup) push("Alergias", "alergias", no(saidNoAllergyGroup), [saidNoAllergyGroup])
+  // Lo que toma hoy y dijo; lo de antes va junto a lo de hoy de su clase, nunca como otro vigente.
+  const medicationGroups = declared.filter((group) => group.medications.length > 0)
+  const saidMedications = history.current(
+    "medications",
+    currentMedications.filter((row) => medicationGroups.some((group) => group.medications.includes(row.id))),
+  )
+  const groupsOf = (ids: string[]) => medicationGroups.filter((group) => ids.some((id) => group.medications.includes(id)))
+  const aloneMedications = history.alone("medications", currentMedications)
+  // Lo que tiene marca (anticoagulante, huesos) va en su propia fila, como arriba de la ficha.
+  for (const key of Object.keys(MEDICATION_CLASSES) as MedicationClass[]) {
+    const inClass = saidMedications.filter((row) => medicationClassOf(row.atcCode) === key)
+    const label = MEDICATION_CLASSES[key].label
+    const short = label.toLocaleLowerCase("es")
+    const alone = aloneMedications.find((line) => line.startsWith(`${label}:`))
+    if (inClass.length > 0)
+      push(
+        label,
+        short,
+        // «Anticoagulante · Anticoagulante (no dijo cuál)» se leía dos veces (B9): sin nombre, «no dijo cuál».
+        inClass
+          .map((row) => {
+            const name = row.name === MEDICATION_CLASSES[key].unnamed ? "no dijo cuál" : [row.name, row.dose].filter(Boolean).join(" ")
+            const before = history.beforeFor("medications", row, currentMedications)
+            return before ? `${name} · ${before}` : name
+          })
+          .join(", "),
+        groupsOf(inClass.map((row) => row.id)),
+      )
+    else if (alone) push(label, short, alone.slice(label.length + 2), [])
+    else if (lastGroup && !child) {
+      // Su «No» o su «No sé» a la clase también se revisa con ella (B9), en su última declaración. A un
+      // niño no se le pregunta (revisión final del 15 nov, K7).
+      const known = health.medicineClasses?.[key]
+      if (known?.said && known.answer === "unknown") push(label, short, "no sabe", [lastGroup])
+      else if (known?.said && known.answer === "no") push(label, short, no(lastGroup), [lastGroup])
     }
-    const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
-    if (otherMedications.length > 0)
-      rows.push({ label: "Medicinas", value: otherMedications.map((row) => row.name).join(", ") })
-    else if (saidMedications.length === 0 && group.saidNo.medications) rows.push({ label: "Medicinas", value: no })
-    const saidConditions = health.conditions.filter((row) => group.conditions.includes(row.id) && row.status === "activa")
-    if (saidConditions.length > 0)
-      rows.push({ label: "Enfermedades", value: saidConditions.map((row) => row.name).join(", ") })
-    else if (group.saidNo.conditions) rows.push({ label: "Enfermedades", value: no })
-    // El corazón, la anestesia, el tabaco y la lactancia que dijo en esta declaración (QA del 14 nov).
-    const interview = group.interview ?? []
-    if (interview.length > 0)
-      for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? [])
-        if (row.keys.some((key) => interview.includes(key))) rows.push({ label: row.label, value: row.value })
-    // Lo del producto, como lo dice el servidor (odentIA: lo de pequeño que contó quien cuida a un niño).
-    for (const row of group.productLines ?? []) rows.push(row)
-    return { title: declaredMarkWords(group.by, group.at, sex), rows }
-  })
-  const shownGroups = saidGroups.filter((group) => group.rows.length > 0)
+  }
+  const otherMedications = saidMedications.filter((row) => medicationClassOf(row.atcCode) === null)
+  const aloneOther = aloneMedications.find((line) => line.startsWith("Medicación:"))
+  const saidNoMedicationGroup = declared.find((group) => group.saidNo.medications)
+  if (otherMedications.length > 0 || aloneOther)
+    push(
+      "Medicinas",
+      "medicinas",
+      [...otherMedications.map((row) => row.name), ...(aloneOther ? [aloneOther.slice("Medicación: ".length)] : [])].join(", "),
+      groupsOf(otherMedications.map((row) => row.id)),
+    )
+  else if (saidMedications.length === 0 && saidNoMedicationGroup)
+    push("Medicinas", "medicinas", no(saidNoMedicationGroup), [saidNoMedicationGroup])
+  const conditionGroups = declared.filter((group) => group.conditions.length > 0)
+  const activeConditions = health.conditions.filter((row) => row.status === "activa")
+  const saidConditions = history.current(
+    "conditions",
+    activeConditions.filter((row) => conditionGroups.some((group) => group.conditions.includes(row.id))),
+  )
+  const aloneConditions = history.alone("conditions", activeConditions)
+  const saidNoConditionGroup = declared.find((group) => group.saidNo.conditions)
+  if (saidConditions.length > 0 || aloneConditions.length > 0)
+    push(
+      "Enfermedades",
+      "enfermedades",
+      [...saidConditions.map((row) => row.name), ...aloneConditions.map((line) => line.slice("Enfermedades: ".length))].join(", "),
+      conditionGroups.filter((group) => saidConditions.some((row) => group.conditions.includes(row.id))),
+    )
+  else if (saidNoConditionGroup) push("Enfermedades", "enfermedades", no(saidNoConditionGroup), [saidNoConditionGroup])
+  // El corazón, la anestesia, el tabaco y la lactancia que dijo (QA del 14 nov), una vez cada uno.
+  const interviewGroups = declared.filter((group) => (group.interview ?? []).length > 0)
+  if (interviewGroups.length > 0)
+    for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? []) {
+      const groups = interviewGroups.filter((group) => row.keys.some((key) => group.interview?.includes(key)))
+      if (groups.length > 0) push(row.label, row.label.toLocaleLowerCase("es"), row.value, groups)
+    }
+  // Lo del producto, como lo dice el servidor (odentIA: lo de pequeño que contó quien cuida a un niño).
+  for (const group of declared)
+    for (const row of group.productLines ?? [])
+      if (!rows.some((item) => item.label === row.label)) push(row.label, row.label.toLocaleLowerCase("es"), row.value, [group])
   // Lo que dijo y nadie revisó se decide por declaración (`health.declared`, del servidor), no por si
   // la salud tuvo antes una revisión: un látex que llegó después de revisarla también se marca (QA del
   // 14 nov, H2 de clínica). `reviewPending` solo dice si hay algo que revisar en Antecedentes.
   const pending = health.reviewPending === true
-  const declaredHere = shownGroups.length > 0 || pending
+  const declaredHere = rows.length > 0 || pending
   // Las alergias que dijo la persona (o su «No») se revisan aquí, con lo demás que dijo: no salen
   // otra vez en una fila «Alergias» aparte ni se dan por vistas con «Sin cambios».
   const declaredAllergyIds = new Set((health.declared ?? []).flatMap((group) => group.allergies))
@@ -191,9 +300,13 @@ export function HealthReviewNotice({
   const allergyRow = allergiesDue && !allergiesSaid
   // «Nuevas» solo si alguien de la clínica ya se las preguntó: el «No» que marcó la persona no cuenta.
   const asked = others.length > 0 || (health.reviewStatus.allergies === "none" && !saidNoAllergies)
-  // Con representante (un niño), se le pregunta a él, como lo dice la ficha; si no, a la persona.
+  // Con representante (un niño), se le pregunta a él, como lo dice la ficha. Sin uno registrado
+  // todavía, a quien lo declaró, no al niño (revisión final del 15 nov, K5); si no, a la persona.
   const patientFirst = patientName.trim().split(/\s+/)[0] ?? patientName
-  const first = askTo ?? patientFirst
+  const declarant = askTo ? null : askDeclarant(declared, sex)
+  const first = askTo ?? declarant ?? patientFirst
+  const talksFor = !!(askTo ?? declarant)
+  const reviewer = talksFor ? (declared.at(-1)?.by ?? null) : null
   const topics = [
     allergyRow ? (asked ? "sus alergias nuevas" : "sus alergias") : null,
     unasked.includes("conditions") ? "sus enfermedades" : null,
@@ -202,7 +315,7 @@ export function HealthReviewNotice({
   const title =
     topics.length === 0
       ? declaredHere
-        ? `Revisa con ${first} lo que dijo de ${askTo ? `la salud de ${patientFirst}` : "su salud"}`
+        ? `Revisa con ${first}${first.includes(",") ? "," : ""} lo que dijo de ${talksFor ? `la salud de ${patientFirst}` : "su salud"}`
         : `Pregúntale a ${first} si sigue embarazada`
       : unasked.length === 0
         ? asked
@@ -210,6 +323,35 @@ export function HealthReviewNotice({
           : `Pregúntale a ${first} si tiene alergias`
         : `Pregúntale a ${first} por ${listWords(topics)}`
   const busy = disabled || reviewed.isPending || denied.isPending
+  const reviewNow = () => {
+    const revision = health.revision
+    const send = () => {
+      pendingReview.current = null
+      void reviewDeclaredHealthApi(patientId, revision)
+        .then(refresh)
+        .catch((error: unknown) => {
+          setReviewedHere(false)
+          toast.error(submitErrorMessage(error))
+        })
+    }
+    setReviewedHere(true)
+    pendingReview.current = { timer: setTimeout(send, REVIEW_UNDO_MS), send }
+    toast.success(`Revisado con ${reviewWho(reviewer, sex)}: ya no dice «sin revisar»`, {
+      duration: REVIEW_UNDO_MS,
+      action: {
+        label: "Deshacer",
+        onClick: () => {
+          const waiting = pendingReview.current
+          if (!waiting) return
+          clearTimeout(waiting.timer)
+          pendingReview.current = null
+          setReviewedHere(false)
+          titleRef.current?.focus()
+        },
+      },
+    })
+    titleRef.current?.focus()
+  }
   return (
     <section
       aria-labelledby={titleId}
@@ -279,60 +421,53 @@ export function HealthReviewNotice({
             </Button>
           </li>
         ) : null}
-        {declaredHere ? (
-          <li className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-col gap-2">
-              {shownGroups.length > 0 ? (
-                shownGroups.map((group) => (
-                  <div key={group.title} className="flex flex-col gap-1">
-                    <h3 className="text-sm font-medium">{group.title}</h3>
-                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-                      {group.rows.map((row) => (
-                        <div key={row.label} className="contents">
-                          <dt className="text-muted-foreground">{row.label}</dt>
-                          <dd>{row.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))
-              ) : (
-                <>
-                  <h3 className="text-sm font-medium">Sin revisar</h3>
-                  <p className="text-sm text-muted-foreground">Datos de su salud que nadie revisó todavía.</p>
-                </>
-              )}
-              {allergiesSaid && others.length > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Ya tenía anotadas: {others.map((allergy) => allergyTitle(allergy)).join(", ")}.
-                </p>
-              ) : null}
-              <p className="text-sm text-muted-foreground">
-                {allergiesSaid && !pending
-                  ? `Confirma con ${first} sus alergias.`
-                  : allergiesSaid
-                    ? `Confírmalo con ${first}: sus alergias aquí y lo demás en sus antecedentes.`
-                    : `Confírmalo con ${first} en sus antecedentes.`}
+        {declaredHere && !reviewedHere ? (
+          // En una línea (revisión final del 15 nov, ux propuesta 3): qué dijo, «Ver lo que dijo» y
+          // «Lo revisé con ella», que lo resuelve en un toque. Lo que la franja ya dice no se repite.
+          <li className="flex flex-col gap-2 py-2 first:pt-0 last:pb-0">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 text-sm">
+                <span className="font-medium">{oneMark ?? "Sin revisar"}</span>
+                {rows.length > 0 ? `: ${summaryOf(rows.map((row) => row.short))}` : ": datos de su salud que nadie revisó todavía"}
               </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {allergiesSaid ? (
-                <>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => reviewed.mutate()}>
-                    {reviewed.isPending ? "Guardando…" : active.length === 0 ? "No tiene alergias" : "Alergias revisadas"}
+              <div className="flex flex-wrap gap-2">
+                {rows.length > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={showing}
+                    aria-controls={detailId}
+                    onClick={() => setShowing((value) => !value)}
+                  >
+                    {showing ? "Ocultar lo que dijo" : "Ver lo que dijo"}
                   </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setAdding(true)}>
-                    <Plus aria-hidden />
-                    Agregar alergia
-                  </Button>
-                </>
-              ) : null}
-              {pending && openWide ? (
-                <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
-                  Revisar antecedentes
+                ) : null}
+                <Button type="button" size="sm" disabled={busy} onClick={reviewNow}>
+                  {`Lo revisé con ${reviewWho(reviewer, sex)}`}
                 </Button>
-              ) : null}
+                {openWide ? (
+                  <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => openWide({ id: "antecedentes", review: true })}>
+                    Corregir algo
+                  </Button>
+                ) : null}
+              </div>
             </div>
+            {/* Apilado: se lee igual a 390 px y con el panel lateral abierto (sin columnas que se aplasten). */}
+            <dl id={detailId} hidden={!showing} className="flex flex-col gap-1 text-sm">
+              {rows.map((row) => (
+                <div key={row.label}>
+                  <dt className="inline text-muted-foreground after:content-[':_']">{row.label}</dt>
+                  <dd className="inline">{row.value}</dd>
+                </div>
+              ))}
+              {saidAllergies.length > 0 && others.length > 0 ? (
+                <div>
+                  <dt className="inline text-muted-foreground after:content-[':_']">Ya tenía anotadas</dt>
+                  <dd className="inline">{others.map((allergy) => allergyTitle(allergy)).join(", ")}</dd>
+                </div>
+              ) : null}
+            </dl>
           </li>
         ) : null}
         {confirmPregnancy && pregnancy ? (

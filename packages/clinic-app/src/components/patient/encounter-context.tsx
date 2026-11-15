@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { ageInYears, diagnosisCodeLabel, isChildAge } from "@odentia/clinical"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useRef } from "react"
@@ -112,6 +112,7 @@ export function EncounterHealthReview({
       disabled={disabled}
       askTo={askWhom(patient.contacts)}
       sex={patient.patient.sex}
+      child={isChildAge(ageInYears(patient.patient.birthDate, clinicToday()))}
     />
   )
 }

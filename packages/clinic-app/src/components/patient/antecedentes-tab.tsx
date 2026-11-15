@@ -62,6 +62,7 @@ import {
   type PatientFull,
   type PatientHealth,
   type SaveHealthInput,
+  reviewDeclaredHealthApi,
   savePatientHealthApi,
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -548,7 +549,10 @@ export function AntecedentesTab({
       )
       sentFamilyRows.current = familyRows
       try {
-        await savePatientHealthApi(patientId, body)
+        // «Revisar y guardar» sin cambiar nada es «Lo revisé con ella»: lo que dijo queda revisado tal
+        // como está, también sus alergias, sin otra versión de la entrevista (revisión final del 15 nov, K6).
+        if (health.reviewPending && !form.state.isDirty) await reviewDeclaredHealthApi(patientId, base.current.revision)
+        else await savePatientHealthApi(patientId, body)
       } catch (error) {
         if (error instanceof ApiError) {
           if (error.shape.code === "STALE_HEALTH_REVISION") setStale(true)

@@ -159,6 +159,7 @@ export function PatientClinicalStrip({
   health,
   sex,
   medicineClasses = false,
+  child = false,
 }: {
   detail: Pick<
     PatientFull,
@@ -181,6 +182,8 @@ export function PatientClinicalStrip({
    * se le preguntó», «dijo que no» o «no sabe» (mesa del 13 nov). La ficha muestra solo la marca.
    */
   medicineClasses?: boolean
+  /** Un menor de 12: no se le preguntan anticoagulantes ni medicinas para los huesos (K7). */
+  child?: boolean
 }) {
   const stripId = useId()
   const noAllergies = !detail.activeAllergies.some((a) => a.verification !== "descartada")
@@ -200,7 +203,8 @@ export function PatientClinicalStrip({
   const saidNoAllergies = noAllergies ? groupIndex((group) => group.saidNo.allergies) : null
   // En la atención, lo que no se sabe de cada clase; lo que toma ya va en su marca. La medicina para
   // los huesos que tomó antes va también en la ficha: el riesgo de una extracción sigue (B3).
-  const classWords = health?.medicineClasses
+  // A un niño no se le preguntan: «Anticoagulante: dijo que no · huesos» no le sirve a quien lo atiende (K7).
+  const classWords = health?.medicineClasses && !child
     ? (Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((key) => {
           const known = health.medicineClasses?.[key]
           if (!known || known.answer === "yes" || (!medicineClasses && known.answer !== "took")) return []
@@ -231,7 +235,8 @@ export function PatientClinicalStrip({
         ]
       : []),
     ...(saidNoAllergies !== null
-      ? [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "warning" as const, group: saidNoAllergies, changed: false }]
+      ? // Su «No» no es una alerta: se dice, sin forma de aviso (revisión final del 15 nov, ux U3).
+        [{ id: "alergias-no", label: "Alergias: dijo que no", tone: "secondary" as const, group: saidNoAllergies, changed: false }]
       : []),
     ...clinicalAlerts(detail)
       .filter((alert) => !beforeIds.has(alert.id))

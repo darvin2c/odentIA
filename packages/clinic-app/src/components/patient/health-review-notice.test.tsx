@@ -94,7 +94,12 @@ describe("«Pregúntale» en la atención", () => {
     // El embarazo, con la semana de hoy y lo que dijo ese día.
     expect(page).toContain("32 semanas hoy (dijo 30 el 13 nov)")
     // El registro no pregunta qué le pasó: no se dice que «no dijo» (auditor, 14 nov).
-    expect(page).toContain("<dd>Látex</dd>")
+    expect(page).toContain(">Látex</dd>")
+    // En una línea, con el detalle a un toque (revisión final del 15 nov, ux propuesta 3).
+    expect(page).toContain("Lo dijo ella el 13 nov, sin revisar</span>: embarazo, alergia y 2 más")
+    expect(page).toContain("Ver lo que dijo")
+    expect(page).toMatch(/<dl[^>]*hidden/)
+    expect(page).toContain("Lo revisé con ella")
     expect(page).not.toContain("no dijo qué le pasó")
     expect(page).toContain("Sulfato ferroso, Ácido fólico")
     // Su «No» es de ella: no se lee «niega».
@@ -137,10 +142,10 @@ describe("«Pregúntale» en la atención", () => {
         />
       </QueryClientProvider>,
     )
-    expect(two).toContain("Lo dijo su madre, Carla, el 1 nov, sin revisar")
-    expect(two).toContain("Lo dijo ella el 13 nov, sin revisar")
-    expect(two.indexOf("Látex")).toBeLessThan(two.indexOf("Lo dijo ella el 13 nov"))
-    expect(two.indexOf("Sulfato ferroso")).toBeGreaterThan(two.indexOf("Lo dijo ella el 13 nov"))
+    // Por dato, no por declaración: cada uno con quién lo dijo y su día (ux R2).
+    expect(two).toContain("Sin revisar</span>: alergia y medicinas")
+    expect(two).toContain("Látex (lo dijo su madre, Carla, el 1 nov)")
+    expect(two).toContain("Sulfato ferroso, Ácido fólico (lo dijo ella el 13 nov)")
   })
   it("un embarazo que ya pasó su término no alarma: pide confirmarlo, sin frenar", () => {
     const past = {
@@ -199,8 +204,8 @@ describe("«Pregúntale» en la atención", () => {
     // Lo que dijo no se da por visto con «Sin cambios»: se revisa a sabiendas, con lo que ya tenía a la vista.
     expect(page).not.toContain("Sin cambios")
     expect(page).not.toContain("alergias nuevas")
-    expect(page).toContain("Alergias revisadas")
-    expect(page).toContain("Ya tenía anotadas: Penicilinas")
+    expect(page).toContain("Lo revisé con ella")
+    expect(page.replace(/<[^>]+>/g, "")).toContain("Ya tenía anotadasPenicilinas")
   })
 
   it("Inés: la alergia que dijo sale una sola vez, en la caja de lo que dijo", () => {
@@ -243,7 +248,8 @@ describe("«Pregúntale» en la atención", () => {
     )
     expect(page).not.toContain("nuevas")
     expect(page).not.toContain("Sin cambios")
-    expect(page).toContain("No tiene alergias")
+    // Se revisa con quien lo dijo, en un toque.
+    expect(page).toContain("Lo revisé con su madre")
     expect(page).toContain("su madre dijo que no")
   })
 })
@@ -430,4 +436,68 @@ it("su «No sé» al anticoagulante se revisa con ella, y lo dicho sin nombre di
   expect(page).toMatch(/Anticoagulante\|+[^|]*no sabe/)
   expect(page).toMatch(/Medicina para los huesos\|+[^|]*no dijo cuál/)
   expect(page).not.toContain("(no dijo cuál)")
+})
+
+// Revisión final del 15 nov (dev H2, H6): tres anticoagulantes como tres declaraciones iguales, y la
+// misma clave repetida con dos declaraciones del mismo día.
+it("con dos correcciones, un solo anticoagulante, con su historia, y cada dato una vez", () => {
+  const uno = {
+    ...health,
+    reviewPending: true,
+    medications: [
+      { id: "w5", name: "warfarina", dose: "5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "w75", name: "warfarina", dose: "7.5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "apix", name: "apixabán", dose: "5 mg", atcCode: "B01AF02", endDate: null },
+    ],
+    changed: { by: { kind: "patient", name: null, relation: null }, at: "2026-11-14T22:21:00.000Z", allergies: [], conditions: [], medications: ["w5", "w75"] },
+    declared: ["w5", "w75", "apix"].map((id, index) => ({
+      by: { kind: "patient", name: null, relation: null },
+      at: `2026-11-14T22:2${index}:00.000Z`,
+      allergies: [],
+      conditions: [],
+      medications: [id],
+      pregnancy: false,
+      saidNo: { allergies: false, conditions: false, medications: false },
+    })),
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Uno Medina" health={uno} sex="F" />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Lo dijo ella el 14 nov, sin revisar|: anticoagulante")
+  expect(page).toMatch(/Anticoagulante\|+apixabán 5 mg · antes warfarina 5 mg y warfarina 7\.5 mg, cambió el 14 nov/)
+  expect(page.split("Anticoagulante|").length - 1).toBe(1)
+})
+
+// Revisión final del 15 nov (K5, K7): sin su representante registrado, se revisa con quien lo dijo, no
+// con el niño; y a un niño no se le pregunta el anticoagulante ni los huesos.
+it("Lucía, de 3 años: se revisa con su madre, que lo dijo, y sin «Anticoagulante: dijo que no»", () => {
+  const lucia = {
+    ...health,
+    allergyReviewDue: false,
+    reviewPending: true,
+    reviewStatus: { allergies: "none", conditions: "none", medications: "none" },
+    medicineClasses: { anticoagulants: { answer: "no", said: true }, boneMedicines: { answer: "no", said: true } },
+    declared: [
+      {
+        by: { kind: "representative", name: "Carmen Paredes", relation: "madre" },
+        at: "2026-11-13T19:27:00.000Z",
+        allergies: [],
+        conditions: [],
+        medications: [],
+        pregnancy: false,
+        saidNo: { allergies: true, conditions: true, medications: true },
+      },
+    ],
+  } as unknown as PatientHealth
+  const page = renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <HealthReviewNotice patientId="p1" patientName="Lucía Paredes" health={lucia} sex="F" child />
+    </QueryClientProvider>,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Revisa con su madre, Carmen, lo que dijo de la salud de Lucía")
+  expect(page).toContain("Lo revisé con su madre")
+  expect(page).not.toContain("Anticoagulante")
+  expect(page).not.toContain("huesos")
 })
