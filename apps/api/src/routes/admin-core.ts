@@ -6,19 +6,23 @@ import {
   ADMIN_MFA_SESSION_TTL_MS,
   ADMIN_RECOVERY_SESSION_TTL_MS,
   acceptAdminInvitation,
+  addStaffAbsence,
   adminResetStaffFactor,
   claimMfaCode,
   clearPendingStaffFactor,
   getStaffFactorId,
+  getStaffSchedule,
   hashMfaCode,
   hasStaffFactor,
   inviteAdminStaff,
+  kairosAbsencePass,
   keepStaffSignInWithoutFactor,
   listAdminAudit,
   listAdminStaff,
   listPendingAdminInvitations,
   recordAdminSessionBinding,
   regenerateStaffBackupCodes,
+  removeStaffAbsence,
   resolveAdminVerification,
   resendAdminInvitation,
   revokeAdminInvitation,
@@ -26,7 +30,9 @@ import {
   ServiceError,
   setAdminStaffActive,
   setAdminStaffRole,
+  setStaffHours,
   setStaffMail,
+  setStaffMeetingUrl,
   trustAdminDevice,
   writeAdminAudit,
 } from "@odentia/services"
@@ -87,6 +93,25 @@ const reasonInput = z.object({
 const acceptInput = z.object({ token: z.string().trim().min(16).max(128) })
 const userIdParam = z.object({ userId: z.string().min(1).max(128) })
 const invitationIdParam = z.object({ id: z.string().uuid("Invitación inválida") })
+/** El horario semanal de una persona: lo valida el servicio (rangos, cruces), aquí solo la forma. */
+const hoursInput = z.strictObject({
+  hours: z
+    .array(
+      z.strictObject({
+        weekday: z.number().int(),
+        startMin: z.number().int(),
+        endMin: z.number().int(),
+      }),
+    )
+    .max(50, "Usa como máximo 50 franjas"),
+})
+const meetingUrlInput = z.strictObject({ url: z.string().max(600).nullable() })
+const absenceInput = z.strictObject({
+  startsAt: z.iso.datetime({ offset: true }),
+  endsAt: z.iso.datetime({ offset: true }),
+  reason: z.string().max(400).nullable().optional(),
+})
+const absenceIdParam = z.object({ id: z.string().uuid("Ausencia inválida") })
 const auditQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   beforeTime: z.iso.datetime({ offset: true }).optional(),
@@ -609,6 +634,89 @@ export function createAdminCoreRoute(deps: CoreDeps) {
     if (!param.success) return validationError(c, param.error.issues)
     const raw = await c.req.json().catch(() => null)
     return runService(c, 200, () => setStaffMail(deps.ownerDb, actor, param.data.userId, raw ?? {}))
+  })
+
+  /*
+   * Horario para presentaciones, sala y ausencias (Equipo › la persona). Lo suyo lo
+   * cambia cada persona; lo de otra, solo Administración: lo exige el servicio.
+   */
+  app.get("/team/:userId/schedule", async (c) => {
+    const actor = adminContextOf(c)
+    const param = userIdParam.safeParse({ userId: c.req.param("userId") })
+    if (!param.success) return validationError(c, param.error.issues)
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) => getStaffSchedule(tx, actor, param.data.userId)),
+    )
+  })
+
+  app.put("/team/:userId/hours", async (c) => {
+    const actor = adminContextOf(c)
+    const param = userIdParam.safeParse({ userId: c.req.param("userId") })
+    if (!param.success) return validationError(c, param.error.issues)
+    const parsed = hoursInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => ({
+      hours: await deps.ownerDb.transaction((tx) =>
+        setStaffHours(tx, actor, param.data.userId, parsed.data.hours),
+      ),
+    }))
+  })
+
+  app.put("/team/:userId/meeting-url", async (c) => {
+    const actor = adminContextOf(c)
+    const param = userIdParam.safeParse({ userId: c.req.param("userId") })
+    if (!param.success) return validationError(c, param.error.issues)
+    const parsed = meetingUrlInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, async () => ({
+      meetingUrl: await deps.ownerDb.transaction((tx) =>
+        setStaffMeetingUrl(tx, actor, param.data.userId, parsed.data.url),
+      ),
+    }))
+  })
+
+  /**
+   * Una ausencia (días completos o unas horas). Devuelve también las presentaciones que
+   * caen en ella; la regla de Kairós corre al momento, así ya quedan en Hoy para decidir.
+   */
+  app.post("/team/:userId/absences", async (c) => {
+    const actor = adminContextOf(c)
+    const param = userIdParam.safeParse({ userId: c.req.param("userId") })
+    if (!param.success) return validationError(c, param.error.issues)
+    const parsed = absenceInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        const now = new Date()
+        const added = await addStaffAbsence(
+          tx,
+          actor,
+          param.data.userId,
+          {
+            startsAt: new Date(parsed.data.startsAt),
+            endsAt: new Date(parsed.data.endsAt),
+            reason: parsed.data.reason ?? null,
+          },
+          now,
+        )
+        if (added.conflicts.length > 0) await kairosAbsencePass(tx, now)
+        return added
+      }),
+    )
+  })
+
+  app.delete("/team/absences/:id", async (c) => {
+    const actor = adminContextOf(c)
+    const param = absenceIdParam.safeParse({ id: c.req.param("id") })
+    if (!param.success) return validationError(c, param.error.issues)
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await removeStaffAbsence(tx, actor, param.data.id)
+        // Lo que ya no choca sale de Hoy al momento.
+        await kairosAbsencePass(tx, new Date())
+        return { ok: true as const }
+      }),
+    )
   })
 
   /** Revoca una invitación pendiente. Solo admin. */

@@ -58,7 +58,7 @@ import {
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff, adminStaffAbsence } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -109,6 +109,7 @@ import {
   senderOfAddress,
   staffShortName,
 } from "./admin-staff-mail.js"
+import { zonedTimeToUtc } from "./availability.js"
 import { productMailDomain } from "./clinic-progress-report.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
@@ -486,6 +487,11 @@ export interface TaskInput {
   assigneeUserId?: string | null
   contactId?: string | null
   demoId?: string | null
+  /**
+   * Una persona agenda igual una presentación que choca con otra de quien presenta o
+   * con su ausencia («Agendar igual», tras el aviso `SLOT_TAKEN`). Kairós nunca.
+   */
+  force?: boolean
 }
 
 export interface TaskRow {
@@ -503,6 +509,8 @@ export interface TaskRow {
   demoId: string | null
   status: SaasTaskStatus
   byKairos: boolean
+  /** De una presentación: la sala fija de videollamada de quien presenta (`admin_staff.meeting_url`). */
+  meetingUrl: string | null
   /** Solo de Administración (las de cobro, siempre): Soporte no la ve. */
   adminOnly?: boolean
   doneAt: Date | null
@@ -510,16 +518,115 @@ export interface TaskRow {
   createdAt: Date
 }
 
+/** Lo que dura una presentación agendada: con su fin se ven los choques de quien presenta. */
+export const PRESENTATION_MS = 45 * 60_000
+
+/** El fin de una tarea con hora: solo la presentación lo tiene (`due_at` + 45 min). */
+export function presentationEndsAt(kind: string, dueAt: Date | null | undefined): Date | null {
+  return kind === "presentacion" && dueAt ? new Date(dueAt.getTime() + PRESENTATION_MS) : null
+}
+
+/**
+ * El candado de quien presenta: agendar, mover o pasar una presentación de esa persona va de uno
+ * en uno (lo toman también los de `admin-staff-schedule.ts`), así dos no se ganan la misma hora.
+ */
+export async function lockPresenter(tx: Db, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`admin_presentation:${userId}`}))`)
+}
+
+const LIMA_CLOCK = new Intl.DateTimeFormat("es-PE", {
+  timeZone: "America/Lima",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+
+/**
+ * Por qué quien presenta no está libre en `[startsAt, endsAt)`: otra presentación abierta suya que
+ * se cruza, o una ausencia. Null si está libre. No mira su horario: una persona puede presentar
+ * fuera de él (esa excepción la decide el equipo; Kairós solo ofrece sus horas).
+ */
+export async function presenterClash(
+  tx: Db,
+  userId: string,
+  startsAt: Date,
+  endsAt: Date,
+  exceptTaskId?: string,
+): Promise<string | null> {
+  const [person] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId))
+  const name = person?.name ?? "Quien presenta"
+  const [busy] = await tx
+    .select({ dueAt: saasTask.dueAt, clientName: saasClient.name })
+    .from(saasTask)
+    .innerJoin(saasClient, eq(saasClient.id, saasTask.clientId))
+    .where(
+      and(
+        eq(saasTask.kind, "presentacion"),
+        eq(saasTask.status, "abierta"),
+        eq(saasTask.assigneeUserId, userId),
+        isNotNull(saasTask.dueAt),
+        sql`${saasTask.dueAt} < ${endsAt.toISOString()}::timestamptz`,
+        sql`coalesce(${saasTask.endsAt}, ${saasTask.dueAt} + interval '45 minutes') > ${startsAt.toISOString()}::timestamptz`,
+        exceptTaskId ? sql`${saasTask.id} <> ${exceptTaskId}::uuid` : undefined,
+      ),
+    )
+    .orderBy(asc(saasTask.dueAt))
+    .limit(1)
+  if (busy?.dueAt)
+    return `${name} ya tiene a esa hora la presentación de ${busy.clientName} (${LIMA_CLOCK.format(busy.dueAt)})`
+  const [absent] = await tx
+    .select({ id: adminStaffAbsence.id })
+    .from(adminStaffAbsence)
+    .where(
+      and(
+        eq(adminStaffAbsence.userId, userId),
+        sql`${adminStaffAbsence.startsAt} < ${endsAt.toISOString()}::timestamptz`,
+        sql`${adminStaffAbsence.endsAt} > ${startsAt.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1)
+  return absent ? `${name} está ausente a esa hora` : null
+}
+
+/**
+ * Antes de agendar o mover una presentación con hora: el candado de quien presenta y su choque.
+ * Si choca, 409 `SLOT_TAKEN` con el porqué; con `force` (una persona que ya vio el aviso) sigue y
+ * devuelve el choque, que queda como constancia en la auditoría.
+ */
+async function presenterCheck(
+  tx: Db,
+  userId: string,
+  startsAt: Date,
+  force: boolean,
+  exceptTaskId?: string,
+): Promise<string | null> {
+  await lockPresenter(tx, userId)
+  const clash = await presenterClash(
+    tx,
+    userId,
+    startsAt,
+    new Date(startsAt.getTime() + PRESENTATION_MS),
+    exceptTaskId,
+  )
+  if (clash && !force) throw new ServiceError("SLOT_TAKEN", 409, `${clash}.`)
+  return clash
+}
+
+/**
+ * Guarda una tarea. `actor` nulo es Kairós (agendar desde una conversación): la
+ * tarea queda a su nombre (`by_kairos`), sin autor, y va a quien se eligió o al
+ * responsable del cliente.
+ */
 async function insertTask(
   tx: Db,
-  actor: AdminActor,
+  actor: AdminActor | null,
   client: ClientRecord,
   input: TaskInput,
   now: Date,
 ): Promise<string> {
   if (!(SAAS_TASK_KINDS as readonly string[]).includes(input.kind))
     throw invalidField("kind", "Elige qué hay que hacer")
-  if (!seesTaskKind(actor, input.kind))
+  if (actor && !seesTaskKind(actor, input.kind))
     throw invalidField("kind", "Las tareas de cobro las pone la administración")
   const title = trimmed("title", input.title, 200, "la tarea")
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
@@ -532,9 +639,17 @@ async function insertTask(
   const adminOnly = input.kind === "cobro"
   const assignee = input.assigneeUserId
     ? await requireActiveStaff(tx, input.assigneeUserId, "assigneeUserId", { adminOnly })
-    : await defaultAssignee(tx, client.ownerUserId, actor, adminOnly)
+    : actor
+      ? await defaultAssignee(tx, client.ownerUserId, actor, adminOnly)
+      : client.ownerUserId
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const demoId = await requireDemo(tx, input.demoId)
+  // Una presentación con hora no se cruza con otra de quien presenta ni con su ausencia sin que
+  // se vea: una persona puede agendarla igual tras el aviso; Kairós (`actor` nulo), nunca.
+  const overrode =
+    input.kind === "presentacion" && input.dueAt && assignee
+      ? await presenterCheck(tx, assignee, input.dueAt, Boolean(actor && input.force))
+      : null
   const [row] = await tx
     .insert(saasTask)
     .values({
@@ -543,21 +658,23 @@ async function insertTask(
       title,
       dueOn,
       dueAt: input.dueAt ?? null,
+      endsAt: presentationEndsAt(input.kind, input.dueAt),
       assigneeUserId: assignee,
       adminOnly,
       contactId: contact?.id ?? null,
       demoId,
-      createdBy: actor.userId,
+      createdBy: actor?.userId ?? null,
+      byKairos: actor === null,
       createdAt: now,
       updatedAt: now,
     })
     .returning({ id: saasTask.id })
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo guardar la tarea")
   await writeAdminAudit(tx, actor, {
-    action: "arm.task_created",
+    action: actor ? "arm.task_created" : "kairos.task_created",
     organizationId: client.organizationId,
     entityId: client.id,
-    metadata: { taskId: row.id, kind: input.kind },
+    metadata: { taskId: row.id, kind: input.kind, ...(overrode ? { overrode } : {}) },
   })
   return row.id
 }
@@ -596,12 +713,17 @@ const assigneeUser = sql<
   string | null
 >`(select u.name from "user" u where u.id = ${saasTask.assigneeUserId})`
 
+const assigneeRoom = sql<
+  string | null
+>`(select s.meeting_url from admin_staff s where s.user_id = ${saasTask.assigneeUserId})`
+
 function taskFields() {
   return {
     task: saasTask,
     clientName: saasClient.name,
     product: saasClient.product,
     assigneeName: assigneeUser,
+    assigneeRoom,
   }
 }
 
@@ -611,6 +733,7 @@ function taskRowOf(
     clientName: string
     product: string
     assigneeName: string | null
+    assigneeRoom?: string | null
   },
   now: Date,
 ): TaskRow {
@@ -632,6 +755,7 @@ function taskRowOf(
     demoId: task.demoId,
     status: task.status as SaasTaskStatus,
     byKairos: task.byKairos,
+    meetingUrl: task.kind === "presentacion" ? (row.assigneeRoom ?? null) : null,
     adminOnly: task.adminOnly || task.kind === "cobro",
     doneAt: task.doneAt,
     doneNote: task.doneNote,
@@ -714,12 +838,23 @@ export async function cancelClientTask(
   return getClientTask(tx, id, now)
 }
 
-/** Cambia el día (y la hora) de una tarea abierta. */
+/** La misma hora de Lima de `at`, en otro día de Lima. */
+function sameLimaTime(day: string, at: Date): Date {
+  const [hh, mm] = LIMA_CLOCK.format(at).split(":").map(Number)
+  return zonedTimeToUtc(day, (hh ?? 0) * 60 + (mm ?? 0), "America/Lima")
+}
+
+/**
+ * Cambia el día (y la hora) de una tarea abierta. Una presentación con hora la conserva si solo
+ * cambia el día («Mover» de Hoy): nunca queda sin hora ni sin su fin. Con hora, toma el candado
+ * de quien presenta y mira el choque (`SLOT_TAKEN`, salvo `force` tras el aviso). Moverla
+ * atiende «Pedir otra hora» (`needs_new_time_at`) y Kairós le avisa el cambio a la clínica.
+ */
 export async function moveClientTask(
   tx: Db,
   actor: AdminActor,
   id: string,
-  input: { dueOn: string; dueAt?: Date | null },
+  input: { dueOn: string; dueAt?: Date | null; force?: boolean },
   now = new Date(),
 ): Promise<TaskRow> {
   const task = await lockTask(tx, actor, id)
@@ -727,14 +862,31 @@ export async function moveClientTask(
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
   if (input.dueAt && (Number.isNaN(input.dueAt.getTime()) || limaDate(input.dueAt) !== dueOn))
     throw invalidField("dueAt", "La hora tiene que ser del mismo día")
+  const presentation = task.kind === "presentacion"
+  const dueAt = input.dueAt ?? (presentation && task.dueAt ? sameLimaTime(dueOn, task.dueAt) : null)
+  const overrode =
+    presentation && dueAt && task.assigneeUserId
+      ? await presenterCheck(tx, task.assigneeUserId, dueAt, Boolean(input.force), task.id)
+      : null
   await tx
     .update(saasTask)
-    .set({ dueOn, dueAt: input.dueAt ?? null, updatedAt: now })
+    .set({
+      dueOn,
+      dueAt,
+      endsAt: presentationEndsAt(task.kind, dueAt),
+      ...(presentation ? { needsNewTimeAt: null } : {}),
+      updatedAt: now,
+    })
     .where(eq(saasTask.id, id))
   await writeAdminAudit(tx, actor, {
     action: "arm.task_moved",
     entityId: task.clientId,
-    metadata: { taskId: id, dueOn },
+    metadata: {
+      taskId: id,
+      dueOn,
+      ...(presentation ? { to: dueAt?.toISOString() ?? null } : {}),
+      ...(overrode ? { overrode } : {}),
+    },
   })
   return getClientTask(tx, id, now)
 }
@@ -1375,10 +1527,17 @@ export async function applyInvitedProposal(
 
 /* ---------- Presentaciones ---------- */
 
-/** Agenda una presentación: es una tarea `presentacion` con su día, hora, contacto y demo. */
+/**
+ * Agenda una presentación: es una tarea `presentacion` con su día, hora (dura
+ * 45 min, `ends_at`), contacto y demo. `actor` nulo es Kairós
+ * (`bookPresentation`, con el candado y el choque ya revisados). Con hora, quien
+ * presenta no puede tener otra presentación ni una ausencia a esa hora: 409
+ * `SLOT_TAKEN` con el porqué, salvo `force` de una persona que ya vio el aviso
+ * (queda en la auditoría como `overrode`). Kairós nunca lo fuerza.
+ */
 export async function schedulePresentation(
   tx: Db,
-  actor: AdminActor,
+  actor: AdminActor | null,
   clientId: string,
   input: {
     dueOn: string
@@ -1386,6 +1545,8 @@ export async function schedulePresentation(
     contactId?: string | null
     demoId?: string | null
     assigneeUserId?: string | null
+    /** «Agendar igual» tras el aviso de choque (`SLOT_TAKEN`); solo una persona. */
+    force?: boolean
   },
   now = new Date(),
 ): Promise<TaskRow> {
@@ -1471,7 +1632,12 @@ export async function recordPresentation(
     if (nextDueOn) {
       await tx
         .update(saasTask)
-        .set({ dueOn: nextDueOn, dueAt: input.nextDueAt ?? null, updatedAt: now })
+        .set({
+          dueOn: nextDueOn,
+          dueAt: input.nextDueAt ?? null,
+          endsAt: presentationEndsAt("presentacion", input.nextDueAt),
+          updatedAt: now,
+        })
         .where(eq(saasTask.id, taskId))
     } else {
       await tx
@@ -2733,6 +2899,83 @@ export async function markOutreachSent(
   await writeAdminAudit(tx, actor, {
     action: result === "enviado" ? "arm.outreach_sent" : "arm.outreach_uncertain",
     entityId: row.clientId ?? row.inReplyToEmailId,
+    metadata: { outreachId: id },
+  })
+  return outreachRowOf(updated)
+}
+
+/**
+ * Un correo que escribe Kairós solo a una clínica de la venta (el recordatorio de su presentación,
+ * pedirle otra hora, avisarle un cambio) cuando no hay WhatsApp por donde: queda `pendiente`, a su
+ * nombre (`by_kairos`, sin persona), desde hola@ de la marca y con su Message-ID. El worker lo
+ * envía después del commit (`outreachEmail`) y anota `markKairosMailSent`; nunca se reintenta.
+ */
+export async function prepareKairosMail(
+  tx: Db,
+  input: { clientId: string; contactId: string | null; to: string; subject: string; body: string },
+  now = new Date(),
+): Promise<OutreachRow> {
+  const client = await lockClient(tx, input.clientId)
+  const to = input.to.trim().toLowerCase()
+  if (!EMAIL.test(to) || to.length > 254) throw invalidField("to", "Hace falta un correo válido")
+  const subject = trimmed("subject", input.subject, 200, "el asunto")
+  const body = trimmed("body", input.body, 5000, "el mensaje")
+  const [row] = await tx
+    .insert(saasOutreach)
+    .values({
+      clientId: client.id,
+      contactId: input.contactId,
+      channel: "correo",
+      toAddress: to,
+      subject,
+      body,
+      fromAddress: null,
+      messageId: newMessageId(productOf(client.product)),
+      adminOnly: !client.organizationId,
+      byKairos: true,
+      // Los correos de Kairós son sus avisos de la presentación: no responden nada.
+      purpose: "aviso",
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  await writeAdminAudit(tx, null, {
+    action: "kairos.mail_prepared",
+    organizationId: client.organizationId,
+    entityId: client.id,
+    metadata: { outreachId: row.id },
+  })
+  return outreachRowOf(row)
+}
+
+/** El resultado del correo de Kairós: `enviado` o `incierto` (nunca se reintenta). Lo ya resuelto no cambia. */
+export async function markKairosMailSent(
+  tx: Db,
+  id: string,
+  result: "enviado" | "incierto",
+  now = new Date(),
+): Promise<OutreachRow> {
+  if (!UUID.test(id)) throw notFound("Envío")
+  const [row] = await tx
+    .select()
+    .from(saasOutreach)
+    .where(eq(saasOutreach.id, id))
+    .for("update")
+    .limit(1)
+  if (row?.channel !== "correo" || !row.byKairos) throw notFound("Envío")
+  if (row.status !== "pendiente") return outreachRowOf(row)
+  const [updated] = await tx
+    .update(saasOutreach)
+    .set({ status: result, sentAt: result === "enviado" ? now : null, updatedAt: now })
+    .where(eq(saasOutreach.id, id))
+    .returning()
+  if (!updated) throw notFound("Envío")
+  if (result === "enviado") await outreachWentOut(tx, null, updated, row.adminOnly, now)
+  await writeAdminAudit(tx, null, {
+    action: result === "enviado" ? "kairos.mail_sent" : "kairos.mail_uncertain",
+    entityId: row.clientId,
     metadata: { outreachId: id },
   })
   return outreachRowOf(updated)

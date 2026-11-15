@@ -148,7 +148,8 @@ function AdminFrame({
       icon: BookOpen,
       badge: complaints || undefined,
     },
-    ...(admin ? [{ label: "Equipo", to: "/team", icon: ShieldCheck }] : []),
+    // Soporte también: ahí marca su horario para presentaciones, su sala y sus ausencias.
+    { label: "Equipo", to: "/team", icon: ShieldCheck },
   ]
   return (
     <AppShell

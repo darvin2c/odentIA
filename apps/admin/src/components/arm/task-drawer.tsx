@@ -28,6 +28,7 @@ import {
   TASK_WORDS,
   type TaskKind,
 } from "./sale-words"
+import { withClashChoice } from "./slot-clash"
 
 /**
  * «Nueva tarea» de la ficha del cliente, y «Cambiar fecha» de una que ya
@@ -226,13 +227,21 @@ function MoveTaskForm({
     validators: { onSubmit: moveSchema },
     onSubmit: async ({ value }) => {
       const dueAt = value.dueTime ? limaInstant(value.dueOn, value.dueTime) : null
-      await postJson(`/api/admin/clients/tasks/${encodeURIComponent(task.id)}/move`, {
-        dueOn: value.dueOn,
-        dueAt,
-      })
-      invalidate()
-      toast.success(`«${task.title}» pasa a ${dueWords(value.dueOn, dueAt)}`)
-      onClose()
+      const send = async (force: boolean) => {
+        await postJson(`/api/admin/clients/tasks/${encodeURIComponent(task.id)}/move`, {
+          dueOn: value.dueOn,
+          dueAt,
+          ...(force ? { force: true } : {}),
+        })
+        invalidate()
+        toast.success(`«${task.title}» pasa a ${dueWords(value.dueOn, dueAt)}`)
+        onClose()
+      }
+      await withClashChoice(
+        () => send(false),
+        "Mover igual",
+        () => send(true),
+      )
     },
   })
   const surface = useFormSurface(form, { fieldMap: { dueAt: "dueTime" } })

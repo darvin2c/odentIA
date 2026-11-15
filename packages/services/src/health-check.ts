@@ -58,8 +58,9 @@ export async function lastHealthKnownAt(tx: Db, orgId: string, patientId: string
 }
 
 /**
- * Si antes de esa cita se le pregunta «¿Cambió algo?»: la cita es suya, sigue en pie y es por
- * venir, su última declaración tiene más de un mes y la clínica pregunta algo de su salud. Nulo:
+ * Si antes de esa cita se le pregunta «¿Cambió algo?»: la cita es suya, sigue en pie y no terminó
+ * (por venir o en curso, como «Tu visita»), su última declaración tiene más de un mes y la clínica
+ * pregunta algo de su salud. Nulo:
  * no se le pregunta. Al responder (que sí o que no) su última declaración pasa a ser de hoy, así
  * que no se le vuelve a preguntar para esa cita.
  */
@@ -79,7 +80,7 @@ export async function healthCheckOf(
         eq(appointment.id, input.appointmentId),
         eq(appointment.patientId, input.patientId),
         inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.startsAt, now),
+        gt(appointment.endsAt, now),
       ),
     )
     .limit(1)

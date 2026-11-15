@@ -249,6 +249,8 @@ const doneBody = z.strictObject({
 const moveBody = z.strictObject({
   dueOn: day("el día"),
   dueAt: instant("la hora").nullable().optional(),
+  /** «Mover igual»: la persona ya vio que choca con otra presentación o una ausencia. */
+  force: z.boolean().optional(),
 })
 
 const decideBody = z.strictObject({
@@ -315,6 +317,8 @@ const presentationBody = z.strictObject({
   contactId: optionalId("la persona"),
   demoId: optionalId("la demo"),
   assigneeUserId: z.string().trim().min(1).max(120, "Elige a quién").nullable().optional(),
+  /** «Agendar igual»: la persona ya vio que choca con otra presentación o una ausencia. */
+  force: z.boolean().optional(),
 })
 
 const recordBody = z.strictObject({
@@ -531,6 +535,7 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
         moveClientTask(tx, actor, c.req.param("taskId"), {
           dueOn: body.dueOn,
           dueAt: at(body.dueAt),
+          force: body.force === true,
         }),
       )
     })

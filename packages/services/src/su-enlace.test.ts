@@ -26,6 +26,7 @@ import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
 import { expect, it, onTestFinished, vi } from "vitest"
 import { createRoom } from "./appointments.js"
+import { beforeVisitStatus } from "./before-visit.js"
 import { invalidateAppointmentTokens, setMessageChoice } from "./automation.js"
 import { listApprovedMessages } from "./clinic-messages.js"
 import {
@@ -2061,4 +2062,67 @@ it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () 
   expect(await told()).toEqual(["datos", "visita"])
   await ownerDb.update(appointment).set({ startsAt: minutes(-10), endsAt: minutes(20) }).where(eq(appointment.id, visit))
   expect(await told()).toEqual(["datos", "visita"])
+})
+
+// QA final de formularios (15 nov, H4): con la cita de hoy en curso y otra el lunes, su enlace y
+// recepción ya hablaban del lunes, y lo que contaba en la sala de espera se guardaba para el lunes.
+it("con una cita en curso y otra el lunes, «Antes de tu cita» es la de hoy hasta que termina, en su enlace y en recepción", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit: today, link } = await withVisit(f)
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000)
+  // La de hoy empezó hace dos minutos y termina en 43; la del lunes, por venir.
+  await ownerDb.update(appointment).set({ startsAt: minutes(-2), endsAt: minutes(43) }).where(eq(appointment.id, today))
+  const monday = await upcomingAppointment(f, marta.patientId)
+  const startsOf = async (id: string) =>
+    (await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, id)))[0]!.startsAt.toISOString()
+  const open = () => f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  const reception = () => f.run((tx) => beforeVisitStatus(tx, ORG, marta.patientId))
+
+  const waiting = await open()
+  // La que se cambia o se cancela sigue siendo la del lunes: la de hoy ya empezó.
+  expect(waiting.appointment?.startsAt).toBe(await startsOf(monday))
+  // «Antes de tu cita» es la de hoy, con su fecha y quién lo lee.
+  expect(waiting.beforeVisit).toMatchObject({ startsAt: await startsOf(today), professionalName: expect.any(String) })
+  expect(waiting.visit).not.toBeNull()
+  expect((await reception())?.appointmentId).toBe(today)
+
+  // Lo que cuenta en la sala de espera es de la cita de hoy, no del lunes.
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1960-03-04" }, visit: { reason: "Me duele una muela", pain: "si", painLevel: 7 } }),
+  )
+  const answers = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.patientId, marta.patientId))
+  expect(answers.map((row) => row.appointmentId)).toEqual([today])
+  expect((await open()).told?.items.map((item) => item.what)).toContain("visita")
+  expect(await reception()).toMatchObject({ appointmentId: today, answeredAt: expect.any(Date) })
+
+  // Al terminar la de hoy, «Antes de tu cita» pasa al lunes, y lo de hoy ya no se anuncia como recibido.
+  await ownerDb.update(appointment).set({ startsAt: minutes(-50), endsAt: minutes(-5) }).where(eq(appointment.id, today))
+  const after = await open()
+  expect(after.beforeVisit?.startsAt).toBe(await startsOf(monday))
+  expect(after.visit).not.toBeNull()
+  expect(after.told?.items.map((item) => item.what) ?? []).not.toContain("visita")
+  expect(await reception()).toMatchObject({ appointmentId: monday, answeredAt: null })
+})
+
+// La «última visita» cuenta al terminar, la misma para su enlace y recepción (H4): lo que contó de
+// su salud antes de que empezara la cita de hoy sigue siendo de ella mientras no termina.
+it("recepción cuenta lo que contó de su salud antes de la cita de hoy mientras esa cita no termina", async () => {
+  const f = await clinicalFixture()
+  const { marta, visit: today } = await withVisit(f)
+  const said = new Date(Date.now() - 30 * 60_000)
+  await f.run((tx) =>
+    recordHealthDeclaration(tx, ORG, marta.patientId, {
+      via: "enlace",
+      by: { kind: "patient", name: null, relation: null },
+      health: { allergies: { state: "none", items: [] } },
+      saidAt: said,
+    }),
+  )
+  await ownerDb
+    .update(appointment)
+    .set({ startsAt: new Date(Date.now() - 2 * 60_000), endsAt: new Date(Date.now() + 28 * 60_000) })
+    .where(eq(appointment.id, today))
+  const status = await f.run((tx) => beforeVisitStatus(tx, ORG, marta.patientId))
+  expect(status?.appointmentId).toBe(today)
+  expect(status?.answeredAt?.getTime()).toBe(said.getTime())
 })

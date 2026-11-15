@@ -128,7 +128,10 @@ export interface KairosChatModel {
   bindTools?(
     tools: unknown[],
     options?: Record<string, unknown>,
-  ): { invoke(messages: BaseMessage[]): Promise<AIMessage> }
+  ): {
+    /** `signal` corta la llamada (el tiempo del turno de Kairós que vende se acabó). */
+    invoke(messages: BaseMessage[], options?: { signal?: AbortSignal }): Promise<AIMessage>
+  }
 }
 
 export interface KairosWriterDeps {

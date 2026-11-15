@@ -31,7 +31,7 @@ import {
   voidEncounterProcedure,
 } from "./encounters.js"
 import { createFollowUp, listFollowUps, scheduleFollowUp } from "./follow-ups.js"
-import { getPatientSummary } from "./patient-history.js"
+import { getPatientSummary, getTimeline } from "./patient-history.js"
 import { listPlanItems } from "./plan.js"
 import { getProfessionalProfile, setProfessionalProfile } from "./professional-profiles.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -717,7 +717,11 @@ it("dos pestañas: guardar un texto que otra pestaña cambió avisa en vez de pi
 })
 
 /** Lo que la persona contó antes de esa cita, como lo guarda su enlace. */
-async function toldBefore(f: Awaited<ReturnType<typeof withAgenda>>, appointmentId: string, said: { reason?: string; pain?: string; painLevel?: number }) {
+async function toldBefore(
+  f: Awaited<ReturnType<typeof withAgenda>>,
+  appointmentId: string,
+  said: { reason?: string; pain?: string; painLevel?: number; more?: string },
+) {
   const [person] = await ownerDb.select({ personId: patient.personId }).from(patient).where(eq(patient.id, f.patient.id))
   await ownerDb.insert(appointmentVisitAnswer).values({
     organizationId: "org_a",
@@ -726,6 +730,7 @@ async function toldBefore(f: Awaited<ReturnType<typeof withAgenda>>, appointment
     reason: said.reason ?? null,
     pain: said.pain ?? null,
     painLevel: said.painLevel ?? null,
+    more: said.more ?? null,
     respondentContactId: person!.personId,
     submittedVia: "enlace",
   })
@@ -792,4 +797,69 @@ it("sin lo que contó antes de venir la atención se abre y se firma igual; un b
   await f.run((tx) => discardEmptyEncounter(tx, ...f.args, draft.id))
   const [kept] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, next.id))
   expect(kept).toMatchObject({ seenBy: f.actor, seenEncounterId: null, pain: "no" })
+})
+
+// QA final de formularios (15 nov, H2 y U2): Rosa contó para su cita del lunes y vino hoy sin cita;
+// «Hoy viene a…» decía «Escribe el motivo abajo» y la Historia no lo tenía.
+it("lo que contó para otra cita sale hoy como de esa cita, queda visto aquí y en la Historia, y el día de su cita no se repite", async () => {
+  const f = await withAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const monday = await f.book(16)
+  const said = "Me duele una muela de abajo a la derecha cuando como frío"
+  await toldBefore(f, monday.id, { reason: said, pain: "si", painLevel: 7, more: "Desde ayer tomo omeprazol" })
+  // Mientras nadie lo lee en una atención, la Historia lo tiene suelto, como la copia.
+  const loose = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  expect(loose.data.find((item) => item.type === "visit_answer")?.told).toMatchObject({ reason: said, appointmentId: monday.id })
+
+  // Vino hoy sin cita: lo que contó para el lunes llega, marcado como de esa cita, con lo de «Algo más».
+  const walkIn = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  const opened = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, walkIn.id, f.actor))
+  expect(opened.visitAnswer).toMatchObject({
+    reason: said,
+    painLevel: 7,
+    more: "Desde ayer tomo omeprazol",
+    appointmentId: monday.id,
+    otherAppointment: true,
+    seen: { by: "Clínico" },
+    seenEncounterId: walkIn.id,
+  })
+  // La Historia lo pone dentro de la atención en que se leyó, y ya no suelto.
+  const read = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  expect(read.data.some((item) => item.type === "visit_answer")).toBe(false)
+  expect(read.data.find((item) => item.id === walkIn.id)?.born?.told).toMatchObject({ reason: said })
+  expect((await f.run((tx) => patientVisitAnswers(tx, "org_a", f.patient.id))).map((item) => item.encounterId)).toEqual([walkIn.id])
+
+  // «Usar como motivo» y firmar: sigue en la atención firmada, como de la otra cita.
+  await f.run((tx) => updateEncounterDraft(tx, ...f.args, walkIn.id, { reason: visitReasonForEncounter(opened.visitAnswer!) }))
+  await f.ready(walkIn.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, walkIn.id))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, walkIn.id, f.actor))).visitAnswer).toMatchObject({
+    otherAppointment: true,
+    seenEncounterId: walkIn.id,
+  })
+  // El lunes, «Hoy viene a…» ya no lo repite como de hoy: se atendió el sábado.
+  const day = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: monday.id }))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, day.id, f.actor))).visitAnswer).toBeNull()
+})
+
+it("si la atención en que se leyó se anula, el día de su cita vuelve a salir; una atención de otro día no lo toma", async () => {
+  const f = await withAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const monday = await f.book(16)
+  await toldBefore(f, monday.id, { reason: "Un dolor de muela", pain: "si", painLevel: 5 })
+  const walkIn = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, walkIn.id, f.actor))).visitAnswer?.otherAppointment).toBe(true)
+  await f.run((tx) => voidEncounter(tx, ...f.args, walkIn.id, { reason: "Se abrió por error" }))
+  const day = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: monday.id }))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, day.id, f.actor))).visitAnswer).toMatchObject({
+    reason: "Un dolor de muela",
+    otherAppointment: false,
+  })
+  await f.run((tx) => voidEncounter(tx, ...f.args, day.id, { reason: "Prueba" }))
+  // Lo que se registra después, de otro día, no es la visita a la que venía.
+  const other = await f.book(18)
+  await toldBefore(f, other.id, { reason: "Una limpieza" })
+  const late = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  await ownerDb.update(encounter).set({ startedAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(encounter.id, late.id))
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, late.id, f.actor))).visitAnswer).toBeNull()
 })

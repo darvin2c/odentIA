@@ -10,7 +10,9 @@ import {
   issueFields,
   markChatNotClinic,
   openChatForContact,
+  pauseChatKairos,
   prepareChatReply,
+  resumeChatKairos,
   ServiceError,
   undoChatNotClinic,
 } from "@odentia/services"
@@ -153,6 +155,18 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
   app.delete("/:id/not-clinic", (c) =>
     adminRun(c, 200, (actor) =>
       owner((tx) => undoChatNotClinic(tx, actor, c.req.param("id"), clock())),
+    ),
+  )
+
+  /** «Lo atiendo yo» y «Devolver a Kairós»: cualquiera del equipo que ve la conversación. */
+  app.post("/:id/kairos-pause", (c) =>
+    staffRun(c, 200, (actor) =>
+      owner((tx) => pauseChatKairos(tx, actor, c.req.param("id"), clock())),
+    ),
+  )
+  app.delete("/:id/kairos-pause", (c) =>
+    staffRun(c, 200, (actor) =>
+      owner((tx) => resumeChatKairos(tx, actor, c.req.param("id"), clock())),
     ),
   )
 
