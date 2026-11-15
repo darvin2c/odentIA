@@ -408,12 +408,13 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
         <div className="hero-copy">
           <span className="tag tag-d rise">[ El ARM para clínicas dentales ]</span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
-            Ningún mensaje sin responder. <span>Ninguna cita olvidada.</span>
+            Más pacientes que vuelven. <span>Menos trabajo para tu equipo.</span>
           </h1>
           <p className="hh-lead rise d2">
-            <b>odentIA es un ARM: agentes de IA que trabajan por tu clínica.</b> Sofi responde por
-            WhatsApp, Instagram y correo a cualquier hora y agenda; Clío prepara la nota mientras
-            atiendes, y Argos recuerda cada cita y trae de vuelta a tus pacientes.{" "}
+            <b>odentIA es un ARM: agentes de IA que hacen el trabajo de tu clínica, no solo conversan.</b>{" "}
+            En la recepción, Sofi responde y agenda. En la consulta, Clío prepara la nota y el
+            presupuesto. En la administración, Argos retoma los presupuestos y trae de vuelta a quien
+            no volvió.{" "}
             <a className="hh-arm" href={ARM_PATH}>
               ¿Usas un CRM? Compáralo <span aria-hidden="true">→</span>
             </a>
