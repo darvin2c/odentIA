@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { answeredFor, healthAnswerWords, healthCheckQuestion, personalDataSentWords } from "./personal-data-form"
+import { healthCheckQuestion } from "../patient/registration-questionnaire"
+import { answeredFor, healthAnswerWords, personalDataSentWords } from "./personal-data-form"
 
 const adult = { firstName: "Marta", age: 66, respondentFirstName: null, missing: [] }
 const thiago = { firstName: "Thiago", age: 6, respondentFirstName: "Carla", missing: [] }
@@ -71,10 +72,10 @@ describe("lo que dice «Su enlace» al terminar", () => {
 // Mesa de formularios del 13 nov, entrega 10 (C6): la pregunta no lista lo que dijo antes (decisión 9).
 describe("¿Cambió algo?", () => {
   it("pregunta desde su última visita, con el día, y a quien cuida a un niño por el niño", () => {
-    expect(healthCheckQuestion(adult, "2026-11-13T19:27:00.000Z")).toBe(
+    expect(healthCheckQuestion(null, "2026-11-13T19:27:00.000Z")).toBe(
       "¿Cambió algo en tu salud o en tus medicinas desde tu última visita (13 nov)?",
     )
-    expect(healthCheckQuestion(thiago, "2026-11-13T19:27:00.000Z")).toBe(
+    expect(healthCheckQuestion("Thiago", "2026-11-13T19:27:00.000Z")).toBe(
       "¿Cambió algo en la salud o en las medicinas de Thiago desde su última visita (13 nov)?",
     )
   })

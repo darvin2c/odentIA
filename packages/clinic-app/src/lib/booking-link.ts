@@ -398,10 +398,13 @@ export interface PersonalDataForm {
   /** «Tu visita», el último paso de «Antes de tu cita»; nulo sin cita o ya respondida. */
   visit?: { purpose: string | null; questions: VisitQuestions } | null
   /**
-   * «¿Cambió algo en tu salud o en tus medicinas?», la primera pregunta (entrega 10): `since`, su
-   * última declaración; `questions`, lo que vuelve a responder si dice que sí. Nulo: no se pregunta.
+   * «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10), después de saber quién responde:
+   * `since`, lo último que se supo de su salud; `questions`, de dónde sale lo que vuelve a responder
+   * según lo que elija en «¿Qué cambió?». Nulo: no se pregunta.
    */
   healthCheck?: { since: string; questions: RegistrationFieldKey[] } | null
+  /** «¿Empezaste o dejaste alguna medicina?» en «Tu visita»: con un «Sí», estas preguntas. Vacío: no se pregunta. */
+  medicineQuestions?: RegistrationFieldKey[]
   /** «Corregir mi salud o mis medicinas»: solo su salud, entera. */
   correcting?: boolean
 }
@@ -432,6 +435,8 @@ export interface PersonalDataInput {
   visit?: VisitAnswerInput | null
   /** Su respuesta a «¿Cambió algo?»: con `cambio`, lo que volvió a responder va en `health`. */
   healthCheck?: "sin_cambios" | "cambio" | null
+  /** «¿Empezaste o dejaste alguna medicina?» con un «Sí»: lo de sus medicinas va en `health`. */
+  medicinesChanged?: boolean
   /** «Corregir mi salud o mis medicinas». */
   correctHealth?: boolean
 }

@@ -9,7 +9,7 @@ import { patient, patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { agentActionLog } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
 import { expect, it, vi } from "vitest"
 import { createRoom } from "./appointments.js"
@@ -157,6 +157,92 @@ it("dentro del mes no se le pregunta, y sin ninguna declaración tampoco: eso es
   const fresh = await f.run((tx) => createPatient(tx, ORG, f.actor, { displayName: "Ana Paz", givenNames: "Ana", familyName: "Paz", phone: "+51987000444" }))
   const visit = await upcoming(f, fresh.id, 4)
   expect(await f.run((tx) => healthCheckOf(tx, ORG, { patientId: fresh.id, appointmentId: visit }))).toBeNull()
+})
+
+// Revisión final del 15 nov (clínica H3, ux D3): a quien solo tiene lo que anotó el equipo nunca se le
+// preguntaba si cambió algo; ahora cuenta desde la última vez que el equipo guardó su salud.
+it("«¿Cambió algo?» llega también a quien nunca declaró y solo tiene lo que anotó el equipo hace más de un mes", async () => {
+  const f = await clinicalFixture()
+  const ana = await f.run((tx) => createPatient(tx, ORG, f.actor, { displayName: "Ana Paz", givenNames: "Ana", familyName: "Paz", phone: "+51987000666" }))
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, ana.id))
+  await f.run((tx) =>
+    savePatientHealth(tx, ORG, f.actor, ana.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "Losartán 50 mg" }],
+    }),
+  )
+  expect(await declarationsOf(ana.id)).toEqual([])
+  const visit = await upcoming(f, ana.id, 4)
+  // Dentro del mes, no.
+  expect(await f.run((tx) => healthCheckOf(tx, ORG, { patientId: ana.id, appointmentId: visit }))).toBeNull()
+  // Lo anotó el equipo hace dos meses: sí.
+  await ownerDb
+    .update(auditEvent)
+    .set({ createdAt: new Date(Date.now() - 60 * DAY) })
+    .where(and(eq(auditEvent.entityId, ana.id), eq(auditEvent.action, "health.saved")))
+  const check = await f.run((tx) => healthCheckOf(tx, ORG, { patientId: ana.id, appointmentId: visit }))
+  expect(check).not.toBeNull()
+  expect(check!.since.getTime()).toBeLessThan(Date.now() - 59 * DAY)
+})
+
+// Revisión final del 15 nov (clínica H3 y D1): Sofía empezó aspirina por su embarazo y no tenía cómo
+// decirlo antes de un mes; lo que escribía en «Algo más» no llegaba a sus antecedentes.
+it("dentro del mes, «¿Empezaste o dejaste alguna medicina?» con un «Sí» deja su medicina nueva por revisar", async () => {
+  const f = await clinicalFixture()
+  const marta = await martaBack(f, 10)
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, marta.link.token))
+  expect(form.healthCheck).toBeNull()
+  expect(form.visit).not.toBeNull()
+  expect(form.medicineQuestions).toEqual(expect.arrayContaining(["anticoagulants", "medications"]))
+  expect(JSON.stringify(form)).not.toContain("Warfarina")
+
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, marta.link.token, {
+      data: {},
+      visit: { reason: "Control" },
+      medicinesChanged: true,
+      health: { anticoagulants: { state: "recorded", detail: "Aspirina 100 mg" }, allergies: { state: "none", items: [] } },
+    }),
+  )
+  const [said] = await declarationsOf(marta.patientId)
+  // Solo sus medicinas: la alergia no se le preguntó aquí y no entra.
+  expect(said).toMatchObject({ reason: "cambio", via: "enlace", respondent: "patient" })
+  expect(said!.health).toEqual({ anticoagulants: { state: "recorded", detail: "Aspirina 100 mg" } })
+  const after = await f.run((tx) => getPatientHealth(tx, ORG, marta.patientId))
+  const aspirin = after.medications.find((row) => row.name === "Aspirina 100 mg")
+  expect(aspirin).toBeDefined()
+  expect(after.declared.some((group) => group.medications.includes(aspirin!.id))).toBe(true)
+})
+
+// Pendiente de la revisión de lo que dijo el paciente: «¿Cambió algo?» va después de «¿Eres Lucía o
+// respondes por ella?», y lo que diga la mamá queda de ella.
+it("sin fecha en la ficha, «No, sigue igual» de quien responde por ella queda a su nombre", async () => {
+  const f = await clinicalFixture()
+  const lucia = await martaBack(f)
+  await ownerDb.update(contact).set({ birthDate: null }).where(eq(contact.id, lucia.personId))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, lucia.link.token))
+  expect(form).toMatchObject({ asksWho: true })
+  expect(form.healthCheck).not.toBeNull()
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, lucia.link.token, {
+      data: {},
+      healthCheck: "sin_cambios",
+      respondent: "representative",
+      representative: { displayName: "Carmen Ríos", relationshipDetail: "Madre" },
+    }),
+  )
+  const [said] = await declarationsOf(lucia.patientId)
+  expect(said).toMatchObject({ reason: "sin_cambios", respondent: "representative", declarantName: "Carmen Ríos", declarantRelation: "madre" })
+})
+
+it("con «¿Cambió algo?» por responder, «Tu visita» no repite la pregunta de sus medicinas", async () => {
+  const f = await clinicalFixture()
+  const due = await martaBack(f)
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, due.link.token))
+  expect(form.healthCheck).not.toBeNull()
+  expect(form.medicineQuestions).toEqual([])
 })
 
 it("C6: le cambiaron el anticoagulante; con «Sí» vuelve a responder, lo nuevo llega por revisar y la warfarina queda «dijo que cambió»", async () => {
