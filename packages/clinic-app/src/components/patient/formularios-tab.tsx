@@ -850,11 +850,12 @@ function StaffResponseDetail({
 
   return (
     // Sin otra tarjeta dentro del panel: su título ya es el de la ficha; aquí, quién y en qué versión.
+    // Lo que recibe el foco deja sitio abajo para el pie pegado: no queda tapado por «Descartar borrador…».
     <article
       ref={articleRef}
       tabIndex={-1}
       aria-labelledby={`${ids}-title`}
-      className="flex flex-col gap-6 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex flex-col gap-6 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&_:is(input,textarea,button,[role=combobox],[role=radio])]:scroll-mb-20"
     >
       <p className="sr-only" aria-live="polite">
         {announcement}
@@ -888,18 +889,6 @@ function StaffResponseDetail({
                       ? "Guardado, menos lo marcado"
                       : "Guardado"}
             </span>
-          ) : null}
-          {/* Arriba, a la vista: un borrador que no sirve se descarta con su motivo, que queda en la traza. */}
-          {editable ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="min-h-11 sm:min-h-8"
-              onClick={() => setDiscardOpen(true)}
-            >
-              Descartar borrador…
-            </Button>
           ) : null}
         </span>
       </header>
@@ -996,7 +985,7 @@ function StaffResponseDetail({
                 <FieldLegend>
                   {twin ? <AnswerLabel field={{ ...twin, label: section.title }} /> : section.title}
                 </FieldLegend>
-                <div className="grid grid-cols-1 items-start gap-x-4 gap-y-6 @lg:grid-cols-6">
+                <div className="grid grid-cols-1 items-start gap-x-4 gap-y-6 @md:grid-cols-2">
           {shown.map((field) => {
               // Por la clave de la pregunta: una versión nueva de la ficha conserva las que no cambió.
               const before = previous ? previousField(previous, field.id) : null
@@ -1019,11 +1008,19 @@ function StaffResponseDetail({
                       className="min-h-11 sm:min-h-8"
                       onClick={() => {
                         setUnfolded((open) => new Set(open).add(field.id))
-                        requestAnimationFrame(() =>
-                          articleRef.current
-                            ?.querySelector<HTMLElement>(`[data-field="${CSS.escape(field.id)}"] textarea`)
-                            ?.focus(),
-                        )
+                        const focusOpened = () => {
+                          const opened = articleRef.current?.querySelector<HTMLElement>(
+                            `[data-field="${CSS.escape(field.id)}"] textarea`,
+                          )
+                          if (!opened || document.activeElement === opened) return
+                          opened.focus()
+                          // El foco solo lo asoma: el campo entero, a la vista.
+                          opened.scrollIntoView({ block: "nearest" })
+                        }
+                        requestAnimationFrame(focusOpened)
+                        // En el cajón del teléfono, el botón que desaparece devuelve el foco al cajón
+                        // después del primer intento: se pone otra vez en el campo.
+                        setTimeout(focusOpened, 100)
                       }}
                     >
                       + {field.label}
@@ -1187,13 +1184,26 @@ function StaffResponseDetail({
           ) : null}
         </p>
       ) : null}
-      {/* En una atención en curso, la ficha se cierra con la firma: sin otro cierre (revisión final del 15 nov);
-          lo dice la descripción del panel. Suelta o después de firmar, «Finalizar…». */}
-      {editable && !inAttention ? (
-        <div className="flex justify-end border-t pt-4">
-          <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
-            Finalizar…
+      {/* El pie de la ficha: pegado abajo del panel, siempre a la vista, y después de las preguntas al
+          recorrerla con el teclado (arriba era la primera parada). En una atención en curso la ficha se
+          cierra con la firma, sin otro cierre (revisión final del 15 nov): lo dice la descripción del
+          panel. Suelta o después de firmar, «Finalizar…». */}
+      {editable ? (
+        <div className="sticky bottom-0 z-10 -mx-6 -mb-4 flex flex-wrap items-center justify-between gap-2 border-t bg-card px-6 py-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="min-h-11 sm:min-h-8"
+            onClick={() => setDiscardOpen(true)}
+          >
+            Descartar borrador…
           </Button>
+          {inAttention ? null : (
+            <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
+              Finalizar…
+            </Button>
+          )}
         </div>
       ) : null}
       {response.status === "finalizado" ? (

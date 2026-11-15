@@ -1391,7 +1391,7 @@ function OpenedDocument({
       )
     case "formulario":
       return (
-        <DetailDrawer open size="xl" title={opened.response.templateTitle ?? "Ficha"} onClose={onClose}>
+        <DetailDrawer open size="lg" title={opened.response.templateTitle ?? "Ficha"} onClose={onClose}>
           <ResponseDetail
             key={opened.response.id}
             response={

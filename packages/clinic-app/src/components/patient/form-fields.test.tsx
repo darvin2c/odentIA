@@ -88,12 +88,12 @@ describe("la ficha ordenada como los demás formularios", () => {
     expect(markup.match(/data-slot="field"[^>]*data-orientation="horizontal"/g)).toHaveLength(2)
     expect(markup).toMatch(/<label[^>]*for="[^"]+-1"[^>]*>Anterior<\/label>/)
   })
-  it("lo corto va de a pares, un número corto en un tercio y lo largo a todo el ancho", () => {
-    expect(answerSpan({ id: "a", label: "Clase molar derecha (Angle)", type: "opcion_unica" })).toBe("@lg:col-span-3")
-    expect(answerSpan({ id: "b", label: "Overjet", type: "numero", unit: "mm" })).toBe("@lg:col-span-2")
-    expect(answerSpan({ id: "c", label: "Desviación de la línea media superior", type: "numero", unit: "mm" })).toBe("@lg:col-span-3")
-    expect(answerSpan({ id: "d", label: "Hábitos", type: "opcion_multiple" })).toBe("@lg:col-span-6")
-    expect(answerSpan({ id: "e", label: "Observaciones", type: "texto_largo" })).toBe("@lg:col-span-6")
+  it("lo corto va de a pares (también los números) y lo largo a todo el ancho", () => {
+    expect(answerSpan({ id: "a", label: "Clase molar derecha (Angle)", type: "opcion_unica" })).toBe("")
+    expect(answerSpan({ id: "b", label: "Overjet", type: "numero", unit: "mm" })).toBe("")
+    expect(answerSpan({ id: "c", label: "Desviación de la línea media superior", type: "numero", unit: "mm" })).toBe("")
+    expect(answerSpan({ id: "d", label: "Hábitos", type: "opcion_multiple" })).toBe("@md:col-span-2")
+    expect(answerSpan({ id: "e", label: "Observaciones", type: "texto_largo" })).toBe("@md:col-span-2")
   })
   it("el título de la sección y la pregunta se reconocen iguales sin contar mayúsculas ni tildes", () => {
     expect(sameWords("Hábitos", "habitos ")).toBe(true)

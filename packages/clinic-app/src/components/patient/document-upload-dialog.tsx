@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import {
+  addSubmitErrors,
   type ApiErrorShape,
   common,
   DatePickerButton,
@@ -489,6 +490,7 @@ export function DocumentUploadDialog({
       // Otro tipo de archivo: el tipo de imagen elegido deja de valer si no es de esa categoría.
       if (name === "category" && row.imageType && !imageTypesFor(value).includes(row.imageType))
         form.setFieldValue(`rows[${index}].imageType`, "")
+      if (name === "category") askImageTypeNow(form as unknown as AnyFormApi, index, value)
     })
   }
 
@@ -850,6 +852,20 @@ export function DocumentUploadDialog({
   )
 }
 
+/**
+ * Lo que falta se pide de una vez: si ya se intentó subir y se elige una categoría que lleva tipo
+ * de imagen (foto, radiografía), el tipo aparece ya marcado como lo que falta, en vez de enterarse
+ * en otro envío. El aviso se va al elegirlo, como los demás.
+ */
+function askImageTypeNow(form: AnyFormApi, index: number, category: string) {
+  if (form.state.submissionAttempts === 0 || imageTypesFor(category).length === 0) return
+  // El campo aparece en el render siguiente: el aviso se pone cuando ya está.
+  requestAnimationFrame(() => {
+    if (form.getFieldValue(`rows[${index}].imageType`)) return
+    addSubmitErrors(form, { [`rows[${index}].imageType`]: "Elige el tipo de imagen." })
+  })
+}
+
 /** El motivo que comparten dos o más filas que fallaron, para decirlo una sola vez; si difieren, ninguno. */
 export function sharedRowError(errors: ReadonlyArray<string | null>): string | null {
   const failed = errors.filter((error): error is string => Boolean(error))
@@ -1014,6 +1030,7 @@ const QueuedRow = withForm({
                     const current = form.getFieldValue(`${at}.imageType`)
                     if (current && !imageTypesFor(value).includes(current))
                       form.setFieldValue(`${at}.imageType`, "")
+                    askImageTypeNow(form as unknown as AnyFormApi, index, value)
                   },
                 }}
               >

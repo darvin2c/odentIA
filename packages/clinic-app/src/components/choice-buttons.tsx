@@ -159,6 +159,7 @@ function itemClass(columns: boolean, tone: "neutral" | "primary"): string {
     tone === "primary"
       ? // El relleno del botón principal, no `bg-primary`: con un color de clínica claro, la letra va oscura.
         "aria-pressed:bg-primary-fill aria-pressed:text-primary-fill-foreground aria-pressed:hover:bg-primary-fill-hover"
-      : "aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:hover:bg-background",
+      : // Lo elegido se ve a 3:1 (WCAG 1.4.11): con el borde de los campos y en negrita, no solo un blanco sobre gris.
+        "aria-pressed:bg-background aria-pressed:font-semibold aria-pressed:text-foreground aria-pressed:ring-1 aria-pressed:ring-input-border aria-pressed:hover:bg-background",
   )
 }

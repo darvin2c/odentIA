@@ -101,25 +101,23 @@ const ANSWER_CHOICES = "max-sm:[&_label]:min-h-11 max-sm:[&_label]:min-w-11 poin
 const CHECK_ROW = "max-sm:min-h-11 pointer-coarse:min-h-11"
 
 /**
- * Cuánto ocupa una respuesta en la grilla de la ficha: seis columnas desde un
- * panel de 32rem, una sola en el teléfono. Lo corto que va de a pares (la clase
- * derecha con la izquierda, la línea media con su desviación) ocupa la mitad;
- * un número de nombre corto, un tercio (los tres del ceod en una fila); las
- * casillas, la escala, el texto largo, la pieza y la firma, todo el ancho.
- * Van literales porque Tailwind lee texto.
+ * Cuánto ocupa una respuesta en la grilla de la ficha: dos columnas desde 28rem (el panel de
+ * 512 px), una sola en el teléfono o con el panel al mínimo. Lo corto va de a pares (la clase
+ * derecha con la izquierda, la línea media con su desviación, overjet con overbite); las
+ * casillas, la escala, el texto largo, la pieza y la firma, a todo el ancho. Va literal porque
+ * Tailwind lee texto.
  */
 export function answerSpan(field: FormFieldDef): string {
   switch (field.type) {
     case "numero":
-      return `${field.label}${field.unit ? ` (${field.unit})` : ""}`.length <= 28 ? "@lg:col-span-2" : "@lg:col-span-3"
     case "opcion_unica":
     case "texto":
     case "fecha":
     case "adjunto":
     case "booleano":
-      return "@lg:col-span-3"
+      return ""
     default:
-      return "@lg:col-span-6"
+      return "@md:col-span-2"
   }
 }
 

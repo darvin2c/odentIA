@@ -158,7 +158,15 @@ export function FormOffersBox({
           },
         },
       })
-      requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>("h2")?.focus())
+      // El foco, en el «Empezar la de hoy» de la misma fila: es el deshacer que está a mano (el aviso
+      // dura 10 s y con el teclado quedaba lejos). Si la fila ya no está, en el título.
+      requestAnimationFrame(() => {
+        const section = sectionRef.current
+        ;(
+          section?.querySelector<HTMLElement>(`[data-offer="${CSS.escape(offer.templateId)}"]`) ??
+          section?.querySelector<HTMLElement>("h2")
+        )?.focus()
+      })
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })

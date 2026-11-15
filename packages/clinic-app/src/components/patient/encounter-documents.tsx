@@ -1059,8 +1059,9 @@ export function FormDetail({
       open={responseId !== null && response !== null}
       title={response?.templateTitle ?? "Ficha"}
       description={formDetailDescription(response, canWrite)}
-      // Ancha: lo corto de la ficha va de a pares (la clase derecha con la izquierda).
-      size="xl"
+      // 512 px: lo corto de la ficha va de a pares y la atención de al lado conserva el odontograma
+      // entero a 1440 (con 640 bajaba a una arcada a la vez). Quien la quiera más ancha, la estira.
+      size="lg"
       onClose={onClose}
       {...(dock === undefined ? {} : { dock })}
     >

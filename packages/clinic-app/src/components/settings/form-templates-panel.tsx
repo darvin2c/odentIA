@@ -751,8 +751,11 @@ function TemplateBuilder({
       }
       description="Se guarda como borrador. Para usarla en la atención, publícala desde la lista."
       submitDisabled={!canAdmin}
-      // Formulario largo, con preguntas de dos columnas: el cajón ancho, como Antecedentes.
+      // Formulario largo, con preguntas de dos columnas: el cajón ancho, como Antecedentes. Encima de la
+      // página y no al lado: con el submenú de Configuración, al lado dejaba la lista en 167 px y el
+      // título cortado («Fich…»).
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(40rem,calc(100vw-2rem))]"
+      dock={false}
     >
       <div className="flex flex-col gap-5">
         {isNewVersion && initial ? (
