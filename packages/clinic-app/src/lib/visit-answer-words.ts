@@ -30,6 +30,13 @@ export function visitForAppointmentWords(answer: Pick<VisitAnswerView, "appointm
   return `Para su cita del ${weekDay(answer.appointmentStartsAt)}`
 }
 
+/** El título de lo que contó en la atención firmada y en la Historia: si fue para otra cita suya, cuál. */
+export function visitToldLabel(answer: Pick<VisitAnswerView, "appointmentStartsAt"> & { otherAppointment?: boolean }): string {
+  return answer.otherAppointment
+    ? `Lo que contó antes de venir · para su cita del ${weekDay(answer.appointmentStartsAt)}`
+    : "Lo que contó antes de venir"
+}
+
 /** «3:02 p. m.», en la zona de la clínica. */
 function timeOf(iso: string): string {
   return new Date(iso).toLocaleTimeString(activeOrgLocale(), { hour: "numeric", minute: "2-digit", timeZone: activeOrgTimeZone() })

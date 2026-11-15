@@ -10,10 +10,9 @@
 import { healthCheckDue, type RegistrationFieldKey } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
-import { patientHealthDeclaration } from "@odentia/db/schema/clinical"
-import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, gt, inArray, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { patientAllHealthQuestions } from "./patient-registration.js"
+import { unfinishedAppointmentOf } from "./visit-answers.js"
 
 export interface HealthCheck {
   /** Cuándo fue su última declaración: «desde tu última visita (13 nov)». */
@@ -22,39 +21,21 @@ export interface HealthCheck {
   questions: RegistrationFieldKey[]
 }
 
-/** Cuándo dijo por última vez algo de su salud (también que nada cambió); nulo si nunca. */
-export async function lastHealthSaidAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
-  const [row] = await tx
-    .select({ at: sql<Date | null>`max(${patientHealthDeclaration.saidAt})`.mapWith(patientHealthDeclaration.saidAt) })
-    .from(patientHealthDeclaration)
-    .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
-  return row?.at ?? null
-}
-
-/** Lo que hace el equipo con su salud: guardar sus antecedentes, revisarlos con ella o negar algo en la atención. */
-const STAFF_HEALTH_ACTIONS = ["health.saved", "health.reviewed", "health.denied"]
-
 /**
  * Lo último que se supo de su salud: cuándo lo dijo (también que nada cambió) o cuándo el equipo
- * guardó o revisó sus antecedentes (revisión final del 15 nov, D3). Así «¿Cambió algo?» llega también
- * a quien nunca declaró y solo tiene lo que anotó el equipo. Nulo si nadie supo nada todavía: entonces
- * se le pregunta lo que falta, dato por dato.
+ * guardó o revisó sus antecedentes, o negó algo en la atención (revisión final del 15 nov, D3). Así
+ * «¿Cambió algo?» llega también a quien nunca declaró y solo tiene lo que anotó el equipo. Nulo si
+ * nadie supo nada todavía: entonces se le pregunta lo que falta, dato por dato.
  */
 export async function lastHealthKnownAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
-  const said = await lastHealthSaidAt(tx, orgId, patientId)
-  const [staff] = await tx
-    .select({ at: sql<Date | null>`max(${auditEvent.createdAt})`.mapWith(auditEvent.createdAt) })
-    .from(auditEvent)
-    .where(
-      and(
-        eq(auditEvent.organizationId, orgId),
-        eq(auditEvent.entity, "patient"),
-        eq(auditEvent.entityId, patientId),
-        inArray(auditEvent.action, STAFF_HEALTH_ACTIONS),
-      ),
-    )
-  const known = [said, staff?.at ?? null].filter((at): at is Date => at !== null)
-  return known.length > 0 ? new Date(Math.max(...known.map((at) => at.getTime()))) : null
+  const [row] = await tx.execute<{ at: Date | string | null }>(sql`
+    select greatest(
+      (select max(said_at) from patient_health_declaration where organization_id = ${orgId} and patient_id = ${patientId}),
+      (select max(created_at) from audit_event
+        where organization_id = ${orgId} and entity = 'patient' and entity_id = ${patientId}
+          and action in ('health.saved', 'health.reviewed', 'health.denied'))
+    ) as at`)
+  return row?.at ? new Date(row.at) : null
 }
 
 /**
@@ -74,15 +55,7 @@ export async function healthCheckOf(
   const [row] = await tx
     .select({ id: appointment.id })
     .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.id, input.appointmentId),
-        eq(appointment.patientId, input.patientId),
-        inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.endsAt, now),
-      ),
-    )
+    .where(and(eq(appointment.id, input.appointmentId), unfinishedAppointmentOf(orgId, input.patientId, now)))
     .limit(1)
   if (!row) return null
   const since = await lastHealthKnownAt(tx, orgId, input.patientId)

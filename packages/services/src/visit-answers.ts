@@ -97,6 +97,19 @@ async function answerOf(tx: Db, orgId: string, appointmentId: string) {
 }
 
 /**
+ * Una cita suya que sigue en pie y no terminó: por venir o en curso (ya empezó y no terminó). La regla
+ * de «Antes de tu cita», de «Tu visita» y de «¿Cambió algo?».
+ */
+export function unfinishedAppointmentOf(orgId: string, patientId: string, now: Date) {
+  return and(
+    eq(appointment.organizationId, orgId),
+    eq(appointment.patientId, patientId),
+    inArray(appointment.status, ["programada", "confirmada"]),
+    gt(appointment.endsAt, now),
+  )
+}
+
+/**
  * La cita de «Antes de tu cita» (QA final de formularios, 15 nov, H4): la que está en curso (suya,
  * en pie, ya empezó y no terminó) hasta que termina y, si no hay, la próxima en pie. Una sola regla
  * para su enlace, recepción y su portal: lo que cuenta en la sala de espera es de la cita a la que
@@ -112,15 +125,8 @@ export async function beforeVisitAppointmentOf(
   const [row] = await tx
     .select({ id: appointment.id, startsAt: appointment.startsAt, endsAt: appointment.endsAt })
     .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        inArray(appointment.status, ["programada", "confirmada"]),
-        // La que no terminó: la que está en curso empezó antes que cualquiera por venir.
-        gt(appointment.endsAt, now),
-      ),
-    )
+    .where(unfinishedAppointmentOf(orgId, patientId, now))
+    // La que está en curso empezó antes que cualquiera por venir.
     .orderBy(asc(appointment.startsAt), asc(appointment.id))
     .limit(1)
   return row ?? null
@@ -158,20 +164,13 @@ export async function visitAskOf(
   tx: Db,
   orgId: string,
   input: { patientId: string; appointmentId: string | null },
+  now: Date = new Date(),
 ): Promise<VisitAsk | null> {
   if (!input.appointmentId) return null
   const [row] = await tx
     .select({ id: appointment.id, startsAt: appointment.startsAt })
     .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.id, input.appointmentId),
-        eq(appointment.patientId, input.patientId),
-        inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.endsAt, new Date()),
-      ),
-    )
+    .where(and(eq(appointment.id, input.appointmentId), unfinishedAppointmentOf(orgId, input.patientId, now)))
     .limit(1)
   if (!row) return null
   if (await answerOf(tx, orgId, row.id)) return null

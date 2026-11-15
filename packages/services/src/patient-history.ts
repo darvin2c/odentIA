@@ -792,6 +792,8 @@ async function loadBornForEncounters(
   patientId: string,
   /** Las atenciones ya leídas: de ellas sale lo que se guardó al firmar, sin leerlas otra vez. */
   encounters: ReadonlyArray<Pick<typeof encounter.$inferSelect, "id" | "healthAtSigning" | "appointmentId">>,
+  /** Lo que contó antes de sus citas, leído una vez por quien llama. */
+  visitAnswers: () => ReturnType<typeof patientVisitAnswers> = () => patientVisitAnswers(tx, orgId, patientId),
 ): Promise<Map<string, EncounterBorn>> {
   const out = new Map<string, EncounterBorn>()
   const encounterIds = encounters.map((row) => row.id)
@@ -1031,7 +1033,7 @@ async function loadBornForEncounters(
   // Lo que contó antes de venir, en la atención en que se leyó (la de su cita o, si vino antes, la
   // de ese día). Una por atención: la que se vio en ella va antes que la de su cita.
   const appointmentOf = new Map(encounters.map((row) => [row.id, row.appointmentId] as const))
-  for (const told of await patientVisitAnswers(tx, orgId, patientId)) {
+  for (const told of await visitAnswers()) {
     if (!told.encounterId || !encounterIds.includes(told.encounterId)) continue
     const born = of(told.encounterId)
     if (born.told && born.told.seenEncounterId === told.encounterId) continue
@@ -1074,6 +1076,9 @@ export async function getTimeline(
     order?: "desc" | "asc"
   } = {},
 ): Promise<{ data: TimelineItem[]; nextCursor: string | null; timezone: string; locale: string }> {
+  // Lo que contó antes de sus citas se lee una vez: lo usan sus atenciones y lo que quedó suelto.
+  let visitAnswers: ReturnType<typeof patientVisitAnswers> | null = null
+  const toldOnce = () => (visitAnswers ??= patientVisitAnswers(tx, orgId, patientId))
   await requirePatient(tx, orgId, patientId)
   const [profile] = await tx
     .select({ timezone: orgProfile.timezone, locale: orgProfile.locale })
@@ -1265,7 +1270,7 @@ export async function getTimeline(
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
       hooks.encounterParts(tx, orgId, encounters),
-      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, records) : Promise.resolve(new Map<string, EncounterBorn>()),
+      types.includes("encounter") ? loadBornForEncounters(tx, orgId, patientId, records, toldOnce) : Promise.resolve(new Map<string, EncounterBorn>()),
       diagnosisTitlesOf(tx, [
         ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
         ...notes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
@@ -1391,7 +1396,7 @@ export async function getTimeline(
     }
   const toldIds = ids("visit_answer")
   if (toldIds.length)
-    for (const told of (await patientVisitAnswers(tx, orgId, patientId)).filter((row) => toldIds.includes(row.id))) {
+    for (const told of (await toldOnce()).filter((row) => toldIds.includes(row.id))) {
       hydrated.set(told.id, {
         id: told.id,
         refId: told.id,

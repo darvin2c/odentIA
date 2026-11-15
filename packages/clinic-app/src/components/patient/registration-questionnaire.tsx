@@ -116,7 +116,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { productUi } from "../../product/product-ui"
 import { AddressStreetField } from "../address/address-street-field"
-import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
+import { ChoiceButtons as BaseChoiceButtons, MultiChoiceButtons as BaseMultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
 import { placeErrors } from "./form-errors"
@@ -134,6 +134,18 @@ import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
  * «Nombres» y «Apellidos» son dos campos (ADR 0058).
  */
 /** `""`: aún no respondió «¿Eres Lucía o respondes por ella?» en su enlace. */
+/**
+ * Lo que responde el paciente se ve elegido con el color de la clínica (Y1): con el tono neutro, lo
+ * elegido quedaba a 1,1:1 del fondo (WCAG 1.4.11 pide 3:1). Todas las opciones del registro y de su
+ * enlace pasan por aquí.
+ */
+function ChoiceButtons<T extends string>(props: Omit<Parameters<typeof BaseChoiceButtons<T>>[0], "tone">) {
+  return <BaseChoiceButtons {...props} tone="primary" />
+}
+function MultiChoiceButtons<T extends string>(props: Omit<Parameters<typeof BaseMultiChoiceButtons<T>>[0], "tone">) {
+  return <BaseMultiChoiceButtons {...props} tone="primary" />
+}
+
 type Respondent = "" | "patient" | "representative"
 type Declared = "" | "none" | "recorded" | "unknown"
 type Relation = "" | "madre" | "padre" | "tutor" | "family" | "other"
@@ -823,7 +835,7 @@ function BoneChoice({
       <span id={id} className="text-sm">
         {label} <span className="text-muted-foreground">(opcional)</span>
       </span>
-      <ChoiceButtons tone="primary" aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
+      <ChoiceButtons aria-labelledby={id} value={value || null} options={options} onChange={onChange} columns={3} />
     </div>
   )
 }
@@ -1825,7 +1837,7 @@ export function RegistrationQuestionnaire({
           {asked("sex") ? (
             <Labeled name="sex" group label="Sexo" optional={!required("sex")}>
               {(control) => (
-              <ChoiceButtons tone="primary"
+              <ChoiceButtons
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -1926,7 +1938,7 @@ export function RegistrationQuestionnaire({
           </Labeled>
           <Labeled name="repRelation" group label={`¿Qué eres de ${name}?`}>
             {(control) => (
-              <ChoiceButtons tone="primary"
+              <ChoiceButtons
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -2323,7 +2335,7 @@ export function RegistrationQuestionnaire({
         >
           <Labeled name="insurance" group label="¿Cuál?" optional={!required("insuranceType")}>
             {(control) => (
-              <ChoiceButtons tone="primary"
+              <ChoiceButtons
                 id={control.id}
                 aria-label="Seguro de salud"
                 aria-describedby={control.describedBy}
@@ -2489,7 +2501,7 @@ export function RegistrationQuestionnaire({
               onState={(value) => set({ conditions: value })}
               onText={(value) => set({ conditionsText: value })}
               before={
-                <MultiChoiceButtons tone="primary"
+                <MultiChoiceButtons
                   label="Enfermedades"
                   value={draft.conditionsPicked}
                   options={child ? CHILD_CONDITION_OPTIONS : CONDITION_OPTIONS}
@@ -2511,7 +2523,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.corazon")}
               >
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2534,7 +2546,7 @@ export function RegistrationQuestionnaire({
                 optional
               >
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2563,7 +2575,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.problemaAnestesia")}
               >
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2579,7 +2591,7 @@ export function RegistrationQuestionnaire({
               {draft.anesthesia === "si" ? (
                 <Labeled name="anesthesiaWhat" group label="¿Qué pasó?" optional>
                   {(control) => (
-                    <ChoiceButtons tone="primary"
+                    <ChoiceButtons
                       id={control.id}
                       aria-labelledby={control.labelId}
                       aria-describedby={control.describedBy}
@@ -2606,7 +2618,7 @@ export function RegistrationQuestionnaire({
                 optional={!required("dental.problemaAnestesia")}
               >
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -2677,7 +2689,7 @@ export function RegistrationQuestionnaire({
             >
               {(control) => (
               <>
-              <ChoiceButtons tone="primary"
+              <ChoiceButtons
                 id={control.id}
                 aria-labelledby={control.labelId}
                 aria-describedby={control.describedBy}
@@ -2715,7 +2727,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2773,7 +2785,7 @@ export function RegistrationQuestionnaire({
           {tobaccoAsked ? (
             <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2790,7 +2802,7 @@ export function RegistrationQuestionnaire({
           {tobaccoAsked && draft.tobacco === "fuma" ? (
             <Labeled name="cigarettes" group label="¿Cuántos cigarrillos al día?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2812,7 +2824,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2840,7 +2852,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.biberon") ? (
             <Labeled name="bottle" group label={first ? `¿${first} toma biberón o pecho para dormir?` : "¿Toma biberón o pecho para dormir?"} optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2857,7 +2869,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.chupon") ? (
             <Labeled name="pacifier" group label="¿Usa chupón o se chupa el dedo?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2879,7 +2891,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2896,7 +2908,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.pastaConFluor") ? (
             <Labeled name="fluoride" group label="¿Su pasta de dientes tiene flúor?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2913,7 +2925,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.quienCepilla") ? (
             <Labeled name="brusher" group label="¿Quién le cepilla los dientes?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2966,7 +2978,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.experienciaPrevia") ? (
             <Labeled name="dentalExperience" group label="¿Cómo le fue esa vez?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -2988,7 +3000,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3005,7 +3017,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.cepilladosAlDia") ? (
             <Labeled name="brushing" group label="¿Cuántas veces al día se cepilla los dientes?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3022,7 +3034,7 @@ export function RegistrationQuestionnaire({
           {asked("dental.hiloDental") ? (
             <Labeled name="floss" group label="¿Usa hilo dental?" optional>
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3044,7 +3056,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3067,7 +3079,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {() => (
-                <MultiChoiceButtons tone="primary"
+                <MultiChoiceButtons
                   label="Hábitos"
                   value={draft.habits}
                   options={HABITS}
@@ -3227,7 +3239,7 @@ export function RegistrationQuestionnaire({
             {visitAsks.pain ? (
               <Labeled name="visitPain" group label={you("¿Te duele ahora?", `¿A ${name} le duele ahora?`)} optional>
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3245,7 +3257,7 @@ export function RegistrationQuestionnaire({
             {visitAsks.pain && draft.visitPain === "si" ? (
               <Labeled name="visitPainLevel" group label="¿Cuánto? 0 es sin dolor, 10 el peor." optional>
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3287,7 +3299,6 @@ export function RegistrationQuestionnaire({
               >
                 {(control) => (
                   <ChoiceButtons
-                    tone="primary"
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3331,7 +3342,7 @@ export function RegistrationQuestionnaire({
                 hint={`Descuentos y campañas${fill.clinicName ? ` de ${fill.clinicName}` : ""}. Puedes darte de baja cuando quieras.`}
               >
                 {(control) => (
-                  <ChoiceButtons tone="primary"
+                  <ChoiceButtons
                     id={control.id}
                     aria-labelledby={control.labelId}
                     aria-describedby={control.describedBy}
@@ -3399,7 +3410,7 @@ export function RegistrationQuestionnaire({
               optional
             >
               {(control) => (
-                <ChoiceButtons tone="primary"
+                <ChoiceButtons
                   id={control.id}
                   aria-labelledby={control.labelId}
                   aria-describedby={control.describedBy}
@@ -3476,8 +3487,11 @@ function HealthCheckStep({
     showFound(form, found)
   }
   const options = offered.map((topic) => ({ value: topic, label: CHANGE_TOPIC_WORDS[topic][other ? "other" : "own"] }))
+  // Si «No, sigue igual» envió desde aquí y el servidor no lo recibió, se dice aquí, como en las demás pantallas.
+  const submitError = useFormSubmitError(form)
+  const loose = finish && fillContext?.at === "change" ? submitError : null
   return (
-    <QuestionnaireItem name="change" required>
+    <QuestionnaireItem name="change" required invalid={loose !== null}>
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
       <QuestionnaireDescription>
         {answer === "cambio"
@@ -3488,7 +3502,6 @@ function HealthCheckStep({
         <Labeled name="changeTopics" group label="¿Qué cambió?" hint="Puedes elegir más de uno.">
           {() => (
             <MultiChoiceButtons
-              tone="primary"
               label="¿Qué cambió?"
               value={topics}
               options={options}
@@ -3498,6 +3511,11 @@ function HealthCheckStep({
         </Labeled>
       ) : null}
       <Carry />
+      {loose ? (
+        <p role="alert" className="text-sm text-destructive">
+          {loose}
+        </p>
+      ) : null}
       <QuestionnaireActions>
         <QuestionnairePrevious data-enter-skip="">Anterior</QuestionnairePrevious>
         {answer === "cambio" ? (
@@ -3792,7 +3810,7 @@ function Pick({
 }) {
   if (options.length <= 4 && options.every((option) => option.label.length <= 20))
     return (
-      <ChoiceButtons tone="primary"
+      <ChoiceButtons
         id={control.id}
         aria-label={label}
         aria-describedby={control.describedBy}
@@ -3870,7 +3888,7 @@ function DeclaredField({
     <Labeled name={name} group label={label} hint={hint} optional={optional}>
       {(control) => (
         <>
-          <ChoiceButtons tone="primary"
+          <ChoiceButtons
             id={control.id}
             aria-labelledby={control.labelId}
             aria-describedby={control.describedBy}
@@ -3928,7 +3946,7 @@ function YesNoField({
     <Labeled name={name} group label={label} optional>
       {(control) => (
         <>
-          <ChoiceButtons tone="primary"
+          <ChoiceButtons
             id={control.id}
             aria-labelledby={control.labelId}
             aria-describedby={control.describedBy}

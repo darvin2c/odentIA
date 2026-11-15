@@ -284,6 +284,11 @@ export function nothingLeftToWrite(view: PersonalLinkView): boolean {
   return view.status !== "abierto" || (!view.data && !view.visit && !view.healthCheck && !view.correctHealth)
 }
 
+/** «Tu cita», si sigue en pie: la cancelada se ve, pero no cuenta para lo demás. */
+function liveAppointmentOf(view: PersonalLinkView): PersonalLinkView["appointment"] {
+  return view.appointment && !view.appointment.cancelled ? view.appointment : null
+}
+
 /**
  * La cita de «Antes de tu cita» (QA final de formularios, 15 nov, H4): la que dice el servidor (la
  * que está en curso hasta que termina o, si no, la próxima en pie), que puede no ser la que se
@@ -291,7 +296,7 @@ export function nothingLeftToWrite(view: PersonalLinkView): boolean {
  */
 export function beforeVisitWhen(view: PersonalLinkView): (PersonalLinkWhen & { professionalName: string | null }) | null {
   if (view.beforeVisit) return view.beforeVisit
-  const appointment = view.appointment && !view.appointment.cancelled ? view.appointment : null
+  const appointment = liveAppointmentOf(view)
   return appointment ? { startsAt: appointment.startsAt, timeZone: appointment.timeZone, professionalName: appointment.professionalName } : null
 }
 
@@ -337,7 +342,7 @@ export function beforeVisitCard(view: PersonalLinkView, clinician: string): Pend
   const what = parts.length === 1 && view.visit && !view.visit.questions.reason ? `Cuéntanos ${parts[0]}` : capital(listed(parts))
   const purpose = view.visit?.purpose ? `${name ? `${name} viene a` : "Vienes a"}: ${view.visit.purpose}. ` : ""
   // Con la cita de hoy en curso, «Tu cita» de arriba es la que viene: la tarjeta dice para cuál es.
-  const shown = view.appointment && !view.appointment.cancelled ? view.appointment.startsAt : null
+  const shown = liveAppointmentOf(view)?.startsAt ?? null
   const forWhen = shown === appointment.startsAt ? "" : `${name ? "Para su cita" : "Para tu cita"} del ${withPeriod(whenText(appointment))} `
   return {
     key: "datos",
@@ -364,7 +369,7 @@ export function pendingItems(view: PersonalLinkView, clinician = "odontólogo", 
 
 function linkItems(view: PersonalLinkView, clinician: string): PendingItem[] {
   const name = view.patientFirstName
-  const cita = view.appointment && !view.appointment.cancelled ? view.appointment.startsAt : null
+  const cita = liveAppointmentOf(view)?.startsAt ?? null
   const items: PendingItem[] = []
   const missing = view.data?.missing ?? []
   const before = beforeVisitCard(view, clinician)
@@ -717,9 +722,9 @@ export function PersonalLinkPage({
 
   // Lo escrito a medias en «Antes de tu cita» vive en este celular (entrega 9): es de esta
   // clínica, de este enlace y de la cita para la que responde (la de «Antes de tu cita»).
-  const draftAppointment = view?.beforeVisit ?? booked ?? view?.appointment ?? null
+  const shownAppointment = booked ?? view?.appointment ?? null
   const draftStartsAt =
-    draftAppointment && !("cancelled" in draftAppointment && draftAppointment.cancelled) ? draftAppointment.startsAt : null
+    view?.beforeVisit?.startsAt ?? (shownAppointment && !shownAppointment.cancelled ? shownAppointment.startsAt : null)
   const draftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt) : undefined
   const correctionDraftKey = slug && token ? personalLinkDraftKey(slug, token, draftStartsAt, "corregir") : undefined
   const [draftOnDevice, setDraftOnDevice] = useState<DraftOnDevice | null>(null)

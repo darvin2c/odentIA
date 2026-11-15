@@ -76,6 +76,15 @@ function sendsSomething(input: PersonalDataInput): boolean {
   )
 }
 
+/**
+ * Lo que el cuestionario dice si el envío falla: lo que es de un dato va a su campo (el `ApiError`
+ * tal cual); lo demás, con las palabras del servidor o `fallback` y, sin red, que revise su conexión.
+ */
+function sendFailure(error: unknown, fallback: string): Error {
+  if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) return error
+  return new Error(error instanceof ApiError ? (error.shape.message ?? fallback) : `${fallback} Revisa tu conexión y vuelve a intentarlo.`)
+}
+
 /** «a», «a y b», «a, b y c». */
 function listed(parts: string[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : (parts[0] ?? "")
@@ -281,7 +290,7 @@ export function PersonalDataForm({
           const said = answeredFor(form, answers, form.today)
           const input: PersonalDataInput = {
             ...toInput(answers, form.pending, extra.visit),
-            ...(healthCheck && extra.healthCheck ? { healthCheck: extra.healthCheck } : {}),
+            ...(extra.healthCheck ? { healthCheck: extra.healthCheck } : {}),
             ...(extra.medicinesChanged ? { medicinesChanged: true } : {}),
             ...(correcting ? { correctHealth: true } : {}),
           }
@@ -290,12 +299,7 @@ export function PersonalDataForm({
               await send.mutateAsync(input)
               onSent(healthAnswerWords(said, clinicName, "correccion"))
             } catch (error) {
-              if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
-              throw new Error(
-                error instanceof ApiError
-                  ? (error.shape.message ?? "No pudimos guardar tu corrección.")
-                  : "No pudimos guardar tu corrección. Revisa tu conexión y vuelve a intentarlo.",
-              )
+              throw sendFailure(error, "No pudimos guardar tu corrección.")
             }
             return
           }
@@ -304,12 +308,7 @@ export function PersonalDataForm({
             try {
               await send.mutateAsync(input)
             } catch (error) {
-              if (!(error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT"))
-                throw new Error(
-                  error instanceof ApiError
-                    ? (error.shape.message ?? "No pudimos enviarlo.")
-                    : "No pudimos enviarlo. Revisa tu conexión y vuelve a intentarlo.",
-                )
+              if (!(error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT")) throw sendFailure(error, "No pudimos enviarlo.")
             }
             onSent(healthAnswerWords(said, clinicName, "sin_cambios"))
             return
@@ -330,13 +329,7 @@ export function PersonalDataForm({
               onSent(personalDataSentWords(said, clinicName, "ya-enviado"))
               return
             }
-            // Lo que es de un dato, el cuestionario lo dice en su campo.
-            if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
-            throw new Error(
-              error instanceof ApiError
-                ? (error.shape.message ?? "No pudimos guardar lo que enviaste.")
-                : "No pudimos guardar lo que enviaste. Revisa tu conexión y vuelve a intentarlo.",
-            )
+            throw sendFailure(error, "No pudimos guardar lo que enviaste.")
           }
         }}
       />
