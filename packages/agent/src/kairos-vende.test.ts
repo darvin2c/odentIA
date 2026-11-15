@@ -286,6 +286,62 @@ describe("Kairós vende: la comprobación antes de enviar", () => {
     expect(invented.ok).toBe(false)
     expect(checkSellReply("¿El 20 de noviembre?", evidence, allowed, now).ok).toBe(false)
   })
+
+  it("puede decir que no hay la hora que le pidieron y ofrecer las libres", async () => {
+    const { model } = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      {
+        text: "El domingo 15 de noviembre a las 8 de la noche no tengo. Te ofrezco el lunes 16 de noviembre a las 10:00 o a las 15:00. ¿Cuál prefieres?",
+      },
+    ])
+    const asked = input({
+      history: [
+        { who: "persona", at: now, text: "Hola, quiero una presentación" },
+        { who: "kairos", at: now, text: "Claro, ¿qué día te acomoda?" },
+        { who: "persona", at: now, text: "¿El domingo 15 de noviembre a las 8 de la noche?" },
+      ],
+    })
+    const result = await seller(model).seller.answer(asked, tools().tools)
+    expect(result).toMatchObject({ kind: "respondio" })
+  })
+
+  it("la hora que pidió no se ofrece como si estuviera libre, y una inventada tampoco", async () => {
+    const history = [
+      {
+        who: "persona" as const,
+        at: now,
+        text: "¿El domingo 15 de noviembre a las 8 de la noche?",
+      },
+    ]
+    const offering = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { text: "Perfecto, te espero el domingo 15 de noviembre a las 8 de la noche." },
+    ])
+    const bad = await seller(offering.model).seller.answer(input({ history }), tools().tools)
+    expect(bad.kind).toBe("fallo")
+    const inventing = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { text: "Esa no la tengo; te ofrezco el martes 17 de noviembre a las 16:00." },
+    ])
+    const worse = await seller(inventing.model).seller.answer(input({ history }), tools().tools)
+    expect(worse.kind).toBe("fallo")
+    // Lo que pidió en un mensaje anterior, ya respondido, no cuenta.
+    const old = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { text: "El domingo 15 de noviembre a las 8 de la noche no tengo." },
+    ])
+    const earlier = await seller(old.model).seller.answer(
+      input({
+        history: [
+          ...history,
+          { who: "kairos", at: now, text: "Esa hora no la tengo." },
+          { who: "persona", at: now, text: "Ok, ¿y otra?" },
+        ],
+      }),
+      tools().tools,
+    )
+    expect(earlier.kind).toBe("fallo")
+  })
 })
 
 describe("Kairós vende: el doble por reglas", () => {
