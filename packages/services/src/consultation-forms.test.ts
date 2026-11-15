@@ -164,6 +164,29 @@ it("una clínica dental nace con las cuatro fichas en uso, unidas a su especiali
   expect((await c.run((tx) => listFormTemplates(tx, c.orgId, {}))).length).toBe(4)
 })
 
+// Revisión final del 15 nov (clínica H5 y D4): el texto mejorado es solo para las clínicas nuevas.
+it("la de odontopediatría nace con el peso, la higiene y el total del ceod; la que ya tenía una clínica no se toca", async () => {
+  const c = await clinic()
+  const pediatric = (await c.run((tx) => listFormTemplates(tx, c.orgId, {}))).find((row) => row.key === "ficha-de-odontopediatria")!
+  const sections = (pediatric.schema as { sections: Array<{ id: string; total?: string; fields: Array<{ id: string; unit?: string | null }> }> }).sections
+  expect(sections.flatMap((section) => section.fields.map((field) => field.id))).toEqual(
+    expect.arrayContaining(["peso", "ceod_c", "ceod_e", "ceod_o", "higiene", "riesgo_caries", "conducta"]),
+  )
+  expect(sections.flatMap((section) => section.fields).find((field) => field.id === "peso")?.unit).toBe("kg")
+  expect(sections.find((section) => section.id === "ceod")?.total).toBe("ceod")
+  // Una clínica que ya existía, con la de antes: el worker no la reescribe.
+  const old = await clinic({ forms: false })
+  const before = { sections: [{ id: "ceod", title: "Índice ceod", fields: [{ id: "ceod_c", label: "c, cariados", type: "numero" }] }] }
+  const [theirs] = await ownerDb
+    .insert(clinicalFormTemplate)
+    .values({ organizationId: old.orgId, key: "ficha-de-odontopediatria", title: "Ficha de odontopediatría", status: "publicado", schema: before })
+    .returning()
+  const created = await old.run((tx) => ensureClinicForms(tx, old.orgId))
+  expect(created.map((row) => row.key)).not.toContain("ficha-de-odontopediatria")
+  const [kept] = await ownerDb.select().from(clinicalFormTemplate).where(eq(clinicalFormTemplate.id, theirs!.id))
+  expect(kept?.schema).toEqual(before)
+})
+
 it("la ficha que la clínica dejó de usar o ya tenía con ese título no se vuelve a crear, y la suya no dice que vino con el producto", async () => {
   const c = await clinic({ forms: false })
   const schema = { sections: [{ id: "general", title: "General", fields: [{ id: "nota", label: "Nota", type: "texto" }] }] }
@@ -419,6 +442,42 @@ it("la ficha que quedó a medias en una atención firmada es la anterior del con
   )
   const listed = await c.run((tx) => listPatientFormResponses(tx, c.orgId, { patientId: c.patient.id }))
   expect(listed.find((row) => row.id === today.id)).toMatchObject({ previousId: halfDone.id })
+})
+
+// Revisión final del 15 nov (propuesta 5; ux U8 y U9, clínica H4): la ficha que ya tiene se ofrece en
+// el control con cualquier profesional, y «la anterior» es la última con respuestas.
+it("en el control se ofrece la ficha que ya tiene, sin depender de la cita ni de quien atiende, con la última que tiene respuestas", async () => {
+  const c = await clinic()
+  const template = async () =>
+    (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find((row) => row.key === "ficha-de-ortodoncia")!
+  const first = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  const filled = await c.run(async (tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: (await template()).id, patientId: c.patient.id, encounterId: first.id, answers: { overjet: 6 } }),
+  )
+  await c.run((tx) => finalizeFormResponse(tx, c.orgId, c.actor, filled.id))
+  // La siguiente la empezó y la dejó vacía: no es «la anterior».
+  const second = await c.attention({ specialty: "ortodoncia_ortopedia_maxilar" })
+  await c.run(async (tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: (await template()).id, patientId: c.patient.id, encounterId: second.id, answers: {} }),
+  )
+  // El control, sin servicio en la cita y con quien no tiene la especialidad: igual se ofrece.
+  const control = await c.attention({ service: false })
+  const offers = await c.offers(control.id)
+  expect(offers.map((offer) => [offer.key, offer.why])).toEqual([["ficha-de-ortodoncia", "tiene"]])
+  expect(offers[0]?.previous).toMatchObject({ responseId: filled.id, unfinished: false })
+})
+
+it("la ficha empezada con «Otra ficha…» queda en la lista de la atención, con su «Seguir»", async () => {
+  const c = await clinic()
+  const session = await c.attention({ service: false })
+  expect(await c.offers(session.id)).toEqual([])
+  const endodontics = (await c.run((tx) => listFormTemplates(tx, c.orgId, { status: "publicado" }))).find((row) => row.key === "evaluacion-de-endodoncia")!
+  const started = await c.run((tx) =>
+    createFormResponse(tx, c.orgId, c.actor, { templateId: endodontics.id, patientId: c.patient.id, encounterId: session.id, answers: {} }),
+  )
+  expect(await c.offers(session.id)).toEqual([
+    expect.objectContaining({ key: "evaluacion-de-endodoncia", why: "empezada", today: { responseId: started.id, status: "borrador" } }),
+  ])
 })
 
 it("la ficha finalizada en una atención que después se anuló no se pone al lado", async () => {

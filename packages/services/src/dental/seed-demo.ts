@@ -5304,7 +5304,8 @@ await db.transaction(async (tx) => {
   })
 })
 // Quién atiende qué (ADR 0039): la Dra. Rojas, Endodoncia; Ana, Cirugía oral
-// (la de la biblioteca, renombrada) y lo general; Luis, lo general.
+// (la de la biblioteca, renombrada) y lo general; Luis, el ortodoncista de la
+// demo, Ortodoncia y lo general (revisión final del 15 nov, clínica H4).
 // Implantología queda sin nadie: la agenda ofrece a cualquiera y
 // Especialidades lo avisa.
 await db.transaction(async (tx) => {
@@ -5313,7 +5314,7 @@ await db.transaction(async (tx) => {
     specialtiesA.get("cirugia")!,
     specialtiesA.get("general")!,
   ])
-  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, LUIS_ID, [specialtiesA.get("general")!])
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, LUIS_ID, [specialtiesA.get("ortodoncia")!, specialtiesA.get("general")!])
 })
 // Firmado en papel (fase 3, paso 2B): la anestesia local de la exodoncia, con
 // la foto de la hoja firmada; el pendiente se cierra con método «papel».
