@@ -4421,6 +4421,8 @@ async function kairosDoneRaw(
         words = client ? `Agendó la presentación de ${client.name} desde un chat` : null
         break
       case "kairos.chat_handed_over":
+        // Lo que Ariadna pasó a Administración (cobros, su plan) Soporte no sabe que se pasó.
+        if (actor.role !== "admin" && meta(a.metadata, "to") === "administracion") break
         words = client
           ? `Pasó al equipo un chat de ${client.name}`
           : "Pasó al equipo un chat sin cliente"

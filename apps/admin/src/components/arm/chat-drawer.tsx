@@ -36,7 +36,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { supportTime } from "../../lib/support-words"
@@ -59,6 +59,7 @@ import {
   openChatOutcome,
   openChatWith,
   pauseKairos,
+  replyAdminOnly,
   replyHelpWords,
   resumeKairos,
   sendChatReply,
@@ -260,16 +261,20 @@ function Conversation({
   // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
   const [proposal, setProposal] = useState(proposalId)
   // Lo que Ariadna pasó a Administración (cobros, su plan) se responde «Solo administración».
+  // Vale para cada respuesta mientras siga así (no solo la primera), y quitarlo se dice al servidor
+  // aparte (`adminOnlyOverride`): sin eso, el servidor la guarda «Solo administración» igual.
   const toAdministration = kairos?.kind === "paso" && kairos.to === "administracion"
+  const hidden = replyAdminOnly(canHide, toAdministration)
+  const hiddenByDefault = hidden.initial
   const form = useAppForm({
-    defaultValues: { body: draft, adminOnly: canHide && toAdministration },
+    defaultValues: { body: draft, adminOnly: hiddenByDefault },
     validators: { onSubmit: replySchema },
     onSubmit: async ({ value, formApi }) => {
-      const empty = { body: "", adminOnly: false }
+      const empty = { body: "", adminOnly: hiddenByDefault }
       try {
         const sent = await sendChatReply(chat.id, {
           body: value.body.trim(),
-          ...(canHide ? { adminOnly: value.adminOnly } : {}),
+          ...hidden.fields(value.adminOnly),
           ...(proposal ? { proposalId: proposal } : {}),
         })
         announceSent(sent.status, channel)
@@ -291,6 +296,10 @@ function Conversation({
     },
   })
   const surface = useFormSurface(form)
+  // Si Ariadna la pasa a Administración con el cajón abierto, lo que se escriba ya sale «Solo administración».
+  useEffect(() => {
+    if (hiddenByDefault) form.setFieldValue("adminOnly", true)
+  }, [hiddenByDefault, form])
   const retomar = useMutation({
     mutationFn: () => sendChatRetomar(chat.id),
     onSuccess: (sent) => announceSent(sent.status, channel),
@@ -455,7 +464,8 @@ function Conversation({
           <p className="text-sm text-muted-foreground">{freeWindowWords(chat)}</p>
           {kairos?.kind === "kairos" ? (
             <p className="text-sm text-muted-foreground">
-              {agent} está respondiendo aquí. Si envías tú, lo atiendes tú y {agent} deja de responder.
+              {agent} está respondiendo aquí. Si envías tú, lo atiendes tú y {agent} deja de
+              responder.
             </p>
           ) : null}
           {chat.canReplyFreely ? (

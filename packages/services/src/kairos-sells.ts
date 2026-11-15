@@ -394,12 +394,7 @@ export async function finishKairosTurn(
   // Lo que Ariadna pasa a Administración (cobros, su plan) es solo de Administración desde ese
   // mensaje: Soporte no lo ve en la conversación ni en Hoy, y lo que se responda nace igual.
   if (result.ariadnaReply === "administracion")
-    await tx
-      .update(saasInboundMessage)
-      .set({ adminOnly: true })
-      .where(
-        and(eq(saasInboundMessage.id, turn.messageId), eq(saasInboundMessage.adminOnly, false)),
-      )
+    await raiseAnsweredAdminOnly(tx, turn.chatId, result.outreachId ?? null)
   if (result.outcome === "paso" || result.outcome === "fallo") {
     const [chat] = await tx
       .update(saasChat)
@@ -421,6 +416,32 @@ export async function finishKairosTurn(
 }
 
 /**
+ * Ariadna pasó a Administración: sube a «solo Administración» todo lo que escribió la persona desde
+ * nuestra última respuesta (lo mismo que leyó `ariadnaChatContext`: sus mensajes seguidos, y lo que
+ * llegó mientras respondía) y su actividad «Nos escribió por …». `ownReply` es la respuesta de este
+ * mismo turno, que no cuenta como la anterior. Solo sube, de no a sí (la base no deja bajarlo).
+ */
+async function raiseAnsweredAdminOnly(
+  tx: Db,
+  chatId: string,
+  ownReply: string | null,
+): Promise<void> {
+  const [since] = await tx.execute<{ at: string | null }>(sql`select max(o.created_at)::text as at
+    from admin.saas_outreach o
+    where o.chat_id = ${chatId}::uuid and o.purpose = 'respuesta' and o.status <> 'no_salio'
+      and (${ownReply}::uuid is null or o.id <> ${ownReply}::uuid)`)
+  const from = since?.at ? sql`${since.at}::timestamptz` : sql`'-infinity'::timestamptz`
+  await tx.execute(sql`update admin.saas_inbound_message set admin_only = true
+    where chat_id = ${chatId}::uuid and created_at >= ${from} and not admin_only`)
+  // La actividad de cada mensaje lleva su conversación y la hora que dijo Meta (`happened_at`).
+  await tx.execute(sql`update admin.saas_follow_up f set admin_only = true
+    from admin.saas_inbound_message m
+    where m.chat_id = ${chatId}::uuid and m.created_at >= ${from}
+      and f.chat_id = m.chat_id and f.direction = 'entro' and f.happened_at = m.received_at
+      and not f.admin_only`)
+}
+
+/**
  * Por qué Kairós ya no puede actuar en esta conversación, o null: se apagó, se pausó (o la pasó
  * al equipo), es «No es una clínica», su cliente ya tiene su app o está archivado, o pasaron las
  * 24 h de Meta. Se mira con la conversación bloqueada antes de cada herramienta que escribe y al
@@ -432,6 +453,11 @@ export async function kairosChatBlocked(
   now = new Date(),
   /** Quién atiende el turno: Ariadna solo responde a la clínica con su app; Kairós, a quien no la tiene. */
   agent: ChatTurnAgent = "kairos",
+  /**
+   * De quién era la conversación cuando se leyó para responder (el cliente y su clínica): si una
+   * persona la movió a otro mientras tanto, lo pensado era para otro y no se escribe.
+   */
+  expected?: { clientId: string; organizationId: string | null },
 ): Promise<string | null> {
   if (!UUID.test(chatId)) return "La conversación no existe"
   const [chat] = await tx
@@ -453,6 +479,9 @@ export async function kairosChatBlocked(
         .where(eq(saasClient.id, chat.clientId))
         .limit(1)
     : []
+  if (expected && chat.clientId !== expected.clientId) return "La conversación pasó a otro cliente"
+  if (expected && (client?.organizationId ?? null) !== expected.organizationId)
+    return "La conversación es de otra clínica"
   if (!ariadna && client?.organizationId) return "La clínica ya tiene su app"
   if (client?.archivedAt) return "El cliente está archivado"
   if (ariadna && !client?.organizationId)

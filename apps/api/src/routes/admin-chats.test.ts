@@ -139,6 +139,21 @@ afterAll(async () => {
 })
 
 describe("responder", () => {
+  it("acepta decir que se quitó «Solo administración» a propósito (`adminOnlyOverride`, ADR 0191)", async () => {
+    mode = "ok"
+    const chatId = await chatWith("whatsapp", "+51911000091")
+    const response = await call("POST", `/${chatId}/reply`, ADMIN, {
+      body: "Hola",
+      adminOnly: false,
+      adminOnlyOverride: true,
+    })
+    await expectStatus(response, 201)
+    await expectStatus(
+      await call("POST", `/${chatId}/reply`, ADMIN, { body: "Hola", adminOnlyOverride: "sí" }),
+      400,
+    )
+  })
+
   it("Meta lo acepta: enviado con su wamid, el id del envío como callback y el número sin «+»", async () => {
     mode = "ok"
     const chatId = await chatWith("whatsapp", "+51911000001")

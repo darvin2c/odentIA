@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ariadnaChatsStateWords } from "./arm/ariadna-chats"
-import { handoverTitle, kairosChatState, sentLineWords } from "./arm/chat-api"
+import { handoverTitle, kairosChatState, replyAdminOnly, sentLineWords } from "./arm/chat-api"
 import { absenceClashDoneWords, absenceClashOf } from "./arm/kairos-items"
 import { kairosSellsStateWords } from "./arm/kairos-sells"
 import {
@@ -278,6 +278,19 @@ describe("Kairós en los chats", () => {
         byAriadna: true,
       }),
     ).toBe("Ariadna · 10:00 · Salió")
+  })
+
+  it("pasada a Administración, cada respuesta nace «Solo administración» y quitarlo se dice aparte", () => {
+    const handed = replyAdminOnly(true, true)
+    expect(handed.initial).toBe(true)
+    expect(handed.fields(true)).toEqual({ adminOnly: true })
+    // Quitarlo a propósito: el servidor lo guarda solo para Administración si no viene el aviso.
+    expect(handed.fields(false)).toEqual({ adminOnly: false, adminOnlyOverride: true })
+    expect(replyAdminOnly(true, false)).toMatchObject({ initial: false })
+    expect(replyAdminOnly(true, false).fields(false)).toEqual({ adminOnly: false })
+    // Soporte (o una conversación de venta) no manda la casilla.
+    expect(replyAdminOnly(false, true).initial).toBe(false)
+    expect(replyAdminOnly(false, true).fields(true)).toEqual({})
   })
 
   it("el interruptor de Ariadna dice quién la dejó así", () => {

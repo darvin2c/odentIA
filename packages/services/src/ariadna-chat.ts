@@ -173,12 +173,79 @@ const BLOCKED = [
 const INSISTS =
   /\b(ya (lo )?(intente|probe|hice)|igual no|sigue (sin|igual)|todavia no|aun no|tampoco|no sirve|no resulta)\b/
 
-/** Un sí a «¿quieres que te pase con Soporte?». */
-const YES =
-  /^(si|sii+|sip|sep|ok|oki|okey|okay|dale|ya|bueno|claro|por favor|porfa|porfavor|pasame|pasalo|pasa|de acuerdo|va|listo|perfecto|si por favor|si porfa|si gracias|si pasame|si dale|si claro|quiero soporte|soporte|con soporte|un humano|una persona|alguien)( .*)?$/
-/** Un no a la oferta. */
-const NO =
-  /^(no|nop|no gracias|no por ahora|asi esta bien|ya no|ya esta|ya lo resolvi|ya pude|ya salio|ya funciono)( .*)?$/
+/** Después de «¿Es alguna de estas? … si no es ninguna, te paso con Soporte»: «ninguna» lo pasa. */
+const NONE_OF_THESE = /\b(ninguna|ninguno|ni una|no es esa|no es eso|no es ese)\b/
+
+const wordsOf = (plain: string) => plain.split(" ").filter(Boolean)
+const onlyWords = (plain: string, allowed: ReadonlySet<string>) =>
+  wordsOf(plain).every((word) => allowed.has(word) || /^si+$/.test(word))
+
+/** Las palabras de un sí corto a «¿quieres que te pase con Soporte?». */
+const YES_WORDS = new Set(
+  "si sip sep ok oki okey okay dale ya bueno claro por favor porfa porfavor porfis pasame pasalo pasa pases me de acuerdo va listo perfecto gracias quiero soporte con un una humano persona alguien nomas".split(
+    " ",
+  ),
+)
+const YES_START =
+  /^(si+|sip|sep|ok|oki|okey|okay|dale|ya|bueno|claro|por favor|porfa|porfavor|porfis|pasame|pasalo|pasa|de acuerdo|va|listo|perfecto|quiero soporte|soporte|con soporte|un humano|una persona|alguien)\b/
+
+/**
+ * Un sí a la oferta: corto (hasta cuatro palabras), sin pregunta y sin pedir otra cosa. «Ok,
+ * gracias» cierra (no es un sí) y «bueno, ¿y cómo creo un paciente?» es otra pregunta.
+ */
+function isShortYes(plain: string, question: string): boolean {
+  if (/[?¿]/.test(question)) return false
+  if (wordsOf(plain).length > 4 || !YES_START.test(plain)) return false
+  if (/\bgracias\b/.test(plain) && !/^(si+|sip|sep)\b/.test(plain)) return false
+  return onlyWords(plain, YES_WORDS)
+}
+
+/** Las palabras de un no corto: «no», «no gracias», «ya no», «así está bien», «ya pude». */
+const DECLINE_WORDS = new Set(
+  "no nop gracias muchas ya pude por ahora asi esta bien lo resolvi salio funciono hace falta todo ok listo nomas nada".split(
+    " ",
+  ),
+)
+/** Lo que hace de «ya …» un no (sin eso, «ya» es un sí). */
+const DECLINE_WITH_YA = /\b(no|pude|esta|resolvi|salio|funciono|bien)\b/
+
+/** Un no puro a la oferta: corto, solo de palabras de no y sin nada más que pedir. */
+function isPureDecline(plain: string, question: string): boolean {
+  if (/[?¿]/.test(question)) return false
+  const words = wordsOf(plain)
+  if (words.length > 6 || !onlyWords(plain, DECLINE_WORDS)) return false
+  const [first] = words
+  if (first === "no" || first === "nop") return true
+  if (first === "asi") return /\basi esta bien\b/.test(plain)
+  if (first === "ya") return DECLINE_WITH_YA.test(words.slice(1).join(" "))
+  return false
+}
+
+/** Un cierre: «ok gracias», «listo, muchas gracias». No pasa a nadie. */
+const CLOSING_WORDS = new Set(
+  "ok oki okey okay listo bueno ya perfecto vale genial gracias muchas mil entendido chevere".split(
+    " ",
+  ),
+)
+function isClosing(plain: string, question: string): boolean {
+  // «Sí, gracias» es un sí, no un cierre.
+  if (/[?¿]/.test(question) || /^(si+|sip|sep)\b/.test(plain)) return false
+  return /\bgracias\b/.test(plain) && wordsOf(plain).length <= 5 && onlyWords(plain, CLOSING_WORDS)
+}
+
+/**
+ * Después de la oferta, insistir lo pasa: «no, todavía me sale error…» (empieza con «no» pero no es
+ * un no puro), «igual no me deja», «no es ninguna». Con una pregunta, se responde como pregunta.
+ */
+function insistsAfterOffer(plain: string, question: string): boolean {
+  if (/[?¿]/.test(question)) return false
+  return (
+    /^(no|nop)\b/.test(plain) ||
+    INSISTS.test(plain) ||
+    NONE_OF_THESE.test(plain) ||
+    matches(BLOCKED, plain)
+  )
+}
 
 /** Pide una cifra, una lista o un dato de su clínica. */
 const DATA = [
@@ -265,6 +332,20 @@ export function readAriadnaChatIntent(result: { answers: readonly AdminAnswer[] 
 
 /* ---------- La respuesta ---------- */
 
+/**
+ * Lo que no sale por el chat en lo redactado, además de lo que ya mira `helpWrittenProblem` (que
+ * es el de la Ayuda de la app y no cambia): un correo, una dirección o un dominio. Por chat lo
+ * leería la clínica como un contacto o una página nuestra; el único enlace es el que pone el
+ * código después («Te dejo la pantalla: …»). Devuelve por qué no pasa, o nulo.
+ */
+export function ariadnaWrittenProblem(written: string): string | null {
+  if (/@/.test(written)) return "correo"
+  if (/https?:\/\/|\bwww\./i.test(written)) return "enlace"
+  if (/\b[\w-]+\.(com|pe|net|org|io|app|ai|co)\b/i.test(written)) return "dominio"
+  if (/\w+\.\w{2,}\//.test(written)) return "enlace"
+  return null
+}
+
 /** El enlace a la pantalla de una respuesta: el origen de la app de la clínica y la ruta del tema. */
 function linkOf(
   option: HelpOption | undefined,
@@ -314,6 +395,29 @@ function dataReply(
   }
 }
 
+/** El pase a Administración de un cobro, su plan, otra sede u otro producto. */
+function billingReply(input: AriadnaChatInput, plain: string): AriadnaChatReply {
+  const other = otherProduct(plain, input.product)
+  return {
+    kind: "administracion",
+    text: withIntro(SAY.administracion, input, false),
+    why: other
+      ? `Pregunta por ${other}, otro producto`
+      : "Es de cobros, su plan o comprar algo más",
+  }
+}
+
+/**
+ * Solo con las palabras, sin modelo: si lo que escribió es de cobros (su plan, otra sede u otro
+ * producto), el pase a Administración; si no, nulo. Lo usa el worker cuando no puede preguntarle a
+ * Ariadna (el tope del día o un error): un cobro tampoco entonces llega a Soporte.
+ */
+export function ariadnaBillingByWords(input: AriadnaChatInput): AriadnaChatReply | null {
+  const question = input.question.trim().slice(0, 500)
+  if (ariadnaRuleIntent(question, input.product) !== "cobro") return null
+  return billingReply(input, normalizeForSearch(question))
+}
+
 /**
  * Responde un turno del chat con la guía del producto de la clínica, sin datos
  * de ella. El decisor y quien redacta son los de la Ayuda (nulos: solo palabras).
@@ -327,7 +431,8 @@ export async function askHelpByChat(
   const texts = agentTextsFor(input.product)
   const question = input.question.trim().slice(0, 500)
   const plain = normalizeForSearch(question)
-  // La anterior viaja como en la Ayuda: sin cifras ni correos y, si puede ser un dato de alguien, no viaja.
+  // La anterior viaja como en la Ayuda (`withoutPersonData`): si parece el dato de una persona, sin
+  // correos ni cifras, y si aun así lo parece, no viaja; una pregunta corriente viaja tal cual.
   const previousAsked = input.previous
     ? withoutPersonData(input.previous.question.trim().slice(0, 500))
     : null
@@ -344,20 +449,11 @@ export async function askHelpByChat(
       written: false,
     }
 
-  // Después de «¿quieres que te pase con Soporte?»: un sí, o insistir, lo pasa; un no, se despide.
-  if (input.offered) {
-    if (
-      YES.test(plain) ||
-      INSISTS.test(plain) ||
-      (matches(BLOCKED, plain) && plain.split(" ").length <= 6)
-    ) {
-      return {
-        kind: "soporte",
-        text: SAY.soporte,
-        why: "Dijo que sí a pasar con Soporte o insistió",
-      }
-    }
-    if (NO.test(plain))
+  // Después de «¿quieres que te pase con Soporte?»: un no puro o un «gracias» se despiden; un sí
+  // corto o insistir (aunque empiece con «no») lo pasa; una pregunta nueva se responde.
+  // Un cobro dicho ahí («no, me cobraron doble») sigue yendo a Administración, nunca a Soporte.
+  if (input.offered && ariadnaRuleIntent(question, input.product) !== "cobro") {
+    if (isPureDecline(plain, question) || isClosing(plain, question))
       return {
         kind: "respuesta",
         text: SAY.noThanks,
@@ -365,6 +461,12 @@ export async function askHelpByChat(
         topicId: null,
         faqId: null,
         written: false,
+      }
+    if (isShortYes(plain, question) || insistsAfterOffer(plain, question))
+      return {
+        kind: "soporte",
+        text: SAY.soporte,
+        why: "Dijo que sí a pasar con Soporte o insistió",
       }
   }
 
@@ -388,7 +490,8 @@ export async function askHelpByChat(
 
   // Lo escrito igual que en la guía responde sin modelo (también lo que se toca de una duda).
   const exact = exactHelpOption(question, topics)
-  // A un modelo viaja sin cifras ni correos; si lo que queda puede ser el dato de una persona, no viaja.
+  // A un modelo viaja con el filtro de la Ayuda: lo que parece el dato de una persona va sin correos
+  // ni cifras, y si aun así lo parece, no viaja.
   const forModel = exact ? null : withoutPersonData(question)
 
   // Lo que no es de la guía: primero las palabras; si no dicen nada, el decisor.
@@ -406,16 +509,7 @@ export async function askHelpByChat(
     decidedPromise = Promise.resolve(decided)
   }
 
-  if (intent === "cobro") {
-    const other = otherProduct(plain, input.product)
-    return {
-      kind: "administracion",
-      text: withIntro(SAY.administracion, input, false),
-      why: other
-        ? `Pregunta por ${other}, otro producto`
-        : "Es de cobros, su plan o comprar algo más",
-    }
-  }
+  if (intent === "cobro") return billingReply(input, plain)
   if (intent === "paciente") {
     return {
       kind: "paciente",
@@ -453,8 +547,10 @@ export async function askHelpByChat(
   }
   if (selection.verdict === "seguro" && selection.shown[0]) {
     const [first] = selection.shown
-    const body =
-      decided.written ?? selection.shown.map((option) => helpAnswerText(option)).join(" ")
+    // Lo redactado que trae un correo, una dirección o un dominio no sale: queda la guía tal cual.
+    const written =
+      decided.written && !ariadnaWrittenProblem(decided.written) ? decided.written : null
+    const body = written ?? selection.shown.map((option) => helpAnswerText(option)).join(" ")
     const link = linkOf(first, input.appOrigin)
     return {
       kind: "respuesta",
@@ -462,7 +558,7 @@ export async function askHelpByChat(
       link,
       topicId: first.topic.id,
       faqId: first.kind === "faq" ? first.faq.id : null,
-      written: Boolean(decided.written),
+      written: Boolean(written),
     }
   }
   if (selection.verdict === "datos") return dataReply(question, topics, input)

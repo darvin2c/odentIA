@@ -3,8 +3,10 @@ import type { AdminAnswer, AdminDecider, AdminQuestion } from "./admin-request.j
 import {
   ARIADNA_APP_HELP,
   ARIADNA_CHAT_QUESTION,
+  ariadnaBillingByWords,
   ariadnaFixedTexts,
   ariadnaRuleIntent,
+  ariadnaWrittenProblem,
   askHelpByChat,
 } from "./ariadna-chat.js"
 import { helpTopicsFor } from "./products.js"
@@ -66,10 +68,10 @@ function scripted(options: { intent?: string; faq?: string; data?: number } = {}
 }
 
 describe("Ariadna por chat", () => {
-  it("«¿cómo anulo una cita?» responde con la guía, el enlace a la pantalla y se presenta la primera vez", async () => {
+  it("«¿cómo cancelo una cita?» responde con la guía, el enlace a la pantalla y se presenta la primera vez", async () => {
     const reply = await askHelpByChat({
       product: "dental",
-      question: "como anulo una cita?",
+      question: "como cancelo una cita?",
       firstReply: true,
       appOrigin: ORIGIN,
     })
@@ -85,7 +87,7 @@ describe("Ariadna por chat", () => {
     // La segunda vez ya no se presenta.
     const again = await askHelpByChat({
       product: "dental",
-      question: "como anulo una cita?",
+      question: "como cancelo una cita?",
       appOrigin: ORIGIN,
     })
     expect(again.text.startsWith("Abre la cita")).toBe(true)
@@ -94,7 +96,7 @@ describe("Ariadna por chat", () => {
   it("sin dirección configurada no inventa un enlace", async () => {
     const reply = await askHelpByChat({
       product: "dental",
-      question: "como anulo una cita?",
+      question: "como cancelo una cita?",
       appOrigin: null,
     })
     expect(reply.kind === "respuesta" && reply.link).toBe(null)
@@ -197,7 +199,7 @@ describe("Ariadna por chat", () => {
     const guide = helpTopicsFor("optical")
     const answers = new Set(guide.flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.a)))
     const fixed = ariadnaFixedTexts("optical")
-    const reply = await askHelpByChat({ product: "optical", question: "como anulo una cita?" })
+    const reply = await askHelpByChat({ product: "optical", question: "como cancelo una cita?" })
     const body = reply.text
     expect(
       [...answers].some((answer) => body.includes(answer)) ||
@@ -209,5 +211,126 @@ describe("Ariadna por chat", () => {
     const reply = await askHelpByChat({ product: "dental", question: "" })
     expect(reply.kind).toBe("respuesta")
     expect(reply.text).toContain("no puedo ver audios")
+  })
+})
+
+describe("Ariadna por chat: el sí y el no después de una oferta", () => {
+  const afterOffer = (question: string) =>
+    askHelpByChat({ product: "dental", question, offered: true })
+
+  it("insistir aunque empiece con «no», o «no es ninguna» tras las opciones, pasa a Soporte", async () => {
+    for (const question of [
+      "no, todavía me sale error cuando quiero guardar la cita en la agenda",
+      "no es ninguna",
+      "ninguna de esas",
+      "no, sigue igual",
+    ]) {
+      expect((await afterOffer(question)).kind, question).toBe("soporte")
+    }
+  })
+
+  it("solo un no corto y puro se despide; «ok gracias» cierra sin pasar a nadie", async () => {
+    for (const question of [
+      "no",
+      "No, gracias",
+      "ya no",
+      "así está bien",
+      "ok gracias",
+      "listo, muchas gracias",
+    ]) {
+      const reply = await afterOffer(question)
+      expect(reply.kind, question).toBe("respuesta")
+      expect(reply.text, question).toContain("Si necesitas algo más")
+    }
+  })
+
+  it("un sí es corto y sin pregunta; «bueno, ¿y cómo creo un paciente?» es otra pregunta y la responde la guía", async () => {
+    for (const question of ["sí", "ok", "dale, pásame", "sí, gracias", "ya"]) {
+      expect((await afterOffer(question)).kind, question).toBe("soporte")
+    }
+    const { decider } = scripted({ faq: "¿Qué hago justo después de registrar a un paciente?" })
+    const other = await askHelpByChat(
+      { product: "dental", question: "bueno, ¿y cómo creo un paciente?", offered: true },
+      decider,
+    )
+    expect(other.kind).toBe("respuesta")
+    expect(other.text).not.toContain("te paso con Soporte")
+  })
+
+  it("un cobro después de la oferta sigue yendo a Administración, aunque empiece con «no»", async () => {
+    expect((await afterOffer("no, me cobraron dos veces este mes")).kind).toBe("administracion")
+  })
+
+  it("sin modelo, las palabras bastan para apartar un cobro (el worker, en el tope o si falla)", () => {
+    expect(
+      ariadnaBillingByWords({ product: "dental", question: "me cobraron dos veces" })?.kind,
+    ).toBe("administracion")
+    expect(
+      ariadnaBillingByWords({ product: "dental", question: "como cancelo una cita" }),
+    ).toBeNull()
+  })
+})
+
+describe("Ariadna por chat: lo redactado no trae correos ni dominios", () => {
+  const topics = helpTopicsFor("dental")
+  const faqOf = (id: string) => {
+    for (const topic of topics) for (const faq of topic.faqs ?? []) if (faq.id === id) return faq
+    throw new Error(`Falta ${id}`)
+  }
+  const create = faqOf("tareas-crear")
+  const assign = faqOf("tareas-asignar")
+  /** Jev dice que la pregunta junta dos respuestas de Tareas y que juntas la completan. */
+  const joining: AdminDecider = {
+    async decide(_state: string, questions: AdminQuestion[]) {
+      const answers: AdminAnswer[] = questions.map((q) => {
+        if (q.kind === "yesno")
+          return { id: q.id, kind: "yesno", probability: q.id === "help_join" ? 0.95 : 0.02 }
+        const pick = (o: { value: string; description?: string }) => {
+          if (q.id === ARIADNA_CHAT_QUESTION) return o.value === "guia" ? 0.97 : 0.006
+          if (q.id === "help_area")
+            return `${o.value} ${o.description ?? ""}`.toLowerCase().includes("tareas")
+              ? 0.95
+              : 0.01
+          if ((o.description ?? "").includes(create.q)) return 0.55
+          if ((o.description ?? "").includes(assign.q)) return 0.38
+          return o.value === "none" ? 0.07 : 0
+        }
+        const probabilities = Object.fromEntries(q.options.map((o) => [o.value, pick(o)]))
+        const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "none"
+        return { id: q.id, kind: "choice", choice, confidence: 0.9, probabilities }
+      })
+      return { answers, model: "guion", usage: null }
+    },
+  }
+  const button = (answer: string) => answer.match(/«([^»\d]+)»/)?.[1] ?? ""
+  const written = `En Tareas pulsa «${button(create.a)}» y guárdala; después ábrela y elige a la persona en «${button(assign.a)}».`
+  const question = "como creo una tarea y se la paso a otra persona"
+
+  it("lo redactado limpio sale; con un correo, un dominio o una ruta, sale la guía tal cual con el enlace del código", async () => {
+    const clean = await askHelpByChat(
+      { product: "dental", question, appOrigin: ORIGIN },
+      joining,
+      async () => written,
+    )
+    expect(clean.kind === "respuesta" && clean.written).toBe(true)
+    for (const extra of [
+      " Si no, escríbenos a soporte@sallca.com.",
+      " Más en sallca.pe.",
+      " Mira odentia.com/ayuda.",
+      " Ve a ayuda.sallca/tareas.",
+    ]) {
+      const reply = await askHelpByChat(
+        { product: "dental", question, appOrigin: ORIGIN },
+        joining,
+        async () => `${written}${extra}`,
+      )
+      expect(reply.kind, extra).toBe("respuesta")
+      if (reply.kind !== "respuesta") continue
+      expect(reply.written, extra).toBe(false)
+      expect(reply.text, extra).toContain(create.a)
+      expect(reply.text, extra).not.toContain(extra.trim())
+      expect(reply.text, extra).toContain(`Te dejo la pantalla: ${ORIGIN}/tasks`)
+    }
+    expect(ariadnaWrittenProblem("Pulsa «Nueva tarea» y guárdala.")).toBeNull()
   })
 })

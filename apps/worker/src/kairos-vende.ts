@@ -12,6 +12,7 @@ import {
   type AdminChannels,
   type AriadnaChatInput,
   type AriadnaChatReply,
+  ariadnaBillingByWords,
   ariadnaChatContext,
   type ChatReply,
   chatSenderOf,
@@ -193,28 +194,33 @@ async function answerAriadna(
   const cap = await ownerDb.transaction((tx) =>
     kairosTurnCap(tx as Db, target.chatId, turnId, now, "ariadna"),
   )
+  const input = {
+    product: context.client.product,
+    question: context.question,
+    previous: context.previous,
+    offered: context.offered,
+    firstReply: context.firstReply,
+    appOrigin: context.appOrigin,
+  }
+  // Sin poder preguntarle a Ariadna (el tope o un error), un cobro igual va a Administración, por
+  // las palabras: nunca le llega a Soporte.
+  const fallback = (why: string): AriadnaChatReply => {
+    const billing = ariadnaBillingByWords(input)
+    return billing && billing.kind === "administracion"
+      ? { ...billing, why: `${why}; ${billing.why}` }
+      : { kind: "soporte", text: KAIROS_FALLBACK_TEXT, why }
+  }
   let result: AriadnaChatReply
   let outcome: "respondio" | "paso" | "fallo"
   if (cap) {
-    result = { kind: "soporte", text: KAIROS_FALLBACK_TEXT, why: cap }
+    result = fallback(cap)
     outcome = "paso"
   } else
     try {
-      result = await deps.ariadna.answer(context.client.organizationId, {
-        product: context.client.product,
-        question: context.question,
-        previous: context.previous,
-        offered: context.offered,
-        firstReply: context.firstReply,
-        appOrigin: context.appOrigin,
-      })
+      result = await deps.ariadna.answer(context.client.organizationId, input)
       outcome = ARIADNA_OUTCOME[result.kind]
     } catch (error) {
-      result = {
-        kind: "soporte",
-        text: KAIROS_FALLBACK_TEXT,
-        why: `Falló al responder (${message(error)})`,
-      }
+      result = fallback(`Falló al responder (${message(error)})`)
       outcome = "fallo"
     }
   if (
@@ -233,7 +239,11 @@ async function answerAriadna(
     reserved = await ownerDb.transaction(async (raw) => {
       const tx = raw as Db
       // Mientras respondía pudieron pausarla, apagar a Ariadna, archivar al cliente o pasar las 24 h.
-      const blocked = await kairosChatBlocked(tx, target.chatId, now, "ariadna")
+      // También que siga siendo del mismo cliente y de la misma clínica que se leyó.
+      const blocked = await kairosChatBlocked(tx, target.chatId, now, "ariadna", {
+        clientId: context.client.id,
+        organizationId: context.client.organizationId,
+      })
       if (blocked) {
         await finishKairosTurn(
           tx,

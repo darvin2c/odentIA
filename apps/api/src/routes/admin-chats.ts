@@ -63,6 +63,8 @@ const assignBody = z.strictObject({
 const replyBody = z.strictObject({
   body: z.string("Escribe el mensaje").max(5000, "Usa como máximo 5000 caracteres"),
   adminOnly: z.boolean().optional(),
+  /** Con `adminOnly: false` en lo que Ariadna pasó a Administración: quitarlo fue a propósito. */
+  adminOnlyOverride: z.boolean().optional(),
   /** «Enviar la propuesta» por WhatsApp: el texto habla de ella (el PDF no va). */
   proposalId: z.uuid("Esa propuesta no es de este cliente").nullish(),
 })
@@ -181,6 +183,7 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
     input: {
       body?: string | null
       adminOnly?: boolean
+      adminOnlyOverride?: boolean
       template?: string
       proposalId?: string | null
     },
@@ -262,6 +265,9 @@ export function createAdminChatsRoute(deps: AdminChatsDeps) {
       return await reserveAndSend(c, actor, {
         body: body.body,
         ...(body.adminOnly !== undefined ? { adminOnly: body.adminOnly } : {}),
+        ...(body.adminOnlyOverride !== undefined
+          ? { adminOnlyOverride: body.adminOnlyOverride }
+          : {}),
         ...(body.proposalId ? { proposalId: body.proposalId } : {}),
       })
     } catch (e) {

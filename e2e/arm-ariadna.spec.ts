@@ -3,7 +3,7 @@
  * punta en pantalla: en Kairós, Administración prende «Ariadna responde en los
  * chats de las clínicas con app», junto al de Kairós. Una clínica que ya tiene
  * su app (su conversación ya ligada a su cliente) escribe por WhatsApp
- * «¿cómo anulo una cita?» y Ariadna responde con la guía y el enlace a la
+ * «¿cómo cancelo una cita?» y Ariadna responde con la guía y el enlace a la
  * Agenda; en el cajón «Ariadna atiende esta conversación» y lo suyo va con su
  * nombre. «No me deja…» recibe la oferta de la Ayuda de la app o Soporte; con
  * el «sí» pasa a Soporte, que lo ve en Hoy. «Me cobraron dos veces» pasa a
@@ -181,12 +181,12 @@ test("Ariadna en los chats: el interruptor, responde con el enlace, «no me deja
     await expect(ariadna).toBeChecked()
     await shot(page, "kairos-interruptores-1366")
 
-    // --- Caso 1: «¿cómo anulo una cita?» → la guía y el enlace a la Agenda -----------------
+    // --- Caso 1: «¿cómo cancelo una cita?» → la guía y el enlace a la Agenda -----------------
     const from = `51957${digits()}`
     const chatId = await linkedChat(from)
     await postMeta(
       page,
-      whatsappText(from, "Carla", `wamid.anular-${tag}`, "¿cómo anulo una cita?"),
+      whatsappText(from, "Carla", `wamid.anular-${tag}`, "¿cómo cancelo una cita?"),
     )
     const first = await waitAriadna(chatId, 1)
     expect(first?.body).toMatch(
@@ -253,6 +253,8 @@ test("Ariadna en los chats: el interruptor, responde con el enlace, «no me deja
     const toAdmin = await waitAriadna(billingChat, 1)
     expect(toAdmin?.body).toContain("Eso lo ve Administración")
     expect(toAdmin?.adminOnly).toBe(true)
+    // Lo que escribe después del pase también es solo de Administración (Soporte no lo ve en Hoy).
+    await postMeta(page, whatsappText(billing, "Dora", `wamid.cobro2-${tag}`, "¿ya lo vieron?"))
 
     // Hoy se arma con la pasada de Kairós: una a pedido, para no esperar la del worker.
     const run = await api(page, "POST", "/api/admin/kairos/run", undefined, {})

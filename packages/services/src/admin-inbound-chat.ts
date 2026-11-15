@@ -381,8 +381,10 @@ export async function ingestInboundChat(
   }))
   const body = trimTo(input.body, BODY_MAX)
   const client = await clientOf(tx, chat.clientId)
-  // Se decide al llegar: Soporte solo ve lo que entra en una conversación de una clínica con su app.
-  const adminOnly = !client?.organizationId
+  // Se decide al llegar: Soporte solo ve lo que entra en una conversación de una clínica con su app,
+  // y no lo que llega después de que Ariadna la pasó a Administración (la conversación es de
+  // Administración desde ese mensaje, ADR 0191): tampoco su actividad ni lo que pida Hoy.
+  const adminOnly = !client?.organizationId || (await chatHandedToAdministration(tx, chat))
   const [created] = await tx
     .insert(saasInboundMessage)
     .values({
@@ -1198,12 +1200,14 @@ export async function getChat(
           .orderBy(desc(kairosChatTurn.updatedAt))
           .limit(1)
       : []
+  // Lo que Ariadna pasó a Administración (cobros, su plan) es de Administración desde ese mensaje:
+  // Soporte no ve que se pasó, ni a quién, ni que está en pausa, ni puede devolverla a Ariadna.
+  const hiddenHandover = !admin && handed?.to === "administracion"
   const kairosHandover =
-    chat.kairosPausedAt && !chat.kairosPausedBy
+    chat.kairosPausedAt && !chat.kairosPausedBy && !hiddenHandover
       ? {
           at: handed?.at ?? chat.kairosPausedAt,
-          // Lo pasado a Administración no le dice a Soporte por qué: es de cobros o de su plan.
-          why: handed?.to === "administracion" && !admin ? null : (handed?.why ?? null),
+          why: handed?.why ?? null,
           agent:
             (handed?.agent as ChatTurnAgent | undefined) ??
             (client?.organizationId ? "ariadna" : "kairos"),
@@ -1258,11 +1262,11 @@ export async function getChat(
       : null,
     contact: contact ?? null,
     notClinicAt: chat.notClinicAt,
-    kairosPausedAt: chat.kairosPausedAt,
+    kairosPausedAt: hiddenHandover ? null : chat.kairosPausedAt,
     handledByKairos: kairosAvailable && !chat.kairosPausedAt,
     kairosAvailable,
     handledByAriadna: ariadnaAvailable && !chat.kairosPausedAt,
-    ariadnaAvailable,
+    ariadnaAvailable: ariadnaAvailable && !hiddenHandover,
     kairosPausedBy:
       chat.kairosPausedAt && chat.kairosPausedBy
         ? { userId: chat.kairosPausedBy, name: (await userName(tx, chat.kairosPausedBy)) ?? "" }
@@ -1301,6 +1305,11 @@ export interface ChatReplyInput {
   body?: string | null
   /** Solo Administración: Soporte no lo ve aunque vea la conversación. */
   adminOnly?: boolean | null
+  /**
+   * Solo cuando Ariadna la pasó a Administración: con `adminOnly: false`, que Administración
+   * quitó a propósito «Solo administración» (sin esto, lo de esa conversación sale solo para ella).
+   */
+  adminOnlyOverride?: boolean | null
   /** Fuera de las 24 h, solo en WhatsApp: la plantilla con que se retoma. */
   template?: string | null
   /**
@@ -1387,12 +1396,14 @@ export async function prepareChatReply(
       metadata: { chatId: chat.id, alEscribir: true },
     })
   }
-  // Lo que Ariadna pasó a Administración (cobros, su plan) nace «Solo administración» si no se dice otra cosa.
-  const markedAdminOnly =
-    input.adminOnly === undefined || input.adminOnly === null
-      ? await chatHandedToAdministration(tx, chat)
-      : input.adminOnly
-  const adminOnly = !client?.organizationId || (actor.role === "admin" && Boolean(markedAdminOnly))
+  // Lo que Ariadna pasó a Administración (cobros, su plan) nace «Solo administración» aunque llegue
+  // `adminOnly: false` (la pantalla lo manda siempre): mostrárselo a Soporte pide decirlo aparte,
+  // con `adminOnlyOverride`. Así un formulario que se quedó sin marcar no lo deja ver.
+  const handedToAdministration = await chatHandedToAdministration(tx, chat)
+  const markedAdminOnly = handedToAdministration
+    ? !(input.adminOnly === false && input.adminOnlyOverride === true)
+    : Boolean(input.adminOnly)
+  const adminOnly = !client?.organizationId || (actor.role === "admin" && markedAdminOnly)
   let proposalId: string | null = null
   if (input.proposalId && !template) {
     if (!chat.clientId)
@@ -1634,6 +1645,10 @@ export async function resumeChatKairos(
   now = new Date(),
 ): Promise<{ chatId: string; kairosPausedAt: null }> {
   const chat = await lockChat(tx, actor, chatId)
+  // Lo que Ariadna pasó a Administración lo devuelve solo Administración: para Soporte no hay nada
+  // que devolver (ni sabe que se pasó).
+  if (actor.role !== "admin" && (await chatHandedToAdministration(tx, chat)))
+    throw new ServiceError("CHAT_NOT_PAUSED", 409, "Esta conversación no está en pausa")
   if (chat.kairosPausedAt) {
     await tx
       .update(saasChat)

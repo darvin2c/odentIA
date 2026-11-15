@@ -267,6 +267,30 @@ export function kairosChatState(
   return { kind: "persona", agent, words, canReturn: true }
 }
 
+/**
+ * Cómo sale «Solo administración» en una respuesta a mano. Mientras Ariadna la tenga pasada a
+ * Administración (`toAdministration`), la casilla nace marcada en cada respuesta y quitarla se dice
+ * aparte (`adminOnlyOverride`): sin eso, el servidor la guarda solo para Administración igual.
+ * `canHide`: es Administración y Soporte ve la conversación (clínica con su app).
+ */
+export function replyAdminOnly(
+  canHide: boolean,
+  toAdministration: boolean,
+): {
+  initial: boolean
+  fields: (adminOnly: boolean) => { adminOnly?: boolean; adminOnlyOverride?: boolean }
+} {
+  return {
+    initial: canHide && toAdministration,
+    fields: (adminOnly) =>
+      !canHide
+        ? {}
+        : toAdministration && !adminOnly
+          ? { adminOnly: false, adminOnlyOverride: true }
+          : { adminOnly },
+  }
+}
+
 /** El título del aviso cuando Kairós o Ariadna se la pasaron al equipo. */
 export function handoverTitle(state: Extract<KairosChatState, { kind: "paso" }>): string {
   if (state.agent === "Kairós") return "Kairós se la pasó al equipo"
@@ -317,7 +341,7 @@ const sentSchema = z.object({ outreachId: z.string(), status: z.string() })
 /** Responder con texto libre (dentro de las 24 h). */
 export async function sendChatReply(
   chatId: string,
-  body: { body: string; adminOnly?: boolean; proposalId?: string },
+  body: { body: string; adminOnly?: boolean; adminOnlyOverride?: boolean; proposalId?: string },
 ): Promise<z.infer<typeof sentSchema>> {
   try {
     return sentSchema.parse(
