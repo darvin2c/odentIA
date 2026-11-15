@@ -253,7 +253,10 @@ describe("el correo", () => {
     expect(files).toHaveLength(2)
     for (const file of files) {
       expect(file).toMatchObject({ kind: "correo", adminOnly: true, source: "correo" })
-      expect(file.deleteAfter).not.toBeNull()
+      // Lo de soporte@ ya no se borra solo: solo lo que se marca como la carga.
+      expect(file.deleteAfter).toBeNull()
+      expect(file.receivedAt).not.toBeNull()
+      expect(file.inboundEmailId).toBe(data.id)
       expect(objects.has(file.objectKey)).toBe(true)
     }
     expect(files.map((file) => file.contentType).sort()).toEqual(["application/pdf", "text/csv"])
