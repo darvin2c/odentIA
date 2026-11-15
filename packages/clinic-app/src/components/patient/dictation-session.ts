@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { byFormOrder, changesWritten, type FormTarget, proposesValue, reread, signOrder } from "./clio-form-proposals"
+import { byFormOrder, type FormTarget, proposesValue, signOrder } from "./clio-form-proposals"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
@@ -71,10 +71,10 @@ export const confirmable = (item: DictationSuggestion) => item.status === "lista
  */
 export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && proposesValue(item))
 /**
- * Al firmar viene marcado lo que se puede confirmar, menos lo que cambia lo escrito a mano y lo de la
- * segunda lectura, que quedó por revisar: eso lo decide una persona.
+ * Al firmar viene marcado lo que se puede confirmar, menos lo que quedó por revisar (lo que cambia lo
+ * escrito a mano, lo de la segunda lectura): eso lo decide una persona.
  */
-export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && !changesWritten(item) && !reread(item)
+export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && item.status === "lista"
 /** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
 const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
 /**

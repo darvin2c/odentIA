@@ -101,5 +101,5 @@ export async function extractDictation(
   if (!misses.length) return { ...read, model: spec.modelName }
   // Si esa lectura falla, la pausa no se pierde: queda lo de la primera y el aviso de la red.
   const reread = await rereadFormSentences(model, spec, misses, forms).catch(() => [])
-  return { ...read, drafts: [...read.drafts, ...reread], reread: { sentences: misses.length, drafts: reread.length }, model: spec.modelName }
+  return { ...read, drafts: [...read.drafts, ...reread], model: spec.modelName }
 }

@@ -57,7 +57,6 @@ import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import {
   answerFormFromDictation,
-  changesWrittenAnswer,
   type DictationFormQuestion,
   dictationFormQuestions,
   formAnswerFragments,
@@ -65,7 +64,6 @@ import {
   formDropNotices,
   pendingFormValues,
   prepareFormAnswer,
-  rereadFormAnswer,
   withDiagnosisFormAnswers,
   withFormTwins,
   withoutFormNotes,
@@ -2219,13 +2217,13 @@ export async function confirmDictationSuggestion(
   const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
-  // La respuesta de ficha que cambia lo ya escrito queda por revisar, y la cambia una persona en su
-  // pregunta, de a una (revisión final del 15 nov, decisión 2): esa sí se confirma. La de la segunda
-  // lectura, con su valor, también: se revisa y se confirma en su pregunta.
-  const oneByOne = row.kind === "ficha" && (changesWrittenAnswer(splitMeta(row.payload).data) || rereadFormAnswer(splitMeta(row.payload).data))
+  const data = splitMeta(row.payload).data
+  // Una respuesta de ficha por revisar con su valor (la que cambia lo ya escrito, revisión final del
+  // 15 nov, decisión 2, y la de la segunda lectura) se revisa y se confirma en su pregunta, de a una.
+  // La que no trae valor pide elegirlo: esa no se confirma.
+  const oneByOne = row.kind === "ficha" && data["value"] != null
   if (row.status === "por_revisar" && !oneByOne) throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
   if (row.kind === "ficha" && options.expectedValue !== undefined) {
-    const data = splitMeta(row.payload).data
     if (JSON.stringify(data["value"] ?? null) !== JSON.stringify(options.expectedValue ?? null)) {
       throw conflict("SUGGESTION_CHANGED", `Clío la cambió mientras la veías: ahora propone «${formAnswerWords(data)}». Revísala y confírmala otra vez.`)
     }
@@ -2234,7 +2232,7 @@ export async function confirmDictationSuggestion(
   if (row.kind === "receta") throw conflict("PRESCRIPTION_NEEDS_ISSUE", "Una receta dictada se emite con «Emitir receta»")
   if (row.kind === "descanso") throw conflict("MEDICAL_LEAVE_NEEDS_ISSUE", "Un descanso médico dictado se emite con «Emitir descanso»")
   // La operación recibe los campos de la sugerencia, no sus metadatos.
-  const payload = splitMeta(row.payload).data
+  const payload = data
   let entityId: string | null = null
   // Un diagnóstico dictado que ya estaba registrado: a cuál apunta y qué se le dice al clínico.
   let onFile: { id: string; note: string } | null = null

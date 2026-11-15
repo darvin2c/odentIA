@@ -8,8 +8,8 @@ import {
   type DictationDraft,
   type DictationFormQuestion,
   formAnswerWords,
-  formVocabulary,
   groundHeard,
+  heardVocabularyOf,
   operationAgentSchema,
 } from "@odentia/services"
 import { z } from "zod"
@@ -338,6 +338,9 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
 
 const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
 
+/** Las comillas con que el modelo a veces copia lo dictado: no son lo dicho. */
+const QUOTES = /[«»“”"]/gu
+
 /**
  * El fragmento que el modelo dice haber oído solo vale si de verdad está en lo
  * dictado: la pantalla lo muestra como «lo que dijiste» y lo resalta. Lo que no
@@ -363,7 +366,7 @@ export function groundSource(said: string | undefined, transcript: string): stri
   // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
   // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
   // respuestas de ficha perdidas eran las comillas.
-  return ground(fragment) || ground(fragment.replace(/[«»“”"]/gu, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim())
+  return ground(fragment) || ground(fragment.replace(QUOTES, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim())
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -409,17 +412,18 @@ export function readDictation(
     omitted += 1
     return []
   }
-  const heard = forms.length ? formVocabulary(forms) : null
   /**
    * Lo dicho, tal cual está en lo dictado. La de una respuesta de ficha también se
    * encuentra si Clío escribió bien el término que Chrome oyó mal («molar derecha»
-   * por «volar derecha»): vale la frase como se dictó (`groundHeard`).
+   * por «volar derecha»), con los términos de su ficha, como la comprueba el
+   * servidor: vale la frase como se dictó (`groundHeard`).
    */
   const quote = (item: Record<string, unknown>, kind?: DictationDraft["kind"]) => {
     const said = typeof item["dicho"] === "string" ? item["dicho"] : undefined
     const grounded = groundSource(said, transcript)
-    if (grounded || kind !== "ficha" || !heard || !said) return grounded
-    return groundHeard(said.replace(/[«»“”"]/gu, ""), transcript, heard)
+    const question = kind === "ficha" ? forms.find((one) => one.number === item["question"]) : undefined
+    if (grounded || !question || !said) return grounded
+    return groundHeard(said.replace(QUOTES, ""), transcript, heardVocabularyOf(question))
   }
   /** Algo que no se pudo usar: se cuenta y, si se sabe qué frase lo pidió, se guarda para mostrarla. */
   const skip = (item: unknown) => {
@@ -517,8 +521,6 @@ export interface DictationExtraction {
   omitted: number
   /** Lo que dijo para pedir lo que no se pudo usar, tal cual está en lo dictado: la pantalla lo muestra. */
   unused: string[]
-  /** La segunda lectura de las fichas: cuántas oraciones se leyeron de nuevo y cuántas respuestas dejó. */
-  reread?: { sentences: number; drafts: number }
   model: string
 }
 
@@ -654,14 +656,30 @@ function rawToolArguments(reply: AIMessage, name = DICTATION_TOOL): string | nul
 
 type Invocable = { invoke: (messages: BaseMessage[]) => Promise<AIMessage> }
 
-/** El modelo con la herramienta que registra lo ordenado; sin `bindTools`, el modelo tal cual. */
-function withRecorder(model: unknown, recorder: unknown): Invocable {
+/**
+ * Una llamada al modelo con la herramienta que registra lo ordenado (sin
+ * `bindTools`, el modelo tal cual), anotada en lo que cuesta, y sus argumentos
+ * tal como llegaron, con las claves repetidas unidas (`parseToolArguments`); si
+ * no se encuentran, lo que leyó LangChain. `args`: sin la herramienta, nada.
+ */
+async function callRecorder(
+  model: unknown,
+  spec: Pick<LlmSpec, "provider" | "modelName">,
+  recorder: { name: string },
+  messages: BaseMessage[],
+): Promise<{ reply: AIMessage; args: unknown; repeated: string[]; raw: string | null }> {
   const bindable = model as { bindTools?: (tools: unknown[]) => Invocable }
-  return bindable.bindTools ? bindable.bindTools([recorder]) : (model as Invocable)
+  const reply = await (bindable.bindTools ? bindable.bindTools([recorder]) : (model as Invocable)).invoke(messages)
+  reportReplyUse(spec.provider, spec.modelName, reply)
+  const call =
+    reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === recorder.name) : undefined
+  const raw = call ? rawToolArguments(reply as AIMessage, recorder.name) : null
+  const parsed = raw === null ? null : parseToolArguments(raw)
+  return { reply, args: call ? (parsed ? parsed.value : call.args) : undefined, repeated: parsed?.repeated ?? [], raw }
 }
 
 /** La llamada de la segunda lectura de las fichas. */
-export const DICTATION_REREAD_TOOL = "registrar_fichas"
+const DICTATION_REREAD_TOOL = "registrar_fichas"
 
 /** Cuántas oraciones se leen de nuevo en una pausa, como mucho. */
 const REREAD_MAX_SENTENCES = 6
@@ -703,13 +721,9 @@ export async function rereadFormSentences(
     description: "Las respuestas de la ficha que dicen estas oraciones.",
     schema: z.object({ fichas: dictationFormAnswers() }),
   })
-  const reply = await withRecorder(model, recorder).invoke([new SystemMessage({ content: REREAD_PROMPT }), new HumanMessage({ content: human })])
-  reportReplyUse(spec.provider, spec.modelName, reply)
-  const call = (reply as AIMessage).tool_calls?.find((item) => item.name === DICTATION_REREAD_TOOL)
-  if (!call) return []
-  const raw = rawToolArguments(reply as AIMessage, DICTATION_REREAD_TOOL)
-  const parsed = raw === null ? null : parseToolArguments(raw)
-  const read = readDictation(parsed ? parsed.value : call.args, targets.map((target) => target.said).join("\n"), 0, [{ key: "fichas", kind: "ficha" }], forms)
+  const { args } = await callRecorder(model, spec, recorder, [new SystemMessage({ content: REREAD_PROMPT }), new HumanMessage({ content: human })])
+  if (args === undefined) return []
+  const read = readDictation(args, targets.map((target) => target.said).join("\n"), 0, [{ key: "fichas", kind: "ficha" }], forms)
   // Solo la pregunta de su oración, con la frase dentro de esa oración.
   const own = (draft: DictationDraft) =>
     targets.some((target) => target.questions.some((question) => question.number === draft.payload["question"]) && !!draft.sourceText && loose(target.said).includes(loose(draft.sourceText)))
@@ -738,21 +752,11 @@ export async function askDictationModel(
     description: profile.toolDescription,
     schema: profile.extraction,
   })
-  const reply = await withRecorder(model, record).invoke(dictationMessages(ask, profile, viaResponses(model)))
-  reportReplyUse(spec.provider, spec.modelName, reply)
-  const call =
-    reply instanceof AIMessage || "tool_calls" in reply
-      ? (reply as AIMessage).tool_calls?.find((item) => item.name === DICTATION_TOOL)
-      : undefined
-  // Lo que llegó tal cual, con las claves repetidas unidas; si no se encuentra, lo que leyó LangChain.
-  const raw = call ? rawToolArguments(reply as AIMessage) : null
-  const parsed = raw === null ? null : parseToolArguments(raw)
+  const { reply, args, repeated, raw } = await callRecorder(model, spec, record, dictationMessages(ask, profile, viaResponses(model)))
   return {
-    read: call
-      ? readDictation(parsed ? parsed.value : call.args, ask.transcript, ask.pending.length, profile.parts, ask.forms ?? [])
-      : null,
+    read: args === undefined ? null : readDictation(args, ask.transcript, ask.pending.length, profile.parts, ask.forms ?? []),
     reply,
-    repeated: parsed?.repeated ?? [],
+    repeated,
     raw,
   }
 }

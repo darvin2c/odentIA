@@ -474,6 +474,9 @@ function StaffResponseDetail({
     if (valued.length > 0) setAnnouncement(`${CLINICAL_NAME} propone ${answersWords(valued.length)} en esta ficha.`)
   }, [valued.length])
   const busy = confirming || !!clio?.busy
+  /** Lo que se escribe o elige en una pregunta de esta ficha. */
+  const fieldControl = (fieldId: string) =>
+    articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, textarea, button, [role="combobox"])`) ?? null
   // «Usar en Percusión» de «No pude usar esto»: lo dictado va al lado de su pregunta mientras siga
   // vacía, y el foco va a ella. No llena nada: la respuesta la elige o la escribe la persona.
   const hint = editable && clio?.hint?.responseId === response.id ? clio.hint : null
@@ -481,10 +484,10 @@ function StaffResponseDetail({
   useEffect(() => {
     if (!hint) return
     const focus = () => {
-      const box = articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(hint.fieldId)}"]`)
-      if (!box || box.contains(document.activeElement)) return
-      box.scrollIntoView?.({ block: "center" })
-      box.querySelector<HTMLElement>(':is(input, textarea, button, [role="combobox"])')?.focus()
+      const control = fieldControl(hint.fieldId)
+      if (!control || control.closest("[data-field]")?.contains(document.activeElement)) return
+      control.scrollIntoView?.({ block: "center" })
+      control.focus()
     }
     const frame = requestAnimationFrame(focus)
     // El cajón pone el foco al abrirse: cuando termina, vuelve a la pregunta.
@@ -497,8 +500,7 @@ function StaffResponseDetail({
   /** Tras confirmar o descartar el botón desaparece: el foco vuelve a la pregunta, o a la ficha. */
   const focusAfter = (fieldId: string | null) =>
     requestAnimationFrame(() => {
-      const question = fieldId ? articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, button, [role="combobox"])`) : null
-      ;(question ?? articleRef.current)?.focus()
+      ;((fieldId ? fieldControl(fieldId) : null) ?? articleRef.current)?.focus()
     })
   // Respondida a mano, la pregunta ya es de la persona: lo que proponía Clío ahí se descarta solo,
   // y no aparece después en «Firmar la atención». Si la respondió otra persona, se dice qué quedó.

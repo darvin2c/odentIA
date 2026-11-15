@@ -129,8 +129,11 @@ export const changesWritten = (item: DictationSuggestion): boolean =>
  */
 export const reread = (item: DictationSuggestion): boolean => item.kind === "ficha" && item.payload["reread"] === true && item.payload["value"] != null
 
-/** Lo que Clío propone con un valor: lo que se confirma, lo que cambia lo escrito y lo de la segunda lectura. Lo demás es un aviso. */
-export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || changesWritten(item) || reread(item)
+/**
+ * Lo que Clío propone con un valor: lo que se confirma y, por revisar, lo que cambia lo escrito y lo
+ * de la segunda lectura. La respuesta de ficha sin valor es un aviso («elige tú»).
+ */
+export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || (item.kind === "ficha" && item.payload["value"] != null)
 
 /** «1 respuesta», «3 respuestas». */
 export const answersWords = (count: number): string => (count === 1 ? "1 respuesta" : `${count} respuestas`)

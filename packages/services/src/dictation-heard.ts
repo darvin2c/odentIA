@@ -20,7 +20,7 @@
  * el número del término siguiente), ni «ser obturados» por «cero obturados»
  * (un número no se lee de otra palabra).
  */
-export const HEARD_AS: Readonly<Record<string, readonly string[]>> = {
+const HEARD_AS: Readonly<Record<string, readonly string[]>> = {
   overjet: ["overjat", "overjaget"],
   frankl: ["francol", "franco"],
   molar: ["volar"],
@@ -28,8 +28,8 @@ export const HEARD_AS: Readonly<Record<string, readonly string[]>> = {
   cpod: ["p o d"],
 }
 
-/** Sin tildes ni mayúsculas, con los espacios de un texto como uno solo. */
-const plain = (text: string) =>
+/** Sin tildes ni mayúsculas, con los espacios de un texto como uno solo: como se comparan lo dicho y la ficha. */
+export const plain = (text: string) =>
   text
     .toLowerCase()
     .normalize("NFD")

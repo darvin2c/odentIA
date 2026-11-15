@@ -192,8 +192,7 @@ for (const dictation of cases) {
       },
     )
   }
-  const firstDrafts = read.drafts
-  const dictated = [...firstDrafts, ...reread]
+  const dictated = [...read.drafts, ...reread]
   // Como el servidor: el diagnóstico que también pregunta una ficha va a los dos lugares, y la nota
   // pierde lo que fue para la ficha y las frases que solo corrigen.
   const all = withDiagnosisFormAnswers(dictated, questions)
@@ -204,7 +203,7 @@ for (const dictation of cases) {
     .flatMap((draft) => Object.values(draft.payload).filter((value): value is string => typeof value === "string"))
     .join(" ")
     .toLowerCase()
-  totals.leidas += firstDrafts.filter((draft) => draft.kind === "ficha").length
+  totals.leidas += read.drafts.filter((draft) => draft.kind === "ficha").length
   const notes: string[] = []
   const listed = new Map<string, unknown>()
   const reviewed = new Map<string, unknown>()
