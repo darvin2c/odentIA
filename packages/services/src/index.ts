@@ -8,6 +8,7 @@
  */
 
 export * from "./address-suggestions.js"
+export * from "./admin-alta-sql.js"
 export * from "./admin-client-files.js"
 export * from "./admin-clients.js"
 export * from "./admin-core.js"

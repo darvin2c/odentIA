@@ -848,6 +848,20 @@
       "when": 1794683271292,
       "tag": "0120_preguntas_al_paciente_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1794700489398,
+      "tag": "0121_kairos_vigila_el_alta",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1794700493913,
+      "tag": "0122_kairos_vigila_el_alta_reglas",
+      "breakpoints": true
     }
   ]
 }

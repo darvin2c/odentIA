@@ -254,6 +254,7 @@ describe("roles", () => {
       ["POST", `/${clientId}/merge`, { dropId: someId }],
       ["POST", `/${clientId}/archive`],
       ["DELETE", `/files/${someId}`],
+      ["POST", `/files/${someId}/carga`],
       ["POST", `/contacts/${someId}/link`, { userId: ADMIN }],
     ]
     for (const [method, path, body] of forbidden) {
@@ -341,6 +342,23 @@ describe("clientes", () => {
     expect((await call("GET", "/tasks?who=todas", SUPPORT)).status).toBe(200)
     expect((await call("GET", "/pipeline?product=dental", SUPPORT)).status).toBe(200)
     expect((await call("GET", "/tasks?who=nadie", SUPPORT)).status).toBe(400)
+  })
+
+  it("el Embudo «Alta»: Soporte sin «Primer pago» ni «Pagó», y los filtros se validan", async () => {
+    const keys = async (who: string) => {
+      const res = await call("GET", "/pipeline/alta?owner=mio", who)
+      expect(res.status).toBe(200)
+      return (await json(res)).data.columns.map((column: { key: string }) => column.key)
+    }
+    expect(await keys(ADMIN)).toEqual([
+      "bienvenida",
+      "sus_datos",
+      "arranque",
+      "primer_pago",
+      "pago",
+    ])
+    expect(await keys(SUPPORT)).toEqual(["bienvenida", "sus_datos", "arranque"])
+    expect((await call("GET", "/pipeline/alta?origin=xyz", ADMIN)).status).toBe(400)
   })
 
   it("los enlaces de antes encuentran su cliente por la solicitud o por la cuenta, sin crear ninguno", async () => {
@@ -920,6 +938,74 @@ describe("documentos", () => {
     )
   })
 
+  it("«Es la carga de datos»: Administración la marca; si llegó hace más de 30 días, se borra al marcarla", async () => {
+    const clientId = await newClient("Odontología Quillabamba (ficticia)", "carga@andes.test")
+    const arrive = async (messageId: string, daysAgo: number) => {
+      const fileKey = `inbound/${crypto.randomUUID()}.csv`
+      objects.set(fileKey, new TextEncoder().encode("nombre\nRosa\n"))
+      const inbound = await ownerDb.transaction((tx) =>
+        ingestInboundEmail(tx as Db, {
+          mailbox: "soporte",
+          product: "dental",
+          messageId,
+          from: "carga@andes.test",
+          to: "soporte@odentia32.com",
+          subject: "Los pacientes",
+          text: "Rosa Díaz, DNI 12345678",
+          receivedAt: new Date(Date.now() - daysAgo * DAY),
+          attachments: [{ filename: "pacientes.csv", contentType: "text/csv", size: 12, fileKey }],
+          senderVerified: true,
+        }),
+      )
+      expect(inbound.clientId).toBe(clientId)
+      return { fileId: inbound.fileIds[0] ?? "", fileKey, emailId: inbound.id }
+    }
+    const recent = await arrive("<carga-5@andes.test>", 5)
+    // Documentos dice el día de borrado con la cuenta del servidor antes de marcarlo.
+    const listed = (await json(await call("GET", `/${clientId}/files`, ADMIN))).data.items.find(
+      (item: { id: string }) => item.id === recent.fileId,
+    )
+    expect(listed).toMatchObject({ kind: "correo", deleteAfter: null, cargaDueNow: false })
+    expect(listed.cargaDeleteAfter).toBe(day(25))
+
+    expect((await call("POST", `/files/${recent.fileId}/carga`, SUPPORT)).status).toBe(403)
+    const marked = await call("POST", `/files/${recent.fileId}/carga`, ADMIN)
+    await expectStatus(marked, 200)
+    expect((await json(marked)).data).toMatchObject({
+      file: { id: recent.fileId, kind: "archivo_clinica", deleteAfter: day(25) },
+      dueNow: false,
+      deletedNow: false,
+    })
+    expect(objects.has(recent.fileKey)).toBe(true)
+    // Dos veces es lo mismo.
+    await expectStatus(await call("POST", `/files/${recent.fileId}/carga`, ADMIN), 200)
+
+    const old = await arrive("<carga-31@andes.test>", 31)
+    const due = await call("POST", `/files/${old.fileId}/carga`, ADMIN)
+    await expectStatus(due, 200)
+    expect((await json(due)).data).toMatchObject({ dueNow: true, deletedNow: true })
+    expect(objects.has(old.fileKey)).toBe(false)
+    const [row] = await ownerDb
+      .select()
+      .from(saasClientFile)
+      .where(eq(saasClientFile.id, old.fileId))
+    expect(row?.deletedAt).not.toBeNull()
+    const email = (await json(await call("GET", `/inbound/${old.emailId}`, ADMIN))).data
+    expect(email.text).toBeNull()
+    expect(email.files).toEqual([
+      expect.objectContaining({ fileId: old.fileId, kind: "archivo_clinica", deleted: true }),
+    ])
+    // Soporte no recibe la lista de adjuntos.
+    expect((await json(await call("GET", `/inbound/${old.emailId}`, SUPPORT))).data.files).toEqual(
+      [],
+    )
+    // Lo ya borrado, o lo que no existe, no está.
+    expect((await call("POST", `/files/${old.fileId}/carga`, ADMIN)).status).toBe(404)
+    expect(
+      (await call("POST", "/files/8b1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f/carga", ADMIN)).status,
+    ).toBe(404)
+  })
+
   it("un archivo que no es lo que dice, uno muy grande o uno sin cliente no queda guardado", async () => {
     const clientId = await newClient("Clínica Archivos Malos (ficticia)", "malos@andes.test")
     const count = objects.size
@@ -944,5 +1030,128 @@ describe("documentos", () => {
     )
     await expectStatus(orphan, 404)
     expect(objects.size).toBe(count)
+  })
+})
+
+describe("«No aplica» en los pasos del alta", () => {
+  async function clientWithAccount(slug: string) {
+    const orgId = `org-${slug}-ficticia`
+    await ownerDb
+      .insert(organization)
+      .values({
+        id: orgId,
+        name: `Alta ${slug} (ficticia)`,
+        slug: `${slug}-ficticia`,
+        createdAt: new Date(),
+      })
+    const [row] = await ownerDb
+      .insert(saasClient)
+      .values({ name: `Alta ${slug} (ficticia)`, product: "dental", organizationId: orgId })
+      .returning({ id: saasClient.id })
+    if (!row) throw new Error("sin cliente")
+    return row.id
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: los pasos se leen sin tipo
+  const stepOf = (body: any, key: string) =>
+    body.data.steps.find((item: { key: string }) => item.key === key)
+
+  it("Soporte marca equipo; pacientes es de Administración; quitarlo responde con los pasos", async () => {
+    const clientId = await clientWithAccount("na-alta")
+    const marked = await call("POST", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT, {
+      reason: "Trabaja sola",
+    })
+    await expectStatus(marked, 200)
+    const body = await json(marked)
+    expect(stepOf(body, "equipo")).toMatchObject({
+      state: "no_aplica",
+      detail: "No aplica: Trabaja sola",
+    })
+    expect(body.data).toMatchObject({ total: 10, notApplicable: 1 })
+
+    await expectStatus(
+      await call("POST", `/${clientId}/onboarding/pacientes/not-applicable`, SUPPORT, {
+        reason: "No tenía lista de pacientes",
+      }),
+      403,
+    )
+    await expectStatus(
+      await call("POST", `/${clientId}/onboarding/pacientes/not-applicable`, ADMIN, {
+        reason: "No tenía lista de pacientes",
+      }),
+      200,
+    )
+    const cleared = await call("DELETE", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT)
+    await expectStatus(cleared, 200)
+    expect(stepOf(await json(cleared), "equipo").state).toBe("falta")
+
+    const empty = await call("POST", `/${clientId}/onboarding/equipo/not-applicable`, SUPPORT, {})
+    await expectStatus(empty, 400)
+    expect((await json(empty)).error.fields.reason).toBe("Escribe por qué no aplica")
+    const wrong = await call("POST", `/${clientId}/onboarding/carta/not-applicable`, ADMIN, {
+      reason: "Ya la tiene",
+    })
+    await expectStatus(wrong, 400)
+    expect((await json(wrong)).error.fields.step).toBeTruthy()
+  })
+
+  it("un rol que no es del equipo da 403 antes de leer el cuerpo", async () => {
+    const clientId = await clientWithAccount("na-ajeno")
+    const outsider = new Hono<{ Variables: { adminActor: AdminActor } }>()
+    outsider.use("*", async (c, next) => {
+      c.set("adminActor", { userId: "arm-ajeno", role: "vendedor" } as unknown as AdminActor)
+      await next()
+    })
+    outsider.route(
+      BASE,
+      createAdminClientsRoute({
+        ownerDb,
+        storage,
+        panelUrlOf: () => "https://app.odentia.localhost",
+        mailer: { send: async () => {} },
+      }),
+    )
+    outsider.onError((err, c) =>
+      err instanceof ServiceError
+        ? c.json(errorBody(c, err.code, err.message, err.fields), err.status)
+        : c.json(errorBody(c, "INTERNAL", "Error interno"), 500),
+    )
+    const response = await outsider.request(
+      `${BASE}/${clientId}/onboarding/equipo/not-applicable`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "esto no es json",
+      },
+    )
+    await expectStatus(response, 403)
+  })
+
+  it("sin «Conectar con Facebook», WhatsApp dice «Espera a Meta»; con él, le toca a la clínica", async () => {
+    const clientId = await clientWithAccount("na-meta")
+    const waiting = stepOf(
+      await json(await call("GET", `/${clientId}/onboarding`, SUPPORT)),
+      "whatsapp",
+    )
+    expect(waiting).toMatchObject({ label: "Espera a Meta", waitingOn: "meta" })
+    const withMeta = new Hono<{ Variables: { adminActor: AdminActor } }>()
+    withMeta.use("*", async (c, next) => {
+      c.set("adminActor", { userId: SUPPORT, role: "support" })
+      await next()
+    })
+    withMeta.route(
+      BASE,
+      createAdminClientsRoute({
+        ownerDb,
+        storage,
+        panelUrlOf: () => "https://app.odentia.localhost",
+        mailer: { send: async () => {} },
+        metaSignupAvailable: true,
+      }),
+    )
+    const ready = stepOf(
+      await json(await withMeta.request(`${BASE}/${clientId}/onboarding`)),
+      "whatsapp",
+    )
+    expect(ready).toMatchObject({ label: "WhatsApp conectado", waitingOn: "clinica" })
   })
 })

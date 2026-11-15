@@ -16,6 +16,7 @@ import {
   kairosRulesPass,
   linkContactToUser,
   listKairosItems,
+  markClientFileCarga,
   markOutreachSent,
   type OutreachEmail,
   type OutreachRow,
@@ -62,6 +63,8 @@ export interface AdminKairosDeps {
    * respuestas van a quien firma (la persona que aprueba, soporte@ u hola@).
    */
   conversationMailer?: Mailer
+  /** «Conectar con Facebook» está configurado: sin él, el paso de WhatsApp del alta espera a Meta. */
+  metaSignupAvailable?: boolean
 }
 
 function staffOf(c: Context): AdminActor {
@@ -136,6 +139,9 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
+    // Lo que ya pasó los 30 días queda para borrarse ahora: lo borra el worker en su vuelta
+    // siguiente (esta ruta no tiene el almacenamiento).
+    markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
   }
 }
 
@@ -296,7 +302,12 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
     return runService(c, 200, async () => {
       const { now, pass } = await deps.ownerDb.transaction(async (tx) => {
         const at = await dbNow(tx)
-        return { now: at, pass: await kairosRulesPass(tx, at) }
+        return {
+          now: at,
+          pass: await kairosRulesPass(tx, at, {
+            metaSignupAvailable: deps.metaSignupAvailable === true,
+          }),
+        }
       })
       // El modelo redacta fuera de la transacción de la pasada; nada se envía.
       const drafts = await draftPendingKairosItems(
