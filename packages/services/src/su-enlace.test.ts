@@ -1871,7 +1871,7 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   await f.run((tx) => grantResponsibility(tx, ORG, f.actor, thiago.patientId, { contactId: carla!.id, kind: "representante_legal", startsAt: "2020-01-01" }))
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla!.id, patientId: thiago.patientId }, { secretsKey: KEY }))
   const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
-  expect(form).toMatchObject({ firstName: "Thiago", age: 6, respondentFirstName: "Carla" })
+  expect(form).toMatchObject({ firstName: "Thiago", age: 6, sex: "M", respondentFirstName: "Carla" })
   expect(form.healthQuestions).toEqual(expect.arrayContaining(["dental.biberon", "dental.chupon", "dental.quienCepilla"]))
   expect(form.healthQuestions).not.toContain("medical.tabaco")
   expect(form.healthQuestions).not.toContain("personal.embarazo")

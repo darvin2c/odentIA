@@ -205,7 +205,7 @@ interface Draft {
   floss: YesNo
   bruxism: YesNoUnknown
   habits: string[]
-  /** «De pequeño» de un menor de 12, lo que cuenta quien lo cuida (odentIA). */
+  /** «Los dientes de Thiago en casa» de un menor de 12, lo que cuenta quien lo cuida (odentIA). */
   bottle: "" | BottleAnswer
   pacifier: "" | PacifierAnswer
   sweets: "" | SweetsAnswer
@@ -363,7 +363,7 @@ const CIGARETTE_OPTIONS = CIGARETTE_BANDS.map((value) => ({
 const CONDITION_OPTIONS = DECLARED_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
 /** Las de un niño, para quien lo cuida: sin «presión alta» ni radioterapia. */
 const CHILD_CONDITION_OPTIONS = DECLARED_CHILD_CONDITION_OPTIONS.map((value) => ({ value, label: value }))
-/** «De pequeño», con las palabras del dibujo de la mesa (entrega 7). */
+/** «Los dientes de Thiago en casa», con las palabras del dibujo de la mesa (entrega 7). */
 const BOTTLE_OPTIONS: ReadonlyArray<{ value: BottleAnswer; label: string }> = [
   { value: "no", label: "No" },
   { value: "si", label: "Sí" },
@@ -667,6 +667,8 @@ export interface RegistrationFill {
   firstName?: string | null
   /** Sus años cumplidos: de un menor de 12 se le pregunta lo de un niño a quien lo cuida. */
   age?: number | null
+  /** Su sexo, solo para concordar las palabras («que la cuidas», «respondes por ella»); nulo si no se sabe. */
+  sex?: "F" | "M" | null
   /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
   respondentFirstName?: string | null
   /** Aún no aceptó el aviso de privacidad (registrada por teléfono, por ejemplo): se pide al final. */
@@ -915,9 +917,11 @@ export function RegistrationQuestionnaire({
   const ageNow = fill && !isRealDate(draft.birthDate) ? (fill.age ?? null) : ageOn(draft.birthDate, today)
   // Un niño (menor de 12): su salud se le pregunta a quien lo cuida, con ejemplos de niño (mesa del 13 nov, entrega 7).
   const child = isChildAge(ageNow)
+  // Su sexo: el que escribe o, en «Su enlace», el de su ficha.
+  const sexNow = draft.sex || fill?.sex || ""
   // A quién se le pregunta cada dato de salud: la misma regla del servidor (`registrationFieldApplies`).
   const applies = (key: RegistrationFieldKey) =>
-    !HEALTH_KEYS.has(key) || registrationFieldApplies(key, { sex: draft.sex || null, age: ageNow })
+    !HEALTH_KEYS.has(key) || registrationFieldApplies(key, { sex: sexNow || null, age: ageNow })
   const asked = (key: RegistrationFieldKey) =>
     !fill
       ? registrationFieldAsked(config, key, countryCode, product) && applies(key)
@@ -955,9 +959,17 @@ export function RegistrationQuestionnaire({
   // A quien cuida a un niño se le habla a él, también en «Su enlace»: «¿Thiago tiene…?».
   const aboutOther = forOther || (!!fill && child)
   const you = (self: string, other: string) => (aboutOther ? other : self)
+  // «la» o «lo» según su sexo: «que la cuidas». Sin saberlo, la frase va sin pronombre (K8).
+  const pronoun = sexNow === "F" ? "la" : sexNow === "M" ? "lo" : null
   // Quien responde por el niño: «Lo respondes tú, Carla».
   const caregiver = fill ? (fill.respondentFirstName?.trim() ?? "") : (draft.repName.trim().split(/\s+/)[0] ?? "")
-  const answeredBy = child ? (caregiver ? `Lo respondes tú, ${caregiver}.` : "Lo respondes tú, que lo cuidas.") : ""
+  const answeredBy = child
+    ? caregiver
+      ? `Lo respondes tú, ${caregiver}.`
+      : pronoun
+        ? `Lo respondes tú, que ${pronoun} cuidas.`
+        : "Lo respondes tú."
+    : ""
   // Con el correo en el registro, basta el celular o el correo.
   const phoneRequired = !forOther && !asked("email") && wants("phone")
 
@@ -1003,7 +1015,7 @@ export function RegistrationQuestionnaire({
   const breastfeedingAsked = asked("medical.lactancia")
   const tobaccoAsked = asked("medical.tabaco")
   const alcoholAsked = asked("medical.alcohol")
-  // «Thiago de pequeño»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
+  // «Los dientes de Thiago en casa»: biberón y chupón hasta los 6 años; dulces, flúor y quién le cepilla, a todo menor de 12.
   const childhoodKeys = [
     "dental.biberon",
     "dental.chupon",
@@ -1192,7 +1204,7 @@ export function RegistrationQuestionnaire({
         ...(d.heartAntibiotic ? { antibioticoPrevio: INTERVIEW_OF[d.heartAntibiotic] } : {}),
       }
     if (asked("dental.problemaAnestesia") && d.anesthesia) dental.problemaAnestesia = INTERVIEW_OF[d.anesthesia]
-    // «De pequeño», con las claves de la entrevista de odentIA.
+    // «Los dientes de Thiago en casa», con las claves de la entrevista de odentIA.
     if (asked("dental.biberon") && d.bottle) dental.biberon = d.bottle
     if (asked("dental.chupon") && d.pacifier) dental.chupon = d.pacifier
     if (asked("dental.dulcesEntreComidas") && d.sweets) dental.dulcesEntreComidas = d.sweets
@@ -2502,7 +2514,8 @@ export function RegistrationQuestionnaire({
           {asked("personal.cirugias") ? (
             <YesNoField
               name="surgeries"
-              label={you("¿Te han operado alguna vez?", `¿A ${name} lo han operado alguna vez?`)}
+              // Sin «lo» ni «la»: vale para niño y niña aunque no se sepa su sexo (K8).
+              label={you("¿Te han operado alguna vez?", `¿Han operado alguna vez a ${name}?`)}
               detail="¿De qué y cuándo?"
               answer={draft.surgeries}
               text={draft.surgeriesText}
@@ -2515,7 +2528,7 @@ export function RegistrationQuestionnaire({
               name="hospitalized"
               label={you(
                 "¿Has estado internado en un hospital?",
-                `¿${first || "La persona"} ha estado internada en un hospital?`,
+                `¿Alguna vez internaron a ${name} en un hospital?`,
               )}
               detail="¿Por qué y cuándo?"
               answer={draft.hospitalized}
@@ -2601,8 +2614,9 @@ export function RegistrationQuestionnaire({
           name="childhood"
           grouped
           disabled={!childhoodKeys.some(asked)}
-          title={first ? `${first} de pequeño` : "De pequeño"}
-          description={`${answeredBy} Ayuda a cuidar sus dientes.`}
+          // En presente y para niño o niña: lo que se pregunta es de hoy (biberón, dulces, quién le cepilla; K8).
+          title={first ? `Los dientes de ${first} en casa` : "Sus dientes en casa"}
+          description={`${answeredBy} Nos ayuda a cuidarlos.`}
           onSkip={() => set({ bottle: "", pacifier: "", sweets: "", fluoride: "", brusher: "" })}
         >
           {asked("dental.biberon") ? (
@@ -2688,7 +2702,7 @@ export function RegistrationQuestionnaire({
                   invalid={control.invalid}
                   onBlur={control.onBlur}
                   value={draft.brusher || null}
-                  options={brusherOptions(draft.sex)}
+                  options={brusherOptions(sexNow)}
                   onChange={(value) => set({ brusher: value })}
                   columns={3}
                 />

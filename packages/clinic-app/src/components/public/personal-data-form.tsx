@@ -283,6 +283,7 @@ export function PersonalDataForm({
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
           age: form.age ?? null,
+          sex: form.sex ?? null,
           respondentFirstName: form.respondentFirstName ?? null,
           privacy: form.pending.privacy,
           promotions: form.pending.promotions,

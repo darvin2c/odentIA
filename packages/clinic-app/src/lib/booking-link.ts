@@ -387,6 +387,8 @@ export interface PersonalDataForm {
   firstName: string | null
   /** Sus años cumplidos hoy, si se saben: de un menor de 12 se le pregunta a quien lo cuida. */
   age?: number | null
+  /** Su sexo, solo para concordar las palabras («que la cuidas»); nulo si no se sabe. */
+  sex?: "F" | "M" | null
   /** Quien abre el enlace, si no es la persona (su madre, su tutor): «Lo respondes tú, Carla». */
   respondentFirstName?: string | null
   /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */

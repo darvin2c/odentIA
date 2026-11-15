@@ -88,10 +88,11 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).not.toContain("todos los días?")
   })
 
-  it("«Thiago de pequeño»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
+  it("K8 · «Los dientes de Thiago en casa»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(6)
-    expect(html).toContain("Thiago de pequeño")
+    expect(html).toContain("Los dientes de Thiago en casa")
+    expect(html).not.toContain("de pequeño")
     expect(html).toContain("¿Thiago toma biberón o pecho para dormir?")
     expect(html).toContain("¿Usa chupón o se chupa el dedo?")
     expect(html).toContain("¿Cuántas veces al día come dulces o toma jugos entre comidas?")
@@ -125,10 +126,46 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
   it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(8)
-    expect(html).toContain("Thiago de pequeño")
+    expect(html).toContain("Los dientes de Thiago en casa")
     expect(html).not.toContain("biberón")
     expect(html).not.toContain("chupón")
     expect(html).toContain("¿Quién le cepilla los dientes?")
+  })
+
+  it("K8 · a una niña se le habla en femenino, o sin pronombre si no se sabe su sexo", () => {
+    declareProduct(bareProduct("dental"))
+    const asks = {
+      ...config,
+      fields: { ...config.fields, "personal.cirugias": "optional" as const, "personal.hospitalizaciones": "optional" as const },
+    }
+    const lucia = (sex: "F" | "M" | null, respondentFirstName: string | null) =>
+      page({
+        config: asks,
+        fill: {
+          missing: new Set(),
+          health: true,
+          healthKeys: new Set(
+            healthQuestionsToAsk(asks, { countryCode: "PE", product: "dental", person: { sex, age: 3 } }, new Set()),
+          ),
+          hasRepresentative: true,
+          firstName: "Lucía",
+          age: 3,
+          sex,
+          respondentFirstName,
+        },
+      }).replace(/<[^>]+>/g, "|")
+    const girl = lucia("F", null)
+    expect(girl).toContain("Lo respondes tú, que la cuidas.")
+    expect(girl).toContain("¿Han operado alguna vez a Lucía?")
+    expect(girl).toContain("¿Alguna vez internaron a Lucía en un hospital?")
+    expect(girl).not.toMatch(/lo han operado|lo cuidas|internad[oa]/)
+    expect(lucia("M", null)).toContain("Lo respondes tú, que lo cuidas.")
+    // Sin su sexo, sin pronombre.
+    const unknown = lucia(null, null)
+    expect(unknown).toContain("Lo respondes tú.")
+    expect(unknown).not.toMatch(/que l[ao] cuidas/)
+    // El paso de un niño no repite el título en su descripción.
+    expect(lucia("F", "Carmen")).toContain("Los dientes de Lucía en casa||Lo respondes tú, Carmen. Nos ayuda a cuidarlos.")
   })
 
   it("latidIA no pregunta lo de pequeño del dentista, y a un niño tampoco el tabaco", () => {

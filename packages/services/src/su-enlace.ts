@@ -873,6 +873,11 @@ export interface PersonalLinkDataForm {
   /** Sus años cumplidos hoy, si se saben: a quien cuida a un menor de 12 se le pregunta lo de un niño. */
   age: number | null
   /**
+   * Su sexo, solo para concordar las palabras («que la cuidas», «¿respondes por ella?»); nulo si no
+   * se sabe o no es femenino ni masculino. La página no lo muestra.
+   */
+  sex: "F" | "M" | null
+  /**
    * El primer nombre de quien abre el enlace cuando no es la persona (su madre, su tutor): a quien
    * cuida a un niño se le habla a él («Lo respondes tú, Carla»). Nulo si el enlace es de la persona.
    */
@@ -931,6 +936,7 @@ export async function getPersonalLinkDataForm(
     countryCode: await findOrgCountry(tx, orgId),
     today,
     age: ageInYears(person.birthDate, today),
+    sex: person.sex === "F" || person.sex === "M" ? person.sex : null,
     respondentFirstName: self ? null : await linkContactFirstName(tx, orgId, link.row.contactId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
     // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).

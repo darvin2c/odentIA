@@ -97,11 +97,11 @@ const INTEGRATIONS = `${SETTINGS} › Integraciones`
 export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
 
 /**
- * Lo que odentIA le pregunta a quien cuida a un niño, «de pequeño» (pediatría dental): las guías de
+ * Lo que odentIA le pregunta a quien cuida a un niño, «Los dientes de Thiago en casa» (pediatría dental): las guías de
  * latidIA y vistIA lo quitan de su respuesta.
  */
 export const CHILDHOOD_DENTAL_SENTENCE =
-  " En el paso «De pequeño», con el nombre del niño, se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga en Configuración › Preguntas al paciente, en «Si se atiende un niño»."
+  " En el paso «Sus dientes en casa», con el nombre del niño (los dientes de Thiago en casa), se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga en Configuración › Preguntas al paciente, en «Si se atiende un niño»."
 
 const BASE_TOPICS: readonly HelpTopic[] = [
   {
