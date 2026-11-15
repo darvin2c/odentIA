@@ -1,18 +1,16 @@
-import { findMedication, type MedicationEntry, pregnancyToday } from "@odentia/clinical"
-import { dayWords, type MedicalHistory } from "./history.js"
+import { findMedication, type MedicationEntry } from "@odentia/clinical"
+import type { MedicalHistory } from "./history.js"
 
 /**
- * Lo que la receta de latidIA revisa además de las alergias (issue 229,
- * decisión 12):
+ * Lo que la receta de latidIA revisa además de lo que revisa toda receta
+ * (issue 229, decisión 12):
  * - los controlados no salen en la receta común: van en la receta oficial
  *   de cada país;
- * - con embarazo o lactancia registrados, lo recuerda, y lo contraindicado
- *   en el embarazo se avisa como una alergia: decide quien receta, y la receta
- *   guarda que vio el aviso (ADR 0143);
  * - a un menor de 12 años se le receta con su peso.
- * El duplicado por código ATC lo avisa `duplicateWarnings` (@odentia/clinical).
- * Las interacciones entre medicamentos quedan fuera: piden una base con
- * licencia.
+ * El embarazo, la lactancia, lo contraindicado en el embarazo y un AINE con un
+ * anticoagulante nacieron aquí y ahora son de toda receta (`prescribingAlerts`
+ * de @odentia/clinical), igual en odentIA. Las alergias y el duplicado por
+ * código ATC, también (`allergyWarnings`, `duplicateWarnings`).
  */
 
 /**
@@ -32,26 +30,6 @@ const CONTROLLED_ATC: ReadonlyArray<readonly [prefix: string, words: string]> = 
   ["N03AA", "un barbitúrico"],
   ["N06BA", "un estimulante"],
   ["N01AX03", "un anestésico disociativo"],
-]
-
-/**
- * Lo que está contraindicado en el embarazo, por su grupo ATC, dicho como se
- * lee en el aviso: los efectos en el feto están bien establecidos y aparecen
- * en las fichas técnicas.
- */
-const PREGNANCY_CONTRAINDICATED: ReadonlyArray<readonly [prefix: string, words: string]> = [
-  ["C09A", "los IECA están contraindicados"],
-  ["C09B", "los IECA están contraindicados"],
-  ["C09C", "los ARA II están contraindicados"],
-  ["C09D", "los ARA II están contraindicados"],
-  ["C10AA", "las estatinas están contraindicadas"],
-  ["B01AA", "los antagonistas de la vitamina K están contraindicados"],
-  ["J01AA", "las tetraciclinas están contraindicadas"],
-  ["D10BA", "los retinoides están contraindicados"],
-  ["A02BB01", "el misoprostol está contraindicado"],
-  ["N03AG01", "el ácido valproico está contraindicado"],
-  ["L04AX03", "el metotrexato está contraindicado"],
-  ["L01BA01", "el metotrexato está contraindicado"],
 ]
 
 /** A un menor de esta edad se le receta con su peso. */
@@ -89,10 +67,6 @@ export interface PrescribingContext {
 export interface PrescribingCheck {
   /** Lo que impide emitir: un controlado, o falta el peso de un niño. */
   errors: string[]
-  /** Lo que se avisa como una alergia: contraindicado en el embarazo. Decide quien receta. */
-  warnings: string[]
-  /** Lo que se recuerda sin bloquear: el embarazo y la lactancia registrados, con su fecha. */
-  reminders: string[]
   /** Si la receta lleva el peso (menor de 12 años). */
   weightRequired: boolean
 }
@@ -104,46 +78,18 @@ export function checkPrescription(
   weightKg: number | null,
 ): PrescribingCheck {
   const errors: string[] = []
-  const warnings: string[] = []
-  const reminders: string[] = []
-  const embarazo = context.history.embarazoLactancia?.embarazo
-  const lactancia = context.history.embarazoLactancia?.lactancia
-  // La misma regla que la franja de la ficha (`pregnancyToday`): en pie hasta la semana 42 y, después,
-  // «por confirmar». La receta nunca deja de avisar en silencio: con el embarazo por confirmar sigue
-  // avisando lo contraindicado, con esas palabras, hasta que alguien actualice sus antecedentes.
-  const pregnancy = pregnancyToday(context.history, context.today)
-  const weeks = pregnancy?.weeksToday ?? null
-  const unconfirmed = pregnancy?.state === "por_confirmar"
-  if (pregnancy && embarazo)
-    reminders.push(
-      unconfirmed
-        ? `Embarazo por confirmar (registrado el ${dayWords(embarazo.fecha)}): ya pasó el tiempo de un embarazo. Pregúntale y actualiza sus antecedentes; mientras tanto se sigue avisando lo contraindicado en el embarazo.`
-        : `Está embarazada${weeks === null ? "" : `, ${weeks} semanas`} (registrado el ${dayWords(embarazo.fecha)}): revisa que cada medicamento sea seguro en el embarazo.`,
-    )
-  if (lactancia?.estado === "si")
-    reminders.push(
-      `Da de lactar (registrado el ${dayWords(lactancia.fecha)}): revisa que cada medicamento sea compatible con la lactancia.`,
-    )
   for (const item of items) {
     const name = item.genericName.trim()
     if (!name) continue
-    const atc = findMedication(name, context.medications)?.atc
-    const controlled = prefixOf(CONTROLLED_ATC, atc)
+    const controlled = prefixOf(CONTROLLED_ATC, findMedication(name, context.medications)?.atc)
     if (controlled)
       errors.push(
         `${capitalized(name)} es ${controlled}, un medicamento controlado: no va en la receta común, usa la receta oficial.`,
-      )
-    const avoid = pregnancy ? prefixOf(PREGNANCY_CONTRAINDICATED, atc) : null
-    if (avoid)
-      warnings.push(
-        unconfirmed
-          ? `${capitalized(name)}: tiene un embarazo por confirmar y ${avoid} en el embarazo (ATC ${atc}).`
-          : `${capitalized(name)}: está embarazada${weeks === null ? "" : ` (${weeks} semanas)`} y ${avoid} en el embarazo (ATC ${atc}).`,
       )
   }
   const age = ageInYears(context.birthDate, context.today)
   const weightRequired = age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS
   if (weightRequired && (weightKg === null || !(weightKg > 0)))
     errors.push(`Tiene ${age} ${age === 1 ? "año" : "años"}: escribe su peso para recetarle.`)
-  return { errors, warnings, reminders, weightRequired }
+  return { errors, weightRequired }
 }

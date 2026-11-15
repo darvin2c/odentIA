@@ -17,7 +17,8 @@ import {
   sumByCurrency,
   normalizeDrugText,
   quantityWords,
-  type TakenMedication,
+  prescribingAlerts,
+  type PrescribingSituation,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -52,7 +53,7 @@ import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./loc
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
-import { createPrescription, currentMedicationsOf } from "./prescriptions.js"
+import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import {
   answerFormFromDictation,
@@ -861,8 +862,11 @@ interface PatientChecks {
   /** Por qué no cabe otra elección de caminos (decisión 3), o null si cabe. */
   choiceBlocked: string | null
   planItems: OpenPlanItem[]
-  /** Lo que ya toma, para avisar el duplicado por ATC (solo informa). */
-  taking: TakenMedication[]
+  /**
+   * Lo de la persona que mira toda receta (`prescribingSituationOf`): lo que ya toma (el duplicado por
+   * ATC solo informa), y el embarazo y el anticoagulante que avisa `prescribingAlerts`, como al emitir.
+   */
+  prescribing: PrescribingSituation
 }
 
 /** Lo que se puede hacer hoy de un tratamiento: no está cerrado ni suspendido, y está aceptado o espera respuesta. */
@@ -923,7 +927,7 @@ async function patientChecks(tx: Db, orgId: string, patientId: string, encounter
     dictatedAllergies,
     choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null,
     planItems,
-    taking: await currentMedicationsOf(tx, orgId, patientId, catalog),
+    prescribing: await prescribingSituationOf(tx, orgId, patientId, catalog),
   }
 }
 
@@ -1219,18 +1223,31 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  */
 function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, medications: MedicationCatalog, dictation: ProductDictation): Prepared {
   if (kind === "receta") {
-    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, ...rest } = prepared.payload
+    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, ...rest } = prepared.payload
     const genericName = String(rest["genericName"] ?? "")
     // Lo que ya toma del mismo principio o grupo: solo informa, en la tarjeta (ADR 0143).
-    const duplicates = duplicateWarnings([{ genericName }], checks.taking, medications)
+    const duplicates = duplicateWarnings([{ genericName }], checks.prescribing.taking, medications)
     const payload = duplicates.length ? { ...rest, duplicateWarnings: duplicates } : rest
     const onFile = allergyWarnings(genericName, checks.allergies as never, medications)
     // La alergia que se acaba de dictar avisa igual, aunque aún no se confirme.
     const dictated = allergyWarnings(genericName, checks.dictatedAllergies as never, medications).filter((line) => !onFile.includes(line))
     const warnings = [...onFile, ...dictated]
-    if (!warnings.length) return { ...prepared, payload }
-    const note = [onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "", dictated.length ? `Aviso de la alergia que dictaste hoy: ${dictated.join(" ")}` : ""].filter(Boolean).join(" ")
-    return { payload: { ...payload, allergyWarnings: warnings }, status: "por_revisar", note }
+    // Lo que avisa toda receta, como al emitirla (QA final de formularios, Y1): el embarazo, un AINE con
+    // un anticoagulante. Sin esto la tarjeta decía «lista» y al emitir se rechazaba con el aviso.
+    const alerts = prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings
+    if (!warnings.length && !alerts.length) return { ...prepared, payload }
+    const note = [
+      onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "",
+      dictated.length ? `Aviso de la alergia que dictaste hoy: ${dictated.join(" ")}` : "",
+      alerts.length ? `Aviso: ${alerts.join(" ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+    return {
+      payload: { ...payload, ...(warnings.length ? { allergyWarnings: warnings } : {}), ...(alerts.length ? { prescribingWarnings: alerts } : {}) },
+      status: "por_revisar",
+      note,
+    }
   }
   if (kind === "alergia") {
     const { review: _review, known: _known, ...payload } = prepared.payload

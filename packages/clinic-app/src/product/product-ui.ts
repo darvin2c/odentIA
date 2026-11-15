@@ -112,18 +112,15 @@ export interface ProductPrescribingUi {
   /** Lo que receta, las alergias que se eligen y la medicación habitual que se sugiere. */
   catalog: MedicationCatalog
   /**
-   * Sus reglas para esta persona (latidIA: controlados, embarazo y lactancia,
-   * el peso de un niño). Es un hook: lee lo que necesita de la persona.
+   * Sus reglas para esta persona (latidIA: controlados y el peso de un niño). Es un hook: lee lo que
+   * necesita de la persona. Lo que avisa toda receta (`prescribingAlerts`) lo suma la receta misma.
    */
   useRules(patientId: string, enabled: boolean): PrescribingRulesUi
 }
 
 export interface PrescribingRulesUi {
-  /** Lo que impide emitir, lo que se avisa como una alergia (ADR 0143) y lo que solo se recuerda. */
-  check(
-    items: ReadonlyArray<{ genericName: string }>,
-    weightKg: number | null,
-  ): { errors: string[]; warnings: string[]; reminders: string[] }
+  /** Lo que impide emitir. */
+  check(items: ReadonlyArray<{ genericName: string }>, weightKg: number | null): { errors: string[] }
   /** Si la receta lleva el peso y el último que se registró, para proponerlo. */
   weight: { required: boolean; suggested: number | null }
 }
@@ -605,7 +602,7 @@ const NO_FINDINGS: SiteFinding[] = []
 const NO_PAPERS: ProductPapers = { query: null, queryKey: [], papers: [] }
 const NO_BLOCKS: ProductEncounterBlocks = { blocks: [], overlay: null }
 const NO_RULES: PrescribingRulesUi = {
-  check: () => ({ errors: [], warnings: [], reminders: [] }),
+  check: () => ({ errors: [] }),
   weight: { required: false, suggested: null },
 }
 
