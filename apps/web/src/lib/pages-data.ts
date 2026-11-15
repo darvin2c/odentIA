@@ -303,8 +303,8 @@ export const PAGES = {
     hero: {
       type: "scene",
       focus: "todos",
-      tag: "Agentes",
-      title: "IA agéntica para tu clínica dental:",
+      tag: "ARM · Agentes",
+      title: "Un ARM para tu clínica dental:",
       accent: "tres agentes alrededor de cada paciente.",
       lead: "Sofi, tu agente de recepción, conversa por cualquier canal; Clío, tu agente clínico, documenta la consulta, y Argos, tu agente administrador, da seguimiento. Todo queda en una sola historia, y tu equipo decide.",
     },
