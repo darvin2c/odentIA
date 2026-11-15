@@ -6,10 +6,10 @@
 import { patientMedication } from "@odentia/db/schema/clinical"
 import { serviceFinding } from "@odentia/db/schema/dental"
 import { expect, it } from "vitest"
-import { addDeclaredHealth, recordHealthDeclaration } from "./clinical.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
-import { addPlanItem, listPlanItems } from "./plan.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { addDeclaredHealth, getPatientHealth, recordHealthDeclaration, savePatientHealth } from "../clinical.js"
+import { clinicalFixture } from "../clinical-test-fixture.js"
+import { addPlanItem, listPlanItems } from "../plan.js"
+import { ownerDb, setupTestDb } from "../test-setup.js"
 
 setupTestDb()
 
@@ -41,11 +41,20 @@ it("la exodoncia por hacer dice lo que toma y la cambia; lo demás del plan y la
 it("un apixabán dice el riesgo de sangrado, y el bisfosfonato que ya dejó sigue contando", async () => {
   const f = await clinicalFixture()
   await ownerDb.insert(serviceFinding).values({ serviceId: f.service.id, organizationId: "org_a", condition: "missing_tooth" })
-  await ownerDb.insert(patientMedication).values([
-    { organizationId: "org_a", patientId: f.patient.id, name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" },
-    { organizationId: "org_a", patientId: f.patient.id, name: "Ácido zoledrónico", atcCode: "M05BA08", endDate: "2024-01-01" },
-    { organizationId: "org_a", patientId: f.patient.id, name: "Clopidogrel 75 mg", atcCode: "B01AC04", endDate: "2024-01-01" },
-  ])
+  // Lo anotó el equipo: sin «lo dijo ella».
+  const health = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await f.run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: health.revision,
+      reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+      conditions: [],
+      medications: [
+        { name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" },
+        { name: "Ácido zoledrónico", atcCode: "M05BA08", endDate: "2024-01-01" },
+        { name: "Clopidogrel 75 mg", atcCode: "B01AC04", endDate: "2024-01-01" },
+      ],
+    }),
+  )
   const item = await f.run((tx) => addPlanItem(tx, ...f.args, { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id }))
   const listed = (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id, undefined, { extractionRisks: true }))).find(
     (row) => row.id === item.id,
