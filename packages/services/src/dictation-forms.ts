@@ -873,9 +873,10 @@ function checkFormAnswer(
   // Para un número, «un milímetro» es 1; para elegir una opción, «una clase dos» no dice «1».
   const heard = saidNumbers(said, { roman: "largos" })
   const heardForOptions = saidNumbers(said, { roman: "largos", articles: false })
-  const spoken = new Set(stemsOf(said))
+  // El dolor a otra prueba es de esa prueba: «sin dolor a la percusión» no dice «Sin dolor».
+  const spoken = new Set(stemsOf(withoutOtherTests(question, said)))
   // La frase (o su oración) tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
-  const context = new Set([...spoken, ...stemsOf(sentence)])
+  const context = new Set([...spoken, ...stemsOf(withoutOtherTests(question, sentence))])
   if (!talksAbout(question, context) || namesAnother(question, said)) return null
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })

@@ -429,6 +429,9 @@ describe("lo que la medición del 15 nov mostró que se perdía en silencio", ()
     expect(ask("palpacion", "Negativa", "ni a la palpación")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
     // El dolor a la percusión no dice nada de la palpación.
     expect(ask("palpacion", "Positiva", "dolor a la percusión")).toBeNull()
+    // Ni de la pregunta «Dolor»: «sin dolor a la percusión» no es «Sin dolor» (lo inventaba en el caso nuevo).
+    expect(ask("dolor", "Sin dolor", "Sin dolor a la percusión ni a la palpación")).toBeNull()
+    expect(ask("dolor", "Sin dolor", "sin dolor")).toMatchObject({ status: "lista", payload: { value: "Sin dolor" } })
   })
 
   it("la oración que nombra una pregunta sin propuesta ni aviso va a «No pude usar esto»", () => {
