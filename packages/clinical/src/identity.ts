@@ -441,12 +441,16 @@ export function whatsappNumberProblem(e164: string, countryCode?: string | null)
     : `Ese número no puede ser su WhatsApp: revisa que sea ${profile.hint}.`
 }
 
-/** Edad legible: en meses antes de los dos años, en años después. */
-export function ageLabel(birthDate: string | null | undefined, today = new Date()): string {
+/**
+ * Edad legible: en meses antes de los dos años, en años después. `today` es el
+ * día de la clínica (AAAA-MM-DD), nunca el del navegador.
+ */
+export function ageLabel(birthDate: string | null | undefined, today: string): string {
   if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return ""
   const [y, m, d] = birthDate.split("-").map(Number) as [number, number, number]
-  let months = (today.getFullYear() - y) * 12 + (today.getMonth() + 1 - m)
-  if (today.getDate() < d) months -= 1
+  const [ty, tm, td] = today.split("-").map(Number) as [number, number, number]
+  let months = (ty - y) * 12 + (tm - m)
+  if (td < d) months -= 1
   if (months < 0) return ""
   if (months < 24) return months === 1 ? "1 mes" : `${months} meses`
   const years = Math.floor(months / 12)

@@ -1,5 +1,6 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
+  ageInYears,
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
@@ -13,6 +14,7 @@ import {
 } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
+import { clinicToday } from "./inventory"
 
 export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-" | "unknown"
 
@@ -1156,18 +1158,14 @@ export function hcLabel(n: number): string {
   return `HC-${String(n).padStart(6, "0")}`
 }
 
-/** Edad en años desde fecha de nacimiento ISO; "" si ausente/inválida. */
-export function ageFrom(birthDate: string | null | undefined): string {
-  if (!birthDate) return ""
-  const born = new Date(birthDate).getTime()
-  if (Number.isNaN(born)) return ""
-  const now = new Date()
-  const b = new Date(born)
-  let age = now.getFullYear() - b.getFullYear()
-  const m = now.getMonth() - b.getMonth()
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age -= 1
-  if (age < 0) return ""
-  return `${age}`
+/**
+ * Edad en años desde la fecha de nacimiento (AAAA-MM-DD), con el día de la
+ * clínica, como `patientAge` en el servidor: nunca como un instante en UTC ni con
+ * el día del navegador. "" si falta o no es una fecha real.
+ */
+export function ageFrom(birthDate: string | null | undefined, today: string = clinicToday()): string {
+  const age = ageInYears(birthDate, today)
+  return age === null || age < 0 ? "" : `${age}`
 }
 
 export function statusLabel(status: string): string {
