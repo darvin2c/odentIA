@@ -6,7 +6,6 @@ import {
 } from "@odentia/clinic-app/product/product-ui"
 import {
   CHILDHOOD_WORDS,
-  childhoodLines,
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
@@ -356,7 +355,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          Corazón, anestesia, tabaco y alcohol <ChevronDown aria-hidden className="size-4" />
+          {child ? "Corazón y anestesia" : "Corazón, anestesia, tabaco y alcohol"} <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -449,7 +448,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
   )
 }
 
-/** Una respuesta de «de pequeño» por lista, con «Sin indicar» primero. */
+/** Una respuesta de «los dientes en casa» por lista, con «Sin indicar» primero. */
 const childItems = (words: Record<string, string>): Record<string, string> => ({
   "sin-indicar": "Sin indicar",
   ...Object.fromEntries(Object.entries(words).map(([key, text]) => [key, text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))])),
@@ -462,8 +461,18 @@ const CHILD_FIELDS = [
   { key: "quienCepilla", label: "Quién le cepilla los dientes", early: false },
 ] as const
 
+/** Lo de un niño en casa que está guardado, dato por dato y con su nombre. */
+function childhoodRows(odontologicos: Rec | null | undefined): Array<{ key: (typeof CHILD_FIELDS)[number]["key"]; label: string; value: string }> {
+  return CHILD_FIELDS.flatMap((field) => {
+    const value = odontologicos?.[field.key]
+    const words: Record<string, string> = CHILDHOOD_WORDS[field.key]
+    const said = typeof value === "string" ? words[value] : undefined
+    return said ? [{ key: field.key, label: field.label, value: said }] : []
+  })
+}
+
 /**
- * «De pequeño» (mesa del 13 nov, entrega 7): lo que cuenta quien cuida a un menor
+ * «Los dientes en casa» (mesa del 13 nov, entrega 7; el nombre, revisión final del 15 nov, K8): lo que cuenta quien cuida a un menor
  * de 12, con las claves de `antecedentesOdontologicos`. Sale para un niño, o si ya
  * hay algo anotado; biberón y chupón, hasta los 6 años.
  */
@@ -483,7 +492,7 @@ function ChildhoodSections({ answers, update, disabled, idPrefix, age, errors }:
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          De pequeño <ChevronDown aria-hidden className="size-4" />
+          Los dientes en casa <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -513,28 +522,30 @@ const withDay = (item: DentalInterviewItem, text: string): string => {
 }
 
 /**
- * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de pequeño, debajo del
- * resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato: lo
- * del equipo queda sin ella (QA del 14 nov, causa raíz).
+ * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de un niño en casa, debajo
+ * del resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato:
+ * lo del equipo queda sin ella (QA del 14 nov, causa raíz; lo de un niño, revisión final del 15 nov,
+ * K2). Cada tarjeta se llama como su sección del cajón, y a un niño no se le titula con el tabaco.
  */
 function DentalHistorySummary({
   answers,
   marks,
-  productMark,
+  age,
 }: {
   answers: Rec
   marks?: Partial<Record<DeclaredInterviewKey, string>>
-  productMark?: string
+  age?: number | null
 }) {
   const items = dentalInterviewItems(answers)
   const raw = answers.antecedentesOdontologicos
-  const childhood = childhoodLines(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
+  const childhood = childhoodRows(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
   if (items.length === 0 && childhood.length === 0) return null
+  const heartTitle = isChildAge(age) ? "Corazón y anestesia" : "Corazón, anestesia, tabaco y alcohol"
   return (
     <>
       {items.length > 0 ? (
-        <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-          <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
+        <section aria-label={heartTitle} className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">{heartTitle}</h3>
           <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
             {items.map((item) => {
               const mark = item.said.map((key) => marks?.[key]).find(Boolean)
@@ -549,20 +560,17 @@ function DentalHistorySummary({
         </section>
       ) : null}
       {childhood.length > 0 ? (
-        <section aria-label="De pequeño" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-          <div className="flex flex-col gap-0.5">
-            <h3 className="font-heading text-sm font-medium">De pequeño</h3>
-            {/* Lo contó quien cuida al niño y nadie lo revisó: lleva su marca, como lo de arriba. */}
-            {productMark ? <p className="text-xs text-warning">{productMark}</p> : null}
-          </div>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+        <section aria-label="Los dientes en casa" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">Los dientes en casa</h3>
+          {/* Cada dato con su marca si lo contó quien cuida al niño y sigue así: lo del equipo, sin ella. */}
+          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
             {childhood.map((row) => (
-              <div key={row.label} className="contents">
-                <dt className="text-muted-foreground">{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
+              <li key={row.key}>
+                {row.label}: {row.value}
+                {marks?.[row.key] ? <span className="text-warning"> · {marks[row.key]}</span> : null}
+              </li>
             ))}
-          </dl>
+          </ul>
         </section>
       ) : null}
     </>
@@ -586,10 +594,22 @@ export const dentalHealth: ProductHealthUi = {
     dentalInterviewItems(answers).flatMap((item) =>
       item.alert ? [{ keys: item.said, label: withDay(item, item.alert) }] : [],
     ),
-  saidRows: (answers) =>
-    dentalInterviewItems(answers).map((item) => {
+  saidRows: (answers) => [
+    ...dentalInterviewItems(answers).map((item) => {
       // «Corazón: válvula…: sí» → «Corazón» y lo que dijo.
       const [label, ...rest] = withDay(item, item.text).split(": ")
-      return { keys: item.said, label: label ?? item.key, value: rest.join(": ") }
+      return { keys: item.said as DeclaredInterviewKey[], label: label ?? item.key, value: rest.join(": ") }
     }),
+    // Lo de un niño en casa, dato por dato, cada uno con su marca (revisión final del 15 nov, K2).
+    ...childhoodRows(
+      answers.antecedentesOdontologicos && typeof answers.antecedentesOdontologicos === "object" && !Array.isArray(answers.antecedentesOdontologicos)
+        ? (answers.antecedentesOdontologicos as Rec)
+        : null,
+    ).map((row) => ({ keys: [row.key] as DeclaredInterviewKey[], label: row.label, value: row.value })),
+  ],
+  // «Ver declaración original» con lo de un niño en casa, tal como llegó (revisión final del 15 nov, K3).
+  declaredRows: (health) =>
+    childhoodRows(health.dental && typeof health.dental === "object" && !Array.isArray(health.dental) ? (health.dental as Rec) : null).map(
+      (row) => ({ label: row.label, value: row.value.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) }),
+    ),
 }

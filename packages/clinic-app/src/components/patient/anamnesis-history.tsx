@@ -1,82 +1,47 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
-import type { AnamnesisAnswers } from "../../lib/patients"
+import { shortDay } from "../../lib/declared-health"
 
-interface AnamnesisVersion {
+export interface AnamnesisVersion {
   id: string
   version: number
   createdAt: string
   createdBy: string | null
 }
 
-function AnswerValue({ value }: { value: unknown }) {
-  if (value == null) return null
-  if (typeof value === "boolean") return <span>{value ? "Sí" : "No"}</span>
-  if (typeof value !== "object") return <span className="whitespace-pre-wrap">{String(value)}</span>
-  if (Array.isArray(value)) {
-    return (
-      <ul className="list-inside list-disc">
-        {value.map((item, index) => (
-          <li key={index}>
-            <AnswerValue value={item} />
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  return (
-    <div className="flex flex-col">
-      {Object.entries(value).map(([key, answer]) => (
-        <div key={key} className="grid grid-cols-[180px_1fr] gap-2 border-b py-1.5 last:border-0">
-          <dt className="text-sm text-muted-foreground first-letter:uppercase">
-            {key.replace(/([a-z])([A-Z])/g, "$1 $2")}
-          </dt>
-          <dd className="text-sm">
-            <AnswerValue value={answer} />
-          </dd>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function AnswersView({ value }: { value: unknown }) {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    return <AnswerValue value={value} />
-  }
-  return (
-    <div className="flex flex-col gap-4">
-      {Object.entries(value).map(([group, answer]) => (
-        <section key={group} className="flex flex-col gap-1">
-          <h4 className="text-sm font-medium first-letter:uppercase">
-            {group.replace(/([a-z])([A-Z])/g, "$1 $2")}
-          </h4>
-          <AnswerValue value={answer} />
-        </section>
-      ))}
-    </div>
-  )
-}
-
+/**
+ * «Ver historial» de la entrevista (revisión final del 15 nov, K2): cada versión, no solo la última,
+ * y en palabras, las mismas de la copia de la historia («Biberón o pecho para dormir: ya no toma
+ * biberón»), sin claves ni códigos. Se pasa de una a otra sin cerrar.
+ */
 export function AnamnesisVersionDialog({
   patientId,
   versionId,
+  versions = [],
+  onSelect = () => {},
   onClose,
 }: {
   patientId: string
   versionId: string | null
+  /** Todas las versiones, de la más nueva a la más antigua; sin ellas, solo la abierta. */
+  versions?: readonly AnamnesisVersion[]
+  onSelect?: (id: string) => void
   onClose: () => void
 }) {
   const version = useQuery({
     queryKey: ["patient-anamnesis-version", patientId, versionId],
     queryFn: () =>
-      apiFetch<{ data: AnamnesisVersion & { answers: AnamnesisAnswers } }>(
+      apiFetch<{ data: AnamnesisVersion & { entries: Array<{ key: string; label: string; value: string }> } }>(
         `/api/patients/${patientId}/anamnesis/${versionId}`,
       ),
     enabled: versionId !== null,
   })
+  const index = versions.findIndex((item) => item.id === versionId)
+  const newer = index > 0 ? versions[index - 1] : undefined
+  const older = index >= 0 ? versions[index + 1] : undefined
+  const entries = version.data?.data.entries ?? []
   return (
     <Dialog
       open={versionId !== null}
@@ -86,24 +51,50 @@ export function AnamnesisVersionDialog({
     >
       <DialogContent scrollable className="max-h-[85vh] sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Anamnesis {version.data ? `v${version.data.data.version}` : ""}</DialogTitle>
+          <DialogTitle>
+            {version.data
+              ? `Entrevista v${version.data.data.version} · ${shortDay(version.data.data.createdAt)}`
+              : "Entrevista"}
+          </DialogTitle>
           <DialogDescription>
-            Registro histórico inmutable de respuestas.{" "}
+            Cómo quedó ese día; no se cambia.{" "}
             {version.data
               ? version.data.data.createdBy
-                ? "Registrado por personal clínico."
-                : "Declarado por el paciente/responsable."
+                ? "La guardó el equipo."
+                : "La declaró el paciente o quien habla por él."
               : ""}
           </DialogDescription>
         </DialogHeader>
+        {versions.length > 1 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={!older} onClick={() => older && onSelect(older.id)}>
+              Anterior{older ? ` (v${older.version})` : ""}
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              {index + 1} de {versions.length}
+            </span>
+            <Button type="button" variant="outline" size="sm" disabled={!newer} onClick={() => newer && onSelect(newer.id)}>
+              Siguiente{newer ? ` (v${newer.version})` : ""}
+            </Button>
+          </div>
+        ) : null}
         {version.isLoading ? (
           <LoadingState message="Cargando antecedentes…" />
         ) : version.isError ? (
           <p role="alert" className="text-sm text-destructive">
             {version.error.message}
           </p>
+        ) : entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Esta versión no tiene nada respondido.</p>
         ) : (
-          <AnswersView value={version.data?.data.answers} />
+          <dl className="flex flex-col gap-1 text-sm">
+            {entries.map((entry) => (
+              <div key={entry.key}>
+                <dt className="inline text-muted-foreground after:content-[':_']">{entry.label}</dt>
+                <dd className="inline">{entry.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
       </DialogContent>
     </Dialog>

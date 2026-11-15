@@ -334,11 +334,6 @@ export interface DeclaredHealthGroup {
    * el corazón, el antibiótico, la anestesia, el tabaco y la lactancia, como el embarazo.
    */
   interview: DeclaredInterviewKey[]
-  /**
-   * Lo del producto que dijo en esta declaración y sigue sin revisar, en palabras
-   * (`ProductInterview.declaredLines`; odentIA: «de pequeño» de un niño).
-   */
-  productLines: Array<{ label: string; value: string }>
   /** Su «No» a un grupo: lo dijo quien declaró, no lo preguntó ni lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
@@ -366,6 +361,13 @@ export const DECLARED_INTERVIEW = {
   tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
   alcohol: { said: ["medical", "alcohol"], kept: ["habitos", "alcohol"] },
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
+  // Lo de un niño en casa (entrega 7), dato por dato y comparado con lo guardado, como el corazón: lo
+  // que anotó el equipo no lleva la marca de la mamá (revisión final del 15 nov, K2).
+  biberon: { said: ["dental", "biberon"], kept: ["antecedentesOdontologicos", "biberon"] },
+  chupon: { said: ["dental", "chupon"], kept: ["antecedentesOdontologicos", "chupon"] },
+  dulcesEntreComidas: { said: ["dental", "dulcesEntreComidas"], kept: ["antecedentesOdontologicos", "dulcesEntreComidas"] },
+  pastaConFluor: { said: ["dental", "pastaConFluor"], kept: ["antecedentesOdontologicos", "pastaConFluor"] },
+  quienCepilla: { said: ["dental", "quienCepilla"], kept: ["antecedentesOdontologicos", "quienCepilla"] },
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 
@@ -809,12 +811,10 @@ export async function getPatientHealth(
     legacySaidOn = legacyPregnancySaidOn(days)
   }
   const pregnancy = pregnancyToday(latest?.answers, today, { legacySaidOn })
-  const { interview } = await productHooks(tx, orgId)
-  const interviewLines = (said: DeclaredPatientHealthInput) => interview.declaredLines?.(said) ?? []
   return {
     ...health,
     reviewPending,
-    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy, interviewLines }),
+    declared: declaredGroupsOf({ health, reviewPending, authorship, declarations, latest, pregnancy }),
     pregnancy,
     declarations,
     changed: changedHealthOf({
@@ -957,8 +957,6 @@ function declaredGroupsOf(input: {
   declarations: HealthDeclaration[]
   latest: AnamnesisRow | null
   pregnancy: PregnancyToday | null
-  /** Lo del producto que dijo, en palabras (`ProductInterview.declaredLines`); sin él (solo alergias), nada. */
-  interviewLines?: (health: DeclaredPatientHealthInput) => Array<{ label: string; value: string }>
 }): DeclaredHealthGroup[] {
   const { health, reviewPending, authorship, declarations, latest } = input
   const groups = new Map<string, DeclaredHealthGroup>()
@@ -975,7 +973,6 @@ function declaredGroupsOf(input: {
         medications: [],
         pregnancy: false,
         interview: [],
-        productLines: [],
         saidNo: { allergies: false, conditions: false, medications: false },
       }
       groups.set(key, group)
@@ -1011,12 +1008,6 @@ function declaredGroupsOf(input: {
         if (said) groupOf(said, latest.createdAt).interview.push(key)
       }
     }
-    // Lo del producto (odentIA: «de pequeño»), de la última declaración que lo dijo, mientras nadie del
-    // equipo haya guardado la entrevista después.
-    const lines = input.interviewLines ?? (() => [])
-    const saidLines = declarations.find((row) => lines(row.health).length > 0)
-    if (saidLines && sinceStaff(saidLines.enteredAt))
-      groupOf(saidLines, saidLines.enteredAt).productLines = lines(saidLines.health)
   }
   // Su «No» es de la última declaración que lo dijo; sin ella, de cuando consta que declaró.
   const saidNo = {
@@ -2371,7 +2362,10 @@ export async function getAnamnesisVersion(
     )
     .limit(1)
   if (!row) throw notFound("Anamnesis")
-  return row
+  // Cada versión en palabras, como la cuenta la copia de la historia (revisión final del 15 nov, K2):
+  // «Biberón o pecho para dormir: ya no toma biberón», no `ya_no`.
+  const entries = (await productHooks(tx, orgId)).interview.record(row.answers, await clinicToday(tx, orgId, row.createdAt))
+  return { ...row, entries }
 }
 
 // --- Notas de evolución ---

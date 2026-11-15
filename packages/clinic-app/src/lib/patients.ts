@@ -231,17 +231,24 @@ export interface DeclaredHealthGroup {
   pregnancy: boolean
   /** Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (el corazón, la anestesia…). */
   interview?: DeclaredInterviewKey[]
-  /**
-   * Lo del producto que dijo, ya en palabras (odentIA: «de pequeño» de un niño). Opcional: un
-   * servidor anterior no lo manda.
-   */
-  productLines?: Array<{ label: string; value: string }>
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
 
 /** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
-export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
+export type DeclaredInterviewKey =
+  | "corazon"
+  | "antibiotico"
+  | "anestesia"
+  | "tabaco"
+  | "alcohol"
+  | "lactancia"
+  // Lo de un niño en casa (entrega 7), dato por dato.
+  | "biberon"
+  | "chupon"
+  | "dulcesEntreComidas"
+  | "pastaConFluor"
+  | "quienCepilla"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {

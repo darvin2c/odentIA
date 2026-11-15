@@ -258,6 +258,7 @@ export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefin
 const INTERVIEW_ANSWER_WORDS: Record<string, string> = { si: "Sí", no: "No", no_sabe: "No sabe" }
 const DECLARED_TOBACCO_WORDS: Record<string, string> = { nunca: "Nunca fumó", fuma: "Fuma", dejo: "Lo dejó" }
 const DECLARED_CIGARETTE_WORDS: Record<string, string> = { menos_10: "menos de 10 al día", "10_o_mas": "10 o más al día" }
+const DECLARED_ALCOHOL_WORDS: Record<string, string> = { no: "No toma", ocasional: "A veces", frecuente: "Con frecuencia" }
 
 /**
  * Lo demás que dijo en una declaración, tal como llegó, en filas: el corazón, el antibiótico, la
@@ -285,6 +286,8 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
               .join(", ")
           : null,
     },
+    // Revisión final del 15 nov (clínica H8): el alcohol que dijo no salía.
+    { label: "Alcohol", value: typeof medical["alcohol"] === "string" ? (DECLARED_ALCOHOL_WORDS[medical["alcohol"]] ?? medical["alcohol"]) : null },
     { label: "Lactancia", value: typeof medical["lactancia"] === "boolean" ? (medical["lactancia"] ? "Sí" : "No") : null },
     { label: "Operaciones", value: typeof personal["cirugias"] === "string" && personal["cirugias"].trim() ? personal["cirugias"] : null },
     {

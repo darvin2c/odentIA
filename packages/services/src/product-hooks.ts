@@ -246,11 +246,6 @@ export interface ProductInterview {
   /** Lo que la persona declaró en su registro, ya con las claves de la entrevista. */
   declared(health: DeclaredHealth, today: string): Record<string, unknown>
   /**
-   * Lo suyo que dijo una declaración, en palabras, para «Revisa con … lo que
-   * dijo» de la atención (odentIA: «de pequeño» de un niño). Sin él, nada.
-   */
-  declaredLines?(health: DeclaredHealth): Array<{ label: string; value: string }>
-  /**
    * La entrevista guardada en la copia de la historia, dato por dato y en el
    * orden de la pantalla: lo común (con el embarazo, que se lee con la regla
    * común en sus dos formas) y lo del producto. `reading`: lo que se sabe de un

@@ -294,45 +294,60 @@ describe("«Pregúntale» con representante", () => {
     expect(askWhom([{ ...guardian, isActive: false }])).toBeNull()
   })
 
-  it("C3 · la odontóloga lee sin clics lo que dijo la mamá de Thiago, con la marca de quien lo dijo", () => {
-    const thiago = {
-      ...health,
-      allergyReviewDue: false,
-      reviewPending: true,
-      reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
-      conditions: [{ id: "c1", name: "Asma", status: "activa" }],
-      medications: [{ id: "m1", name: "salbutamol inhalador cuando tiene crisis", atcCode: null, endDate: null }],
-      declared: [
-        {
-          by: { kind: "representative", name: "Carla Ramos", relation: "madre" },
-          at: "2026-11-13T19:27:00.000Z",
-          allergies: [],
-          conditions: ["c1"],
-          medications: ["m1"],
-          pregnancy: false,
-          interview: [],
-          productLines: [
-            { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-            { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-            { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
-          ],
-          saidNo: { allergies: true, conditions: false, medications: false },
-        },
-      ],
-    } as unknown as PatientHealth
-    const carla = { ...guardian, displayName: "Carla Ramos", relationshipDetail: "Madre", kinship: "MTH" }
-    const page = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <HealthReviewNotice patientId="p1" patientName="Thiago Quispe" health={thiago} sex="M" askTo={askWhom([carla])} />
-      </QueryClientProvider>,
-    ).replace(/<[^>]+>/g, "|")
-    expect(page).toContain("Revisa con su madre (Carla Ramos) lo que dijo de la salud de Thiago")
-    expect(page).toContain("Lo dijo su madre, Carla, el 13 nov, sin revisar")
-    expect(page).toMatch(/Enfermedades\|+[^|]*Asma/)
-    expect(page).toMatch(/Alergias\|+Su madre dijo que no/i)
-    expect(page).toMatch(/De pequeño\|+[^|]*ya no toma biberón · se chupa el dedo/)
-    expect(page).toMatch(/Dulces o jugos entre comidas\|+[^|]*4 o más veces al día/)
-    expect(page).toMatch(/Dientes\|+[^|]*se cepilla sin ayuda/)
+  // Revisión final del 15 nov (K2, K8): lo de un niño en casa llega dato por dato, por la entrevista,
+  // solo lo que sigue como lo dijo la mamá; el detalle está a un toque, en «Ver lo que dijo».
+  it("C3 · la odontóloga lee lo que dijo la mamá de Thiago, con la marca de quien lo dijo", () => {
+    const base = bareProduct("dental")
+    declareProduct({
+      ...base,
+      health: {
+        ...base.health,
+        saidRows: () => [
+          { keys: ["biberon"], label: "Biberón o pecho para dormir", value: "ya no toma biberón" },
+          { keys: ["dulcesEntreComidas"], label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
+          // Lo anotó la doctora: no es de la mamá y no se le atribuye.
+          { keys: ["quienCepilla"], label: "Quién le cepilla los dientes", value: "lo cepilla un adulto" },
+        ],
+      },
+    })
+    try {
+      const thiago = {
+        ...health,
+        allergyReviewDue: false,
+        reviewPending: true,
+        reviewStatus: { allergies: "none", conditions: "recorded", medications: "recorded" },
+        latestAnamnesis: { id: "x", version: 1, answers: {}, createdAt: "2026-11-14T15:00:00.000Z" },
+        conditions: [{ id: "c1", name: "Asma", status: "activa" }],
+        medications: [{ id: "m1", name: "salbutamol inhalador cuando tiene crisis", atcCode: null, endDate: null }],
+        declared: [
+          {
+            by: { kind: "representative", name: "Carla Ramos", relation: "madre" },
+            at: "2026-11-13T19:27:00.000Z",
+            allergies: [],
+            conditions: ["c1"],
+            medications: ["m1"],
+            pregnancy: false,
+            interview: ["biberon", "dulcesEntreComidas"],
+            saidNo: { allergies: true, conditions: false, medications: false },
+          },
+        ],
+      } as unknown as PatientHealth
+      const carla = { ...guardian, displayName: "Carla Ramos", relationshipDetail: "Madre", kinship: "MTH" }
+      const page = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <HealthReviewNotice patientId="p1" patientName="Thiago Quispe" health={thiago} sex="M" askTo={askWhom([carla])} child />
+        </QueryClientProvider>,
+      ).replace(/<[^>]+>/g, "|")
+      expect(page).toContain("Revisa con su madre (Carla Ramos) lo que dijo de la salud de Thiago")
+      expect(page).toContain("Lo dijo su madre, Carla, el 13 nov, sin revisar")
+      expect(page).toMatch(/Enfermedades\|+[^|]*Asma/)
+      expect(page).toMatch(/Alergias\|+Su madre dijo que no/i)
+      expect(page).toMatch(/Biberón o pecho para dormir\|+[^|]*ya no toma biberón/)
+      expect(page).toMatch(/Dulces o jugos entre comidas\|+[^|]*4 o más veces al día/)
+      expect(page).not.toContain("lo cepilla un adulto")
+    } finally {
+      declareProduct(bareProduct("dental"))
+    }
   })
 
   it("Marta: el anticoagulante y la medicina para los huesos van cada uno en su fila", () => {

@@ -183,6 +183,7 @@ export function EncounterContextBody({
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = data.pregnancy ? pregnancyWords(data.pregnancy) : null
+  const interviewRows = productUi().health.saidRows?.((data.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? []
   return (
     <div className="flex flex-col gap-5 text-sm">
       {data.unchanged ? (
@@ -278,6 +279,24 @@ export function EncounterContextBody({
           </ul>
         )}
       </section>
+      {interviewRows.length > 0 ? (
+        // Lo de la entrevista que cambia la cita (el corazón, la anestesia) y lo de un niño en casa, también
+        // ya revisado: no desaparece de la atención (revisión final del 15 nov, K4).
+        <section className="flex flex-col gap-1">
+          <h3 className="font-medium">De su entrevista</h3>
+          <ul className="flex flex-col gap-1">
+            {interviewRows.map((row) => {
+              const group = groups?.find((item) => row.keys.some((key) => item.interview?.includes(key)))
+              return (
+                <li key={row.label}>
+                  {row.label}: {row.value}
+                  {group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ) : null}
       {showsAsa ? (
         <section className="flex flex-col gap-1">
           <h3 className="font-medium">Riesgo anestésico</h3>

@@ -7,7 +7,7 @@ import { automationConsent } from "@odentia/db/schema/automation"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
 import { getCaseBrief } from "./agent-case-brief.js"
-import { getPatientHealth, savePatientHealth } from "./clinical.js"
+import { getAnamnesisVersion, getPatientHealth, listAnamnesisVersions, savePatientHealth } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact } from "./contacts.js"
 import { listDataConsents } from "./data-consents.js"
@@ -1932,11 +1932,13 @@ it("C3 · Carla registra a Thiago: lo de pequeño entra a su entrevista y la ate
   const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", result.patient!.id))
   expect(health.latestAnamnesis?.answers).toMatchObject({ antecedentesOdontologicos: child })
   expect(health.reviewPending).toBe(true)
-  const said = health.declared.find((group) => group.productLines.length > 0)
+  // Cada dato con quien lo dijo (revisión final del 15 nov, K2): lo de un niño en casa, por dato.
+  const said = health.declared.find((group) => group.interview.includes("biberon"))
   expect(said?.by).toMatchObject({ kind: "representative", name: "Carla Ramos" })
-  expect(said?.productLines).toEqual([
-    { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-    { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-    { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
-  ])
+  expect(said?.interview).toEqual(expect.arrayContaining(Object.keys(child)))
+  // «Ver historial» la cuenta en palabras, como la copia, no con `ya_no` ni `4_o_mas`.
+  const [version] = await withOrgContext(appDb, "org_a", (tx) => listAnamnesisVersions(tx, "org_a", result.patient!.id))
+  const words = await withOrgContext(appDb, "org_a", (tx) => getAnamnesisVersion(tx, "org_a", result.patient!.id, version!.id))
+  expect(words.entries).toContainEqual(expect.objectContaining({ label: "Biberón o pecho para dormir", value: "Ya no toma biberón" }))
+  expect(JSON.stringify(words.entries)).not.toContain("4_o_mas")
 })

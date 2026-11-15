@@ -1,4 +1,11 @@
-import { ageInYears, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS, pregnancyRecordOf, type PregnancyToday } from "@odentia/clinical"
+import {
+  ageInYears,
+  CONDITION_STATUSES,
+  FAMILY_KINSHIP_LABELS,
+  isChildAge,
+  pregnancyRecordOf,
+  type PregnancyToday,
+} from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -683,6 +690,7 @@ export function AntecedentesTab({
       declaration.via === "enlace" || (declaration.via === "registro" && declaration.enteredAt !== registration?.createdAt),
   )
   const pendingReview = isHealthReviewPending(health)
+  const childPatient = isChildAge(ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday()))
   // «Dijo que no · 13 nov», junto al grupo donde se decide: es de quien declaró, no del equipo.
   const saidNoOf = (topic: "conditions" | "medications"): string | undefined => {
     const group = saidNoGroupOf(health.declared, topic)
@@ -777,17 +785,13 @@ export function AntecedentesTab({
       )}
       <productHealth.Summary
         answers={(health.latestAnamnesis?.answers ?? {}) as Rec}
+        age={ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())}
         // Lo que dijo la persona y nadie revisó, con su marca dato por dato (QA del 14 nov, causa raíz).
         marks={Object.fromEntries(
           (health.declared ?? []).flatMap((group) =>
             (group.interview ?? []).map((key) => [key, declaredMarkWords(group.by, group.at, sex)]),
           ),
         )}
-        // Lo del producto (odentIA: «de pequeño» de un niño), con la marca de quien lo contó.
-        productMark={(() => {
-          const said = (health.declared ?? []).find((group) => (group.productLines ?? []).length > 0)
-          return said ? declaredMarkWords(said.by, said.at, sex) : undefined
-        })()}
       />
 
       <FormDrawer
@@ -965,7 +969,8 @@ export function AntecedentesTab({
                         />
                       </Field>
                     ))}
-                    {productHealth.asksPregnancy ? (
+                    {/* A un niño no se le pregunta el embarazo; lo ya anotado sí se ve (revisión final del 15 nov, K8). */}
+                    {productHealth.asksPregnancy && (!childPatient || pregnancyRecord) ? (
                       <Field>
                         <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
                         <Select
@@ -1171,6 +1176,8 @@ export function AntecedentesTab({
       <AnamnesisVersionDialog
         patientId={patientId}
         versionId={versionId}
+        versions={versions}
+        onSelect={setVersionId}
         onClose={() => setVersionId(null)}
       />
       <RegistrationSnapshotDialog
@@ -1500,7 +1507,8 @@ export function DeclaredHealthSnapshot({ health }: { health: Rec }): React.JSX.E
           {pregnancy}
         </p>
       ) : null}
-      {declaredInterviewRows(health).map((row) => (
+      {/* Lo común y lo del producto (odentIA: lo de un niño en casa), tal como llegó. */}
+      {[...declaredInterviewRows(health), ...(productUi().health.declaredRows?.(health) ?? [])].map((row) => (
         <p key={row.label}>
           <span className="font-medium">{row.label} · </span>
           {row.value}

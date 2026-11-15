@@ -268,17 +268,14 @@ export function HealthReviewNotice({
       conditionGroups.filter((group) => saidConditions.some((row) => group.conditions.includes(row.id))),
     )
   else if (saidNoConditionGroup) push("Enfermedades", "enfermedades", no(saidNoConditionGroup), [saidNoConditionGroup])
-  // El corazón, la anestesia, el tabaco y la lactancia que dijo (QA del 14 nov), una vez cada uno.
+  // El corazón, la anestesia, el tabaco, la lactancia y lo de un niño en casa que dijo (QA del 14 nov),
+  // una vez cada uno y solo lo que sigue como lo dijo.
   const interviewGroups = declared.filter((group) => (group.interview ?? []).length > 0)
   if (interviewGroups.length > 0)
     for (const row of productUi().health.saidRows?.((health.latestAnamnesis?.answers ?? {}) as Record<string, unknown>) ?? []) {
       const groups = interviewGroups.filter((group) => row.keys.some((key) => group.interview?.includes(key)))
       if (groups.length > 0) push(row.label, row.label.toLocaleLowerCase("es"), row.value, groups)
     }
-  // Lo del producto, como lo dice el servidor (odentIA: lo de pequeño que contó quien cuida a un niño).
-  for (const group of declared)
-    for (const row of group.productLines ?? [])
-      if (!rows.some((item) => item.label === row.label)) push(row.label, row.label.toLocaleLowerCase("es"), row.value, [group])
   // Lo que dijo y nadie revisó se decide por declaración (`health.declared`, del servidor), no por si
   // la salud tuvo antes una revisión: un látex que llegó después de revisarla también se marca (QA del
   // 14 nov, H2 de clínica). `reviewPending` solo dice si hay algo que revisar en Antecedentes.
