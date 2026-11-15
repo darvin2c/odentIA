@@ -129,7 +129,7 @@ import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
  */
 type Respondent = "patient" | "representative"
 type Declared = "" | "none" | "recorded" | "unknown"
-type Relation = "" | "guardian" | "family" | "other"
+type Relation = "" | "madre" | "padre" | "tutor" | "family" | "other"
 type YesNo = "" | "si" | "no"
 type YesNoUnknown = "" | "si" | "no" | "nose"
 type BottleAnswer = (typeof BOTTLE_ANSWERS)[number]
@@ -335,11 +335,25 @@ const YES_NO_UNKNOWN: ReadonlyArray<{ value: Exclude<YesNoUnknown, "">; label: s
   { value: "si", label: "Sí" },
   { value: "nose", label: "No sé" },
 ]
-const RELATIONS: ReadonlyArray<{ value: Exclude<Relation, "">; label: string; detail: string }> = [
-  { value: "guardian", label: "Madre, padre o tutor", detail: "Madre, padre o tutor" },
-  { value: "family", label: "Familiar", detail: "Familiar" },
-  { value: "other", label: "Otra relación", detail: "Otra relación" },
+/**
+ * Qué es de la persona quien la registra. Madre, padre y tutor legal van por separado (QA del 15
+ * nov, K15): el vínculo guarda el parentesco escrito y su código HL7 (`kinshipFromWords`: MTH, FTH;
+ * «tutor» no es un parentesco), y lo que dijo se lee «su madre, Rosa». Los tres son el mismo vínculo
+ * `guardian`: quién decide por ella no cambia con la palabra.
+ */
+const RELATIONS: ReadonlyArray<{
+  value: Exclude<Relation, "">
+  label: string
+  relationship: NonNullable<RegistrationAnswers["representative"]>["relationship"]
+}> = [
+  { value: "madre", label: "Madre", relationship: "guardian" },
+  { value: "padre", label: "Padre", relationship: "guardian" },
+  { value: "tutor", label: "Tutor legal", relationship: "guardian" },
+  { value: "family", label: "Familiar", relationship: "family" },
+  { value: "other", label: "Otra relación", relationship: "other" },
 ]
+/** La opción elegida; un borrador de antes («guardian», la opción que juntaba las tres) cuenta como sin elegir. */
+const relationOf = (value: Relation) => RELATIONS.find((option) => option.value === value)
 const EXPERIENCES = [
   { value: "positiva", label: "Bien" },
   { value: "regular", label: "Regular" },
@@ -1097,11 +1111,12 @@ export function RegistrationQuestionnaire({
       privacyAccepted: d.privacy,
     }
     if (forOther || (repInFill && minor && d.repName.trim())) {
-      const relation = RELATIONS.find((option) => option.value === d.repRelation) ?? RELATIONS[0]
+      // Sin elegir, el vínculo sin parentesco: nunca se supone cuál de los tres es.
+      const relation = relationOf(d.repRelation)
       answers.representative = {
         displayName: d.repName.trim(),
-        relationship: relation.value,
-        relationshipDetail: relation.detail,
+        relationship: relation?.relationship ?? "guardian",
+        relationshipDetail: relation?.label ?? "",
         ...(d.repPhone ? { phone: d.repPhone } : {}),
         ...(minor && d.repDoc.trim() ? { docType: repDocType, docNumber: d.repDoc.trim() } : {}),
       }
@@ -1585,9 +1600,9 @@ export function RegistrationQuestionnaire({
           }
           check={() =>
             needs(!draft.repName.trim(), "repName", "Escribe tu nombre y apellidos.") ??
-            needs(!draft.repRelation, "repRelation", `Elige qué eres de ${name}.`) ??
+            needs(!relationOf(draft.repRelation), "repRelation", `Elige qué eres de ${name}.`) ??
             needs(
-              minor && draft.repRelation !== "guardian",
+              minor && relationOf(draft.repRelation)?.relationship !== "guardian",
               "repRelation",
               `${first || "La persona"} es menor de edad: lo registra su madre, padre o tutor.`,
             ) ??
@@ -1621,7 +1636,7 @@ export function RegistrationQuestionnaire({
                 aria-describedby={control.describedBy}
                 invalid={control.invalid}
                 onBlur={control.onBlur}
-                value={draft.repRelation || null}
+                value={relationOf(draft.repRelation)?.value ?? null}
                 options={RELATIONS}
                 onChange={(value) => set({ repRelation: value })}
                 columns={3}

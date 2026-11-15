@@ -10,9 +10,10 @@ import type { HealthDeclarant } from "./health-review.js"
 type Sex = string | null | undefined
 
 /**
- * El parentesco, si dice cuál es. «Madre, padre o tutor» es la opción del
- * registro, no un parentesco: no se escribe «su madre, padre o tutor» ni se
- * inventa cuál de los tres fue (QA del 14 nov).
+ * El parentesco, si dice cuál es. «Madre, padre o tutor» fue la opción del
+ * registro hasta el 15 nov, no un parentesco: lo guardado así no se escribe «su
+ * madre, padre o tutor» ni se inventa cuál de los tres fue (QA del 14 nov). Desde
+ * entonces el registro guarda «Madre», «Padre» o «Tutor legal» (K15).
  */
 const GENERIC_KIN = new Set(["madre, padre o tutor", "madre, padre o tutora", "representante"])
 export function specificKin(relation: string | null | undefined): string | null {
@@ -40,7 +41,7 @@ export function whoWords(by: HealthDeclarant, sex: Sex): string {
   const kin = specificKin(by.relation)
   if (kin && first) return `su ${kin}, ${first}`
   if (kin) return `su ${kin}`
-  // Eligió «Madre, padre o tutor» en el registro: quien la cuida, sin decir cuál de los tres.
+  // Eligió «Madre, padre o tutor» en el registro de antes: quien la cuida, sin decir cuál de los tres.
   if (by.relation) return first ? `${caregiver(sex)}, ${first}` : caregiver(sex)
   if (first) return first
   return sex === "F" ? "quien habla por ella" : sex === "M" ? "quien habla por él" : "quien habla en su nombre"

@@ -575,7 +575,7 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
     const repName = minor.getByLabel("Tu nombre y apellidos")
     await advanceTo(minor, repName)
     await repName.fill(`Madre Enlace ${org.slug}`)
-    await minor.getByRole("button", { name: "Madre, padre o tutor", exact: true }).click()
+    await minor.getByRole("button", { name: "Madre", exact: true }).click()
     await minor.getByRole("textbox", { name: /^Tu celular/ }).fill(maskedPhone(phoneFromId(nextEventId())))
     // El documento se revisa al pasar de paso, no recién al enviar: con 7 números lo dice ahí y no avanza.
     const before = await minor.getByText(/^Paso \d+ de \d+$/).textContent()
@@ -613,7 +613,7 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
   expect(minorDetail.registration?.answers.representative).toMatchObject({
     displayName: `Madre Enlace ${org.slug}`,
     relationship: "guardian",
-    relationshipDetail: "Madre, padre o tutor",
+    relationshipDetail: "Madre",
   })
   const contactDetail = await call<{ patients: { id: string; relationship: string }[] }>(
     page,
