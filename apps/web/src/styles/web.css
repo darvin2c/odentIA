@@ -407,6 +407,43 @@ details.q p {
   opacity: 1;
   transition: opacity 0.4s ease var(--rv-d, 0s);
 }
+/* El distintivo «ARM» de las portadas de las tres webs: la sigla grande en el color de la marca y,
+   al lado, el nombre completo y para quién es. */
+.arm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 16px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--sky) 45%, transparent);
+  background: color-mix(in srgb, var(--sky) 10%, transparent);
+  box-shadow: 0 0 32px -8px color-mix(in srgb, var(--sky) 60%, transparent);
+}
+.arm-badge b {
+  flex: none;
+  font: 800 18px/1 var(--font);
+  letter-spacing: 0.04em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--sky);
+  color: var(--night);
+}
+.arm-badge span {
+  font: 600 13px/1.3 var(--font);
+  color: var(--on-night);
+}
+.arm-badge span i {
+  font-style: normal;
+  color: var(--on-night-3);
+}
+@media (max-width: 520px) {
+  .arm-badge b { font-size: 16px; padding: 7px 12px; }
+  .arm-badge span { font-size: 12px; }
+  .arm-badge span i { display: none; }
+}
+
 @media print {
   [data-rv] {
     opacity: 1;

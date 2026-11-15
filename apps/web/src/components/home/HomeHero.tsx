@@ -406,7 +406,12 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       <div className="grain" aria-hidden="true"></div>
       <div className="wrap herow">
         <div className="hero-copy">
-          <span className="tag tag-d rise">[ El ARM para clínicas dentales ]</span>
+          <span className="arm-badge rise">
+            <b>ARM</b>
+            <span>
+              Agentic Relationship Management <i>· para clínicas dentales</i>
+            </span>
+          </span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
             Más pacientes que vuelven. <span>Menos trabajo para tu equipo.</span>
           </h1>
