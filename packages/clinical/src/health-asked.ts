@@ -135,13 +135,14 @@ export function healthQuestionsToAsk(
  * Lo que se sabe de una clase de medicina, para la atención: `yes` (toma una;
  * la marca va arriba), `saidYes` (dijo que toma una y ninguna medicina anotada
  * lleva esa clase: hay que preguntarle cuál), `no` (dijo que no, el equipo la
- * terminó, o no toma ninguna medicina), `unknown` (dijo «No sé») o `unasked`
- * (nadie se lo preguntó). `said`: lo respondió en una declaración y no lo anotó
- * el equipo.
+ * terminó, o no toma ninguna medicina), `unknown` (dijo «No sé»), `skipped` (se
+ * le preguntó y no respondió: «Saltar» en «Tus medicinas») o `unasked` (nadie
+ * se lo preguntó). `said`: lo respondió (o lo saltó) en una declaración y no lo
+ * anotó el equipo.
  */
 export interface MedicineClassAnswer {
   /** `took`: de los huesos, la tomó y ya no; el riesgo de una extracción sigue (AAOMS 2022). */
-  answer: "yes" | "saidYes" | "took" | "no" | "unknown" | "unasked"
+  answer: "yes" | "saidYes" | "took" | "no" | "unknown" | "skipped" | "unasked"
   said: boolean
 }
 
@@ -169,6 +170,8 @@ export function medicineClassAnswers(
     if (said === "none") return { answer: "no", said: true }
     if (said === "unknown") return { answer: "unknown", said: true }
     if (takesNoMedicine(input)) return { answer: "no", said: false }
+    // Se le preguntó y no respondió (QA del 15 nov, A12): no es «no se le preguntó».
+    if (input.declarations.some((row) => row.health[group]?.state === "unanswered")) return { answer: "skipped", said: true }
     return { answer: "unasked", said: false }
   }
   return { anticoagulants: of("anticoagulants"), boneMedicines: of("boneMedicines") }

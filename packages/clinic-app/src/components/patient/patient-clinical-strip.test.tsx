@@ -408,3 +408,14 @@ it("su «No sé» a las alergias dice «no sabe», no «no preguntado»", () => 
   expect(page).not.toContain("no preguntado")
   expect(text(<PatientClinicalStrip detail={unknown} sex="F" />)).toContain("Alergias: no preguntado")
 })
+
+// QA de formularios del 15 nov (A12 del auditor): «Saltar» en «Tus medicinas» se leía «no se le preguntó».
+it("lo que saltó de una clase de medicina dice «no respondió»", () => {
+  const plain: Detail = { activeAllergies: [], activeConditions: [], currentMedications: [], allergyReview: "none" }
+  const classes = {
+    medicineClasses: { anticoagulants: { answer: "skipped", said: true }, boneMedicines: { answer: "unasked", said: false } },
+  } as unknown as Partial<PatientHealth>
+  const page = text(<PatientClinicalStrip detail={plain} sex="F" health={health([], classes)} medicineClasses />)
+  expect(page).toContain("Anticoagulante: no respondió")
+  expect(page).not.toContain("Anticoagulante: no se le preguntó")
+})

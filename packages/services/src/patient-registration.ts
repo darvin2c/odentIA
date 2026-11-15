@@ -392,7 +392,10 @@ export async function patientHealthQuestionsWith(
   patientId: string,
 ): Promise<{
   ask: RegistrationFieldKey[]
-  /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
+  /**
+   * Ya respondió: lo que se le pregunta es solo lo que la lista sumó después (respondió con la de antes)
+   * o lo que saltó del anticoagulante y los huesos.
+   */
   onlyNew: boolean
   health: PatientHealth
   known: Set<RegistrationFieldKey>
@@ -419,8 +422,15 @@ export async function patientHealthQuestionsWith(
   // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
   const responded = !!sent || health.declarations.some((row) => row.via === "registro")
   const answeredOldList = health.declarations.length > 0 && !sawToday
-  if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
-  const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
+  // La excepción: lo que saltó del anticoagulante y los huesos, que cambian la cita. Se le preguntó y no
+  // respondió, así que su enlace le pregunta solo eso (QA del 15 nov, A12 y D3 del auditor).
+  const skipped = (Object.keys(health.medicineClasses) as Array<keyof typeof health.medicineClasses>).filter(
+    (key) => health.medicineClasses[key].answer === "skipped",
+  )
+  if (responded && !answeredOldList && skipped.length === 0) return { ask: [], onlyNew: false, health, known }
+  const onlyNew = responded
+    ? new Set<string>(answeredOldList ? newRegistrationQuestions(1, product).map((question) => question.key) : skipped)
+    : null
   const config = await getPatientRegistrationConfig(tx, orgId)
   const person = await requirePatient(tx, orgId, patientId)
   const today = await patientOrganizationToday(tx, orgId)

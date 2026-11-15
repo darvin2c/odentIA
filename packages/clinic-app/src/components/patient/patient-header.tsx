@@ -120,6 +120,8 @@ const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, 
   took: () => "la tomó antes, hoy no",
   no: (said) => (said ? "dijo que no" : "no toma"),
   unknown: () => "no sabe",
+  // Se le preguntó y no respondió («Saltar» en «Tus medicinas»): su enlace se lo vuelve a preguntar.
+  skipped: () => "no respondió",
 }
 
 /** Lo declarado que llega a quien solo ve las alergias, como grupos de la franja. */
