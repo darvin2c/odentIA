@@ -52,10 +52,8 @@ function useMedicalPrescribingRules(patientId: string, enabled: boolean): Prescr
     vitals.data?.data.filter((reading) => reading.vitals.peso !== undefined).at(-1)?.vitals.peso ??
     null
   return {
-    check(items, weightKg) {
-      const { errors, warnings, reminders } = checkPrescription(context, items, weightKg)
-      return { errors, warnings, reminders }
-    },
+    // El embarazo, la lactancia y lo demás que avisa toda receta lo suma la receta misma (`prescribingAlerts`).
+    check: (items, weightKg) => ({ errors: checkPrescription(context, items, weightKg).errors }),
     weight: { required: age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS, suggested: lastWeight },
   }
 }

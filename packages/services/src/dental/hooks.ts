@@ -20,6 +20,7 @@ import {
   periodontalChart,
   periodontalTooth,
   planItemFinding,
+  serviceFinding,
 } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
@@ -356,6 +357,21 @@ export const dentalHooks: ProductHooks = {
         [row.leaves, row.family].filter((tag): tag is string => !!tag),
       ]),
     )
+  },
+  // La exodoncia es el servicio que deja la pieza ausente (`dental.service_finding`).
+  async extractionServiceIds(tx, orgId, serviceIds) {
+    if (serviceIds.length === 0) return new Set()
+    const rows = await tx
+      .select({ serviceId: serviceFinding.serviceId })
+      .from(serviceFinding)
+      .where(
+        and(
+          eq(serviceFinding.organizationId, orgId),
+          inArray(serviceFinding.serviceId, [...serviceIds]),
+          eq(serviceFinding.condition, "missing_tooth"),
+        ),
+      )
+    return new Set(rows.map((row) => row.serviceId))
   },
   // Una consulta, una evaluación o una radiografía no piden «Falta otra sesión».
   oneOffKinds: ["diagnostico"],

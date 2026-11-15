@@ -257,7 +257,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-receta-escribir",
         q: "¿Cómo escribo una receta con varios medicamentos?",
-        a: "En «Nuevo» › «Receta» escribes cada medicamento por su denominación común, con concentración, forma, dosis, vía, frecuencia y duración; «Añadir medicamento» suma otro y «Quitar el último» lo saca. Arriba ves lo que ya toma y lo que tiene. Si lo que escribes choca con algo de su ficha, sale «Aviso de alergia» o «Aviso» ahí mismo, con «Cambiar medicamento»: si la recetas igual, la receta guarda que viste el aviso, con tu nombre. «Emitir receta» la deja hecha; para corregirla después se anula con su motivo.",
+        a: "En «Nuevo» › «Receta» escribes cada medicamento por su denominación común, con concentración, forma, dosis, vía, frecuencia y duración; «Añadir medicamento» suma otro y «Quitar el último» lo saca. Arriba ves lo que ya toma y lo que tiene, y si está embarazada o da de lactar. Si lo que escribes choca con algo de su ficha (una alergia, un antiinflamatorio como el ibuprofeno con su anticoagulante, o en el embarazo), sale «Aviso de alergia» o «Aviso» ahí mismo, con «Cambiar medicamento»: si la recetas igual, la receta guarda que viste el aviso, con tu nombre. «Emitir receta» la deja hecha; para corregirla después se anula con su motivo.",
         forms: ["como hago una receta", "dos medicamentos en una receta", "por que me avisa de una alergia al recetar"],
         area: "clinica",
         needs: "clinical.write",

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
-import { patientAllergy, patientMedication } from "@odentia/db/schema/clinical"
+import { patientAllergy, patientAnamnesis, patientMedication } from "@odentia/db/schema/clinical"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { addClinicalNote } from "./clinical.js"
 import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
 import { createClinicalOrder } from "./clinical-forms.js"
 import { takeOverEncounter } from "./encounters.js"
+import { clinicToday } from "./inventory-stock.js"
 import { createMedicalLeave } from "./medical-leaves.js"
 import { addPlanItem } from "./plan.js"
 import { cancelPrescription, createPrescription, getPrescriptionDetail } from "./prescriptions.js"
@@ -124,6 +125,38 @@ it("exige DCI y vía reconocida, y avisa la alergia antes de prescribir", async 
   )
   expect(plain.allergyOverrideReason).toBeNull()
   expect(plain.alertsSeen).toBeNull()
+})
+
+// Revisión final de formularios (clínica Y1): en odentIA, ibuprofeno a quien toma warfarina, o a una
+// gestante de 30 semanas, se emitía sin ningún aviso. Ahora avisa como en latidIA, sin frenar: se
+// emite igual con el aviso a la vista y la receta guarda que se vio.
+it("odentIA avisa un AINE con un anticoagulante y en el embarazo, y se receta igual con el aviso visto", async () => {
+  const f = await clinicalFixture()
+  await ownerDb
+    .insert(patientMedication)
+    .values({ organizationId: "org_a", patientId: f.patient.id, name: "Warfarina 5 mg", genericName: "warfarina", atcCode: "B01AA03" })
+  await ownerDb.insert(patientAnamnesis).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    version: 1,
+    answers: { embarazoLactancia: { embarazo: { estado: "si", fecha: await f.run((tx) => clinicToday(tx, "org_a")), semanas: 30 } } },
+  })
+  const ibuprofen = { genericName: "ibuprofeno", strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "Cada 8 horas", duration: "3 días" }
+  const bleeding =
+    "Ibuprofeno: toma Warfarina 5 mg (anticoagulante o antiagregante) y los AINE aumentan el riesgo de sangrado; el paracetamol es la alternativa habitual."
+  const pregnancy = "Ibuprofeno: está embarazada (30 semanas) y los AINE se evitan desde la semana 20 del embarazo (ATC M01AE01)."
+  const unseen = await f
+    .run((tx) => createPrescription(tx, ...f.args, { alertsShown: [], items: [ibuprofen] }))
+    .catch((error: unknown) => error)
+  expect(unseen).toMatchObject({ code: "ALLERGY_CONFLICT" })
+  expect(String((unseen as Error).message)).toContain(bleeding)
+  const issued = await f.run((tx) => createPrescription(tx, ...f.args, { alertsShown: [bleeding, pregnancy], items: [ibuprofen] }))
+  expect(issued.alertsSeen).toEqual([pregnancy, bleeding])
+  // El paracetamol no avisa nada de eso.
+  const paracetamol = await f.run((tx) =>
+    createPrescription(tx, ...f.args, { items: [{ ...ibuprofen, genericName: "paracetamol", strength: "500 mg" }] }),
+  )
+  expect(paracetamol.alertsSeen).toBeNull()
 })
 
 it("lo que ya toma, o dos veces lo mismo en la receta, se avisa por su código ATC y no frena (X2)", async () => {

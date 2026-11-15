@@ -641,6 +641,11 @@ export interface PlanItem {
   consent?: TreatmentConsentState | null
   /** Los consentimientos que faltan preparar, por su título (`treatmentConsentWords`). */
   consentMissing?: string[]
+  /**
+   * En una exodoncia por hacer, lo que toma y la cambia, con quién lo dijo: «Toma warfarina 5 mg (lo
+   * dijo ella el 14 nov): pide su INR del día». Lo dice el servidor; es un aviso, no frena nada.
+   */
+  extractionRisks?: string[]
 }
 
 type PriceFields = Pick<PlanItem, "priceCents" | "currency" | "agreedPriceCents" | "agreedCurrency" | "offeredPriceCents" | "offeredCurrency">

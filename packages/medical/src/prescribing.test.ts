@@ -1,4 +1,4 @@
-import { allergyWarnings } from "@odentia/clinical"
+import { allergyWarnings, prescribingAlerts } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import { readMedicalHistory } from "./history.js"
 import { GENERAL_MEDICATIONS, MEDICAL_MEDICATION_CATALOG } from "./medications.js"
@@ -25,63 +25,21 @@ describe("la receta de latidIA (issue 229, decisión 12)", () => {
     ])
     expect(checkPrescription(context({}), [{ genericName: "paracetamol" }], null)).toEqual({
       errors: [],
-      warnings: [],
-      reminders: [],
       weightRequired: false,
     })
   })
 
-  it("con embarazo lo recuerda y lo contraindicado se avisa, como una alergia", () => {
+  // El embarazo, la lactancia y lo contraindicado se mudaron a toda receta (`prescribingAlerts` de
+  // @odentia/clinical, QA final de formularios): sus pruebas viven en `prescribing-alerts.test.ts`,
+  // con los medicamentos de latidIA.
+  it("con embarazo, la regla de latidIA no repite el aviso: lo da toda receta", () => {
     const pregnant = context({
       embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-10-10", semanas: 10 } },
     })
-    const check = checkPrescription(
-      pregnant,
-      [{ genericName: "enalapril" }, { genericName: "paracetamol" }],
-      null,
-    )
-    expect(check.reminders).toEqual([
-      "Está embarazada, 12 semanas (registrado el 10/10/2026): revisa que cada medicamento sea seguro en el embarazo.",
-    ])
-    expect(check.warnings).toEqual([
-      "Enalapril: está embarazada (12 semanas) y los IECA están contraindicados en el embarazo (ATC C09AA02).",
-    ])
-    // Un embarazo que por sus semanas ya pasó su término queda «por confirmar», como en la franja de
-    // la ficha, y la receta no deja de avisar en silencio: lo contraindicado se avisa con esas palabras.
-    const old = context({
-      embarazoLactancia: { embarazo: { estado: "si", fecha: "2025-09-01", semanas: 20 } },
-    })
-    const stale = checkPrescription(old, [{ genericName: "enalapril" }], null)
-    expect(stale.reminders[0]).toMatch(/^Embarazo por confirmar \(registrado el 01\/09\/2025\)/)
-    expect(stale.warnings).toEqual([
-      "Enalapril: tiene un embarazo por confirmar y los IECA están contraindicados en el embarazo (ATC C09AA02).",
-    ])
-    // Sin las semanas, la misma regla: en pie hasta 42 semanas después de haberlo dicho, no para siempre.
-    const noWeeks = (fecha: string) =>
-      checkPrescription(context({ embarazoLactancia: { embarazo: { estado: "si", fecha } } }), [{ genericName: "enalapril" }], null)
-    expect(noWeeks("2026-09-01").warnings).toEqual([
-      "Enalapril: está embarazada y los IECA están contraindicados en el embarazo (ATC C09AA02).",
-    ])
-    expect(noWeeks("2025-09-01").reminders[0]).toMatch(/^Embarazo por confirmar/)
-    expect(noWeeks("2025-09-01").warnings[0]).toMatch(/tiene un embarazo por confirmar/)
-    // Un «no» no avisa nada.
-    const not = checkPrescription(
-      context({ embarazoLactancia: { embarazo: { estado: "no", fecha: "2026-09-01" } } }),
-      [{ genericName: "enalapril" }],
-      null,
-    )
-    expect(not).toMatchObject({ warnings: [], reminders: [] })
-  })
-
-  it("la lactancia se recuerda con su fecha", () => {
-    const check = checkPrescription(
-      context({ embarazoLactancia: { lactancia: { estado: "si", fecha: "2026-09-01" } } }),
-      [{ genericName: "ibuprofeno" }],
-      null,
-    )
-    expect(check.reminders).toEqual([
-      "Da de lactar (registrado el 01/09/2026): revisa que cada medicamento sea compatible con la lactancia.",
-    ])
+    expect(checkPrescription(pregnant, [{ genericName: "enalapril" }], null)).toEqual({ errors: [], weightRequired: false })
+    expect(
+      prescribingAlerts({ interview: pregnant.history, today: TODAY, taking: [] }, [{ genericName: "enalapril" }], GENERAL_MEDICATIONS).warnings,
+    ).toEqual(["Enalapril: está embarazada (12 semanas) y los IECA están contraindicados en el embarazo (ATC C09AA02)."])
   })
 
   it("a un menor de 12 años se le receta con su peso", () => {
