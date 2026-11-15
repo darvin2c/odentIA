@@ -21,3 +21,9 @@ it("odentIA: «evaluación», con o sin tilde y a medio escribir, también busca
   for (const q of ["evaluación", "evaluacion", "evalua"])
     expect(everydayServiceVariants(q, dentalCatalog.everydayWords)).toContain("consulta")
 })
+
+// Prueba con voz del 15 nov (c3): un bracket solo es el control; «brackets», toda la ortodoncia.
+it("odentIA: «bracket» busca el control de ortodoncia y «brackets», la ortodoncia", () => {
+  expect(everydayServiceVariants("el bracket", dentalCatalog.everydayWords)).toEqual(["el control de ortodoncia"])
+  expect(everydayServiceVariants("brackets", dentalCatalog.everydayWords)).toEqual(["ortodoncia"])
+})

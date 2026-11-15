@@ -476,8 +476,12 @@ export function prepareFormAnswer(
   const checked = checkWithWritten(draft, questions, site, transcript)
   if (!draft.reread || !checked) return checked
   // La segunda lectura de una oración de la red: solo un valor que calza, y siempre por revisar.
-  // Sin valor no se propone: el aviso de la red se queda.
+  // Sin valor no se propone: el aviso de la red se queda. Su frase tiene que nombrar la pregunta: la
+  // oración releída puede ser todo lo dictado sin puntos, y en ella «de 6 no perdón de 4 mm» es del
+  // overjet, no del overbite (prueba con voz del 15 nov, c3, v02).
   if (checked.payload["value"] == null) return null
+  const question = questions.find((item) => item.number === draft.payload["question"])
+  if (!question || !namesQuestion(question, heardBy(question, draft.sourceText ?? ""), site)) return null
   return { ...checked, payload: { ...checked.payload, reread: true }, status: "por_revisar", note: checked.note ?? REREAD_NOTE }
 }
 

@@ -39,6 +39,10 @@ const EVERYDAY_WORDS: Record<string, readonly string[]> = {
   nervio: ["endodoncia"],
   conducto: ["endodoncia"],
   brackets: ["ortodoncia"],
+  // Un bracket solo (recementarlo, recolocarlo, uno que se soltó) es el control de ortodoncia, nunca
+  // aparatología nueva: «brackets» trae toda la ortodoncia (prueba con voz del 15 nov, c3: «hoy
+  // reglamentamos el bracket» ofrecía la aparatología fija y la removible).
+  bracket: ["control de ortodoncia"],
   // «Cambiamos el arco» es el control de ortodoncia; sin esto calzaba con «Apexificación, cambio de medicación».
   arco: ["control de ortodoncia"],
   frenillos: ["ortodoncia"],
