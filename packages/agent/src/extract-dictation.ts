@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { DICTATION_CHARS, getDictationCatalog, getOrgLocale, ServiceError } from "@odentia/services"
+import { DICTATION_CHARS, type DictationFormQuestion, getDictationCatalog, getOrgLocale, ServiceError } from "@odentia/services"
 import { askDictationModel, type DictationExtraction, type DictationPending } from "./dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
@@ -21,6 +21,8 @@ export async function extractDictation(
     context?: string | undefined
     /** Sugerencias de este dictado que el profesional aún no decide, para corregirlas o quitarlas por voz. */
     pending?: DictationPending[] | undefined
+    /** Las preguntas vacías de las fichas empezadas en la atención (`dictationFormQuestions`). */
+    forms?: readonly DictationFormQuestion[] | undefined
   },
 ): Promise<DictationExtraction> {
   const transcript = input.transcript.trim()
@@ -79,6 +81,7 @@ export async function extractDictation(
       transcript,
       context: input.context ?? "",
       pending,
+      forms: input.forms ?? [],
     },
     profile,
   )

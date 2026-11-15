@@ -579,6 +579,14 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "recepcion-preguntar-su-salud": () => [],
   // Sin dictado no hay sugerencias que corregir ni página de Clío donde probarlo.
   "pacientes-dictado-corregir-pausar": () => [],
+  "pacientes-dictado-ficha": () => [],
+  "pacientes-dictado-ficha-no-lleno": () => [],
+  "pacientes-dictado-ficha-revisar": () => [],
+  "pacientes-dictado-barra-ficha": () => [],
+  "pacientes-dictado-dos-fichas": () => [],
+  "pacientes-dictado-firmar-sin-decidir": () => [],
+  "pacientes-dictado-tercera-ficha": () => [],
+  "pacientes-dictado-corregir-confirmada": () => [],
   "agente-clio-probar-dictado": () => [],
   "elijo-tratamientos-trae-cita": (faq) => [
     {

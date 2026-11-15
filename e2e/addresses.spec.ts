@@ -142,7 +142,7 @@ test("la reserva por enlace dice cómo llegar a la sede", async ({ owner, fixtur
     await visitor.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
     await visitor.getByRole("button", { name: /^Continuar · / }).click()
     await expect(visitor.getByRole("heading", { name: "Revisa y reserva" })).toBeVisible()
-    const howTo = visitor.getByRole("region", { name: "Tu cita" }).getByRole("link", { name: "Cómo llegar" })
+    const howTo = visitor.getByRole("region", { name: "Tu cita", exact: true }).getByRole("link", { name: "Cómo llegar" })
     await expect(howTo).toBeVisible()
     await expect(howTo).toHaveAttribute("href", /google\.com\/maps\/search\/\?api=1&query=.*query_place_id=fake-place/)
     await visitor.screenshot({ path: testInfo.outputPath("reserva-como-llegar.png") })
