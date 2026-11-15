@@ -26,11 +26,13 @@ import { user } from "@odentia/db/schema/auth"
 import { encounter } from "@odentia/db/schema/clinical"
 import { appointmentVisitAnswer } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm"
 import { declarantOfContact } from "./clinical.js"
 import { ServiceError, validation } from "./errors.js"
+import { findOrgLocale } from "./locale.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { contactDecides } from "./responsibilities.js"
+import { dayKeyIn } from "./to-schedule.js"
 
 /** Lo que se le pregunta antes de una cita suya por venir. */
 export interface VisitAsk {
@@ -313,21 +315,113 @@ async function viewsOf(tx: Db, orgId: string, rows: Array<typeof appointmentVisi
   return out
 }
 
+/** Lo que contó, como lo lee la atención («Hoy viene a…» y la atención firmada). */
+export interface EncounterVisitAnswer extends VisitAnswerView {
+  /**
+   * Lo contó para otra cita suya (la de `appointmentStartsAt`), no para la de esta atención: vino
+   * sin cita, o antes de la cita para la que lo contó (QA final de formularios, 15 nov, H2). La
+   * pantalla dice «Para su cita del lun 16 contó…».
+   */
+  otherAppointment: boolean
+}
+
+interface EncounterForVisit {
+  id: string
+  patientId: string
+  appointmentId: string | null
+  professionalUserId: string
+  status: string
+  startedAt: Date
+}
+
+/** La atención sigue viva: existe y no se anuló. */
+async function encounterAlive(tx: Db, orgId: string, encounterId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ status: encounter.status })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId)))
+    .limit(1)
+  return !!row && row.status !== "anulada"
+}
+
 /**
- * «Hoy viene a…»: lo que contó para la cita de esta atención, y solo de esa cita (lo de otra
- * visita no se lee como de hoy). Si quien atiende abre su borrador, el sistema anota que lo vio
- * (quién, cuándo y en qué atención), una sola vez y sin botón. Una respuesta en blanco no se
- * muestra. Nulo sin cita o sin nada que contar.
+ * Lo que contó para la cita de esta atención, si contó algo y no lo vio ya alguien en otra
+ * atención que sigue viva: si vino antes sin cita y ahí se leyó, el día de su cita ya no se
+ * repite como de hoy.
+ */
+async function ownAnswerOf(tx: Db, orgId: string, row: EncounterForVisit) {
+  if (!row.appointmentId) return null
+  const answer = await answerOf(tx, orgId, row.appointmentId)
+  if (!answer || answer.patientId !== row.patientId || !visitAnswerHasContent(answer)) return null
+  if (answer.seenEncounterId && answer.seenEncounterId !== row.id && (await encounterAlive(tx, orgId, answer.seenEncounterId)))
+    return null
+  return answer
+}
+
+/**
+ * Lo que contó para otra cita suya, cuando esta atención no tiene cita o su cita no trae nada (QA
+ * final de formularios, 15 nov, H2: Rosa contó para su cita del lunes y vino hoy). Lo que ya se vio
+ * en esta atención sigue en ella, también firmada. Si no, solo en un borrador de hoy: lo de una cita
+ * suya que sigue en pie y no terminó, que nadie vio en otra atención viva; la más cercana. Una
+ * atención que se registra otro día no lo toma: no es la visita a la que venía.
+ */
+async function toldForAnotherVisit(tx: Db, orgId: string, row: EncounterForVisit, now: Date) {
+  const rows = await tx
+    .select({
+      answer: appointmentVisitAnswer,
+      status: appointment.status,
+      endsAt: appointment.endsAt,
+      seenStatus: encounter.status,
+    })
+    .from(appointmentVisitAnswer)
+    .innerJoin(
+      appointment,
+      and(eq(appointment.organizationId, appointmentVisitAnswer.organizationId), eq(appointment.id, appointmentVisitAnswer.appointmentId)),
+    )
+    .leftJoin(
+      encounter,
+      and(eq(encounter.organizationId, appointmentVisitAnswer.organizationId), eq(encounter.id, appointmentVisitAnswer.seenEncounterId)),
+    )
+    .where(
+      and(
+        eq(appointmentVisitAnswer.organizationId, orgId),
+        eq(appointmentVisitAnswer.patientId, row.patientId),
+        row.appointmentId ? ne(appointmentVisitAnswer.appointmentId, row.appointmentId) : undefined,
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+  const told = rows.filter((item) => visitAnswerHasContent(item.answer))
+  const here = told.find((item) => item.answer.seenEncounterId === row.id)
+  if (here) return here.answer
+  if (row.status !== "borrador") return null
+  const { timezone } = await findOrgLocale(tx, orgId)
+  if (dayKeyIn(row.startedAt, timezone) !== dayKeyIn(now, timezone)) return null
+  return (
+    told.find(
+      (item) =>
+        (item.status === "programada" || item.status === "confirmada") &&
+        item.endsAt > now &&
+        (!item.answer.seenEncounterId || item.seenStatus === null || item.seenStatus === "anulada"),
+    )?.answer ?? null
+  )
+}
+
+/**
+ * «Hoy viene a…»: lo que contó para la cita de esta atención o, si no trae nada, lo que contó para
+ * otra cita suya que aún no llega (`otherAppointment`, con su fecha). Si quien atiende abre su
+ * borrador, el sistema anota que lo vio (quién, cuándo y en esta atención), una sola vez y sin
+ * botón; así, el día de esa otra cita ya no sale como de hoy. Una respuesta en blanco no se
+ * muestra. Nulo si no hay nada que contar.
  */
 export async function encounterVisitAnswer(
   tx: Db,
   orgId: string,
-  row: { id: string; patientId: string; appointmentId: string | null; professionalUserId: string; status: string },
+  row: EncounterForVisit,
   viewerUserId: string | null,
-): Promise<VisitAnswerView | null> {
-  if (!row.appointmentId) return null
-  let answer = await answerOf(tx, orgId, row.appointmentId)
-  if (!answer || answer.patientId !== row.patientId || !visitAnswerHasContent(answer)) return null
+  now: Date = new Date(),
+): Promise<EncounterVisitAnswer | null> {
+  let answer = (await ownAnswerOf(tx, orgId, row)) ?? (await toldForAnotherVisit(tx, orgId, row, now))
+  if (!answer) return null
   if (row.status === "borrador" && viewerUserId && viewerUserId === row.professionalUserId && !answer.seenAt) {
     const [seen] = await tx
       .update(appointmentVisitAnswer)
@@ -337,12 +431,13 @@ export async function encounterVisitAnswer(
     if (seen) answer = seen
   }
   const [view] = await viewsOf(tx, orgId, [answer])
-  return view ?? null
+  return view ? { ...view, otherAppointment: answer.appointmentId !== row.appointmentId } : null
 }
 
 /**
- * Todo lo que contó antes de sus citas, la más reciente primero, con la atención de esa cita si la
- * tuvo: lo lee la Historia y la copia de su historia. Lo que quedó en blanco no cuenta.
+ * Todo lo que contó antes de sus citas, la más reciente primero, con la atención en que se leyó (la
+ * de esa cita o, si vino antes, la de ese día) si la tuvo: lo lee la Historia y la copia de su
+ * historia. Lo que quedó en blanco no cuenta; lo que aún no tiene atención va suelto.
  */
 export async function patientVisitAnswers(
   tx: Db,
@@ -357,6 +452,7 @@ export async function patientVisitAnswers(
   const told = rows.filter((row) => visitAnswerHasContent(row))
   const views = await viewsOf(tx, orgId, told)
   if (views.length === 0) return []
+  const seenIds = views.flatMap((view) => (view.seenEncounterId ? [view.seenEncounterId] : []))
   const encounters = await tx
     .select({ id: encounter.id, appointmentId: encounter.appointmentId, status: encounter.status })
     .from(encounter)
@@ -364,11 +460,18 @@ export async function patientVisitAnswers(
       and(
         eq(encounter.organizationId, orgId),
         eq(encounter.patientId, patientId),
-        inArray(encounter.appointmentId, views.map((view) => view.appointmentId)),
+        or(
+          inArray(encounter.appointmentId, views.map((view) => view.appointmentId)),
+          seenIds.length > 0 ? inArray(encounter.id, seenIds) : undefined,
+        ),
       ),
     )
+  const alive = encounters.filter((item) => item.status !== "anulada")
   return views.map((view) => {
-    const own = encounters.filter((item) => item.appointmentId === view.appointmentId && item.status !== "anulada")
-    return { ...view, encounterId: (own.find((item) => item.id === view.seenEncounterId) ?? own[0])?.id ?? null }
+    // Lo visto en una atención viva va en ella, aunque sea de otra cita (vino antes, sin cita);
+    // si no, en la de su cita.
+    const seen = alive.find((item) => item.id === view.seenEncounterId)
+    const own = alive.find((item) => item.appointmentId === view.appointmentId)
+    return { ...view, encounterId: (seen ?? own)?.id ?? null }
   })
 }

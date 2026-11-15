@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import { setOrgLocale } from "../../lib/locale"
+import { visitToldHeading } from "../../lib/visit-answer-words"
 import { visitBookedWords, visitWaitWords } from "./encounter-visit"
 
 describe("«Hoy viene a…» con la espera entre sesiones (QA del 10 nov, B6)", () => {
@@ -39,5 +41,29 @@ describe("«Hoy vino sin cita. Ya tiene una reservada»", () => {
     expect(plain(visitBookedWords({ startsAt: at, serviceName: null }, "es-ES", "Europe/Madrid"))).toBe(
       "Hoy vino sin cita. Ya tiene una reservada: sáb 14 nov, 21:00.",
     )
+  })
+})
+
+// QA final de formularios (15 nov, H2 y U2): lo que contó para su cita del lunes, si vino antes.
+describe("lo que contó para otra cita", () => {
+  beforeAll(() => void setOrgLocale("es-PE", "America/Lima", "PE"))
+  const told = {
+    by: { kind: "patient" as const, name: null, relation: null },
+    submittedAt: "2026-11-15T03:50:00.000Z",
+    submittedVia: "enlace" as const,
+    appointmentStartsAt: "2026-11-16T16:00:00.000Z",
+  }
+
+  it("dice para qué cita lo contó, con su fecha", () => {
+    expect(visitToldHeading({ ...told, otherAppointment: true }, "Rosa")).toBe("Para su cita del lun 16 nov, Rosa contó (14 nov, desde su enlace)")
+    expect(visitToldHeading({ ...told, otherAppointment: true }, null)).toBe("Para su cita del lun 16 nov contó (14 nov, desde su enlace)")
+    expect(
+      visitToldHeading({ ...told, by: { kind: "representative", name: "Carla Ruiz", relation: "madre" }, otherAppointment: true }, "Mateo"),
+    ).toBe("Para su cita del lun 16 nov, su madre, Carla, contó (14 nov, desde su enlace)")
+  })
+
+  it("lo de la cita de hoy se dice como siempre", () => {
+    expect(visitToldHeading(told, "Rosa")).toBe("Lo que contó Rosa antes de venir (14 nov, desde su enlace)")
+    expect(visitToldHeading({ ...told, otherAppointment: false }, null)).toBe("Lo que contó antes de venir (14 nov, desde su enlace)")
   })
 })

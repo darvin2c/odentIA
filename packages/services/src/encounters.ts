@@ -100,7 +100,7 @@ import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diag
 import { assertAttending } from "./encounter-attending.js"
 import { removableFromEncounter } from "./encounter-plan-remove.js"
 import { type EncounterVisit, encounterVisitOf } from "./encounter-visit.js"
-import { encounterVisitAnswer, type VisitAnswerView } from "./visit-answers.js"
+import { type EncounterVisitAnswer, encounterVisitAnswer } from "./visit-answers.js"
 import {
   checkEncounterVoidBudgets,
   type EncounterVoidPreview,
@@ -330,11 +330,12 @@ export interface EncounterDetailBase {
    */
   visit: EncounterVisit | null
   /**
-   * Lo que contó antes de venir para la cita de esta atención («Antes de tu cita»): solo de esa
-   * cita, en el borrador y después de firmar, con quién lo vio al atender. Nulo sin cita o si no
-   * contó nada. No traba nada: sin él, la atención se firma igual.
+   * Lo que contó antes de venir («Antes de tu cita»): lo de la cita de esta atención o, si vino
+   * sin cita o antes de la cita para la que lo contó, lo de esa otra cita (`otherAppointment`),
+   * en el borrador y después de firmar, con quién lo vio al atender. Nulo si no contó nada. No
+   * traba nada: sin él, la atención se firma igual.
    */
-  visitAnswer: VisitAnswerView | null
+  visitAnswer: EncounterVisitAnswer | null
   /**
    * Tratamientos que esta atención deja por ejecutar: los vinculados y los
    * indicados aquí, sin repetir, que siguen abiertos y la persona no dejó fuera
