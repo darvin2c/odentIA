@@ -128,7 +128,7 @@ import {
   portalBudgetContext,
   toPortalBudget,
 } from "./portal.js"
-import { saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
+import { beforeVisitAppointmentOf, lastVisitAt, saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
@@ -253,9 +253,16 @@ export interface PersonalLinkView {
   /** Consentimientos que la clínica le envió a firmar. */
   consents: PersonalLinkConsent[]
   /**
-   * «Tu visita» de la cita de este enlace, si se le pregunta y aún no la respondió: va con sus
-   * datos en una sola tarjeta, «Antes de tu cita». `purpose`: a qué viene, si la cita ya lo dice
-   * («sesión 2 de endodoncia»); entonces solo se le pregunta si le duele.
+   * La cita de «Antes de tu cita» (`linkBeforeVisitOf`), solo a quien decide por el paciente: la
+   * que está en curso hasta que termina y, si no, la próxima en pie. Puede no ser `appointment`
+   * (la que se cambia o se cancela, solo por venir): en la sala de espera es la de hoy. La tarjeta
+   * dice su fecha y quién lo lee. Nulo sin cita en pie.
+   */
+  beforeVisit: { startsAt: string; timeZone: string; professionalName: string } | null
+  /**
+   * «Tu visita» de la cita de «Antes de tu cita», si se le pregunta y aún no la respondió: va con
+   * sus datos en una sola tarjeta. `purpose`: a qué viene, si la cita ya lo dice («sesión 2 de
+   * endodoncia»); entonces solo se le pregunta si le duele.
    */
   visit: { purpose: string | null; questions: VisitQuestions } | null
   /**
@@ -391,61 +398,32 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
     patientId: link.patientId,
     contactId: link.row.contactId,
     dataSubmitted: link.row.dataSubmittedAt !== null,
-    appointmentId: linkAppointmentId(link),
+    appointmentId: await linkBeforeVisitIdOf(tx, orgId, link),
   })
 }
 
-/** La cita que muestra el enlace, si sigue en pie: «Tu visita» es de ella. */
-function linkAppointmentId(link: ResolvedPersonalLink): string | null {
-  return link.appointment && link.appointment.status !== "cancelada" ? link.appointment.id : null
-}
-
 /**
- * La cita de lo que contó: la que muestra el enlace o, si ya empezó, la suya mientras no termina. En la
- * sala de espera «Lo que nos contaste» sigue diciendo su visita (QA de la entrega 3, también en la 8).
+ * La cita de «Antes de tu cita» en este enlace: la de su paciente con la misma regla de recepción y
+ * su portal (`beforeVisitAppointmentOf`: la que está en curso hasta que termina y, si no, la próxima
+ * en pie). No es la que el enlace muestra para cambiar o cancelar (`link.appointment`, solo por
+ * venir): en la sala de espera, lo que cuenta es de la cita a la que vino (QA final de formularios,
+ * 15 nov, H4), y «Lo que nos contaste» sigue diciendo su visita mientras no termina.
  */
-async function toldAppointmentId(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
-  const shown = linkAppointmentId(link)
-  if (shown || !link.row.appointmentId) return shown
-  const [own] = await tx
-    .select({ id: appointment.id, status: appointment.status })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.id, link.row.appointmentId),
-        gt(appointment.endsAt, new Date()),
-      ),
-    )
-    .limit(1)
-  return own && own.status !== "cancelada" ? own.id : null
+async function linkBeforeVisitOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
+  if (!link.patientId || !link.decides) return null
+  return beforeVisitAppointmentOf(tx, orgId, link.patientId)
 }
 
-/** Cuándo terminó la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
-async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
-  // Una cita cuenta como pasada al terminar, no al empezar: mientras la persona espera en la sala
-  // (o se atiende), lo que envió para ella sigue siendo de esta cita.
-  const [row] = await tx
-    .select({ endsAt: appointment.endsAt })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        lte(appointment.endsAt, new Date()),
-        sql`${appointment.status} <> 'cancelada'`,
-      ),
-    )
-    .orderBy(desc(appointment.endsAt))
-    .limit(1)
-  return row?.endsAt ?? null
+async function linkBeforeVisitIdOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
+  return (await linkBeforeVisitOf(tx, orgId, link))?.id ?? null
 }
 
 /**
  * Lo que envió desde su enlace quien lo abre (sus datos, su salud, su visita) y cuándo: de la
  * traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo. Es lo de
- * la cita que viene: lo enviado antes de su última cita pasada fue para aquella y ya no se anuncia
- * como recién recibido. «Tu visita» guarda su cita: cuenta solo la de la cita de este enlace.
+ * la cita que viene: lo enviado antes de su última visita (`lastVisitAt`, al terminar) fue para
+ * aquella y ya no se anuncia como recién recibido. «Tu visita» guarda su cita: cuenta solo la de
+ * «Antes de tu cita» (`linkBeforeVisitOf`).
  */
 async function toldOf(
   tx: Db,
@@ -480,7 +458,7 @@ async function toldOf(
   const health = traced.find((row) => row.health)
   // «Nada cambió» (entrega 10): lo dijo, aunque no envió nada de su salud.
   const unchanged = traced.find((row) => row.healthCheck === "sin_cambios")
-  const visit = await visitSentOf(tx, orgId, await toldAppointmentId(tx, orgId, link), link.row.contactId)
+  const visit = await visitSentOf(tx, orgId, await linkBeforeVisitIdOf(tx, orgId, link), link.row.contactId)
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
@@ -492,7 +470,7 @@ async function toldOf(
 /** «¿Cambió algo?» antes de la cita de este enlace, solo a quien decide por el paciente (`healthCheckOf`). */
 async function linkHealthCheckOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<HealthCheck | null> {
   if (!link.patientId || !link.decides || link.expired) return null
-  return healthCheckOf(tx, orgId, { patientId: link.patientId, appointmentId: linkAppointmentId(link) })
+  return healthCheckOf(tx, orgId, { patientId: link.patientId, appointmentId: await linkBeforeVisitIdOf(tx, orgId, link) })
 }
 
 /**
@@ -714,6 +692,7 @@ export async function getPersonalLinkView(
     pending: null,
     budgets: [],
     consents: [],
+    beforeVisit: null,
     visit: null,
     told: null,
     healthCheck: null,
@@ -758,6 +737,8 @@ export async function getPersonalLinkView(
     !messages
   if (nothing) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const told = await toldOf(tx, orgId, link, region.timezone)
+  const before = link.expired ? null : await linkBeforeVisitOf(tx, orgId, link)
+  const beforeView = before ? await appointmentView(tx, orgId, before.id) : null
   const self = link.patientId
     ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
     : true
@@ -781,6 +762,9 @@ export async function getPersonalLinkView(
     ...(await youOf(tx, orgId, link)),
     budgets,
     consents,
+    beforeVisit: beforeView
+      ? { startsAt: beforeView.startsAt, timeZone: beforeView.timeZone, professionalName: beforeView.professionalName }
+      : null,
     visit,
     told,
     healthCheck: todo?.healthCheck ? { since: todo.healthCheck.since.toISOString() } : null,
@@ -952,7 +936,7 @@ export interface PersonalLinkDataForm {
 /** «Tu visita» de la cita de este enlace, solo a quien decide por el paciente y mientras no la respondió. */
 async function linkVisitOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
   if (!link.patientId || !link.decides || link.expired) return null
-  return visitAskOf(tx, orgId, { patientId: link.patientId, appointmentId: linkAppointmentId(link) })
+  return visitAskOf(tx, orgId, { patientId: link.patientId, appointmentId: await linkBeforeVisitIdOf(tx, orgId, link) })
 }
 
 /**

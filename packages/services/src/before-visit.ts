@@ -6,17 +6,16 @@
  * clínico (`clinical.alerts` sigue siendo la única excepción, y solo con las alergias).
  */
 import type { Db } from "@odentia/db"
-import { appointment } from "@odentia/db/schema/agenda"
 import { patientHealthDeclaration } from "@odentia/db/schema/clinical"
 import { appointmentVisitAnswer } from "@odentia/db/schema/clinical-forms"
-import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm"
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm"
 import { getPatientHealth } from "./clinical.js"
 import { healthCheckOf } from "./health-check.js"
 import { patientHealthToAsk } from "./patient-registration.js"
-import { nextAppointmentIdOf, visitAskOf } from "./visit-answers.js"
+import { beforeVisitAppointmentOf, lastVisitAt, visitAskOf } from "./visit-answers.js"
 
 export interface BeforeVisitStatus {
-  /** Su próxima cita, la que lo pide. */
+  /** La cita de «Antes de su cita» (`beforeVisitAppointmentOf`): la que está en curso o, si no, la próxima en pie. */
   appointmentId: string
   startsAt: Date
   /** `respondio`: no le queda nada por responder y respondió; `por_responder`: le queda algo. */
@@ -29,24 +28,6 @@ export interface BeforeVisitStatus {
    * encolado. Nulo si nunca salió.
    */
   linkSent: { at: Date; channel: string } | null
-}
-
-/** La última cita suya que ya pasó; una cancelada no fue una visita. */
-async function lastVisitAt(tx: Db, orgId: string, patientId: string, now: Date): Promise<Date | null> {
-  const [row] = await tx
-    .select({ startsAt: appointment.startsAt })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        lte(appointment.startsAt, now),
-        sql`${appointment.status} <> 'cancelada'`,
-      ),
-    )
-    .orderBy(desc(appointment.startsAt))
-    .limit(1)
-  return row?.startsAt ?? null
 }
 
 /** Cuándo salió por última vez su enlace (cualquiera de los suyos) y por qué canal. */
@@ -69,7 +50,8 @@ async function linkSentOf(tx: Db, orgId: string, patientId: string): Promise<Bef
 }
 
 /**
- * El estado de «Antes de su cita» para su próxima cita: por responder si se le pregunta lo de su
+ * El estado de «Antes de su cita» para la cita en curso o, si no hay, la próxima (la misma regla
+ * de su enlace y su portal, `beforeVisitAppointmentOf`): por responder si se le pregunta lo de su
  * visita, «¿Cambió algo?» o algo de su salud que nadie le preguntó; respondió si ya no le queda
  * nada y contó algo desde su última visita. Nulo sin cita por venir o si no hay nada que decir
  * (la clínica no le pregunta nada y no respondió nada). Lo que le falta de sus datos ya lo dice
@@ -81,14 +63,9 @@ export async function beforeVisitStatus(
   patientId: string,
   now: Date = new Date(),
 ): Promise<BeforeVisitStatus | null> {
-  const appointmentId = await nextAppointmentIdOf(tx, orgId, patientId)
-  if (!appointmentId) return null
-  const [next] = await tx
-    .select({ startsAt: appointment.startsAt })
-    .from(appointment)
-    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
-    .limit(1)
+  const next = await beforeVisitAppointmentOf(tx, orgId, patientId, now)
   if (!next) return null
+  const appointmentId = next.id
   const pending =
     (await visitAskOf(tx, orgId, { patientId, appointmentId })) !== null ||
     (await healthCheckOf(tx, orgId, { patientId, appointmentId }, now)) !== null ||

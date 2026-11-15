@@ -4,8 +4,9 @@
  * lo marca la clínica en «Preguntas al paciente» (grupo «Antes de cada cita», `visitQuestionsOf`);
  * en una sesión o un control se le dice a qué viene y solo se le pregunta si le duele.
  *
- * Una sola regla para su enlace y su portal: lo responde quien decide por el paciente, para una
- * cita suya por venir, una vez. Lo que envió llega a «Hoy viene a…» de la atención de esa cita,
+ * Una sola regla para su enlace y su portal: lo responde quien decide por el paciente, para la
+ * cita de «Antes de tu cita» (`beforeVisitAppointmentOf`: la de hoy mientras no termina o, si no,
+ * la próxima), una vez. Lo que envió llega a «Hoy viene a…» de la atención de esa cita,
  * donde el sistema anota quién lo vio al atender, y queda en la Historia y en la copia de su
  * historia. Nada de esto traba la atención: sin respuesta, la atención se abre, se firma y se cobra.
  */
@@ -25,7 +26,7 @@ import { user } from "@odentia/db/schema/auth"
 import { encounter } from "@odentia/db/schema/clinical"
 import { appointmentVisitAnswer } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, sql } from "drizzle-orm"
 import { declarantOfContact } from "./clinical.js"
 import { ServiceError, validation } from "./errors.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
@@ -94,8 +95,62 @@ async function answerOf(tx: Db, orgId: string, appointmentId: string) {
 }
 
 /**
- * Lo que se le pregunta de su visita antes de esa cita: solo si es suya, sigue en pie y es por
- * venir, la clínica pregunta algo y aún no lo respondió. Nulo: nada que preguntar.
+ * La cita de «Antes de tu cita» (QA final de formularios, 15 nov, H4): la que está en curso (suya,
+ * en pie, ya empezó y no terminó) hasta que termina y, si no hay, la próxima en pie. Una sola regla
+ * para su enlace, recepción y su portal: lo que cuenta en la sala de espera es de la cita a la que
+ * vino, no de la del lunes. No es la cita que el enlace deja cambiar o cancelar: esa es solo la que
+ * aún no empieza (`shownAppointment` de `booking-links.ts`).
+ */
+export async function beforeVisitAppointmentOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  now: Date = new Date(),
+): Promise<{ id: string; startsAt: Date; endsAt: Date } | null> {
+  const [row] = await tx
+    .select({ id: appointment.id, startsAt: appointment.startsAt, endsAt: appointment.endsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        // La que no terminó: la que está en curso empezó antes que cualquiera por venir.
+        gt(appointment.endsAt, now),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+    .limit(1)
+  return row ?? null
+}
+
+/**
+ * Cuándo terminó su última visita, la última cita suya que ya terminó; una cancelada no fue una
+ * visita. Nulo si no tuvo ninguna. Cuenta al terminar y no al empezar: mientras espera en la sala
+ * (o se atiende), lo que envió sigue siendo de esta cita. Una sola regla para su enlace («Lo que
+ * nos contaste») y recepción (`beforeVisitStatus`).
+ */
+export async function lastVisitAt(tx: Db, orgId: string, patientId: string, now: Date = new Date()): Promise<Date | null> {
+  const [row] = await tx
+    .select({ endsAt: appointment.endsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        lte(appointment.endsAt, now),
+        ne(appointment.status, "cancelada"),
+      ),
+    )
+    .orderBy(desc(appointment.endsAt))
+    .limit(1)
+  return row?.endsAt ?? null
+}
+
+/**
+ * Lo que se le pregunta de su visita antes de esa cita: solo si es suya, sigue en pie y no terminó
+ * (por venir o en curso: en la sala de espera también se responde), la clínica pregunta algo y aún
+ * no lo respondió. Nulo: nada que preguntar.
  */
 export async function visitAskOf(
   tx: Db,
@@ -112,7 +167,7 @@ export async function visitAskOf(
         eq(appointment.id, input.appointmentId),
         eq(appointment.patientId, input.patientId),
         inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.startsAt, new Date()),
+        gt(appointment.endsAt, new Date()),
       ),
     )
     .limit(1)
@@ -122,24 +177,6 @@ export async function visitAskOf(
   const questions = visitQuestionsOf(await getPatientRegistrationConfig(tx, orgId), purpose)
   if (!asksAnything(questions)) return null
   return { appointmentId: row.id, startsAt: row.startsAt, purpose, questions }
-}
-
-/** La próxima cita en pie del paciente: la del portal, que no viene con una cita. */
-export async function nextAppointmentIdOf(tx: Db, orgId: string, patientId: string): Promise<string | null> {
-  const [row] = await tx
-    .select({ id: appointment.id })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.startsAt, new Date()),
-      ),
-    )
-    .orderBy(asc(appointment.startsAt))
-    .limit(1)
-  return row?.id ?? null
 }
 
 /** Ya lo envió para esa cita: cuándo, y si fue quien abre (`own`) u otra persona que también decide por él. */

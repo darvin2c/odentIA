@@ -80,8 +80,14 @@ export interface PersonalLinkView {
   budgets: PortalBudget[]
   consents: PersonalLinkConsent[]
   /**
-   * «Tu visita» de la cita del enlace, si se le pregunta y aún no la respondió: va con sus datos en
-   * la tarjeta «Antes de tu cita». `purpose`: a qué viene, si la cita lo dice (una sesión, un control).
+   * La cita de «Antes de tu cita»: la que está en curso hasta que termina y, si no, la próxima en
+   * pie. Puede no ser `appointment` (la que se cambia o se cancela, solo por venir): en la sala de
+   * espera es la de hoy. Nulo sin cita en pie o si quien abre no decide por el paciente.
+   */
+  beforeVisit: (PersonalLinkWhen & { professionalName: string }) | null
+  /**
+   * «Tu visita» de la cita de «Antes de tu cita», si se le pregunta y aún no la respondió: va con sus
+   * datos en esa tarjeta. `purpose`: a qué viene, si la cita lo dice (una sesión, un control).
    */
   visit: { purpose: string | null; questions: VisitQuestions } | null
   /** «Lo que nos contaste»: qué envió quien abre y cuándo (en la zona de la clínica). Nunca lo que respondió. */
@@ -201,6 +207,7 @@ export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
     told: view.told ?? null,
     healthCheck: view.healthCheck ?? null,
     correctHealth: view.correctHealth ?? false,
+    beforeVisit: view.beforeVisit ?? null,
     visit: view.visit ?? null,
     toSchedule: view.toSchedule ?? [],
     another: view.another ?? null,

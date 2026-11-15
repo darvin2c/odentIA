@@ -54,6 +54,7 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
       { id: "c1", title: "Exodoncia", procedureRef: "Pieza 38", appointment: { startsAt: THURSDAY, timeZone: "America/Lima" }, signable: true, why: null },
       { id: "c2", title: "Implante", procedureRef: null, appointment: { startsAt: LATER, timeZone: "America/Lima" }, signable: true, why: null },
     ],
+    beforeVisit: null,
     visit: null,
     told: null,
     healthCheck: null,
@@ -118,6 +119,22 @@ describe("antes de su cita, una sola tarjeta", () => {
       "odontólogo",
     )
     expect(card).toMatchObject({ badge: "Opcional", text: "Vienes a: sesión 2 de endodoncia. Cuéntanos si te duele algo." })
+  })
+
+  // QA final de formularios (15 nov, H4): con la cita de hoy en curso, «Antes de tu cita» hablaba de la del lunes.
+  it("con la cita de hoy en curso, la tarjeta es de la de hoy y lo dice, aunque «Tu cita» sea la que viene", () => {
+    const today = { startsAt: "2026-11-10T03:30:00.000Z", timeZone: "America/Lima", professionalName: "Dr. Luis Prado" }
+    const card = beforeVisitCard(view({ consents: [], data: null, beforeVisit: today, visit: { purpose: null, questions } }), "odontólogo")
+    expect(card).toMatchObject({ title: "Antes de tu cita", at: today.startsAt })
+    expect(card?.detail).toMatch(/^Para tu cita del .+ Lo lee el Dr\. Luis Prado antes de atenderte\.$/)
+    expect(card?.detail).toContain("9 de noviembre")
+    // En la sala de espera, sin otra cita por venir: la tarjeta sigue, con la de hoy.
+    expect(beforeVisitCard(view({ consents: [], appointment: null, data: null, beforeVisit: today, visit: { purpose: null, questions } }), "odontólogo")).toMatchObject({
+      at: today.startsAt,
+    })
+    // Si es la misma cita de «Tu cita», no repite la fecha.
+    const same = beforeVisitCard(view({ consents: [], data: null, beforeVisit: { startsAt: THURSDAY, timeZone: "America/Lima", professionalName: "Dra. Díaz" }, visit: { purpose: null, questions } }), "odontólogo")
+    expect(same?.detail).toBe("Lo lee la Dra. Díaz antes de atenderte.")
   })
 
   it("sin cita por venir, sus datos siguen siendo «Tus datos»", () => {
