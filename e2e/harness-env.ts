@@ -158,6 +158,16 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     // El correo entrante (soporte@ y los demás buzones) llega firmado como lo firma el worker de
     // Cloudflare; con una clave solo de pruebas, el recorrido lo manda igual.
     INBOUND_EMAIL_SECRET: "e2e-only-inbound-email-secret-0123456789abcdef",
+    // Los canales de la administración (ADR 0189) con claves solo de pruebas: los avisos de Meta
+    // llegan firmados con ellas y lo que sale va a la Meta de mentira del supervisor
+    // (`ADMIN_META_GRAPH_URL`, `meta-graph-stub.ts`).
+    ADMIN_META_APP_SECRET: "e2e-only-admin-meta-app-secret-0123456789",
+    ADMIN_META_VERIFY_TOKEN: "e2e-only-admin-meta-verify-token",
+    ADMIN_WA_PHONE_NUMBER_ID: "100000000000001",
+    ADMIN_WA_ACCESS_TOKEN: "e2e-only-admin-wa-token",
+    ADMIN_META_PAGE_ID: "200000000000002",
+    ADMIN_META_PAGE_ACCESS_TOKEN: "e2e-only-admin-page-token",
+    ADMIN_IG_ACCOUNT_ID: "300000000000003",
     S3_ENDPOINT: s3Endpoint,
     S3_REGION: "auto",
     S3_ACCESS_KEY: STORAGE_ACCESS_KEY,

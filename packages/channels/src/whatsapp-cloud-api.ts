@@ -19,7 +19,7 @@ import type {
   WebhookParseResult,
 } from "./protocol.js"
 import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
-import { graphRejectedPart, metaGraphVersion } from "./meta-graph.js"
+import { graphRejectedPart, mediaSignal, metaGraphVersion, readMediaBody } from "./meta-graph.js"
 
 export interface WhatsAppTemplateRef {
   name: string
@@ -1164,7 +1164,11 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     // `to` es el externalThreadId del parse (`wa:<phone>`).
     const to = msg.to.startsWith("wa:") ? msg.to.slice("wa:".length) : msg.to
-    const body = buildBody(to, msg.kind, msg.replyToExternalId)
+    const body = {
+      ...buildBody(to, msg.kind, msg.replyToExternalId),
+      // Vuelve en los estados de ese envío; Meta lo limita a 512 caracteres.
+      ...(msg.callbackData ? { biz_opaque_callback_data: msg.callbackData.slice(0, 512) } : {}),
+    }
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/messages`,
@@ -1198,9 +1202,10 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     }
     const dl = await deps.fetch(info.url, {
       headers: { Authorization: `Bearer ${cfg.accessToken}` },
+      ...mediaSignal(deps.media),
     })
     if (!dl.ok) throw new Error(`WhatsApp descarga de media falló: ${dl.status}`)
-    const bytes = new Uint8Array(await dl.arrayBuffer())
+    const bytes = await readMediaBody(dl, "WhatsApp", deps.media)
     const ext = EXT_BY_MIME[info.mimeType] ?? "bin"
     return { bytes, mimeType: info.mimeType, filename: `${mediaExternalId}.${ext}` }
   },

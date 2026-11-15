@@ -4,7 +4,10 @@ import type { KairosItemStatus } from "@odentia/db/schema/admin-arm"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminActor,
+  type AdminChannels,
+  assignChat,
   assignInboundEmail,
+  type ChatReply,
   createSaasProposal,
   decideKairosItem,
   draftPendingKairosItems,
@@ -22,6 +25,7 @@ import {
   type OutreachRow,
   outreachEmail,
   outreachMailMessage,
+  prepareChatMessage,
   prepareEmailReply,
   prepareOutreach,
   recordPresentation,
@@ -35,6 +39,7 @@ import { sql } from "drizzle-orm"
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
+import { sendChatOutreach } from "../lib/admin-chat-send.js"
 import { adminContextOf } from "../lib/admin-context.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -45,8 +50,10 @@ import { runService, serviceErrorResponse, validationError } from "./helpers.js"
  * de la pantalla (`KairosExecutors` con las funciones reales de venta,
  * clientes y correos) y, si es un correo, la ruta lo envía después
  * del commit como cualquier envío: queda `enviado` o `incierto`, nunca se
- * reintenta. Un WhatsApp aprobado devuelve su enlace y queda pendiente hasta
- * que la persona dice «Salió» o «No salió».
+ * reintenta. Un WhatsApp aprobado sale igual por el número de Sallca, desde
+ * la conversación de esa persona (queda en su historial; fuera de las 24 h,
+ * con la plantilla para retomar); sin el número configurado, devuelve su
+ * enlace wa.me y queda pendiente hasta que la persona dice «Salió» o «No salió».
  */
 export interface AdminKairosDeps {
   /** Las tablas del ARM viven en `admin`, sin GRANT a la app: solo la conexión propietaria. */
@@ -65,7 +72,20 @@ export interface AdminKairosDeps {
   conversationMailer?: Mailer
   /** «Conectar con Facebook» está configurado: sin él, el paso de WhatsApp del alta espera a Meta. */
   metaSignupAvailable?: boolean
+  /** Los canales de la administración (ADR 0189): con WhatsApp, el mensaje sale por el número de Sallca. */
+  channels?: AdminChannels | undefined
+  /** Solo las pruebas lo cambian (el envío a Meta). */
+  fetch?: typeof fetch
 }
+
+/**
+ * Lo que prepara un sí de un mensaje: el envío de los envíos (`prepareOutreach`:
+ * correo, o WhatsApp por wa.me) o, con el número de Sallca, la respuesta
+ * reservada en la conversación (`prepareChatMessage`), que la ruta envía.
+ */
+export type KairosOutreach =
+  | { via: "envio"; id: string; row: OutreachRow }
+  | { via: "chat"; id: string; reply: ChatReply }
 
 function staffOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
@@ -124,17 +144,46 @@ async function dbNow(tx: Db): Promise<Date> {
 }
 
 /** Las operaciones de la pantalla que ejecuta un sí: las mismas, con sus reglas y su auditoría. */
-function executorsAt(now: Date): KairosExecutors<OutreachRow> {
+function executorsAt(
+  now: Date,
+  channels: AdminChannels | undefined,
+): KairosExecutors<KairosOutreach> {
+  const envio = (row: OutreachRow): KairosOutreach => ({ via: "envio", id: row.id, row })
   return {
-    prepareOutreach: (tx, actor, clientId, input) =>
-      prepareOutreach(tx, actor, clientId, input, now),
+    prepareOutreach: async (tx, actor, clientId, input) => {
+      // Con el número de Sallca, el WhatsApp a una persona del cliente sale desde su
+      // conversación (la misma de «Escribir»); wa.me solo sin él.
+      if (input.channel === "whatsapp" && channels?.whatsapp) {
+        if (!input.contactId)
+          throw new ServiceError(
+            "KAIROS_ITEM_INCOMPLETE",
+            409,
+            "Falta a qué persona del cliente se le escribe",
+          )
+        const reply = await prepareChatMessage(
+          tx,
+          actor,
+          clientId,
+          {
+            contactId: input.contactId,
+            body: input.body,
+            proposalId: input.proposalId ?? null,
+            kairosItemId: input.kairosItemId ?? null,
+          },
+          now,
+        )
+        return { via: "chat", id: reply.outreachId, reply }
+      }
+      return envio(await prepareOutreach(tx, actor, clientId, input, now))
+    },
     updateClient: (tx, actor, clientId, patch) => updateClient(tx, actor, clientId, patch),
     linkContactToUser: (tx, actor, contactId, userId) =>
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
-    prepareEmailReply: (tx, actor, emailId, input) =>
-      prepareEmailReply(tx, actor, emailId, input, now),
+    assignChat: (tx, actor, chatId, input) => assignChat(tx, actor, chatId, input, now),
+    prepareEmailReply: async (tx, actor, emailId, input) =>
+      envio(await prepareEmailReply(tx, actor, emailId, input, now)),
     recordPresentation: (tx, actor, taskId, input) =>
       recordPresentation(tx, actor, taskId, input, now),
     createProposal: (tx, actor, clientId, input) =>
@@ -215,14 +264,21 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const id = c.req.param("id")
     const now = new Date()
-    let decided: Awaited<ReturnType<typeof decideKairosItem<OutreachRow>>>
+    let decided: Awaited<ReturnType<typeof decideKairosItem<KairosOutreach>>>
     let email: OutreachEmail | null = null
     try {
       const done = await deps.ownerDb.transaction(async (tx) => {
-        const decision = await decideKairosItem(tx, actor, id, parsed.data, executorsAt(now), now)
+        const decision = await decideKairosItem(
+          tx,
+          actor,
+          id,
+          parsed.data,
+          executorsAt(now, deps.channels),
+          now,
+        )
         // El correo se arma dentro: si no se puede (la propuesta no sale en PDF), no queda nada a medias.
         const mail =
-          decision.outreach?.channel === "correo"
+          decision.outreach?.via === "envio" && decision.outreach.row.channel === "correo"
             ? await outreachEmail(tx, decision.outreach.id)
             : null
         return { decision, mail }
@@ -234,8 +290,39 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
       if (response) return response
       throw error
     }
-    const { outreach, ...decision } = decided
-    if (!outreach) return c.json({ data: { ...decision, outreach: null, emailSent: null } })
+    const { outreach: prepared, ...decision } = decided
+    if (!prepared) return c.json({ data: { ...decision, outreach: null, emailSent: null } })
+    if (prepared.via === "chat") {
+      // Después del commit, una sola vez: enviado, no salió (con el motivo de Meta) o incierto.
+      const { reply } = prepared
+      const sent = await sendChatOutreach(
+        {
+          ownerDb: deps.ownerDb,
+          channels: deps.channels,
+          ...(deps.fetch ? { fetch: deps.fetch } : {}),
+        },
+        reply,
+        "whatsapp",
+      )
+      return c.json({
+        data: {
+          ...decision,
+          status: sent.itemStatus ?? decision.status,
+          outreach: {
+            id: reply.outreachId,
+            channel: "whatsapp",
+            to: reply.to,
+            status: sent.status,
+            whatsappUrl: null,
+            chatId: reply.chatId,
+            template: reply.template,
+            why: sent.kind === "rejected" ? sent.why : null,
+          },
+          emailSent: null,
+        },
+      })
+    }
+    const outreach = prepared.row
     if (!email) {
       return c.json({
         data: {
@@ -246,6 +333,9 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
             to: outreach.to,
             status: outreach.status,
             whatsappUrl: outreach.whatsappUrl,
+            chatId: null,
+            template: null,
+            why: null,
           },
           emailSent: null,
         },
@@ -262,6 +352,9 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
           to: outreach.to,
           status: sent.outreachStatus,
           whatsappUrl: null,
+          chatId: null,
+          template: null,
+          why: null,
         },
         emailSent: sent.emailSent,
       },

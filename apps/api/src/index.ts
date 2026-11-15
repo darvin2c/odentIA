@@ -6,7 +6,7 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { adminChannelsFromEnv, adminChannelsWarning, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -97,6 +97,18 @@ if (env.NODE_ENV === "production" && !env.INBOUND_EMAIL_SECRET) {
   console.warn("INBOUND_EMAIL_SECRET vacío: el correo entrante (los buzones y la dirección de cada persona del equipo) no llega al ARM (docs/deployment.md).")
 }
 
+// WhatsApp, Instagram y Messenger de la administración: cada canal con sus variables.
+const adminChannels = adminChannelsFromEnv(env)
+const adminChannelsNotice = adminChannelsWarning(env)
+if (env.NODE_ENV === "production" && adminChannelsNotice) console.warn(adminChannelsNotice)
+/** Solo pruebas (e2e): lo que iría a graph.facebook.com va al servidor local que hace de Meta. */
+const adminChannelsFetch = env.ADMIN_META_GRAPH_URL
+  ? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+      return fetch(url.replace(/^https:\/\/graph\.facebook\.com/, env.ADMIN_META_GRAPH_URL), init)
+    }) as typeof fetch
+  : undefined
+
 const app = createApp({
   auth,
   db,
@@ -136,6 +148,8 @@ const app = createApp({
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
   metaSignup: metaSignupFromEnv(env),
+  adminChannels,
+  adminChannelsFetch,
   vapidPublicKey: env.VAPID_PUBLIC_KEY,
   embedder: embedderFromEnv(env),
   // `fake`: el proveedor de demostración de dev y e2e (sin red); el entorno lo impide con canales reales.

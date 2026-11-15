@@ -10,13 +10,16 @@ import {
   SAAS_CONTACT_CHANNELS,
   SAAS_CONTACT_ROLES,
   type SaasActivityKind,
+  type SaasChatChannel,
   type SaasClientOrigin,
   type SaasClientSummarySource,
   type SaasContactChannel,
   type SaasContactRole,
   type SaasLostReason,
   type SaasOpportunityDecision,
+  type SaasOutreachChannel,
   type SaasTaskKind,
+  saasChat,
   saasClient,
   saasClientContact,
   saasClientFile,
@@ -259,13 +262,17 @@ export function proposalOfOpenSaleSql(alias = "p"): SQL<boolean> {
 
 /**
  * ¿Es solo de Administración un envío? Lleva una propuesta, sale de algo de
- * Kairós que solo ve Administración, o responde un correo que no llegó a
- * soporte@ (lo comercial: puede hablar de precios). `o` es el alias de
- * `saas_outreach`.
+ * Kairós que solo ve Administración, responde un correo que no llegó a
+ * soporte@ (lo comercial: puede hablar de precios) o está marcado
+ * `admin_only`: lo marcó así quien respondió, o salió en una conversación de
+ * WhatsApp, Instagram o Messenger que no era de una clínica con su app. Eso se
+ * fija al reservar el envío (y sube si la conversación pasa a un cliente sin
+ * app), no al leer: lo de la venta no aparece después para Soporte.
+ * `o` es el alias de `saas_outreach`.
  */
 export function outreachAdminOnlySql(alias = "o"): SQL<boolean> {
   const o = sql.raw(alias)
-  return sql<boolean>`(${o}.proposal_id is not null or exists (select 1 from admin.kairos_item ki
+  return sql<boolean>`(${o}.proposal_id is not null or ${o}.admin_only or exists (select 1 from admin.kairos_item ki
     where ki.id = ${o}.kairos_item_id and ki.admin_only) or exists (select 1 from admin.saas_inbound_email ie
     where ie.id = ${o}.in_reply_to_email_id and ie.mailbox <> 'soporte'))`
 }
@@ -1936,6 +1943,15 @@ export async function mergeClients(
       .where(eq(saasClientFile.clientId, dropId))
       .returning({ id: saasClientFile.id }),
   )
+  // Las conversaciones de WhatsApp siguen a su cliente (sus contactos ya pasaron).
+  count(
+    "chats",
+    await tx
+      .update(saasChat)
+      .set({ clientId: keepId, updatedAt: now })
+      .where(eq(saasChat.clientId, dropId))
+      .returning({ id: saasChat.id }),
+  )
   count(
     "inboundEmails",
     await tx
@@ -2312,7 +2328,7 @@ export interface TimelineEntry {
   detail?: string
   adminOnly: boolean
   link?: {
-    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo"
+    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo" | "chat"
     id: string
   }
 }
@@ -2434,6 +2450,23 @@ const ACTIVITY_TITLES: Record<SaasActivityKind, { salio: string; entro: string; 
     nota: "Propuesta",
   },
   nota: { salio: "Nota", entro: "Nota", nota: "Nota" },
+  instagram: {
+    salio: "Le escribimos por Instagram",
+    entro: "Nos escribió por Instagram",
+    nota: "Instagram",
+  },
+  messenger: {
+    salio: "Le escribimos por Messenger",
+    entro: "Nos escribió por Messenger",
+    nota: "Messenger",
+  },
+}
+
+const OUTREACH_CHANNEL_WORDS: Record<SaasOutreachChannel, string> = {
+  correo: "correo",
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
 }
 
 const SALE_TASKS: readonly string[] = ["presentacion", "propuesta"]
@@ -2448,6 +2481,20 @@ const FILE_TITLES: Record<string, string> = {
   archivo_clinica: "Archivo de la clínica",
   correo: "Adjunto de un correo",
   otro: "Documento",
+}
+
+/** Lo que llegó en una conversación, por su canal. */
+const CHAT_FILE_TITLES: Record<SaasChatChannel, string> = {
+  whatsapp: "Llegó por WhatsApp",
+  instagram: "Llegó por Instagram",
+  messenger: "Llegó por Messenger",
+}
+
+/** El título de un documento en el historial: lo que llegó en una conversación dice por dónde. */
+function fileTitle(file: { kind: string; source: string | null }): string {
+  const chat = CHAT_FILE_TITLES[file.source as SaasChatChannel]
+  if (chat && file.kind === "correo") return chat
+  return FILE_TITLES[file.kind] ?? "Documento"
 }
 
 const day = (date: Date) =>
@@ -2653,6 +2700,13 @@ export async function clientTimeline(
           (select o.in_reply_to_email_id::text from ${saasOutreach} o join ${saasInboundEmail} e on e.id = o.in_reply_to_email_id
             where o.client_id = ${outer}.client_id and o.status = 'enviado'
               and o.sent_at = ${outer}.happened_at and ${mailboxOk} order by o.id limit 1) end`,
+        // Quién escribió por WhatsApp, Instagram o Messenger: su contacto, el nombre que dio Meta o su número.
+        chatFrom: sql<
+          string | null
+        >`case when ${outer}.chat_id is not null and ${outer}.direction = 'entro' then
+          (select coalesce(nullif(trim(p.name), ''), nullif(trim(ch.display_name), ''), ch.address)
+            from ${saasChat} ch left join ${saasClientContact} p on p.id = coalesce(${outer}.contact_id, ch.contact_id)
+            where ch.id = ${outer}.chat_id) end`,
       })
       .from(saasFollowUp)
       .where(
@@ -2664,7 +2718,7 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const { f, inboundId, inboundFrom, repliedId } of rows) {
+    for (const { f, inboundId, inboundFrom, repliedId, chatFrom } of rows) {
       const kind = f.kind as SaasActivityKind
       const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
       const title = repliedId
@@ -2679,14 +2733,15 @@ export async function clientTimeline(
         id: `actividad:${f.id}`,
         at: f.happenedAt,
         // El correo que entró lo escribió quien lo mandó, aunque lo haya anotado Kairós.
-        who: inboundFrom
-          ? { kind: "clinica", name: inboundFrom }
-          : f.byKairos
-            ? { kind: "kairos", name: "Kairós" }
-            : byUser(f.authorUserId, {
-                kind: "persona",
-                name: "Nota anterior, sin autor registrado",
-              }),
+        who:
+          (inboundFrom ?? chatFrom)
+            ? { kind: "clinica", name: inboundFrom ?? chatFrom ?? "" }
+            : f.byKairos
+              ? { kind: "kairos", name: "Kairós" }
+              : byUser(f.authorUserId, {
+                  kind: "persona",
+                  name: "Nota anterior, sin autor registrado",
+                }),
         category: kind === "presentacion" || kind === "propuesta" ? "venta" : "contactos",
         title,
         detail:
@@ -2694,7 +2749,12 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ") || undefined,
         adminOnly: f.adminOnly,
-        ...(emailId ? { link: { kind: "correo" as const, id: emailId } } : {}),
+        ...(emailId
+          ? { link: { kind: "correo" as const, id: emailId } }
+          : f.chatId
+            ? // Lo que entró o salió por WhatsApp, Instagram o Messenger abre su conversación.
+              { link: { kind: "chat" as const, id: f.chatId } }
+            : {}),
       })
     }
   }
@@ -2839,12 +2899,12 @@ export async function clientTimeline(
       .orderBy(desc(saasOutreach.createdAt))
       .limit(one)
     for (const { outreach: o, adminOnly } of rows) {
-      const channel = o.channel === "whatsapp" ? "WhatsApp" : "correo"
+      const channel = OUTREACH_CHANNEL_WORDS[o.channel as SaasOutreachChannel] ?? "correo"
       const title =
         o.status === "pendiente"
           ? `Mensaje por ${channel}: falta decir si salió`
           : o.status === "incierto"
-            ? `No se sabe si salió el ${channel === "correo" ? "correo" : "WhatsApp"}`
+            ? `No se sabe si salió el ${channel === "correo" ? "correo" : `mensaje por ${channel}`}`
             : `No salió el mensaje por ${channel}`
       push({
         id: `envio:${o.id}`,
@@ -2855,7 +2915,7 @@ export async function clientTimeline(
         detail: clip(o.subject ?? o.body, 140),
         // El de una propuesta o de algo de Kairós solo de Administración: Soporte no lo ve.
         adminOnly: Boolean(adminOnly),
-        link: { kind: "envio", id: o.id },
+        link: o.chatId ? { kind: "chat", id: o.chatId } : { kind: "envio", id: o.id },
       })
     }
   }
@@ -3063,7 +3123,7 @@ export async function clientTimeline(
         at: f.createdAt,
         who,
         category,
-        title: `${FILE_TITLES[f.kind] ?? "Documento"}: ${f.filename}`,
+        title: `${fileTitle(f)}: ${f.filename}`,
         adminOnly: f.adminOnly,
         link,
       })

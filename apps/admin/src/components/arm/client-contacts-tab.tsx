@@ -30,6 +30,7 @@ import {
 } from "./client-model"
 import { useClientContacts } from "./client-queries"
 import { ContactDrawer } from "./contact-drawer"
+import { WhatsAppWrite } from "./whatsapp-write"
 
 const enc = encodeURIComponent
 
@@ -134,7 +135,7 @@ export function ClientContactsTab({ clientId, organizationId, isAdmin }: ClientT
                   {contact.title ? (
                     <span className="text-sm text-muted-foreground">{contact.title}</span>
                   ) : null}
-                  <ContactWays contact={contact} />
+                  <ContactWays clientId={clientId} contact={contact} />
                   {contact.user ? (
                     <span className="text-sm text-muted-foreground">
                       Tiene cuenta{contact.user.roleLabel ? ` · ${contact.user.roleLabel}` : ""}
@@ -249,19 +250,20 @@ export function ClientContactsTab({ clientId, organizationId, isAdmin }: ClientT
   )
 }
 
-/** Cómo contactarla: el celular abre WhatsApp, el correo el programa de correo. */
-function ContactWays({ contact }: { contact: ContactRow }) {
+/**
+ * Cómo contactarla: el celular, «Escribir por WhatsApp» desde el número de
+ * Sallca (o wa.me si aún no está configurado); el correo, el programa de correo.
+ */
+function ContactWays({ clientId, contact }: { clientId: string; contact: ContactRow }) {
   const ways = [
     contact.phone ? (
-      <a
+      <WhatsAppWrite
         key="phone"
-        className="underline underline-offset-2"
-        href={`https://wa.me/${contact.phone.replace(/^\+/, "")}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        WhatsApp {contact.phone}
-      </a>
+        clientId={clientId}
+        contactId={contact.source === "contacto" ? contact.id : null}
+        phone={contact.phone}
+        fallbackLabel={`WhatsApp ${contact.phone}`}
+      />
     ) : null,
     contact.email ? (
       <a

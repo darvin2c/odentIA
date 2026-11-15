@@ -3,8 +3,8 @@
  * etapa, sus personas, tareas, propuestas, envíos, correos que llegan, un
  * documento, lo que cargó la skill (con un informe que no se sabe si salió),
  * el alta de cada clínica (ADR 0187: una posible carga por correo, la carga
- * con errores, una carga por borrarse y un «No aplica») y lo que prepara
- * Kairós, para recorrer Hoy, Clientes, Embudo (Venta y Alta), Kairós y
+ * con errores, una carga por borrarse y un «No aplica»), lo que llega por
+ * WhatsApp e Instagram (con y sin cliente) y lo que prepara Kairós, para recorrer Hoy, Clientes, Embudo (Venta y Alta), Kairós y
  * Reportes en local.
  *
  * Solo manual (seed-dev la llama al final, cuando ya existen las cuentas de la
@@ -37,6 +37,7 @@ import {
   saasClientFile,
   saasClientMilestone,
   saasInboundEmail,
+  saasInboundMessage,
   saasOpportunity,
   saasProposal,
   saasTask,
@@ -47,6 +48,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, like, ne, sql } from "drizzle-orm"
+import { strToU8, zipSync } from "fflate"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import {
   clientFileKey,
@@ -63,6 +65,7 @@ import {
   updateClientContact,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { assignChat, ingestInboundChat, openChatForContact } from "./admin-inbound-chat.js"
 import { assignInboundEmail, ingestInboundEmail } from "./admin-inbound-email.js"
 import {
   decideKairosItem,
@@ -404,6 +407,7 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
       linkContactToUser(tx, actor, contactId, userId),
     assignInboundEmail: (tx, actor, emailId, clientId) =>
       assignInboundEmail(tx, actor, emailId, clientId, now),
+    assignChat: (tx, actor, chatId, input) => assignChat(tx, actor, chatId, input, now),
     prepareEmailReply: (tx, actor, emailId, input) =>
       prepareEmailReply(tx, actor, emailId, input, now),
     recordPresentation: (tx, actor, taskId, input) =>
@@ -1144,6 +1148,9 @@ export async function seedAdminArm(
   await seedOnboardingFiles(tx, clock, storage, { prueba, deuda })
   if (await seedAlta(tx, clock, storage, { prueba, cobrada })) clients += 1
 
+  /* --- Lo que llega por WhatsApp e Instagram --- */
+  await seedChats(tx, clock, storage, { sonrisaPhone: "+51987100001", deuda })
+
   /* --- Kairós: su pasada, sus borradores, lo que ya se decidió, sus resúmenes y la semana --- */
   const pass = await kairosRulesPass(tx, now)
   const drafts = await draftPendingKairosItems(tx, TEMPLATE_WRITER, { limit: 50 }, now)
@@ -1678,6 +1685,154 @@ async function seedAlta(
   // Ada lo marcó como la carga al día siguiente: los 30 días cuentan desde que llegó.
   if (fileId) await markClientFileCarga(tx, ADA, fileId, clock.ago(25))
   return !exists
+}
+
+/* ---------- WhatsApp e Instagram ---------- */
+
+/**
+ * Un Excel mínimo (una hoja, dos filas) que se abre: lo justo para que el
+ * adjunto de la demo no sea un archivo roto. Datos ficticios.
+ */
+function fictitiousXlsx(): Uint8Array {
+  const xml = (body: string) =>
+    strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${body}`)
+  const cell = (ref: string, text: string) =>
+    `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`
+  return zipSync({
+    "[Content_Types].xml": xml(
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    ),
+    "_rels/.rels": xml(
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    ),
+    "xl/workbook.xml": xml(
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Pacientes" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    ),
+    "xl/_rels/workbook.xml.rels": xml(
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+    ),
+    "xl/worksheets/sheet1.xml": xml(
+      `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">${cell("A1", "nombre")}${cell("B1", "telefono")}</row><row r="2">${cell("A2", "Paciente Uno (ficticio)")}${cell("B2", "+51900000001")}</row></sheetData></worksheet>`,
+    ),
+  })
+}
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+/** ¿Ya entró ese mensaje de la semilla? (su id de Meta es fijo). */
+async function chatMessageSeeded(tx: Db, externalId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: saasInboundMessage.id })
+    .from(saasInboundMessage)
+    .where(eq(saasInboundMessage.externalId, externalId))
+    .limit(1)
+  return Boolean(row)
+}
+
+/**
+ * Lo que llega por los canales de la administración, como lo deja la ruta
+ * firmada de Meta (`ingestInboundChat`), una sola vez por mensaje:
+ * - Un WhatsApp sin cliente desde el celular de Paola Ríos (Sonrisa Total): Hoy
+ *   lo pide decidir con la sugerencia «Ese celular es de Paola Ríos…».
+ * - Un Instagram sin cliente (@dra.melissa.ortodoncia), sin sugerencia.
+ * - El WhatsApp de Gabriela Soto (Demo Deuda, que ya tiene su app), ligado por
+ *   Ada, con una pregunta sin responder y un Excel: Hoy lo pone en «Responder»
+ *   (también para Soporte) y el Excel como «¿Es la carga de datos?». Sin
+ *   `putAttachmentAt` el mensaje llega sin el archivo.
+ */
+async function seedChats(
+  tx: Db,
+  clock: Clock,
+  storage: Pick<Storage, "putAttachmentAt">,
+  ids: { sonrisaPhone: string; deuda: string },
+): Promise<void> {
+  const unassigned = "wamid.seed-arm-sin-cliente-1"
+  if (!(await chatMessageSeeded(tx, unassigned)))
+    await ingestInboundChat(
+      tx,
+      {
+        channel: "whatsapp",
+        address: ids.sonrisaPhone,
+        waId: ids.sonrisaPhone.slice(1),
+        displayName: "Paola",
+        externalId: unassigned,
+        body: "Hola, soy Paola de Sonrisa Total. ¿Ya tienen fecha para la presentación con mi socia? (ejemplo ficticio)",
+        media: [],
+        receivedAt: clock.ago(0, 2),
+      },
+      clock.now,
+    )
+
+  const instagram = "seed-arm-ig-melissa-1"
+  if (!(await chatMessageSeeded(tx, instagram)))
+    await ingestInboundChat(
+      tx,
+      {
+        channel: "instagram",
+        address: "seed-igsid-melissa-ortodoncia",
+        displayName: "@dra.melissa.ortodoncia",
+        externalId: instagram,
+        body: "¿Sirve para ortodoncia? Tengo consultorio en Trujillo",
+        media: [],
+        receivedAt: clock.ago(0, 1),
+      },
+      clock.now,
+    )
+
+  const withClient = "wamid.seed-arm-deuda-dentalink-1"
+  if (await chatMessageSeeded(tx, withClient)) return
+  const [gabriela] = await tx
+    .select({ id: saasClientContact.id })
+    .from(saasClientContact)
+    .where(
+      and(
+        eq(saasClientContact.clientId, ids.deuda),
+        eq(saasClientContact.email, "gerencia.deuda@example.test"),
+      ),
+    )
+    .limit(1)
+  if (!gabriela) return
+  const chat = await openChatForContact(
+    tx,
+    ADA,
+    { clientId: ids.deuda, contactId: gabriela.id, channel: "whatsapp" },
+    clock.ago(0, 4),
+  )
+  const [contact] = await tx
+    .select({ phone: saasClientContact.phone })
+    .from(saasClientContact)
+    .where(eq(saasClientContact.id, gabriela.id))
+    .limit(1)
+  if (!contact?.phone) return
+  const put = storage.putAttachmentAt?.bind(storage)
+  const media: Array<{ objectKey: string; mimeType: string; filename: string; size: number }> = []
+  if (put) {
+    const bytes = fictitiousXlsx()
+    const objectKey = inboundAttachmentKey("xlsx")
+    await put(objectKey, bytes, XLSX_TYPE)
+    media.push({
+      objectKey,
+      mimeType: XLSX_TYPE,
+      filename: "pacientes-dentalink-ficticios.xlsx",
+      size: bytes.byteLength,
+    })
+  }
+  const received = await ingestInboundChat(
+    tx,
+    {
+      channel: "whatsapp",
+      address: contact.phone,
+      waId: contact.phone.slice(1),
+      displayName: "Gabriela",
+      externalId: withClient,
+      body: "¿Traen los datos de nuestro sistema viejo? Usamos Dentalink",
+      media,
+      receivedAt: clock.ago(0, 3),
+    },
+    clock.now,
+  )
+  if (received.chatId !== chat.chatId)
+    throw new Error("El WhatsApp de la semilla entró en otra conversación")
 }
 
 /**

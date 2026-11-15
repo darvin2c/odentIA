@@ -555,6 +555,7 @@ describe("la respuesta a un correo que llegó", () => {
           updateClient: unused,
           linkContactToUser: unused,
           assignInboundEmail: unused,
+          assignChat: unused,
           prepareEmailReply: unused,
           recordPresentation: unused,
           createProposal: unused,

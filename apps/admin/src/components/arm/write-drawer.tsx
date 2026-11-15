@@ -16,6 +16,8 @@ import { ExternalLink } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
 import { useIsAdmin } from "../../lib/session"
+import { openChatOutcome, openChatWith, useChatsConfig } from "./chat-api"
+import { ChatDrawer } from "./chat-drawer"
 import { FORMAT_HINT, FormatTools } from "./formatted-body"
 import {
   resolveOutreach,
@@ -25,6 +27,7 @@ import {
   useClientSale,
   useInvalidateClient,
 } from "./sale-api"
+import { writesThroughChat } from "./whatsapp-write"
 
 /**
  * «Escribir» a un cliente (lienzo de la ficha). Correo: sale con el nombre y
@@ -33,8 +36,11 @@ import {
  * a esa dirección; si se corta a mitad, el
  * servidor dice que no se sabe si salió (502 `SEND_UNKNOWN`) y aquí no se
  * vuelve a enviar: la persona revisa y marca «Salió» o «No salió». WhatsApp:
- * no hay bandeja de Sallca, así que se abre el chat con el texto puesto en otra
- * pestaña y queda «¿Salió?» hasta que la persona lo diga. Nada sale solo.
+ * con el número de Sallca configurado, a una persona del cliente se le escribe
+ * desde su conversación (`ChatDrawer`, con el texto puesto y, si es la
+ * propuesta, con ella: el PDF no va); sin él, o a otro número, se abre wa.me
+ * con el texto en otra pestaña y queda «¿Salió?» hasta que la persona lo diga.
+ * Nada sale solo.
  */
 export type WriteChannel = "correo" | "whatsapp"
 
@@ -71,7 +77,17 @@ export function WriteDrawer(props: WriteDrawerProps) {
 
 const OTHER = "__otro"
 
-type Phase = { kind: "form" } | OutreachCheck
+type Phase =
+  | { kind: "form" }
+  | {
+      kind: "chat"
+      chatId: string
+      draft: string
+      proposalId: string | null
+      /** Ese celular ya escribió sin decir de quién es: se abre «¿De quién es?» primero. */
+      decide?: boolean
+    }
+  | OutreachCheck
 
 const writeSchema = z
   .object({
@@ -159,6 +175,13 @@ function WriteForm({
   const invalidate = useInvalidateClient(clientId)
   const isAdmin = useIsAdmin()
   const [phase, setPhase] = useState<Phase>({ kind: "form" })
+  // Con el número de Sallca, el WhatsApp a una persona del cliente sale desde su conversación
+  // (la propuesta, con ella). Un borrador de Kairós sale con su sí (`useKairosDecide`).
+  const config = useChatsConfig()
+  const throughChat = (value: { channel: WriteChannel; contactId: string }) =>
+    value.channel === "whatsapp" &&
+    !kairosItemId &&
+    writesThroughChat(config.data?.whatsapp, value.contactId === OTHER ? null : value.contactId)
 
   const form = useAppForm({
     defaultValues: {
@@ -169,8 +192,29 @@ function WriteForm({
       body,
     },
     validators: { onSubmit: writeSchema },
-    onSubmit: async ({ value }) => {
+    onSubmit: async ({ value, formApi }) => {
       const other = value.contactId === OTHER
+      if (throughChat(value)) {
+        let chatId: string | null = null
+        let decide = false
+        try {
+          chatId = (await openChatWith(clientId, value.contactId)).id
+        } catch (error) {
+          // Ese celular ya escribió sin decir de quién es: Administración lo dice primero (el
+          // texto queda puesto en la conversación). Soporte sigue por wa.me, como antes.
+          const outcome = openChatOutcome(error, isAdmin)
+          if (outcome.kind === "error") throw error
+          if (outcome.kind === "decidir") {
+            chatId = outcome.chatId
+            decide = true
+          } else if (outcome.message) toast.info(outcome.message)
+        }
+        if (chatId) {
+          formApi.reset(value)
+          setPhase({ kind: "chat", chatId, draft: value.body.trim(), proposalId, decide })
+          return
+        }
+      }
       try {
         const result = await sendOutreach(clientId, {
           channel: value.channel,
@@ -213,6 +257,20 @@ function WriteForm({
     { value: OTHER, label: values.channel === "whatsapp" ? "Otro número" : "Otro correo" },
   ]
 
+  if (phase.kind === "chat")
+    return (
+      <ChatDrawer
+        chatId={phase.chatId}
+        open
+        draft={phase.draft}
+        proposalId={phase.proposalId}
+        decide={phase.decide}
+        onClose={() => {
+          invalidate()
+          onClose()
+        }}
+      />
+    )
   if (phase.kind !== "form") {
     return (
       <OutreachCheckDrawer
@@ -233,7 +291,13 @@ function WriteForm({
       onClose={onClose}
       title={title ?? (proposalId ? "Enviar la propuesta" : "Escribir")}
       description={`A ${clientName}.`}
-      submitLabel={values.channel === "whatsapp" ? "Abrir WhatsApp" : "Enviar correo"}
+      submitLabel={
+        values.channel === "whatsapp"
+          ? throughChat(values)
+            ? "Seguir en la conversación"
+            : "Abrir WhatsApp"
+          : "Enviar correo"
+      }
       cancelLabel={common.actions.cancel}
     >
       <div className="flex flex-col gap-4">
@@ -308,7 +372,9 @@ function WriteForm({
                 description={
                   values.channel === "correo"
                     ? `${writeEmailHint({ proposal: Boolean(proposalId), support: !isAdmin })} ${FORMAT_HINT}`
-                    : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
+                    : throughChat(values)
+                      ? "Se abre su conversación con este texto puesto: lo revisas y sale desde el número de Sallca."
+                      : "Se abre WhatsApp con este texto; lo envías tú desde ahí."
                 }
                 rows={7}
                 maxLength={5000}

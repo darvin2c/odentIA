@@ -10,7 +10,8 @@ import {
   kairosItem,
   SAAS_CLIENT_PROFESSIONALS,
   SAAS_CLIENT_TOOLS,
-  SAAS_OUTREACH_CHANNELS,
+  SAAS_WRITE_CHANNELS,
+  type SaasChatChannel,
   type SaasOutreachChannel,
   type SaasTaskKind,
   saasClient,
@@ -39,6 +40,12 @@ import {
   visibleTaskSql,
 } from "./admin-clients.js"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
+import {
+  type AssignChatInput,
+  type ChatSuggestion,
+  chatFreeWindow,
+  chatSuggestion,
+} from "./admin-inbound-chat.js"
 import {
   ALTA_MISSING_WORDS,
   type AltaState,
@@ -141,6 +148,7 @@ const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "vinculo",
   "duplicado",
   "posible_carga",
+  "chat_sin_cliente",
 ])
 /** Lo que el modelo redacta antes de estar listo. */
 const DRAFT_KINDS = [
@@ -162,6 +170,8 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   correo_sin_cliente: "un correo sin cliente",
   responder_correo: "la respuesta a un correo",
   posible_carga: "una posible carga de datos",
+  chat_sin_cliente: "un mensaje sin cliente",
+  responder_chat: "un mensaje por responder",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -646,6 +656,16 @@ async function captureState(
     )
     state.file = row ? { kind: row.kind, deleted: row.deleted } : null
   }
+  const chatId = str(payload.chatId)
+  if ((kind === "chat_sin_cliente" || kind === "responder_chat") && chatId) {
+    // Vale mientras la conversación siga como estaba: sin decir de quién es (o del mismo
+    // cliente) y sin marcar «No es una clínica».
+    const [row] = await rows<{ client_id: string | null; not_clinic: boolean }>(
+      tx,
+      sql`select client_id, not_clinic_at is not null as not_clinic from saas_chat where id = ${chatId}::uuid`,
+    )
+    state.chat = row ? { clientId: row.client_id, notClinic: row.not_clinic } : null
+  }
   const contactId = str(payload.contactId)
   if (kind === "vinculo" && contactId) {
     const [row] = await rows<{ user_id: string | null }>(
@@ -967,6 +987,8 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
     clientId: string,
     input: KairosProposalInput,
   ): Promise<{ id: string }>
+  /** La misma operación que «¿De quién es?» de la conversación (`assignChat`). */
+  assignChat(tx: Db, actor: AdminActor, chatId: string, input: AssignChatInput): Promise<unknown>
   /** La misma operación que «Es la carga de datos» de Documentos (`markClientFileCarga`). */
   markClientFileCarga(
     tx: Db,
@@ -987,9 +1009,21 @@ export interface KairosDecision<O extends KairosOutreachPrepared = KairosOutreac
   status: KairosItemStatus
   result: Record<string, unknown> | null
   error: string | null
-  /** Un mensaje aprobado: el envío que la ruta manda después del commit (correo) o abre por enlace (WhatsApp). */
+  /**
+   * Un mensaje aprobado: el envío que la ruta manda después del commit (correo,
+   * o WhatsApp por el número de Sallca) o abre por enlace (wa.me, sin él).
+   */
   outreach?: O
 }
+
+/**
+ * Lo que no se pudo al aprobar pero se arregla en la ficha o en la
+ * conversación y se vuelve a aprobar: el ítem sigue en espera (409 a la
+ * persona) en vez de quedar fallido. Un mensaje por el WhatsApp de Sallca a un
+ * celular que ya escribe como otra clínica, que falta decir de quién es, o
+ * que Soporte no envía (una clínica sin su cuenta).
+ */
+const KEEPS_WAITING = new Set(["CHAT_OTHER_CLIENT", "CHAT_UNASSIGNED", "CHAT_ADMIN_ONLY"])
 
 /** Lo que cada tipo deja cambiar antes de aprobar. */
 const EDITABLE: Record<KairosItemKind, readonly string[]> = {
@@ -1012,6 +1046,8 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   correo_sin_cliente: ["clientId"],
   responder_correo: ["body"],
   posible_carga: [],
+  chat_sin_cliente: ["clientId", "contactId"],
+  responder_chat: [],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -1048,7 +1084,7 @@ async function executeItem<O extends KairosOutreachPrepared>(
   switch (kind) {
     case "mensaje": {
       const channel = str(payload.channel)
-      if (!channel || !(SAAS_OUTREACH_CHANNELS as readonly string[]).includes(channel)) {
+      if (!channel || !(SAAS_WRITE_CHANNELS as readonly string[]).includes(channel)) {
         throw invalidField("edited.channel", "Elige correo o WhatsApp")
       }
       const body = optText(payload.body)
@@ -1062,8 +1098,9 @@ async function executeItem<O extends KairosOutreachPrepared>(
         proposalId: optText(payload.proposalId),
         kairosItemId: item.id,
       })
-      // Hasta saber si salió: el correo lo envía la ruta después del commit y el
-      // WhatsApp lo confirma la persona («Salió»); nunca se reintenta solo.
+      // Hasta saber si salió: el correo, y el WhatsApp por el número de Sallca, los
+      // envía la ruta después del commit; el de wa.me lo confirma la persona
+      // («Salió»). Nunca se reintenta solo.
       return { status: "incierta", result: { outreachId: outreach.id, channel }, outreach }
     }
     case "dato": {
@@ -1190,6 +1227,31 @@ async function executeItem<O extends KairosOutreachPrepared>(
     case "guion":
       // El guion se lee; aprobarlo es «listo», no ejecuta nada.
       return { status: "ejecutada", result: { taskId: str(payload.taskId) } }
+    case "chat_sin_cliente": {
+      // El sí es decir de quién es: la misma operación del cajón de la conversación.
+      // «No es una clínica» no es descartar: tiene su ruta (`markChatNotClinic`).
+      const chatId = optText(payload.chatId)
+      if (!chatId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta la conversación")
+      const target = optText(payload.clientId)
+      if (!target || !UUID.test(target))
+        throw invalidField("edited.clientId", "Elige el cliente de esta conversación")
+      const contactId = optText(payload.contactId)
+      if (contactId && !UUID.test(contactId))
+        throw invalidField("edited.contactId", "Esa persona no es de este cliente")
+      // Con su id: «¿De quién es?» no cierra como «ya no hace falta» el ítem que se está aprobando.
+      await executors.assignChat(tx, actor, chatId, {
+        clientId: target,
+        ...(contactId ? { contactId } : {}),
+        kairosItemId: item.id,
+      })
+      return {
+        status: "ejecutada",
+        result: { chatId, clientId: target, contactId: contactId ?? null },
+      }
+    }
+    case "responder_chat":
+      // Se responde en la conversación (`prepareChatReply`); `decideKairosItem` ya lo frenó.
+      throw new ServiceError("KAIROS_ITEM_IN_CHAT", 409, "Esto se responde en la conversación")
     case "posible_carga": {
       const fileId = optText(payload.fileId)
       if (!fileId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el archivo")
@@ -1267,6 +1329,10 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
   }
   if (ADMIN_KINDS.has(kind) && actor.role !== "admin")
     throw new ServiceError("FORBIDDEN", 403, "Esto lo aprueba Administración")
+  // «Responder» abre la conversación: no hay sí que dar aquí, y el ítem queda como estaba
+  // (se cierra solo cuando sale la respuesta).
+  if (kind === "responder_chat")
+    throw new ServiceError("KAIROS_ITEM_IN_CHAT", 409, "Esto se responde en la conversación")
   const edits = cleanEdits(kind, input.edited)
   const current = await captureState(tx, kind, item.clientId, item.payload)
   if (stable(item.expectedState ?? {}) !== stable(current)) {
@@ -1285,6 +1351,8 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
       executeItem(inner as Db, actor, item, payload, executors),
     )
   } catch (error) {
+    // Lo que la persona puede arreglar y volver a aprobar (de quién es el celular) no lo da por fallido.
+    if (error instanceof ServiceError && KEEPS_WAITING.has(error.code)) throw error
     if (error instanceof ServiceError && (error.status === 409 || error.status === 404)) {
       await tx
         .update(kairosItem)
@@ -1310,6 +1378,7 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
     .set({
       status: executed.status,
       result: executed.result,
+      error: null,
       decidedBy: actor.userId,
       decidedAt: now,
       updatedAt: now,
@@ -2022,6 +2091,292 @@ async function ruleInboundEmails(pass: Pass): Promise<void> {
   }
 }
 
+/* ---------- Lo que llega por WhatsApp, Instagram y Messenger ---------- */
+
+/** El canal de una conversación, como se nombra en Hoy. */
+const CHAT_CHANNEL_WORDS: Record<SaasChatChannel, string> = {
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
+}
+
+const chatChannelOf = (value: string): SaasChatChannel =>
+  value === "instagram" || value === "messenger" ? value : "whatsapp"
+
+/**
+ * Un número E.164 para leerlo: «+51 954 220 318». Solo el Perú se agrupa (3-3-3 tras
+ * el código, como se escriben los celulares peruanos de 9 dígitos); los demás quedan
+ * en E.164 sin espacios (ITU-T E.123 no fija una agrupación única por país).
+ */
+export function chatAddressWords(channel: SaasChatChannel, address: string): string {
+  if (channel !== "whatsapp") return address
+  const peru = /^\+51(9\d{2})(\d{3})(\d{3})$/.exec(address)
+  return peru ? `+51 ${peru[1]} ${peru[2]} ${peru[3]}` : address
+}
+
+/** Quién escribe en una conversación sin cliente: «+51 954 220 318», «@usuario», «Nombre». */
+function chatWho(chat: {
+  channel: SaasChatChannel
+  address: string
+  display_name: string | null
+}): string {
+  if (chat.channel === "whatsapp") return chatAddressWords("whatsapp", chat.address)
+  // Instagram y Messenger: el id de Meta no le dice nada a nadie; el nombre o @usuario, sí.
+  return (
+    chat.display_name?.trim() ||
+    (chat.channel === "instagram" ? "una cuenta de Instagram" : "una cuenta de Messenger")
+  )
+}
+
+/** Lo que se lee de un mensaje en Hoy: hasta 280 caracteres. */
+const CHAT_PREVIEW_MAX = 280
+
+function chatPreview(body: string | null, files: number): string | null {
+  const text = body?.trim()
+  if (text) return text.length > CHAT_PREVIEW_MAX ? `${text.slice(0, CHAT_PREVIEW_MAX - 1)}…` : text
+  if (files > 0) return files === 1 ? "Mandó un archivo" : `Mandó ${files} archivos`
+  return null
+}
+
+/**
+ * La conversación `c` tiene una respuesta nuestra desde su mensaje `m`: pendiente,
+ * enviada o incierta (lo que no salió no cuenta como respuesta).
+ */
+const chatRepliedSql = sql`exists (select 1 from saas_outreach o where o.chat_id = c.id
+  and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.received_at)`
+
+interface ChatPending extends Record<string, unknown> {
+  id: string
+  channel: string
+  address: string
+  display_name: string | null
+  client_id: string | null
+  client_name: string | null
+  organization_id: string | null
+  contact_name: string | null
+  last_inbound_at: string | null
+  message_id: string
+  body: string | null
+  files: number
+  received_at: string
+  /** El último mensaje es solo de Administración (llegó cuando la conversación era de la venta). */
+  admin_only: boolean
+  maybe_carga: boolean
+}
+
+/**
+ * Las conversaciones cuyo último mensaje es de la persona y no tiene respuesta
+ * nuestra después (`chatRepliedSql`): sin cliente y sin «No es una clínica», o
+ * de un cliente no archivado. `maybe_carga`: alguno de sus mensajes trae un
+ * archivo con pinta de carga (`likelyCargaSql`, sin abrirlo).
+ */
+async function pendingChats(tx: Db, withClient: boolean, since: SQL): Promise<ChatPending[]> {
+  return rows<ChatPending>(
+    tx,
+    sql`select c.id, c.channel, c.address, c.display_name, c.client_id, cl.name as client_name,
+      cl.organization_id, ct.name as contact_name,
+      ${iso(sql`c.last_inbound_at`)} as last_inbound_at,
+      m.id as message_id, m.body, jsonb_array_length(m.media)::int as files,
+      ${iso(sql`m.received_at`)} as received_at, m.admin_only,
+      exists (select 1 from saas_inbound_message mm
+        cross join lateral (select e ->> 'mimeType' as content_type, e ->> 'filename' as filename
+          from jsonb_array_elements(mm.media) e) f
+        where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga
+    from saas_chat c
+    join lateral (select id, body, media, received_at, admin_only from saas_inbound_message
+      where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
+    left join saas_client cl on cl.id = c.client_id
+    left join saas_client_contact ct on ct.id = c.contact_id
+    where ${
+      withClient
+        ? sql`c.client_id is not null and cl.archived_at is null`
+        : sql`c.client_id is null and c.not_clinic_at is null`
+    }
+      and not ${chatRepliedSql}
+      and m.received_at > ${since}
+    order by m.received_at asc, c.id asc`,
+  )
+}
+
+interface ChatItemPlan {
+  rule: "chat_sin_cliente" | "responder_chat"
+  clientId: string | null
+  chatId: string
+  fact: string
+  title: string
+  reason: string
+  payload: Record<string, unknown>
+  adminOnly: boolean
+}
+
+/**
+ * Pone lo de una conversación en espera, una vez por mensaje: si ya hay uno de
+ * este mensaje (en espera o decidido), nada; si espera el de un mensaje anterior
+ * (escribió otra vez), el mismo ítem pasa a este, sin otro ítem ni otro aviso en
+ * «Lo que hizo»; si no, uno nuevo.
+ */
+async function putChatItem(pass: Pass, plan: ChatItemPlan): Promise<void> {
+  const prefix = `${plan.rule}:${plan.clientId ?? "-"}:`
+  const [taken] = await pass.tx
+    .select({ id: kairosItem.id })
+    .from(kairosItem)
+    .where(
+      sql`left(${kairosItem.idempotencyKey}, ${prefix.length + plan.fact.length + 1}) = ${`${prefix}${plan.fact}:`}`,
+    )
+    .limit(1)
+  if (taken) return
+  const moved = await pass.tx
+    .update(kairosItem)
+    .set({
+      title: plan.title.slice(0, 200),
+      reason: plan.reason.slice(0, 1000),
+      payload: plan.payload,
+      adminOnly: plan.adminOnly,
+      idempotencyKey: `${prefix}${plan.fact}:${pass.today}`,
+      expiresAt: new Date(pass.now.getTime() + KAIROS_ITEM_HOURS * HOUR),
+      updatedAt: pass.now,
+    })
+    .where(
+      and(
+        eq(kairosItem.status, "espera"),
+        eq(kairosItem.kind, plan.rule),
+        sql`${kairosItem.payload} ->> 'chatId' = ${plan.chatId}`,
+        sql`left(${kairosItem.idempotencyKey}, ${prefix.length}) = ${prefix}`,
+      ),
+    )
+    .returning({ id: kairosItem.id })
+  if (moved.length > 0) return
+  await pass.item({ ...plan, kind: plan.rule })
+}
+
+/**
+ * (10c) Lo que llega por WhatsApp, Instagram o Messenger, en Hoy, una vez por
+ * mensaje (clave: conversación y último mensaje):
+ * - `chat_sin_cliente`: la conversación sin cliente ni «No es una clínica» cuyo
+ *   último mensaje no tiene respuesta: di de quién es. Solo de Administración. En
+ *   WhatsApp, con el contacto que tiene exactamente ese celular (`chatSuggestion`);
+ *   nunca liga sola. El sí es `assignChat`.
+ * - `responder_chat`: la conversación de un cliente con el último mensaje sin
+ *   responder. La ve Soporte si la clínica ya tiene su app (la regla de la
+ *   conversación); si no, solo Administración. Kairós no redacta: «Responder» abre
+ *   la conversación y no se aprueba aquí.
+ * Lo descartado no vuelve para ese mensaje, sí si escribe otra vez. Los dos se
+ * retiran solos cuando sale la respuesta (pendiente, enviada o incierta: lo que no
+ * salió lo vuelve a pedir), se dice de quién es, se marca «No es una clínica» o la
+ * conversación pasa a otro cliente.
+ */
+async function ruleInboundChats(pass: Pass): Promise<void> {
+  const { tx } = pass
+  // Primero se retira lo que ya no hace falta: así lo que se pone después es lo vigente.
+  const stale = await rows<{ id: string; why: string }>(
+    tx,
+    sql`select k.id, case
+        when c.id is null then 'la conversación ya no está'
+        when k.kind = 'chat_sin_cliente' and c.client_id is not null then 'ya se dijo de quién es'
+        when k.kind = 'chat_sin_cliente' and c.not_clinic_at is not null then 'no es una clínica'
+        when k.kind = 'responder_chat' and c.client_id is distinct from k.client_id
+          then 'la conversación pasó a otro cliente'
+        when k.kind = 'responder_chat' and cl.archived_at is not null then 'el cliente está archivado'
+        else 'ya se le respondió' end as why
+    from kairos_item k
+    left join saas_chat c on c.id::text = k.payload ->> 'chatId'
+    left join saas_client cl on cl.id = c.client_id
+    left join lateral (select received_at from saas_inbound_message
+      where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
+    where k.kind in ('chat_sin_cliente', 'responder_chat') and k.status = 'espera'
+      and (c.id is null
+        or (k.kind = 'chat_sin_cliente' and (c.client_id is not null or c.not_clinic_at is not null))
+        or (k.kind = 'responder_chat'
+          and (c.client_id is distinct from k.client_id or cl.archived_at is not null))
+        or ${chatRepliedSql})`,
+  )
+  const byWhy = new Map<string, string[]>()
+  for (const row of stale) byWhy.set(row.why, [...(byWhy.get(row.why) ?? []), row.id])
+  for (const [why, ids] of byWhy) await pass.closeItems({ ids }, why)
+
+  for (const chat of await pendingChats(tx, false, pass.ago(CHAT_OWNER_LOOKBACK_HOURS / 24))) {
+    const channel = chatChannelOf(chat.channel)
+    const words = CHAT_CHANNEL_WORDS[channel]
+    const who = chatWho({ channel, address: chat.address, display_name: chat.display_name })
+    const received = new Date(chat.received_at)
+    const suggestion: ChatSuggestion | null =
+      channel === "whatsapp" ? await chatSuggestion(tx, chat.address) : null
+    await putChatItem(pass, {
+      rule: "chat_sin_cliente",
+      clientId: null,
+      chatId: chat.id,
+      fact: `${chat.id}:${chat.message_id}`,
+      title: `${words} sin cliente: ${who}`,
+      reason: [
+        `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y no es de ningún cliente.`,
+        suggestion
+          ? `Ese celular es de ${suggestion.contactName}, de ${suggestion.clientName}.`
+          : null,
+        chat.maybe_carga ? "Trae un Excel, CSV o Word: puede ser la carga de datos." : null,
+        "Di de quién es.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      adminOnly: true,
+      payload: {
+        chatId: chat.id,
+        channel,
+        address: chat.address,
+        displayName: chat.display_name,
+        messageId: chat.message_id,
+        lastBody: chatPreview(chat.body, chat.files),
+        receivedAt: chat.received_at,
+        suggestion,
+        maybeCarga: chat.maybe_carga,
+        clientId: null,
+      },
+    })
+  }
+
+  for (const chat of await pendingChats(tx, true, pass.ago(CHAT_REPLY_LOOKBACK_HOURS / 24))) {
+    if (!chat.client_id) continue
+    const channel = chatChannelOf(chat.channel)
+    const words = CHAT_CHANNEL_WORDS[channel]
+    const received = new Date(chat.received_at)
+    const person =
+      chat.contact_name?.trim() ||
+      chat.display_name?.trim() ||
+      chatAddressWords(channel, chat.address)
+    const { freeUntil } = chatFreeWindow(toDate(chat.last_inbound_at), pass.now)
+    await putChatItem(pass, {
+      rule: "responder_chat",
+      clientId: chat.client_id,
+      chatId: chat.id,
+      fact: `${chat.id}:${chat.message_id}`,
+      title: `${person} · ${chat.client_name ?? "Cliente"}`,
+      reason: `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y todavía no le respondemos.`,
+      // La conversación de una clínica con su app también la ve Soporte; la de venta, no, ni un
+      // mensaje que llegó cuando era de la venta (su `admin_only`).
+      adminOnly: !chat.organization_id || chat.admin_only,
+      payload: {
+        chatId: chat.id,
+        channel,
+        clientId: chat.client_id,
+        messageId: chat.message_id,
+        lastBody: chatPreview(chat.body, chat.files),
+        receivedAt: chat.received_at,
+        freeUntil: freeUntil?.toISOString() ?? null,
+      },
+    })
+  }
+}
+
+/**
+ * Cuántas horas atrás mira Kairós un mensaje por responder (`responder_chat`):
+ * pasada una semana ya no es «por responder» en Hoy (la conversación sigue en la ficha).
+ */
+const CHAT_REPLY_LOOKBACK_HOURS = 7 * 24
+/**
+ * Cuántas horas atrás mira Kairós una conversación sin cliente (`chat_sin_cliente`): decir de
+ * quién es importa más tiempo que responder, pero no para siempre.
+ */
+const CHAT_OWNER_LOOKBACK_HOURS = 30 * 24
+
 /** Cuántas horas atrás mira Kairós los correos por responder: lo que llegó antes ya no es nuevo. */
 const REPLY_LOOKBACK_HOURS = KAIROS_ITEM_HOURS
 
@@ -2465,7 +2820,8 @@ function cargaDeleteWords(deleteOn: string, today: string): string {
 }
 
 /**
- * (8b) Posible carga de datos: un adjunto que llegó por correo en los últimos 30 días con
+ * (8b) Posible carga de datos: un adjunto que llegó por correo, WhatsApp, Instagram o
+ * Messenger (`kind` correo, por su `source`) en los últimos 30 días con
  * pinta de carga (Excel, CSV o Word: `likelyCargaSql`, sin abrirlo) o lo que estaba
  * programado para borrarse antes del cambio (`client_file.retention_lifted`, de cualquier
  * tipo). Kairós no decide: deja un ítem solo de Administración, una sola vez por archivo, que
@@ -2482,11 +2838,15 @@ async function rulePossibleCarga(pass: Pass): Promise<void> {
     content_type: string
     received_at: string
     inbound_email_id: string | null
+    inbound_message_id: string | null
+    chat_id: string | null
+    source: string | null
     lifted: boolean
   }>(
     tx,
     sql`select f.id, f.client_id, f.filename, f.content_type, ${iso(sql`f.received_at`)} as received_at,
-      f.inbound_email_id,
+      f.inbound_email_id, f.inbound_message_id, f.source,
+      (select m.chat_id from saas_inbound_message m where m.id = f.inbound_message_id) as chat_id,
       exists (select 1 from admin_audit a where a.action = 'client_file.retention_lifted' and a.entity_id = f.id::text) as lifted
     from saas_client_file f
     join saas_client c on c.id = f.client_id
@@ -2498,7 +2858,8 @@ async function rulePossibleCarga(pass: Pass): Promise<void> {
   )
   for (const file of files) {
     const receivedAt = new Date(file.received_at)
-    const words = possibleCargaWords(now, receivedAt, file.lifted)
+    const via = cargaArrivedVia(file.source)
+    const words = possibleCargaWords(now, receivedAt, file.lifted, via)
     const thirty = new Date(receivedAt.getTime() + CLIENT_FILE_WINDOW_DAYS * DAY)
     await pass.item({
       rule: "posible_carga",
@@ -2518,6 +2879,10 @@ async function rulePossibleCarga(pass: Pass): Promise<void> {
         contentType: file.content_type,
         receivedAt: file.received_at,
         inboundEmailId: file.inbound_email_id,
+        // Lo que llegó por WhatsApp, Instagram o Messenger: su mensaje y su conversación.
+        inboundMessageId: file.inbound_message_id,
+        chatId: file.chat_id,
+        source: via,
         lifted: file.lifted,
         ...words.payload,
       },
@@ -2525,16 +2890,27 @@ async function rulePossibleCarga(pass: Pass): Promise<void> {
   }
   // A los 25 días, el mismo ítem pasa a urgente (sin otro ítem ni otra tarea); y pasado su día
   // de borrado, dice que se borra al marcarlo (la pantalla lo calcula también al leer).
-  const late = await rows<{ id: string; received_at: string; lifted: boolean }>(
+  const late = await rows<{
+    id: string
+    received_at: string
+    lifted: boolean
+    source: string | null
+  }>(
     tx,
-    sql`select k.id, ${iso(sql`f.received_at`)} as received_at, coalesce((k.payload ->> 'lifted')::boolean, false) as lifted
+    sql`select k.id, ${iso(sql`f.received_at`)} as received_at, coalesce((k.payload ->> 'lifted')::boolean, false) as lifted,
+      f.source
     from kairos_item k join saas_client_file f on f.id::text = k.payload ->> 'fileId'
     where k.kind = 'posible_carga' and k.status = 'espera'
       and ((coalesce(k.payload ->> 'urgent', 'false') <> 'true' and f.received_at <= ${pass.ago(POSSIBLE_CARGA_URGENT_DAYS)})
         or (coalesce(k.payload ->> 'dueNow', 'false') <> 'true' and k.payload ->> 'deleteOn' <= ${pass.today}))`,
   )
   for (const item of late) {
-    const words = possibleCargaWords(now, new Date(item.received_at), item.lifted)
+    const words = possibleCargaWords(
+      now,
+      new Date(item.received_at),
+      item.lifted,
+      cargaArrivedVia(item.source),
+    )
     await tx
       .update(kairosItem)
       .set({
@@ -2563,17 +2939,34 @@ async function rulePossibleCarga(pass: Pass): Promise<void> {
 /** Los días que se cuenta lo que llega por correo (y lo marcado como la carga) para borrarlo. */
 const CLIENT_FILE_WINDOW_DAYS = 30
 
+/** Por dónde llegó un adjunto que puede ser la carga: el correo o el canal de su conversación. */
+type CargaVia = "correo" | SaasChatChannel
+
+function cargaArrivedVia(source: unknown): CargaVia {
+  return source === "whatsapp" || source === "instagram" || source === "messenger"
+    ? source
+    : "correo"
+}
+
+const CARGA_VIA_WORDS: Record<CargaVia, string> = {
+  correo: "correo",
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
+}
+
 /** Lo que dice una posible carga: cuándo llegó y qué pasa si se marca hoy (la fecha la da el servidor). */
 function possibleCargaWords(
   now: Date,
   receivedAt: Date,
   lifted: boolean,
+  via: CargaVia = "correo",
 ): { reason: string; payload: { deleteOn: string; dueNow: boolean; urgent: boolean } } {
   const today = limaDate(now)
   const deleteOn = cargaDeleteAfter(receivedAt, now)
   const dueNow = deleteOn <= today
   const urgent = now.getTime() - receivedAt.getTime() >= POSSIBLE_CARGA_URGENT_DAYS * DAY
-  const arrived = `Llegó por correo el ${dayText(limaDate(receivedAt))}`
+  const arrived = `Llegó por ${CARGA_VIA_WORDS[via]} el ${dayText(limaDate(receivedAt))}`
   const why = lifted
     ? "estaba programado para borrarse y ahora se guarda hasta que digas si es la carga"
     : "por su tipo puede ser la carga de datos (no se abrió)"
@@ -2597,7 +2990,12 @@ function possibleCargaNow(
     return { reason: item.reason, payload: item.payload }
   const at = new Date(receivedAt)
   if (Number.isNaN(at.getTime())) return { reason: item.reason, payload: item.payload }
-  const words = possibleCargaWords(now, at, item.payload.lifted === true)
+  const words = possibleCargaWords(
+    now,
+    at,
+    item.payload.lifted === true,
+    cargaArrivedVia(item.payload.source),
+  )
   return { reason: words.reason, payload: { ...item.payload, ...words.payload } }
 }
 
@@ -3449,6 +3847,7 @@ export async function kairosRulesPass(
   await ruleAccountsWithoutClient(pass)
   await ruleInboundEmails(pass)
   await ruleReplyEmails(pass)
+  await ruleInboundChats(pass)
   await ruleDuplicates(pass)
   await ruleWaitlist(pass)
   await ruleProposalsExpiring(pass)

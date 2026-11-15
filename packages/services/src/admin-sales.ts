@@ -36,9 +36,9 @@ import {
   SAAS_CLIENT_PROFESSIONALS,
   SAAS_CLIENT_TOOLS,
   SAAS_LOST_REASONS,
-  SAAS_OUTREACH_CHANNELS,
   SAAS_PROPOSAL_BILLING_CYCLES,
   SAAS_TASK_KINDS,
+  SAAS_WRITE_CHANNELS,
   type SaasActivityDirection,
   type SaasActivityKind,
   type SaasInboundMailbox,
@@ -408,6 +408,8 @@ async function insertActivity(
   client: ClientRecord,
   input: ActivityInput,
   now: Date,
+  /** La conversación de la que sale (un envío por WhatsApp, Instagram o Messenger): la abre el Historial. */
+  extra: { chatId?: string | null } = {},
 ): Promise<ActivityRow> {
   if (!(SAAS_ACTIVITY_KINDS as readonly string[]).includes(input.kind))
     throw invalidField("kind", "Elige qué fue")
@@ -443,6 +445,7 @@ async function insertActivity(
       happenedAt,
       adminOnly,
       byKairos: actor === null,
+      chatId: extra.chatId ?? null,
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo anotar la actividad")
@@ -2166,8 +2169,9 @@ function newMessageId(product: ClinicalProduct): string {
 /**
  * La propuesta que se puede enviar a un cliente: lista (no por aprobar),
  * vigente, sin decidir y la última que salió. Solo la envía Administración.
+ * También la usa la conversación de WhatsApp (`prepareChatReply`).
  */
-async function sendableProposal(
+export async function sendableProposal(
   tx: Db,
   actor: AdminActor,
   clientId: string,
@@ -2218,7 +2222,8 @@ export async function prepareOutreach(
   now = new Date(),
 ): Promise<OutreachRow> {
   const client = await lockClient(tx, clientId)
-  if (!(SAAS_OUTREACH_CHANNELS as readonly string[]).includes(input.channel))
+  // Instagram y Messenger solo salen respondiendo en su conversación (`prepareChatReply`).
+  if (!(SAAS_WRITE_CHANNELS as readonly string[]).includes(input.channel))
     throw invalidField("channel", "Elige por dónde sale")
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const body = trimmed("body", input.body, 5000, "el mensaje")
@@ -2652,7 +2657,7 @@ async function outreachWentOut(
     actor,
     client,
     {
-      kind: row.channel === "whatsapp" ? "whatsapp" : "correo",
+      kind: row.channel === "correo" ? "correo" : (row.channel as SaasActivityKind),
       direction: "salio",
       body: (row.subject ? `${row.subject}\n\n${row.body}` : row.body).slice(0, 2000),
       contactId: row.contactId,
@@ -2661,6 +2666,7 @@ async function outreachWentOut(
       ...(row.sentAt ? { happenedAt: row.sentAt } : {}),
     },
     now,
+    { chatId: row.chatId },
   )
   if (row.proposalId) {
     // Una propuesta ya enviada no cambia (reenviarla no mueve su fecha).
@@ -2733,9 +2739,19 @@ export async function markOutreachSent(
 }
 
 /**
+ * Cuánto se espera a que un envío de una conversación (WhatsApp, Instagram,
+ * Messenger) deje de estar pendiente por sí solo: la ruta lo anota apenas
+ * Meta responde. Pasado esto, un pendiente es que la API se cayó entre
+ * reservarlo y enviarlo, y una persona puede decir si salió.
+ */
+export const CHAT_OUTREACH_SETTLE_MS = 10 * 60_000
+
+/**
  * Una persona dice si salió: el WhatsApp abierto por su enlace, o un correo
  * incierto (o que quedó pendiente porque la ruta se cortó antes de anotarlo).
  * «Salió» deja la actividad y pasa la propuesta a enviada; «No salió» es final.
+ * Uno de una conversación que sigue pendiente se está enviando: hasta
+ * `CHAT_OUTREACH_SETTLE_MS` no se resuelve a mano (409).
  */
 export async function resolveOutreach(
   tx: Db,
@@ -2749,6 +2765,16 @@ export async function resolveOutreach(
   const row = await lockOutreach(tx, actor, id)
   if (row.status !== "pendiente" && row.status !== "incierto")
     throw new ServiceError("OUTREACH_SETTLED", 409, "Ese envío ya tiene su resultado")
+  if (
+    row.chatId &&
+    row.status === "pendiente" &&
+    now.getTime() - row.createdAt.getTime() < CHAT_OUTREACH_SETTLE_MS
+  )
+    throw new ServiceError(
+      "OUTREACH_IN_FLIGHT",
+      409,
+      "Ese mensaje se está enviando: en unos minutos se sabe si salió",
+    )
   const status: SaasOutreachStatus = outcome === "salio" ? "enviado" : "no_salio"
   const [updated] = await tx
     .update(saasOutreach)

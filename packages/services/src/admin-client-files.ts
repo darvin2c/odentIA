@@ -27,9 +27,11 @@ import {
   type SaasClientFileKind,
   type SaasClientFileSource,
   type SaasInboundAttachment,
+  type SaasInboundMedia,
   saasClient,
   saasClientFile,
   saasInboundEmail,
+  saasInboundMessage,
 } from "@odentia/db/schema/admin-arm"
 import { user } from "@odentia/db/schema/auth"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -213,6 +215,8 @@ export interface RegisterClientFileInput {
   receivedAt?: Date
   /** El correo en que llegó, si vino por correo. */
   inboundEmailId?: string | null
+  /** El mensaje de WhatsApp en que llegó, si vino por WhatsApp. */
+  inboundMessageId?: string | null
 }
 
 export interface ClientFileRow {
@@ -234,6 +238,8 @@ export interface ClientFileRow {
   cargaAt: Date | null
   /** El correo en que llegó. */
   inboundEmailId: string | null
+  /** El mensaje de WhatsApp en que llegó. */
+  inboundMessageId: string | null
   /**
    * Solo en un adjunto (`correo`): el día de Lima en que se borraría si se
    * marca ahora como la carga. Lo calcula el servidor: el día de Lima y el del
@@ -310,6 +316,7 @@ export async function registerClientFile(
         source,
         receivedAt,
         inboundEmailId: input.inboundEmailId ?? null,
+        inboundMessageId: input.inboundMessageId ?? null,
         // Subirlo como la carga ya es decir que lo es.
         cargaAt: clinicSent ? now : null,
       })
@@ -361,6 +368,7 @@ function toRow(
     receivedAt: row.receivedAt,
     cargaAt: row.cargaAt,
     inboundEmailId: row.inboundEmailId,
+    inboundMessageId: row.inboundMessageId,
     cargaDeleteAfter: cargaDay,
     cargaDueNow: cargaDay !== null && cargaDay <= limaDate(now),
   }
@@ -488,9 +496,9 @@ export async function deleteClientFile(
 }
 
 /**
- * «Es la carga de datos»: un adjunto que mandó la clínica (`correo`) pasa a
- * ser la carga (`archivo_clinica`) y se borra a los 30 días de llegar, con el
- * texto del correo en que llegó. Solo Administración, sobre lo que ya llegó
+ * «Es la carga de datos»: un adjunto que mandó la clínica (`correo`, por
+ * correo o por WhatsApp) pasa a ser la carga (`archivo_clinica`) y se borra a
+ * los 30 días de llegar, con el texto del correo o del mensaje en que llegó. Solo Administración, sobre lo que ya llegó
  * (no se vuelve a subir), y no se deshace. Es idempotente: lo que ya es la
  * carga se devuelve igual. Si llegó hace 30 días o más (`dueNow`), el texto
  * del correo se borra aquí mismo y el objeto lo borra quien llama después del
@@ -552,12 +560,18 @@ export async function markClientFileCarga(
       .update(saasInboundEmail)
       .set({ textBody: null, notice: null })
       .where(eq(saasInboundEmail.id, row.inboundEmailId))
+  if (dueNow && row.inboundMessageId)
+    await tx
+      .update(saasInboundMessage)
+      .set({ body: null })
+      .where(eq(saasInboundMessage.id, row.inboundMessageId))
   await writeAdminAudit(tx, staff, {
     action: "client_file.marked_carga",
     entityId: row.id,
     metadata: {
       clientId: row.clientId,
       inboundEmailId: row.inboundEmailId,
+      inboundMessageId: row.inboundMessageId,
       receivedAt: row.receivedAt.toISOString(),
       deleteAfter,
       deletedNow: dueNow,
@@ -621,6 +635,7 @@ export async function confirmClientFileDeletions(
       id: saasClientFile.id,
       clientId: saasClientFile.clientId,
       inboundEmailId: saasClientFile.inboundEmailId,
+      inboundMessageId: saasClientFile.inboundMessageId,
     })
   if (marked.length === 0) return
   const byEmail = new Map<string, Set<string>>()
@@ -645,6 +660,30 @@ export async function confirmClientFileDeletions(
       .update(saasInboundEmail)
       .set({ attachments: kept })
       .where(eq(saasInboundEmail.id, emailId))
+  }
+  // Lo mismo en el mensaje de WhatsApp en que llegó.
+  const byMessage = new Map<string, Set<string>>()
+  for (const file of marked) {
+    if (!file.inboundMessageId) continue
+    const ids = byMessage.get(file.inboundMessageId) ?? new Set<string>()
+    ids.add(file.id)
+    byMessage.set(file.inboundMessageId, ids)
+  }
+  for (const [messageId, ids] of byMessage) {
+    const [message] = await tx
+      .select({ media: saasInboundMessage.media })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.id, messageId))
+      .for("update")
+      .limit(1)
+    if (!message) continue
+    const kept = (message.media as SaasInboundMedia[]).map(({ objectKey, ...rest }) =>
+      rest.fileId && ids.has(rest.fileId) ? rest : { ...rest, ...(objectKey ? { objectKey } : {}) },
+    )
+    await tx
+      .update(saasInboundMessage)
+      .set({ media: kept })
+      .where(eq(saasInboundMessage.id, messageId))
   }
   await writeAdminAudit(tx, null, {
     action: "kairos.client_files_expired",
@@ -756,7 +795,7 @@ export async function clearDueCargaNow(
  * con ella: el contrato promete borrar el correo de la carga. Solo el de un
  * correo con un adjunto marcado como la carga (`archivo_clinica`); los demás
  * se guardan con su texto. Quedan el asunto, el remitente y los adjuntos que
- * hubo.
+ * hubo. Lo mismo con el texto (el pie) del mensaje de WhatsApp en que llegó.
  */
 export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> {
   const cutoff = addDays(limaDate(now), -CLIENT_FILE_RETENTION_DAYS)
@@ -772,5 +811,16 @@ export async function purgeInboundEmailText(db: Db, now: Date): Promise<number> 
       ),
     )
     .returning({ id: saasInboundEmail.id })
-  return cleared.length
+  const clearedMessages = await db
+    .update(saasInboundMessage)
+    .set({ body: null })
+    .where(
+      and(
+        isNotNull(saasInboundMessage.body),
+        sql`exists (select 1 from ${saasClientFile} f where f.inbound_message_id = ${saasInboundMessage.id} and f.kind = 'archivo_clinica')`,
+        sql`(${saasInboundMessage.receivedAt} at time zone 'America/Lima')::date <= ${cutoff}::date`,
+      ),
+    )
+    .returning({ id: saasInboundMessage.id })
+  return cleared.length + clearedMessages.length
 }

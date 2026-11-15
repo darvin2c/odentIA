@@ -6,7 +6,7 @@ import {
   kairosWeekly,
   type SAAS_CLIENT_PROFESSIONALS,
   type SAAS_CLIENT_TOOLS,
-  SAAS_OUTREACH_CHANNELS,
+  SAAS_WRITE_CHANNELS,
   type SaasOutreachChannel,
   saasClient,
   saasClientContact,
@@ -393,7 +393,7 @@ export async function pendingKairosDraftJobs(
       kind: item.kind === "guion" ? "guion" : "mensaje",
       goal: str(payload.goal) ?? item.kind,
       channel:
-        channel && (SAAS_OUTREACH_CHANNELS as readonly string[]).includes(channel)
+        channel && (SAAS_WRITE_CHANNELS as readonly string[]).includes(channel)
           ? (channel as SaasOutreachChannel)
           : null,
       client: clientFactsOf(client, product, stage),
