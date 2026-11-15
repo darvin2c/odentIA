@@ -1,4 +1,5 @@
 // Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
+import { ARM_PATH } from "./arm"
 import { giftOf, type Pricing } from "./pricing"
 import { DEFAULT_DOMAIN, ofProduct, WORDS } from "./product"
 
@@ -134,6 +135,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los tres agentes" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
         { href: "/agentes/administrador", label: "Argos · administración" },
@@ -174,6 +176,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los tres agentes" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
         { href: "/agentes/administrador", label: "Argos · administración" },
@@ -208,6 +211,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = ofProduct({
       title: "Agentes",
       links: [
         { href: "/agentes", label: "Los dos agentes" },
+        { href: ARM_PATH, label: "Compáranos" },
         { href: "/agentes/recepcion", label: "Sofi · recepción" },
         { href: "/agentes/administrador", label: "Argos · administración" },
       ],

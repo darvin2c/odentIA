@@ -14,6 +14,7 @@ import {
 } from "react"
 import { AGENTS, CHANS, DAY, type DayEvent, dir, type SceneHost, ToothScene, via } from "@odentia/brand-scene"
 import { pauseStore, useInterval, useNarrow, usePaused, useReducedMotion } from "./motion"
+import { ARM_PATH } from "../../lib/arm"
 
 type Props = {
   ctaHref: string
@@ -405,15 +406,43 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       <div className="grain" aria-hidden="true"></div>
       <div className="wrap herow">
         <div className="hero-copy">
-          <span className="tag tag-d rise">[ Para clínicas dentales ]</span>
+          <span className="arm-badge rise">
+            <b>ARM</b>
+            <span>
+              Agentic Relationship Management <i>· clínicas dentales</i>
+            </span>
+          </span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
-            Omnicanal <span>y agéntica.</span>
+            Más pacientes que vuelven. <span>Menos trabajo para tu equipo.</span>
           </h1>
-          <p className="hh-lead rise d2">
-            WhatsApp, Instagram, correo y más llegan a una sola ficha por persona. Y tus agentes no
-            solo conversan: agendan, documentan y traen de vuelta a tus pacientes mientras tu equipo
-            atiende.
-          </p>
+          <div className="arm-pitch rise d2">
+            <p className="hh-lead">
+              <b>odentIA es un ARM: agentes de IA que hacen el trabajo de tu clínica, no solo conversan.</b>
+            </p>
+            <ul className="arm-areas">
+              <li>
+                <span className="area">Recepción</span>
+                <span>
+                  <b className="sofi">Sofi</b> responde y agenda.
+                </span>
+              </li>
+              <li>
+                <span className="area">Consulta</span>
+                <span>
+                  <b className="clio">Clío</b> prepara la nota y el presupuesto.
+                </span>
+              </li>
+              <li>
+                <span className="area">Administración</span>
+                <span>
+                  <b className="argos">Argos</b> retoma presupuestos y trae de vuelta a quien no volvió.
+                </span>
+              </li>
+            </ul>
+            <a className="arm-cmp" href={ARM_PATH}>
+              Compáranos con lo que usas hoy <span aria-hidden="true">→</span>
+            </a>
+          </div>
           <div className="hh-ctas rise d3">
             <a className="btn btn-p" href={ctaHref}>
               {ctaLabel}
