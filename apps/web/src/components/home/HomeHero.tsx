@@ -407,12 +407,12 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
         <div className="hero-copy">
           <span className="tag tag-d rise">[ Para clínicas dentales ]</span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
-            Omnicanal <span>y agéntica.</span>
+            No es un CRM con{" "}IA. <span>Es un ARM.</span>
           </h1>
           <p className="hh-lead rise d2">
-            WhatsApp, Instagram, correo y más llegan a una sola ficha por persona. Y tus agentes no
-            solo conversan: agendan, documentan y traen de vuelta a tus pacientes mientras tu equipo
-            atiende.
+            <b>ARM: la relación con tus pacientes, gestionada por agentes.</b> Un CRM solo guarda lo
+            que anotas; aquí tus agentes agendan, documentan y traen de vuelta a tus pacientes mientras
+            tu equipo atiende. WhatsApp, Instagram, correo y más llegan a una sola ficha por persona.
           </p>
           <div className="hh-ctas rise d3">
             <a className="btn btn-p" href={ctaHref}>

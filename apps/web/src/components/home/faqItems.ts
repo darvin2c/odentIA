@@ -12,8 +12,8 @@ export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] =
   const terms = pricing.terms
   return [
   {
-    q: "¿Qué significa omnicanal y agéntica?",
-    a: "Omnicanal: atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona. Agéntica: los agentes no solo conversan, también actúan. Agendan, mueven citas, preparan la nota, recuerdan y retoman presupuestos, siempre dentro de lo que tú les permites.",
+    q: "¿Qué es un ARM?",
+    a: "ARM es Agentic Relationship Management. Un CRM guarda lo que tu equipo anota y espera a que alguien haga el resto. En un ARM, los agentes hacen el trabajo: atienden por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, todo en una sola ficha por persona, y agendan, mueven citas, preparan la nota, recuerdan y retoman presupuestos, siempre dentro de lo que tú les permites. odentIA nació así; no es un CRM al que le agregaron IA.",
   },
   {
     q: "¿Cuánto voy a pagar al mes?",
