@@ -2770,6 +2770,81 @@ export async function markOutreachSent(
 }
 
 /**
+ * Un correo que escribe Kairós solo a una clínica de la venta (el recordatorio de su presentación,
+ * pedirle otra hora, avisarle un cambio) cuando no hay WhatsApp por donde: queda `pendiente`, a su
+ * nombre (`by_kairos`, sin persona), desde hola@ de la marca y con su Message-ID. El worker lo
+ * envía después del commit (`outreachEmail`) y anota `markKairosMailSent`; nunca se reintenta.
+ */
+export async function prepareKairosMail(
+  tx: Db,
+  input: { clientId: string; contactId: string | null; to: string; subject: string; body: string },
+  now = new Date(),
+): Promise<OutreachRow> {
+  const client = await lockClient(tx, input.clientId)
+  const to = input.to.trim().toLowerCase()
+  if (!EMAIL.test(to) || to.length > 254) throw invalidField("to", "Hace falta un correo válido")
+  const subject = trimmed("subject", input.subject, 200, "el asunto")
+  const body = trimmed("body", input.body, 5000, "el mensaje")
+  const [row] = await tx
+    .insert(saasOutreach)
+    .values({
+      clientId: client.id,
+      contactId: input.contactId,
+      channel: "correo",
+      toAddress: to,
+      subject,
+      body,
+      fromAddress: null,
+      messageId: newMessageId(productOf(client.product)),
+      adminOnly: !client.organizationId,
+      byKairos: true,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+  if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo preparar el envío")
+  await writeAdminAudit(tx, null, {
+    action: "kairos.mail_prepared",
+    organizationId: client.organizationId,
+    entityId: client.id,
+    metadata: { outreachId: row.id },
+  })
+  return outreachRowOf(row)
+}
+
+/** El resultado del correo de Kairós: `enviado` o `incierto` (nunca se reintenta). Lo ya resuelto no cambia. */
+export async function markKairosMailSent(
+  tx: Db,
+  id: string,
+  result: "enviado" | "incierto",
+  now = new Date(),
+): Promise<OutreachRow> {
+  if (!UUID.test(id)) throw notFound("Envío")
+  const [row] = await tx
+    .select()
+    .from(saasOutreach)
+    .where(eq(saasOutreach.id, id))
+    .for("update")
+    .limit(1)
+  if (row?.channel !== "correo" || !row.byKairos) throw notFound("Envío")
+  if (row.status !== "pendiente") return outreachRowOf(row)
+  const [updated] = await tx
+    .update(saasOutreach)
+    .set({ status: result, sentAt: result === "enviado" ? now : null, updatedAt: now })
+    .where(eq(saasOutreach.id, id))
+    .returning()
+  if (!updated) throw notFound("Envío")
+  if (result === "enviado") await outreachWentOut(tx, null, updated, row.adminOnly, now)
+  await writeAdminAudit(tx, null, {
+    action: result === "enviado" ? "kairos.mail_sent" : "kairos.mail_uncertain",
+    entityId: row.clientId,
+    metadata: { outreachId: id },
+  })
+  return outreachRowOf(updated)
+}
+
+/**
  * Cuánto se espera a que un envío de una conversación (WhatsApp, Instagram,
  * Messenger) deje de estar pendiente por sí solo: la ruta lo anota apenas
  * Meta responde. Pasado esto, un pendiente es que la API se cayó entre

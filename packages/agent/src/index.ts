@@ -53,6 +53,27 @@ export {
   readWeekly,
 } from "./kairos.js"
 export {
+  checkSellReply,
+  createKairosSeller,
+  fakeSellerModel,
+  KAIROS_SELL_FALLBACK,
+  KAIROS_SELL_HANDOFF,
+  KAIROS_SELL_INTRO,
+  KAIROS_SELL_PATIENT,
+  type KairosSellBooked,
+  type KairosSellChannel,
+  type KairosSeller,
+  type KairosSellerDeps,
+  type KairosSellInput,
+  type KairosSellLine,
+  type KairosSellResult,
+  type KairosSellSlot,
+  type KairosSellTools,
+  SELLER_SYSTEM,
+  sellContext,
+  sellWhenWords,
+} from "./kairos-vende.js"
+export {
   type AgentRuntime,
   consumeAgentRun,
   processAgentRun,

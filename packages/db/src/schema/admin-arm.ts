@@ -228,6 +228,7 @@ export const KAIROS_AI_PURPOSES = [
   "guion",
   "semana",
   "clasificar",
+  "vende",
 ] as const
 export type KairosAiPurpose = (typeof KAIROS_AI_PURPOSES)[number]
 /** Los mismos valores que la solicitud de la web (`saas_waitlist_request`). */
@@ -239,6 +240,14 @@ export const KAIROS_PROPOSAL_STATUSES = [
   "vencida",
 ] as const
 export type KairosProposalStatus = (typeof KAIROS_PROPOSAL_STATUSES)[number]
+/**
+ * En qué quedó el turno de Kairós con un mensaje de una conversación (`kairos_chat_turn`):
+ * `en_curso` mientras redacta; `respondio` (salió su respuesta), `paso` (lo pasó al equipo con el
+ * aviso fijo), `fallo` (el modelo falló o no pasó la comprobación: aviso fijo y al equipo) u
+ * `omitido` (no respondió: se apagó, se pausó o el canal no está).
+ */
+export const KAIROS_TURN_OUTCOMES = ["en_curso", "respondio", "paso", "fallo", "omitido"] as const
+export type KairosTurnOutcome = (typeof KAIROS_TURN_OUTCOMES)[number]
 export const SAAS_CLIENT_PROFESSIONALS = ["1", "2-3", "4-9", "10+"] as const
 export const SAAS_CLIENT_TOOLS = ["nada", "cuaderno_excel", "otro_software"] as const
 
@@ -1129,5 +1138,35 @@ export const kairosProposal = adminSchema.table(
       .where(sql`${table.status} = 'pendiente'`),
     check("kairos_proposal_status_check", oneOf(table.status, KAIROS_PROPOSAL_STATUSES)),
     check("kairos_proposal_expires_check", sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+)
+
+/**
+ * Lo que hizo Kairós con cada mensaje de una conversación cuando responde solo (ADR 0189 y la
+ * de «Kairós vende»): uno por mensaje (`message_id`, la clave: nunca dos respuestas al mismo) y
+ * solo uno `en_curso` a la vez por conversación (lo cuida el worker con su candado). `why` dice por
+ * qué lo pasó, falló u omitió, en palabras para Hoy; `outreach_id`, lo que salió.
+ */
+export const kairosChatTurn = adminSchema.table(
+  "kairos_chat_turn",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => saasChat.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => saasInboundMessage.id, { onDelete: "cascade" }),
+    outcome: text("outcome").notNull().default("en_curso"),
+    why: text("why"),
+    outreachId: uuid("outreach_id").references(() => saasOutreach.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("kairos_chat_turn_message_uidx").on(table.messageId),
+    index("kairos_chat_turn_chat_idx").on(table.chatId, table.createdAt),
+    check("kairos_chat_turn_outcome_check", oneOf(table.outcome, KAIROS_TURN_OUTCOMES)),
+    check("kairos_chat_turn_why_check", sql`${table.why} IS NULL OR length(${table.why}) <= 500`),
   ],
 )

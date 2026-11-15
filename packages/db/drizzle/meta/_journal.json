@@ -918,6 +918,13 @@
       "when": 1794711687586,
       "tag": "0130_kairos_vende_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1794712991116,
+      "tag": "0131_kairos_responde",
+      "breakpoints": true
     }
   ]
 }

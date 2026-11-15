@@ -69,6 +69,7 @@ import {
   progressReportsOf,
 } from "./clinic-progress-report.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
+import { kairosHandlesSql } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
 import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
 import {
@@ -2221,10 +2222,13 @@ function chatPreview(body: string | null, files: number): string | null {
 
 /**
  * La conversación `c` tiene una respuesta nuestra desde su mensaje `m`: pendiente,
- * enviada o incierta (lo que no salió no cuenta como respuesta).
+ * enviada o incierta (lo que no salió no cuenta como respuesta). El aviso fijo de
+ * Kairós cuando lo pasó al equipo o falló tampoco: Hoy tiene que mostrarlo.
  */
 const chatRepliedSql = sql`exists (select 1 from saas_outreach o where o.chat_id = c.id
-  and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.received_at)`
+  and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.received_at
+  and not exists (select 1 from kairos_chat_turn kt where kt.outreach_id = o.id
+    and kt.outcome in ('paso', 'fallo')))`
 
 interface ChatPending extends Record<string, unknown> {
   id: string
@@ -2243,6 +2247,8 @@ interface ChatPending extends Record<string, unknown> {
   /** El último mensaje es solo de Administración (llegó cuando la conversación era de la venta). */
   admin_only: boolean
   maybe_carga: boolean
+  /** Por qué Kairós la pasó al equipo (o falló) con este mensaje, si fue así. */
+  kairos_why: string | null
 }
 
 /**
@@ -2251,7 +2257,12 @@ interface ChatPending extends Record<string, unknown> {
  * de un cliente no archivado. `maybe_carga`: alguno de sus mensajes trae un
  * archivo con pinta de carga (`likelyCargaSql`, sin abrirlo).
  */
-async function pendingChats(tx: Db, withClient: boolean, since: SQL): Promise<ChatPending[]> {
+async function pendingChats(
+  tx: Db,
+  withClient: boolean,
+  since: SQL,
+  now: Date,
+): Promise<ChatPending[]> {
   return rows<ChatPending>(
     tx,
     sql`select c.id, c.channel, c.address, c.display_name, c.client_id, cl.name as client_name,
@@ -2262,7 +2273,10 @@ async function pendingChats(tx: Db, withClient: boolean, since: SQL): Promise<Ch
       exists (select 1 from saas_inbound_message mm
         cross join lateral (select e ->> 'mimeType' as content_type, e ->> 'filename' as filename
           from jsonb_array_elements(mm.media) e) f
-        where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga
+        where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga,
+      (select kt.why from kairos_chat_turn kt where kt.chat_id = c.id and kt.outcome in ('paso', 'fallo')
+        and kt.created_at >= m.received_at - interval '1 day'
+        order by kt.created_at desc limit 1) as kairos_why
     from saas_chat c
     join lateral (select id, body, media, received_at, admin_only from saas_inbound_message
       where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
@@ -2274,6 +2288,7 @@ async function pendingChats(tx: Db, withClient: boolean, since: SQL): Promise<Ch
         : sql`c.client_id is null and c.not_clinic_at is null`
     }
       and not ${chatRepliedSql}
+      and not ${kairosHandlesSql(now)}
       and m.received_at > ${since}
     order by m.received_at asc, c.id asc`,
   )
@@ -2375,7 +2390,12 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
   for (const row of stale) byWhy.set(row.why, [...(byWhy.get(row.why) ?? []), row.id])
   for (const [why, ids] of byWhy) await pass.closeItems({ ids }, why)
 
-  for (const chat of await pendingChats(tx, false, pass.ago(CHAT_OWNER_LOOKBACK_HOURS / 24))) {
+  for (const chat of await pendingChats(
+    tx,
+    false,
+    pass.ago(CHAT_OWNER_LOOKBACK_HOURS / 24),
+    pass.now,
+  )) {
     const channel = chatChannelOf(chat.channel)
     const words = CHAT_CHANNEL_WORDS[channel]
     const who = chatWho({ channel, address: chat.address, display_name: chat.display_name })
@@ -2394,6 +2414,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
           ? `Ese celular es de ${suggestion.contactName}, de ${suggestion.clientName}.`
           : null,
         chat.maybe_carga ? "Trae un Excel, CSV o Word: puede ser la carga de datos." : null,
+        chat.kairos_why ? `Kairós se lo pasó al equipo: ${chat.kairos_why}.` : null,
         "Di de quién es.",
       ]
         .filter(Boolean)
@@ -2414,7 +2435,12 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
     })
   }
 
-  for (const chat of await pendingChats(tx, true, pass.ago(CHAT_REPLY_LOOKBACK_HOURS / 24))) {
+  for (const chat of await pendingChats(
+    tx,
+    true,
+    pass.ago(CHAT_REPLY_LOOKBACK_HOURS / 24),
+    pass.now,
+  )) {
     if (!chat.client_id) continue
     const channel = chatChannelOf(chat.channel)
     const words = CHAT_CHANNEL_WORDS[channel]
@@ -2430,7 +2456,12 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
       chatId: chat.id,
       fact: `${chat.id}:${chat.message_id}`,
       title: `${person} · ${chat.client_name ?? "Cliente"}`,
-      reason: `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y todavía no le respondemos.`,
+      reason: [
+        `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y todavía no le respondemos.`,
+        chat.kairos_why ? `Kairós se lo pasó al equipo: ${chat.kairos_why}.` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
       // La conversación de una clínica con su app también la ve Soporte; la de venta, no, ni un
       // mensaje que llegó cuando era de la venta (su `admin_only`).
       adminOnly: !chat.organization_id || chat.admin_only,
@@ -2564,6 +2595,30 @@ async function ruleDuplicates(pass: Pass): Promise<void> {
       payload: { keepId: pair.keep_id, dropId: pair.drop_id, email: pair.email },
     })
   }
+}
+
+/**
+ * Kairós creó una clínica desde un chat y su nombre (o su celular) se parece al
+ * de otra: no las une ni liga la conversación a la otra. Deja en Hoy el mismo
+ * «¿Es la misma que…?» de los duplicados («Revisar las dos»); fusionar lo decide
+ * una persona. Una vez por pareja.
+ */
+export async function raiseKairosDuplicate(
+  tx: Db,
+  pair: { keepId: string; keepName: string; dropId: string; why: string },
+  now = new Date(),
+): Promise<string | null> {
+  const pass = new Pass(tx, now)
+  return pass.item({
+    rule: "duplicado_chat",
+    clientId: pair.dropId,
+    fact: pair.keepId,
+    kind: "duplicado",
+    title: `¿Es la misma que ${pair.keepName}?`,
+    reason: `Kairós la creó desde un chat con el nombre que le dieron. ${pair.why}.`,
+    adminOnly: true,
+    payload: { keepId: pair.keepId, dropId: pair.dropId, email: null, why: pair.why },
+  })
 }
 
 /** (3) y (4) Las solicitudes por responder y las invitaciones que vencen: la regla de Inicio (`waitlistHomeRows`). */
@@ -4311,6 +4366,17 @@ async function kairosDoneRaw(
       }
       case "kairos.client_created":
         words = client ? `Creó el cliente ${client.name} de una cuenta nueva` : null
+        break
+      case "kairos.chat_client_created":
+        words = client ? `Registró a ${client.name} con lo que dijo en un chat` : null
+        break
+      case "kairos.presentation_booked":
+        words = client ? `Agendó la presentación de ${client.name} desde un chat` : null
+        break
+      case "kairos.chat_handed_over":
+        words = client
+          ? `Pasó al equipo un chat de ${client.name}`
+          : "Pasó al equipo un chat sin cliente"
         break
       case "kairos.client_linked":
         words = client ? `Ligó la cuenta nueva a ${client.name}, el cliente de su solicitud` : null
