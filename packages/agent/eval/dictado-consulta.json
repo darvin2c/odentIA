@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato.",
+  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato; «adulto», que el paciente es adulto (a un adulto no se le propone lo de diente de leche). Los servicios de leche, anterior o posterior son para ver que el servidor siga la pieza (prueba con voz c3).",
   "servicios": [
     "Obturación con resina",
     "Endodoncia multirradicular",
@@ -13,7 +13,12 @@
     "Ajuste de prótesis",
     "Apexificación, cambio de medicación",
     "Aparatología fija de ortodoncia",
-    "Aparatología removible de ortodoncia"
+    "Aparatología removible de ortodoncia",
+    "Apertura cameral",
+    "Endodoncia anterior vital",
+    "Endodoncia posterior vital",
+    "Pulpectomía anterior, deciduo",
+    "Pulpectomía posterior, deciduo"
   ],
   "dictados": [
     {
@@ -265,7 +270,9 @@
           ]
         },
         "serviciosNo": [
-          "Apexificación, cambio de medicación"
+          "Apexificación, cambio de medicación",
+          "Aparatología fija de ortodoncia",
+          "Aparatología removible de ortodoncia"
         ],
         "serviciosSi": [
           "Control de ortodoncia"
@@ -324,6 +331,66 @@
             "madre|mama"
           ]
         },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v06-pulpectomia-adulta",
+      "adulto": true,
+      "texto": "ya a ver paciente de 42 años viene porque le duele la muela de abajo del lado izquierdo refiere que empezó Hace 3 días el dolor es espontáneo no la deja dormir y tomó ibuprofeno pero no le calma este 10 a 36 intensidad 9 de 10 a la inspección caries profunda ocluso distal tumefacción no tiene fístula tampoco pásame en algodón con el frío por favor prueba de frío aumentada que persiste o sea se queda doliendo como 10 segundos calor también aumentado persiste percusión positiva palpación negativa movilidad fisiológica grado 0 sondaje 2 mm En la radiografía se ve ensanchamiento del ligamento periodontal sin radio lucidez diagnóstico pulpar pulpitis Irreversible sintomática apical periodontitis apical sintomática plan endodoncia de la 36 y luego Corona hoy hacemos la apertura y la pulpectomía",
+      "espera": {
+        "consulta": {
+          "motivo": [
+            "dolor|duele"
+          ],
+          "tiempo": "3|tres"
+        },
+        "diagnosticos": [
+          "K04"
+        ],
+        "hechos": [
+          {
+            "servicio": "apertura",
+            "pieza": 36
+          },
+          {
+            "servicio": "pulpectom",
+            "pieza": 36
+          }
+        ],
+        "serviciosNo": [
+          "Pulpectomía anterior, deciduo",
+          "Pulpectomía posterior, deciduo",
+          "Endodoncia anterior vital"
+        ],
+        "serviciosSi": [
+          "Apertura cameral"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v10-3-hoy-solo",
+      "texto": "hoy solo hacemos adaptación y profilaxis y los citamos en una semana",
+      "contexto": "niño de 4 años primera consulta la mamá refiere que le duelen las muelitas cuando come dulces peso 15 kg y medio sé o d cinco cariados dos con extracción indicada ser obturados higiene mala mucha placa riesgo alto llora no deja trabajar Franco 2",
+      "espera": {
+        "hechos": [
+          {
+            "servicio": "adaptaci"
+          },
+          {
+            "servicio": "profilaxis"
+          }
+        ],
+        "serviciosSi": [
+          "Profilaxis dental"
+        ],
+        "presupuesto": false,
+        "citas": [
+          {
+            "enDias": 7
+          }
+        ],
         "soloConsulta": true
       }
     }

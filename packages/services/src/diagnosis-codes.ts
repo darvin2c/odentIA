@@ -89,6 +89,23 @@ export async function findDiagnosisCode(
   return row ? { system, code: row.code, description: row.title, isCategory: row.isCategory } : null
 }
 
+/**
+ * El código de esa lista o, si no está, el más cercano que sí: su padre (K04.02 → K04.0 → K04).
+ * Para lo que propone Clío (prueba con voz del 15 nov, c3): el modelo a veces escribe un subcódigo
+ * de otra edición (K04.02 es de la CIE-10-MC de EE. UU.) que la lista de la clínica no tiene, y su
+ * padre sí. Nunca cambia de lista: el padre es de la misma. Un padre que es categoría vuelve como tal.
+ */
+export async function closestDiagnosisCode(tx: Db, system: DiagnosisSystemKey, rawCode: string): Promise<DiagnosisCodeOption | null> {
+  const code = normalizeDiagnosisCode(system, rawCode.trim())
+  if (!code) return null
+  // El código y sus padres, del más largo a la categoría de tres caracteres.
+  const parents = Array.from({ length: Math.max(1, code.length - 2) }, (_, cut) => code.slice(0, code.length - cut)).filter((parent) => !parent.endsWith("."))
+  const known = await codesIn(tx, system, parents)
+  const found = parents.find((parent) => known.has(parent))
+  const row = found ? known.get(found) : undefined
+  return found && row ? { system, code: found, description: row.title, isCategory: row.isCategory } : null
+}
+
 export interface DiagnosisCodeInput {
   code: string
   /** Lista del código; sin ella, la de la clínica. */

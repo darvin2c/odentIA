@@ -153,6 +153,8 @@ export const MEDICAL_DICTATION: ProductDictation = {
   placeWords: [],
   catalogText: examSystemsText,
   context: async () => null,
+  // Sin «dónde» ni dentición: cualquier servicio puede ser lo dicho.
+  serviceFit: () => "fits",
   // Sin «dónde» (decisión 4): una pieza o una cara que llegue se quita, no se adivina.
   normalizeSite: ({ toothNumber: _tooth, surfaces: _surfaces, ...rest }) => ({
     payload: rest,

@@ -329,6 +329,13 @@ describe("la prueba con voz del 15 nov", () => {
     expect(fixed).toContain("Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años»")
     expect(dictationFormsText(endo)).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
   })
+
+  // Tercera prueba (c3, v10): «hoy solo hacemos adaptación y profilaxis y los citamos en una semana».
+  it("«hoy hacemos…» es lo hecho hoy, la cita no es para lo de hoy y nadie pidió el presupuesto (v10)", () => {
+    expect(fixed).toContain("contado como hecho («le hice la profilaxis», «terminamos la resina de la 36») o como lo de hoy («hoy hacemos…», «hoy solo…»), uno por prestación")
+    expect(fixed).toContain("en `service` para qué vuelve, solo si lo dijo: lo que se hace hoy no es para qué vuelve")
+    expect(fixed).toContain("Sin ese pedido no va nada: reservar una cita, indicar un tratamiento o contar lo que se hizo no lo piden.")
+  })
 })
 
 describe("las respuestas de una ficha", () => {
