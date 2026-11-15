@@ -19,6 +19,7 @@ import {
   dictationFormAnswers,
   dictationList,
   dictationSaid,
+  homeCarePrompt,
   materialsPrompt,
 } from "../dictation.js"
 
@@ -85,6 +86,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     `Lista de hallazgos (código, nombre, variantes):\n${input.catalog}`,
     `En \`diagnosticos\` van los diagnósticos que no son un hallazgo de la lista (por ejemplo, gingivitis o pulpitis), con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra. Pon el código más exacto que corresponda; solo si dudas entre varios del mismo grupo, el de la categoría (los tres primeros caracteres), y el odontólogo lo revisa. Un diagnóstico que nombró no se deja fuera por la duda.`,
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
+    homeCarePrompt("«que use enjuague», «dieta blanda», «hilo dental todas las noches»"),
     "Si dice dos o tres tratamientos para lo mismo, para que el paciente elija («una resina, o si no una corona»), es una sola indicación: en `service` la que recomienda (si no lo dice, la primera que nombró) y las demás en `alternatives`, en el orden en que las dijo. Si ya eligió una, es una indicación sin alternativas.",
     "En `recetas` va cada medicamento que receta, con lo que dijo: la DCI, la concentración con su unidad, la forma, la dosis, la frecuencia y la duración. No completes lo que no dijo: el sistema lo pregunta y calcula la cantidad. Lo recetado no se repite en el texto de la consulta. Cambiar un medicamento pendiente («mejor paracetamol en vez del ibuprofeno») o completarlo («el naproxeno por cinco días») es una corrección de ese medicamento, con la DCI y lo que cambie, no uno nuevo.",
     input.services.length

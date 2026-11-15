@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { DICTATION_CHARS, type DictationFormQuestion, formNetMisses, getDictationCatalog, getOrgLocale, productHooksFor, ServiceError } from "@odentia/services"
+import { DICTATION_CHARS, type DictationFormQuestion, formNetMisses, getDictationCatalog, getOrgLocale, productHooksFor, ServiceError, withPauseBridge } from "@odentia/services"
 import { askDictationModel, type DictationExtraction, type DictationPending, rereadFormSentences } from "./dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
@@ -96,8 +96,9 @@ export async function extractDictation(
     )
   }
   // La segunda lectura de las fichas: lo que la red avisaría se lee una vez más, en la misma pausa.
+  // La red mira también el final del tramo anterior si lo nuevo sigue su frase, como el servidor.
   const forms = input.forms ?? []
-  const misses = forms.length ? formNetMisses(read.drafts, forms, productHooksFor(product).site, transcript, input.formPending) : []
+  const misses = forms.length ? formNetMisses(read.drafts, forms, productHooksFor(product).site, withPauseBridge(input.context, transcript), input.formPending) : []
   if (!misses.length) return { ...read, model: spec.modelName }
   // Si esa lectura falla, la pausa no se pierde: queda lo de la primera y el aviso de la red.
   const reread = await rereadFormSentences(model, spec, misses, forms).catch(() => [])

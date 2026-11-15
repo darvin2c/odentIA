@@ -28,6 +28,7 @@ import {
   undoConfirmedDictation,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
+  withPauseBridge,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -168,7 +169,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
               return suggestionId ? [{ suggestionId, said: item.sourceText }] : []
             }),
             segmentId,
-            transcript,
+            // Lo nuevo que sigue la frase del tramo anterior se comprueba con su final delante, como lo leyó Clío.
+            transcript: withPauseBridge(context, transcript),
             formQuestions: ready.forms,
           }),
         )
