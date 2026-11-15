@@ -1,11 +1,13 @@
 // Las preguntas del inicio de latidIA (lienzo «Inicio», sección 9). Las usa la página y sus datos
 // estructurados (FAQPage en index.astro). El regalo sale del plan que se muestra, nunca del código.
+import { armFaq } from "../../../lib/arm"
 import type { FaqItem } from "../../../lib/faq"
 import { trialFaq } from "../../../lib/offer"
 import type { Pricing } from "../../../lib/pricing"
 
 export function homeFaq(gift: string | null, pricing: Pricing): FaqItem[] {
   return [
+    armFaq,
     {
       q: "¿Para qué especialidades sirve?",
       a: "Para medicina general, medicina familiar, medicina interna, pediatría y ginecología y obstetricia. Tu consultorio empieza con sus servicios y un tarifario que ajustas a tus precios.",

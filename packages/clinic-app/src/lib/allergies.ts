@@ -1,4 +1,4 @@
-import { allergenByCode, allergenDetail, allergenName, type AllergenEntry } from "@odentia/clinical"
+import { ALLERGY_REMOVAL_REASON_LABELS, allergenByCode, allergenDetail, allergenName, type AllergenEntry } from "@odentia/clinical"
 import { productUi } from "../product/product-ui"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import type { Allergy } from "./patients"
@@ -75,12 +75,8 @@ export function allergyListDetail(entry: AllergenEntry | null): string {
   return entry ? allergenDetail(entry) : "sin codificar"
 }
 
-/** Por qué se quitó, como lo eligió quien la quitó. */
-export const REMOVAL_REASON_LABELS: Record<string, string> = {
-  ya_no: "Ya no es alérgica",
-  otra_cosa: "Era otra cosa (malestar, efecto secundario)",
-  error: "Se registró por error",
-}
+/** Por qué se quitó, como lo eligió quien la quitó: las mismas palabras que la copia de la historia. */
+export const REMOVAL_REASON_LABELS: Record<string, string> = ALLERGY_REMOVAL_REASON_LABELS
 
 const isSevere = (allergy: Allergy) => allergy.severity === "severa" || allergy.severity === "grave"
 

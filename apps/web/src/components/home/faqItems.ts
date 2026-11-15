@@ -1,4 +1,5 @@
 // Preguntas del inicio (sección 09). Los textos vienen del lienzo aprobado.
+import { armFaq } from "../../lib/arm"
 import type { FaqItem } from "../../lib/faq"
 import { offerOf, trialFaq } from "../../lib/offer"
 import { hours, type Pricing } from "../../lib/pricing"
@@ -11,10 +12,7 @@ export const homeFaq = (pricing: Pricing): (FaqItem & { pending?: boolean })[] =
   const { founder } = offerOf(pricing)
   const terms = pricing.terms
   return [
-  {
-    q: "¿Qué significa omnicanal y agéntica?",
-    a: "Omnicanal: atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona. Agéntica: los agentes no solo conversan, también actúan. Agendan, mueven citas, preparan la nota, recuerdan y retoman presupuestos, siempre dentro de lo que tú les permites.",
-  },
+  armFaq,
   {
     q: "¿Cuánto voy a pagar al mes?",
     // ADR 0085: también se suman los paquetes de preguntas a Argos y el espacio que pasa de lo incluido.

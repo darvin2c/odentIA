@@ -1296,6 +1296,17 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
+ * Las preguntas cuya respuesta cambia de `before` a `after`, para la auditoría: de ahí la copia, la
+ * atención firmada y la Historia dicen quién escribió cada respuesta (QA final de formularios, H10).
+ * Solo los ids, nunca el valor clínico.
+ */
+export function changedQuestions(before: unknown, after: unknown): string[] {
+  const was = (before ?? {}) as Record<string, unknown>
+  const now = (after ?? {}) as Record<string, unknown>
+  return Object.keys({ ...was, ...now }).filter((key) => canonicalJson(was[key] ?? null) !== canonicalJson(now[key] ?? null))
+}
+
+/**
  * Publica el borrador con su número de versión real y archiva la versión
  * publicada anterior de la misma clave: «Nuevo formulario» ofrece solo la
  * vigente. Republicar nunca altera respuestas ya capturadas (snapshot).
@@ -1728,6 +1739,7 @@ export async function createFormResponse(
   await audit(tx, orgId, actorUserId, "form_response.create", "clinical_form_response", row.id, {
     template: template.key,
     version: template.version,
+    questions: changedQuestions({}, answers),
   })
   return row
 }
@@ -1820,13 +1832,9 @@ export async function updateFormResponseDraft(
   if (!row) throw notFound("Ficha")
   // Qué preguntas cambió (sin su valor clínico) y si fue con la atención ya firmada: la ficha lo
   // dice en esa pregunta, también si la había confirmado Clío (revisión final del 15 nov, A5).
-  const before = (current.answers ?? {}) as Record<string, unknown>
-  const changed = [...new Set([...Object.keys(before), ...Object.keys(answers)])].filter(
-    (id) => canonicalJson(before[id] ?? null) !== canonicalJson(answers[id] ?? null),
-  )
   await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {
-    ...(input.auditMetadata ?? {}),
-    ...(changed.length > 0 ? { fields: changed } : {}),
+    ...input.auditMetadata,
+    questions: changedQuestions(current.answers, answers),
     ...(visit?.status === "finalizada" ? { afterSigning: true } : {}),
   })
   return { ...row, rejected }
@@ -2212,7 +2220,7 @@ export async function listFormResponses(
   const afterSigning = new Map<string, ListedFormResponse["afterSigning"]>()
   for (const event of late) {
     if (!event.entityId) continue
-    const fields = (event.metadata as { fields?: unknown } | null)?.fields
+    const fields = (event.metadata as { questions?: unknown } | null)?.questions
     const own = afterSigning.get(event.entityId) ?? {}
     for (const field of Array.isArray(fields) ? fields : []) if (typeof field === "string") own[field] = { by: event.by, at: event.at }
     afterSigning.set(event.entityId, own)

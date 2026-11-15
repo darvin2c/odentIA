@@ -17,6 +17,12 @@ export type AllergySeverity = (typeof ALLERGY_SEVERITIES)[number]
  */
 export const ALLERGY_REMOVAL_REASONS = ["ya_no", "otra_cosa", "error"] as const
 export type AllergyRemovalReason = (typeof ALLERGY_REMOVAL_REASONS)[number]
+/** Por qué se quitó, como lo eligió quien la quitó: lo dicen la ficha y la copia de la historia. */
+export const ALLERGY_REMOVAL_REASON_LABELS: Record<AllergyRemovalReason, string> = {
+  ya_no: "Ya no es alérgica",
+  otra_cosa: "Era otra cosa (malestar, efecto secundario)",
+  error: "Se registró por error",
+}
 
 /** Quién dijo la alergia: el equipo que la registró o el paciente (FHIR `asserter`). */
 export const ALLERGY_SOURCES = ["equipo", "paciente"] as const
