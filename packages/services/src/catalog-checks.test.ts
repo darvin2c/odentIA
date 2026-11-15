@@ -6,7 +6,6 @@
  */
 import {
   ALLERGEN_SYSTEMS,
-  ALLERGY_REMOVAL_REASONS,
   ALLERGY_SOURCES,
   CONDITION_STATUSES,
   CONTACT_RELATIONSHIPS,
@@ -45,7 +44,6 @@ const LISTS: Array<[constraint: string, values: readonly string[]]> = [
   ["patient_condition_status_check", CONDITION_STATUSES],
   ["patient_allergy_substance_system_check", ALLERGEN_SYSTEMS],
   ["patient_allergy_source_check", ALLERGY_SOURCES],
-  ["patient_allergy_removed_reason_check", ALLERGY_REMOVAL_REASONS],
   ["patient_medication_dose_unit_check", DOSE_UNITS],
   ["patient_medication_frequency_code_check", MEDICATION_FREQUENCIES],
   ["patient_responsibility_kind_check", RESPONSIBILITY_KINDS],

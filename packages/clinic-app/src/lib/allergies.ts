@@ -75,13 +75,6 @@ export function allergyListDetail(entry: AllergenEntry | null): string {
   return entry ? allergenDetail(entry) : "sin codificar"
 }
 
-/** Por qué se quitó, como lo eligió quien la quitó. */
-export const REMOVAL_REASON_LABELS: Record<string, string> = {
-  ya_no: "Ya no es alérgica",
-  otra_cosa: "Era otra cosa (malestar, efecto secundario)",
-  error: "Se registró por error",
-}
-
 const isSevere = (allergy: Allergy) => allergy.severity === "severa" || allergy.severity === "grave"
 
 /** Lo más grave primero. Lo que no se sabe va después de lo severo: podría serlo. */

@@ -1614,6 +1614,45 @@ it("el documento manda sobre el celular, y «Es otra persona» nunca le pone a n
   expect(dora).toMatchObject({ displayName: "Dora Tercera", docNumber: "44044231" })
 })
 
+// Auditor, 15 nov (A3): quien se registraba en línea y recepción resolvía con «Es otra persona»
+// quedaba como «alta interna», sin su salud en el registro y sin «Ver declaración original».
+it("«Es otra persona» deja su registro en línea como llegó: por dónde entró, quién lo dijo, su salud y su hora", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  await withOrgContext(appDb, "org_a", (tx) => createContact(tx, "org_a", { displayName: "Olga Celular", phone: "+51987650260" }))
+  const answers: RegistrationAnswers = {
+    demographics: { displayName: "Rita Campos", givenNames: "Rita", familyName: "Campos", birthDate: ADULT_BIRTH, phone: "+51987650260" },
+    respondent: "patient",
+    health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Ibuprofeno", severity: "desconocida" }] } },
+    privacyAccepted: true,
+  }
+  const held = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(tx, "org_a", { kind: "public", entryPoint: "public_link" }, { submissionId: randomUUID(), formVersion: version, answers }),
+  ).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(held).toBeInstanceOf(RegistrationHeld)
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (held as RegistrationHeld).hold))
+  const [task] = await ownerDb
+    .select()
+    .from(crmTask)
+    .where(and(eq(crmTask.kind, "registro_con_documento"), sql`${crmTask.title} like '%Olga Celular%'`))
+  // Lo envió de madrugada; recepción lo resuelve horas después.
+  const sentAt = new Date(Date.now() - 5 * 60 * 60_000)
+  await ownerDb.execute(sql`update registration_hold set created_at = ${sentAt.toISOString()}::timestamptz where task_id = ${task!.id}`)
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  const other = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: false, revision: view.revision }))
+  const rita = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", other.patientId))
+  expect(rita.registration).toMatchObject({ entryPoint: "public_link", respondent: "patient", privacyNotice: NOTICE })
+  expect((rita.registration?.answers as RegistrationAnswers).health?.allergies).toMatchObject({ state: "recorded", items: [{ substance: "Ibuprofeno" }] })
+  // Su registro dice la hora en que lo envió, la misma de su declaración: «Ver declaración original» la muestra.
+  expect(rita.registration?.createdAt.getTime()).toBe(sentAt.getTime())
+  const health = await withOrgContext(appDb, "org_a", (tx) => getPatientHealth(tx, "org_a", other.patientId))
+  expect(health.declarations.map((row) => [row.via, row.at.getTime()])).toEqual([["registro", sentAt.getTime()]])
+})
+
 it("su contacto de emergencia con el mismo nombre y otro teléfono se actualiza, y quien estaba archivada vuelve al decir que es ella", async () => {
   await seedActor()
   await publishAsking("org_a", { emergencyContactName: "optional", emergencyContactPhone: "optional" })

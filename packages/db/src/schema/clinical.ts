@@ -2,6 +2,7 @@ import type {
   BloodGroup,
   ContactRelationship,
   FinishControl,
+  HealthAtSigning,
   PatientGuide,
   ProcedureCodingSnapshot,
   RegistrationAnswers,
@@ -506,7 +507,11 @@ export const patientAllergy = pgTable(
     /** Quién la dijo (FHIR `asserter`): el equipo al registrarla o el paciente en su formulario. */
     source: text("source").notNull().default("equipo"),
     isActive: boolean("is_active").notNull().default(true),
-    /** Quitarla no la borra: queda en «Alergias quitadas» con quién, cuándo y por qué. */
+    /**
+     * Quitarla no la borra: queda en «Alergias quitadas» con quién, cuándo y por qué. El
+     * motivo es un atajo por su código (`ALLERGY_REMOVAL_REASONS`, con su sentido en FHIR) o lo
+     * que se escribió; `allergyRemovalReasonWords` lo dice en palabras.
+     */
     removedReason: text("removed_reason"),
     removedAt: timestamp("removed_at", { withTimezone: true }),
     removedBy: text("removed_by").references(() => user.id),
@@ -526,7 +531,8 @@ export const patientAllergy = pgTable(
     check("patient_allergy_source_check", sql`${table.source} IN ('equipo','paciente')`),
     check(
       "patient_allergy_removed_reason_check",
-      sql`${table.removedReason} IS NULL OR ${table.removedReason} IN ('ya_no','otra_cosa','error')`,
+      // Un atajo por su código (`ALLERGY_REMOVAL_REASONS`) o el motivo escrito (auditor, 15 nov, A11).
+      sql`${table.removedReason} IS NULL OR (btrim(${table.removedReason}) <> '' AND char_length(${table.removedReason}) <= 500)`,
     ),
     // Una alergia vigente no tiene motivo de quitada.
     check(
@@ -951,6 +957,12 @@ export const encounter = pgTable(
      * decisión 3 de la fase 3). Historia como el resto: no cambia al cerrar.
      */
     consentSkipReason: text("consent_skip_reason"),
+    /**
+     * Lo que se dijo de su salud y seguía sin revisar al firmar, una foto por declaración
+     * (`healthAtSigningOf`): `[]` si no quedaba nada, nulo en lo firmado antes de guardarla.
+     * Historia como el resto: no cambia después de firmar.
+     */
+    healthAtSigning: jsonb("health_at_signing").$type<HealthAtSigning[]>(),
     /**
      * «Viene a su control»: el control por cumplir que quien atiende dijo, al
      * empezar, que es el de hoy. El cierre lo trae marcado y se cumple al

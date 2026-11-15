@@ -1,5 +1,10 @@
 import { appWords } from "../../lib/product-words"
-import { ALLERGY_REMOVAL_REASONS } from "@odentia/clinical"
+import {
+  ALLERGY_REMOVAL_REASON_MAX,
+  ALLERGY_REMOVAL_REASON_WORDS,
+  ALLERGY_REMOVAL_REASONS,
+  allergyRemovalReasonWords,
+} from "@odentia/clinical"
 import { Button, cn, Collapsible, CollapsibleContent, CollapsibleTrigger, toast } from "@odentia/ui"
 import { FormDrawer, RowActions, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -14,7 +19,6 @@ import {
   allergyPhrase,
   allergyTitle,
   bySeverity,
-  REMOVAL_REASON_LABELS,
 } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
@@ -40,9 +44,10 @@ import { type AllergenChoice, AllergenPicker } from "./allergen-picker"
 
 /**
  * Alergias una por una (issue 43, tablero 7 del lienzo de Pacientes): la lista
- * con su origen, «Agregar alergia» con tres datos, «Quitar» con motivo (solo
- * quien escribe en la historia; no se borra: queda en «Alergias quitadas») y
- * «Elegir de la lista» para lo escrito a mano. Las reglas son del servidor.
+ * con su origen, «Agregar alergia» con tres datos, «Quitar» con su motivo escrito
+ * («Agregar una corrección» en la que dijo la persona; solo quien escribe en la
+ * historia; no se borra: queda en «Alergias quitadas») y «Elegir de la lista»
+ * para lo escrito a mano. Las reglas son del servidor.
  */
 
 const SEVERITY_OPTIONS = [
@@ -52,12 +57,6 @@ const SEVERITY_OPTIONS = [
   { value: "desconocida", label: "No se sabe" },
 ] as const
 type SeverityChoice = (typeof SEVERITY_OPTIONS)[number]["value"]
-
-const REASON_OPTIONS = ALLERGY_REMOVAL_REASONS.map((value) => ({
-  value,
-  label: REMOVAL_REASON_LABELS[value] ?? value,
-}))
-type ReasonChoice = (typeof ALLERGY_REMOVAL_REASONS)[number]
 
 /** Lo que falló en una acción de un solo botón, junto a ese botón (también dentro de un texto en línea). */
 function ActionError({ error }: { error: unknown }) {
@@ -252,7 +251,7 @@ export function AllergiesCard({
                     items={[
                       {
                         key: "quitar",
-                        label: "Quitar",
+                        label: allergyRemovalWords(allergy).action,
                         tone: "danger",
                         onSelect: () => setRemoving(allergy),
                       },
@@ -296,9 +295,7 @@ export function AllergiesCard({
                         allergy.removedAt
                           ? `Quitada${allergy.removedBy ? ` por ${memberName(allergy.removedBy)}` : ""} el ${allergyDay(allergy.removedAt)}`
                           : "Quitada",
-                        allergy.removedReason
-                          ? `«${REMOVAL_REASON_LABELS[allergy.removedReason] ?? allergy.removedReason}»`
-                          : null,
+                        allergy.removedReason ? `«${allergyRemovalReasonWords(allergy.removedReason)}»` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
@@ -509,17 +506,46 @@ export function AllergyFormDrawer({
 }
 
 const removeSchema = z.object({
-  reason: z.custom<ReasonChoice | "">((value) => typeof value === "string").refine(
-    (value) => value !== "",
-    "Elige por qué se quita.",
-  ),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe por qué se quita, por ejemplo «era naproxeno y no ibuprofeno».")
+    .max(ALLERGY_REMOVAL_REASON_MAX, `Escribe como mucho ${ALLERGY_REMOVAL_REASON_MAX} caracteres.`),
 })
 
 /**
- * «Quitar» la alergia, con su motivo. Siempre en cajón (quita algo que avisa):
- * hay que decidir antes de seguir. Después, el aviso ofrece «Deshacer».
+ * Cómo se llama quitarla: la que dijo la persona se corrige con «Agregar una corrección», como
+ * lo que envió en un cuestionario (auditor, 15 nov, D2); la del equipo se quita.
  */
-function RemoveAllergyDrawer({
+export function allergyRemovalWords(allergy: Pick<Allergy, "source" | "substance" | "substanceSystem" | "substanceCode">): {
+  action: string
+  title: string
+  description: string
+  submit: string
+} {
+  const phrase = allergyPhrase(allergy)
+  return allergy.source === "paciente"
+    ? {
+        action: "Agregar una corrección",
+        title: `Corregir la alergia a ${phrase}`,
+        description:
+          "Deja de avisar al recetar y queda en «Alergias quitadas», con tu motivo. Lo que dijo no cambia: sigue en «Ver declaración original». Si era otra sustancia, agrégala después con «Agregar alergia».",
+        submit: "Guardar corrección",
+      }
+    : {
+        action: "Quitar",
+        title: `Quitar la alergia a ${phrase}`,
+        description: "Dejará de avisar al recetar. No se borra: queda en «Alergias quitadas», con tu motivo, y se puede volver a poner.",
+        submit: "Quitar alergia",
+      }
+}
+
+/**
+ * «Quitar» la alergia, o corregir la que dijo la persona, con su motivo escrito. Los motivos de
+ * siempre quedan como atajos que lo llenan. Siempre en cajón (quita algo que avisa): hay que
+ * decidir antes de seguir. Después, el aviso ofrece «Deshacer».
+ */
+export function RemoveAllergyDrawer({
   patientId,
   allergy,
   onClose,
@@ -532,11 +558,11 @@ function RemoveAllergyDrawer({
   const queryClient = useQueryClient()
   const restore = useRestoreAllergy(patientId)
   const form = useAppForm({
-    defaultValues: { reason: "" as ReasonChoice | "" },
+    defaultValues: { reason: "" },
     validators: { onSubmit: removeSchema },
     onSubmit: async ({ value }) => {
-      if (!allergy || !value.reason) return
-      await removeAllergyApi(patientId, allergy.id, value.reason)
+      if (!allergy) return
+      await removeAllergyApi(patientId, allergy.id, value.reason.trim())
       await refresh(queryClient, patientId)
       toast.success(`Alergia a ${allergyPhrase(allergy)} quitada`, {
         action: { label: "Deshacer", onClick: () => restore.mutate(allergy) },
@@ -546,6 +572,7 @@ function RemoveAllergyDrawer({
     },
   })
   const surface = useFormSurface(form)
+  const words = allergy ? allergyRemovalWords(allergy) : null
   return (
     <FormDrawer
       {...surface}
@@ -556,26 +583,41 @@ function RemoveAllergyDrawer({
         form.reset()
         onClose()
       }}
-      title={allergy ? `Quitar la alergia a ${allergyPhrase(allergy)}` : "Quitar la alergia"}
-      description="Dejará de avisar al recetar. No se borra: queda en «Alergias quitadas» y se puede volver a poner."
-      submitLabel="Quitar alergia"
+      title={words?.title ?? "Quitar la alergia"}
+      description={words?.description}
+      submitLabel={words?.submit ?? "Quitar alergia"}
     >
       <form.AppField name="reason">
         {(field) => (
-          <field.Group id={`${id}-reason`} legend="¿Por qué?">
-            {(control) => (
-              <ChoiceButtons
-                id={control.id}
-                invalid={control.invalid}
-                aria-describedby={control.describedBy}
-                onBlur={control.onBlur}
-                value={field.state.value || null}
-                options={REASON_OPTIONS}
-                onChange={(next) => field.handleChange(next)}
-                tone="primary"
-              />
-            )}
-          </field.Group>
+          <div className="flex flex-col gap-2">
+            <field.TextareaField
+              id={`${id}-reason`}
+              label="Motivo"
+              aria-required="true"
+              rows={3}
+              maxLength={ALLERGY_REMOVAL_REASON_MAX}
+              description="Queda junto a la alergia quitada. Por ejemplo, «era naproxeno y no ibuprofeno»."
+            />
+            {/* Los motivos de siempre, a un toque: llenan el motivo y se puede seguir escribiendo. */}
+            <div role="group" aria-label="Motivos frecuentes" className="flex flex-wrap gap-2">
+              {ALLERGY_REMOVAL_REASONS.map((code) => {
+                const text = ALLERGY_REMOVAL_REASON_WORDS[code]
+                return (
+                  <Button
+                    key={code}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-pressed={field.state.value.trim() === text}
+                    disabled={surface.isSubmitting}
+                    onClick={() => field.handleChange(text)}
+                  >
+                    {text}
+                  </Button>
+                )
+              })}
+            </div>
+          </div>
         )}
       </form.AppField>
     </FormDrawer>

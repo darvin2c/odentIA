@@ -683,12 +683,7 @@ export function AntecedentesTab({
   const fid = (name: string): string => `${uid}-${name}`
   const registration = patientQuery.data?.data.registration ?? null
   const sex = patientQuery.data?.data.patient.sex
-  // Lo que declaró después del registro con que se creó su ficha (ese ya se muestra entero): lo de su
-  // enlace y un registro en línea posterior. Las alergias de un cuestionario están en el cuestionario.
-  const laterDeclarations = (health.declarations ?? []).filter(
-    (declaration) =>
-      declaration.via === "enlace" || (declaration.via === "registro" && declaration.enteredAt !== registration?.createdAt),
-  )
+  const laterDeclarations = laterDeclarationsOf(health.declarations ?? [], registration)
   const pendingReview = isHealthReviewPending(health)
   const age = ageInYears(patientQuery.data?.data.patient.birthDate, clinicToday())
   const childPatient = isChildAge(age)
@@ -1539,15 +1534,39 @@ export function healthReviewedWords(
   return `Antecedentes revisados${reviewedBy ? ` por ${memberName(reviewedBy)}` : ""}${day ? ` · ${day}` : ""}`
 }
 
+/**
+ * Lo que declaró aparte del registro con que se creó su ficha, que el diálogo ya muestra entero:
+ * lo de su enlace y otro registro en línea. Las alergias de un cuestionario están en el cuestionario.
+ * La declaración de ese registro es la que entró con la ficha o la que dice su misma hora (la que
+ * recepción resolvió en «¿Es la misma persona?» entra después, con la hora en que la envió), y solo
+ * se omite si el registro trae su salud: el que quedó del equipo, sin ella, la deja aparte (auditor,
+ * 15 nov, A3: quien se registró en línea se quedaba sin «Ver declaración original»).
+ */
+export function laterDeclarationsOf(
+  declarations: readonly HealthDeclarationView[],
+  registration: Pick<NonNullable<PatientFull["registration"]>, "answers" | "createdAt"> | null,
+): HealthDeclarationView[] {
+  const shown = registration && hasRegistrationHealth(registration) ? new Date(registration.createdAt).getTime() : null
+  const ofRegistration = (declaration: HealthDeclarationView) =>
+    shown !== null && [declaration.enteredAt, declaration.at].some((at) => new Date(at).getTime() === shown)
+  return declarations.filter(
+    (declaration) => declaration.via === "enlace" || (declaration.via === "registro" && !ofRegistration(declaration)),
+  )
+}
+
+/** Si el registro con que se creó su ficha trae algo de su salud. */
+function hasRegistrationHealth(registration: Pick<NonNullable<PatientFull["registration"]>, "answers">): boolean {
+  const health = ((registration.answers ?? {}) as Rec)["health"]
+  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
+}
+
 export function hasOriginalDeclaration(
   registration: Pick<NonNullable<PatientFull["registration"]>, "respondent" | "answers"> | null,
   later: readonly unknown[],
 ): boolean {
   if (later.length > 0) return true
   if (!registration) return false
-  if (registration.respondent !== "staff") return true
-  const health = ((registration.answers ?? {}) as Rec)["health"]
-  return !!health && typeof health === "object" && Object.keys(health as Rec).length > 0
+  return registration.respondent !== "staff" || hasRegistrationHealth(registration)
 }
 
 /**

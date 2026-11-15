@@ -19,6 +19,9 @@
 /** Un embarazo dura hasta 42 semanas (el mismo tope de la pregunta del registro). */
 export const PREGNANCY_TERM_WEEKS = 42
 
+/** «1 semana», «30 semanas»: igual en la copia, la ficha y la atención firmada. */
+export const weeksWords = (weeks: number): string => `${weeks} ${weeks === 1 ? "semana" : "semanas"}`
+
 export interface PregnancyStatement {
   estado: "si" | "no"
   /** El día en que se dijo (YYYY-MM-DD). */

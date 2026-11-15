@@ -241,7 +241,8 @@ const allergySubstance = {
 const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
-const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
+// El motivo es libre: lo vacío y lo largo los dice el servicio junto a «Motivo» (`removePatientAllergy`).
+const allergyRemoveInput = z.object({ reason: z.string() }).strict()
 const healthReviewedInput = z.object({ expectedRevision: z.number().int().min(0) }).strict()
 const healthDeniedInput = z
   .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })

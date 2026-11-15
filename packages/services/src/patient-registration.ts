@@ -92,6 +92,7 @@ import {
   REGISTRATION_NOT_COMPLETED_TEXT,
   RegistrationHeld,
   type RegistrationHold,
+  type RegistrationProvenance,
   requirePatient,
   updatePatient,
 } from "./patients.js"
@@ -1327,6 +1328,13 @@ export async function registerPatient(
     answers,
     privacyNotice: config.privacyNotice || null,
   }
+  // Lo que queda para recepción en «¿Es la misma persona?»: sus respuestas, el aviso que vio y por
+  // dónde llegó, con los que se registra al decidir.
+  const submitted = {
+    answers,
+    notice: { version: config.version, text: config.privacyNotice },
+    entryPoint: entryPoint === "platform" ? undefined : entryPoint,
+  }
   const docType = demographics.docType || null
   const documentOf = {
     docType,
@@ -1339,8 +1347,7 @@ export async function registerPatient(
     const owner = await findRealPersonByDocument(tx, orgId, documentOf)
     if (owner) {
       const held = await heldByDocument(tx, orgId, owner, demographics)
-      held.hold.answers = answers
-      held.hold.notice = { version: config.version, text: config.privacyNotice }
+      Object.assign(held.hold, submitted)
       throw held
     }
   }
@@ -1356,8 +1363,7 @@ export async function registerPatient(
         ownerPatientId: owner.patientId,
         declared: { displayName: demographics.displayName, phone: demographics.phone ?? null, email: demographics.email ?? null },
         match: "celular",
-        answers,
-        notice: { version: config.version, text: config.privacyNotice },
+        ...submitted,
       })
     }
   }
@@ -1383,10 +1389,7 @@ export async function registerPatient(
     }
     if (isPublic && e instanceof ServiceError && e.code === "ALREADY_PATIENT") throw notCompleted()
     // Con sus respuestas, para que recepción decida con ellas.
-    if (e instanceof RegistrationHeld && isPublic) {
-      e.hold.answers = answers
-      e.hold.notice = { version: config.version, text: config.privacyNotice }
-    }
+    if (e instanceof RegistrationHeld && isPublic) Object.assign(e.hold, submitted)
     throw e
   }
 
@@ -1800,6 +1803,7 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
     // Sin texto de aviso no hay consentimiento que guardar: se pedirá en la clínica.
     noticeVersion: hold.notice?.text ? hold.notice.version : null,
     noticeText: hold.notice?.text || null,
+    entryPoint: hold.entryPoint ?? null,
   })
 }
 
@@ -1980,6 +1984,18 @@ export async function resolveRegistrationHold(
   const savable = new Set(rows.filter((row) => row.key !== "document" && row.state !== "same" && !row.blocked).map((row) => row.key))
   const apply = input.same ? [...new Set(input.apply ?? [])] : []
   if (apply.some((key) => !savable.has(key))) throw validation("Ese dato no se puede guardar desde aquí")
+  // La ficha que nace aquí viene de su registro en línea, no de un alta del equipo: queda por
+  // dónde entró, quién lo dijo, lo que escribió y cuándo lo envió (auditor, 15 nov, A3: Datos decía
+  // «alta interna» y faltaba «Ver declaración original»). Recepción solo decidió quién es.
+  const provenance: RegistrationProvenance = {
+    // Lo dejado antes de guardar por dónde entró: el código QR, el que nombra su fila.
+    entryPoint: hold.entryPoint ?? "qr",
+    respondent: answers.respondent,
+    formVersion: hold.noticeVersion,
+    answers,
+    privacyNotice: hold.noticeText,
+    createdAt: hold.createdAt,
+  }
   let patientId: string
   if (input.same) {
     const patch = registrationHoldPatch(answers, apply)
@@ -2002,7 +2018,7 @@ export async function resolveRegistrationHold(
           composeDisplayName({ givenNames: text(merged.givenNames), familyName: text(merged.familyName) }) ||
           (text(owner.values.displayName) ?? String(declared.displayName ?? "")),
         contacts: [{ contactId: ownerId, relationship: "self", isPreferred: true }],
-      })
+      }, provenance)
       patientId = created.id
     }
     // Lo que había antes no se pierde: queda dicho en su persona.
@@ -2025,7 +2041,7 @@ export async function resolveRegistrationHold(
       delete own.docNumber
       delete own.docCountry
     }
-    const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3])
+    const created = await createPatient(tx, orgId, actorUserId, own as unknown as Parameters<typeof createPatient>[3], provenance)
     patientId = created.id
   }
   // Su salud entra como declarada, solo si nadie la registró antes. Si ya

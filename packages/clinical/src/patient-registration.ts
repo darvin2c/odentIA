@@ -30,6 +30,8 @@ export const CONTACT_RELATIONSHIP_LABELS: Record<ContactRelationship, string> = 
 }
 export type RegistrationRespondent = "patient" | "representative" | "staff"
 export type RegistrationEntryPoint = "platform" | "public_link" | "qr" | "conversation"
+/** Por dónde llega un registro desde fuera: todo menos el alta del equipo. */
+export type PublicEntryPoint = Exclude<RegistrationEntryPoint, "platform">
 export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]

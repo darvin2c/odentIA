@@ -2177,7 +2177,8 @@ const rosaIbuprofen = await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, 
   severity: "leve",
   reaction: "Le cae mal al estómago",
 })
-await removePatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, rosaIbuprofen.id, "otra_cosa")
+// Quitada con su motivo en palabras, como se corrige lo que no era una alergia.
+await removePatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, rosaIbuprofen.id, "Le cae mal al estómago: es un efecto del ibuprofeno, no una alergia")
 await db
   .update(patient)
   .set({ allergiesReviewedAt: sql`now() - interval '8 months'`, allergiesReviewedBy: ANA_ID })

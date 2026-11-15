@@ -1704,7 +1704,8 @@ export function EncounterEditor({
           </li>
         ))}
         {unrecordedAll.length > 0 ? <li>Sin registrar: {unrecordedAll.join(", ")}</li> : null}
-        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual.</li> : null}
+        {/* Queda en la atención firmada, con quién lo dijo y cuándo (`healthAtSigningOf`, auditor, 15 nov, A2). */}
+        {unreviewed ? <li>Sin revisar: {unreviewed}. Se firma igual y queda anotado en la atención.</li> : null}
       </ul>
     ) : null
 
