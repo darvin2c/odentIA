@@ -18,6 +18,7 @@ Una voz genérica opina sobre la pantalla. Una voz profunda recorre casos concre
 - **Comprobado o supuesto.** Lo que se hizo en la pantalla o se leyó en el código está comprobado. Lo que depende de cómo trabaja una clínica real y no tiene fuente va marcado como **supuesto**. Lo legal queda como pendiente: ninguna voz da el visto bueno jurídico.
 - **Ninguna decisión esconde un problema.** Si algo está mal, se anota aunque un ADR o un `AGENTS.md` diga que es a propósito, o aunque venga de cómo se armó la demo.
 - **No inventa.** Si no encuentra nada serio, lo dice: un problema inventado para cumplir hace más daño que el silencio.
+- **Recorrido base.** La voz que la ficha designa recorre también, aunque el cambio sea de otra parte, registrar un paciente, reservar, atender, subir una imagen, recetar, firmar y cobrar (apartado 3 de `SKILL.md`). Si una falla, es un hallazgo alto aunque no sea del cambio.
 - **Mira lo que ve la persona.** Capturas, no solo el árbol de accesibilidad.
 - **Parte de su catálogo y lo hace crecer.** Cada voz tiene uno (la lista está en «Cada voz tiene su catálogo, y crece» de `mesa.md`). Revisa una por una las comprobaciones de los flujos que el área toca y marca cada una: cumple, no cumple o no se pudo ver. Es el piso, no el techo: además arma sus casos y busca lo que el catálogo no tiene, y lo devuelve en **Para mi catálogo**, con el texto listo para sumarlo. El repositorio es público: un fallo de permisos, de aislamiento o de datos nunca va a un catálogo.
 - **En la app**, recibe `comun.md` de la ronda. Crea sus datos con el prefijo `QA`, teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. No toca la configuración de canales.
@@ -271,7 +272,7 @@ Después revisa la tarea contra esta lista, y cada falla es un hallazgo:
 - **Estados:** vacío, cargando, error, a medias y hecho. ¿Cada uno se ve y se distingue? ¿Lo pendiente se distingue de lo confirmado?
 - **Recuperación:** ¿se conserva el borrador? ¿Se puede deshacer o corregir sin rehacer todo?
 - **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral. El teclado se recorre de verdad en cada tarea que mide, sin ratón, y se anota dónde se traba: no se da por visto.
-- **Coherente:** ¿se comporta como el resto de odentIA?
+- **Coherente con el sistema de diseño:** pone cada pantalla nueva o cambiada al lado de los componentes de `@odentia/ui` (Field, Input, Select, Checkbox, Button) y de una pantalla buena de referencia de la app, con captura del antes y del después. Revisa alto, borde, fondo, espaciado y botones; que nada se repita, como un título igual a su etiqueta; y que todo lo que se agrega o empieza tenga cómo quitarse o deshacerse. Lo que no coincide es un hallazgo.
 
 Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra pantalla, y cumple tres cosas:
 
