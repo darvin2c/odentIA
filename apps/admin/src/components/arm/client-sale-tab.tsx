@@ -238,7 +238,7 @@ function StageCard({
           {timeline.isPending ? (
             <Skeleton className="my-0.5 h-4 w-48" />
           ) : latest ? (
-            `${latest.title} · ${supportDayTime(latest.at)}${latest.who.kind === "persona" ? ` · ${latest.who.name}` : latest.who.kind === "kairos" ? " · Kairós" : ""}`
+            `${latest.title} · ${supportDayTime(latest.at)}${latest.who.kind === "persona" ? ` · ${latest.who.name}` : latest.who.kind === "kairos" ? ` · ${latest.who.name || "Kairós"}` : ""}`
           ) : (
             "Todavía nada"
           )}

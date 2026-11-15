@@ -30,6 +30,7 @@ import { AGREEMENT_VERSION } from "@odentia/auth/legal"
 import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  kairosChatTurn,
   kairosItem,
   type SaasClientOrigin,
   saasClient,
@@ -65,7 +66,13 @@ import {
   updateClientContact,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { assignChat, ingestInboundChat, openChatForContact } from "./admin-inbound-chat.js"
+import {
+  assignChat,
+  ingestInboundChat,
+  markChatOutreachSent,
+  openChatForContact,
+  prepareKairosChatReply,
+} from "./admin-inbound-chat.js"
 import { assignInboundEmail, ingestInboundEmail } from "./admin-inbound-email.js"
 import {
   decideKairosItem,
@@ -104,6 +111,7 @@ import {
   setStaffHours,
   setStaffMeetingUrl,
 } from "./admin-staff-schedule.js"
+import { askHelpByChat } from "./ariadna-chat.js"
 import {
   finishProgressReport,
   listProgressReports,
@@ -111,8 +119,9 @@ import {
   progressReportPdfKey,
   reserveProgressReport,
 } from "./clinic-progress-report.js"
-import { getKairosSells, setKairosSells } from "./kairos-sells.js"
+import { getAriadnaChats, getKairosSells, setAriadnaChats, setKairosSells } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
+import { clinicOriginOf } from "./public-links.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
 import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID } from "./seed-admin-core.js"
@@ -1294,6 +1303,8 @@ async function seedStaffSchedules(tx: Db, clock: Clock, sonrisa: Seeded): Promis
     )
 
   if ((await getKairosSells(tx)).enabled) await setKairosSells(tx, ADA, false, clock.now)
+  // Ariadna en los chats nace apagada en la demo, como en producción: se prende después de medirla.
+  if ((await getAriadnaChats(tx)).enabled) await setAriadnaChats(tx, ADA, false, clock.now)
 }
 
 /**
@@ -1849,7 +1860,9 @@ async function chatMessageSeeded(tx: Db, externalId: string): Promise<boolean> {
  * - El WhatsApp de Gabriela Soto (Demo Deuda, que ya tiene su app), ligado por
  *   Ada, con una pregunta sin responder y un Excel: Hoy lo pone en «Responder»
  *   (también para Soporte) y el Excel como «¿Es la carga de datos?». Sin
- *   `putAttachmentAt` el mensaje llega sin el archivo.
+ *   `putAttachmentAt` el mensaje llega sin el archivo. Antes, esa mañana,
+ *   preguntó «¿cómo anulo una cita?» y le respondió Ariadna con la guía y el
+ *   enlace a la Agenda (ADR 0191), como lo deja el worker.
  */
 async function seedChats(
   tx: Db,
@@ -1915,6 +1928,58 @@ async function seedChats(
     .where(eq(saasClientContact.id, gabriela.id))
     .limit(1)
   if (!contact?.phone) return
+  // Lo que respondió Ariadna esa mañana: su pregunta, su respuesta (salió) y su turno.
+  const asked = clock.ago(0, 5)
+  const answeredAt = new Date(asked.getTime() + 60_000)
+  const howTo = await ingestInboundChat(
+    tx,
+    {
+      channel: "whatsapp",
+      address: contact.phone,
+      waId: contact.phone.slice(1),
+      displayName: "Gabriela",
+      externalId: "wamid.seed-arm-deuda-ariadna-1",
+      body: "¿cómo anulo una cita?",
+      media: [],
+      receivedAt: asked,
+    },
+    asked,
+  )
+  const [deudaClient] = await tx
+    .select({ organizationId: saasClient.organizationId, product: saasClient.product })
+    .from(saasClient)
+    .where(eq(saasClient.id, ids.deuda))
+    .limit(1)
+  if (deudaClient?.organizationId) {
+    const help = await askHelpByChat({
+      product: deudaClient.product as ClinicalProduct,
+      question: "¿cómo anulo una cita?",
+      firstReply: true,
+      appOrigin: await clinicOriginOf(tx, deudaClient.organizationId),
+    })
+    const reply = await prepareKairosChatReply(
+      tx,
+      chat.chatId,
+      { body: help.text, agent: "ariadna" },
+      answeredAt,
+    )
+    await markChatOutreachSent(
+      tx,
+      reply.outreachId,
+      "wamid.seed-arm-deuda-ariadna-respuesta",
+      answeredAt,
+    )
+    await tx.insert(kairosChatTurn).values({
+      chatId: chat.chatId,
+      messageId: howTo.messageId,
+      agent: "ariadna",
+      outcome: "respondio",
+      ariadnaReply: help.kind === "respuesta" ? "respuesta" : "oferta",
+      outreachId: reply.outreachId,
+      createdAt: answeredAt,
+      updatedAt: answeredAt,
+    })
+  }
   const put = storage.putAttachmentAt?.bind(storage)
   const media: Array<{ objectKey: string; mimeType: string; filename: string; size: number }> = []
   if (put) {
