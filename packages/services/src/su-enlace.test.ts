@@ -1892,9 +1892,12 @@ it("«Lo que nos contaste» sigue mientras la cita de hoy no termina", async () 
   const f = await clinicalFixture()
   const { visit, link } = await withVisit(f)
   // Contó a qué viene; la cita empezó hace diez minutos y termina en veinte: está en la sala.
-  await f.run((tx) => submitPersonalLinkData(tx, ORG, link.token, { data: {}, visit: { reason: "Me duele la muela de abajo", pain: "no" } }))
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1960-03-04" }, visit: { reason: "Me duele la muela de abajo", pain: "no" } }),
+  )
   const minutes = (n: number) => new Date(Date.now() + n * 60_000)
   const told = async () => (await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).told?.items.map((item) => item.what) ?? null
+  expect(await told()).toEqual(["datos", "visita"])
   await ownerDb.update(appointment).set({ startsAt: minutes(-10), endsAt: minutes(20) }).where(eq(appointment.id, visit))
-  expect(await told()).toEqual(["visita"])
+  expect(await told()).toEqual(["datos", "visita"])
 })

@@ -338,6 +338,27 @@ function linkAppointmentId(link: ResolvedPersonalLink): string | null {
   return link.appointment && link.appointment.status !== "cancelada" ? link.appointment.id : null
 }
 
+/**
+ * La cita de lo que contó: la que muestra el enlace o, si ya empezó, la suya mientras no termina. En la
+ * sala de espera «Lo que nos contaste» sigue diciendo su visita (QA de la entrega 3, también en la 8).
+ */
+async function toldAppointmentId(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
+  const shown = linkAppointmentId(link)
+  if (shown || !link.row.appointmentId) return shown
+  const [own] = await tx
+    .select({ id: appointment.id, status: appointment.status })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.id, link.row.appointmentId),
+        gt(appointment.endsAt, new Date()),
+      ),
+    )
+    .limit(1)
+  return own && own.status !== "cancelada" ? own.id : null
+}
+
 /** Cuándo terminó la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
 async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
   // Una cita cuenta como pasada al terminar, no al empezar: mientras la persona espera en la sala
@@ -392,7 +413,7 @@ async function toldOf(
     .map((row) => ({ at: row.at, ...((row.metadata ?? {}) as { fields?: unknown[]; renamed?: boolean; health?: boolean }) }))
   const data = traced.find((row) => (row.fields?.length ?? 0) > 0 || row.renamed)
   const health = traced.find((row) => row.health)
-  const visit = await visitSentOf(tx, orgId, linkAppointmentId(link), link.row.contactId)
+  const visit = await visitSentOf(tx, orgId, await toldAppointmentId(tx, orgId, link), link.row.contactId)
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
