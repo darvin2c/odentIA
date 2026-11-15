@@ -10,9 +10,15 @@
  * sola vez: si no se sabe si salió queda «No se sabe si salió» con «¿Salió?»,
  * nunca se reenvía solo. Lo abren la tarjeta de Hoy, el Historial de la ficha
  * y «Escribir por WhatsApp» (Contactos, Venta, «Escribir»).
+ *
+ * Kairós (con «Kairós responde solo en los chats» prendido): mientras atiende
+ * la conversación lo dice arriba y la respuesta a mano espera a «Lo atiendo
+ * yo», que lo pausa solo aquí; «Devolver a Kairós» lo reanuda. Lo que escribió
+ * va con su nombre, y si se la pasó al equipo se dice por qué.
  */
 import { Badge, Button, toast } from "@odentia/ui"
 import {
+  AgentMark,
   common,
   ErrorState,
   FormDrawer,
@@ -27,7 +33,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
-import { useIsAdmin } from "../../lib/session"
+import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { supportTime } from "../../lib/support-words"
 import {
   assignChatTo,
@@ -43,7 +49,10 @@ import {
   entriesByDay,
   freeWindowWords,
   isUnsettled,
+  kairosChatState,
   openChatOutcome,
+  pauseKairos,
+  resumeKairos,
   openChatWith,
   replyHelpWords,
   sendChatReply,
@@ -221,8 +230,23 @@ function Conversation({
   onChanged: () => void
 }) {
   const isAdmin = useIsAdmin()
+  const myUserId = useAdminUserId()
   const channel = CHAT_CHANNEL_WORDS[chat.channel]
   const { undo } = useNotClinic()
+  const kairos = kairosChatState(chat, myUserId)
+  const takeOver = useMutation({
+    mutationFn: (mine: boolean) => (mine ? pauseKairos(chat.id) : resumeKairos(chat.id)),
+    onSuccess: (_data, mine) =>
+      toast.success(
+        mine
+          ? "Lo atiendes tú: Kairós no responde solo en esta conversación"
+          : "Kairós vuelve a responder aquí lo que siga sin respuesta y lo que llegue",
+      ),
+    onError: (error) => toast.error(submitErrorMessage(error)),
+    onSettled: onChanged,
+  })
+  // Mientras Kairós atiende, la respuesta a mano espera a «Lo atiendo yo»: no responden los dos.
+  const canWrite = chat.canReplyFreely && kairos?.kind !== "kairos"
   // «Solo administración» solo tiene sentido si Soporte ve la conversación (clínica con su app).
   const canHide = isAdmin && Boolean(chat.client?.hasAccount)
   // La propuesta va con la primera respuesta que sale; después, lo que se escriba ya no la lleva.
@@ -298,7 +322,7 @@ function Conversation({
       onClose={onClose}
       title={chatTitle(chat)}
       description={chatSubtitle(chat)}
-      hideSubmit={!chat.canReplyFreely}
+      hideSubmit={!canWrite}
       submitLabel={`Enviar por ${channel}`}
       cancelLabel={common.actions.close}
     >
@@ -358,6 +382,48 @@ function Conversation({
           </PageNotice>
         ) : null}
 
+        {kairos ? (
+          <PageNotice
+            tone={kairos.kind === "paso" ? "alarma" : "aviso"}
+            label={
+              kairos.kind === "kairos"
+                ? "Kairós atiende esta conversación"
+                : kairos.kind === "paso"
+                  ? "Kairós se la pasó al equipo"
+                  : "Kairós está en pausa aquí"
+            }
+            action={
+              kairos.kind === "kairos" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={takeOver.isPending}
+                  onClick={() => takeOver.mutate(true)}
+                >
+                  Lo atiendo yo
+                </Button>
+              ) : kairos.canReturn ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={takeOver.isPending}
+                  onClick={() => takeOver.mutate(false)}
+                >
+                  Devolver a Kairós
+                </Button>
+              ) : null
+            }
+          >
+            {kairos.kind === "kairos"
+              ? "Responde lo de las webs y los precios, y agenda presentaciones. Nunca ofrece descuentos. Para escribir tú, toca «Lo atiendo yo»."
+              : kairos.kind === "paso"
+                ? `${kairos.why ? `${kairos.why}. ` : ""}Respóndele tú; Kairós no vuelve a escribir aquí hasta que lo devuelvas.`
+                : kairos.words}
+          </PageNotice>
+        ) : null}
+
         <Messages chat={chat} onChanged={onChanged} />
 
         {isAdmin && chat.files.length > 0 ? <ChatFiles chat={chat} onChanged={onChanged} /> : null}
@@ -375,7 +441,11 @@ function Conversation({
             Responder
           </h3>
           <p className="text-sm text-muted-foreground">{freeWindowWords(chat)}</p>
-          {chat.canReplyFreely ? (
+          {kairos?.kind === "kairos" ? (
+            <p className="text-sm text-muted-foreground">
+              Kairós está respondiendo. Para escribir tú, toca «Lo atiendo yo» arriba.
+            </p>
+          ) : chat.canReplyFreely ? (
             <>
               <form.AppField name="body">
                 {(field) => (
@@ -555,6 +625,7 @@ function Outbound({
       ) : null}
       <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{entry.body}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        {entry.byKairos ? <AgentMark size="sm" className="size-4" /> : null}
         <span>{sentLineWords(entry)}</span>
         {marked ? <Badge variant="outline">Solo administración</Badge> : null}
       </div>

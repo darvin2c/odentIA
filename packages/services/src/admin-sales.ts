@@ -503,6 +503,8 @@ export interface TaskRow {
   demoId: string | null
   status: SaasTaskStatus
   byKairos: boolean
+  /** De una presentación: la sala fija de videollamada de quien presenta (`admin_staff.meeting_url`). */
+  meetingUrl: string | null
   /** Solo de Administración (las de cobro, siempre): Soporte no la ve. */
   adminOnly?: boolean
   doneAt: Date | null
@@ -613,12 +615,17 @@ const assigneeUser = sql<
   string | null
 >`(select u.name from "user" u where u.id = ${saasTask.assigneeUserId})`
 
+const assigneeRoom = sql<
+  string | null
+>`(select s.meeting_url from admin_staff s where s.user_id = ${saasTask.assigneeUserId})`
+
 function taskFields() {
   return {
     task: saasTask,
     clientName: saasClient.name,
     product: saasClient.product,
     assigneeName: assigneeUser,
+    assigneeRoom,
   }
 }
 
@@ -628,6 +635,7 @@ function taskRowOf(
     clientName: string
     product: string
     assigneeName: string | null
+    assigneeRoom?: string | null
   },
   now: Date,
 ): TaskRow {
@@ -649,6 +657,7 @@ function taskRowOf(
     demoId: task.demoId,
     status: task.status as SaasTaskStatus,
     byKairos: task.byKairos,
+    meetingUrl: task.kind === "presentacion" ? (row.assigneeRoom ?? null) : null,
     adminOnly: task.adminOnly || task.kind === "cobro",
     doneAt: task.doneAt,
     doneNote: task.doneNote,

@@ -327,7 +327,21 @@ function RecordForm({
                 : contact.name
               : "Por saber"}
           </DetailField>
-          <DetailField label="Responsable">{task.assignee?.name ?? "Sin responsable"}</DetailField>
+          <DetailField label="Presenta">{task.assignee?.name ?? "Sin responsable"}</DetailField>
+          <DetailField label="Sala">
+            {task.meetingUrl ? (
+              <a
+                href={task.meetingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline-offset-4 [overflow-wrap:anywhere] hover:underline"
+              >
+                {task.meetingUrl}
+              </a>
+            ) : (
+              "Sin sala de videollamada: se pone en Equipo › Horario y sala"
+            )}
+          </DetailField>
           <DetailField label="Demo">
             {demo
               ? `${demo.name} · ${demoLine(demo)}`

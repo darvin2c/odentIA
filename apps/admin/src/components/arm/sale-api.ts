@@ -41,6 +41,8 @@ export const taskSchema = z.object({
   demoId: z.string().nullable(),
   status: z.enum(["abierta", "hecha", "cancelada"]),
   byKairos: z.boolean(),
+  /** De una presentación: la sala de videollamada de quien presenta. */
+  meetingUrl: z.string().nullable().default(null),
   doneAt: z.string().nullable(),
   doneNote: z.string().nullable(),
 })

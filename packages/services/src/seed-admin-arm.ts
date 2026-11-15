@@ -91,11 +91,19 @@ import {
   type OutreachRow,
   prepareEmailReply,
   prepareOutreach,
+  presentationEndsAt,
   recordPresentation,
   resolveOutreach,
   schedulePresentation,
 } from "./admin-sales.js"
-import { reassignPresentation } from "./admin-staff-schedule.js"
+import {
+  addStaffAbsence,
+  getStaffSchedule,
+  reassignPresentation,
+  removeStaffAbsence,
+  setStaffHours,
+  setStaffMeetingUrl,
+} from "./admin-staff-schedule.js"
 import {
   finishProgressReport,
   listProgressReports,
@@ -103,6 +111,7 @@ import {
   progressReportPdfKey,
   reserveProgressReport,
 } from "./clinic-progress-report.js"
+import { getKairosSells, setKairosSells } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
 import { addDays as addCivilDays, dayStart } from "./report-periods.js"
 import { markDemoOpened } from "./saas-demos.js"
@@ -1154,6 +1163,9 @@ export async function seedAdminArm(
   /* --- Lo que llega por WhatsApp e Instagram --- */
   await seedChats(tx, clock, storage, { sonrisaPhone: "+51987100001", deuda })
 
+  /* --- Horarios, sala y una ausencia del equipo (Kairós agenda presentaciones con ellos) --- */
+  await seedStaffSchedules(tx, clock, sonrisa)
+
   /* --- Kairós: su pasada, sus borradores, lo que ya se decidió, sus resúmenes y la semana --- */
   const pass = await kairosRulesPass(tx, now)
   const drafts = await draftPendingKairosItems(tx, TEMPLATE_WRITER, { limit: 50 }, now)
@@ -1177,7 +1189,8 @@ async function movePresentation(
 ): Promise<void> {
   await tx
     .update(saasTask)
-    .set({ dueOn, dueAt, updatedAt: clock.now })
+    // El fin va con el inicio: `ends_at` tiene que quedar después de `due_at`.
+    .set({ dueOn, dueAt, endsAt: presentationEndsAt("presentacion", dueAt), updatedAt: clock.now })
     .where(
       and(
         eq(saasTask.clientId, clientId),
@@ -1186,6 +1199,92 @@ async function movePresentation(
         ne(saasTask.dueOn, dueOn),
       ),
     )
+}
+
+/** El motivo de la ausencia de la semilla: así se reconoce al volver a sembrar. */
+const SEED_ABSENCE_REASON = "Vacaciones"
+
+/**
+ * El horario para presentaciones, la sala y una ausencia del equipo (lienzo
+ * «Kairós vende»): Ada presenta de lunes a viernes de 9 a 13 y de 15 a 18, con
+ * su sala; Sofía, de lunes a viernes de 10 a 17, sin sala. Sofía sale de
+ * vacaciones del lunes que viene al miércoles y su presentación con Sonrisa
+ * Total cae el martes a las 10: Hoy lo muestra con «Pasar a Ada». El
+ * interruptor «Kairós responde solo en los chats» queda apagado (se prende
+ * después de medirlo). Con las operaciones de Equipo; el horario y la sala solo
+ * se ponen si la persona no tiene, así no pisan lo que se cambió a mano.
+ */
+async function seedStaffSchedules(tx: Db, clock: Clock, sonrisa: Seeded): Promise<void> {
+  const weekdays = [1, 2, 3, 4, 5]
+  const ada = await getStaffSchedule(tx, ADA, ADA.userId, clock.now)
+  if (ada.hours.length === 0)
+    await setStaffHours(
+      tx,
+      ADA,
+      ADA.userId,
+      weekdays.flatMap((weekday) => [
+        { weekday, startMin: 9 * 60, endMin: 13 * 60 },
+        { weekday, startMin: 15 * 60, endMin: 18 * 60 },
+      ]),
+      clock.now,
+    )
+  if (!ada.meetingUrl)
+    await setStaffMeetingUrl(tx, ADA, ADA.userId, "https://meet.example.test/sallca-ada")
+  const sofia = await getStaffSchedule(tx, SOFIA, SOFIA.userId, clock.now)
+  if (sofia.hours.length === 0)
+    await setStaffHours(
+      tx,
+      SOFIA,
+      SOFIA.userId,
+      weekdays.map((weekday) => ({ weekday, startMin: 10 * 60, endMin: 17 * 60 })),
+      clock.now,
+    )
+
+  // El lunes que viene (si hoy es lunes, el de la semana siguiente).
+  const weekday = new Date(`${clock.today}T12:00:00Z`).getUTCDay()
+  const monday = (8 - weekday) % 7 || 7
+  const presentedAt = clock.at(monday + 1, 10)
+  const [open] = await tx
+    .select({ id: saasTask.id })
+    .from(saasTask)
+    .where(
+      and(
+        eq(saasTask.clientId, sonrisa.id),
+        eq(saasTask.kind, "presentacion"),
+        eq(saasTask.status, "abierta"),
+      ),
+    )
+    .limit(1)
+  if (open) await movePresentation(tx, sonrisa.id, limaDate(presentedAt), presentedAt, clock)
+  else
+    await schedulePresentation(
+      tx,
+      SOFIA,
+      sonrisa.id,
+      { dueOn: limaDate(presentedAt), dueAt: presentedAt, contactId: sonrisa.contactId },
+      clock.now,
+    )
+
+  const startsAt = clock.at(monday, 0)
+  const endsAt = clock.at(monday + 3, 0)
+  const seeded = sofia.absences.filter((absence) => absence.reason === SEED_ABSENCE_REASON)
+  const kept = seeded.find(
+    (absence) =>
+      absence.startsAt.getTime() === startsAt.getTime() &&
+      absence.endsAt.getTime() === endsAt.getTime(),
+  )
+  for (const absence of seeded)
+    if (absence !== kept) await removeStaffAbsence(tx, SOFIA, absence.id)
+  if (!kept)
+    await addStaffAbsence(
+      tx,
+      SOFIA,
+      SOFIA.userId,
+      { startsAt, endsAt, reason: SEED_ABSENCE_REASON },
+      clock.now,
+    )
+
+  if ((await getKairosSells(tx)).enabled) await setKairosSells(tx, ADA, false, clock.now)
 }
 
 /**

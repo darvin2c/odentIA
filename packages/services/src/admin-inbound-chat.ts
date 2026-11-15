@@ -35,6 +35,7 @@
 import { isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  kairosChatTurn,
   kairosItem,
   SAAS_CHAT_CHANNELS,
   type SaasChatChannel,
@@ -58,7 +59,7 @@ import { outreachAdminOnlySql } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { sendableProposal } from "./admin-sales.js"
 import { invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
-import { kairosHandlesChat } from "./kairos-sells.js"
+import { getKairosSells } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -972,6 +973,8 @@ export type ChatEntry =
       adminOnly: boolean
       createdBy: { userId: string; name: string } | null
       sentAt: Date | null
+      /** Lo escribió Kairós solo (`by_kairos`): se muestra con su nombre, no el de una persona. */
+      byKairos: boolean
     }
 
 export interface ChatDetail {
@@ -989,6 +992,15 @@ export interface ChatDetail {
    * clínica con su app ni «No es una clínica» (`kairosHandlesChat`).
    */
   handledByKairos: boolean
+  /**
+   * Kairós podría atenderla si no estuviera pausada: está prendido y no es de una clínica con su
+   * app ni «No es una clínica». Con esto la pantalla ofrece «Devolver a Kairós».
+   */
+  kairosAvailable: boolean
+  /** Quién dijo «Lo atiendo yo»; nulo si nadie (o si la pasó Kairós). */
+  kairosPausedBy: { userId: string; name: string } | null
+  /** Kairós la pasó al equipo (o no pudo responder): cuándo y por qué. Nulo si no fue así. */
+  kairosHandover: { at: Date; why: string | null } | null
   lastInboundAt: Date | null
   /** Se puede responder con texto libre: no pasaron 24 h desde su último mensaje. */
   canReplyFreely: boolean
@@ -1124,9 +1136,32 @@ export async function getChat(
         adminOnly: Boolean(adminOnly),
         createdBy: row.createdBy ? { userId: row.createdBy, name: authorName ?? "" } : null,
         sentAt: row.sentAt,
+        byKairos: row.byKairos,
       }),
     ),
   ].sort((a, b) => a.at.getTime() - b.at.getTime())
+  // Lo mismo que `kairosHandlesChat`, sin la pausa: la pantalla ofrece «Devolver a Kairós».
+  const kairosAvailable =
+    !chat.notClinicAt && !client?.organizationId && (await getKairosSells(tx)).enabled
+  // Pausada sin persona: la pasó Kairós (su último turno que pasó o falló dice por qué).
+  const [handed] =
+    chat.kairosPausedAt && !chat.kairosPausedBy
+      ? await tx
+          .select({ at: kairosChatTurn.updatedAt, why: kairosChatTurn.why })
+          .from(kairosChatTurn)
+          .where(
+            and(
+              eq(kairosChatTurn.chatId, chat.id),
+              inArray(kairosChatTurn.outcome, ["paso", "fallo"]),
+            ),
+          )
+          .orderBy(desc(kairosChatTurn.updatedAt))
+          .limit(1)
+      : []
+  const kairosHandover =
+    chat.kairosPausedAt && !chat.kairosPausedBy
+      ? { at: handed?.at ?? chat.kairosPausedAt, why: handed?.why ?? null }
+      : null
   const today = limaDate(now)
   const files: ChatFile[] =
     admin && messages.length > 0
@@ -1176,7 +1211,13 @@ export async function getChat(
     contact: contact ?? null,
     notClinicAt: chat.notClinicAt,
     kairosPausedAt: chat.kairosPausedAt,
-    handledByKairos: await kairosHandlesChat(tx, chat, client),
+    handledByKairos: kairosAvailable && !chat.kairosPausedAt,
+    kairosAvailable,
+    kairosPausedBy:
+      chat.kairosPausedAt && chat.kairosPausedBy
+        ? { userId: chat.kairosPausedBy, name: (await userName(tx, chat.kairosPausedBy)) ?? "" }
+        : null,
+    kairosHandover,
     lastInboundAt: chat.lastInboundAt,
     ...chatFreeWindow(chat.lastInboundAt, now),
     replySignature: chatSignature(await userName(tx, actor.userId), client),

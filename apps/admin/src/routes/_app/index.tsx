@@ -14,7 +14,7 @@ import {
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, ExternalLink } from "lucide-react"
 import { z } from "zod"
 import {
   ClientName,
@@ -105,6 +105,10 @@ const todaySchema = z.object({
         .optional(),
       // Lo que dice su botón cuando no es «Hecho» («Revisado»: los que no entraron en una carga).
       doneLabel: z.string().optional(),
+      // Es de alguien que ahora está ausente: «De Ana, ausente» ya va en `why`.
+      absentAssignee: z.boolean().optional(),
+      // De una presentación: la sala de videollamada de quien presenta.
+      meetingUrl: z.string().nullable().optional(),
     }),
   ),
   cooling: z.array(
@@ -888,9 +892,32 @@ function TaskItem({
       <Line
         parts={[
           { text: row.why, urgent: row.overdue },
-          who === "todas" ? (row.assignee ? `De ${row.assignee.name}` : "Sin asignar") : null,
+          presentation && row.assignee
+            ? `Presenta ${row.assignee.name}`
+            : who === "todas" && !row.absentAssignee
+              ? row.assignee
+                ? `De ${row.assignee.name}`
+                : "Sin asignar"
+              : null,
         ]}
       />
+      {presentation ? (
+        row.meetingUrl ? (
+          <a
+            href={row.meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            <ExternalLink aria-hidden className="size-3.5" />
+            Entrar a la sala
+          </a>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Sin sala de videollamada: ponla en Equipo › Horario y sala.
+          </p>
+        )
+      ) : null}
     </HomeRow>
   )
 }

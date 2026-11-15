@@ -525,6 +525,19 @@ queues.push(
     ownerDb,
     seller: createKairosSeller({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
     channels: adminChannelsFromEnv(env),
+    // Solo pruebas (e2e): lo que iría a graph.facebook.com va al servidor local que hace de Meta.
+    ...(env.ADMIN_META_GRAPH_URL
+      ? {
+          fetch: ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+            const url =
+              typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+            return fetch(
+              url.replace(/^https:\/\/graph\.facebook\.com/, env.ADMIN_META_GRAPH_URL),
+              init,
+            )
+          }) as typeof fetch,
+        }
+      : {}),
     mailer: conversationMailer,
   }),
 )

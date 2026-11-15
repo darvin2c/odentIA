@@ -2922,9 +2922,14 @@ async function ruleAbsenceConflicts(pass: Pass): Promise<void> {
     const list = tasks
       .map((task) => `${task.client_name}, el ${presentationWhenWords(new Date(task.due_at))}`)
       .join("; ")
-    const reason = `${who} no está del ${dayText(limaDate(new Date(first.starts_at)))} al ${dayText(
-      limaDate(new Date(first.ends_at)),
-    )}${first.reason ? ` (${first.reason})` : ""}: ${list}. ${
+    // El fin es exclusivo: una ausencia hasta la medianoche del 19 termina el 18.
+    const firstDay = limaDate(new Date(first.starts_at))
+    const lastDay = limaDate(new Date(new Date(first.ends_at).getTime() - 1))
+    const away =
+      firstDay === lastDay
+        ? `el ${dayText(firstDay)}`
+        : `del ${dayText(firstDay)} al ${dayText(lastDay)}`
+    const reason = `${who} no está ${away}${first.reason ? ` (${first.reason})` : ""}: ${list}. ${
       free.length
         ? `Puede tomarlas ${free.map((person) => person.name).join(", ")}.`
         : "Nadie más está libre a esas horas: pide otra hora a la clínica."
@@ -4141,6 +4146,18 @@ export async function kairosRulesPass(
   return pass.result
 }
 
+/**
+ * Solo la regla de las ausencias, al momento: Equipo la corre al guardar o
+ * quitar una ausencia, para que «Choca con 2 presentaciones: quedan en Hoy»
+ * sea cierto ya, sin esperar la pasada del worker (con el mismo candado).
+ */
+export async function kairosAbsencePass(tx: Db, now: Date): Promise<KairosPassResult> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kairos:pass'))`)
+  const pass = new Pass(tx, now)
+  await ruleAbsenceConflicts(pass)
+  return pass.result
+}
+
 /* ---------- Lo que hizo ---------- */
 
 export type KairosUndo =
@@ -4555,6 +4572,8 @@ export interface TodayTaskRow {
   doneLabel?: string
   /** Es de alguien que ahora no está (`admin_staff_absence`): sale en Hoy del resto, «De Ana, ausente». */
   absentAssignee?: true
+  /** De una presentación: la sala de videollamada de quien presenta. */
+  meetingUrl?: string | null
 }
 
 type WithWhy<T> = T & { clientId: string | null; why: string }
@@ -4642,6 +4661,9 @@ export async function todayForStaff(
       organizationId: saasClient.organizationId,
       assigneeName: assignee.name,
       assigneeAbsent,
+      assigneeRoom: sql<
+        string | null
+      >`(select s.meeting_url from admin_staff s where s.user_id = ${saasTask.assigneeUserId})`,
     })
     .from(saasTask)
     .innerJoin(saasClient, eq(saasClient.id, saasTask.clientId))
@@ -4670,7 +4692,7 @@ export async function todayForStaff(
       )
     : new Map<string, ProgressReportRecord[]>()
   const tasks: TodayTaskRow[] = taskRows.map(
-    ({ task, clientName, product, organizationId, assigneeName, assigneeAbsent }) => {
+    ({ task, clientName, product, organizationId, assigneeName, assigneeAbsent, assigneeRoom }) => {
       const overdue = taskOverdue(task, now)
       const absent = assigneeAbsent && task.assigneeUserId !== actor.userId
       const when =
@@ -4716,6 +4738,7 @@ export async function todayForStaff(
           .filter(Boolean)
           .join(" · "),
         ...(absent ? { absentAssignee: true as const } : {}),
+        ...(task.kind === "presentacion" ? { meetingUrl: assigneeRoom ?? null } : {}),
         ...(report ? { report } : {}),
         ...(task.byKairos && task.kairosKey?.startsWith(`${LOAD_ERRORS_RULE}:`)
           ? { doneLabel: "Revisado" }

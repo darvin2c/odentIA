@@ -74,6 +74,11 @@ const envSchema = z.object({
   ADMIN_META_PAGE_ID: z.string().default(""),
   ADMIN_META_PAGE_ACCESS_TOKEN: z.string().default(""),
   ADMIN_IG_ACCOUNT_ID: z.string().default(""),
+  /**
+   * Solo pruebas (e2e): la Graph API de Meta de los canales de la administración en
+   * un servidor local, como en la API. Producción no arranca con ella.
+   */
+  ADMIN_META_GRAPH_URL: z.string().default(""),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**
@@ -168,6 +173,8 @@ const envSchema = z.object({
   if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
   const sender = senderModeStartProblem(data)
   if (sender) ctx.addIssue({ code: "custom", path: ["CHANNEL_SENDER_MODE"], message: sender })
+  if (data.NODE_ENV === "production" && data.ADMIN_META_GRAPH_URL)
+    ctx.addIssue({ code: "custom", path: ["ADMIN_META_GRAPH_URL"], message: "ADMIN_META_GRAPH_URL es solo de pruebas: en producción los canales de la administración hablan con Meta" })
 })
 
 function loadEnv() {

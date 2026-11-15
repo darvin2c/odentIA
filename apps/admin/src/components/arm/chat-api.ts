@@ -61,6 +61,8 @@ const entrySchema = z.discriminatedUnion("kind", [
     adminOnly: z.boolean(),
     createdBy: z.object({ userId: z.string(), name: z.string() }).nullable(),
     sentAt: z.string().nullable(),
+    /** Lo escribió Kairós solo: va con su nombre. */
+    byKairos: z.boolean().default(false),
   }),
 ])
 export type ChatEntry = z.infer<typeof entrySchema>
@@ -89,6 +91,14 @@ export const chatDetailSchema = z.object({
     .nullable(),
   contact: z.object({ id: z.string(), name: z.string(), phone: z.string().nullable() }).nullable(),
   notClinicAt: z.string().nullable(),
+  /** «Lo atiendo yo» o Kairós la pasó al equipo: mientras tenga fecha, Kairós no responde solo. */
+  kairosPausedAt: z.string().nullable().default(null),
+  /** Kairós responde solo aquí ahora. */
+  handledByKairos: z.boolean().default(false),
+  /** Kairós podría atenderla si no estuviera pausada (está prendido y no es de una clínica con su app). */
+  kairosAvailable: z.boolean().default(false),
+  kairosPausedBy: z.object({ userId: z.string(), name: z.string() }).nullable().default(null),
+  kairosHandover: z.object({ at: z.string(), why: z.string().nullable() }).nullable().default(null),
   lastInboundAt: z.string().nullable(),
   canReplyFreely: z.boolean(),
   freeUntil: z.string().nullable(),
@@ -176,6 +186,45 @@ export const assignChatTo = (
   chatId: string,
   body: { clientId: string; contactId?: string | null },
 ) => api(`/api/admin/chats/${enc(chatId)}/assign`, { method: "POST", body: JSON.stringify(body) })
+
+/** «Lo atiendo yo»: Kairós deja de responder solo en esta conversación. */
+export const pauseKairos = (chatId: string) =>
+  api(`/api/admin/chats/${enc(chatId)}/kairos-pause`, { method: "POST", body: "{}" })
+
+/** «Devolver a Kairós»: vuelve a responder solo lo que siga sin respuesta y lo que llegue. */
+export const resumeKairos = (chatId: string) =>
+  api(`/api/admin/chats/${enc(chatId)}/kairos-pause`, { method: "DELETE" })
+
+/**
+ * Quién atiende la conversación, en palabras: Kairós, una persona («Lo atiendes
+ * tú», «Lo atiende Ana») o el equipo porque Kairós se la pasó (con su motivo).
+ * Nulo si Kairós no tiene nada que ver (apagado o clínica con su app) y nadie la pausó.
+ */
+export type KairosChatState =
+  | { kind: "kairos" }
+  | { kind: "persona"; words: string; canReturn: boolean }
+  | { kind: "paso"; why: string | null; canReturn: boolean }
+
+export function kairosChatState(
+  chat: Pick<
+    ChatDetail,
+    "handledByKairos" | "kairosAvailable" | "kairosPausedAt" | "kairosPausedBy" | "kairosHandover"
+  >,
+  myUserId: string,
+): KairosChatState | null {
+  if (chat.handledByKairos) return { kind: "kairos" }
+  if (!chat.kairosPausedAt) return null
+  if (chat.kairosHandover)
+    return { kind: "paso", why: chat.kairosHandover.why, canReturn: chat.kairosAvailable }
+  // Pausada por una persona: solo se dice si Kairós la atendería (si no, no hay nada que devolver).
+  if (!chat.kairosAvailable) return null
+  const by = chat.kairosPausedBy
+  const words =
+    by?.userId === myUserId
+      ? "Lo atiendes tú: Kairós no responde solo aquí."
+      : `Lo atiende ${by?.name.trim().split(/\s+/)[0] || "alguien del equipo"}: Kairós no responde solo aquí.`
+  return { kind: "persona", words, canReturn: true }
+}
 
 export const markNotClinic = (chatId: string) =>
   api(`/api/admin/chats/${enc(chatId)}/not-clinic`, { method: "POST", body: "{}" })
@@ -378,7 +427,7 @@ export const isUnsettled = (entry: ChatEntry, now: Date) =>
 
 /** «Ana Ruiz · 17:42 · Salió» de un mensaje nuestro. */
 export function sentLineWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {
-  const who = entry.createdBy?.name?.trim() || "El equipo"
+  const who = entry.byKairos ? "Kairós" : entry.createdBy?.name?.trim() || "El equipo"
   return `${who} · ${supportTime(entry.sentAt ?? entry.at)} · ${CHAT_SEND_STATUS_WORDS[entry.status] ?? entry.status}`
 }
 
