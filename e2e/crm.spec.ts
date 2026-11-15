@@ -728,8 +728,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(page.getByRole("region", { name: "Tu cita", exact: true })).toContainText("Confirmada")
   await expect(page.getByRole("button", { name: "Confirmar", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Añadir al calendario" })).toBeVisible()
-  // Ya no le falta ningún dato; su salud queda como opcional.
-  await expect(page.getByRole("region", { name: "Tu salud" })).toContainText("Opcional")
+  // Ya no le falta ningún dato: su salud y su visita quedan como opcionales, en «Antes de tu cita» (entrega 8).
+  await expect(page.getByRole("region", { name: "Antes de tu cita" })).toContainText("Opcional")
   await info.attach("reserva-lista", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Queda en la agenda como cualquier cita, con su origen, y la confirmación va a la conversación.
