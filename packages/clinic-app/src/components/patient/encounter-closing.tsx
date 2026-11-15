@@ -58,7 +58,9 @@ import { productUi } from "../../product/product-ui"
 import { whenSaid } from "../agenda/shared"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import type { FormResponse } from "../../lib/clinical-forms"
+import { answersWords } from "./clio-form-proposals"
 import type { DictationSuggestion } from "./dictation-session"
+import { isOn } from "./dictation-sign-list"
 import { isEmptyAnswer, missingRequired } from "./form-fields"
 
 /**
@@ -1147,9 +1149,7 @@ export const finishesByDefault = (form: SignForm): boolean => form.answered > 0 
 
 /** Las que se finalizan con la firma: las marcadas por omisión, salvo las que quien firma tocó. */
 export function finishingAtSign(forms: readonly SignForm[], toggled: readonly string[]): string[] {
-  return forms
-    .filter((form) => form.missing.length === 0 && finishesByDefault(form) !== toggled.includes(form.id))
-    .map((form) => form.id)
+  return forms.filter((form) => form.missing.length === 0 && isOn(finishesByDefault(form), toggled, form.id)).map((form) => form.id)
 }
 
 /** «3 respuestas, 1 de Clío», «Sin respuestas», y lo que falta para finalizarla. */
@@ -1157,7 +1157,7 @@ export function signFormWords(form: SignForm): string {
   const answers =
     form.answered === 0
       ? "Sin respuestas"
-      : `${form.answered === 1 ? "1 respuesta" : `${form.answered} respuestas`}${form.clio > 0 ? `, ${form.clio} de ${CLINICAL_NAME}` : ""}`
+      : `${answersWords(form.answered)}${form.clio > 0 ? `, ${form.clio} de ${CLINICAL_NAME}` : ""}`
   return form.missing.length > 0 ? `${answers} · falta ${listWords(form.missing.map((label) => `«${label}»`))}: queda a medias` : answers
 }
 
@@ -1186,10 +1186,13 @@ export function FormsAtSign({
   disabled?: boolean
   id?: string
 }): React.JSX.Element | null {
+  const titleId = useId()
   if (forms.length === 0) return null
   return (
-    <section id={id} aria-label={forms.length === 1 ? "La ficha de esta atención" : "Las fichas de esta atención"} className="flex flex-col gap-2">
-      <h3 className="font-medium">{forms.length === 1 ? "La ficha de esta atención" : "Las fichas de esta atención"}</h3>
+    <section id={id} aria-labelledby={titleId} className="flex flex-col gap-2">
+      <h3 id={titleId} className="font-medium">
+        {forms.length === 1 ? "La ficha de esta atención" : "Las fichas de esta atención"}
+      </h3>
       <ul className="flex flex-col gap-2">
         {forms.map((form) => {
           const checked = finishing.includes(form.id)

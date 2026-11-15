@@ -337,6 +337,15 @@ export function ResponseDetail({
   return <StaffResponseDetail response={response} previous={latest} first={first} canWrite={canWrite} onChanged={onChanged} />
 }
 
+/** «ceod: 6», debajo de la sección que lleva total. */
+function SectionTotal({ words }: { words: string | null }) {
+  return words ? (
+    <p className="text-sm font-medium" aria-live="polite">
+      {words}
+    </p>
+  ) : null
+}
+
 /** Otra pestaña o persona guardó esta ficha mientras se escribía. */
 const isStale = (error: unknown) => error instanceof ApiError && error.shape.code === "STALE_DRAFT"
 
@@ -365,7 +374,8 @@ function StaffResponseDetail({
   const queryClient = useQueryClient()
   // Con qué se compara: la anterior, o la de inicio en un tratamiento largo.
   const [against, setAgainst] = useState<"anterior" | "inicio">("anterior")
-  const previous = against === "inicio" && first ? first : latest
+  const fromStart = against === "inicio" && !!first
+  const previous = fromStart ? first : latest
   const memberName = useMemberName()
   const schema = response.templateSnapshot
   // La ficha de una atención la llena quien la lleva (o tomó el relevo): los demás la leen.
@@ -851,14 +861,14 @@ function StaffResponseDetail({
       {previous ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm">
           <p>
-            Debajo de cada pregunta, {against === "inicio" && first ? "lo de la de inicio" : "lo de la anterior"}:{" "}
+            Debajo de cada pregunta, {fromStart ? "lo de la de inicio" : "lo de la anterior"}:{" "}
             {previousWhen(previous)}
             {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
           </p>
           {/* Copia de un toque lo de la anterior en lo que hoy sigue vacío; lo escrito hoy no se toca. */}
           {editable && Object.keys(fromPrevious).length > 0 ? (
             <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={copyPrevious}>
-              Usar lo de {against === "inicio" && first ? "la de inicio" : "la anterior"}
+              Usar lo de {fromStart ? "la de inicio" : "la anterior"}
             </Button>
           ) : null}
         </div>
@@ -914,6 +924,9 @@ function StaffResponseDetail({
                     const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
                     const beforeId = `${ids}-antes-${field.id}`
                     const proposal = proposalFor(field.id)
+                    const changes = proposal ? changesWritten(proposal) : false
+                    const valued = proposal ? proposesValue(proposal) : false
+                    const late = response.afterSigning?.[field.id]
                     // Lo aceptado de Clío, mientras siga siendo eso: si se cambia a mano, ya es de la persona.
                     const mark = response.clioAccepted?.[field.id]
                     const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null) && !typedHere.current.has(field.id)
@@ -930,10 +943,10 @@ function StaffResponseDetail({
                           <div
                             role="group"
                             aria-label={`Propuesta de ${CLINICAL_NAME} para «${field.label}»`}
-                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${proposesValue(proposal) ? "bg-agent-soft" : "bg-muted"}`}
+                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${valued ? "bg-agent-soft" : "bg-muted"}`}
                           >
                             <span className="min-w-0 [overflow-wrap:anywhere]">
-                              {changesWritten(proposal) ? (
+                              {changes ? (
                                 <>
                                   {/* Cambia lo ya escrito: dice lo que hay y lo que dijo; lo decide quien escribió, de a una. */}
                                   <strong>{CLINICAL_NAME} propone:</strong> {proposedWords(proposal)} · ya dice «
@@ -952,21 +965,21 @@ function StaffResponseDetail({
                               )}
                             </span>
                             <span className="flex items-center gap-1">
-                              {proposesValue(proposal) ? (
+                              {valued ? (
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant={changesWritten(proposal) ? "outline" : "default"}
+                                  variant={changes ? "outline" : "default"}
                                   className="min-h-11 sm:min-h-8"
                                   aria-label={
-                                    changesWritten(proposal)
+                                    changes
                                       ? `Cambiar «${field.label}» a ${proposedWords(proposal)}`
                                       : `Confirmar ${proposedWords(proposal)} en «${field.label}»`
                                   }
                                   disabled={busy}
                                   onClick={() => void accept([proposal])}
                                 >
-                                  {changesWritten(proposal) ? `Cambiar a ${proposedWords(proposal)}` : "Confirmar"}
+                                  {changes ? `Cambiar a ${proposedWords(proposal)}` : "Confirmar"}
                                 </Button>
                               ) : null}
                               <Button
@@ -989,11 +1002,9 @@ function StaffResponseDetail({
                           </p>
                         ) : null}
                         {/* Cambiada con la atención ya firmada: queda dicho en su pregunta, con quién y cuándo. */}
-                        {response.afterSigning?.[field.id] ? (
+                        {late ? (
                           <p className="text-xs text-muted-foreground">
-                            Respondida después de firmar la atención:{" "}
-                            {response.afterSigning[field.id]?.by ? memberName(response.afterSigning[field.id]?.by ?? "") : "alguien del equipo"},{" "}
-                            {whenAt(response.afterSigning[field.id]?.at ?? "")}
+                            Respondida después de firmar la atención: {late.by ? memberName(late.by) : "alguien del equipo"}, {whenAt(late.at)}
                           </p>
                         ) : null}
                         {previous && before ? (
@@ -1021,11 +1032,7 @@ function StaffResponseDetail({
                 </form.AppField>
               )
             })}
-          {sectionTotal(section, answers) ? (
-            <p className="text-sm font-medium" aria-live="polite">
-              {sectionTotal(section, answers)}
-            </p>
-          ) : null}
+          <SectionTotal words={sectionTotal(section, answers)} />
         </section>
       ))}
       {formError ? (

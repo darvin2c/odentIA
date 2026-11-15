@@ -14,13 +14,23 @@ import {
 import { AppointmentChoices, BudgetLines } from "./dictation-suggestions"
 
 /**
+ * Lo que quien firma cambió de como venía: `toggled` guarda solo lo que difiere de `byDefault`.
+ * Lo usan lo dictado y las fichas del cierre.
+ */
+export const isOn = (byDefault: boolean, toggled: readonly string[], id: string): boolean => byDefault !== toggled.includes(id)
+export function setFromDefault(toggled: readonly string[], id: string, byDefault: boolean, value: boolean): string[] {
+  const rest = toggled.filter((other) => other !== id)
+  return byDefault === value ? rest : [...rest, id]
+}
+
+/**
  * Lo dictado que entra con la firma, en el orden de la ficha: lo que se puede confirmar y viene
  * marcado, salvo que se haya tocado. `toggled`: lo que quien firma cambió de como venía (desmarcó lo
  * marcado, o marcó lo que cambia lo escrito, que viene desmarcado).
  */
 export function markedAtSign(session: DictationSession, toggled: readonly string[]): string[] {
   return signOrder(session.suggestions)
-    .filter((item) => confirmableAtSign(item) && markedByDefault(item) !== toggled.includes(item.id))
+    .filter((item) => confirmableAtSign(item) && isOn(markedByDefault(item), toggled, item.id))
     .map((item) => item.id)
 }
 
@@ -83,19 +93,11 @@ export function DictationSignList({
   // La que no se pudo confirmar lleva el aviso en su fila; lo demás, al pie del cierre.
   const failedId = confirmError ? (session.confirmManyFailed?.id ?? null) : null
   if (items.length === 0) return null
-  // Deja una como se quiere: «toggled» guarda solo lo que difiere de como venía.
-  const set = (next: Set<string>, item: DictationSuggestion, value: boolean) => {
-    if (markedByDefault(item) === value) next.delete(item.id)
-    else next.add(item.id)
-  }
   const toggle = (item: DictationSuggestion, value: boolean) => {
-    const next = new Set(toggled)
-    set(next, item, value)
     // Marcar la que depende de otra marca también esa; desmarcarla desmarca las que dependen de ella.
     const parent = parentOf(all, item)
-    if (value && parent) set(next, parent, true)
-    if (!value) for (const other of dependentsOf(all, item)) set(next, other, false)
-    onToggledChange([...next])
+    const also = value ? (parent ? [parent] : []) : dependentsOf(all, item)
+    onToggledChange([item, ...also].reduce((next, one) => setFromDefault(next, one.id, markedByDefault(one), value), toggled))
   }
   const list = (
       <ul aria-label={responseId ? `Lo que propone ${CLINICAL_NAME} en esta ficha` : `Lo que propone ${CLINICAL_NAME}`} className="flex flex-col gap-2">

@@ -48,7 +48,7 @@ import {
 import { appointment } from "@odentia/db/schema/agenda"
 import { contact, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, type SQL, sql } from "drizzle-orm"
 import { findOrgLocale } from "./locale.js"
 import { requireCanAttend } from "./attending.js"
 import {
@@ -803,6 +803,14 @@ export function isEmptyAnswer(value: unknown): boolean {
   if (typeof value === "string") return value.trim() === ""
   if (Array.isArray(value)) return value.length === 0
   return false
+}
+
+/** `isEmptyAnswer` en la base: ¿las respuestas (`answers`, jsonb) tienen alguna que no esté vacía? */
+export function hasAnswersSql(answers: SQL): SQL {
+  return sql`exists (select 1 from jsonb_each(coalesce(${answers}, '{}'::jsonb)) answer where not (
+    answer.value = 'null'::jsonb
+    or (jsonb_typeof(answer.value) = 'string' and btrim(answer.value #>> '{}') = '')
+    or (jsonb_typeof(answer.value) = 'array' and jsonb_array_length(answer.value) = 0)))`
 }
 
 /**
@@ -1583,14 +1591,10 @@ async function assertFormWriter(
     .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, form.encounterId)))
     .limit(1)
   if (!visit) return null
-  if (visit.professionalUserId === actorUserId) return { status: visit.status }
-  throw new ServiceError(
-    "NOT_ATTENDING",
-    409,
-    visit.status === "borrador"
-      ? "Otro profesional lleva esta atención: toma el relevo para escribir en su ficha"
-      : "Esta ficha la termina quien atendió. Cuando la finalice, puedes agregarle una adenda",
-  )
+  if (visit.status === "borrador") assertAttending(visit, actorUserId)
+  else if (visit.professionalUserId !== actorUserId)
+    throw new ServiceError("NOT_ATTENDING", 409, "Esta ficha la termina quien atendió. Cuando la finalice, puedes agregarle una adenda")
+  return { status: visit.status }
 }
 
 /**
@@ -2204,14 +2208,14 @@ export async function listFormResponses(
         )
         .orderBy(asc(auditEvent.createdAt))
     : []
-  const afterSigningOf = (id: string): ListedFormResponse["afterSigning"] => {
-    const out: ListedFormResponse["afterSigning"] = {}
-    for (const event of late) {
-      if (event.entityId !== id) continue
-      const fields = (event.metadata as { fields?: unknown } | null)?.fields
-      for (const field of Array.isArray(fields) ? fields : []) if (typeof field === "string") out[field] = { by: event.by, at: event.at }
-    }
-    return out
+  // Por ficha y pregunta, la última vez (vienen en orden).
+  const afterSigning = new Map<string, ListedFormResponse["afterSigning"]>()
+  for (const event of late) {
+    if (!event.entityId) continue
+    const fields = (event.metadata as { fields?: unknown } | null)?.fields
+    const own = afterSigning.get(event.entityId) ?? {}
+    for (const field of Array.isArray(fields) ? fields : []) if (typeof field === "string") own[field] = { by: event.by, at: event.at }
+    afterSigning.set(event.entityId, own)
   }
   const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] =>
     Object.fromEntries(
@@ -2236,7 +2240,7 @@ export async function listFormResponses(
     encounterStatus: row.encounterStatus,
     encounterFinalizedAt: row.encounterFinalizedAt,
     encounterProfessionalUserId: row.encounterProfessionalUserId,
-    afterSigning: afterSigningOf(row.response.id),
+    afterSigning: afterSigning.get(row.response.id) ?? {},
   }))
 }
 

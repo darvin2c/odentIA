@@ -16,6 +16,7 @@ import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
+import { listWords } from "../../lib/materials"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
@@ -66,6 +67,7 @@ function DictationExamples() {
 
 /** El título de la barra del dictado: ahí vuelve el foco tras confirmar, también desde la barra del teléfono. */
 const DICTATION_TITLE_ID = "dictado-titulo"
+const focusDictationTitle = () => requestAnimationFrame(() => document.getElementById(DICTATION_TITLE_ID)?.focus())
 
 /** Lleva a la lista de sugerencias de un bloque y la deja con el foco. */
 function goToSuggestions(label: string): void {
@@ -83,11 +85,6 @@ function openFormSuggestions(responseId: string): void {
   notice.querySelector<HTMLButtonElement>("button")?.click()
 }
 
-/** «A 1 le falta un dato: complétala en su bloque. Nada entra…»; sin nada más, solo el aviso, sin un punto suelto. */
-export function readinessLine(counts: string): string {
-  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
-}
-
 /**
  * Lo que propone Clío, con una sola palabra (revisión final del 15 nov, propuesta 2): «Clío propone
  * 5: 2 en la consulta y 3 en la ficha». La receta va aparte: se emite. Sin «listas» ni «por revisar».
@@ -98,20 +95,21 @@ export function proposesLine(suggestions: readonly Pick<DictationSuggestion, "ki
   const prescription = suggestions.some((item) => item.kind === "receta")
   const parts = [consult > 0 ? `${consult} en la consulta` : "", forms > 0 ? `${forms} en la ficha` : "", prescription ? "1 receta" : ""].filter(Boolean)
   const total = consult + forms + (prescription ? 1 : 0)
-  if (parts.length <= 1) return `${CLINICAL_NAME} propone ${parts[0] ?? total}`
-  return `${CLINICAL_NAME} propone ${total}: ${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}`
+  return `${CLINICAL_NAME} propone ${parts.length <= 1 ? (parts[0] ?? total) : `${total}: ${listWords(parts)}`}`
 }
 
+/** «A 1 le falta un dato: complétala en su bloque. Nada entra…»; sin nada más, solo el aviso. */
 function readiness(session: DictationSession): string {
   // Lo de la consulta a lo que le falta un dato se completa en su bloque; la receta tiene su «Emitir receta».
   const incomplete = session.suggestions.filter((item) => item.kind !== "receta" && item.kind !== "ficha" && item.status !== "lista").length
   const removed = session.removedByVoice.length
-  return [
+  const counts = [
     incomplete > 0 ? `${incomplete === 1 ? "A 1 le falta un dato" : `A ${incomplete} les falta un dato`}: complétala${incomplete === 1 ? "" : "s"} en su bloque` : "",
     removed > 0 ? plural(removed, "quitada por voz", "quitadas por voz") : "",
   ]
     .filter(Boolean)
     .join(" · ")
+  return `${counts ? `${counts}. ` : ""}Nada entra a la historia hasta que lo confirmes.`
 }
 
 /**
@@ -249,7 +247,6 @@ export function DictationPanel({
   const setTyping = onTypingChange
   // El foco no se pierde: al empezar a dictar va a «Pausar»; tras confirmar, al título de la barra.
   const pauseRef = useRef<HTMLButtonElement>(null)
-  const titleRef = useRef<HTMLHeadingElement>(null)
   const [confirmedWords, setConfirmedWords] = useState("")
   useEffect(() => {
     const lost = !document.activeElement || document.activeElement === document.body
@@ -263,7 +260,7 @@ export function DictationPanel({
     session.confirmReady.mutate(undefined, {
       onSuccess: (done) => {
         setConfirmedWords(done.length === 1 ? "Confirmada 1 de la consulta." : `Confirmadas las ${done.length} de la consulta.`)
-        requestAnimationFrame(() => titleRef.current?.focus())
+        focusDictationTitle()
       },
     })
   // La primera vez que dicta ve, mientras escucha, qué puede decir; se recuerda al empezar.
@@ -429,7 +426,7 @@ export function DictationPanel({
       <div className="flex flex-wrap items-center gap-3">
         <AgentMark />
         <div className="min-w-0 flex-1 basis-48">
-          <h2 id={DICTATION_TITLE_ID} ref={titleRef} tabIndex={-1} className="font-heading text-base font-semibold outline-none">
+          <h2 id={DICTATION_TITLE_ID} tabIndex={-1} className="font-heading text-base font-semibold outline-none">
             {pending > 0 ? proposesLine(session.suggestions) : "Dictar la atención"}
           </h2>
           <p className="sr-only" aria-live="polite">
@@ -438,7 +435,7 @@ export function DictationPanel({
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readinessLine(readiness(session))}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readiness(session)}<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>
@@ -747,9 +744,7 @@ export function DictationMobileBar({
               className="h-12 min-w-0 flex-[2]"
               pending={session.confirmReady.isPending}
               onClick={() =>
-                session.confirmReady.mutate(undefined, {
-                  onSuccess: () => requestAnimationFrame(() => document.getElementById(DICTATION_TITLE_ID)?.focus()),
-                })
+                session.confirmReady.mutate(undefined, { onSuccess: focusDictationTitle })
               }
             >
               {confirmReadyLabel(session.ready)}

@@ -7,12 +7,12 @@ import {
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import {
   assertFormSchema,
   type ListedFormResponse,
   type FormTemplateRow,
-  isEmptyAnswer,
+  hasAnswersSql,
   listFormResponses,
 } from "./clinical-forms.js"
 import { notFound } from "./errors.js"
@@ -316,7 +316,7 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
       finalizedAt: clinicalFormResponse.finalizedAt,
       status: clinicalFormResponse.status,
       professionalUserId: clinicalFormResponse.professionalUserId,
-      answers: clinicalFormResponse.answers,
+      hasAnswers: sql<boolean>`${hasAnswersSql(sql`${clinicalFormResponse.answers}`)}`,
       encounterStatus: encounter.status,
       encounterFinalizedAt: encounter.finalizedAt,
     })
@@ -338,7 +338,7 @@ async function finalizedForms(tx: Db, orgId: string, patientId: string): Promise
     .flatMap((row) => {
       if (row.encounterStatus === "anulada") return []
       // «La anterior» es la última con respuestas, no la última empezada (revisión final del 15 nov, U8).
-      if (!Object.values((row.answers ?? {}) as Record<string, unknown>).some((value) => !isEmptyAnswer(value))) return []
+      if (!row.hasAnswers) return []
       if (row.status === "finalizado" && row.finalizedAt) return [{ ...base(row), finalizedAt: row.finalizedAt, unfinished: false }]
       // A medias en una atención ya firmada: lo respondido también es la vez anterior.
       if (row.status === "borrador" && row.encounterStatus === "finalizada" && row.encounterFinalizedAt)

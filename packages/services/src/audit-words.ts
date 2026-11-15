@@ -684,7 +684,8 @@ export interface AuditWords {
  */
 export function describeAuditEvent(action: string, origin?: string | null): AuditWords {
   // Lo que propuso Clío y confirmó una persona lo dice: la persona manda, Clío se nombra (A14).
-  const phrase = origin === "clio" && CLIO_WORDS[action] ? say(CLIO_WORDS[action]) : phraseOf(action)
+  const clio = origin === "clio" ? CLIO_WORDS[action] : undefined
+  const phrase = clio ? say(clio) : phraseOf(action)
   const area = auditAreaOf(action)
   return {
     what: phrase.what,

@@ -168,13 +168,13 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           }),
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
-        // Lo de una ficha solo si quedó como propuesta, y por dato: lo que el servidor no dejó pasar
-        // no dio nada (QA del 14 nov, D20; revisión final del 15 nov, U5).
+        // Lo de una ficha solo si quedó como propuesta, y por dato (`formSources`): lo que el servidor
+        // no dejó pasar no dio nada (QA del 14 nov, D20; revisión final del 15 nov, U5).
         const dropped = new Set(saved.droppedForms.map((item) => item.said))
         const sources = [...extracted.drafts.filter((item) => item.kind !== "ficha"), ...extracted.corrections, ...extracted.removals]
           .map((item) => item.sourceText ?? "")
+          .filter(Boolean)
           .concat(saved.formSources)
-          .filter((said) => said && !dropped.has(said.trim()))
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
         const unused = [
           ...new Set([...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said): said is string => !!said), ...dropped]),

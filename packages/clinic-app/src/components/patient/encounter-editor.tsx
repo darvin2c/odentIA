@@ -119,7 +119,7 @@ import {
   type DictationSuggestion,
   useDictationSession,
 } from "./dictation-session"
-import { DictationSignList, markedAtSign, signWithDictationLabel } from "./dictation-sign-list"
+import { DictationSignList, markedAtSign, setFromDefault, signWithDictationLabel } from "./dictation-sign-list"
 import { FinalizedFreedAppointments, type FreedAppointment } from "./freed-appointments"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
@@ -1184,12 +1184,23 @@ export function EncounterEditor({
   // Las fichas a medias en la firma, un bloque por ficha, con lo de Clío que entra marcado: con
   // respuestas vienen marcadas para finalizarse con la firma (revisión final del 15 nov, propuesta 4).
   const signMarked = new Set(signIdsRef.current ?? [])
-  const signForms = signFormsOf(
-    closingQuery.data?.data.openForms ?? [],
-    docs.forms,
-    dictation.suggestions.filter((item) => signMarked.has(item.id)),
-  )
+  // Solo con el cierre abierto: fuera de él nadie las mira.
+  const signForms = confirmOpen
+    ? signFormsOf(closingQuery.data?.data.openForms ?? [], docs.forms, dictation.suggestions.filter((item) => signMarked.has(item.id)))
+    : []
   const finishFormsAtSign = finishingAtSign(signForms, formsToggled)
+  // Lo dictado en el cierre: el de la consulta y el de cada ficha, con las mismas casillas.
+  const signListProps = {
+    session: dictation,
+    busy: finalizing || dictation.confirmMany.isPending,
+    toggled: signToggled,
+    onToggledChange: setSignToggled,
+    onComplete: (id: string) => openSuggestion(id),
+    onOpenForm: (formId: string) => {
+      setConfirmOpen(false)
+      setFinishingForm(formId)
+    },
+  }
   /** Lo que se dicta en un bloque: en los comunes, lo de arriba; en los del producto, lo que declara el bloque. */
   const dictationOf = (key: SectionKey) =>
     SECTION_DICTATION[key as CommonSectionKey] ?? product.blocks.find((block) => block.key === key)?.dictation
@@ -2998,46 +3009,14 @@ export function EncounterEditor({
         blockedReason={signBlockedReason}
         registration={registrationFields}
         confirmLabel={needsRegistration ? "Guardar y firmar" : signIdsRef.current ? signWithDictationLabel(signIdsRef.current.length) : null}
-        dictated={
-          confirmWithDictation ? (
-            <DictationSignList
-              session={dictation}
-              busy={finalizing || dictation.confirmMany.isPending}
-              toggled={signToggled}
-              onToggledChange={setSignToggled}
-              onComplete={(id) => openSuggestion(id)}
-              onOpenForm={(formId) => {
-                setConfirmOpen(false)
-                setFinishingForm(formId)
-              }}
-            />
-          ) : null
-        }
+        dictated={confirmWithDictation ? <DictationSignList {...signListProps} /> : null}
         signForms={signForms}
         finishingForms={finishFormsAtSign}
         onFinishFormToggle={(formId, finish) => {
           const form = signForms.find((item) => item.id === formId)
-          if (!form) return
-          setFormsToggled((current) => (finishesByDefault(form) === finish ? current.filter((id) => id !== formId) : [...new Set([...current, formId])]))
+          if (form) setFormsToggled((current) => setFromDefault(current, formId, finishesByDefault(form), finish))
         }}
-        formProposals={
-          confirmWithDictation
-            ? (formId) => (
-                <DictationSignList
-                  session={dictation}
-                  busy={finalizing || dictation.confirmMany.isPending}
-                  toggled={signToggled}
-                  onToggledChange={setSignToggled}
-                  responseId={formId}
-                  onComplete={(id) => openSuggestion(id)}
-                  onOpenForm={(id) => {
-                    setConfirmOpen(false)
-                    setFinishingForm(id)
-                  }}
-                />
-              )
-            : undefined
-        }
+        formProposals={confirmWithDictation ? (formId) => <DictationSignList {...signListProps} responseId={formId} /> : undefined}
         initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
         onPaper={(need) => void openPaper(need)}
