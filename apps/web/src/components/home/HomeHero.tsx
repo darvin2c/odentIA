@@ -406,16 +406,16 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
       <div className="grain" aria-hidden="true"></div>
       <div className="wrap herow">
         <div className="hero-copy">
-          <span className="tag tag-d rise">[ Para clínicas dentales ]</span>
+          <span className="tag tag-d rise">[ El ARM para clínicas dentales ]</span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
-            No es un CRM con{" "}IA. <span>Es un ARM.</span>
+            Ningún mensaje sin responder. <span>Ninguna cita olvidada.</span>
           </h1>
           <p className="hh-lead rise d2">
-            <b>ARM: la relación con tus pacientes, gestionada por agentes.</b> Un CRM solo guarda lo
-            que anotas; aquí tus agentes agendan, documentan y traen de vuelta a tus pacientes mientras
-            tu equipo atiende. WhatsApp, Instagram, correo y más llegan a una sola ficha por persona.{" "}
+            <b>odentIA es un ARM: agentes de IA que trabajan por tu clínica.</b> Sofi responde por
+            WhatsApp, Instagram y correo a cualquier hora y agenda; Clío prepara la nota mientras
+            atiendes, y Argos recuerda cada cita y trae de vuelta a tus pacientes.{" "}
             <a className="hh-arm" href={ARM_PATH}>
-              Compara un ARM con un CRM <span aria-hidden="true">→</span>
+              ¿Usas un CRM? Compáralo <span aria-hidden="true">→</span>
             </a>
           </p>
           <div className="hh-ctas rise d3">
