@@ -37,7 +37,7 @@ const PREGNANCY_CONTRAINDICATED: ReadonlyArray<readonly [prefix: string, words: 
 /** Los AINE (M01A) y la aspirina como analgésico (N02BA): la aspirina de 100 mg diaria es antiagregante (B01AC). */
 const NSAID_ATC = ["M01A", "N02BA"] as const
 /** Desde esta semana del embarazo se evitan los AINE (FDA, 2020). */
-export const NSAID_AVOID_FROM_WEEK = 20
+const NSAID_AVOID_FROM_WEEK = 20
 
 const prefixOf = (list: ReadonlyArray<readonly [string, string]>, atc: string | undefined): string | null =>
   atc ? (list.find(([prefix]) => atc.startsWith(prefix))?.[1] ?? null) : null
@@ -64,8 +64,6 @@ export interface PrescribingSituation {
   today: string
   /** Lo que toma hoy, con su código ATC si se sabe (`currentMedicationsOf`). */
   taking: readonly TakenMedication[]
-  /** El día en que se anotó un embarazo guardado sin fecha (`legacyPregnancySaidOn`), si se sabe. */
-  legacySaidOn?: string | null
 }
 
 /** Lo que la receta avisa (decide quien receta) y lo que solo recuerda, para lo que se va a recetar. */
@@ -79,7 +77,7 @@ export function prescribingAlerts(
   // La misma regla que la franja de la ficha (`pregnancyToday`): en pie hasta la semana 42 y, después,
   // «por confirmar». La receta nunca deja de avisar en silencio: con el embarazo por confirmar sigue
   // avisando lo contraindicado, con esas palabras, hasta que alguien actualice sus antecedentes.
-  const pregnancy = pregnancyToday(situation.interview, situation.today, { legacySaidOn: situation.legacySaidOn ?? null })
+  const pregnancy = pregnancyToday(situation.interview, situation.today)
   const weeks = pregnancy?.weeksToday ?? null
   const unconfirmed = pregnancy?.state === "por_confirmar"
   const said = pregnancy?.saidOn ? civilDay(pregnancy.saidOn) : null

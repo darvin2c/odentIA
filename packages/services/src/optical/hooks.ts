@@ -74,5 +74,5 @@ export const opticalHooks: ProductHooks = {
     ]
   },
   // Su lista propia, no la dental: lubricantes y lo del ojo irritado o alérgico.
-  prescribing: { catalog: OPTICAL_MEDICATION_CATALOG, review: async () => ({ errors: [], warnings: [] }) },
+  prescribing: { catalog: OPTICAL_MEDICATION_CATALOG, review: async () => ({ errors: [] }) },
 }

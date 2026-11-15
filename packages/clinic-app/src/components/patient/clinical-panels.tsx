@@ -993,22 +993,18 @@ export function RecetasPanel({
   const taking = (healthQuery.data?.data.medications ?? []).filter((medication) => !medication.endDate || medication.endDate >= today)
   const illnesses = (healthQuery.data?.data.conditions ?? []).filter((condition) => condition.status === "activa")
   // Lo que avisa toda receta (el embarazo, la lactancia, un AINE con un anticoagulante), con la misma
-  // regla que el servidor (`prescribingAlerts`): no frena, decide quien receta (QA final, Y1).
-  const alertsOf = (items: ReadonlyArray<{ genericName: string }>) =>
-    prescribingAlerts(
-      {
-        interview: healthQuery.data?.data.latestAnamnesis?.answers ?? null,
-        today,
-        taking: taking.map((medication) => takenMedication(medication, prescribing.catalog)),
-      },
-      items,
-      prescribing.catalog.medications,
-    )
-  /** Lo que se receta solo con motivo para un medicamento: sus alergias y lo que avisan las reglas. */
+  // regla y lo mismo de la persona que el servidor (`prescribingAlerts`): no frena, decide quien
+  // receta (QA final, Y1). Lo de la persona se arma una vez por vez que se dibuja.
+  const situation = {
+    interview: healthQuery.data?.data.latestAnamnesis?.answers ?? null,
+    today,
+    taking: taking.map((medication) => takenMedication(medication, prescribing.catalog)),
+  }
+  const alertsOf = (items: ReadonlyArray<{ genericName: string }>) => prescribingAlerts(situation, items, prescribing.catalog.medications)
+  /** Lo que se receta solo con motivo para un medicamento: sus alergias y lo que avisa toda receta. */
   const conflictsOf = (genericName: string) => [
     ...allergyWarnings(genericName, activeAllergies, prescribing.catalog),
     ...alertsOf([{ genericName }]).warnings,
-    ...rules.check([{ genericName }], 1).warnings,
   ]
   // El esquema se arma una vez; las reglas y las alergias llegan después y cambian.
   const latest = useRef({ rules, conflictsOf, taking })
@@ -1159,9 +1155,9 @@ export function RecetasPanel({
   // Lo contraindicado en el embarazo va como una alergia: se avisa y decide quien receta (ADR 0143).
   const conflicts = [...new Set(conflictsByMedication.flat())]
   const alerts = alertsOf(medications)
-  const onlyAllergies = ruleCheck.warnings.length === 0 && alerts.warnings.length === 0
+  const onlyAllergies = alerts.warnings.length === 0
   // El embarazo con sus semanas y la lactancia se recuerdan junto a «Ya toma» (P-ODO-13).
-  const reminders = [...alerts.reminders, ...ruleCheck.reminders]
+  const reminders = alerts.reminders
   const duplicates = duplicateWarnings(medications, taking, prescribing.catalog)
   // El peso del último registro se propone una vez; quien receta lo corrige.
   useEffect(() => {

@@ -40,6 +40,6 @@ export const medicalPrescribing: ProductPrescribing = {
       items,
       weightKg,
     )
-    return { errors: check.errors, warnings: [] }
+    return { errors: check.errors }
   },
 }

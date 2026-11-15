@@ -1468,9 +1468,13 @@ const VITAMIN_K_ANTAGONISTS = HABITUAL_MEDICATIONS.filter((entry) => entry.atc.s
  * su INR del día». Es un aviso: no frena indicar ni hacer nada.
  */
 export async function extractionRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
+  // Primero, si toma alguna de esas clases: la salud entera (quién lo dijo) se lee solo entonces.
+  const coded = await tx
+    .select({ atcCode: patientMedication.atcCode })
+    .from(patientMedication)
+    .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
+  if (!coded.some((row) => medicationClassOf(row.atcCode) !== null)) return []
   const health = await getPatientHealth(tx, orgId, patientId)
-  const risky = health.medications.filter((row) => medicationClassOf(row.atcCode) !== null)
-  if (risky.length === 0) return []
   const today = await clinicToday(tx, orgId)
   const { locale, timezone } = await findOrgLocale(tx, orgId)
   const sex = (await requirePatient(tx, orgId, patientId)).sex ?? null
@@ -1481,27 +1485,28 @@ export async function extractionRisksOf(tx: Db, orgId: string, patientId: string
     return group ? ` (${lowerFirst(saidWhenWords(group.by, group.at ? day(group.at) : "", sex))})` : ""
   }
   const lines: string[] = []
-  for (const row of risky) {
+  for (const row of health.medications) {
     const group = medicationClassOf(row.atcCode)
+    if (!group) continue
     const ended = !!row.endDate && row.endDate < today
-    const unnamed = row.name === MEDICATION_CLASSES.anticoagulants.unnamed || row.name === MEDICATION_CLASSES.boneMedicines.unnamed
-    const what = unnamed ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál` : row.name
-    if (group === "anticoagulants") {
-      // Lo que ya no toma no cambia el sangrado de hoy.
-      if (ended) continue
-      const vitaminK =
-        row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) ||
-        VITAMIN_K_ANTAGONISTS.some((dci) => normalizeDrugText(row.name).startsWith(dci))
-      // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
-      const which = row.atcCode === MEDICATION_CLASSES.anticoagulants.atc
-      lines.push(
-        vitaminK
-          ? `Toma ${what}${said(row.id)}: pide su INR del día.`
-          : which
-            ? `Toma ${what}${said(row.id)}: riesgo de sangrado; si es warfarina o acenocumarol, pide su INR del día.`
-            : `Toma ${what}${said(row.id)}: riesgo de sangrado.`,
-      )
-    } else lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: riesgo de osteonecrosis de los maxilares.`)
+    // Lo que ya no toma no cambia el sangrado de hoy; la medicina para los huesos, sí (B3).
+    if (group === "anticoagulants" && ended) continue
+    const what =
+      row.name === MEDICATION_CLASSES[group].unnamed
+        ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
+        : row.name
+    const vitaminK =
+      row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || VITAMIN_K_ANTAGONISTS.some((dci) => normalizeDrugText(row.name).startsWith(dci))
+    // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
+    const advice =
+      group === "boneMedicines"
+        ? "riesgo de osteonecrosis de los maxilares"
+        : vitaminK
+          ? "pide su INR del día"
+          : row.atcCode === MEDICATION_CLASSES.anticoagulants.atc
+            ? "riesgo de sangrado; si es warfarina o acenocumarol, pide su INR del día"
+            : "riesgo de sangrado"
+    lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: ${advice}.`)
   }
   return lines
 }

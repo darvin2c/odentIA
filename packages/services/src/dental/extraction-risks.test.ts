@@ -49,9 +49,9 @@ it("un apixabán dice el riesgo de sangrado, y el bisfosfonato que ya dejó sigu
       reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
       conditions: [],
       medications: [
-        { name: "Apixabán 5 mg", genericName: "apixabán", atcCode: "B01AF02" },
-        { name: "Ácido zoledrónico", atcCode: "M05BA08", endDate: "2024-01-01" },
-        { name: "Clopidogrel 75 mg", atcCode: "B01AC04", endDate: "2024-01-01" },
+        { name: "Apixabán 5 mg", genericName: "apixabán" },
+        { name: "Ácido zoledrónico", genericName: "ácido zoledrónico", endDate: "2024-01-01" },
+        { name: "Clopidogrel 75 mg", genericName: "clopidogrel", endDate: "2024-01-01" },
       ],
     }),
   )

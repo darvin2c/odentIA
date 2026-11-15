@@ -998,13 +998,14 @@ export async function listPlanItems(
   const withProgress = await withDecisions(tx, orgId, items)
   // Lo que va después de otro tratamiento de la misma pieza (la corona tras la endodoncia), con
   // la regla de «Qué sigue» (`waitingFor`): «Registrar lo de hoy» no lo propone por omisión.
-  const phases = (await hooksOf(tx, orgId)).planPhases
+  const hooks = await hooksOf(tx, orgId)
+  const phases = hooks.planPhases
   // Lo indicado y aún por decidir cuenta como si se aceptara: la endodoncia y la corona indicadas en
   // la misma consulta ya tienen su orden antes de responder el presupuesto (QA antes de entregar).
   const asDecided = withProgress.map((item) => (item.decisionStatus === "pendiente" ? { ...item, decisionStatus: "aceptado" } : item))
   // El consentimiento va con el tratamiento: el Plan dice si falta firmarlo (consentimientos, 10 nov).
   const consents = await treatmentConsentStates(tx, orgId, withProgress.map((item) => item.id))
-  const risky = opts.extractionRisks ? await extractionItemsOf(tx, orgId, withProgress) : new Set<string>()
+  const risky = opts.extractionRisks ? await extractionItemsOf(tx, orgId, hooks, withProgress) : new Set<string>()
   const risks = risky.size > 0 ? await extractionRisksOf(tx, orgId, patientId) : []
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
@@ -1025,13 +1026,16 @@ export async function listPlanItems(
 async function extractionItemsOf(
   tx: Db,
   orgId: string,
+  { extractionServiceIds }: ProductHooks,
   items: ReadonlyArray<{ id: string; serviceId: string | null; status: string }>,
 ): Promise<Set<string>> {
-  const open = items.filter((item) => item.serviceId && !["realizado", "cancelado", "reemplazado"].includes(item.status))
-  const { extractionServiceIds } = await productHooks(tx, orgId)
+  const open = items.filter(
+    (item): item is typeof item & { serviceId: string } =>
+      item.serviceId !== null && !["realizado", "cancelado", "reemplazado"].includes(item.status),
+  )
   if (!extractionServiceIds || open.length === 0) return new Set()
-  const extractions = await extractionServiceIds(tx, orgId, [...new Set(open.map((item) => item.serviceId as string))])
-  return new Set(open.filter((item) => extractions.has(item.serviceId as string)).map((item) => item.id))
+  const extractions = await extractionServiceIds(tx, orgId, [...new Set(open.map((item) => item.serviceId))])
+  return new Set(open.filter((item) => extractions.has(item.serviceId)).map((item) => item.id))
 }
 
 export async function addPlanItem(

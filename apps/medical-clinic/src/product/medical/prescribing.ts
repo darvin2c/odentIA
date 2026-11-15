@@ -53,7 +53,7 @@ function useMedicalPrescribingRules(patientId: string, enabled: boolean): Prescr
     null
   return {
     // El embarazo, la lactancia y lo demás que avisa toda receta lo suma la receta misma (`prescribingAlerts`).
-    check: (items, weightKg) => ({ errors: checkPrescription(context, items, weightKg).errors, warnings: [], reminders: [] }),
+    check: (items, weightKg) => ({ errors: checkPrescription(context, items, weightKg).errors }),
     weight: { required: age !== null && age < WEIGHT_REQUIRED_UNDER_YEARS, suggested: lastWeight },
   }
 }
