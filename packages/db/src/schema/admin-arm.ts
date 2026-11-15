@@ -134,6 +134,7 @@ export const KAIROS_ITEM_KINDS = [
   "posible_carga",
   "chat_sin_cliente",
   "responder_chat",
+  "ausencia_choca",
 ] as const
 export type KairosItemKind = (typeof KAIROS_ITEM_KINDS)[number]
 export const KAIROS_ITEM_STATUSES = [
@@ -230,6 +231,14 @@ export const KAIROS_AI_PURPOSES = [
 ] as const
 export type KairosAiPurpose = (typeof KAIROS_AI_PURPOSES)[number]
 /** Los mismos valores que la solicitud de la web (`saas_waitlist_request`). */
+/** Lo que Kairós propuso en una conversación (`kairos_proposal`): la última manda. */
+export const KAIROS_PROPOSAL_STATUSES = [
+  "pendiente",
+  "confirmada",
+  "reemplazada",
+  "vencida",
+] as const
+export type KairosProposalStatus = (typeof KAIROS_PROPOSAL_STATUSES)[number]
 export const SAAS_CLIENT_PROFESSIONALS = ["1", "2-3", "4-9", "10+"] as const
 export const SAAS_CLIENT_TOOLS = ["nada", "cuaderno_excel", "otro_software"] as const
 
@@ -395,6 +404,12 @@ export const saasClientContact = adminSchema.table(
  * y día (`kairos_key`) para no repetirlas. `admin_only`: lo que solo hace
  * Administración (cobro, carga, informe, Zoho): Soporte no la ve. Una de cobro
  * tampoco la ve aunque la columna diga que no (el código anterior no la escribía).
+ *
+ * Una presentación con hora dura hasta `ends_at` (45 min): con ella se ve si
+ * choca con otra de la misma persona (lo impide `admin-staff-schedule.ts`, con
+ * un candado por persona). `channel_chat_id` es la conversación en que se
+ * agendó, para avisarle por ahí; `needs_new_time_at`, que hay que pedirle otra
+ * hora a la clínica (quien presenta no está).
  */
 export const saasTask = adminSchema.table(
   "saas_task",
@@ -419,11 +434,24 @@ export const saasTask = adminSchema.table(
     doneAt: timestamp("done_at", { withTimezone: true }),
     doneBy: text("done_by").references(() => user.id),
     doneNote: text("done_note"),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    channelChatId: uuid("channel_chat_id").references((): AnyPgColumn => saasChat.id, {
+      onDelete: "set null",
+    }),
+    needsNewTimeAt: timestamp("needs_new_time_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     uniqueIndex("saas_task_kairos_key_uidx").on(table.kairosKey),
+    // Las presentaciones abiertas de cada persona, por hora: los choques y los huecos.
+    index("saas_task_presentation_idx")
+      .on(table.assigneeUserId, table.dueAt)
+      .where(sql`${table.kind} = 'presentacion' AND ${table.status} = 'abierta'`),
+    check(
+      "saas_task_ends_check",
+      sql`${table.endsAt} IS NULL OR (${table.dueAt} IS NOT NULL AND ${table.endsAt} > ${table.dueAt})`,
+    ),
     index("saas_task_status_due_idx").on(table.status, table.dueOn),
     index("saas_task_client_status_idx").on(table.clientId, table.status),
     index("saas_task_assignee_status_idx").on(table.assigneeUserId, table.status),
@@ -648,6 +676,8 @@ export const saasOutreach = adminSchema.table(
     externalId: text("external_id"),
     /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
     template: text("template"),
+    /** Lo escribió y lo envió Kairós (`Kairós · odentIA`), no una persona. */
+    byKairos: boolean("by_kairos").notNull().default(false),
     /**
      * Solo de Administración, fijado al reservar el envío: lo marcó así quien respondió, o salió en
      * una conversación que no era de una clínica con su app (venta). Solo sube, de no a sí (la
@@ -929,6 +959,9 @@ export const saasChat = adminSchema.table(
     notClinicAt: timestamp("not_clinic_at", { withTimezone: true }),
     notClinicBy: text("not_clinic_by").references(() => user.id, { onDelete: "set null" }),
     lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    /** «Lo atiendo yo»: mientras tenga fecha, Kairós no responde solo en esta conversación. */
+    kairosPausedAt: timestamp("kairos_paused_at", { withTimezone: true }),
+    kairosPausedBy: text("kairos_paused_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -945,6 +978,10 @@ export const saasChat = adminSchema.table(
       "saas_chat_text_check",
       sql`(${table.displayName} IS NULL OR length(${table.displayName}) <= 200)
         AND (${table.waId} IS NULL OR length(${table.waId}) BETWEEN 1 AND 256)`,
+    ),
+    check(
+      "saas_chat_kairos_paused_check",
+      sql`${table.kairosPausedAt} IS NOT NULL OR ${table.kairosPausedBy} IS NULL`,
     ),
     check(
       "saas_chat_not_clinic_check",
@@ -1040,5 +1077,57 @@ export const kairosWeekly = adminSchema.table(
   (table) => [
     check("kairos_weekly_monday_check", sql`extract(isodow from ${table.weekStart}) = 1`),
     check("kairos_weekly_text_check", sql`char_length(btrim(${table.text})) BETWEEN 1 AND 4000`),
+  ],
+)
+
+/**
+ * Lo general de Kairós, en una sola fila (`id` siempre verdadero). `sells_enabled`:
+ * si responde solo en los chats a quien todavía no tiene su app. Nace apagado y se
+ * prende solo con la medición sin graves y el sí del dueño (ADR 0189).
+ */
+export const kairosSetting = adminSchema.table(
+  "kairos_setting",
+  {
+    id: boolean("id").primaryKey().default(true),
+    sellsEnabled: boolean("sells_enabled").notNull().default(false),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check("kairos_setting_single_check", sql`${table.id}`)],
+)
+
+/**
+ * Una hora que Kairós le propuso a alguien en una conversación, como las
+ * propuestas de Sofi (ADR 0097): la última manda, así que una nueva reemplaza
+ * a la pendiente de esa conversación (una sola pendiente por conversación). Se
+ * confirma dentro de 48 h (`expires_at`) y entonces se agenda con el candado de
+ * quien presenta (`task_id`, la presentación); si la hora ya se la ganó otro,
+ * queda vencida.
+ */
+export const kairosProposal = adminSchema.table(
+  "kairos_proposal",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => saasChat.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "set null" }),
+    assigneeUserId: text("assignee_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("pendiente"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    taskId: uuid("task_id").references(() => saasTask.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("kairos_proposal_chat_idx").on(table.chatId, table.createdAt),
+    uniqueIndex("kairos_proposal_pending_uidx")
+      .on(table.chatId)
+      .where(sql`${table.status} = 'pendiente'`),
+    check("kairos_proposal_status_check", oneOf(table.status, KAIROS_PROPOSAL_STATUSES)),
+    check("kairos_proposal_expires_check", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 )

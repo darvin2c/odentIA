@@ -95,6 +95,7 @@ import {
   resolveOutreach,
   schedulePresentation,
 } from "./admin-sales.js"
+import { reassignPresentation } from "./admin-staff-schedule.js"
 import {
   finishProgressReport,
   listProgressReports,
@@ -415,6 +416,8 @@ function executorsAt(now: Date): KairosExecutors<OutreachRow> {
     createProposal: (tx, actor, clientId, input) =>
       createSaasProposal(tx, actor, clientId, input, now),
     markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
+    reassignPresentation: (tx, actor, taskId, toUserId) =>
+      reassignPresentation(tx, actor, taskId, toUserId, now),
   }
 }
 

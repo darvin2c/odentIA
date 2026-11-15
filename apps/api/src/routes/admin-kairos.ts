@@ -28,6 +28,7 @@ import {
   prepareChatMessage,
   prepareEmailReply,
   prepareOutreach,
+  reassignPresentation,
   recordPresentation,
   ServiceError,
   settleKairosOutreach,
@@ -191,6 +192,8 @@ function executorsAt(
     // Lo que ya pasó los 30 días queda para borrarse ahora: lo borra el worker en su vuelta
     // siguiente (esta ruta no tiene el almacenamiento).
     markClientFileCarga: (tx, actor, fileId) => markClientFileCarga(tx, actor, fileId, now),
+    reassignPresentation: (tx, actor, taskId, toUserId) =>
+      reassignPresentation(tx, actor, taskId, toUserId, now),
   }
 }
 

@@ -111,6 +111,7 @@ const executors: KairosExecutors = {
   recordPresentation: unused,
   createProposal: unused,
   markClientFileCarga: unused,
+  reassignPresentation: unused,
 }
 const decide = (actor: AdminActor, id: string, input: Parameters<typeof decideKairosItem>[3]) =>
   ownerDb.transaction((tx) => decideKairosItem(tx, actor, id, input, executors, NOW))

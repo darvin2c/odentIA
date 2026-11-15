@@ -510,16 +510,29 @@ export interface TaskRow {
   createdAt: Date
 }
 
+/** Lo que dura una presentación agendada: con su fin se ven los choques de quien presenta. */
+export const PRESENTATION_MS = 45 * 60_000
+
+/** El fin de una tarea con hora: solo la presentación lo tiene (`due_at` + 45 min). */
+export function presentationEndsAt(kind: string, dueAt: Date | null | undefined): Date | null {
+  return kind === "presentacion" && dueAt ? new Date(dueAt.getTime() + PRESENTATION_MS) : null
+}
+
+/**
+ * Guarda una tarea. `actor` nulo es Kairós (agendar desde una conversación): la
+ * tarea queda a su nombre (`by_kairos`), sin autor, y va a quien se eligió o al
+ * responsable del cliente.
+ */
 async function insertTask(
   tx: Db,
-  actor: AdminActor,
+  actor: AdminActor | null,
   client: ClientRecord,
   input: TaskInput,
   now: Date,
 ): Promise<string> {
   if (!(SAAS_TASK_KINDS as readonly string[]).includes(input.kind))
     throw invalidField("kind", "Elige qué hay que hacer")
-  if (!seesTaskKind(actor, input.kind))
+  if (actor && !seesTaskKind(actor, input.kind))
     throw invalidField("kind", "Las tareas de cobro las pone la administración")
   const title = trimmed("title", input.title, 200, "la tarea")
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
@@ -532,7 +545,9 @@ async function insertTask(
   const adminOnly = input.kind === "cobro"
   const assignee = input.assigneeUserId
     ? await requireActiveStaff(tx, input.assigneeUserId, "assigneeUserId", { adminOnly })
-    : await defaultAssignee(tx, client.ownerUserId, actor, adminOnly)
+    : actor
+      ? await defaultAssignee(tx, client.ownerUserId, actor, adminOnly)
+      : client.ownerUserId
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const demoId = await requireDemo(tx, input.demoId)
   const [row] = await tx
@@ -543,18 +558,20 @@ async function insertTask(
       title,
       dueOn,
       dueAt: input.dueAt ?? null,
+      endsAt: presentationEndsAt(input.kind, input.dueAt),
       assigneeUserId: assignee,
       adminOnly,
       contactId: contact?.id ?? null,
       demoId,
-      createdBy: actor.userId,
+      createdBy: actor?.userId ?? null,
+      byKairos: actor === null,
       createdAt: now,
       updatedAt: now,
     })
     .returning({ id: saasTask.id })
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo guardar la tarea")
   await writeAdminAudit(tx, actor, {
-    action: "arm.task_created",
+    action: actor ? "arm.task_created" : "kairos.task_created",
     organizationId: client.organizationId,
     entityId: client.id,
     metadata: { taskId: row.id, kind: input.kind },
@@ -729,7 +746,12 @@ export async function moveClientTask(
     throw invalidField("dueAt", "La hora tiene que ser del mismo día")
   await tx
     .update(saasTask)
-    .set({ dueOn, dueAt: input.dueAt ?? null, updatedAt: now })
+    .set({
+      dueOn,
+      dueAt: input.dueAt ?? null,
+      endsAt: presentationEndsAt(task.kind, input.dueAt),
+      updatedAt: now,
+    })
     .where(eq(saasTask.id, id))
   await writeAdminAudit(tx, actor, {
     action: "arm.task_moved",
@@ -1375,10 +1397,14 @@ export async function applyInvitedProposal(
 
 /* ---------- Presentaciones ---------- */
 
-/** Agenda una presentación: es una tarea `presentacion` con su día, hora, contacto y demo. */
+/**
+ * Agenda una presentación: es una tarea `presentacion` con su día, hora (dura
+ * 45 min, `ends_at`), contacto y demo. `actor` nulo es Kairós
+ * (`bookPresentation`, con el candado y el choque ya revisados).
+ */
 export async function schedulePresentation(
   tx: Db,
-  actor: AdminActor,
+  actor: AdminActor | null,
   clientId: string,
   input: {
     dueOn: string
@@ -1471,7 +1497,12 @@ export async function recordPresentation(
     if (nextDueOn) {
       await tx
         .update(saasTask)
-        .set({ dueOn: nextDueOn, dueAt: input.nextDueAt ?? null, updatedAt: now })
+        .set({
+          dueOn: nextDueOn,
+          dueAt: input.nextDueAt ?? null,
+          endsAt: presentationEndsAt("presentacion", input.nextDueAt),
+          updatedAt: now,
+        })
         .where(eq(saasTask.id, taskId))
     } else {
       await tx

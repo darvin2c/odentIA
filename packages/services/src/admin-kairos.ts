@@ -58,6 +58,7 @@ import {
 } from "./admin-onboarding.js"
 import { type OwnerPendingRow, ownersPendingRows } from "./admin-organizations.js"
 import { PRESENTATION_OUTCOMES, type PresentationOutcome } from "./admin-sales.js"
+import { freePresenters, presentationWhenWords } from "./admin-staff-schedule.js"
 import { type SupportHomeRow, supportHomeRows } from "./admin-support.js"
 import {
   type ClinicLoadRecord,
@@ -149,6 +150,7 @@ const ADMIN_KINDS: ReadonlySet<KairosItemKind> = new Set<KairosItemKind>([
   "duplicado",
   "posible_carga",
   "chat_sin_cliente",
+  "ausencia_choca",
 ])
 /** Lo que el modelo redacta antes de estar listo. */
 const DRAFT_KINDS = [
@@ -172,6 +174,7 @@ const ITEM_KIND_WORDS: Record<KairosItemKind, string> = {
   posible_carga: "una posible carga de datos",
   chat_sin_cliente: "un mensaje sin cliente",
   responder_chat: "un mensaje por responder",
+  ausencia_choca: "presentaciones en una ausencia",
 }
 
 const STATUS_WORDS: Record<KairosItemStatus, string> = {
@@ -666,6 +669,38 @@ async function captureState(
     )
     state.chat = row ? { clientId: row.client_id, notClinic: row.not_clinic } : null
   }
+  if (kind === "ausencia_choca" && Array.isArray(payload.taskIds)) {
+    // Vale mientras esas presentaciones sigan abiertas, a la misma hora y con la misma persona,
+    // y la ausencia siga como estaba.
+    const ids = payload.taskIds.filter(
+      (id): id is string => typeof id === "string" && UUID.test(id),
+    )
+    state.tasks = ids.length
+      ? (
+          await rows<{
+            id: string
+            status: string
+            due_at: string | null
+            assignee: string | null
+          }>(
+            tx,
+            sql`select id, status, ${iso(sql`due_at`)} as due_at, assignee_user_id as assignee from saas_task
+              where id in (${sql.join(
+                ids.map((id) => sql`${id}::uuid`),
+                sql`, `,
+              )}) order by id`,
+          )
+        ).map((row) => `${row.id}:${row.status}:${row.due_at}:${row.assignee}`)
+      : []
+    const absenceId = str(payload.absenceId)
+    if (absenceId && UUID.test(absenceId)) {
+      const [row] = await rows<{ starts_at: string; ends_at: string }>(
+        tx,
+        sql`select ${iso(sql`starts_at`)} as starts_at, ${iso(sql`ends_at`)} as ends_at from admin_staff_absence where id = ${absenceId}::uuid`,
+      )
+      state.absence = row ? `${row.starts_at}:${row.ends_at}` : null
+    }
+  }
   const contactId = str(payload.contactId)
   if (kind === "vinculo" && contactId) {
     const [row] = await rows<{ user_id: string | null }>(
@@ -995,6 +1030,13 @@ export interface KairosExecutors<O extends KairosOutreachPrepared = KairosOutrea
     actor: AdminActor,
     fileId: string,
   ): Promise<{ file: Pick<ClientFileRow, "deleteAfter">; dueNow: boolean }>
+  /** La misma operación que «Pasar a…» de una presentación (`reassignPresentation`): solo si está libre. */
+  reassignPresentation(
+    tx: Db,
+    actor: AdminActor,
+    taskId: string,
+    toUserId: string,
+  ): Promise<unknown>
 }
 
 export interface KairosDecideInput {
@@ -1023,7 +1065,13 @@ export interface KairosDecision<O extends KairosOutreachPrepared = KairosOutreac
  * celular que ya escribe como otra clínica, que falta decir de quién es, o
  * que Soporte no envía (una clínica sin su cuenta).
  */
-const KEEPS_WAITING = new Set(["CHAT_OTHER_CLIENT", "CHAT_UNASSIGNED", "CHAT_ADMIN_ONLY"])
+const KEEPS_WAITING = new Set([
+  "CHAT_OTHER_CLIENT",
+  "CHAT_UNASSIGNED",
+  "CHAT_ADMIN_ONLY",
+  // «Pasar a…» a alguien que ya no está libre a esa hora: se elige a otra persona.
+  "STAFF_BUSY",
+])
 
 /** Lo que cada tipo deja cambiar antes de aprobar. */
 const EDITABLE: Record<KairosItemKind, readonly string[]> = {
@@ -1048,6 +1096,7 @@ const EDITABLE: Record<KairosItemKind, readonly string[]> = {
   posible_carga: [],
   chat_sin_cliente: ["clientId", "contactId"],
   responder_chat: [],
+  ausencia_choca: ["choice", "toUserId"],
 }
 
 function cleanEdits(kind: KairosItemKind, edited: unknown): Record<string, unknown> {
@@ -1073,6 +1122,7 @@ async function executeItem<O extends KairosOutreachPrepared>(
   item: ItemRow,
   payload: Record<string, unknown>,
   executors: KairosExecutors<O>,
+  now: Date,
 ): Promise<Executed<O>> {
   const kind = item.kind as KairosItemKind
   const clientId = item.clientId
@@ -1252,6 +1302,37 @@ async function executeItem<O extends KairosOutreachPrepared>(
     case "responder_chat":
       // Se responde en la conversación (`prepareChatReply`); `decideKairosItem` ya lo frenó.
       throw new ServiceError("KAIROS_ITEM_IN_CHAT", 409, "Esto se responde en la conversación")
+    case "ausencia_choca": {
+      const taskIds = Array.isArray(payload.taskIds)
+        ? payload.taskIds.filter((id): id is string => typeof id === "string" && UUID.test(id))
+        : []
+      if (taskIds.length === 0)
+        throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Faltan las presentaciones")
+      const choice = str(payload.choice)
+      if (choice === "pasar") {
+        const toUserId = optText(payload.toUserId)
+        if (!toUserId) throw invalidField("edited.toUserId", "Elige a quién pasarlas")
+        // Cada una con su candado y su choque: si alguna no cabe, no se pasa ninguna.
+        for (const taskId of taskIds)
+          await executors.reassignPresentation(tx, actor, taskId, toUserId)
+        return { status: "ejecutada", result: { choice, toUserId, taskIds } }
+      }
+      if (choice === "otra_hora") {
+        // Lo anota en cada presentación: Kairós le escribe a la clínica pidiendo otra hora.
+        const marked = await tx
+          .update(saasTask)
+          .set({ needsNewTimeAt: now, updatedAt: now })
+          .where(and(inArray(saasTask.id, taskIds), eq(saasTask.status, "abierta")))
+          .returning({ id: saasTask.id, clientId: saasTask.clientId })
+        await writeAdminAudit(tx, actor, {
+          action: "arm.presentation_new_time_asked",
+          entityId: item.id,
+          metadata: { taskIds: marked.map((row) => row.id) },
+        })
+        return { status: "ejecutada", result: { choice, taskIds: marked.map((row) => row.id) } }
+      }
+      throw invalidField("edited.choice", "Elige «Pasar a…» o «Pedir otra hora»")
+    }
     case "posible_carga": {
       const fileId = optText(payload.fileId)
       if (!fileId) throw new ServiceError("KAIROS_ITEM_INCOMPLETE", 409, "Falta el archivo")
@@ -1348,7 +1429,7 @@ export async function decideKairosItem<O extends KairosOutreachPrepared = Kairos
   let executed: Executed<O>
   try {
     executed = await tx.transaction((inner) =>
-      executeItem(inner as Db, actor, item, payload, executors),
+      executeItem(inner as Db, actor, item, payload, executors, now),
     )
   } catch (error) {
     // Lo que la persona puede arreglar y volver a aprobar (de quién es el celular) no lo da por fallido.
@@ -2717,6 +2798,150 @@ async function rulePresentations(pass: Pass): Promise<void> {
   }
 }
 
+/** El nombre de pila: «Ana» de «Ana Pérez». */
+const firstName = (name: string | null | undefined): string =>
+  (name ?? "").trim().split(/\s+/)[0] || "Sin nombre"
+
+/**
+ * Una ausencia que choca con presentaciones abiertas de esa persona (K8): un
+ * ítem en Hoy, solo de Administración, con «Pasar a…» (la primera persona
+ * libre a todas esas horas, si hay) o «Pedir otra hora». Nada se mueve solo.
+ * Si cambian las presentaciones que chocan, el ítem anterior se retira y sale
+ * otro con las de ahora.
+ */
+async function ruleAbsenceConflicts(pass: Pass): Promise<void> {
+  const { tx } = pass
+  const found = await rows<{
+    absence_id: string
+    user_id: string
+    user_name: string
+    starts_at: string
+    ends_at: string
+    reason: string | null
+    task_id: string
+    client_id: string
+    client_name: string
+    due_at: string
+    task_ends: string
+  }>(
+    tx,
+    sql`select a.id as absence_id, a.user_id, u.name as user_name, ${iso(sql`a.starts_at`)} as starts_at,
+      ${iso(sql`a.ends_at`)} as ends_at, a.reason, t.id as task_id, t.client_id, c.name as client_name,
+      ${iso(sql`t.due_at`)} as due_at, ${iso(sql`coalesce(t.ends_at, t.due_at + interval '45 minutes')`)} as task_ends
+    from admin_staff_absence a
+    join "user" u on u.id = a.user_id
+    join saas_task t on t.assignee_user_id = a.user_id and t.kind = 'presentacion' and t.status = 'abierta'
+      and t.due_at is not null and t.needs_new_time_at is null and t.due_at > ${pass.nowSql}
+      and t.due_at < a.ends_at and coalesce(t.ends_at, t.due_at + interval '45 minutes') > a.starts_at
+    join saas_client c on c.id = t.client_id and c.archived_at is null
+    where a.ends_at > ${pass.nowSql}
+    order by a.id, t.due_at, t.id`,
+  )
+  const groups = new Map<string, typeof found>()
+  for (const row of found) groups.set(row.absence_id, [...(groups.get(row.absence_id) ?? []), row])
+  const current: string[] = []
+  for (const [absenceId, tasks] of groups) {
+    const first = tasks[0]
+    if (!first) continue
+    const taskIds = tasks.map((task) => task.task_id).sort()
+    const fact = `${absenceId}:${createHash("sha256").update(taskIds.join(",")).digest("hex").slice(0, 16)}`
+    current.push(`ausencia_choca:-:${fact}:`)
+    // Quien puede tomarlas todas: libre a cada una de esas horas.
+    let candidates: Array<{ userId: string; name: string }> | null = null
+    for (const task of tasks) {
+      const free = await freePresenters(tx, new Date(task.due_at), new Date(task.task_ends), {
+        except: [first.user_id],
+      })
+      candidates = candidates
+        ? candidates.filter((person) => free.some((other) => other.userId === person.userId))
+        : free
+    }
+    const who = firstName(first.user_name)
+    const n = tasks.length
+    const where = /vacacion/i.test(first.reason ?? "") ? "sus vacaciones" : "su ausencia"
+    const title =
+      n === 1
+        ? `1 presentación de ${who} cae en ${where}`
+        : `${n} presentaciones de ${who} caen en ${where}`
+    const free = candidates ?? []
+    const list = tasks
+      .map((task) => `${task.client_name}, el ${presentationWhenWords(new Date(task.due_at))}`)
+      .join("; ")
+    const reason = `${who} no está del ${dayText(limaDate(new Date(first.starts_at)))} al ${dayText(
+      limaDate(new Date(first.ends_at)),
+    )}${first.reason ? ` (${first.reason})` : ""}: ${list}. ${
+      free.length
+        ? `Puede tomarlas ${free.map((person) => person.name).join(", ")}.`
+        : "Nadie más está libre a esas horas: pide otra hora a la clínica."
+    }`
+    const soonest = Math.min(...tasks.map((task) => new Date(task.due_at).getTime()))
+    await pass.item({
+      rule: "ausencia_choca",
+      clientId: null,
+      fact,
+      kind: "ausencia_choca",
+      title,
+      reason,
+      adminOnly: true,
+      expiresAt: new Date(Math.min(pass.now.getTime() + KAIROS_ITEM_HOURS * HOUR, soonest)),
+      payload: {
+        absenceId,
+        userId: first.user_id,
+        userName: first.user_name,
+        taskIds,
+        tasks: tasks.map((task) => ({
+          taskId: task.task_id,
+          clientId: task.client_id,
+          clientName: task.client_name,
+          startsAt: task.due_at,
+        })),
+        candidates: free,
+        choice: free.length ? "pasar" : "otra_hora",
+        toUserId: free[0]?.userId ?? null,
+      },
+    })
+  }
+  // Lo que ya no choca (o choca con otras presentaciones) sale de Hoy.
+  const waiting = await tx
+    .select({ id: kairosItem.id, key: kairosItem.idempotencyKey })
+    .from(kairosItem)
+    .where(and(eq(kairosItem.kind, "ausencia_choca"), eq(kairosItem.status, "espera")))
+  const stale = waiting.filter((item) => !current.some((key) => item.key.startsWith(key)))
+  await pass.closeItems(
+    { ids: stale.map((item) => item.id) },
+    "esas presentaciones ya no caen en la ausencia",
+  )
+}
+
+/**
+ * «No se conectó» en una presentación (caso 11): una tarea «Llamar» al
+ * responsable del cliente, una vez por presentación. Kairós no insiste solo.
+ */
+async function ruleMissedPresentations(pass: Pass): Promise<void> {
+  const missed = await rows<{ task_id: string; client_id: string; contact_id: string | null }>(
+    pass.tx,
+    sql`select t.id as task_id, t.client_id, t.contact_id
+    from admin_audit a
+    join saas_task t on t.id::text = a.metadata ->> 'taskId' and t.kind = 'presentacion'
+    join saas_client c on c.id = t.client_id and c.archived_at is null
+    where a.action = 'arm.presentation_recorded' and a.metadata ->> 'outcome' = 'no_se_conecto'
+      and t.updated_at > ${pass.ago(7)}
+    order by a.created_at`,
+  )
+  for (const row of missed) {
+    const client = await pass.client(row.client_id)
+    await pass.task({
+      rule: "no_se_conecto",
+      clientId: row.client_id,
+      fact: row.task_id,
+      repeat: "once",
+      kind: "llamar",
+      title: `Llamar a ${client?.name ?? "la clínica"}: no se conectó a la presentación`,
+      contactId: row.contact_id,
+    })
+  }
+}
+
 /**
  * (8) El alta, de lo más concreto a lo más general: los archivos que no llegan, la posible
  * carga, lo que cargó la skill y el informe, los plazos de la carga, el pago revertido, la
@@ -3853,6 +4078,8 @@ export async function kairosRulesPass(
   await ruleProposalsExpiring(pass)
   await ruleReturnOn(pass)
   await rulePresentations(pass)
+  await ruleAbsenceConflicts(pass)
+  await ruleMissedPresentations(pass)
   await ruleOnboarding(pass)
   await ruleRisk(pass)
   await ruleCoolingAndNextStep(pass)
@@ -4260,6 +4487,8 @@ export interface TodayTaskRow {
   report?: { organizationId: string; number: number; to: string | null; canResend: boolean }
   /** Lo que dice su botón de cerrarla cuando no es «Hecho» («Revisado»: los que no entraron). */
   doneLabel?: string
+  /** Es de alguien que ahora no está (`admin_staff_absence`): sale en Hoy del resto, «De Ana, ausente». */
+  absentAssignee?: true
 }
 
 type WithWhy<T> = T & { clientId: string | null; why: string }
@@ -4335,6 +4564,10 @@ export async function todayForStaff(
   )
 
   const assignee = alias(user, "task_assignee")
+  // Quien tiene la tarea no está ahora: sus tareas salen también en «Mías» del resto.
+  const assigneeAbsent = sql<boolean>`exists (select 1 from admin_staff_absence ab
+    where ab.user_id = ${saasTask.assigneeUserId} and ab.starts_at <= ${now.toISOString()}::timestamptz
+      and ab.ends_at > ${now.toISOString()}::timestamptz)`
   const taskRows = await tx
     .select({
       task: saasTask,
@@ -4342,6 +4575,7 @@ export async function todayForStaff(
       product: saasClient.product,
       organizationId: saasClient.organizationId,
       assigneeName: assignee.name,
+      assigneeAbsent,
     })
     .from(saasTask)
     .innerJoin(saasClient, eq(saasClient.id, saasTask.clientId))
@@ -4351,7 +4585,9 @@ export async function todayForStaff(
         eq(saasTask.status, "abierta"),
         lte(saasTask.dueOn, today),
         sql`${saasClient.archivedAt} is null`,
-        options.who === "mias" ? eq(saasTask.assigneeUserId, actor.userId) : undefined,
+        options.who === "mias"
+          ? sql`(${saasTask.assigneeUserId} = ${actor.userId} or ${assigneeAbsent})`
+          : undefined,
         visibleTaskSql(actor),
       ),
     )
@@ -4368,8 +4604,9 @@ export async function todayForStaff(
       )
     : new Map<string, ProgressReportRecord[]>()
   const tasks: TodayTaskRow[] = taskRows.map(
-    ({ task, clientName, product, organizationId, assigneeName }) => {
+    ({ task, clientName, product, organizationId, assigneeName, assigneeAbsent }) => {
       const overdue = taskOverdue(task, now)
+      const absent = assigneeAbsent && task.assigneeUserId !== actor.userId
       const when =
         task.dueOn < today
           ? `Vencida desde el ${dayText(task.dueOn)}`
@@ -4405,7 +4642,14 @@ export async function todayForStaff(
           : null,
         byKairos: task.byKairos,
         overdue,
-        why: task.byKairos ? `${when} · La puso Kairós` : when,
+        why: [
+          absent ? `De ${firstName(assigneeName)}, ausente` : null,
+          when,
+          task.byKairos ? "La puso Kairós" : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        ...(absent ? { absentAssignee: true as const } : {}),
         ...(report ? { report } : {}),
         ...(task.byKairos && task.kairosKey?.startsWith(`${LOAD_ERRORS_RULE}:`)
           ? { doneLabel: "Revisado" }

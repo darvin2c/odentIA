@@ -1006,6 +1006,8 @@ const NEXT_FREE_DAYS = 14
 
 /** Un tramo en milisegundos: `[inicio, fin)`. Reportes › Agenda usa las mismas cuentas. */
 type Span = [start: number, end: number]
+/** El mismo tramo para quien lo usa fuera (horarios del equipo): `Span` ya es de los reportes. */
+export type AvailabilitySpan = Span
 
 /** Une tramos solapados o contiguos. */
 export function mergeSpans(spans: Span[]): Span[] {
