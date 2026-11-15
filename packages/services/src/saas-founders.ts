@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { saasClient } from "@odentia/db/schema/admin-arm"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { organization, user } from "@odentia/db/schema/auth"
 import {
@@ -17,7 +18,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gt, ilike, inArray, lte, ne, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lte, ne, or, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { planPrices } from "./saas-actions.js"
@@ -410,7 +411,17 @@ export interface FounderSeats {
   limit: number | null
 }
 
-/** Lugares usados de un plan por invitación: las clínicas que entraron y las invitaciones vigentes. */
+/**
+ * La constancia de una clínica que la administración pasó a Fundadores desde su prueba
+ * (`moveClinicToFounders`): ocupa su lugar en `founderSeats` y no deja pasarla otra vez.
+ */
+export const FOUNDERS_ENTERED_ACTION = "saas.founders_entered"
+
+/**
+ * Lugares usados de un plan por invitación: las clínicas que entraron con la invitación,
+ * las que la administración pasó desde su prueba y las invitaciones vigentes. Terminar sus
+ * condiciones no libera el lugar: es de las clínicas que entraron al programa.
+ */
 export async function founderSeats(tx: Db, planId: string, now = new Date()): Promise<FounderSeats> {
   const [plan] = await tx.select({ id: saasPlan.id, name: saasPlan.name, seatLimit: saasPlan.seatLimit }).from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
   if (!plan) throw notFound("Plan")
@@ -426,7 +437,11 @@ export async function founderSeats(tx: Db, planId: string, now = new Date()): Pr
         ),
       ),
     )
-  return { planId: plan.id, planName: plan.name, used: row?.used ?? 0, limit: plan.seatLimit }
+  const [moved] = await tx
+    .select({ used: sql<number>`count(distinct ${adminAudit.organizationId})::int` })
+    .from(adminAudit)
+    .where(and(eq(adminAudit.action, FOUNDERS_ENTERED_ACTION), sql`${adminAudit.metadata}->>'planId' = ${planId}`))
+  return { planId: plan.id, planName: plan.name, used: (row?.used ?? 0) + (moved?.used ?? 0), limit: plan.seatLimit }
 }
 
 /** El plan por invitación de un producto: el activo con lugares, o null si no hay (ADR 0093). */
@@ -1103,27 +1118,8 @@ export async function completeFounderInvitation(tx: Db, requestId: string, orgId
   if (!row || row.status !== "invitada" || !row.planId) throw new ServiceError("INVITATION_INVALID", 409, "La invitación ya no estaba vigente")
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, row.planId)).limit(1)
   if (!plan) throw notFound("Plan")
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas:${orgId}`}, 0))`)
-  const trialEnds = new Date(now.getTime() + plan.trialDays * DAY)
-  const guaranteedUntil = plan.guaranteeMonths ? addMonths(now, plan.guaranteeMonths) : null
   // El disparador de la base dejó la suscripción con la prueba del plan por defecto; aquí toma la del plan invitado.
-  const updated = await tx
-    .update(saasSubscription)
-    .set({
-      planId: plan.id,
-      status: "prueba",
-      trialStartedAt: now,
-      trialEndsAt: trialEnds,
-      currentPeriodStart: now,
-      currentPeriodEnd: trialEnds,
-      trialCreditCents: null,
-      trialDays: null,
-      guaranteedUntil,
-      updatedAt: now,
-    })
-    .where(eq(saasSubscription.organizationId, orgId))
-    .returning({ id: saasSubscription.organizationId })
-  if (!updated.length) throw notFound("Suscripción")
+  await enterInvitationPlan(tx, orgId, plan, now)
   await tx
     .update(saasWaitlistRequest)
     .set({ status: "entro", organizationId: orgId, enteredAt: now, claimedAt: null, tokenHash: null, updatedAt: now })
@@ -1154,6 +1150,174 @@ export async function completeFounderInvitation(tx: Db, requestId: string, orgId
     })
   }
   await writeAdminAudit(tx, null, { action: "saas.waitlist_entered", organizationId: orgId, entityId: requestId, metadata: { planId: plan.id } })
+}
+
+/**
+ * La suscripción entra al plan por invitación como al usar la invitación: su prueba desde
+ * ahora (la del plan) y, si el plan los tiene, sus meses garantizados.
+ */
+async function enterInvitationPlan(
+  tx: Db,
+  orgId: string,
+  plan: typeof saasPlan.$inferSelect,
+  now: Date,
+): Promise<{ trialEndsAt: Date; guaranteedUntil: Date | null }> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas:${orgId}`}, 0))`)
+  const trialEndsAt = new Date(now.getTime() + plan.trialDays * DAY)
+  const guaranteedUntil = plan.guaranteeMonths ? addMonths(now, plan.guaranteeMonths) : null
+  const updated = await tx
+    .update(saasSubscription)
+    .set({
+      planId: plan.id,
+      status: "prueba",
+      trialStartedAt: now,
+      trialEndsAt,
+      currentPeriodStart: now,
+      currentPeriodEnd: trialEndsAt,
+      trialCreditCents: null,
+      trialDays: null,
+      guaranteedUntil,
+      updatedAt: now,
+    })
+    .where(eq(saasSubscription.organizationId, orgId))
+    .returning({ id: saasSubscription.organizationId })
+  if (!updated.length) throw notFound("Suscripción")
+  return { trialEndsAt, guaranteedUntil }
+}
+
+/* ---------- Una clínica que ya existe pasa a Fundadores ---------- */
+
+/**
+ * Lo que ve la administración para pasar a Fundadores una clínica que entró sin la
+ * invitación (el alta asistida): el plan por invitación de su producto, sus lugares y lo
+ * que tendría si pasa ahora.
+ */
+export interface FoundersMove {
+  planName: string
+  currency: string
+  /** Lugares usados, sin esta clínica, y los del plan: lleno, no pasa. */
+  used: number
+  limit: number
+  guaranteeMonths: number | null
+  /** Hasta cuándo valdrían sus condiciones si pasa ahora; después, el plan de lista. */
+  guaranteedUntil: Date | null
+  listPlanName: string | null
+  /** Su prueba empieza de nuevo, como al entrar con la invitación. */
+  trialDays: number
+  trialCreditCents: number
+}
+
+type FoundersMoveCheck = { plan: typeof saasPlan.$inferSelect; seatLimit: number } | { refusal: ServiceError }
+
+/**
+ * Si esta clínica puede pasar a Fundadores y a qué plan: una en prueba, que no es una demo
+ * y que nunca estuvo en un plan por invitación (ni entró con la invitación ni se la pasó
+ * antes, aunque sus condiciones ya terminaran). Los lugares se miran aparte.
+ */
+async function foundersMoveCheck(tx: Db, orgId: string): Promise<FoundersMoveCheck> {
+  const [sub] = await tx
+    .select({
+      status: saasSubscription.status,
+      isDemo: saasSubscription.isDemo,
+      planId: saasSubscription.planId,
+      guaranteedUntil: saasSubscription.guaranteedUntil,
+    })
+    .from(saasSubscription)
+    .where(eq(saasSubscription.organizationId, orgId))
+    .limit(1)
+  if (!sub) return { refusal: notFound("Suscripción") }
+  if (sub.isDemo) return { refusal: new ServiceError("FOUNDERS_DEMO", 409, "Una demo no pasa a Fundadores") }
+  if (sub.status !== "prueba")
+    return { refusal: new ServiceError("FOUNDERS_NOT_IN_TRIAL", 409, "Solo pasa a Fundadores una clínica en prueba") }
+  const [current] = sub.planId
+    ? await tx.select({ seatLimit: saasPlan.seatLimit }).from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
+    : []
+  const [entered] = await tx
+    .select({ id: saasWaitlistRequest.id })
+    .from(saasWaitlistRequest)
+    .innerJoin(saasPlan, eq(saasPlan.id, saasWaitlistRequest.planId))
+    .where(and(eq(saasWaitlistRequest.organizationId, orgId), eq(saasWaitlistRequest.status, "entro"), isNotNull(saasPlan.seatLimit)))
+    .limit(1)
+  const [moved] = await tx
+    .select({ id: adminAudit.id })
+    .from(adminAudit)
+    .where(and(eq(adminAudit.organizationId, orgId), eq(adminAudit.action, FOUNDERS_ENTERED_ACTION)))
+    .limit(1)
+  if (sub.guaranteedUntil || (current && current.seatLimit !== null) || entered || moved)
+    return { refusal: new ServiceError("FOUNDERS_ALREADY", 409, "Esta clínica ya es o fue Fundadora") }
+  const product = await orgProduct(tx, orgId)
+  const invited = await invitationPlan(tx, product)
+  if (!invited) {
+    return {
+      refusal: new ServiceError(
+        "SAAS_NO_INVITATION_PLAN",
+        409,
+        `No hay un plan por invitación de ${productWords(product).name}: crea uno con lugares en Cobros y planes`,
+      ),
+    }
+  }
+  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, invited.id)).limit(1)
+  if (!plan || plan.seatLimit === null) return { refusal: notFound("Plan") }
+  return { plan, seatLimit: plan.seatLimit }
+}
+
+/** Lo de «Pasar a Fundadores» en Plan y pagos de la administración; null si esta clínica no puede. */
+export async function getFoundersMove(tx: Db, orgId: string, now = new Date()): Promise<FoundersMove | null> {
+  const check = await foundersMoveCheck(tx, orgId)
+  if ("refusal" in check) return null
+  const { plan, seatLimit } = check
+  const seats = await founderSeats(tx, plan.id, now)
+  const [list] = await tx.select({ name: saasPlan.name }).from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
+  return {
+    planName: plan.name,
+    currency: plan.currency,
+    used: seats.used,
+    limit: seatLimit,
+    guaranteeMonths: plan.guaranteeMonths,
+    guaranteedUntil: plan.guaranteeMonths ? addMonths(now, plan.guaranteeMonths) : null,
+    listPlanName: list?.name ?? null,
+    trialDays: plan.trialDays,
+    trialCreditCents: plan.trialCreditCents,
+  }
+}
+
+export interface FoundersEntered {
+  planName: string
+  trialEndsAt: Date
+  guaranteedUntil: Date | null
+}
+
+/**
+ * Pasa a Fundadores una clínica que entró sin la invitación (el alta asistida) y sigue en
+ * prueba: queda como si hubiera entrado hoy con ella —el plan, su prueba desde ahora y sus
+ * meses garantizados— y ocupa uno de sus lugares. Solo Administración. Con el plan
+ * bloqueado, como al invitar, dos a la vez no toman el mismo lugar.
+ */
+export async function moveClinicToFounders(
+  tx: Db,
+  actor: AdminActor,
+  orgId: string,
+  now = new Date(),
+): Promise<FoundersEntered> {
+  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo Administración pasa una clínica a Fundadores")
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`saas:${orgId}`}, 0))`)
+  const check = await foundersMoveCheck(tx, orgId)
+  if ("refusal" in check) throw check.refusal
+  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, check.plan.id)).limit(1).for("update")
+  if (!plan) throw notFound("Plan")
+  const seats = await founderSeats(tx, plan.id, now)
+  if (plan.seatLimit !== null && seats.used >= plan.seatLimit) {
+    throw new ServiceError(
+      "SAAS_SEATS_FULL",
+      409,
+      `Los ${plan.seatLimit} lugares de ${plan.name} están ocupados: sube los lugares del plan para pasarla`,
+    )
+  }
+  const entered = await enterInvitationPlan(tx, orgId, plan, now)
+  await writeAdminAudit(tx, actor, { action: FOUNDERS_ENTERED_ACTION, organizationId: orgId, metadata: { planId: plan.id } })
+  // La clínica abierta ve su plan nuevo sin recargar (Plan y pagos y la franja de avisos).
+  await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "saas.subscription.updated", at: now.toISOString() })})`)
+  return { planName: plan.name, ...entered }
 }
 
 function addMonths(date: Date, months: number): Date {
