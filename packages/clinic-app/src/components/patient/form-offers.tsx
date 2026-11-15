@@ -235,7 +235,8 @@ export function FormOffersBox({
   if (view === "solo-otra") {
     return (
       <>
-        <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+        {/* Una línea, pero en su tarjeta como las demás partes de la atención, con «Otra ficha…» a la derecha. */}
+        <p className="flex flex-wrap items-center justify-between gap-2 rounded-sm bg-card px-6 py-2 text-sm text-muted-foreground max-sm:px-4">
           Ninguna ficha aparece sola en esta atención.
           {other}
         </p>

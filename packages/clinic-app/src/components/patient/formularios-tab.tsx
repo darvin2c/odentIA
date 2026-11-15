@@ -51,6 +51,7 @@ import {
   AnswerLabel,
   type AttachmentOption,
   answerSpan,
+  isAsideNote,
   answersForServer,
   isEmptyAnswer,
   isFieldVisible,
@@ -977,12 +978,11 @@ function StaffResponseDetail({
           {shown.map((field) => {
               // Por la clave de la pregunta: una versión nueva de la ficha conserva las que no cambió.
               const before = previous ? previousField(previous, field.id) : null
-              // Lo poco frecuente se pliega: un texto largo opcional y vacío, sin propuesta de Clío
-              // ni respuesta en la anterior, queda en «+ Observaciones» hasta que se abre.
+              // Lo poco frecuente se pliega: «Observaciones» vacía, sin propuesta de Clío ni respuesta
+              // en la anterior, queda en «+ Observaciones» hasta que se abre.
               const folded =
                 editable &&
-                field.type === "texto_largo" &&
-                !field.required &&
+                isAsideNote(field) &&
                 !unfolded.has(field.id) &&
                 isEmptyAnswer(answers[field.id]) &&
                 !proposalFor(field.id) &&

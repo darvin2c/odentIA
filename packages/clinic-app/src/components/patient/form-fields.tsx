@@ -123,16 +123,27 @@ export function answerSpan(field: FormFieldDef): string {
   }
 }
 
+/** Una frase sin mayúsculas, tildes ni espacios de más. */
+const plainWords = (text: string) =>
+  text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+
 /** «Hábitos» y «hábitos»: la misma frase, sin contar mayúsculas, tildes ni espacios de más. */
 export function sameWords(a: string, b: string): boolean {
-  const plain = (text: string) =>
-    text
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase()
-  return plain(a) === plain(b)
+  return plainWords(a) === plainWords(b)
+}
+
+/**
+ * Lo poco frecuente de una ficha: un texto largo opcional para anotar aparte («Observaciones»,
+ * «Notas», «Comentarios», «Otros»). Vacío, se pliega en «+ Observaciones»; una pregunta de
+ * texto como «Hallazgos» no, aunque sea opcional: es parte del examen.
+ */
+export function isAsideNote(field: FormFieldDef): boolean {
+  return field.type === "texto_largo" && !field.required && /^(observaci|nota|comentario|otro|otra)/.test(plainWords(field.label))
 }
 
 /**

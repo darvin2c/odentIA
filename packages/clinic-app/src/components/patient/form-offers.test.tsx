@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { offerRemoval } from "./form-offers"
 
 const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8")
 
@@ -39,4 +40,24 @@ it("el aviso de «No tiene» queda unido a la casilla «Obligatorio»", () => {
   const panel = source("../settings/form-templates-panel.tsx")
   expect(panel).toContain("requiredWithoutNone(field) ? noneWarningId : null")
   expect(panel).toContain("<p id={noneWarningId}")
+})
+
+// Pedido del 15 nov: no había cómo sacar una ficha agregada por error. Vacía, «Quitar» sin preguntar
+// (con «Deshacer»); con algo escrito o propuesto por Clío, «Descartar…» con su motivo.
+describe("sacar de la atención la ficha de hoy", () => {
+  it("vacía se quita; con una respuesta o con algo de Clío, se descarta con su motivo", () => {
+    expect(offerRemoval({ status: "borrador", answers: { a: null, b: "", c: [] } }, 0)).toBe("Quitar")
+    expect(offerRemoval({ status: "borrador", answers: {} }, 0)).toBe("Quitar")
+    expect(offerRemoval({ status: "borrador", answers: { a: 3 } }, 0)).toBe("Descartar…")
+    expect(offerRemoval({ status: "borrador", answers: {} }, 2)).toBe("Descartar…")
+  })
+  it("la finalizada no se quita ni se descarta, y sin la de hoy no hay nada que sacar", () => {
+    expect(offerRemoval({ status: "finalizado", answers: {} }, 0)).toBeNull()
+    expect(offerRemoval(null, 0)).toBeNull()
+  })
+  it("las dos son el descarte de siempre, con su traza: no hay otra operación", () => {
+    const offers = source("./form-offers.tsx")
+    expect(offers).toContain("discardFormResponse(offer.today.responseId, EMPTY_REMOVED_REASON)")
+    expect(offers).toContain("<DiscardFormDialog")
+  })
 })

@@ -1256,7 +1256,7 @@ function FieldEditor({
         {(helpField) => (
           <helpField.TextField
             label="Texto de ayuda (opcional)"
-            placeholder="Lo que ve quien la llena, debajo de la pregunta"
+            placeholder="Se ve debajo de la pregunta"
             maxLength={500}
             disabled={disabled}
           />
