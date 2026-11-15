@@ -230,6 +230,10 @@ it("soporte ve cuántas cosas hicieron los agentes, sin importes, y no abre el p
       })
     ).status,
   ).toBe(403)
+  expect(
+    (await call(`/organizations/${ORG}/billing/founders`, "u-soporte", { method: "POST", body: "{}" }))
+      .status,
+  ).toBe(403)
   expect((await call(`/billing/cost-margin/${ORG}/actions`, "u-soporte")).status).toBe(403)
   expect(
     (await call(`/billing/cost-margin/${ORG}/actions/a:${actionId}`, "u-soporte")).status,

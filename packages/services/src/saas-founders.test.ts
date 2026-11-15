@@ -26,6 +26,8 @@ import {
   discardWaitlistRequest,
   endFounderGuarantees,
   followUpChoices,
+  founderSeats,
+  getFoundersMove,
   getPublicPricing,
   getSignupMode,
   getSignupModes,
@@ -34,6 +36,7 @@ import {
   inviteFromWaitlist,
   listExpiringTerms,
   listWaitlist,
+  moveClinicToFounders,
   readFounderInvitation,
   releaseFounderInvitation,
   setSignupMode,
@@ -242,6 +245,66 @@ describe("la invitación Fundadores", () => {
     expect(moved).toContain(orgId)
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub).toMatchObject({ planId: listPlanId, guaranteedUntil: null })
+  })
+})
+
+describe("pasar a Fundadores desde la administración", () => {
+  it("una clínica en prueba que entró sin la invitación pasa con el plan, su prueba desde hoy, sus meses y un lugar", async () => {
+    await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
+    // Con un precio especial negociado en el plan de lista: Fundadores trae sus precios.
+    const orgId = await clinic({ discountBps: 1000, discountEndsAt: new Date(Date.now() + 90 * DAY) })
+    const before = await founderSeats(ownerDb, foundersPlanId)
+    const now = new Date()
+    expect(await getFoundersMove(ownerDb, orgId, now)).toMatchObject({
+      planName: "Fundadores",
+      used: before.used,
+      limit: 50,
+      guaranteeMonths: 12,
+      listPlanName: "Plan odentIA",
+      trialDays: 90,
+    })
+
+    const entered = await moveClinicToFounders(ownerDb, admin, orgId, now)
+    expect(entered.guaranteedUntil?.getUTCFullYear()).toBe(now.getUTCFullYear() + 1)
+    const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    expect(sub).toMatchObject({
+      planId: foundersPlanId,
+      status: "prueba",
+      trialStartedAt: now,
+      guaranteedUntil: entered.guaranteedUntil,
+      discountBps: 0,
+      discountEndsAt: null,
+    })
+    expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - now.getTime()) / DAY)).toBe(90)
+    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
+    // Ya es Fundadora: no se ofrece ni pasa otra vez.
+    expect(await getFoundersMove(ownerDb, orgId)).toBeNull()
+    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
+
+    // Terminadas sus condiciones, su lugar sigue ocupado y no vuelve a pasar.
+    await ownerDb.update(saasSubscription).set({ guaranteedUntil: new Date(Date.now() - 60_000) }).where(eq(saasSubscription.organizationId, orgId))
+    expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
+    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
+    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
+  })
+
+  it("no pasa sin lugar, ni una demo, ni una clínica que ya paga, y solo Administración la pasa", async () => {
+    const orgId = await clinic()
+    const { used } = await founderSeats(ownerDb, foundersPlanId)
+    await ownerDb.update(saasPlan).set({ seatLimit: used }).where(eq(saasPlan.id, foundersPlanId))
+    expect(await getFoundersMove(ownerDb, orgId)).toMatchObject({ used, limit: used })
+    await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "SAAS_SEATS_FULL" })
+    await ownerDb.update(saasPlan).set({ seatLimit: 50 }).where(eq(saasPlan.id, foundersPlanId))
+    await expect(moveClinicToFounders(ownerDb, support, orgId)).rejects.toMatchObject({ code: "FORBIDDEN" })
+
+    const demo = await clinic({ isDemo: true })
+    expect(await getFoundersMove(ownerDb, demo)).toBeNull()
+    await expect(moveClinicToFounders(ownerDb, admin, demo)).rejects.toMatchObject({ code: "FOUNDERS_DEMO" })
+    const paying = await clinic({ planId: listPlanId, status: "activa" })
+    expect(await getFoundersMove(ownerDb, paying)).toBeNull()
+    await expect(moveClinicToFounders(ownerDb, admin, paying)).rejects.toMatchObject({ code: "FOUNDERS_NOT_IN_TRIAL" })
+    // Nada de lo rechazado ocupó un lugar.
+    expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(used)
   })
 })
 
