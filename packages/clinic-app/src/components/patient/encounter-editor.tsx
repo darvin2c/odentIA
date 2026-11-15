@@ -155,7 +155,7 @@ import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, FormDetail, useEncounterDocuments } from "./encounter-documents"
 import { FormOffersBox } from "./form-offers"
-import { type ClioFormProposals, ClioFormProposalsContext } from "./clio-form-proposals"
+import { type ClioFormProposals, ClioFormProposalsContext, type FormHint } from "./clio-form-proposals"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -635,6 +635,8 @@ export function EncounterEditor({
   // El formulario a medias que se abre para terminarlo: desde el aviso del cierre («Completar
   // ahora») o desde «Atención finalizada» («Completar»), sin ir a buscarlo a Documentos.
   const [finishingForm, setFinishingForm] = useState<string | null>(null)
+  // «Usar en Percusión» de «No pude usar esto»: la ficha se abre en esa pregunta con la frase al lado.
+  const [formHint, setFormHint] = useState<FormHint | null>(null)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
   // Lo dictado en el cierre se decide al abrirlo: firmar descarta las sugerencias y la lista no cambia a mitad.
@@ -1757,8 +1759,15 @@ export function EncounterEditor({
         if (open) formOpenRef.current.set(key, responseId ?? null)
         else formOpenRef.current.delete(key)
       },
+      hint: formHint,
+      // Si esa ficha ya está abierta al lado, la frase aparece ahí: no se abre otra vez.
+      openAt: (hint) => {
+        setFormHint(hint)
+        if (![...formOpenRef.current.values()].includes(hint.responseId)) setFinishingForm(hint.responseId)
+      },
+      clearHint: () => setFormHint(null),
     }),
-    [dictation.enabled, dictation.suggestions, dictation.acceptForms, dictation.act],
+    [dictation.enabled, dictation.suggestions, dictation.acceptForms, dictation.act, formHint],
   )
   const contextSurface = {
     title: "Antecedentes y última atención",
@@ -2967,7 +2976,10 @@ export function EncounterEditor({
           sex={patient.patient.sex ?? null}
           responseId={finishingForm}
           canWrite={canFillFormInAttention(canWrite, !attending, detail.encounter.status, attending)}
-          onClose={() => setFinishingForm(null)}
+          onClose={() => {
+            setFinishingForm(null)
+            setFormHint(null)
+          }}
           onChanged={handleChildChanged}
         />
       )}

@@ -549,7 +549,7 @@
       "id": "voz-v03-1",
       "texto": "Sí señor este paciente que viene a su control de ortodoncia va en el primer año de tratamiento prefiere que hace como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
       "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overjet": 7, "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"] }, "revisar": ["ficha-de-ortodoncia.clase_molar_derecha", "ficha-de-ortodoncia.clase_molar_izquierda"], "noEnNota": ["te duele"] }
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overjet": 7, "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"], "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "noEnNota": ["te duele"] }
     },
     {
       "id": "voz-v03-2",
@@ -604,8 +604,7 @@
       "id": "voz-v08-1",
       "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" } },
-      "ignora": ["ficha-de-odontopediatria.ceod_c"]
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"] }
     },
     {
       "id": "voz-v08-2",
@@ -667,7 +666,7 @@
       "id": "voz-v12-1",
       "texto": "muy buenos días p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor ese Este 0,99",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
-      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_p": 1 }, "revisar": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o"] },
+      "espera": { "fichas": { "ficha-odontoestomatologica.cpod_c": 3, "ficha-odontoestomatologica.cpod_p": 1, "ficha-odontoestomatologica.cpod_o": 7 }, "revisar": ["ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_o"] },
       "ignora": ["ficha-odontoestomatologica.ihos"]
     },
     {
@@ -681,6 +680,19 @@
       "texto": "y profilaxis",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
       "espera": { "fichas": {} }
+    },
+    {
+      "id": "voz-oido-volar",
+      "texto": "volar derecha clase 2 división 1 la izquierda también clase dos división 1",
+      "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "revisar": ["ficha-de-ortodoncia.clase_canina_derecha", "ficha-de-ortodoncia.clase_canina_izquierda"] }
+    },
+    {
+      "id": "voz-oido-seod",
+      "texto": "sé o d cinco cariados dos con extracción indicada ser obturados",
+      "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
+      "espera": { "fichas": { "ficha-odontoestomatologica.ceod_c": 5, "ficha-odontoestomatologica.ceod_e": 2 }, "revisar": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_p", "ficha-odontoestomatologica.cpod_o"] },
+      "ignora": ["ficha-odontoestomatologica.ceod_o"]
     }
   ]
 }

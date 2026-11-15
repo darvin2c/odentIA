@@ -14,6 +14,18 @@ import type { DictationSuggestion } from "./dictation-session"
  * respuesta en su pregunta (forma B, aprobada el 14 nov). Fuera de una
  * atención con Clío no hay contexto y nada de esto se ve.
  */
+/** Una pregunta de una ficha empezada, como la nombra un aviso de «No pude usar esto». */
+export interface FormTarget {
+  responseId: string
+  fieldId: string
+  label: string
+}
+
+/** «Usar en Percusión»: la pregunta que se abre y la frase dicha que va al lado. */
+export interface FormHint extends FormTarget {
+  said: string
+}
+
 export interface ClioFormProposals {
   /** Las propuestas sin decidir: por confirmar y por revisar. */
   items: DictationSuggestion[]
@@ -29,6 +41,11 @@ export interface ClioFormProposals {
    * clave: en la atención hay más de uno montado.
    */
   setFormOpen: (key: string, open: boolean, responseId?: string | null) => void
+  /** La frase de «No pude usar esto» que se está usando en su pregunta («Usar en…»), o ninguna. */
+  hint: FormHint | null
+  /** Abre la ficha en esa pregunta con la frase al lado: no llena nada. */
+  openAt: (hint: FormHint) => void
+  clearHint: () => void
 }
 
 export const ClioFormProposalsContext = createContext<ClioFormProposals | null>(null)
@@ -106,8 +123,17 @@ export const proposedWords = (item: DictationSuggestion): string => formAnswerWo
 export const changesWritten = (item: DictationSuggestion): boolean =>
   item.kind === "ficha" && item.payload["replaces"] !== undefined && item.payload["value"] != null
 
-/** Lo que Clío propone con un valor: lo que se confirma y lo que cambia lo escrito. Lo demás es un aviso. */
-export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || changesWritten(item)
+/**
+ * La propuesta de la segunda lectura (lo que la red avisaba y Clío leyó de nuevo): queda por
+ * revisar, se confirma de a una en su pregunta y al firmar viene desmarcada.
+ */
+export const reread = (item: DictationSuggestion): boolean => item.kind === "ficha" && item.payload["reread"] === true && item.payload["value"] != null
+
+/**
+ * Lo que Clío propone con un valor: lo que se confirma y, por revisar, lo que cambia lo escrito y lo
+ * de la segunda lectura. La respuesta de ficha sin valor es un aviso («elige tú»).
+ */
+export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || (item.kind === "ficha" && item.payload["value"] != null)
 
 /** «1 respuesta», «3 respuestas». */
 export const answersWords = (count: number): string => (count === 1 ? "1 respuesta" : `${count} respuestas`)

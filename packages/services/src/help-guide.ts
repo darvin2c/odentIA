@@ -1032,9 +1032,11 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "dicto-atencion",
         q: "¿Cómo dicto una atención?",
-        a: "Dentro de la atención, pulsa «Dictar», arriba junto a «Antecedentes y última atención», y habla: Clío ordena lo que dices en sugerencias dentro de cada parte, y tú las confirmas o firmas. Al lado, «¿Qué puedo decir?» muestra ejemplos (la primera vez se abre solo) y «Escribir en vez de dictar». Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
+        a: "Dentro de la atención, pulsa «Dictar», arriba junto a «Antecedentes y última atención», y habla: Clío ordena lo que dices en sugerencias dentro de cada parte, y tú las confirmas o firmas. Al lado, «¿Qué puedo decir?» muestra ejemplos (la primera vez se abre solo) y «Escribir en vez de dictar». Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar. Dicta con un micrófono de vincha o de solapa cerca de la boca: las voces de fondo (radio, otra conversación) se cuelan.",
         forms: [
           "como uso el dictado",
+          "microfono de vincha para dictar",
+          "el dictado escribe lo que dice la radio",
           "dictado",
           "dictar",
           "como funciona clio",
