@@ -347,8 +347,9 @@ export function groundSource(said: string | undefined, transcript: string): stri
       .join(" ")
   }
   // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
-  // tres»): sin ellas era lo dicho. Medido el 15 nov: 5 de 9 respuestas de ficha perdidas eran eso.
-  return ground(fragment) || ground(fragment.replace(/[«»“”"]/gu, "").trim())
+  // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
+  // respuestas de ficha perdidas eran las comillas.
+  return ground(fragment) || ground(fragment.replace(/[«»“”"]/gu, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim())
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
