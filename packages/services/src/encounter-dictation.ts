@@ -63,7 +63,9 @@ import {
   formAnswerFragments,
   formAnswerWords,
   formDropNotices,
+  pendingFormValues,
   prepareFormAnswer,
+  rereadFormAnswer,
   withDiagnosisFormAnswers,
   withFormTwins,
   withoutFormNotes,
@@ -135,6 +137,11 @@ export interface DictationDraft {
   payload: Record<string, unknown>
   /** Lo que dijo el odontólogo y dio lugar a la sugerencia. */
   sourceText?: string
+  /**
+   * Una respuesta de ficha de la segunda lectura de una oración que la red avisó
+   * (`formNetMisses`): si calza queda por revisar, y si no, la oración sigue avisada.
+   */
+  reread?: boolean
 }
 
 export interface DictationSuggestion {
@@ -1419,8 +1426,11 @@ export interface DictationSegmentResult {
   alreadyOnFile: string[]
   /** Lo hecho que ya está registrado en esta atención («Profilaxis»): no se propone otra vez, se avisa. */
   alreadyDone: string[]
-  /** Lo dicho para una ficha que no quedó como propuesta, con por qué: va a «No pude usar esto». */
-  droppedForms: Array<{ said: string; why: string }>
+  /**
+   * Lo dicho para una ficha que no quedó como propuesta, con por qué: va a «No pude usar esto».
+   * `targets`: las preguntas que nombra, para abrirlas con «Usar en…» (ninguna si no hay dónde).
+   */
+  droppedForms: Array<{ said: string; why: string; targets: FormTarget[] }>
   /**
    * Lo dicho para una ficha que sí quedó como propuesta, por dato («perdidos uno», no la frase
    * entera): es lo único de la ficha que la pantalla resalta como usado (revisión final del 15 nov).
@@ -1428,6 +1438,13 @@ export interface DictationSegmentResult {
   formSources: string[]
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
+}
+
+/** Una pregunta de una ficha empezada, para abrirla desde «No pude usar esto» («Usar en Percusión»). */
+export interface FormTarget {
+  responseId: string
+  fieldId: string
+  label: string
 }
 
 /** ¿Ese tramo del dictado ya dejó algo en esta atención? */
@@ -1602,7 +1619,7 @@ export async function saveDictationSegment(
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
-  const droppedForms: Array<{ said: string; why: string }> = []
+  const droppedForms: DictationSegmentResult["droppedForms"] = []
   const formSources: string[] = []
   const formQuestionOf = (draft: DictationDraft) => scope.formQuestions.find((item) => item.number === draft.payload["question"])
   // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada, y lo
@@ -1623,16 +1640,14 @@ export async function saveDictationSegment(
   // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov,
   // U5), y la oración que nombra una pregunta sin propuesta ni aviso tampoco se pierde en silencio
   // (medición del 15 nov). Lo que ya propone una pendiente de otra pausa solo avisa si se dijo otro valor.
-  const pendingFormValues = new Map(
-    pendingNow
-      .filter((item) => item.kind === "ficha")
-      .flatMap((item) => {
-        const question = scope.formQuestions.find((one) => one.responseId === item.payload["responseId"] && one.fieldId === item.payload["fieldId"])
-        return question ? [[question.number, item.payload["value"] ?? null] as const] : []
-      }),
-  )
-  for (const { said, why } of formDropNotices(outcomes, twins, scope.formQuestions, { site: scope.site, transcript: scope.transcript }, pendingFormValues))
-    droppedForms.push({ said, why })
+  const pendingValues = pendingFormValues(pendingNow, scope.formQuestions)
+  for (const { said, why, questions } of formDropNotices(outcomes, twins, scope.formQuestions, { site: scope.site, transcript: scope.transcript }, pendingValues)) {
+    const targets = questions.flatMap((number) => {
+      const question = scope.formQuestions.find((item) => item.number === number)
+      return question ? [{ responseId: question.responseId, fieldId: question.fieldId, label: question.label }] : []
+    })
+    droppedForms.push({ said, why, targets })
+  }
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
   // Las alergias, antes que las recetas: la que se acaba de dictar ya avisa en este mismo tramo.
   const first = (draft: { draft: DictationDraft; prepared: Prepared }) => Number(isPlanChoice(draft.draft.kind, draft.prepared.payload)) * 2 + Number(draft.draft.kind === "alergia")
@@ -2205,9 +2220,10 @@ export async function confirmDictationSuggestion(
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   // La respuesta de ficha que cambia lo ya escrito queda por revisar, y la cambia una persona en su
-  // pregunta, de a una (revisión final del 15 nov, decisión 2): esa sí se confirma.
-  const changesWritten = row.kind === "ficha" && changesWrittenAnswer(splitMeta(row.payload).data)
-  if (row.status === "por_revisar" && !changesWritten) throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
+  // pregunta, de a una (revisión final del 15 nov, decisión 2): esa sí se confirma. La de la segunda
+  // lectura, con su valor, también: se revisa y se confirma en su pregunta.
+  const oneByOne = row.kind === "ficha" && (changesWrittenAnswer(splitMeta(row.payload).data) || rereadFormAnswer(splitMeta(row.payload).data))
+  if (row.status === "por_revisar" && !oneByOne) throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
   if (row.kind === "ficha" && options.expectedValue !== undefined) {
     const data = splitMeta(row.payload).data
     if (JSON.stringify(data["value"] ?? null) !== JSON.stringify(options.expectedValue ?? null)) {
