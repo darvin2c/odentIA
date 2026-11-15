@@ -172,6 +172,15 @@ describe("lo que quedó sin revisar, al firmar", () => {
     expect(unreviewedWords([], "F")).toBeNull()
     expect(unreviewedWords(undefined, "F")).toBeNull()
   })
+
+  // Revisión final del 15 nov (dev H6): con tres declaraciones del mismo día decía «lo que dijo ella de
+  // su salud el 14 nov, lo que dijo ella… y lo que dijo ella…».
+  it("lo del mismo día y de la misma persona se dice una vez", () => {
+    const herselfOn = (at: string) => ({ ...base, at, by: { kind: "patient" as const, name: null, relation: null } })
+    expect(
+      unreviewedWords([herselfOn("2026-11-14T22:20:00.000Z"), herselfOn("2026-11-14T22:21:00.000Z"), herselfOn("2026-11-14T22:22:00.000Z")], "F"),
+    ).toBe("lo que dijo ella de su salud el 14 nov")
+  })
 })
 
 // Revisión final del 15 nov (dev H2, ux D5): con dos correcciones del anticoagulante, Antecedentes, el

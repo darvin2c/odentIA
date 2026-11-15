@@ -241,7 +241,8 @@ export function pregnancyChip(pregnancy: PregnancyToday): string {
  * H6 de clínica). null si no queda nada.
  */
 export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefined, sex: Sex): string | null {
-  const parts = (groups ?? []).map((group) => {
+  // Lo de la misma persona el mismo día se dice una vez (revisión final del 15 nov, dev H6).
+  const said = (groups ?? []).map((group) => {
     const day = group.at ? shortDay(group.at) : ""
     const when = day ? ` el ${day}` : ""
     if (group.by.kind === "staff") return `lo que anotó el equipo de su salud${when}`
@@ -251,6 +252,7 @@ export function unreviewedWords(groups: readonly DeclaredHealthGroup[] | undefin
     if (who.includes(",")) return `lo que dijo de su salud ${who}${when ? `,${when}` : ""}`
     return `lo que dijo${who ? ` ${who}` : ""} de su salud${when}`
   })
+  const parts = [...new Set(said)]
   if (parts.length === 0) return null
   return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
 }
