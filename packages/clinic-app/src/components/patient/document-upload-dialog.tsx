@@ -68,6 +68,9 @@ import {
 } from "./tomography-upload"
 import { PlacesField } from "../../product/site-fields"
 
+/** La atención común vacía: el archivo queda en la ficha sin atención. */
+const GENERAL_WORDS = "General (sin atención)"
+
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 
 /** Lo que se escribe de cada archivo: los campos de su fila. */
@@ -113,9 +116,6 @@ const NO_LINKS: DocumentLinkValue = {
 }
 
 const EMPTY_UPLOAD: UploadValues = { encounterId: "", allCategory: "", allCapturedAt: "", rows: [] }
-
-/** La atención común vacía: el archivo queda en la ficha sin atención. */
-const GENERAL_WORDS = "General (sin atención)"
 
 const UNCONFIRMED_ROW =
   "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar."
@@ -457,8 +457,7 @@ export function DocumentUploadDialog({
   const pendingKeys = rows
     .filter((row) => statusOf(row.key) === "pending" || statusOf(row.key) === "error")
     .map((row) => row.key)
-  // El mismo motivo en varias filas (la conexión que se cortó para todas) se dice una sola vez.
-  const sharedError = sharedRowError(rows.map((row) => files[row.key]?.error ?? null))
+  const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
 
   /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
   const lastCommon = useRef({ category: "", capturedAt: "" })
@@ -577,6 +576,8 @@ export function DocumentUploadDialog({
     tomography.scanning || tomography.candidate || tomography.job || tomography.existing,
   )
   const reviewingStudy = Boolean(tomography.candidate) && !tomography.job && !tomography.existing
+  // El mismo motivo en varias filas (la conexión que se cortó para todas) se dice una sola vez.
+  const sharedError = sharedRowError(rows.map((row) => files[row.key]?.error ?? null))
 
   if (studyMode)
     return (
@@ -638,7 +639,7 @@ export function DocumentUploadDialog({
       error={surface.error}
       // Solo por permiso: lo que falta en una fila se dice en su campo al subir.
       submitDisabled={disabled}
-      submitLabel={uploading ? "Subiendo…" : uploadWords(pendingKeys.length)}
+      submitLabel={uploading ? "Subiendo…" : `Subir ${pendingKeys.length}`}
     >
       <fieldset disabled={uploading || disabled} className="flex flex-col gap-3">
         <form.AppField name="encounterId">
@@ -817,15 +818,15 @@ export function DocumentUploadDialog({
           )}
         </form.AppField>
 
+        {unconfirmedCount > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Hay {unconfirmedCount} archivo(s) con resultado no confirmado. La lista de Documentos ya se
+            actualizó: verifica si aparecen antes de reenviar.
+          </p>
+        )}
       </fieldset>
     </FormDrawer>
   )
-}
-
-/** Lo que dice el botón: «Subir» sin nada por subir (nunca «Subir 0»), y cuántos archivos cuando hay. */
-export function uploadWords(pending: number): string {
-  if (pending === 0) return "Subir"
-  return pending === 1 ? "Subir 1 archivo" : `Subir ${pending} archivos`
 }
 
 /** El motivo que comparten dos o más filas que fallaron, para decirlo una sola vez; si difieren, ninguno. */
