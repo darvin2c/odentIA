@@ -69,7 +69,7 @@ import {
   withFormTwins,
   withoutFormNotes,
 } from "./dictation-forms.js"
-import type { DictationPatient, DictationPrepared, ProductDictation, ProductHooks } from "./product-hooks.js"
+import type { DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
 import type { ProductCatalog } from "./product-catalog.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
 import { patientAge } from "./responsibilities.js"
@@ -299,7 +299,11 @@ interface DictationScope {
   transcript?: string
   /** Con qué palabras se busca en el tarifario lo dicho. */
   serviceWords: ServiceWords
-  /** Si el paciente es adulto: a un adulto no se le propone lo de diente de leche (`ProductDictation.fitsService`). */
+  /**
+   * Si el paciente es adulto: a un adulto no se le propone lo de diente de leche
+   * (`ProductDictation.serviceFit`). Sin `patientId` en `dictationScope` (lo que no busca en el
+   * tarifario: las recetas, el presupuesto), no se sabe.
+   */
   patient: DictationPatient
 }
 
@@ -326,10 +330,6 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
   }
 }
 
-/** Los servicios que pueden ser lo dicho en ese sitio, para el paciente de la atención. */
-function fitsWhere(scope: Pick<DictationScope, "dictation" | "patient" | "product">, where: Record<string, unknown>): (service: ServiceOption) => boolean {
-  return (service) => scope.dictation.fitsService(service, where, scope.patient, scope.product)
-}
 
 /** Las clases de sugerencia de todo producto; cada uno suma las suyas (`ProductDictation.kinds`). */
 const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "control", "receta", "alergia", "procedimiento", "cita", "presupuesto", "material", "ficha"]
@@ -429,11 +429,25 @@ function matchService<T extends { name: string }>(spoken: string, services: T[],
 }
 
 /**
- * El servicio de lo dicho en un producto (`matchService`), por nombre: el que
- * se da por bueno o las candidatas, solo entre los que pueden ser lo dicho en
- * ese sitio y para ese paciente (`fitsService`, con lo que dice el nombre). Lo
- * usa la medición del dictado (`eval:dictado`) para contar los procedimientos
- * que calzan con otro, o con el de otra pieza o de otra dentición.
+ * `matchService` entre los servicios que pueden ser lo dicho (`ProductDictation.serviceFit`, prueba
+ * con voz del 15 nov, c3): primero los que calzan en la pieza y para el paciente; si ninguno calza
+ * con lo dicho, los de otro grupo de piezas, solo para elegir (la endodoncia anterior en la 36 si
+ * la clínica no tiene la posterior); los que no pueden ser (lo de leche en una permanente), nunca.
+ */
+function matchFitting<T extends { name: string }>(spoken: string, services: T[], fit: (service: T) => DictationServiceFit, lookup: ServiceWords): { match: T | null; candidates: T[] } {
+  const fits = services.map((service) => ({ service, fit: fit(service) }))
+  const own = matchService(spoken, fits.flatMap((item) => (item.fit === "fits" ? [item.service] : [])), lookup)
+  if (own.match || own.candidates.length) return own
+  const other = matchService(spoken, fits.flatMap((item) => (item.fit === "otherGroup" ? [item.service] : [])), lookup)
+  return { match: null, candidates: other.match ? [other.match] : other.candidates }
+}
+
+/**
+ * El servicio de lo dicho en un producto (`matchFitting`), por nombre: el que
+ * se da por bueno o las candidatas, con la pieza dicha y si el paciente es
+ * adulto (con lo que dice el nombre de cada servicio). Lo usa la medición del
+ * dictado (`eval:dictado`) para contar los procedimientos que calzan con otro,
+ * o con el de otra pieza o de otra dentición.
  */
 export function dictatedService(
   spoken: string,
@@ -443,8 +457,8 @@ export function dictatedService(
   patient: DictationPatient = { adult: null },
 ): { match: string | null; candidates: string[] } {
   const hooks = productHooksFor(product)
-  const fitting = names.filter((name) => hooks.dictation?.fitsService({ name }, where, patient) ?? true)
-  const { match, candidates } = matchService(spoken, fitting.map((name) => ({ name })), serviceWordsOf(hooks))
+  const fit = (service: { name: string }) => hooks.dictation?.serviceFit(service, where, patient) ?? "fits"
+  const { match, candidates } = matchFitting(spoken, names.map((name) => ({ name })), fit, serviceWordsOf(hooks))
   return { match: match?.name ?? null, candidates: candidates.map((item) => item.name) }
 }
 
@@ -659,7 +673,7 @@ async function settleMaterial(tx: Db, orgId: string, encounterId: string, prepar
  * una persona puede elegir queda `por_revisar` con el motivo, nunca se pierde.
  */
 async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Promise<Prepared | null> {
-  const { services, diagnosisSystem, dictation } = scope
+  const { diagnosisSystem, dictation } = scope
   const own = dictation.kinds.includes(draft.kind)
   if (!own && !COMMON_KINDS.includes(draft.kind)) return null
   // La respuesta de una ficha se comprueba contra su pregunta y contra lo que de verdad se dijo.
@@ -696,7 +710,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal.
     const { alternatives, ...main } = payload
     const options = scope.choices && Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
-    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, services, scope)
+    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, scope)
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
@@ -707,35 +721,37 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
       return { payload, status: "por_revisar", note: "No entendí para qué día. Dilo otra vez o elige otro horario." }
     }
     if (payload["time"] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(payload["time"]))) delete payload["time"]
-    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services, scope.serviceWords, fitsWhere(scope, payload)) : {}
     // La cita no lleva un servicio que no existe (prueba con voz del 15 nov, c3: «adaptación y
     // profilaxis», lo de hoy): sin uno de tus servicios que calce, va sin servicio.
-    if (what.service !== undefined && !what.serviceId && !what.candidates?.length) {
-      const { service: _said, ...rest } = payload
-      return { payload: rest, status: "lista", note: null }
+    if (typeof payload["service"] === "string") {
+      const what = chooseService(payload as PlanChoice, scope, payload)
+      if (what.serviceId || what.candidates?.length) Object.assign(payload, what)
+      else delete payload["service"]
     }
-    return { payload: { ...payload, ...what }, status: "lista", note: null }
+    return { payload, status: "lista", note: null }
   }
   if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
-  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services, scope.serviceWords, fitsWhere(scope, payload)) }, status: "lista", note: null }
+  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, scope, payload) }, status: "lista", note: null }
   return { payload, status: "lista", note: null }
 }
 
-/** Con qué se busca en el tarifario una prestación dicha: las palabras del producto y los servicios que pueden ser lo dicho. */
-type ServiceLookup = Pick<DictationScope, "dictation" | "serviceWords" | "patient" | "product">
+/** Con qué se busca en el tarifario una prestación dicha: sus servicios, las palabras del producto y lo que decide cuáles pueden ser lo dicho. */
+type ServiceLookup = Pick<DictationScope, "services" | "dictation" | "serviceWords" | "patient" | "product">
 
 /** Lo que se busca en el tarifario de una prestación dicha: el servicio si hay uno solo, o las candidatas. */
 type PlanChoice = { service?: string; serviceId?: string; serviceName?: string; priceCents?: number; currency?: string; serviceScope?: string | null; candidates?: ServiceOption[] }
 
 /**
- * `fits`: los que pueden ser lo dicho en su sitio y para el paciente (`fitsWhere`); el tarifario se
- * busca solo entre ellos. Lo que eligió una persona (`serviceId`) no se juzga: decide ella.
+ * Se busca entre los que pueden ser lo dicho en `where` (su pieza) y para el paciente
+ * (`matchFitting`). Lo que eligió una persona (`serviceId`) no se juzga: decide ella.
  */
-function chooseService(choice: PlanChoice, services: ServiceOption[], lookup: ServiceWords, fits: (service: ServiceOption) => boolean = () => true): PlanChoice {
+function chooseService(choice: PlanChoice, scope: ServiceLookup, where: Record<string, unknown>): PlanChoice {
+  const { services } = scope
   const chosen = typeof choice.serviceId === "string" ? services.find((service) => service.id === choice.serviceId) : undefined
-  const { match, candidates } = chosen ? { match: chosen, candidates: [] } : matchService(String(choice.service ?? ""), services.filter(fits), lookup)
+  const fit = (service: ServiceOption) => scope.dictation.serviceFit(service, where, scope.patient, scope.product)
+  const { match, candidates } = chosen ? { match: chosen, candidates: [] } : matchFitting(String(choice.service ?? ""), services, fit, scope.serviceWords)
   if (match) return { service: choice.service ?? match.name, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }
   return { service: choice.service ?? "", candidates }
 }
@@ -747,13 +763,12 @@ const OPTION_LETTER = ["A", "B", "C"]
  * fase 2). La principal es la recomendada (la opción A del presupuesto); cada
  * camino busca su servicio en el tarifario como la principal. Queda lista solo
  * si todos tienen su servicio. Cada uno se busca entre los que pueden ir en la
- * pieza dicha y para el paciente (`fitsWhere`).
+ * pieza dicha y para el paciente.
  */
-function settlePlan(payload: Record<string, unknown>, services: ServiceOption[], scope: ServiceLookup): Prepared {
-  const { dictation, serviceWords: lookup } = scope
-  const fits = fitsWhere(scope, payload)
+function settlePlan(payload: Record<string, unknown>, scope: ServiceLookup): Prepared {
+  const { dictation } = scope
   const { options: rawOptions, candidates: _candidates, ...rest } = payload
-  const main = chooseService(rest as PlanChoice, services, lookup, fits)
+  const main = chooseService(rest as PlanChoice, scope, payload)
   const base = { ...rest, ...main }
   delete base["candidates"]
   const fitted: Prepared = main.serviceId
@@ -766,7 +781,7 @@ function settlePlan(payload: Record<string, unknown>, services: ServiceOption[],
           : `Dijiste «${main.service}» y no está en tus servicios. Elige la prestación.`,
       }
   if (!Array.isArray(rawOptions) || rawOptions.length === 0) return fitted
-  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services, lookup, fits))
+  const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, scope, payload))
   // La elección guarda la pieza y las caras como se dijeron: cada camino toma de ahí lo suyo al
   // confirmarse (`confirmPlanChoice`), y la corona no se queda sin las caras que pide la resina.
   const site = choiceSite(base)
@@ -931,7 +946,7 @@ async function revise(
   let payload: Record<string, unknown> = Object.fromEntries(
     Object.entries({ ...(kind === "receta" ? saidInMedication(current) : current), ...patch }).filter(([, value]) => value !== null && value !== ""),
   )
-  if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, services, scope)
+  if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, scope)
   // Tocar otro hueco de los que ofrece la tarjeta: se queda ese, si sigue libre.
   if (kind === "cita" && typeof patch["startsAt"] === "string") return { payload: { ...current, startsAt: patch["startsAt"] }, status: "lista", note: null }
   if (kind === "procedimiento") {
@@ -1407,9 +1422,9 @@ const MAIN_SERVICE_KEYS = ["service", "serviceId", "serviceName", "priceCents", 
  * principal (`serviceId`) o de un camino (`option1ServiceId`, `option2ServiceId`),
  * y «Recomendar» un camino (`recommend`: 1 o 2), que pasa a ser la opción A.
  */
-function revisePlanChoice(current: Record<string, unknown>, patch: Record<string, unknown>, services: ServiceOption[], scope: ServiceLookup): Prepared {
+function revisePlanChoice(current: Record<string, unknown>, patch: Record<string, unknown>, scope: ServiceLookup): Prepared {
   const pick = (id: unknown) => {
-    const chosen = services.find((service) => service.id === id)
+    const chosen = scope.services.find((service) => service.id === id)
     if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
     return chosen.id
   }
@@ -1434,7 +1449,7 @@ function revisePlanChoice(current: Record<string, unknown>, patch: Record<string
   }
   const site = scope.dictation.normalizeSite(rest)
   if (site.invalid) return { payload: { ...rest, ...chosenMain, options }, status: "por_revisar", note: site.invalid }
-  return settlePlan({ ...site.payload, ...chosenMain, options }, services, scope)
+  return settlePlan({ ...site.payload, ...chosenMain, options }, scope)
 }
 
 const FIELD_LABEL = Object.fromEntries(
@@ -1910,12 +1925,11 @@ export async function saveDictationSegment(
   // Un presupuesto sin nada que llevar no se crea (prueba con voz del 15 nov, c3): ni lo indicado hoy,
   // ni lo dictado que espera, ni una indicación de este tramo. Si se pidió con esa palabra, «No pude
   // usar esto» dice por qué; si no, Clío lo leyó de otra cosa («los citamos en una semana»).
-  const quoted = rows.some((row) => row.kind === "plan")
-  for (const [index, row] of [...rows.entries()].reverse()) {
-    if (row.kind !== "presupuesto" || quoted || row.note !== NOTHING_TO_QUOTE) continue
-    rows.splice(index, 1)
-    if (/presupuest/i.test(row.sourceText ?? "")) droppedForms.push({ said: row.sourceText ?? "", why: NOTHING_TO_QUOTE, targets: [] })
-  }
+  // Uno por tramo (`pendingBudget`).
+  const empty = rows.some((row) => row.kind === "plan") ? -1 : rows.findIndex((row) => row.kind === "presupuesto" && row.note === NOTHING_TO_QUOTE)
+  const [unquoted] = empty >= 0 ? rows.splice(empty, 1) : []
+  const asked = unquoted?.sourceText ?? ""
+  if (/\b(?:presupuest|cotiz|proforma)/.test(normalizeForSearch(asked))) droppedForms.push({ said: asked, why: NOTHING_TO_QUOTE, targets: [] })
   const inserted = rows.length ? await tx.insert(encounterDictationSuggestion).values(rows).returning() : []
   // Una alergia nueva, corregida o quitada cambia el aviso de las recetas que ya esperaban.
   if (allergiesTouched) await refreshRecipes(tx, orgId, patientId, encounterId, scope)

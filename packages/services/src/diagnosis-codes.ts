@@ -98,14 +98,12 @@ export async function findDiagnosisCode(
 export async function closestDiagnosisCode(tx: Db, system: DiagnosisSystemKey, rawCode: string): Promise<DiagnosisCodeOption | null> {
   const code = normalizeDiagnosisCode(system, rawCode.trim())
   if (!code) return null
-  // El código y sus padres, hasta la categoría de tres caracteres.
-  const parents = [...new Set(Array.from({ length: Math.max(1, code.length - 2) }, (_, cut) => code.slice(0, code.length - cut).replace(/\.$/, "")))]
-  const rows = await tx
-    .select({ code: diagnosisCatalog.code, title: diagnosisCatalog.title, isCategory: diagnosisCatalog.isCategory })
-    .from(diagnosisCatalog)
-    .where(and(eq(diagnosisCatalog.systemKey, system), inArray(diagnosisCatalog.code, parents)))
-  const [row] = rows.sort((a, b) => b.code.length - a.code.length)
-  return row ? { system, code: row.code, description: row.title, isCategory: row.isCategory } : null
+  // El código y sus padres, del más largo a la categoría de tres caracteres.
+  const parents = Array.from({ length: Math.max(1, code.length - 2) }, (_, cut) => code.slice(0, code.length - cut)).filter((parent) => !parent.endsWith("."))
+  const known = await codesIn(tx, system, parents)
+  const found = parents.find((parent) => known.has(parent))
+  const row = found ? known.get(found) : undefined
+  return found && row ? { system, code: found, description: row.title, isCategory: row.isCategory } : null
 }
 
 export interface DiagnosisCodeInput {

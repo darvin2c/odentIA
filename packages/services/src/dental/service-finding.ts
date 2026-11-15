@@ -4,12 +4,14 @@ import { dentalTemplateRule, serviceFinding } from "@odentia/db/schema/dental"
 import {
   DENTITION_COUNTERPART_FAMILIES,
   type Dentition,
+  isDentition,
+  isToothGroup,
   type LeavesFinding,
   leavesFindingIssues,
   type ToothGroup,
   validateLeavesFinding,
 } from "@odentia/dental"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, isNotNull, sql } from "drizzle-orm"
 import { validation } from "../errors.js"
 import { orgProduct } from "../locale.js"
 import { orgDentalProfile } from "./profile.js"
@@ -59,6 +61,26 @@ export interface TemplateToothAnatomy {
   groups: ToothGroup[]
   dentition: Dentition | null
   family: string
+}
+
+/**
+ * Los servicios activos de la clínica con la anatomía de su tratamiento de la biblioteca (la misma
+ * regla que `toothAnatomy`: la tiene si su familia no es nula), o `null` si no la tiene. Lo lee Clío
+ * una vez por pausa para no proponer lo de otra pieza (prueba con voz del 15 nov, c3).
+ */
+export async function activeServiceAnatomies(
+  tx: Db,
+  orgId: string,
+): Promise<Array<{ id: string; name: string; code: string | null; anatomy: Pick<TemplateToothAnatomy, "groups" | "dentition"> | null }>> {
+  const rows = await tx
+    .select({ id: serviceCatalog.id, name: serviceCatalog.name, code: serviceCatalog.code, groups: dentalTemplateRule.toothGroups, dentition: dentalTemplateRule.dentition })
+    .from(serviceCatalog)
+    .leftJoin(dentalTemplateRule, and(eq(dentalTemplateRule.templateId, serviceCatalog.templateId), isNotNull(dentalTemplateRule.family)))
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
+  return rows.map(({ groups, dentition, ...service }) => ({
+    ...service,
+    anatomy: groups ? { groups: groups.filter(isToothGroup), dentition: isDentition(dentition) ? dentition : null } : null,
+  }))
 }
 
 /** Un servicio activo de la misma familia, que se puede ofrecer en su lugar. */

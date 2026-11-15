@@ -331,7 +331,10 @@ export interface DictationPrepared {
   said?: string
 }
 
-/** Un servicio del tarifario, como lo mira `ProductDictation.fitsService`. */
+/** Si un servicio puede ser lo dicho (`ProductDictation.serviceFit`): sí, solo si ninguno de su grupo de piezas calza, o nunca. */
+export type DictationServiceFit = "fits" | "otherGroup" | "never"
+
+/** Un servicio del tarifario, como lo mira `ProductDictation.serviceFit`. */
 export interface DictationService {
   id?: string
   name: string
@@ -366,13 +369,14 @@ export interface ProductDictation {
    */
   context(tx: Db, orgId: string): Promise<unknown>
   /**
-   * Si un servicio puede ser lo dicho en ese sitio y para ese paciente: el tarifario solo se busca
-   * entre los que sí (`matchService`). odentIA no propone uno de diente de leche para una pieza
-   * permanente, ni a un adulto sin pieza dicha, ni uno de permanente para una temporal, ni el de
-   * otro grupo de piezas (prueba con voz del 15 nov, c3). `context`: lo que el producto leyó;
-   * sin él, lo que dicen su nombre y su código.
+   * Si un servicio puede ser lo dicho en ese sitio y para ese paciente (prueba con voz del 15 nov,
+   * c3): el tarifario se busca primero entre los que calzan y, si ninguno calza con lo dicho, entre
+   * los de otro grupo de piezas, solo para elegir; los que no pueden ser nunca se proponen. odentIA:
+   * uno de diente de leche nunca para una pieza permanente ni para un adulto sin pieza dicha, ni uno
+   * de permanente para una temporal; la endodoncia anterior en la 36 es de otro grupo. `context`:
+   * lo que el producto leyó; sin él, lo que dicen su nombre y su código.
    */
-  fitsService(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): boolean
+  serviceFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): DictationServiceFit
   /** El «dónde» dictado de un diagnóstico o una indicación, en los valores del sistema; `invalid`: por qué no vale. */
   normalizeSite(payload: Record<string, unknown>): {
     payload: Record<string, unknown>

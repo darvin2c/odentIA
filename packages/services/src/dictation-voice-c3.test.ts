@@ -60,6 +60,9 @@ describe("lo de diente de leche no se propone para una pieza permanente, ni lo d
     expect(dictatedService("endodoncia", DEMO, "dental", { toothNumber: 36 }, adult).candidates).toEqual(["Endodoncia posterior vital", "Endodoncia posterior no vital"])
     expect(dictatedService("endodoncia", DEMO, "dental", { toothNumber: 11 }, adult).match).toBe("Endodoncia anterior vital")
     expect(dictatedService("endodoncia anterior vital", DEMO, "dental", { toothNumber: 46 }, adult).match).toBeNull()
+    // Sin la de su grupo, la de otro se ofrece para elegir, nunca dada por buena; la de otra dentición, nunca.
+    expect(dictatedService("endodoncia", ["Endodoncia anterior vital", "Pulpectomía posterior, deciduo"], "dental", { toothNumber: 36 }, adult)).toEqual({ match: null, candidates: ["Endodoncia anterior vital"] })
+    expect(dictatedService("pulpectomía", ["Pulpectomía posterior, deciduo"], "dental", { toothNumber: 36 }, adult)).toEqual({ match: null, candidates: [] })
   })
 
   it("sin la anatomía de la biblioteca, la marca sale del nombre o del código; «temporal» solo no es de leche", () => {

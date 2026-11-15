@@ -34,7 +34,7 @@ interface PracticeDictation {
   pendientes?: string[]
   /** Lo ya ordenado antes en el mismo dictado, que llega como contexto. */
   contexto?: string
-  /** Si el paciente es adulto: a un adulto no se le propone lo de diente de leche (`fitsService`). */
+  /** Si el paciente es adulto: a un adulto no se le propone lo de diente de leche (`serviceFit`). */
   adulto?: boolean
   espera: {
     hallazgos?: ExpectedFinding[]

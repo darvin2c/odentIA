@@ -1,29 +1,27 @@
 import { type DiagnosisSystemKey, findingDiagnosisCode } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { serviceCatalog } from "@odentia/db/schema/clinical"
-import { dentalTemplateRule } from "@odentia/db/schema/dental"
 import {
+  anatomyFits,
   conditionLabel,
   type Dentition,
   dentitionOf,
   FINDINGS,
   type FindingDefinition,
   type FindingDetails,
-  isDentition,
-  isToothGroup,
   isValidTooth,
   surfaceLabel,
   surfacesForTooth,
+  TOOTH_GROUPS,
   type ToothGroup,
-  toothGroupOf,
+  type TreatmentAnatomy,
   validateFinding,
   variantLabel,
 } from "@odentia/dental"
-import { and, eq, isNotNull } from "drizzle-orm"
 import { findDiagnosisCode } from "../diagnosis-codes.js"
 import { normalizeForSearch } from "../knowledge.js"
-import type { DictationPatient, DictationPrepared, DictationService, ProductDictation } from "../product-hooks.js"
+import type { DictationPatient, DictationPrepared, DictationService, DictationServiceFit, ProductDictation } from "../product-hooks.js"
 import { orgStrictVariants } from "./odontogram.js"
+import { activeServiceAnatomies } from "./service-finding.js"
 import { registerToothFinding } from "./tooth-panel.js"
 
 /* ---------- Lo que Clío dicta de odentIA: los hallazgos del odontograma y la pieza con sus caras ---------- */
@@ -308,20 +306,17 @@ function fitIndication(payload: Record<string, unknown>, scope: string | null): 
 /* ---------- Para qué piezas es una prestación dicha (prueba con voz del 15 nov, c3) ---------- */
 
 /** Para qué piezas es un servicio: su dentición (null: las dos) y sus grupos (vacío: todos). */
-interface ServiceAnatomy {
-  groups: readonly ToothGroup[]
-  dentition: Dentition | null
-}
+type ServiceAnatomy = Pick<TreatmentAnatomy, "groups" | "dentition">
 
 /** De leche: «deciduo», «de leche» o «diente temporal». «Temporal» solo no: «Restauración temporal» no es de leche. */
-const DECIDUOUS_WORDS = /\b(?:decidu[oa]s?|de leche|(?:diente|dientes|denticion|pieza|piezas|molar|molares)\s+temporal(?:es)?)\b/
+const DECIDUOUS_WORDS = /\b(?:decidu[oa]s?|de leche|(?:dientes?|denticion|piezas?|molar(?:es)?)\s+temporal(?:es)?)\b/
 const PERMANENT_WORDS = /\bpermanentes?\b/
 /** El grupo por la palabra con que lo nombra la biblioteca; «posterior», amplio (premolares y molares). */
 const GROUP_WORDS: ReadonlyArray<readonly [RegExp, readonly ToothGroup[]]> = [
-  [/\banteriore?s?\b/, ["anterior"]],
-  [/\bposteriore?s?\b/, ["premolar", "molar"]],
-  [/\b(?:bicuspides?|premolares?)\b/, ["premolar"]],
-  [/\bmolares?\b/, ["molar"]],
+  [/\banterior(?:es)?\b/, ["anterior"]],
+  [/\bposterior(?:es)?\b/, ["premolar", "molar"]],
+  [/\b(?:bicuspides?|premolar(?:es)?)\b/, ["premolar"]],
+  [/\bmolar(?:es)?\b/, ["molar"]],
 ]
 
 /**
@@ -334,45 +329,34 @@ const GROUP_WORDS: ReadonlyArray<readonly [RegExp, readonly ToothGroup[]]> = [
 export function anatomyFromName(service: Pick<DictationService, "name" | "code">): ServiceAnatomy | null {
   const said = normalizeForSearch(`${service.name} ${service.code ?? ""}`)
   const dentition: Dentition | null = DECIDUOUS_WORDS.test(said) ? "deciduous" : PERMANENT_WORDS.test(said) ? "permanent" : null
-  const groups = [...new Set(GROUP_WORDS.flatMap(([words, groups]) => (words.test(said) ? groups : [])))]
+  const groups = [...new Set(GROUP_WORDS.flatMap(([words, named]) => (words.test(said) ? named : [])))]
   return dentition || groups.length ? { groups, dentition } : null
 }
 
 /**
- * Si un servicio puede ser lo dicho (`ProductDictation.fitsService`): en una pieza FDI, el de su
- * dentición y su grupo, como `anatomyFits` (la 36 es un molar permanente: ni la pulpectomía de leche
- * ni la endodoncia anterior); sin pieza, a un adulto nunca uno de leche. La anatomía es la de la
- * biblioteca y, si el servicio no la tiene, la que dicen su nombre y su código (`anatomyFromName`).
+ * Si un servicio puede ser lo dicho (`ProductDictation.serviceFit`): en una pieza FDI, el de otra
+ * dentición nunca y el de otro grupo solo si ninguno del suyo calza (`anatomyFits`: la 36 es un
+ * molar permanente, ni la pulpectomía de leche ni la endodoncia anterior); sin pieza, a un adulto
+ * nunca uno de leche. La anatomía es la que se leyó de la clínica (`context`) o, sin ella, la que
+ * dicen su nombre y su código.
  */
-function fitsService(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): boolean {
-  const known = service.id ? (context as DentalDictationContext | undefined)?.anatomy.get(service.id) : undefined
-  const anatomy = known ?? anatomyFromName(service)
-  if (!anatomy) return true
+function serviceFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): DictationServiceFit {
+  const read = (context as DentalDictationContext | undefined)?.anatomy
+  const anatomy = service.id && read?.has(service.id) ? read.get(service.id) : anatomyFromName(service)
+  if (!anatomy) return "fits"
   const tooth = where["toothNumber"]
-  if (typeof tooth !== "number" || !isValidTooth(tooth)) return !(patient.adult === true && anatomy.dentition === "deciduous")
-  if (anatomy.dentition && anatomy.dentition !== dentitionOf(tooth)) return false
-  return anatomy.groups.length === 0 || anatomy.groups.includes(toothGroupOf(tooth))
-}
-
-/** La anatomía de la biblioteca de los servicios activos de la clínica que la tienen, por su id. */
-async function serviceAnatomies(tx: Db, orgId: string): Promise<Map<string, ServiceAnatomy>> {
-  const rows = await tx
-    .select({ id: serviceCatalog.id, groups: dentalTemplateRule.toothGroups, dentition: dentalTemplateRule.dentition })
-    .from(serviceCatalog)
-    .innerJoin(dentalTemplateRule, eq(dentalTemplateRule.templateId, serviceCatalog.templateId))
-    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true), isNotNull(dentalTemplateRule.family)))
-  return new Map(
-    rows.map((row) => [row.id, { groups: (row.groups ?? []).filter(isToothGroup), dentition: isDentition(row.dentition) ? row.dentition : null }]),
-  )
+  if (typeof tooth !== "number" || !isValidTooth(tooth)) return patient.adult && anatomy.dentition === "deciduous" ? "never" : "fits"
+  if (anatomy.dentition && anatomy.dentition !== dentitionOf(tooth)) return "never"
+  return anatomyFits({ groups: anatomy.groups.length ? anatomy.groups : TOOTH_GROUPS, dentition: null }, tooth) ? "fits" : "otherGroup"
 }
 
 /**
  * Lo que odentIA lee una vez para revisar un tramo: si la norma de su país exige la variante del
- * hallazgo y para qué piezas es cada servicio de la biblioteca.
+ * hallazgo y para qué piezas es cada servicio activo (de la biblioteca o, sin ella, de su nombre).
  */
 interface DentalDictationContext {
   strictVariants: boolean
-  anatomy: ReadonlyMap<string, ServiceAnatomy>
+  anatomy: ReadonlyMap<string, ServiceAnatomy | null>
 }
 
 export const DENTAL_DICTATION: ProductDictation = {
@@ -385,9 +369,11 @@ export const DENTAL_DICTATION: ProductDictation = {
   ],
   catalogText: dictationFindingsText,
   async context(tx, orgId): Promise<DentalDictationContext> {
-    return { strictVariants: await orgStrictVariants(tx, orgId), anatomy: await serviceAnatomies(tx, orgId) }
+    const strictVariants = await orgStrictVariants(tx, orgId)
+    const services = await activeServiceAnatomies(tx, orgId)
+    return { strictVariants, anatomy: new Map(services.map((service) => [service.id, service.anatomy ?? anatomyFromName(service)])) }
   },
-  fitsService,
+  serviceFit,
   normalizeSite,
   siteWords: site,
   fitToScope,
