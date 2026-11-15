@@ -432,6 +432,20 @@ describe("lo que la medición del 15 nov mostró que se perdía en silencio", ()
     // Ni de la pregunta «Dolor»: «sin dolor a la percusión» no es «Sin dolor» (lo inventaba en el caso nuevo).
     expect(ask("dolor", "Sin dolor", "Sin dolor a la percusión ni a la palpación")).toBeNull()
     expect(ask("dolor", "Sin dolor", "sin dolor")).toMatchObject({ status: "lista", payload: { value: "Sin dolor" } })
+    // Tampoco si cita solo el pedazo «Sin dolor» de esa oración.
+    const pain = { payload: { question: numberOf(endo, "dolor"), answer: "Sin dolor" }, sourceText: "Sin dolor" }
+    expect(prepareFormAnswer(pain, endo, FDI, "Pieza cuarenta y seis. Sin dolor a la percusión ni a la palpación.")).toBeNull()
+    expect(prepareFormAnswer(pain, endo, FDI, "Pieza cuarenta y seis. Sin dolor.")).toMatchObject({ status: "lista" })
+  })
+
+  it("la opción respondida con su número («4») es la que empieza con ese número, y se comprueba igual", () => {
+    const kid = formsOf(["ficha-de-odontopediatria"])
+    const frankl = (answer: string, said: string) => prepareFormAnswer({ payload: { question: numberOf(kid, "conducta"), answer }, sourceText: said }, kid, FDI, said)
+    expect(frankl("4", "Frankl cuatro")).toMatchObject({ status: "lista", payload: { value: "4 · Definitivamente positiva" } })
+    // El número tiene que estar dicho, como con la opción escrita entera.
+    expect(frankl("4", "Frankl tres")).not.toMatchObject({ status: "lista" })
+    // «Grado 1» no empieza con su número: «1» no la elige.
+    expect(ask("movilidad", "1", "movilidad grado uno")).toBeNull()
   })
 
   it("la oración que nombra una pregunta sin propuesta ni aviso va a «No pude usar esto»", () => {
@@ -462,6 +476,14 @@ describe("lo que la medición del 15 nov mostró que se perdía en silencio", ()
     expect(net(endo, "Percusión igual que la vez pasada.")).toEqual([])
     // El dolor a una prueba es de esa prueba, no de la pregunta «Dolor».
     expect(net(endo, "Sin dolor a la percusión ni a la palpación.", ["percusion", "palpacion"])).toEqual([])
+    // Con las dos hermanas en la oración, el valor es de la parte que nombra a cada una: los dos
+    // milímetros son de la inferior, no de la superior.
+    expect(
+      net(ortho, "Línea media superior centrada, la inferior desviada a la izquierda dos milímetros.", ["linea_media_superior", "linea_media_inferior", "linea_media_inferior_mm"]),
+    ).toEqual([])
+    expect(net(ortho, "Línea media superior desviada a la derecha, dos milímetros.", ["linea_media_superior"])).toEqual([
+      { said: "Línea media superior desviada a la derecha, dos milímetros.", why: "Parece de «Desviación de la línea media superior»: revísala en la ficha." },
+    ])
     // «conductometría» empieza como «conducta», pero no es la conducta del niño.
     expect(net(formsOf(["ficha-de-odontopediatria"]), "Hicimos la conductometría de la cincuenta y cinco.")).toEqual([])
     // Lo que repite lo ya escrito no se avisa; lo que dice otro valor, sí.

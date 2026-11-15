@@ -488,7 +488,9 @@ export function formAnswerDropReason(
   if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
   const said = draft.sourceText ?? ""
   // Lo que repite lo ya escrito («clase dos división dos» donde ya dice eso) no es algo que no se pudo usar.
+  // Ni el pedazo de otra prueba («sin dolor» de «sin dolor a la percusión»): no era de esta pregunta.
   if (where && saysWritten(question, said, questions, where.site, sentenceOf(where.transcript, said), question.answered)) return null
+  if (partOfOtherTest(question, said, sentenceOf(where?.transcript, said))) return null
   const tooth = where ? otherToothOf(question, questions, where.site, said, where.transcript) : null
   if (tooth) return `«${question.formTitle}» es de la ${tooth.form} y dijiste la ${tooth.said}: no la llené. Escríbelo tú o empieza otra ficha para la ${tooth.said}.`
   // Lo que dice dos preguntas hermanas por igual («cariados tres»: ¿del CPOD o del ceod?) no se pierde
@@ -538,6 +540,12 @@ function saysWritten(
 /** Lo dicho sin tildes y sin el dolor a otra prueba: «sin dolor a la percusión» no es de la pregunta «Dolor». */
 const withoutOtherTests = (question: DictationFormQuestion, said: string) =>
   plain(said).replace(PAIN_ON, (phrase, test: string) => (isTestOf(question, test) ? phrase : " "))
+
+/** ¿Lo dicho es un pedazo del dolor a otra prueba de su oración? («Sin dolor» de «Sin dolor a la percusión».) */
+function partOfOtherTest(question: DictationFormQuestion, said: string, sentence: string): boolean {
+  const part = plain(said).replace(/[\s.,;:!?…]+$/u, "")
+  return !!part && [...plain(sentence).matchAll(PAIN_ON)].some((match) => !isTestOf(question, match[1]) && match[0].includes(part))
+}
 
 /**
  * ¿Lo dicho nombra la pregunta? Su rótulo sin lo de entre paréntesis (de
@@ -620,12 +628,16 @@ export function formSentencesWithoutAnswer(
   return sentencesOf(transcript).flatMap((sentence) => {
     const said = sentence.trim()
     if (!said) return []
-    const named = open.filter(
-      (question) =>
-        namesQuestion(question, said, site) &&
-        saysValue(question, said) &&
-        !saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered),
-    )
+    const parts = said.split(/,\s*/)
+    const named = open.filter((question) => {
+      if (!namesQuestion(question, said, site) || !saysValue(question, said)) return false
+      if (saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered)) return false
+      // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar en una
+      // parte (entre comas) que hable de esta: en «Línea media superior centrada, la inferior desviada
+      // dos milímetros», los dos milímetros no son de la superior.
+      const another = questions.some((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, said, site))
+      return !another || parts.some((part) => talksAbout(question, new Set(stemsOf(withoutOtherTests(question, part)))) && saysValue(question, part))
+    })
     if (!named.length) return []
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
     return [{ said, why: looksLike([...new Set(named.map((question) => question.label))]), questions: named.map((question) => question.number) }]
@@ -877,11 +889,18 @@ function checkFormAnswer(
   const spoken = new Set(stemsOf(withoutOtherTests(question, said)))
   // La frase (o su oración) tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
   const context = new Set([...spoken, ...stemsOf(withoutOtherTests(question, sentence))])
-  if (!talksAbout(question, context) || namesAnother(question, said)) return null
+  if (!talksAbout(question, context) || namesAnother(question, said) || partOfOtherTest(question, said, sentence)) return null
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
-  const option = (text: string) => (question.options ?? []).find((item) => plain(item) === plain(text)) ?? null
+  const option = (text: string) => {
+    const exact = (question.options ?? []).find((item) => plain(item) === plain(text))
+    if (exact || !/^\d+$/.test(text.trim())) return exact ?? null
+    // Con las opciones numeradas («4 · Definitivamente positiva») el modelo a veces responde solo el
+    // número: es la única que empieza con él. Se comprueba contra lo dicho como las demás.
+    const numbered = (question.options ?? []).filter((item) => plain(item).split(/\D/)[0] === text.trim())
+    return numbered.length === 1 ? (numbered[0] ?? null) : null
+  }
   const options = question.options ?? []
   const ownStems = (item: string) => stemsOf(item)
   const fullySaid = (item: string) => ownStems(item).length > 0 && ownStems(item).every((stem) => spoken.has(stem))
