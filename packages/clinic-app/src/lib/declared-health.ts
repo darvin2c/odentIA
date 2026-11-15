@@ -7,8 +7,8 @@
  * deduce quién fue por quién figura hoy como su representante.
  */
 import {
-  ANESTHESIA_TROUBLE_WORDS,
   anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
   type HealthDeclarant,
   KINSHIP_LABELS,
   type PregnancyToday,
@@ -208,7 +208,7 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
   const answer = (value: unknown) => (typeof value === "string" ? (INTERVIEW_ANSWER_WORDS[value] ?? value) : null)
   // La anestesia (con qué pasó) y el sangrado, por separado (H9); lo de antes, con su pregunta doble.
   const anesthesia = anesthesiaAnswersOf(dental["problemaAnestesia"])
-  const how = anesthesia.what ? ANESTHESIA_TROUBLE_WORDS[anesthesia.what].read : null
+  const how = anesthesia.what ? anesthesiaTroubleWords(anesthesia.what) : null
   const rows: Array<{ label: string; value: string | null }> = [
     { label: "Válvula, problema del corazón de nacimiento o endocarditis", value: answer(heart["riesgoEndocarditis"]) },
     { label: "Su médico le indicó antibiótico antes del dentista", value: answer(heart["antibioticoPrevio"]) },

@@ -392,6 +392,11 @@ const FLUORIDE_OPTIONS: ReadonlyArray<{ value: Exclude<YesNoUnknown, "">; label:
   { value: "no", label: "No" },
   { value: "nose", label: "No sé" },
 ]
+/** «que la cuidas» y «respondes por ella», según su sexo; sin él, la frase va sin pronombre (K8). */
+const SEX_WORDS: Partial<Record<string, { pronoun: string; subject: string }>> = {
+  F: { pronoun: "la", subject: "ella" },
+  M: { pronoun: "lo", subject: "él" },
+}
 /** «Él solo» o «Ella sola» según su sexo; sin él, «Sin ayuda». */
 const brusherOptions = (sex: string): ReadonlyArray<{ value: BrusherAnswer; label: string }> => [
   { value: "solo", label: sex === "F" ? "Ella sola" : sex === "M" ? "Él solo" : "Sin ayuda" },
@@ -975,6 +980,8 @@ export function RegistrationQuestionnaire({
   // registra después (un menor sin representante, en su enlace). A quien solo responde por la
   // persona en su enlace, basta su nombre y qué es de ella (K1).
   const repToRegister = !fill || (repInFill && minor)
+  // En el registro, quien registra a otra persona queda como su responsable y recibe sus avisos.
+  const registersRep = forOther && !fill
   const docTypes = profile.documentTypes.map(({ code }) => ({
     value: code,
     label: DOC_TYPE_LABELS[code],
@@ -988,8 +995,7 @@ export function RegistrationQuestionnaire({
   const aboutOther = forOther || (!!fill && child)
   const you = (self: string, other: string) => (aboutOther ? other : self)
   // «la» o «lo», «ella» o «él», según su sexo: «que la cuidas». Sin saberlo, la frase va sin pronombre (K8).
-  const pronoun = sexNow === "F" ? "la" : sexNow === "M" ? "lo" : null
-  const subject = sexNow === "F" ? "ella" : sexNow === "M" ? "él" : null
+  const { pronoun, subject } = SEX_WORDS[sexNow] ?? { pronoun: null, subject: null }
   // Quien responde por la persona: «Lo respondes tú, Carla». En su enlace, quien lo abrió o, si dijo
   // «Respondo por ella», el nombre que escribió (K1).
   const repFirst = draft.repName.trim().split(/\s+/)[0] ?? ""
@@ -1003,6 +1009,21 @@ export function RegistrationQuestionnaire({
         ? `Lo respondes tú, que ${pronoun} cuidas.`
         : "Lo respondes tú."
     : ""
+  // El primer paso: «¿Para quién es el registro?» o, en su enlace, con el nombre de su ficha (K1),
+  // «¿Eres Lucía o respondes por ella?»; sin saber su sexo, sin pronombre.
+  const who = fill?.asksWho
+    ? {
+        title: first && subject ? `¿Eres ${first} o respondes por ${subject}?` : "¿Quién responde?",
+        self: first ? `Soy ${first}` : "Soy quien se atenderá",
+        other: `Respondo por ${subject ?? (first || "otra persona")}`,
+        otherHint: pronoun ? `Eres su madre, su padre o quien ${pronoun} cuida` : "Eres su madre, su padre o un familiar",
+      }
+    : {
+        title: "¿Para quién es el registro?",
+        self: "Para mí",
+        other: "Para otra persona",
+        otherHint: "Un hijo, un familiar o alguien a tu cargo",
+      }
   // Con el correo en el registro, basta el celular o el correo.
   const phoneRequired = !forOther && !asked("email") && wants("phone")
 
@@ -1266,7 +1287,7 @@ export function RegistrationQuestionnaire({
     // Se le dijo que le escribiremos por WhatsApp a ese número sobre sus citas: va con lo que
     // envía para que quede guardado. En «Su enlace», quien responde por ella no tiene ficha en la
     // que guardarlo: vale el celular de la persona, si lo escribió.
-    if (forOther && !fill ? !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
+    if (registersRep ? !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
   }
 
@@ -1448,13 +1469,7 @@ export function RegistrationQuestionnaire({
           disabled={ownRecord || (!!fill && !fill.asksWho)}
           // En su enlace, con el nombre de su ficha (K1): «¿Eres Lucía o respondes por ella?». Sin
           // saber su sexo, sin pronombre.
-          title={
-            fill?.asksWho
-              ? first && subject
-                ? `¿Eres ${first} o respondes por ${subject}?`
-                : "¿Quién responde?"
-              : "¿Para quién es el registro?"
-          }
+          title={who.title}
         >
           <QuestionnaireChoices>
             <QuestionnaireChoice
@@ -1462,21 +1477,15 @@ export function RegistrationQuestionnaire({
               checked={draft.respondent === "patient"}
               onChange={() => set({ respondent: "patient" })}
             >
-              {fill?.asksWho ? (first ? `Soy ${first}` : "Soy quien se atenderá") : "Para mí"}
+              {who.self}
             </QuestionnaireChoice>
             <QuestionnaireChoice
               value="representative"
               checked={draft.respondent === "representative"}
               onChange={() => set({ respondent: "representative" })}
             >
-              {fill?.asksWho ? `Respondo por ${subject ?? (first || "otra persona")}` : "Para otra persona"}
-              <QuestionnaireChoiceDescription>
-                {fill?.asksWho
-                  ? pronoun
-                    ? `Eres su madre, su padre o quien ${pronoun} cuida`
-                    : "Eres su madre, su padre o un familiar"
-                  : "Un hijo, un familiar o alguien a tu cargo"}
-              </QuestionnaireChoiceDescription>
+              {who.other}
+              <QuestionnaireChoiceDescription>{who.otherHint}</QuestionnaireChoiceDescription>
             </QuestionnaireChoice>
           </QuestionnaireChoices>
           <FieldMessage name="respondent" />
@@ -1642,11 +1651,11 @@ export function RegistrationQuestionnaire({
           // En «Su enlace» lo llena quien responde por la persona (un niño, o quien dijo «Respondo por ella»,
           // K1): se le habla a ella, con el nombre de la persona. Desde el enlace no se registra a nadie: de
           // un menor sin representante, la clínica lo registra con su documento.
-          disabled={fill ? !(forOther || (repInFill && minor)) : !forOther}
+          disabled={fill ? !(forOther || repToRegister) : !forOther}
           title={fill ? (child || forOther ? "Ahora tus datos" : "Tu madre, padre o tutor") : "Ahora tus datos"}
           description={
             fill
-              ? repInFill && minor
+              ? repToRegister
                 ? child || forOther
                   ? `${name} es menor de edad: déjanos tus datos, que respondes por ${name}. La clínica te registra con tu documento cuando vengan.`
                   : "Eres menor de edad: déjanos los datos de quien responde por ti. La clínica lo registra con su documento cuando vengan."
@@ -1874,7 +1883,7 @@ export function RegistrationQuestionnaire({
             optional={!phoneRequired}
             hint={
               // En su enlace no se registra a quien responde por ella: sus avisos van a este número.
-              forOther && !fill
+              registersRep
                 ? "Si no tiene, sus avisos te llegan a ti."
                 : forOther
                   ? `Le escribiremos por WhatsApp a este número sobre las citas de ${name}: la confirmación, los recordatorios y los cambios.`
@@ -2337,7 +2346,7 @@ export function RegistrationQuestionnaire({
                       value={draft.anesthesiaWhat || null}
                       options={ANESTHESIA_TROUBLES.map((value) => ({
                         value,
-                        label: aboutOther ? ANESTHESIA_TROUBLE_WORDS[value].other : ANESTHESIA_TROUBLE_WORDS[value].said,
+                        label: you(ANESTHESIA_TROUBLE_WORDS[value].said, ANESTHESIA_TROUBLE_WORDS[value].other),
                       }))}
                       onChange={(value) => set({ anesthesiaWhat: value })}
                     />

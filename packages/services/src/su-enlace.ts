@@ -84,6 +84,7 @@ import {
   declarantOfContact,
   initializeDeclaredPatientHealth,
   recordHealthDeclaration,
+  writtenDeclarant,
 } from "./clinical.js"
 import {
   CONSENT_SIGNATURE_WORDS,
@@ -324,32 +325,25 @@ async function healthQuestionsOf(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
+  options: HealthQuestionsOptions = {},
 ): Promise<RegistrationFieldKey[]> {
-  return (await healthQuestionsWithOf(tx, orgId, link))?.ask ?? []
+  return (await healthQuestionsWithOf(tx, orgId, link, options))?.ask ?? []
 }
+
+type HealthQuestionsOptions = NonNullable<Parameters<typeof patientHealthQuestionsWith>[3]>
 
 /**
  * `healthQuestionsOf` con la salud y lo ya sabido que leyó para decidirlo; nulo si este enlace no
- * pregunta su salud. `written`: su sexo y sus años de lo que escribió, si su ficha no los tiene.
+ * pregunta su salud. `options`: lo que escribió de su sexo y su fecha, y si va también lo de un niño.
  */
 async function healthQuestionsWithOf(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
-  written: { sex?: string | null; age?: number | null } = {},
+  options: HealthQuestionsOptions = {},
 ) {
   if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return null
-  return patientHealthQuestionsWith(tx, orgId, link.patientId, written)
-}
-
-/**
- * Sin fecha en su ficha, lo que se le pregunta a un adulto y lo de un niño: la pantalla elige con la
- * fecha que escribe (`registrationFieldApplies`) y el servidor, al recibirlo, con esa misma fecha.
- */
-async function healthQuestionsForAnyAgeOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<RegistrationFieldKey[]> {
-  const adult = await healthQuestionsOf(tx, orgId, link)
-  const child = (await healthQuestionsWithOf(tx, orgId, link, { age: 0 }))?.ask ?? []
-  return [...new Set([...adult, ...child])]
+  return patientHealthQuestionsWith(tx, orgId, link.patientId, options)
 }
 
 /**
@@ -373,15 +367,13 @@ async function writtenDeclarantOf(
   input: Pick<PersonalLinkDataInput, "respondent" | "representative">,
 ): Promise<HealthDeclarant | null> {
   if (input.respondent !== "representative" || !link.patientId) return null
-  const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
   const person = await requirePatient(tx, orgId, link.patientId)
-  if (!asksWhoResponds(self, ageInYears(person.birthDate, await patientOrganizationToday(tx, orgId))))
+  const age = ageInYears(person.birthDate, await patientOrganizationToday(tx, orgId))
+  if (!asksWhoResponds(person.personId === link.row.contactId, age))
     throw invalidField("respondent", "Desde este enlace se responde por la persona del enlace.")
-  const name = input.representative?.displayName?.trim() ?? ""
-  if (!name) throw invalidField("representative.displayName", "Escribe tu nombre y apellidos.")
-  if (name.length > 200) throw invalidField("representative.displayName", "Tu nombre es muy largo.")
-  const relation = input.representative?.relationshipDetail?.trim().toLocaleLowerCase("es").slice(0, 80) || null
-  return { kind: "representative", name, relation }
+  if (!input.representative?.displayName?.trim())
+    throw invalidField("representative.displayName", "Escribe tu nombre y apellidos.")
+  return writtenDeclarant(input.representative.displayName, input.representative.relationshipDetail)
 }
 
 async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
@@ -981,25 +973,24 @@ export async function getPersonalLinkDataForm(
   const missing = correction ? null : await missingOf(tx, orgId, link)
   // Si se le pide la fecha, también lo de un niño: la pantalla lo pregunta solo si la fecha que
   // escribe lo hace niño (B3 de la 7). Sin fecha no se presume niño.
-  const asksBirthDate = !!missing?.some((item) => item.key === "birthDate")
-  const healthQuestions =
-    correction ??
-    (asksBirthDate ? await healthQuestionsForAnyAgeOf(tx, orgId, link) : await healthQuestionsOf(tx, orgId, link))
+  const orChild = !!missing?.some((item) => item.key === "birthDate")
+  const healthQuestions = correction ?? (await healthQuestionsOf(tx, orgId, link, { orChild }))
   const health = healthQuestions.length > 0
   const visit = correction ? null : await linkVisitOf(tx, orgId, link)
   const check = correction ? null : await linkHealthCheckOf(tx, orgId, link)
   if ((!missing && !health && !visit && !check) || !link.patientId) throw linkExpired()
   const person = await requirePatient(tx, orgId, link.patientId)
   const today = await patientOrganizationToday(tx, orgId)
-  const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
+  const self = person.personId === link.row.contactId
+  const age = ageInYears(person.birthDate, today)
   return {
-    asksWho: asksWhoResponds(self, ageInYears(person.birthDate, today)),
+    asksWho: asksWhoResponds(self, age),
     healthCheck: check ? { since: check.since.toISOString(), questions: check.questions } : null,
     correcting: correction !== null,
     missing: missing ?? [],
     countryCode: await findOrgCountry(tx, orgId),
     today,
-    age: ageInYears(person.birthDate, today),
+    age,
     sex: person.sex === "F" || person.sex === "M" ? person.sex : null,
     respondentFirstName: self ? null : await linkContactFirstName(tx, orgId, link.row.contactId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
@@ -1276,11 +1267,8 @@ async function saveLinkData(
   // pregunta en su producto, que le corresponde y que aún no se sabía. Lo que marcó «No se pide», lo
   // de otro producto o lo ya anotado no se le mostró y no entra aunque llegue (K12). Con la fecha y el
   // sexo que escribió, si su ficha no los tenía: si la fecha lo hace niño, lo de un niño (B3 de la 7).
-  const written = {
-    sex: patch.sex ?? null,
-    age: patch.birthDate && isRealDate(patch.birthDate) ? ageInYears(patch.birthDate, today) : null,
-  }
-  const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link, written) : null
+  const written = { sex: patch.sex ?? null, age: ageInYears(patch.birthDate, today) }
+  const questions = input.health ? await healthQuestionsWithOf(tx, orgId, link, { written }) : null
   const said = input.health && questions && questions.ask.length > 0 ? onlyAskedHealth(input.health, questions.ask) : null
   const withHealth = !!said && declaredHealthAnswered(said)
   const renamed = input.name ? await correctLinkName(tx, orgId, link, patientId, input.name) : null
@@ -1335,6 +1323,7 @@ async function saveLinkData(
       .map((item) => item.label)
     const by = options.by
     const parts = [
+      // Quien dijo «Respondo por ella» (K1): recepción sabe quién lo contó.
       by?.name ? `Lo respondió ${by.name}${by.relation ? ` (${by.relation})` : ""}, por ${person.displayName}.` : null,
       renamed ? `Corrigió su nombre desde su enlace: antes figuraba como ${renamed}.` : null,
       done.length > 0 ? `Completó desde su enlace: ${done.join(", ")}.` : renamed ? null : "Envió sus datos desde su enlace.",

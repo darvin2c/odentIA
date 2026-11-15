@@ -345,11 +345,16 @@ export const INTERVIEW_ANSWER_LABELS: Record<InterviewAnswer, string> = { si: "S
  */
 export const ANESTHESIA_TROUBLES = ["desmayo", "alergia", "otra"] as const
 export type AnesthesiaTrouble = (typeof ANESTHESIA_TROUBLES)[number]
-/** Como lo dice la persona (`said`) y como se lee en su ficha (`read`). */
-export const ANESTHESIA_TROUBLE_WORDS: Record<AnesthesiaTrouble, { said: string; other: string; read: string }> = {
-  desmayo: { said: "Me desmayé o me bajó la presión", other: "Se desmayó o le bajó la presión", read: "se desmayó o le bajó la presión" },
-  alergia: { said: "Alergia o ronchas", other: "Alergia o ronchas", read: "alergia o ronchas" },
-  otra: { said: "Otra cosa", other: "Otra cosa", read: "otra cosa" },
+/** Como lo dice la persona (`said`) y quien responde por ella o su ficha (`other`). */
+export const ANESTHESIA_TROUBLE_WORDS: Record<AnesthesiaTrouble, { said: string; other: string }> = {
+  desmayo: { said: "Me desmayé o me bajó la presión", other: "Se desmayó o le bajó la presión" },
+  alergia: { said: "Alergia o ronchas", other: "Alergia o ronchas" },
+  otra: { said: "Otra cosa", other: "Otra cosa" },
+}
+/** Qué pasó con la anestesia, dentro de una frase: «se desmayó o le bajó la presión». */
+export function anesthesiaTroubleWords(what: AnesthesiaTrouble): string {
+  const words = ANESTHESIA_TROUBLE_WORDS[what].other
+  return words.charAt(0).toLocaleLowerCase("es") + words.slice(1)
 }
 /**
  * La anestesia y el sangrado tras una extracción, cada uno con su respuesta; «¿Qué pasó?» solo con

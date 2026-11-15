@@ -383,6 +383,12 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
   return (await patientHealthQuestionsWith(tx, orgId, patientId)).ask
 }
 
+/** Su sexo y sus años de lo que escribió en el mismo envío (la edad, de la fecha que escribió). */
+export interface WrittenPerson {
+  sex?: string | null
+  age?: number | null
+}
+
 /**
  * `patientHealthQuestions` con la salud que leyó para decidirlo, para que quien guarda lo que envió
  * no la vuelva a cargar.
@@ -391,11 +397,18 @@ export async function patientHealthQuestionsWith(
   tx: Db,
   orgId: string,
   patientId: string,
-  /**
-   * Su sexo y sus años, si su ficha no los tiene y los escribió en el mismo envío (la edad, de la
-   * fecha que escribió): lo que se le pregunta sale de eso (a un niño, lo de un niño; B3 de la 7).
-   */
-  written: { sex?: string | null; age?: number | null } = {},
+  options: {
+    /**
+     * Lo que escribió, si su ficha no lo tiene: lo que se le pregunta sale de eso (a un niño, lo de
+     * un niño; B3 de la 7).
+     */
+    written?: WrittenPerson
+    /**
+     * Sin fecha en su ficha, también lo de un niño: la pantalla lo muestra solo si la fecha que
+     * escribe lo hace niño, y el servidor lo acepta con esa misma fecha. Sin fecha no se presume niño.
+     */
+    orChild?: boolean
+  } = {},
 ): Promise<{
   ask: RegistrationFieldKey[]
   /** Ya envió «Tus datos» con la lista de antes: lo que se le pregunta son solo las preguntas nuevas. */
@@ -416,27 +429,29 @@ export async function patientHealthQuestionsWith(
     .limit(1)
   const health = await getPatientHealth(tx, orgId, patientId)
   const known = knownHealthQuestionsOf(health)
-  const product = await orgProduct(tx, orgId)
-  const stored = await requirePatient(tx, orgId, patientId)
-  const today = await patientOrganizationToday(tx, orgId)
-  const person = { sex: stored.sex ?? written.sex ?? null, age: ageInYears(stored.birthDate, today) ?? written.age ?? null }
-  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
-  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después. A un
-  // niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.
-  const sawToday =
-    !registrationFieldApplies("anticoagulants", person) ||
-    health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
-  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
-  // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
-  // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Quien
+  // respondió con la lista de hoy (su declaración trae las dos clases de medicina), o lo dejó todo en
+  // blanco, no ve de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
   const responded = !!sent || health.declarations.some((row) => row.via === "registro")
-  const answeredOldList = health.declarations.length > 0 && !sawToday
-  if (responded && !answeredOldList) return { ask: [], onlyNew: false, health, known }
+  const sawClasses = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  if (responded && (health.declarations.length === 0 || sawClasses)) return { ask: [], onlyNew: false, health, known }
+  const stored = await requirePatient(tx, orgId, patientId)
+  const written = options.written ?? {}
+  const person = {
+    sex: stored.sex ?? written.sex ?? null,
+    age: ageInYears(stored.birthDate, await patientOrganizationToday(tx, orgId)) ?? written.age ?? null,
+  }
+  // A un niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.
+  if (responded && !registrationFieldApplies("anticoagulants", person)) return { ask: [], onlyNew: false, health, known }
+  const product = await orgProduct(tx, orgId)
   const onlyNew = responded ? new Set<string>(newRegistrationQuestions(1, product).map((question) => question.key)) : null
   const config = await getPatientRegistrationConfig(tx, orgId)
-  const ask = healthQuestionsToAsk(config, { countryCode: await findOrgCountry(tx, orgId), product, person }, known).filter(
-    (key) => !onlyNew || onlyNew.has(key),
-  )
+  const countryCode = await findOrgCountry(tx, orgId)
+  const askOf = (who: typeof person) =>
+    healthQuestionsToAsk(config, { countryCode, product, person: who }, known).filter((key) => !onlyNew || onlyNew.has(key))
+  // Un niño de meses: entra todo lo de un niño, también el biberón y el chupón.
+  const ask =
+    options.orChild && person.age === null ? [...new Set([...askOf(person), ...askOf({ ...person, age: 0 })])] : askOf(person)
   return { ask, onlyNew: !!onlyNew, health, known }
 }
 

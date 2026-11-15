@@ -1,7 +1,7 @@
 import {
   ALLERGY_SEVERITIES,
-  ANESTHESIA_TROUBLE_WORDS,
   anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -374,23 +374,24 @@ export const DECLARED_INTERVIEW = {
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 
 /**
- * Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día.
- * La anestesia (con qué pasó) y el sangrado, cada uno por su lado; lo guardado antes con una sola
- * respuesta para los dos es de la anestesia.
+ * Si lo que dijo es lo que está en la entrevista (`kept`), para buscarlo entre sus declaraciones: la
+ * lactancia se dice Sí o No y se guarda con su día. La anestesia (con qué pasó) y el sangrado, cada
+ * uno por su lado; lo guardado antes con una sola respuesta para los dos es de la anestesia.
  */
-function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
-  if (said === undefined) return false
-  if (key === "lactancia") return isPlainObject(kept) && kept.estado === (said === true ? "si" : said === false ? "no" : undefined)
-  if (key === "anestesia" || key === "sangrado") {
-    const part = (value: unknown) => {
-      const answers = anesthesiaAnswersOf(value)
-      if (key === "sangrado") return answers.bleeding
-      return answers.joint ?? (answers.anesthesia ? `${answers.anesthesia}:${answers.what ?? ""}` : null)
-    }
-    const told = part(said)
-    return told !== null && told === part(kept)
+function saidAsKept(key: DeclaredInterviewKey, kept: unknown): (said: unknown) => boolean {
+  if (key === "lactancia") {
+    const estado = isPlainObject(kept) ? kept.estado : undefined
+    return (said) => said !== undefined && estado === (said === true ? "si" : said === false ? "no" : undefined)
   }
-  return said === kept
+  if (key === "anestesia" || key === "sangrado") {
+    const now = anesthesiaAnswersOf(kept)
+    return (said) => {
+      const told = anesthesiaAnswersOf(said)
+      if (key === "sangrado") return told.bleeding !== null && told.bleeding === now.bleeding
+      return (told.joint ?? told.anesthesia) !== null && told.joint === now.joint && told.anesthesia === now.anesthesia && told.what === now.what
+    }
+  }
+  return (said) => said !== undefined && said === kept
 }
 
 /** Lo que hay en `value` siguiendo `path`, o undefined. */
@@ -1024,7 +1025,8 @@ function declaredGroupsOf(input: {
         const kept = atPath(latest.answers, where.kept)
         if (kept === undefined) continue
         // Lo que anotó el equipo no lleva la marca de ella aunque ella haya dicho otra cosa.
-        const said = declarations.find((row) => sameInterviewValue(key, atPath(row.health, where.said), kept))
+        const matches = saidAsKept(key, kept)
+        const said = declarations.find((row) => matches(atPath(row.health, where.said)))
         if (said) groupOf(said, latest.createdAt).interview.push(key)
       }
     }
@@ -1193,11 +1195,15 @@ export function declarantOfLink(link: {
 export function declarantOfRegistration(answers: Pick<RegistrationAnswers, "respondent" | "representative">): HealthDeclarant {
   if (answers.respondent === "staff") return { kind: "staff", name: null, relation: null }
   if (answers.respondent === "patient") return { kind: "patient", name: null, relation: null }
-  return {
-    kind: "representative",
-    name: answers.representative?.displayName?.trim() || null,
-    relation: answers.representative?.relationshipDetail?.trim().toLocaleLowerCase("es") || null,
-  }
+  return writtenDeclarant(answers.representative?.displayName, answers.representative?.relationshipDetail)
+}
+
+/**
+ * Quien habla por la persona, con su nombre y su vínculo como los escribió: el registro y quien dijo
+ * «Respondo por ella» en su enlace lo guardan igual.
+ */
+export function writtenDeclarant(name: string | null | undefined, relation: string | null | undefined): HealthDeclarant {
+  return { kind: "representative", name: name?.trim() || null, relation: relation?.trim().toLocaleLowerCase("es") || null }
 }
 
 /**
@@ -1453,7 +1459,7 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
     // Por separado (H9): con un anticoagulante, el sangrado no se confunde con una reacción a la anestesia.
     ...say(
       anesthesia,
-      `tuvo problemas con la anestesia${what ? `: ${ANESTHESIA_TROUBLE_WORDS[what].read}` : ""}`,
+      `tuvo problemas con la anestesia${what ? `: ${anesthesiaTroubleWords(what)}` : ""}`,
       "no sabe si tuvo problemas con la anestesia",
     ),
     ...say(bleeding, "sangró mucho tras una extracción", "no sabe si sangró mucho tras una extracción"),

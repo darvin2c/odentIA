@@ -82,18 +82,23 @@ function listed(parts: string[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : (parts[0] ?? "")
 }
 
+type LinkPerson = Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">
 /** A quién se le habla al terminar: lo de su ficha y lo que escribió en este envío. */
-type SentFor = Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing"> & {
+type SentFor = LinkPerson & {
   /** Dijo «Respondo por ella»: se le habla a quien respondió, sea niña o adulta. */
   forOther?: boolean
 }
+
+/** Se le habla a quien responde por la persona (un niño, o dijo «Respondo por ella»), con su nombre. */
+const toRespondent = (form: Pick<SentFor, "firstName" | "age" | "forOther">): boolean =>
+  (isChildAge(form.age) || form.forOther === true) && !!form.firstName
 
 /**
  * Quién respondió y por quién, con lo que escribió en el mismo envío (K1): sus años, de la fecha que
  * escribió si su ficha no la tenía, y si dijo «Respondo por ella», el nombre de quien respondió.
  */
 export function answeredFor(
-  form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">,
+  form: LinkPerson,
   answers: Pick<RegistrationAnswers, "demographics" | "respondent" | "representative">,
   today: string,
 ): SentFor {
@@ -103,7 +108,7 @@ export function answeredFor(
     ...form,
     age: form.age ?? written,
     respondentFirstName: forOther
-      ? (answers.representative?.displayName.trim().split(/\s+/)[0] ?? form.respondentFirstName)
+      ? answers.representative?.displayName.trim().split(/\s+/)[0] || form.respondentFirstName
       : form.respondentFirstName,
     forOther,
   }
@@ -124,7 +129,7 @@ export function personalDataSentWords(
   outcome: "nada" | "con-salud" | "sin-salud" | "ya-enviado",
   visit?: { reader: string | null; askedReason: boolean } | null,
 ): { title: string; text: string } {
-  const child = (isChildAge(form.age) || form.forOther === true) && !!form.firstName
+  const child = toRespondent(form)
   const greeted = child ? form.respondentFirstName : form.firstName
   const listo = greeted ? `Listo, ${greeted}` : "Listo"
   const health = child ? `la salud de ${form.firstName}` : "tu salud"
@@ -187,7 +192,7 @@ export function healthAnswerWords(
   clinicName: string,
   outcome: "sin_cambios" | "correccion",
 ): { title: string; text: string } {
-  const child = (isChildAge(form.age) || form.forOther === true) && !!form.firstName && !!form.respondentFirstName
+  const child = toRespondent(form) && !!form.respondentFirstName
   const greeted = child ? form.respondentFirstName : form.firstName
   const listo = greeted ? `Listo, ${greeted}` : "Listo"
   if (outcome === "sin_cambios")
