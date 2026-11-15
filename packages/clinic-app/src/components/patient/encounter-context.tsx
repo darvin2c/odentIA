@@ -14,7 +14,7 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
 import {
   askWhom,
-  changedMarkWords,
+  changedHistoryOf,
   declaredGroupOf,
   pregnancyGroupOf,
   pregnancyWords,
@@ -148,10 +148,21 @@ export function EncounterContextBody({
     return <ErrorState message="No se pudieron cargar los antecedentes" onRetry={() => void health.refetch()} />
   const data = health.data.data
   const allergies = data.allergies.filter((allergy) => allergy.isActive)
-  const conditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
+  // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca dos anticoagulantes vigentes
+  // (revisión final del 15 nov, dev H2).
   // La que toma: sin fin o con fin desde hoy, como en la receta; la ya terminada no se dice como actual.
   const today = clinicToday()
-  const medications = data.medications.filter((medication) => isCurrentMedication(medication, today))
+  const currentMedications = data.medications.filter((medication) => isCurrentMedication(medication, today))
+  const history = changedHistoryOf({ changed: data.changed, medications: currentMedications }, patient?.patient.sex)
+  const activeConditions = data.conditions.filter((condition) => condition.isActive !== false && condition.status !== "resuelta")
+  const conditions = history.current("conditions", activeConditions)
+  const medications = history.current("medications", currentMedications)
+  const beforeLines = (topic: "conditions" | "medications", rows: typeof activeConditions | typeof currentMedications) =>
+    history.alone(topic, rows).map((line) => (
+      <li key={line} className="text-muted-foreground">
+        {line}
+      </li>
+    ))
   const asa = asaLabel(data.asaClass)
   const showsAsa = productUi().health.showsAsa || asa !== null
   // Lo que dijo la persona y nadie revisó se dice igual que en la franja: su «No» no es un «niega».
@@ -163,8 +174,9 @@ export function EncounterContextBody({
     return group ? `${saidNoWords(group.by, sex)} · sin revisar.` : null
   }
   const unreviewed = (topic: "allergies" | "conditions" | "medications", id: string): string => {
-    // Lo vigente que volvió a responder sin nombrarlo (entrega 10): sigue ahí, con esa marca.
-    if (data.changed?.[topic].includes(id)) return ` · ${changedMarkWords(data.changed.by, data.changed.at, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))}`
+    // La alergia que volvió a responder sin nombrarla (entrega 10) sigue ahí, con esa marca.
+    const mark = topic === "allergies" ? history.allergyMark(id) : null
+    if (mark) return ` · ${mark}`
     const group = declaredGroupOf(groups, topic, id)
     return group ? ` · ${saidByWords(group.by, sex)}, sin revisar` : ""
   }
@@ -213,7 +225,7 @@ export function EncounterContextBody({
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Enfermedades</h3>
-        {conditions.length === 0 ? (
+        {conditions.length === 0 && history.alone("conditions", activeConditions).length === 0 ? (
           // Como las alergias: «niega» solo si se le preguntó; si no, se dice que no se preguntó.
           <p className="text-muted-foreground">
             {saidNo("conditions") ??
@@ -232,12 +244,13 @@ export function EncounterContextBody({
                 {unreviewed("conditions", condition.id)}
               </li>
             ))}
+            {beforeLines("conditions", activeConditions)}
           </ul>
         )}
       </section>
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Medicación</h3>
-        {medications.length === 0 ? (
+        {medications.length === 0 && history.alone("medications", currentMedications).length === 0 ? (
           <p className="text-muted-foreground">
             {saidNo("medications") ??
               (data.reviewStatus.medications === "none"
@@ -248,14 +261,19 @@ export function EncounterContextBody({
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {medications.map((medication) => (
-              <li key={medication.id}>
-                {medication.name}
-                {medication.dose ? ` · ${medication.dose}` : ""}
-                {medication.frequency ? ` · ${medication.frequency}` : ""}
-                {unreviewed("medications", medication.id)}
-              </li>
-            ))}
+            {medications.map((medication) => {
+              const before = history.beforeFor("medications", medication)
+              return (
+                <li key={medication.id}>
+                  {medication.name}
+                  {medication.dose ? ` · ${medication.dose}` : ""}
+                  {medication.frequency ? ` · ${medication.frequency}` : ""}
+                  {before ? ` · ${before}` : ""}
+                  {unreviewed("medications", medication.id)}
+                </li>
+              )
+            })}
+            {beforeLines("medications", currentMedications)}
           </ul>
         )}
       </section>

@@ -170,3 +170,42 @@ describe("la marca de lo que dijo, por dato", () => {
     expect(page).not.toContain("Lo dijo ella · sin revisar")
   })
 })
+
+// Revisión final del 15 nov (dev H2): con dos correcciones, «Medicación vigente: apixabán 5 mg,
+// warfarina 7.5 mg, warfarina 5 mg», sin marca. Lo de hoy, con su historia.
+describe("lo que dijo que cambió, en el resumen de Antecedentes", () => {
+  it("un solo anticoagulante vigente, con el de antes al lado", () => {
+    const meds = [
+      { id: "apix", name: "apixabán", dose: "5 mg", atcCode: "B01AF02", endDate: null },
+      { id: "w75", name: "warfarina", dose: "7.5 mg", atcCode: "B01AA03", endDate: null },
+      { id: "w5", name: "warfarina", dose: "5 mg", atcCode: "B01AA03", endDate: null },
+    ]
+    const page = renderToStaticMarkup(
+      <AntecedentesSummary
+        saved={{
+          ...EMPTY_HEALTH_FORM,
+          reviewStatus: { conditions: "unknown", medications: "recorded" },
+          medications: meds.map((m) => ({ ...m, endDate: "" })) as unknown as typeof EMPTY_HEALTH_FORM.medications,
+        }}
+        pendingReview
+        groups={[]}
+        changed={
+          {
+            medications: meds,
+            changed: {
+              by: { kind: "patient", name: null, relation: null },
+              at: "2026-11-14T22:21:00.000Z",
+              allergies: [],
+              conditions: [],
+              medications: ["w75", "w5"],
+            },
+          } as unknown as Pick<PatientHealth, "changed" | "medications">
+        }
+        pregnancy={null}
+        sex="F"
+      />,
+    ).replace(/<[^>]+>/g, "|")
+    expect(page).toContain("apixabán 5 mg · antes warfarina 7.5 mg y warfarina 5 mg, cambió el 14 nov")
+    expect(page).not.toContain(", warfarina")
+  })
+})

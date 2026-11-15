@@ -9,6 +9,9 @@
 import {
   type HealthDeclarant,
   KINSHIP_LABELS,
+  MEDICATION_CLASSES,
+  type MedicationClass,
+  medicationClassOf,
   type PregnancyToday,
   saidNoWords,
   saidWhenWords,
@@ -16,7 +19,7 @@ import {
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
+import type { ChangedHealth, DeclaredHealthGroup, PatientContactLink } from "./patients"
 
 export type { HealthDeclarant }
 // Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
@@ -88,6 +91,74 @@ export function changedMarkWords(by: HealthDeclarant, at: string | null | undefi
   if (by.kind !== "representative") return `Dijo que cambió${when}`
   const who = whoWords(by, sex)
   return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))}${who.includes(",") ? "," : ""} dijo que cambió${when}`
+}
+
+type ChangedRow = { id?: string | undefined; name?: string | null; substance?: string | null; dose?: string | null; atcCode?: string | null }
+
+const TOPIC_WORDS: Record<Topic, string> = { allergies: "Alergias", conditions: "Enfermedades", medications: "Medicación" }
+
+/** «a, b y c». */
+const listOf = (items: string[]): string =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+
+/**
+ * Lo que dijo que cambió (entrega 10), por dato y no por declaración (revisión final del 15 nov,
+ * dev H2 y ux D5): lo vigente que volvió a responder sin nombrar no se lee como de hoy. Lo de antes
+ * de una clase de medicina (anticoagulante, huesos) va junto a lo de hoy de esa clase, en la
+ * primera fila: «apixabán 5 mg · antes warfarina 5 mg, cambió el 14 nov». Lo demás, y lo de una
+ * clase de la que ya no nombró nada, en su propia línea: «Medicación: antes losartán · dijo que
+ * cambió el 14 nov». Una medicina sin clase nunca se junta con otra: diría un cambio que no dijo.
+ * Una alergia queda vigente, con su marca (`allergyMark`). La franja, Antecedentes, el Resumen y
+ * «Revisa con…» lo dicen igual.
+ */
+export function changedHistoryOf(
+  health: { changed?: ChangedHealth | null; medications?: ReadonlyArray<ChangedRow> },
+  sex?: Sex,
+) {
+  const changed = health.changed ?? null
+  // Una alergia que no volvió a nombrar sigue siendo una alergia (y una severa no se esconde): queda
+  // con su marca, no pasa a «antes».
+  const isBefore = (topic: Topic, id: string | undefined) => topic !== "allergies" && !!id && !!changed?.[topic].includes(id)
+  // La clase de una fila: la trae la fila o, en el formulario, la medicina guardada con ese id.
+  const classOf = (row: ChangedRow): MedicationClass | null =>
+    medicationClassOf(row.atcCode ?? health.medications?.find((item) => item.id === row.id)?.atcCode)
+  const words = (row: ChangedRow) => [row.name ?? row.substance, row.dose].filter(Boolean).join(" ")
+  const day = changed?.at ? shortDay(changed.at) : ""
+  const mark = changed ? changedMarkWords(changed.by, changed.at, sex).replace(/^./, (letter) => letter.toLocaleLowerCase("es")) : ""
+  /** Lo de antes de un grupo, de una clase (o sin clase con `null`). */
+  const beforeIn = (topic: Topic, rows: ReadonlyArray<ChangedRow>, group: MedicationClass | null | undefined) =>
+    rows.filter((row) => isBefore(topic, row.id) && (group === undefined || classOf(row) === group))
+  return {
+    /** La marca de una alergia vigente que no volvió a nombrar: «dijo que cambió el 14 nov», o null. */
+    allergyMark: (id: string | undefined): string | null => (id && changed?.allergies.includes(id) ? mark : null),
+    /** Las filas de hoy: sin lo de antes. */
+    current: <T extends ChangedRow>(topic: Topic, rows: ReadonlyArray<T>): T[] => rows.filter((row) => !isBefore(topic, row.id)),
+    /** Lo de antes que va junto a esta fila de hoy, o null. */
+    beforeFor: (topic: Topic, row: ChangedRow, rows: ReadonlyArray<ChangedRow> = health.medications ?? []): string | null => {
+      if (topic !== "medications" || isBefore(topic, row.id)) return null
+      const group = classOf(row)
+      if (!group) return null
+      // Solo la primera de hoy de esa clase lleva la historia: no se repite.
+      const first = rows.find((item) => !isBefore(topic, item.id) && classOf(item) === group)
+      if (first?.id !== row.id) return null
+      const before = beforeIn(topic, rows, group)
+      return before.length > 0 ? `antes ${listOf(before.map(words))}, cambió el ${day}` : null
+    },
+    /** Lo de antes que no tiene nada de hoy a su lado, cada grupo en una línea. */
+    alone: (topic: Topic, rows: ReadonlyArray<ChangedRow>): string[] => {
+      if (!changed) return []
+      const line = (label: string, before: ChangedRow[]) =>
+        before.length > 0 ? [`${label}: antes ${listOf(before.map(words))} · ${mark}`] : []
+      if (topic !== "medications") return line(TOPIC_WORDS[topic], beforeIn(topic, rows, undefined))
+      const today = rows.filter((row) => !isBefore(topic, row.id))
+      return [
+        ...(Object.keys(MEDICATION_CLASSES) as MedicationClass[]).flatMap((group) =>
+          today.some((row) => classOf(row) === group) ? [] : line(MEDICATION_CLASSES[group].label, beforeIn(topic, rows, group)),
+        ),
+        ...line(TOPIC_WORDS.medications, beforeIn(topic, rows, null)),
+      ]
+    },
+  }
 }
 
 /** «Dijo el 14 may que nada cambió en su salud ni en sus medicinas» (entrega 10). */

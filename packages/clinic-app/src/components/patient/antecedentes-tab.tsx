@@ -36,6 +36,7 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
+  changedHistoryOf,
   declaredGroupOf,
   declaredInterviewRows,
   declaredMarkWords,
@@ -764,6 +765,7 @@ export function AntecedentesTab({
           saved={saved}
           pendingReview={pendingReview}
           groups={health.declared}
+          changed={health}
           // latidIA dice el embarazo en su propia sección, debajo: aquí no se repite.
           pregnancy={productHealth.asksPregnancy ? (health.pregnancy ?? null) : null}
           sex={sex}
@@ -1187,6 +1189,7 @@ export function AntecedentesSummary({
   saved,
   pendingReview,
   groups,
+  changed,
   pregnancy,
   sex,
 }: {
@@ -1194,15 +1197,25 @@ export function AntecedentesSummary({
   pendingReview: boolean
   /** Lo que se dijo y nadie revisó, por declaración (lo decide el servidor). */
   groups?: PatientHealth["declared"]
+  /** Lo que dijo que cambió (lo decide el servidor), con las medicinas guardadas para saber su clase. */
+  changed?: Pick<PatientHealth, "changed" | "medications">
   pregnancy: PregnancyToday | null
   /** El sexo registrado del paciente, para decir «ella» o «él» de quien declaró. */
   sex?: string | null
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
-  const activeCon = conditions.filter((r) => r.status === "activa")
+  // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca tres anticoagulantes vigentes
+  // (revisión final del 15 nov, dev H2).
+  const history = changedHistoryOf({ changed: changed?.changed, medications: changed?.medications }, sex)
+  const allActiveCon = conditions.filter((r) => r.status === "activa")
+  const activeCon = history.current("conditions", allActiveCon)
   // La que toma: sin fin o con fin desde hoy, como en la receta y en la atención.
   const today = clinicToday()
-  const activeMed = medications.filter((r) => r.endDate === "" || r.endDate >= today)
+  const activeMed = history.current("medications", medications.filter((r) => r.endDate === "" || r.endDate >= today))
+  // Lo de antes se dice con lo guardado (nombre y dosis como la franja), no con el borrador.
+  const savedMed = (changed?.medications ?? []).filter((m) => !m.endDate || m.endDate >= today)
+  const beforeCon = history.alone("conditions", allActiveCon)
+  const beforeMed = history.alone("medications", savedMed)
   // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo),
   // primero y con el nombre de su tarjeta en el formulario: quien va a anestesiar la busca así
   // (QA del 8 nov, noche: al final de «Condiciones» se leía como una cola de «Sin registros»).
@@ -1240,10 +1253,13 @@ export function AntecedentesSummary({
       lead:
         asa || productUi().health.showsAsa ? `Riesgo anestésico (ASA): ${asa ?? "sin clasificar"}` : undefined,
       detail:
-        activeCon.length > 0
-          ? activeCon
-              .map((row) => rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))))
-              .join(", ")
+        activeCon.length > 0 || beforeCon.length > 0
+          ? [
+              ...activeCon.map((row) =>
+                rowWords("conditions", row.id, row.name, activeCon.flatMap((item) => (item.id ? [item.id] : []))),
+              ),
+              ...beforeCon,
+            ].join(", ")
           : conditions.length > 0
             ? "Ninguna activa"
             : "Sin registros",
@@ -1253,17 +1269,20 @@ export function AntecedentesSummary({
       state: review.medications,
       said: saidWord("medications", activeMed.flatMap((row) => (row.id ? [row.id] : []))),
       detail:
-        activeMed.length > 0
-          ? activeMed
-              .map((row) =>
-                rowWords(
+        activeMed.length > 0 || beforeMed.length > 0
+          ? [
+              ...activeMed.map((row) => {
+                const before = history.beforeFor("medications", row, savedMed)
+                const text = rowWords(
                   "medications",
                   row.id,
                   [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "),
                   activeMed.flatMap((item) => (item.id ? [item.id] : [])),
-                ),
-              )
-              .join(", ")
+                )
+                return before ? `${text} · ${before}` : text
+              }),
+              ...beforeMed,
+            ].join(", ")
           : medications.length > 0
             ? "Ninguna vigente"
             : "Sin registros",
