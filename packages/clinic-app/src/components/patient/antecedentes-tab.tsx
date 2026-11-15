@@ -1233,7 +1233,8 @@ export function AntecedentesSummary({
   const capital = (text: string) => text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))
   const saidWord = (topic: "conditions" | "medications", ids: string[]): string | undefined => {
     const no = saidNoGroupOf(groups, topic)
-    if (no) return `${saidNoWords(no.by, sex)} · sin revisar`
+    // Con su día, como en el cajón: «Dijo que no · 14 nov · sin revisar» (pantalla, 15 nov).
+    if (no) return `${saidNoWords(no.by, sex)}${no.at ? ` · ${shortDay(no.at)}` : ""} · sin revisar`
     // Quien dijo cada fila lo trae su declaración; con dos personas, se nombran las dos.
     const who = [
       ...new Set(ids.flatMap((id) => {

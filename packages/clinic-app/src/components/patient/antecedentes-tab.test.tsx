@@ -261,3 +261,27 @@ describe("lo que dijo que cambió, en el resumen de Antecedentes", () => {
     expect(page).not.toContain(", warfarina")
   })
 })
+
+// Pantalla del 15 nov: el resumen de Antecedentes decía «Dijo que no · sin revisar», sin el día.
+it("el resumen dice su «No» con su día, como el cajón", () => {
+  const page = renderToStaticMarkup(
+    <AntecedentesSummary
+      saved={{ ...EMPTY_HEALTH_FORM, reviewStatus: { conditions: "none", medications: "unknown" } }}
+      pendingReview
+      groups={[
+        {
+          by: { kind: "patient", name: null, relation: null },
+          at: "2026-11-13T19:27:00.000Z",
+          allergies: [],
+          conditions: [],
+          medications: [],
+          pregnancy: false,
+          saidNo: { allergies: false, conditions: true, medications: false },
+        },
+      ]}
+      pregnancy={null}
+      sex="F"
+    />,
+  ).replace(/<[^>]+>/g, "|")
+  expect(page).toContain("Dijo que no · 13 nov · sin revisar")
+})

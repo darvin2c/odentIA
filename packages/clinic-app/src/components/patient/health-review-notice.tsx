@@ -292,6 +292,9 @@ export function HealthReviewNotice({
   // Un embarazo que ya pasó su término (o quedó sin fecha) y que ya nadie tiene por revisar: se pide confirmarlo.
   const confirmPregnancy = pregnancy?.state === "por_confirmar" && !(declaredHere && pregnancyPending)
   if (!canWrite || (!allergiesDue && unasked.length === 0 && !declaredHere && !confirmPregnancy)) return null
+  // Mientras corre «Deshacer» de «Lo revisé con ella», sin nada más que pedir, la caja no queda vacía
+  // con su título (pantalla, 15 nov): sigue montada para guardar o deshacer.
+  if (reviewedHere && !(allergiesDue && !allergiesSaid) && unasked.length === 0 && !confirmPregnancy) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   // Las que ya tenía, anotadas o revisadas por el equipo: revisar las alergias también las cubre.
   const others = active.filter((allergy) => !declaredAllergyIds.has(allergy.id))

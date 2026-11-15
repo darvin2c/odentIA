@@ -71,7 +71,8 @@ export function AnamnesisVersionDialog({
               Anterior{older ? ` (v${older.version})` : ""}
             </Button>
             <span className="text-sm text-muted-foreground">
-              {index + 1} de {versions.length}
+              {/* Las versiones llegan de la más nueva a la más antigua: la v1 es «1 de N». */}
+              {versions.length - index} de {versions.length}
             </span>
             <Button type="button" variant="outline" size="sm" disabled={!newer} onClick={() => newer && onSelect(newer.id)}>
               Siguiente{newer ? ` (v${newer.version})` : ""}
