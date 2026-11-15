@@ -41,6 +41,7 @@ import {
   FHIR_VERSION,
   FORM_FIELD_TYPE_FHIR,
   fhirCode,
+  type HealthAtSigning,
   type HealthDeclarant,
   HEALTH_DECLARATION_REASON_LABELS,
   HL7_IDENTIFIER_TYPE_SYSTEM,
@@ -800,6 +801,18 @@ function unreviewedWords(said: { by: HealthDeclarant; at: Date | null }, sex: st
   return `${saidWhenWords(said.by, said.at ? dayWords(said.at, zone) : "", sex)}, sin revisar`
 }
 
+/**
+ * Lo que seguía sin revisar al firmar una atención, como lo guardó la firma (`health_at_signing`;
+ * auditor, 15 nov, A2 y 52): la marca de cada declaración y lo que dijo, dato por dato. Lo mismo que
+ * «Lo que dijo de su salud al firmar» de la atención firmada.
+ */
+function healthAtSigningWords(group: HealthAtSigning, sex: string | null, zone: Zone): { mark: string; said: string } {
+  return {
+    mark: unreviewedWords({ by: group.by, at: group.at ? new Date(group.at) : null }, sex, zone),
+    said: group.rows.map((row) => `${row.label}: ${row.value}`).join("; "),
+  }
+}
+
 /** Lo que acompaña a un dato de la entrevista: que sigue sin revisar, o de qué versión anterior viene. */
 /** «Dijo que cambió el 14 nov», de lo vigente que no volvió a nombrar; null si no es de eso. */
 function changedRowWords(record: Pick<PatientRecord, "changed">, topic: HealthTopic, id: string, sex: string | null, zone: Zone): string | null {
@@ -1247,6 +1260,14 @@ export async function renderPatientRecordPdf(
       [
         "Lo que contó antes de venir",
         record.visitAnswers.filter((told) => told.encounterId === row.id).map((told) => visitAnswerLine(told)),
+      ],
+      // La constancia del aviso del cierre: lo que dijo de su salud y nadie había revisado al firmar.
+      [
+        "Lo que dijo de su salud al firmar",
+        (row.healthAtSigning ?? []).map((group) => {
+          const words = healthAtSigningWords(group, p.sex, zone)
+          return `${words.mark}: ${words.said}`
+        }),
       ],
       ["Evolución", row.evolution],
       ["Plan", row.indications],
@@ -1853,6 +1874,22 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         effectiveDateTime: row.startedAt.toISOString(),
         valueString: row.presentIllness,
       })
+    // Lo que seguía sin revisar al firmar, una por declaración: lo que dijo, con quién y cuándo en la
+    // nota. Sin un código propio en LOINC ni SNOMED para «sin revisar al firmar»: va como texto.
+    for (const [index, group] of (row.healthAtSigning ?? []).entries()) {
+      const words = healthAtSigningWords(group, p.sex, record.clinic)
+      resources.push({
+        resourceType: "Observation",
+        id: `${row.id}-sin-revisar-al-firmar-${index + 1}`,
+        status: observationStatus,
+        code: { text: "Lo que dijo de su salud y seguía sin revisar al firmar" },
+        subject: patientRef,
+        encounter: encounterRef,
+        effectiveDateTime: (row.endedAt ?? row.startedAt).toISOString(),
+        valueString: words.said,
+        note: [{ text: words.mark }],
+      })
+    }
     const vitals = (row.vitals ?? {}) as Record<string, unknown>
     for (const v of VITAL_SIGNS) {
       const value = vitals[v.key]

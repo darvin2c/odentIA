@@ -2,12 +2,14 @@ import { withOrgContext } from "@odentia/db"
 import { encounter, patientRegistration } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import { markAllergiesReviewed } from "./allergies.js"
 import { getPatientHealth, initializeDeclaredPatientHealth, recordHealthDeclaration, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { DocumentKit } from "./document-kit.js"
 import { finalizeEncounter, getEncounterDetail } from "./encounters.js"
 import { getTimeline } from "./patient-history.js"
+import { loadPatientRecord, patientRecordFhirBundle, renderPatientRecordPdf } from "./patient-record.js"
 import { patientPersonId } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -98,6 +100,39 @@ function constraintOf(error: unknown): string | null {
   }
   return null
 }
+
+// Revisión final del 15 nov (52): la copia de la historia lleva la misma constancia, en el PDF y en FHIR.
+it("la copia de la historia trae lo que seguía sin revisar al firmar, con quién lo dijo y cuándo", async () => {
+  const f = await clinicalFixture()
+  const personId = await f.run((tx) => patientPersonId(tx, ORG, f.patient.id))
+  await ownerDb.update(contact).set({ sex: "F" }).where(eq(contact.id, personId!))
+  await ownerDb.insert(patientRegistration).values({ organizationId: ORG, patientId: f.patient.id, entryPoint: "platform", respondent: "staff", answers: {} })
+  await f.run(async (tx) => {
+    await recordHealthDeclaration(tx, ORG, f.patient.id, { via: "enlace", by: HER, health: SAID, saidAt: new Date(Date.now() - DAY) })
+    await initializeDeclaredPatientHealth(tx, ORG, f.patient.id, SAID, null)
+  })
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, { nextControl: { none: true } }))
+
+  const record = await f.run((tx) => loadPatientRecord(tx, ORG, f.patient.id))
+  const lay = vi.spyOn(DocumentKit.prototype, "lay")
+  await renderPatientRecordPdf(record, record.clinic)
+  const printed = JSON.stringify(lay.mock.calls.map((call) => call[0]))
+  lay.mockRestore()
+  expect(printed).toContain("Lo que dijo de su salud al firmar")
+  expect(printed).toMatch(/Lo dijo ella el [^"]*, sin revisar: Alergias: dijo que no; Anticoagulante: Warfarina 5 mg/)
+  const observations = (patientRecordFhirBundle(record) as { entry: Array<{ resource: Record<string, unknown> }> }).entry
+    .map((entry) => entry.resource)
+    .filter((resource) => String(resource.id).startsWith(`${f.encounter.id}-sin-revisar-al-firmar`))
+  expect(observations).toHaveLength(1)
+  expect(observations[0]).toMatchObject({
+    resourceType: "Observation",
+    status: "final",
+    encounter: { reference: `Encounter/${f.encounter.id}` },
+    valueString: expect.stringContaining("Anticoagulante: Warfarina 5 mg"),
+  })
+  expect(JSON.stringify(observations[0]?.note)).toMatch(/Lo dijo ella el .*, sin revisar/)
+})
 
 it("sin nada por revisar al firmar, queda dicho que no había nada", async () => {
   const f = await clinicalFixture()

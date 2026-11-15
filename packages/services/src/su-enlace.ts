@@ -10,6 +10,7 @@ import {
   documentText,
   documentTypeProfile,
   type HealthDeclarant,
+  healthChangeQuestions,
   identityDocumentError,
   isMinor,
   isRealDate,
@@ -32,6 +33,7 @@ import {
   appointmentPlanItem,
   patient,
   patientDataConsent,
+  patientHealthDeclaration,
   patientResponsibility,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
@@ -79,6 +81,7 @@ import { currentCatalogMessage } from "./clinic-messages.js"
 import {
   addDeclaredAllergies,
   addDeclaredHealth,
+  canonicalJson,
   type DeclaredPatientHealthInput,
   getPatientHealth,
   declarantOfContact,
@@ -128,7 +131,7 @@ import {
   portalBudgetContext,
   toPortalBudget,
 } from "./portal.js"
-import { saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
+import { beforeVisitAppointmentOf, lastVisitAt, saveVisitAnswer, visitAskOf, visitSentOf } from "./visit-answers.js"
 import { type PersonalLinkTarget, personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
@@ -253,9 +256,16 @@ export interface PersonalLinkView {
   /** Consentimientos que la clínica le envió a firmar. */
   consents: PersonalLinkConsent[]
   /**
-   * «Tu visita» de la cita de este enlace, si se le pregunta y aún no la respondió: va con sus
-   * datos en una sola tarjeta, «Antes de tu cita». `purpose`: a qué viene, si la cita ya lo dice
-   * («sesión 2 de endodoncia»); entonces solo se le pregunta si le duele.
+   * La cita de «Antes de tu cita» (`linkBeforeVisitOf`), solo a quien decide por el paciente: la
+   * que está en curso hasta que termina y, si no, la próxima en pie. Puede no ser `appointment`
+   * (la que se cambia o se cancela, solo por venir): en la sala de espera es la de hoy. La tarjeta
+   * dice su fecha y quién lo lee. Nulo sin cita en pie.
+   */
+  beforeVisit: { startsAt: string; timeZone: string; professionalName: string } | null
+  /**
+   * «Tu visita» de la cita de «Antes de tu cita», si se le pregunta y aún no la respondió: va con
+   * sus datos en una sola tarjeta. `purpose`: a qué viene, si la cita ya lo dice («sesión 2 de
+   * endodoncia»); entonces solo se le pregunta si le duele.
    */
   visit: { purpose: string | null; questions: VisitQuestions } | null
   /**
@@ -376,10 +386,6 @@ async function writtenDeclarantOf(
   return writtenDeclarant(input.representative.displayName, input.representative.relationshipDetail)
 }
 
-async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
-  return (await healthQuestionsOf(tx, orgId, link)).length > 0
-}
-
 /**
  * Lo que tiene por hacer (`patientTodo`, la definición que comparten la página, el recordatorio
  * y «Enviarme uno nuevo»), con lo que sabe este enlace: quién lo abre, si ya envió sus datos y
@@ -391,61 +397,40 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
     patientId: link.patientId,
     contactId: link.row.contactId,
     dataSubmitted: link.row.dataSubmittedAt !== null,
-    appointmentId: linkAppointmentId(link),
+    appointmentId: await linkBeforeVisitIdOf(tx, orgId, link),
   })
 }
 
-/** La cita que muestra el enlace, si sigue en pie: «Tu visita» es de ella. */
-function linkAppointmentId(link: ResolvedPersonalLink): string | null {
-  return link.appointment && link.appointment.status !== "cancelada" ? link.appointment.id : null
-}
-
 /**
- * La cita de lo que contó: la que muestra el enlace o, si ya empezó, la suya mientras no termina. En la
- * sala de espera «Lo que nos contaste» sigue diciendo su visita (QA de la entrega 3, también en la 8).
+ * La cita de «Antes de tu cita» en este enlace: la de su paciente con la misma regla de recepción y
+ * su portal (`beforeVisitAppointmentOf`: la que está en curso hasta que termina y, si no, la próxima
+ * en pie). No es la que el enlace muestra para cambiar o cancelar (`link.appointment`, solo por
+ * venir): en la sala de espera, lo que cuenta es de la cita a la que vino (QA final de formularios,
+ * 15 nov, H4), y «Lo que nos contaste» sigue diciendo su visita mientras no termina.
  */
-async function toldAppointmentId(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
-  const shown = linkAppointmentId(link)
-  if (shown || !link.row.appointmentId) return shown
-  const [own] = await tx
-    .select({ id: appointment.id, status: appointment.status })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.id, link.row.appointmentId),
-        gt(appointment.endsAt, new Date()),
-      ),
-    )
-    .limit(1)
-  return own && own.status !== "cancelada" ? own.id : null
+function linkBeforeVisitOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
+  if (!link.patientId || !link.decides) return Promise.resolve(null)
+  // Una vez por petición: el enlace resuelto es de esta petición, y así todo lo de la página habla de
+  // la misma cita aunque termine mientras responde.
+  let found = beforeVisitOfLink.get(link)
+  if (!found) {
+    found = beforeVisitAppointmentOf(tx, orgId, link.patientId)
+    beforeVisitOfLink.set(link, found)
+  }
+  return found
 }
+const beforeVisitOfLink = new WeakMap<ResolvedPersonalLink, ReturnType<typeof beforeVisitAppointmentOf>>()
 
-/** Cuándo terminó la última cita del paciente que ya pasó; una cancelada no fue una visita. Nulo si no tuvo ninguna. */
-async function lastVisitAt(tx: Db, orgId: string, patientId: string): Promise<Date | null> {
-  // Una cita cuenta como pasada al terminar, no al empezar: mientras la persona espera en la sala
-  // (o se atiende), lo que envió para ella sigue siendo de esta cita.
-  const [row] = await tx
-    .select({ endsAt: appointment.endsAt })
-    .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        lte(appointment.endsAt, new Date()),
-        sql`${appointment.status} <> 'cancelada'`,
-      ),
-    )
-    .orderBy(desc(appointment.endsAt))
-    .limit(1)
-  return row?.endsAt ?? null
+async function linkBeforeVisitIdOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<string | null> {
+  return (await linkBeforeVisitOf(tx, orgId, link))?.id ?? null
 }
 
 /**
  * Lo que envió desde su enlace quien lo abre (sus datos, su salud, su visita) y cuándo: de la
  * traza de sus envíos, a su nombre. Solo a quien decide por el paciente, y solo lo suyo. Es lo de
- * la cita que viene: lo enviado antes de su última cita pasada fue para aquella y ya no se anuncia
- * como recién recibido. «Tu visita» guarda su cita: cuenta solo la de la cita de este enlace.
+ * la cita que viene: lo enviado antes de su última visita (`lastVisitAt`, al terminar) fue para
+ * aquella y ya no se anuncia como recién recibido. «Tu visita» guarda su cita: cuenta solo la de
+ * «Antes de tu cita» (`linkBeforeVisitOf`).
  */
 async function toldOf(
   tx: Db,
@@ -480,7 +465,7 @@ async function toldOf(
   const health = traced.find((row) => row.health)
   // «Nada cambió» (entrega 10): lo dijo, aunque no envió nada de su salud.
   const unchanged = traced.find((row) => row.healthCheck === "sin_cambios")
-  const visit = await visitSentOf(tx, orgId, await toldAppointmentId(tx, orgId, link), link.row.contactId)
+  const visit = await visitSentOf(tx, orgId, await linkBeforeVisitIdOf(tx, orgId, link), link.row.contactId)
   const items: NonNullable<PersonalLinkView["told"]>["items"] = []
   if (data) items.push({ what: "datos", at: data.at.toISOString() })
   if (health) items.push({ what: "salud", at: health.at.toISOString() })
@@ -492,7 +477,7 @@ async function toldOf(
 /** «¿Cambió algo?» antes de la cita de este enlace, solo a quien decide por el paciente (`healthCheckOf`). */
 async function linkHealthCheckOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<HealthCheck | null> {
   if (!link.patientId || !link.decides || link.expired) return null
-  return healthCheckOf(tx, orgId, { patientId: link.patientId, appointmentId: linkAppointmentId(link) })
+  return healthCheckOf(tx, orgId, { patientId: link.patientId, appointmentId: await linkBeforeVisitIdOf(tx, orgId, link) })
 }
 
 /**
@@ -506,10 +491,12 @@ async function correctableHealthOf(
   orgId: string,
   link: ResolvedPersonalLink,
   told: PersonalLinkView["told"],
+  /** El «¿Cambió algo?» de esta cita, si ya se calculó (`todoOf`): no se vuelve a leer. */
+  check?: HealthCheck | null,
 ): Promise<RegistrationFieldKey[] | null> {
   if (!link.patientId || !link.decides || link.expired) return null
   if (!told?.items.some((item) => item.what === "salud" || item.what === "sin_cambios")) return null
-  if (await linkHealthCheckOf(tx, orgId, link)) return null
+  if ((check === undefined ? await linkHealthCheckOf(tx, orgId, link) : check) !== null) return null
   const questions = await patientAllHealthQuestions(tx, orgId, link.patientId)
   return questions.length > 0 ? questions : null
 }
@@ -714,6 +701,7 @@ export async function getPersonalLinkView(
     pending: null,
     budgets: [],
     consents: [],
+    beforeVisit: null,
     visit: null,
     told: null,
     healthCheck: null,
@@ -758,6 +746,9 @@ export async function getPersonalLinkView(
     !messages
   if (nothing) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const told = await toldOf(tx, orgId, link, region.timezone)
+  const before = link.expired ? null : await linkBeforeVisitOf(tx, orgId, link)
+  // La de «Tu cita», si es la misma: ya se leyó.
+  const beforeView = before ? (appointment && link.appointment?.id === before.id ? appointment : await appointmentView(tx, orgId, before.id)) : null
   const self = link.patientId
     ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
     : true
@@ -781,10 +772,13 @@ export async function getPersonalLinkView(
     ...(await youOf(tx, orgId, link)),
     budgets,
     consents,
+    beforeVisit: beforeView
+      ? { startsAt: beforeView.startsAt, timeZone: beforeView.timeZone, professionalName: beforeView.professionalName }
+      : null,
     visit,
     told,
     healthCheck: todo?.healthCheck ? { since: todo.healthCheck.since.toISOString() } : null,
-    correctHealth: (await correctableHealthOf(tx, orgId, link, told)) !== null,
+    correctHealth: (await correctableHealthOf(tx, orgId, link, told, todo?.healthCheck ?? null)) !== null,
     toSchedule,
     another,
     confirmVia: await linkReplyVia(tx, orgId, link.row),
@@ -945,14 +939,35 @@ export interface PersonalLinkDataForm {
    * si dice que sí (todo lo de su salud que la clínica pregunta). Con «No», solo lo que falte.
    */
   healthCheck: { since: string; questions: RegistrationFieldKey[] } | null
+  /**
+   * «¿Empezaste o dejaste alguna medicina?» en «Tu visita» (revisión final del 15 nov, D1): con un
+   * «Sí», sus medicinas, con estas preguntas, aunque no haya pasado un mes. Vacío si la clínica no
+   * pregunta sus medicinas, si ya se le preguntan en este recorrido o si «¿Cambió algo?» ya lo cubre.
+   */
+  medicineQuestions: RegistrationFieldKey[]
   /** «Corregir mi salud o mis medicinas»: vuelve a responder su salud entera, y nada más. */
   correcting: boolean
+}
+
+/**
+ * Las preguntas de sus medicinas que «Tu visita» ofrece (`medicineQuestions`): solo con «Tu visita»,
+ * sin «¿Cambió algo?» y si ninguna de sus medicinas se le pregunta ya.
+ */
+async function visitMedicineQuestionsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  asked: { visit: boolean; check: boolean; healthQuestions: readonly RegistrationFieldKey[] },
+): Promise<RegistrationFieldKey[]> {
+  if (!asked.visit || asked.check) return []
+  const medicines = healthChangeQuestions(["medicinas"], await patientAllHealthQuestions(tx, orgId, patientId))
+  return medicines.some((key) => asked.healthQuestions.includes(key)) ? [] : medicines
 }
 
 /** «Tu visita» de la cita de este enlace, solo a quien decide por el paciente y mientras no la respondió. */
 async function linkVisitOf(tx: Db, orgId: string, link: ResolvedPersonalLink) {
   if (!link.patientId || !link.decides || link.expired) return null
-  return visitAskOf(tx, orgId, { patientId: link.patientId, appointmentId: linkAppointmentId(link) })
+  return visitAskOf(tx, orgId, { patientId: link.patientId, appointmentId: await linkBeforeVisitIdOf(tx, orgId, link) })
 }
 
 /**
@@ -986,6 +1001,7 @@ export async function getPersonalLinkDataForm(
   return {
     asksWho: asksWhoResponds(self, age),
     healthCheck: check ? { since: check.since.toISOString(), questions: check.questions } : null,
+    medicineQuestions: await visitMedicineQuestionsOf(tx, orgId, link.patientId, { visit: !!visit, check: !!check, healthQuestions }),
     correcting: correction !== null,
     missing: missing ?? [],
     countryCode: await findOrgCountry(tx, orgId),
@@ -1068,6 +1084,11 @@ export interface PersonalLinkDataInput {
    * toque; queda anotado con su fecha) o `cambio` (volvió a responder su salud, en `health`).
    */
   healthCheck?: "sin_cambios" | "cambio" | null
+  /**
+   * «¿Empezaste o dejaste alguna medicina?» de «Tu visita» con un «Sí» (`medicineQuestions`): lo que
+   * dijo de sus medicinas va en `health` y llega como lo nuevo por revisar.
+   */
+  medicinesChanged?: boolean
   /** «Corregir mi salud o mis medicinas»: lo que vuelve a responder va en `health`. */
   correctHealth?: boolean
 }
@@ -1148,10 +1169,16 @@ export async function submitPersonalLinkData(
   // «Corregir mi salud o mis medicinas» (entrega 10): solo su salud, entera, como declaración nueva.
   if (input.correctHealth === true) return correctLinkHealth(tx, orgId, link, input, by, deps)
   const missing = await missingOf(tx, orgId, link)
-  const health = await healthPendingOf(tx, orgId, link)
+  const healthQuestions = await healthQuestionsOf(tx, orgId, link)
+  const health = healthQuestions.length > 0
   const visit = await linkVisitOf(tx, orgId, link)
   const check = await linkHealthCheckOf(tx, orgId, link)
   const patientId = link.patientId
+  // Lo que «Tu visita» le preguntó de sus medicinas, antes de guardar nada: después ya se sabría.
+  const medicines =
+    input.medicinesChanged === true && patientId
+      ? await visitMedicineQuestionsOf(tx, orgId, patientId, { visit: !!visit, check: !!check, healthQuestions })
+      : []
   const withData = Boolean(missing || health)
   if ((!withData && !visit && !check) || !patientId) {
     if (patientId && !link.decides) requireLinkDecider(link)
@@ -1192,11 +1219,16 @@ export async function submitPersonalLinkData(
       "enlace",
     )
   }
+  // «¿Empezaste o dejaste alguna medicina?» con un «Sí» (D1): llega como lo nuevo por revisar, con su
+  // marca si es de una clase, sin esperar el mes de «¿Cambió algo?».
+  const medicinesSaid =
+    medicines.length > 0
+      ? await saveHealthChange(tx, orgId, link, patientId, medicines, "cambio", input.health ?? null, by, { medicinesChanged: true })
+      : false
   // «¿Cambió algo?» va en el mismo envío. Sin responderla no se anota nada: es opcional, como lo demás.
-  const checked =
-    check && (input.healthCheck === "sin_cambios" || input.healthCheck === "cambio")
-      ? await saveHealthCheck(tx, orgId, link, patientId, check, input.healthCheck, input.health ?? null, by)
-      : null
+  const checked = check && (input.healthCheck === "sin_cambios" || input.healthCheck === "cambio") ? input.healthCheck : null
+  if (check && checked)
+    await saveHealthChange(tx, orgId, link, patientId, check.questions, checked, input.health ?? null, by, { healthCheck: checked })
   await thankInChat(
     tx,
     orgId,
@@ -1223,7 +1255,9 @@ export async function submitPersonalLinkData(
           title: "recibió sus datos",
         }
       : {
-          note: "Contó desde su enlace lo de su visita.",
+          note: medicinesSaid
+            ? "Contó desde su enlace lo de su visita y que empezó o dejó una medicina: queda por revisar en sus antecedentes."
+            : "Contó desde su enlace lo de su visita.",
           message: "Gracias, ya recibimos lo que nos contaste para tu cita.",
           key: `enlace-visita:${link.row.id}:${visit?.appointmentId ?? ""}`,
           reason: "La persona contó desde su enlace lo de su visita",
@@ -1460,24 +1494,28 @@ async function askedHealthOf(
 }
 
 /**
- * Su respuesta a «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10). «No, sigue igual»
- * queda como una declaración sin salud (`sin_cambios`), con quién y cuándo: la atención lo dice y
- * no se le vuelve a preguntar hasta pasado otro mes. «Sí, cambió» guarda lo que volvió a responder
- * como lo nuevo por revisar; lo vigente que ya no nombró queda «dijo que cambió» y no se borra
- * (`changedHealthOf`). Si dijo que sí y no respondió nada, igual queda dicho que cambió.
+ * Su respuesta a «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10), o el «Sí» a «¿Empezaste
+ * o dejaste alguna medicina?» de «Tu visita» (revisión final del 15 nov, D1). «No, sigue igual» queda
+ * como una declaración sin salud (`sin_cambios`), con quién y cuándo: la atención lo dice y no se le
+ * vuelve a preguntar hasta pasado otro mes. «Sí, cambió» guarda lo que volvió a responder de lo que se
+ * le preguntó (`questions`) como lo nuevo por revisar; lo vigente que ya no nombró queda «dijo que
+ * cambió» y no se borra (`changedHealthOf`). Si dijo que sí y no respondió nada, igual queda dicho que
+ * cambió. `mark` va en su traza, sin copiar lo dicho. Devuelve si trajo algo de su salud.
  */
-async function saveHealthCheck(
+async function saveHealthChange(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
   patientId: string,
-  check: HealthCheck,
+  questions: readonly RegistrationFieldKey[],
   answer: "sin_cambios" | "cambio",
   health: DeclaredPatientHealthInput | null,
   by: HealthDeclarant | null,
-): Promise<"sin_cambios" | "cambio"> {
-  const said = answer === "cambio" ? await askedHealthOf(tx, orgId, patientId, health, check.questions) : null
-  if (answer === "cambio" && said && declaredHealthAnswered(said)) {
+  mark: { healthCheck: "sin_cambios" | "cambio" } | { medicinesChanged: true },
+): Promise<boolean> {
+  const said = answer === "cambio" ? await askedHealthOf(tx, orgId, patientId, health, questions) : null
+  const answered = !!said && declaredHealthAnswered(said)
+  if (said && answered) {
     await saveLinkHealth(tx, orgId, link, patientId, said, "cambio", by)
   } else {
     // Que nada cambió, o que cambió sin decir qué: lo dijo, con su fecha. Después de lo que envió en
@@ -1496,10 +1534,9 @@ async function saveHealthCheck(
     action: "personal_link.data_sent",
     entity: "patient",
     entityId: patientId,
-    // Sin copiar lo dicho: qué respondió a la pregunta y si trajo salud.
-    metadata: { fields: [], health: answer === "cambio" && !!said && declaredHealthAnswered(said), healthCheck: answer, origin: "paciente" },
+    metadata: { fields: [], health: answered, ...mark, origin: "paciente" },
   })
-  return answer
+  return answered
 }
 
 /**
@@ -1524,7 +1561,12 @@ async function correctLinkHealth(
   }
   const said = await askedHealthOf(tx, orgId, patientId, input.health ?? null, questions)
   if (!said || !declaredHealthAnswered(said)) throw invalidField("health", "Responde al menos una pregunta de tu salud")
-  await saveLinkHealth(tx, orgId, link, patientId, said, "correccion", by)
+  // La misma corrección otra vez (otra pestaña, o reintentar tras un corte) ya llegó: no deja otra
+  // declaración, otra nota ni otro mensaje (H7). El enlace va bloqueado (`requireLiveLink`), así que
+  // dos envíos a la vez se ven uno al otro.
+  const declarant = await linkDeclarant(tx, orgId, link, patientId, by)
+  if (await repeatsLastCorrection(tx, orgId, patientId, said, declarant)) return { received: true }
+  await saveLinkHealth(tx, orgId, link, patientId, said, "correccion", declarant)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId: `contact:${link.row.contactId}`,
@@ -1549,14 +1591,50 @@ async function correctLinkHealth(
     {
       note: "Corrigió desde su enlace lo que dijo de su salud.",
       message: "Gracias, ya recibimos tu corrección.",
-      key: `enlace-correccion:${link.row.id}:${Date.now()}`,
+      // Una vez por lo que corrigió: la misma corrección no repite el mensaje.
+      key: `enlace-correccion:${link.row.id}:${createHash("sha256").update(canonicalJson(said)).digest("hex").slice(0, 16)}`,
       reason: "La persona corrigió su salud desde su enlace",
       kind: "enlace",
       title: "recibió su corrección",
+      // Corregir lo ya enviado no es algo nuevo que hizo Sofi: no cuenta como su acción.
+      agentAction: false,
     },
     deps,
   )
   return { received: true }
+}
+
+/**
+ * Si lo último que dijo de su salud es esta misma corrección, de la misma persona y desde su enlace:
+ * entonces ya llegó. Compara lo guardado como lo guarda la base (`jsonb`), sin importar el orden.
+ */
+async function repeatsLastCorrection(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  said: DeclaredPatientHealthInput,
+  by: HealthDeclarant,
+): Promise<boolean> {
+  const [last] = await tx
+    .select({
+      via: patientHealthDeclaration.via,
+      reason: patientHealthDeclaration.reason,
+      respondent: patientHealthDeclaration.respondent,
+      declarantName: patientHealthDeclaration.declarantName,
+      same: sql<boolean>`${patientHealthDeclaration.health} = ${JSON.stringify(said)}::jsonb`,
+    })
+    .from(patientHealthDeclaration)
+    .where(and(eq(patientHealthDeclaration.organizationId, orgId), eq(patientHealthDeclaration.patientId, patientId)))
+    .orderBy(desc(patientHealthDeclaration.createdAt), desc(patientHealthDeclaration.saidAt))
+    .limit(1)
+  return (
+    !!last &&
+    last.same === true &&
+    last.via === "enlace" &&
+    last.reason === "correccion" &&
+    last.respondent === by.kind &&
+    (by.kind !== "representative" || (last.declarantName ?? null) === (by.name?.slice(0, 200) ?? null))
+  )
 }
 
 /** Sin espacios, puntos ni guiones y en mayúsculas: el mismo documento escrito de otra forma. */
@@ -1976,16 +2054,25 @@ async function thankInChat(
   tx: Db,
   orgId: string,
   link: ResolvedPersonalLink,
-  input: { note: string; message: string; key: string; reason: string; kind: string; title: string },
+  input: {
+    note: string
+    message: string
+    key: string
+    reason: string
+    kind: string
+    title: string
+    /** `false`: no es algo nuevo que hizo con el enlace de Sofi (una corrección), y no cuenta como su acción. */
+    agentAction?: false
+  },
   deps: { secretsKey?: Buffer },
 ): Promise<void> {
-  const { kind, title, ...said } = input
+  const { kind, title, agentAction, ...said } = input
   const { timezone } = await findOrgLocale(tx, orgId)
   await tellConversation(
     tx,
     orgId,
     link.row,
-    { ...said, done: { kind, title, at: new Date().toISOString(), timeZone: timezone } },
+    { ...said, done: { kind, title, at: new Date().toISOString(), timeZone: timezone, agentAction } },
     deps,
   )
 }

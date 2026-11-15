@@ -429,6 +429,15 @@ it("antes de su cita, desde el portal: lo responde quien decide, para su próxim
   expect(await errorCode(inPortal((tx, ctx) => savePortalVisit(tx, ctx, { reason: "Otra cosa" })))).toBe("ALREADY_SUBMITTED")
   const [row] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, visitId))
   expect(row).toMatchObject({ reason: "Se me rompió un diente", pain: "si", painLevel: 6, submittedVia: "portal", respondentContactId: contactId })
+
+  // QA final de formularios (15 nov, H4): con una cita en curso, «Antes de tu cita» es esa, no la que viene.
+  const now = await upcomingAppointmentOf(patient3Id, -2 / 1440)
+  const waiting = await inPortal((tx, ctx) => getPortalVisit(tx, ctx))
+  expect(waiting.visit?.appointmentId).toBe(now)
+  await inPortal((tx, ctx) => savePortalVisit(tx, ctx, { reason: "Me duele al morder" }))
+  const [today] = await ownerDb.select().from(appointmentVisitAnswer).where(eq(appointmentVisitAnswer.appointmentId, now))
+  expect(today).toMatchObject({ reason: "Me duele al morder", submittedVia: "portal" })
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, now))
 })
 
 // Mesa de formularios del 13 nov, entrega 10 (C8, decisión 9): lo que su enlace no muestra se lee en su portal.

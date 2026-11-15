@@ -80,8 +80,14 @@ export interface PersonalLinkView {
   budgets: PortalBudget[]
   consents: PersonalLinkConsent[]
   /**
-   * «Tu visita» de la cita del enlace, si se le pregunta y aún no la respondió: va con sus datos en
-   * la tarjeta «Antes de tu cita». `purpose`: a qué viene, si la cita lo dice (una sesión, un control).
+   * La cita de «Antes de tu cita»: la que está en curso hasta que termina y, si no, la próxima en
+   * pie. Puede no ser `appointment` (la que se cambia o se cancela, solo por venir): en la sala de
+   * espera es la de hoy. Nulo sin cita en pie o si quien abre no decide por el paciente.
+   */
+  beforeVisit: (PersonalLinkWhen & { professionalName: string }) | null
+  /**
+   * «Tu visita» de la cita de «Antes de tu cita», si se le pregunta y aún no la respondió: va con sus
+   * datos en esa tarjeta. `purpose`: a qué viene, si la cita lo dice (una sesión, un control).
    */
   visit: { purpose: string | null; questions: VisitQuestions } | null
   /** «Lo que nos contaste»: qué envió quien abre y cuándo (en la zona de la clínica). Nunca lo que respondió. */
@@ -201,6 +207,7 @@ export function withLinkViewDefaults(view: PersonalLinkView): PersonalLinkView {
     told: view.told ?? null,
     healthCheck: view.healthCheck ?? null,
     correctHealth: view.correctHealth ?? false,
+    beforeVisit: view.beforeVisit ?? null,
     visit: view.visit ?? null,
     toSchedule: view.toSchedule ?? [],
     another: view.another ?? null,
@@ -398,10 +405,13 @@ export interface PersonalDataForm {
   /** «Tu visita», el último paso de «Antes de tu cita»; nulo sin cita o ya respondida. */
   visit?: { purpose: string | null; questions: VisitQuestions } | null
   /**
-   * «¿Cambió algo en tu salud o en tus medicinas?», la primera pregunta (entrega 10): `since`, su
-   * última declaración; `questions`, lo que vuelve a responder si dice que sí. Nulo: no se pregunta.
+   * «¿Cambió algo en tu salud o en tus medicinas?» (entrega 10), después de saber quién responde:
+   * `since`, lo último que se supo de su salud; `questions`, de dónde sale lo que vuelve a responder
+   * según lo que elija en «¿Qué cambió?». Nulo: no se pregunta.
    */
   healthCheck?: { since: string; questions: RegistrationFieldKey[] } | null
+  /** «¿Empezaste o dejaste alguna medicina?» en «Tu visita»: con un «Sí», estas preguntas. Vacío: no se pregunta. */
+  medicineQuestions?: RegistrationFieldKey[]
   /** «Corregir mi salud o mis medicinas»: solo su salud, entera. */
   correcting?: boolean
 }
@@ -432,6 +442,8 @@ export interface PersonalDataInput {
   visit?: VisitAnswerInput | null
   /** Su respuesta a «¿Cambió algo?»: con `cambio`, lo que volvió a responder va en `health`. */
   healthCheck?: "sin_cambios" | "cambio" | null
+  /** «¿Empezaste o dejaste alguna medicina?» con un «Sí»: lo de sus medicinas va en `health`. */
+  medicinesChanged?: boolean
   /** «Corregir mi salud o mis medicinas». */
   correctHealth?: boolean
 }

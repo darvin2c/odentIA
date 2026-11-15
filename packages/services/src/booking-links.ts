@@ -1613,8 +1613,11 @@ export async function tellConversation(
     message: string
     key: string
     reason: string
-    /** `kind`: cómo se ve en el hilo (`AGENT_ACTION_KINDS`); sin decirlo, una cita. */
-    done: { title: string; at: string; timeZone: string; kind?: string }
+    /**
+     * `kind`: cómo se ve en el hilo (`AGENT_ACTION_KINDS`); sin decirlo, una cita. `agentAction: false`:
+     * no cuenta como algo que hizo Sofi (corregir lo ya enviado); queda la nota y el mensaje.
+     */
+    done: { title: string; at: string; timeZone: string; kind?: string; agentAction?: false }
     /** Pasadas las 24 horas: el aviso de su cita, que dice la fecha. Sin él, «Recibido desde su enlace». */
     notice?: { appointmentId: string; change: AppointmentChange }
   },
@@ -1630,12 +1633,13 @@ export async function tellConversation(
       // Lo que la persona hizo en el enlace que le dio Sofi es parte de su atención: el hilo y
       // la fila de la Bandeja lo dicen como lo que hizo Sofi, y así se cobra (ADR 0085).
       const { locale } = await findOrgLocale(inner, orgId)
-      await recordAgentAction(inner, orgId, {
-        conversationId,
-        kind: input.done.kind ?? "cita",
-        title: input.done.title,
-        detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
-      })
+      if (input.done.agentAction !== false)
+        await recordAgentAction(inner, orgId, {
+          conversationId,
+          kind: input.done.kind ?? "cita",
+          title: input.done.title,
+          detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
+        })
       const [thread] = await inner
         .select({ lastInboundAt: conversation.lastInboundAt, provider: channelConnection.provider })
         .from(conversation)

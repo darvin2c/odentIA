@@ -787,7 +787,7 @@ export interface EncounterDetail {
    * Lo que contó antes de venir para la cita de esta atención (mesa del 13 nov, entrega 8): solo de
    * esa cita, en el borrador y firmada, con quién lo vio al atender. Nulo sin cita o si no contó nada.
    */
-  visitAnswer?: VisitAnswerView | null
+  visitAnswer?: EncounterVisitAnswerView | null
 }
 
 /** Lo que contó antes de su cita, como lo manda el servidor. */
@@ -805,6 +805,15 @@ export interface VisitAnswerView {
   by: HealthDeclarant
   seen: { by: string; at: string } | null
   seenEncounterId: string | null
+}
+
+/** Lo que contó, como lo lee la atención. */
+export interface EncounterVisitAnswerView extends VisitAnswerView {
+  /**
+   * Lo contó para otra cita suya (la de `appointmentStartsAt`): vino sin cita, o antes de la cita
+   * para la que lo contó. La pantalla dice «Para su cita del lun 16 nov…». Ausente en una API anterior.
+   */
+  otherAppointment?: boolean
 }
 
 /** Un tratamiento aceptado por hacer, con la sesión que le toca hoy («sesión 2 de 2»). */
@@ -865,6 +874,7 @@ export type TimelineType =
   | "order"
   | "form"
   | "odontogram_signed"
+  | "visit_answer"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -876,6 +886,8 @@ export interface TimelineItem {
   toothNumbers: number[]
   authorId?: string | null
   refId: string
+  /** `visit_answer`: lo que contó antes de su cita y aún no se leyó en una atención. */
+  told?: VisitAnswerView | null
   diagnosisCode?: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
@@ -953,7 +965,7 @@ export interface EncounterBorn {
     fromPerson?: boolean
   }>
   /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
-  told?: VisitAnswerView | null
+  told?: EncounterVisitAnswerView | null
   /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó en la atención firmada. */
   healthAtSigning?: HealthAtSigning[]
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
@@ -1284,6 +1296,8 @@ export function timelineTypeLabel(type: string): string {
       return "Ficha"
     case "odontogram_signed":
       return "Odontograma firmado"
+    case "visit_answer":
+      return "Antes de su cita"
     default:
       return type
   }
