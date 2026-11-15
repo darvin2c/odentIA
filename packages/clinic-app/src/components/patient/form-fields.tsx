@@ -97,6 +97,44 @@ export interface AttachmentOption {
  */
 const ANSWER_CHOICES = "max-sm:[&_label]:min-h-11 max-sm:[&_label]:min-w-11 pointer-coarse:[&_label]:min-h-11 pointer-coarse:[&_label]:min-w-11"
 
+/** Una casilla de varias: en el teléfono, o con el dedo, la fila entera mide 44 px. */
+const CHECK_ROW = "max-sm:min-h-11 pointer-coarse:min-h-11"
+
+/**
+ * Cuánto ocupa una respuesta en la grilla de la ficha: seis columnas desde un
+ * panel de 32rem, una sola en el teléfono. Lo corto que va de a pares (la clase
+ * derecha con la izquierda, la línea media con su desviación) ocupa la mitad;
+ * un número de nombre corto, un tercio (los tres del ceod en una fila); las
+ * casillas, la escala, el texto largo, la pieza y la firma, todo el ancho.
+ * Van literales porque Tailwind lee texto.
+ */
+export function answerSpan(field: FormFieldDef): string {
+  switch (field.type) {
+    case "numero":
+      return `${field.label}${field.unit ? ` (${field.unit})` : ""}`.length <= 28 ? "@lg:col-span-2" : "@lg:col-span-3"
+    case "opcion_unica":
+    case "texto":
+    case "fecha":
+    case "adjunto":
+    case "booleano":
+      return "@lg:col-span-3"
+    default:
+      return "@lg:col-span-6"
+  }
+}
+
+/** «Hábitos» y «hábitos»: la misma frase, sin contar mayúsculas, tildes ni espacios de más. */
+export function sameWords(a: string, b: string): boolean {
+  const plain = (text: string) =>
+    text
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+  return plain(a) === plain(b)
+}
+
 /**
  * ¿La respuesta se da con varios controles (opciones, casillas, piezas,
  * firma)? Entonces va en `FieldSet` + `FieldLegend`; si no, en `Field` +
@@ -138,6 +176,7 @@ function AnswerFrame({
   helpId,
   invalid = false,
   error,
+  hideLabel = false,
   children,
 }: {
   field: FormFieldDef
@@ -145,6 +184,8 @@ function AnswerFrame({
   helpId: string | undefined
   invalid?: boolean
   error?: React.ReactNode
+  /** El título de su sección ya la nombra («Hábitos» › «Hábitos»): la etiqueta queda solo para el lector. */
+  hideLabel?: boolean
   children: (labelId: string | undefined) => React.ReactNode
 }): React.JSX.Element {
   const labelId = `${id}-label`
@@ -155,8 +196,8 @@ function AnswerFrame({
   ) : null
   if (answerIsGroup(field)) {
     return (
-      <FieldSet data-invalid={invalid || undefined} className="gap-1.5">
-        <FieldLegend id={labelId} variant="label" className={cn("mb-0", invalid && "text-destructive")}>
+      <FieldSet data-invalid={invalid || undefined} className="gap-3">
+        <FieldLegend id={labelId} variant="label" className={cn("mb-3", invalid && "text-destructive", hideLabel && "sr-only")}>
           <AnswerLabel field={field} />
           {/* El asterisco es solo para la vista y un grupo no lleva `aria-required`: se dice con palabras. */}
           {field.required ? <span className="sr-only"> (obligatoria)</span> : null}
@@ -169,7 +210,7 @@ function AnswerFrame({
   }
   return (
     <Field data-invalid={invalid || undefined}>
-      <FieldLabel htmlFor={id}>
+      <FieldLabel htmlFor={id} className={cn(hideLabel && "sr-only")}>
         <AnswerLabel field={field} />
       </FieldLabel>
       {children(undefined)}
@@ -215,6 +256,7 @@ export function AnswerAppField({
   attachments,
   describedBy,
   enterKeyHint,
+  hideLabel = false,
 }: {
   field: FormFieldDef
   disabled?: boolean
@@ -223,6 +265,8 @@ export function AnswerAppField({
   describedBy?: string
   /** En un cuestionario donde Enter pasa de pregunta (`advanceOnEnter`): la tecla del teléfono dice «Siguiente», no «Ir». */
   enterKeyHint?: "next"
+  /** El título de su sección ya dice lo mismo: la etiqueta se oye pero no se repite a la vista. */
+  hideLabel?: boolean
 }): React.JSX.Element | null {
   const formField = useFieldContext<unknown>()
   const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!field.help })
@@ -232,6 +276,7 @@ export function AnswerAppField({
       field={field}
       id={control.id}
       helpId={descriptionId}
+      hideLabel={hideLabel}
       invalid={control.invalid}
       error={
         control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null
@@ -390,6 +435,7 @@ export function AnswerInput({
         >
           <SelectTrigger
             id={id}
+            className="w-full"
             aria-required={required}
             aria-describedby={describedBy}
             aria-invalid={ariaInvalid}
@@ -409,31 +455,40 @@ export function AnswerInput({
     case "opcion_multiple": {
       const selected = Array.isArray(value) ? (value as string[]) : []
       return (
+        // Cada casilla con su `Field` horizontal, como en el resto de los formularios; en dos
+        // columnas cuando el panel da para eso.
         <fieldset
           id={id}
           aria-labelledby={labelledBy}
           aria-describedby={describedBy}
           aria-invalid={ariaInvalid}
           onBlur={groupBlur}
-          className="flex min-w-0 flex-col gap-1"
+          data-slot="checkbox-group"
+          className="grid min-w-0 gap-x-6 gap-y-3 @md:grid-cols-2"
         >
-          {(field.options ?? []).map((option) => (
-            <label key={option} className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={selected.includes(option)}
-                disabled={disabled}
-                aria-invalid={ariaInvalid}
-                onCheckedChange={(checked) =>
-                  onChange(
-                    checked === true
-                      ? [...selected, option]
-                      : selected.filter((v) => v !== option),
-                  )
-                }
-              />
-              {option}
-            </label>
-          ))}
+          {(field.options ?? []).map((option, index) => {
+            const optionId = `${id}-${index}`
+            return (
+              <Field key={option} orientation="horizontal" data-disabled={disabled || undefined} className={CHECK_ROW}>
+                <Checkbox
+                  id={optionId}
+                  checked={selected.includes(option)}
+                  disabled={disabled}
+                  aria-invalid={ariaInvalid}
+                  onCheckedChange={(checked) =>
+                    onChange(
+                      checked === true
+                        ? [...selected, option]
+                        : selected.filter((v) => v !== option),
+                    )
+                  }
+                />
+                <FieldLabel htmlFor={optionId} className="font-normal">
+                  {option}
+                </FieldLabel>
+              </Field>
+            )
+          })}
         </fieldset>
       )
     }
@@ -441,7 +496,7 @@ export function AnswerInput({
       return (
         <DatePickerButton
           {...common}
-          className="w-56"
+          className="w-full"
           value={typeof value === "string" ? value : ""}
           emptyLabel={field.required ? undefined : "Sin fecha"}
           onChange={(next) => onChange(next || null)}
@@ -477,6 +532,7 @@ export function AnswerInput({
           >
             <SelectTrigger
               id={id}
+              className="w-full"
               aria-required={required}
               aria-describedby={[describedBy, hintId].filter(Boolean).join(" ")}
               aria-invalid={ariaInvalid}

@@ -1,5 +1,5 @@
 import { canAttend } from "@odentia/auth/permissions"
-import { Badge, Button, toast } from "@odentia/ui"
+import { Badge, Button, cn, FieldGroup, FieldLegend, FieldSeparator, FieldSet, toast } from "@odentia/ui"
 import {
   AgentMark,
   addSubmitErrors,
@@ -19,7 +19,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useStore } from "@tanstack/react-form"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
@@ -48,11 +48,14 @@ import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
   AnswerAppField,
+  AnswerLabel,
   type AttachmentOption,
+  answerSpan,
   answersForServer,
   isEmptyAnswer,
   isFieldVisible,
   missingRequired,
+  sameWords,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
 import { answersFromPrevious, answerWords, defaultResponsible, draftOf, newFormSubmitWords, reusableAnswer } from "../../lib/consultation-forms"
@@ -337,6 +340,55 @@ export function ResponseDetail({
   return <StaffResponseDetail response={response} previous={latest} first={first} canWrite={canWrite} onChanged={onChanged} />
 }
 
+/**
+ * «Descartar borrador»: con su motivo, que queda en la traza (`form_response.discard`). La misma
+ * operación desde la ficha abierta y desde su fila en «Fichas para esta atención».
+ */
+export function DiscardFormDialog({
+  responseId,
+  onClose,
+  onDiscarded,
+}: {
+  responseId: string
+  onClose: () => void
+  onDiscarded: () => Promise<void>
+}) {
+  const discard = useMutation({
+    mutationFn: (reason: string) => discardFormResponse(responseId, reason),
+  })
+  const discardForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: discardSchema },
+    onSubmit: async ({ value }) => {
+      await discard.mutateAsync(value.reason.trim())
+      onClose()
+      toast.success("Borrador descartado")
+      await onDiscarded()
+    },
+  })
+  const discardError = useFormSubmitError(discardForm)
+  const discarding = useStore(discardForm.store, (state) => state.isSubmitting)
+  return (
+    <ConfirmDialog
+      open
+      title="Descartar borrador"
+      description="No cuenta como registro clínico y ya no se podrá editar. Queda la traza con el motivo."
+      confirmLabel="Descartar"
+      pending={discarding}
+      error={discardError}
+      onClose={onClose}
+      onConfirm={() => void submitForm(discardForm)}
+    >
+      {/* El motivo acompaña a «Descartar»: escribirlo no es un cambio del formulario que se pierda al salir. */}
+      <div data-draft-ignore>
+        <discardForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
+        </discardForm.AppField>
+      </div>
+    </ConfirmDialog>
+  )
+}
+
 /** «ceod: 6», debajo de la sección que lleva total. */
 function SectionTotal({ words }: { words: string | null }) {
   return words ? (
@@ -387,6 +439,8 @@ function StaffResponseDetail({
   const [saveState, setSaveState] = useState<SaveState>("guardado")
   const [finalizeOpen, setFinalizeOpen] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
+  // Los textos largos opcionales que se abrieron con «+ Observaciones».
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set())
   // Cambios sin guardar: `version` cuenta cada cambio y `saved` el último guardado.
   const version = useRef(0)
   const saved = useRef(0)
@@ -747,22 +801,6 @@ function StaffResponseDetail({
       })
   }
 
-  const discard = useMutation({
-    mutationFn: (reason: string) => discardFormResponse(response.id, reason),
-  })
-  const discardForm = useAppForm({
-    defaultValues: { reason: "" },
-    validators: { onSubmit: discardSchema },
-    onSubmit: async ({ value }) => {
-      await discard.mutateAsync(value.reason.trim())
-      setDiscardOpen(false)
-      toast.success("Borrador descartado")
-      await onChanged()
-    },
-  })
-  const discardError = useFormSubmitError(discardForm)
-  const discarding = useStore(discardForm.store, (state) => state.isSubmitting)
-
   const addendaQuery = useQuery({
     queryKey: ["form-addenda", response.id],
     queryFn: () => fetchFormAddenda(response.id),
@@ -788,21 +826,23 @@ function StaffResponseDetail({
   const status = statusOf(response)
 
   return (
+    // Sin otra tarjeta dentro del panel: su título ya es el de la ficha; aquí, quién y en qué versión.
     <article
       ref={articleRef}
       tabIndex={-1}
       aria-labelledby={`${ids}-title`}
-      className="flex flex-col gap-4 rounded-md border p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex flex-col gap-6 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <p className="sr-only" aria-live="polite">
         {announcement}
       </p>
-      <header className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 id={`${ids}-title`} className="text-base font-semibold">
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3 id={`${ids}-title`} className="sr-only">
             {response.templateTitle ?? "Ficha"} · versión {response.templateVersion}
           </h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
+            Versión {response.templateVersion} ·{" "}
             {response.professionalUserId ? memberName(response.professionalUserId) : "Sin profesional asignado"}
             {/* Quién lo finalizó, con fecha y hora: lo terminado después de firmar la atención lleva la suya, y se ve. */}
             {response.finalizedAt
@@ -811,7 +851,7 @@ function StaffResponseDetail({
             {response.encounterStatus === "anulada" ? " · de una atención anulada" : ""}
           </p>
         </div>
-        <span className="flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2">
           <Badge variant={status.tone}>{status.label}</Badge>
           {editable ? (
             <span aria-live="polite" className="text-xs text-muted-foreground">
@@ -825,6 +865,18 @@ function StaffResponseDetail({
                       ? "Guardado, menos lo marcado"
                       : "Guardado"}
             </span>
+          ) : null}
+          {/* Arriba, a la vista: un borrador que no sirve se descarta con su motivo, que queda en la traza. */}
+          {editable ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-11 sm:min-h-8"
+              onClick={() => setDiscardOpen(true)}
+            >
+              Descartar borrador…
+            </Button>
           ) : null}
         </span>
       </header>
@@ -908,14 +960,54 @@ function StaffResponseDetail({
           ) : null}
         </div>
       ) : null}
-      {schema.sections.map((section) => (
-        <section key={section.id} className="flex flex-col gap-3">
-          <h4 className="text-sm font-semibold">{section.title}</h4>
-          {section.fields
-            .filter((field) => isFieldVisible(field, answers))
-            .map((field) => {
+      {/* Cada sección de la ficha es un grupo con su título; lo corto va de a pares y, en el teléfono, en una columna. */}
+      <FieldGroup className="gap-6">
+        {schema.sections.map((section, sectionIndex) => {
+          const shown = section.fields.filter((field) => isFieldVisible(field, answers))
+          // La pregunta que se llama como su sección («Hábitos» › «Hábitos»): el título ya la nombra.
+          const twin = shown.find((field) => sameWords(field.label, section.title)) ?? null
+          return (
+            <Fragment key={section.id}>
+              {sectionIndex > 0 ? <FieldSeparator /> : null}
+              <FieldSet className="gap-4">
+                <FieldLegend className="mb-1">
+                  {twin ? <AnswerLabel field={{ ...twin, label: section.title }} /> : section.title}
+                </FieldLegend>
+                <div className="grid grid-cols-1 items-start gap-x-4 gap-y-6 @lg:grid-cols-6">
+          {shown.map((field) => {
               // Por la clave de la pregunta: una versión nueva de la ficha conserva las que no cambió.
               const before = previous ? previousField(previous, field.id) : null
+              // Lo poco frecuente se pliega: un texto largo opcional y vacío, sin propuesta de Clío
+              // ni respuesta en la anterior, queda en «+ Observaciones» hasta que se abre.
+              const folded =
+                editable &&
+                field.type === "texto_largo" &&
+                !field.required &&
+                !unfolded.has(field.id) &&
+                isEmptyAnswer(answers[field.id]) &&
+                !proposalFor(field.id) &&
+                !(before && !isEmptyAnswer(previous?.answers?.[field.id]))
+              if (folded)
+                return (
+                  <div key={field.id} className={cn("flex", answerSpan(field))} data-field={field.id}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="min-h-11 sm:min-h-8"
+                      onClick={() => {
+                        setUnfolded((open) => new Set(open).add(field.id))
+                        requestAnimationFrame(() =>
+                          articleRef.current
+                            ?.querySelector<HTMLElement>(`[data-field="${CSS.escape(field.id)}"] textarea`)
+                            ?.focus(),
+                        )
+                      }}
+                    >
+                      + {field.label}
+                    </Button>
+                  </div>
+                )
               return (
                 <form.AppField key={field.id} name={`answers.${field.id}`}>
                   {(answerField) => {
@@ -931,9 +1023,10 @@ function StaffResponseDetail({
                     const mark = response.clioAccepted?.[field.id]
                     const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null) && !typedHere.current.has(field.id)
                     return (
-                      <div className="flex flex-col gap-1" data-field={field.id}>
+                      <div className={cn("flex min-w-0 flex-col gap-2", answerSpan(field))} data-field={field.id}>
                         <AnswerAppField
                           field={field}
+                          hideLabel={field === twin}
                           disabled={!editable}
                           attachments={attachments}
                           // La respuesta anterior se oye al llegar a la pregunta, no solo se ve.
@@ -1032,9 +1125,13 @@ function StaffResponseDetail({
                 </form.AppField>
               )
             })}
-          <SectionTotal words={sectionTotal(section, answers)} />
-        </section>
-      ))}
+                </div>
+                <SectionTotal words={sectionTotal(section, answers)} />
+              </FieldSet>
+            </Fragment>
+          )
+        })}
+      </FieldGroup>
       {formError ? (
         <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           {formError}
@@ -1045,26 +1142,13 @@ function StaffResponseDetail({
           ) : null}
         </p>
       ) : null}
-      {editable ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => {
-              discardForm.reset()
-              setDiscardOpen(true)
-            }}
-          >
-            Descartar borrador…
+      {/* En una atención en curso, la ficha se cierra con la firma: sin otro cierre (revisión final del 15 nov);
+          lo dice la descripción del panel. Suelta o después de firmar, «Finalizar…». */}
+      {editable && !inAttention ? (
+        <div className="flex justify-end border-t pt-4">
+          <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
+            Finalizar…
           </Button>
-          {/* En una atención en curso, la ficha se cierra con la firma: sin otro cierre (revisión final del 15 nov). */}
-          {inAttention ? (
-            <span className="text-sm text-muted-foreground">Se finaliza al firmar la atención.</span>
-          ) : (
-            <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
-              Finalizar…
-            </Button>
-          )}
         </div>
       ) : null}
       {response.status === "finalizado" ? (
@@ -1126,23 +1210,9 @@ function StaffResponseDetail({
         onClose={() => setFinalizeOpen(false)}
         onConfirm={confirmFinalize}
       />
-      <ConfirmDialog
-        open={discardOpen}
-        title="Descartar borrador"
-        description="No cuenta como registro clínico y ya no se podrá editar. Queda la traza con el motivo."
-        confirmLabel="Descartar"
-        pending={discarding}
-        error={discardError}
-        onClose={() => setDiscardOpen(false)}
-        onConfirm={() => void submitForm(discardForm)}
-      >
-        {/* El motivo acompaña a «Descartar»: escribirlo no es un cambio del formulario que se pierda al salir. */}
-        <div data-draft-ignore>
-          <discardForm.AppField name="reason">
-            {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
-          </discardForm.AppField>
-        </div>
-      </ConfirmDialog>
+      {discardOpen ? (
+        <DiscardFormDialog responseId={response.id} onClose={() => setDiscardOpen(false)} onDiscarded={onChanged} />
+      ) : null}
     </article>
   )
 }

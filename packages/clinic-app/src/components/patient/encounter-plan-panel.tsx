@@ -1158,6 +1158,9 @@ function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budg
   )
 }
 
+/** Una fila del formulario de indicar: una columna angosta y otra ancha, desde 42rem; antes, una debajo de otra. */
+const ROW = "grid grid-cols-1 items-start gap-x-4 gap-y-5 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
+
 /** «Indicar un tratamiento»: ámbito y sitio, prestación con su tarifa, hallazgo, detalle y diagnóstico. */
 function IndicationForm({
   patientId,
@@ -1374,130 +1377,174 @@ function IndicationForm({
   const validSurfaces = tooth != null ? (site?.partsOf(tooth) ?? []).map(String) : []
 
   return (
-    <div ref={rootRef} className="flex flex-col gap-3 rounded-lg border p-4">
+    // Como los demás formularios: lo corto de a pares (el ámbito con el tratamiento, la pieza con su hallazgo,
+    // las sesiones con el diagnóstico) y, en el teléfono o en una columna angosta, uno debajo del otro.
+    <div ref={rootRef} className="@container flex flex-col gap-5 rounded-xl border p-4">
       {/* Lo que falta se dice en su campo; lo que no es de ninguno, junto al botón. */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {/* Sin «dónde» (latidIA, decisión 4 del issue 229) todo es general: no hay ámbito que elegir. */}
-        {site && !editing ? (
-          <form.AppField name="scope">
+      <div className={ROW}>
+          {site && !editing ? (
+            <form.AppField name="scope">
+              {(field) => (
+                <field.SelectField
+                  id={`${uid}-scope`}
+                  label="Ámbito"
+                  options={SCOPE_OPTIONS}
+                  disabled={blocked}
+                />
+              )}
+            </form.AppField>
+          ) : null}
+        {/* Sin ámbito que elegir (latidIA, o al cambiar), el tratamiento ocupa la fila. */}
+        <div className={site && !editing ? undefined : "@2xl:col-span-2"}>
+          <form.AppField name="service">
             {(field) => (
-              <field.SelectField
-                id={`${uid}-scope`}
-                label="Ámbito"
-                options={SCOPE_OPTIONS}
-                disabled={blocked}
-              />
-            )}
-          </form.AppField>
-        ) : null}
-        {site && (scope === "tooth" || scope === "surfaces") && (
-          <form.AppField
-            name="teeth"
-            listeners={{
-              onChange: ({ value }) => {
-                form.setFieldValue("surfaces", [])
-                form.setFieldValue("odontogramEntryId", "")
-                // El diagnóstico es de su pieza: otra pieza no se lleva la pulpitis de la 36
-                // (QA del 9 nov). Vuelve si se vuelve a la pieza con que empezó.
-                // Solo el que venía puesto: uno elegido a mano para esta pieza se queda.
-                const current = form.getFieldValue("diagnosisCode")
-                if (current !== "" && current !== initial.diagnosisCode) return
-                const same = value.length > 0 && value.length === initial.teeth.length && value.every((tooth, index) => tooth === initial.teeth[index])
-                form.setFieldValue("diagnosisCode", same ? initial.diagnosisCode : "")
-              },
-            }}
-          >
-            {(field) => (
-              <field.Control id={`${uid}-place`} label={site.placeLabel}>
-                {(control) =>
-                  // Con la pieza ya puesta (la del último hallazgo, o la del renglón al cambiarlo), se dice
-                  // en una línea: un segundo odontograma entero confundía (segunda mesa del 9 nov).
-                  !pickingPlace && field.state.value.length > 0 ? (
-                    <span className="flex flex-wrap items-center gap-2 text-sm">
-                      <span id={control.id} className="font-medium">
-                        {site.placeLabel} {field.state.value[0]}
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={blocked}
-                        onClick={() => setPickingPlace(true)}
-                      >
-                        Cambiar
-                      </Button>
-                    </span>
-                  ) : (
-                    <site.PlacesPicker
-                      id={control.id}
-                      invalid={control.invalid}
-                      aria-describedby={control.describedBy}
-                      onBlur={control.onBlur}
-                      value={field.state.value.slice(0, 1)}
-                      onChange={(next) => field.handleChange(next.slice(0, 1))}
-                      disabled={blocked}
-                    />
-                  )
+              <field.Control
+                id={`${uid}-service`}
+                label={
+                  editing
+                    ? `Tratamiento (ahora: ${editing.title}; elige otro solo si cambia)`
+                    : "Tratamiento"
                 }
+              >
+                {(control) => (
+                  <ServicePicker
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value?.id ?? ""}
+                    disabled={blocked}
+                    // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
+                    place={scope === "tooth" || scope === "surfaces" ? tooth : null}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      if (next.scope) form.setFieldValue("scope", next.scope)
+                      fillSurfacesFrom(form.getFieldValue("odontogramEntryId"), next.scope ?? form.getFieldValue("scope"))
+                      // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
+                      form.setFieldValue("sessions", String(next.usualSessions ?? 1))
+                    }}
+                  />
+                )}
               </field.Control>
             )}
           </form.AppField>
-        )}
-        {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
-          <form.AppField
-            name="odontogramEntryId"
-            listeners={{
-              onChange: ({ value }) => {
-                // Otro hallazgo, otras caras: las que trae ese.
-                if (form.getFieldValue("scope") !== "surfaces") return
-                form.setFieldValue("surfaces", [])
-                fillSurfacesFrom(value, "surfaces")
-              },
-            }}
-          >
-            {(field) => (
-              <field.SelectField
-                id={`${uid}-finding`}
-                label="Hallazgo que motiva"
-                placeholder="Sin hallazgo asociado"
-                disabled={blocked}
-                // Una caries de dos caras es un hallazgo: se elige una vez, con sus caras.
-                options={groupFindings(findings).map((group) => ({
-                  // El valor es el que ya trae el formulario si es una de sus caras (el último hallazgo de hoy).
-                  value: group.ids.includes(entryId) ? entryId : group.first.id,
-                  label: `${site?.findingName(group.first.condition) ?? group.first.condition}${group.surfaces.length ? ` · ${partNames(group.surfaces)}` : ""}`,
-                }))}
-              />
-            )}
-          </form.AppField>
-        )}
-        {scope === "quadrant" && (
-          <form.AppField name="quadrant">
-            {(field) => (
-              <field.SelectField
-                id={`${uid}-quadrant`}
-                label="Cuadrante"
-                placeholder="Elige el cuadrante"
-                options={QUADRANT_OPTIONS}
-                disabled={blocked}
-              />
-            )}
-          </form.AppField>
-        )}
-        {scope === "arch" && (
-          <form.AppField name="arch">
-            {(field) => (
-              <field.SelectField
-                id={`${uid}-arch`}
-                label="Arcada"
-                placeholder="Elige la arcada"
-                options={ARCH_OPTIONS}
-                disabled={blocked}
-              />
-            )}
-          </form.AppField>
-        )}
+        </div>
       </div>
+
+      {site && scope !== "general" ? (
+        <div className={ROW}>
+          {site && (scope === "tooth" || scope === "surfaces") ? (
+            // El dibujo entero necesita la fila; la pieza ya puesta («Pieza 46 · Cambiar») va en la columna corta.
+            <div className={pickingPlace ? "@2xl:col-span-2" : undefined}>
+              <form.AppField
+                name="teeth"
+                listeners={{
+                  onChange: ({ value }) => {
+                    form.setFieldValue("surfaces", [])
+                    form.setFieldValue("odontogramEntryId", "")
+                    // El diagnóstico es de su pieza: otra pieza no se lleva la pulpitis de la 36
+                    // (QA del 9 nov). Vuelve si se vuelve a la pieza con que empezó.
+                    // Solo el que venía puesto: uno elegido a mano para esta pieza se queda.
+                    const current = form.getFieldValue("diagnosisCode")
+                    if (current !== "" && current !== initial.diagnosisCode) return
+                    const same = value.length > 0 && value.length === initial.teeth.length && value.every((tooth, index) => tooth === initial.teeth[index])
+                    form.setFieldValue("diagnosisCode", same ? initial.diagnosisCode : "")
+                  },
+                }}
+              >
+                {(field) => (
+                  <field.Control id={`${uid}-place`} label={site.placeLabel}>
+                    {(control) =>
+                      // Con la pieza ya puesta (la del último hallazgo, o la del renglón al cambiarlo), se dice
+                      // en una línea: un segundo odontograma entero confundía (segunda mesa del 9 nov).
+                      !pickingPlace && field.state.value.length > 0 ? (
+                        <span className="flex flex-wrap items-center gap-2 text-sm">
+                          <span id={control.id} className="font-medium">
+                            {site.placeLabel} {field.state.value[0]}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={blocked}
+                            onClick={() => setPickingPlace(true)}
+                          >
+                            Cambiar
+                          </Button>
+                        </span>
+                      ) : (
+                        <site.PlacesPicker
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          value={field.state.value.slice(0, 1)}
+                          onChange={(next) => field.handleChange(next.slice(0, 1))}
+                          disabled={blocked}
+                        />
+                      )
+                    }
+                  </field.Control>
+                )}
+              </form.AppField>
+            </div>
+          ) : null}
+          {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && !editing && (
+            <form.AppField
+              name="odontogramEntryId"
+              listeners={{
+                onChange: ({ value }) => {
+                  // Otro hallazgo, otras caras: las que trae ese.
+                  if (form.getFieldValue("scope") !== "surfaces") return
+                  form.setFieldValue("surfaces", [])
+                  fillSurfacesFrom(value, "surfaces")
+                },
+              }}
+            >
+              {(field) => (
+                <field.SelectField
+                  id={`${uid}-finding`}
+                  label="Hallazgo que motiva"
+                  placeholder="Sin hallazgo asociado"
+                  disabled={blocked}
+                  // Una caries de dos caras es un hallazgo: se elige una vez, con sus caras.
+                  options={groupFindings(findings).map((group) => ({
+                    // El valor es el que ya trae el formulario si es una de sus caras (el último hallazgo de hoy).
+                    value: group.ids.includes(entryId) ? entryId : group.first.id,
+                    label: `${site?.findingName(group.first.condition) ?? group.first.condition}${group.surfaces.length ? ` · ${partNames(group.surfaces)}` : ""}`,
+                  }))}
+                />
+              )}
+            </form.AppField>
+          )}
+          {scope === "quadrant" && (
+            <form.AppField name="quadrant">
+              {(field) => (
+                <field.SelectField
+                  id={`${uid}-quadrant`}
+                  label="Cuadrante"
+                  placeholder="Elige el cuadrante"
+                  options={QUADRANT_OPTIONS}
+                  disabled={blocked}
+                />
+              )}
+            </form.AppField>
+          )}
+          {scope === "arch" && (
+            <form.AppField name="arch">
+              {(field) => (
+                <field.SelectField
+                  id={`${uid}-arch`}
+                  label="Arcada"
+                  placeholder="Elige la arcada"
+                  options={ARCH_OPTIONS}
+                  disabled={blocked}
+                />
+              )}
+            </form.AppField>
+          )}
+        </div>
+      ) : null}
 
       {scope === "surfaces" && tooth != null ? (
         <form.AppField name="surfaces">
@@ -1534,47 +1581,6 @@ function IndicationForm({
         </form.AppField>
       ) : null}
 
-      <form.AppField name="service">
-        {(field) => (
-          <field.Control
-            id={`${uid}-service`}
-            label={
-              editing
-                ? `Tratamiento (ahora: ${editing.title}; elige otro solo si cambia)`
-                : "Tratamiento"
-            }
-          >
-            {(control) => (
-              <ServicePicker
-                id={control.id}
-                invalid={control.invalid}
-                aria-describedby={control.describedBy}
-                onBlur={control.onBlur}
-                value={field.state.value?.id ?? ""}
-                disabled={blocked}
-                // Lo que encaja en la pieza, primero (la endodoncia posterior en la 46).
-                place={scope === "tooth" || scope === "surfaces" ? tooth : null}
-                onChange={(next) => {
-                  field.handleChange(next)
-                  if (next.scope) form.setFieldValue("scope", next.scope)
-                  fillSurfacesFrom(form.getFieldValue("odontogramEntryId"), next.scope ?? form.getFieldValue("scope"))
-                  // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
-                  form.setFieldValue("sessions", String(next.usualSessions ?? 1))
-                }}
-              />
-            )}
-          </field.Control>
-        )}
-      </form.AppField>
-      {service ? (
-        <p className="text-sm text-muted-foreground" aria-live="polite">
-          Precio de la tarifa:{" "}
-          {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
-          {site && service.scope
-            ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}`
-            : ""}
-        </p>
-      ) : null}
       {/* Justo debajo de lo elegido: la endodoncia anterior en la 46 avisa y ofrece la que encaja. */}
       {fitService && toothFit && tooth != null && (scope === "tooth" || scope === "surfaces") ? (
         <toothFit.Notice
@@ -1590,25 +1596,48 @@ function IndicationForm({
           {switchError}
         </p>
       ) : null}
-      {/* «Cambiar» las pide igual que «Indicar»: una endodoncia cambiada desde una exodoncia no llega
-          al cierre como «1 de 1» (QA del 9 nov, repaso 3). Ya empezado, se cambian desde el Plan. */}
-      {(editing ? editableSessions(editing) : service) ? (
-        <form.AppField name="sessions">
-          {(field) => (
-            <field.TextField
-              id={`${uid}-sessions`}
-              label="Sesiones previstas"
-              description="Las que suele llevar este servicio; cámbialas si este paciente necesita otras."
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={60}
-              inputClassName="w-28"
-              disabled={blocked}
-            />
-          )}
-        </form.AppField>
-      ) : null}
+      <div className={ROW}>
+        {/* «Cambiar» las pide igual que «Indicar»: una endodoncia cambiada desde una exodoncia no llega
+            al cierre como «1 de 1» (QA del 9 nov, repaso 3). Ya empezado, se cambian desde el Plan. */}
+        {(editing ? editableSessions(editing) : service) ? (
+          <form.AppField name="sessions">
+            {(field) => (
+              <field.TextField
+                id={`${uid}-sessions`}
+                label="Sesiones previstas"
+                description="Las que suele llevar este servicio; cámbialas si este paciente necesita otras."
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={60}
+                inputClassName="max-w-28"
+                disabled={blocked}
+              />
+            )}
+          </form.AppField>
+        ) : null}
+
+        <div className={(editing ? editableSessions(editing) : service) ? undefined : "@2xl:col-span-2"}>
+          <form.AppField name="diagnosisCode">
+            {(field) => (
+              <field.Control id={`${uid}-diagnosis`} label="Diagnóstico (opcional)">
+                {(control) => (
+                  <DiagnosisSearch
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(code) => field.handleChange(code)}
+                    disabled={blocked}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+
+        </div>
+      </div>
 
       <form.AppField name="detail">
         {(field) => (
@@ -1619,23 +1648,6 @@ function IndicationForm({
             maxLength={4000}
             disabled={blocked}
           />
-        )}
-      </form.AppField>
-      <form.AppField name="diagnosisCode">
-        {(field) => (
-          <field.Control id={`${uid}-diagnosis`} label="Diagnóstico (opcional)">
-            {(control) => (
-              <DiagnosisSearch
-                id={control.id}
-                invalid={control.invalid}
-                aria-describedby={control.describedBy}
-                onBlur={control.onBlur}
-                value={field.state.value}
-                onChange={(code) => field.handleChange(code)}
-                disabled={blocked}
-              />
-            )}
-          </field.Control>
         )}
       </form.AppField>
 

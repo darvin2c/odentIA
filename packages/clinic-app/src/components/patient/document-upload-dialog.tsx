@@ -9,6 +9,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
   Button,
+  cn,
   FieldError,
   Select,
   SelectContent,
@@ -112,6 +113,9 @@ const NO_LINKS: DocumentLinkValue = {
 }
 
 const EMPTY_UPLOAD: UploadValues = { encounterId: "", allCategory: "", allCapturedAt: "", rows: [] }
+
+/** La atención común vacía: el archivo queda en la ficha sin atención. */
+const GENERAL_WORDS = "General (sin atención)"
 
 const UNCONFIRMED_ROW =
   "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar."
@@ -453,7 +457,8 @@ export function DocumentUploadDialog({
   const pendingKeys = rows
     .filter((row) => statusOf(row.key) === "pending" || statusOf(row.key) === "error")
     .map((row) => row.key)
-  const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
+  // El mismo motivo en varias filas (la conexión que se cortó para todas) se dice una sola vez.
+  const sharedError = sharedRowError(rows.map((row) => files[row.key]?.error ?? null))
 
   /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
   const lastCommon = useRef({ category: "", capturedAt: "" })
@@ -633,7 +638,7 @@ export function DocumentUploadDialog({
       error={surface.error}
       // Solo por permiso: lo que falta en una fila se dice en su campo al subir.
       submitDisabled={disabled}
-      submitLabel={uploading ? "Subiendo…" : `Subir ${pendingKeys.length}`}
+      submitLabel={uploading ? "Subiendo…" : uploadWords(pendingKeys.length)}
     >
       <fieldset disabled={uploading || disabled} className="flex flex-col gap-3">
         <form.AppField name="encounterId">
@@ -649,19 +654,25 @@ export function DocumentUploadDialog({
               {(control) => (
                 <>
                   <Select
-                    items={Object.fromEntries(drafts.map((e) => [e.id, encounterLabel(e)] as const))}
+                    items={Object.fromEntries([
+                      ["", GENERAL_WORDS],
+                      ...drafts.map((e) => [e.id, encounterLabel(e)] as const),
+                    ])}
                     value={field.state.value}
                     onValueChange={(v) => field.handleChange(v ?? "")}
                   >
                     <SelectTrigger
                       id={control.id}
+                      className="w-full"
                       aria-invalid={control.invalid || undefined}
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
                     >
-                      <SelectValue placeholder="General (sin atención)" />
+                      <SelectValue placeholder={GENERAL_WORDS} />
                     </SelectTrigger>
                     <SelectContent>
+                      {/* Subir como general es elegirlo aquí, no un botón aparte. */}
+                      <SelectItem value="">{GENERAL_WORDS}</SelectItem>
                       {drafts.map((e) => (
                         <SelectItem key={e.id} value={e.id}>
                           {encounterLabel(e)}
@@ -669,11 +680,6 @@ export function DocumentUploadDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  {field.state.value && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => field.handleChange("")}>
-                      Subir como general
-                    </Button>
-                  )}
                 </>
               )}
             </field.Control>
@@ -710,14 +716,16 @@ export function DocumentUploadDialog({
                       </p>
                     )}
                     {rejected.length > 0 && (
-                      <ul role="alert" className="flex flex-col gap-1">
+                      <ul role="alert" className="flex flex-col divide-y divide-destructive/15 rounded-xl border border-destructive/30 bg-destructive/5 px-3">
                         {rejected.map((message) => (
-                          <li key={message} className="flex items-center gap-2 text-xs text-destructive">
-                            <span className="min-w-0 flex-1">{message}</span>
+                          <li key={message} className="flex items-center gap-2 py-1.5 text-sm">
+                            <span className="min-w-0 flex-1 text-destructive [overflow-wrap:anywhere]">{message}</span>
                             <Button
                               type="button"
                               size="sm"
                               variant="ghost"
+                              className="min-h-11 sm:min-h-8"
+                              aria-label={`Descartar el aviso: ${message}`}
                               onClick={() => setRejected((prev) => prev.filter((m) => m !== message))}
                             >
                               Descartar
@@ -731,13 +739,13 @@ export function DocumentUploadDialog({
               </rowsField.Group>
 
               {pendingKeys.length > 1 && (
-                <fieldset className="flex flex-col gap-2 rounded-lg border border-dashed p-3">
-                  <legend className="px-1 text-sm font-medium">Para todos</legend>
-                  <p className="text-xs text-muted-foreground">
+                <fieldset className="flex flex-col gap-3 rounded-xl bg-muted/50 p-4">
+                  <legend className="float-left text-sm font-medium">Para todos</legend>
+                  <p className="clear-left text-sm text-muted-foreground">
                     Se copia a los archivos que no tienen una propia; después puedes cambiar la de cualquiera.
                     La fecha de un papel es la que tiene escrita; si abarca varios años, la de su última anotación.
                   </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
                     <form.AppField
                       name="allCategory"
                       listeners={{ onChange: ({ value }) => applyToAll("category", value) }}
@@ -775,6 +783,11 @@ export function DocumentUploadDialog({
                 </fieldset>
               )}
 
+              {sharedError ? (
+                <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {sharedError}
+                </p>
+              ) : null}
               {rows.length > 0 && (
                 <ol className="flex flex-col gap-3">
                   {rows.map((row, index) => {
@@ -794,6 +807,7 @@ export function DocumentUploadDialog({
                         onRemove={() => removeRow(index)}
                         onRetry={() => retryRow(row.key)}
                         several={pendingKeys.length > 1}
+                        sharedError={sharedError}
                       />
                     ) : null
                   })}
@@ -803,15 +817,21 @@ export function DocumentUploadDialog({
           )}
         </form.AppField>
 
-        {unconfirmedCount > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Hay {unconfirmedCount} archivo(s) con resultado no confirmado. La lista de Documentos ya se
-            actualizó: verifica si aparecen antes de reenviar.
-          </p>
-        )}
       </fieldset>
     </FormDrawer>
   )
+}
+
+/** Lo que dice el botón: «Subir» sin nada por subir (nunca «Subir 0»), y cuántos archivos cuando hay. */
+export function uploadWords(pending: number): string {
+  if (pending === 0) return "Subir"
+  return pending === 1 ? "Subir 1 archivo" : `Subir ${pending} archivos`
+}
+
+/** El motivo que comparten dos o más filas que fallaron, para decirlo una sola vez; si difieren, ninguno. */
+export function sharedRowError(errors: ReadonlyArray<string | null>): string | null {
+  const failed = errors.filter((error): error is string => Boolean(error))
+  return failed.length > 1 && failed.every((error) => error === failed[0]) ? (failed[0] ?? null) : null
 }
 
 function rowStateLabel(status: RowStatus): string {
@@ -876,6 +896,8 @@ interface QueuedRowProps {
   onRetry: () => void
   /** Varios archivos: la ayuda de la fecha va una vez, en «Para todos», no en cada fila. */
   several: boolean
+  /** El motivo que comparten varias filas: va una vez, arriba, y la fila no lo repite. */
+  sharedError: string | null
 }
 
 const QueuedRow = withForm({
@@ -894,6 +916,7 @@ const QueuedRow = withForm({
     onRemove,
     onRetry,
     several,
+    sharedError,
   }) {
     const id = useId()
     const row = useStore(form.store, (state) => state.values.rows[index])
@@ -911,7 +934,12 @@ const QueuedRow = withForm({
       Object.values(row.links).some(Boolean) ||
       row.tags.length > 0
     return (
-      <li className="flex flex-col gap-2 rounded-lg border p-3">
+      <li
+        className={cn(
+          "flex flex-col gap-3 rounded-xl border p-3",
+          (meta.status === "error" || meta.status === "unconfirmed") && "border-destructive/30",
+        )}
+      >
         <Attachment
           state={
             meta.status === "uploading"
@@ -921,7 +949,7 @@ const QueuedRow = withForm({
                 : "done"
           }
           orientation="horizontal"
-          className="w-full"
+          className="w-full border-0 bg-transparent px-0"
         >
           <AttachmentMedia variant={meta.previewUrl ? "image" : "icon"}>
             {meta.previewUrl ? <img src={meta.previewUrl} alt={name} /> : <FileText aria-hidden="true" />}
@@ -943,8 +971,8 @@ const QueuedRow = withForm({
         </Attachment>
 
         {meta.status !== "saved" ? (
-          <div className="flex flex-col gap-2">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="flex flex-col gap-5">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
               <form.AppField name={`${at}.title`}>
                 {(field) => (
                   <field.TextField
@@ -977,7 +1005,7 @@ const QueuedRow = withForm({
                 )}
               </form.AppField>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
               {types.length > 0 && (
                 <form.AppField name={`${at}.imageType`}>
                   {(field) => (
@@ -1139,10 +1167,12 @@ const QueuedRow = withForm({
             </details>
 
             {(meta.status === "error" || meta.status === "unconfirmed") && meta.error && (
-              <div className="flex flex-wrap items-center gap-2">
-                <p role="alert" className="min-w-0 flex-1 text-xs text-destructive">
-                  {meta.error}
-                </p>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {meta.error !== sharedError ? (
+                  <p role="alert" className="min-w-0 flex-1 text-sm text-destructive">
+                    {meta.error}
+                  </p>
+                ) : null}
                 <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onRetry}>
                   {meta.status === "unconfirmed" ? "Verifiqué: reenviar" : "Reintentar"}
                 </Button>

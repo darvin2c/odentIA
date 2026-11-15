@@ -133,8 +133,9 @@ export function ServicePicker({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha cuándo el foco sale de lo que tiene dentro, para dar el campo por visitado.
-    <div className="flex flex-col gap-3" onBlur={handleBlur}>
-      <div className="flex flex-col gap-2">
+    // La especialidad al lado del buscador cuando cabe (desde 28rem), y debajo de él en lo angosto.
+    <div className="@container/servicio flex flex-col gap-3" onBlur={handleBlur}>
+      <div className="flex flex-col gap-2 @md/servicio:flex-row">
         <Select
           value={specialty}
           items={{
@@ -144,7 +145,7 @@ export function ServicePicker({
           onValueChange={(next) => setSpecialty(next ?? NO_SPECIALTY)}
           disabled={disabled}
         >
-          <SelectTrigger id={`${id}-especialidad`} aria-label="Especialidad">
+          <SelectTrigger id={`${id}-especialidad`} aria-label="Especialidad" className="w-full shrink-0 @md/servicio:w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -189,6 +190,7 @@ export function ServicePicker({
         >
           <ComboboxInput
             id={id}
+            className="w-full min-w-0 @md/servicio:flex-1"
             disabled={disabled}
             placeholder="Buscar tratamiento por nombre, código o especialidad…"
             showTrigger={false}
@@ -261,7 +263,8 @@ export function ServicePicker({
         </Combobox>
       </div>
       {selectedItem ? (
-        <div className="flex flex-wrap items-center gap-2">
+        // Lo elegido y su precio, una sola vez: se oye al elegirlo.
+        <div className="flex flex-wrap items-center gap-2" aria-live="polite">
           <Badge>{selectedItem.name}</Badge>
           <span className="text-sm text-muted-foreground">
             Precio normal:{" "}
