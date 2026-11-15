@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  allergiesSaidUnknownOf,
   healthQuestionsToAsk,
   type KnownHealthInput,
   knownHealthQuestions,
@@ -246,4 +247,24 @@ it("de los huesos, la que tomó y ya no toma es «la tomó antes»; del anticoag
   })
   expect(answers.boneMedicines).toEqual({ answer: "took", said: true })
   expect(answers.anticoagulants).toEqual({ answer: "no", said: false })
+})
+
+// QA de formularios del 15 nov (K16; clínica A1 y Y4 de la 6): su «No sé» a las alergias se mostraba
+// «no se le preguntó», como si nadie se lo hubiera preguntado.
+describe("su «No sé» a las alergias es lo que dijo, no «no se le preguntó»", () => {
+  const dontKnow = { at: "2026-11-13", health: { allergies: { state: "unknown" as const, items: [] } } }
+  it("la última declaración que respondió las alergias dijo «No sé», y la ficha no sabe más", () => {
+    expect(allergiesSaidUnknownOf({ reviewState: "unknown", activeAllergies: 0, declarations: [dontKnow] })).toBe(dontKnow)
+    // «Nada cambió» o lo que no respondió las alergias no tapa su «No sé».
+    expect(
+      allergiesSaidUnknownOf({ reviewState: "unknown", activeAllergies: 0, declarations: [{ at: "2026-11-14", health: {} }, dontKnow] }),
+    ).toBe(dontKnow)
+  })
+  it("no, si después dijo otra cosa, si el equipo lo anotó o si nadie se lo preguntó", () => {
+    const saidNo = { at: "2026-11-14", health: { allergies: { state: "none" as const, items: [] } } }
+    expect(allergiesSaidUnknownOf({ reviewState: "none", activeAllergies: 0, declarations: [saidNo, dontKnow] })).toBeNull()
+    expect(allergiesSaidUnknownOf({ reviewState: "recorded", activeAllergies: 1, declarations: [dontKnow] })).toBeNull()
+    expect(allergiesSaidUnknownOf({ reviewState: "unknown", activeAllergies: 1, declarations: [dontKnow] })).toBeNull()
+    expect(allergiesSaidUnknownOf({ reviewState: "unknown", activeAllergies: 0, declarations: [] })).toBeNull()
+  })
 })

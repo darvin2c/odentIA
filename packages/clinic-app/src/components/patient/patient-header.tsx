@@ -167,6 +167,7 @@ export function PatientClinicalStrip({
     | "currentMedications"
     | "allergyReview"
     | "allergySaidNo"
+    | "allergySaidUnknown"
     | "declaredAllergies"
   >
   onAntecedentes?: () => void
@@ -295,7 +296,10 @@ export function PatientClinicalStrip({
       : noAllergies && detail.allergyReview === "none"
         ? "Niega alergias"
         : noAllergies && detail.allergyReview === "unknown"
-          ? "Alergias: no preguntado"
+          ? // Su «No sé» no es «no preguntado», como el del anticoagulante (QA del 15 nov, K16).
+            detail.allergySaidUnknown
+            ? "Alergias: no sabe"
+            : "Alergias: no preguntado"
           : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =

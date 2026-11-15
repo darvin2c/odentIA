@@ -5,6 +5,7 @@ import { useState } from "react"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
+  allergiesSaidUnknown,
   declaredGroupOf,
   pregnancyGroupOf,
   pregnancyWords,
@@ -181,6 +182,8 @@ export function ClinicalAlertsCard({
       ? `${saidNoWords(group.by, sex).toLocaleLowerCase("es")}${group.at ? ` (${shortDay(group.at)})` : ""}`
       : null
   }
+  // Su «No sé» a las alergias: se le preguntó y no sabe (QA del 15 nov, K16).
+  const saidUnknown = health ? allergiesSaidUnknown(health) : null
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = health?.pregnancy ? pregnancyWords(health.pregnancy) : null
   const asa = asaLabel(health?.asaClass)
@@ -256,7 +259,9 @@ export function ClinicalAlertsCard({
                 ? `Alergias: ${saidNo("allergies")} · sin revisar`
                 : allergyState === "none"
                   ? "Alergias: niega"
-                  : "Alergias: no preguntado"}
+                  : saidUnknown
+                    ? `Alergias: ${saidNoWords(saidUnknown.by, sex, "no sabe").replace(/^./, (letter) => letter.toLocaleLowerCase("es"))} (${shortDay(saidUnknown.at)})`
+                    : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />

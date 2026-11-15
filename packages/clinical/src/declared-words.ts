@@ -64,14 +64,15 @@ export function saidWhenWords(by: HealthDeclarant, day: string, sex: Sex): strin
 
 /**
  * El «No» que marcó quien declaró: «Dijo que no», «Su madre dijo que no». No es
- * el «niega» que anota un profesional cuando se lo pregunta.
+ * el «niega» que anota un profesional cuando se lo pregunta. Con `answer`, su
+ * «No sé»: «Su madre dijo que no sabe», que tampoco es «no se le preguntó».
  */
-export function saidNoWords(by: HealthDeclarant, sex: Sex): string {
-  if (by.kind === "staff") return "El equipo anotó que no"
+export function saidNoWords(by: HealthDeclarant, sex: Sex, answer: "no" | "no sabe" = "no"): string {
+  if (by.kind === "staff") return `El equipo anotó que ${answer}`
   if (by.kind === "representative") {
     const kin = specificKin(by.relation)
     const who = kin ? `su ${kin}` : by.relation ? caregiver(sex) : whoWords(by, sex)
-    return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que no`
+    return `${who.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))} dijo que ${answer}`
   }
-  return "Dijo que no"
+  return `Dijo que ${answer}`
 }

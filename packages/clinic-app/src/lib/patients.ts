@@ -1144,6 +1144,8 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /** Su «No sé» a las alergias, si es lo último que dijo de ellas: quién y cuándo. No es «no se le preguntó». */
+  allergySaidUnknown?: { by: HealthDeclarant; at: string | null } | null
   /**
    * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
    * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.

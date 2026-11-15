@@ -49,6 +49,7 @@ import {
   getPlanNextStep,
   getPlanNextSteps,
   allergiesSaidNoByPatient,
+  allergiesSaidUnknownByPatient,
   declaredAllergiesByPatient,
   getStaffMissingData,
   getTimeline,
@@ -887,6 +888,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         // quién lo dijo y cuándo: no es un «niega» del equipo. null si no es un «No» declarado.
         const seesAllergies = clinicalRead || canAccess(memberRole, "clinical.alerts")
         const allergySaidNo = seesAllergies ? await allergiesSaidNoByPatient(tx, orgId, c.req.param("id")) : null
+        // Su «No sé» a las alergias, con quién y cuándo: tampoco es «no se le preguntó» (QA del 15 nov, K16).
+        const allergySaidUnknown = seesAllergies ? await allergiesSaidUnknownByPatient(tx, orgId, c.req.param("id")) : null
         // Y qué alergias activas dijo la persona y nadie revisó, con quién y cuándo: la marca de
         // recepción (QA del 14 nov). Solo las alergias, nada más de lo declarado.
         const declaredAllergies = seesAllergies ? await declaredAllergiesByPatient(tx, orgId, c.req.param("id")) : []
@@ -895,6 +898,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
             ...full,
             allergyReview: (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown",
             allergySaidNo,
+            allergySaidUnknown,
             declaredAllergies,
           }
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
@@ -916,6 +920,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
               ? (full.patient.healthReviewStatus as { allergies?: string } | null)?.allergies ?? "unknown"
               : null,
           allergySaidNo,
+          allergySaidUnknown,
           declaredAllergies,
           activeConditions: [],
           currentMedications: [],

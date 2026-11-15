@@ -397,3 +397,14 @@ it("su «No sé» al anticoagulante va dentro de la caja de lo que dijo", () => 
   // Lo que nadie preguntó no es de ella: queda fuera.
   expect(boxes[0]).not.toContain("no se le preguntó")
 })
+
+// QA de formularios del 15 nov (K16; clínica Y4 de la 6): su «No sé» a las alergias salía «Alergias: no
+// preguntado», al lado de «Anticoagulante: no sabe». A quien solo ve las alergias, igual.
+it("su «No sé» a las alergias dice «no sabe», no «no preguntado»", () => {
+  const unknown: Detail = { activeAllergies: [], activeConditions: [], currentMedications: [], allergyReview: "unknown" }
+  const said = { by: { kind: "patient" as const, name: null, relation: null }, at: "2026-11-13T19:27:00.000Z" }
+  const page = text(<PatientClinicalStrip detail={{ ...unknown, allergySaidUnknown: said }} sex="F" />)
+  expect(page).toContain("Alergias: no sabe")
+  expect(page).not.toContain("no preguntado")
+  expect(text(<PatientClinicalStrip detail={unknown} sex="F" />)).toContain("Alergias: no preguntado")
+})

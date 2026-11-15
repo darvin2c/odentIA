@@ -175,6 +175,27 @@ export function medicineClassAnswers(
 }
 
 /**
+ * Su «No sé» a las alergias (QA del 15 nov, K16): la última declaración que las respondió dijo «No
+ * sé» y la ficha sigue sin saber si tiene (ninguna alergia vigente ni un «tiene» o «no tiene» del
+ * equipo). No es «no se le preguntó»: se le preguntó y no sabe. Las alergias no tienen ese estado en
+ * su revisión (`unknown` es «nadie lo dijo»), así que se lee de lo que dijo, como `medicineClassAnswers`.
+ * Devuelve esa declaración (quién y cuándo), o null.
+ */
+export function allergiesSaidUnknownOf<T extends { health: DeclaredHealth }>(input: {
+  reviewState: string
+  activeAllergies: number
+  /** De la más nueva a la más antigua. */
+  declarations: readonly T[]
+}): T | null {
+  if (input.reviewState !== "unknown" || input.activeAllergies > 0) return null
+  const said = input.declarations.find((row) => {
+    const state = row.health.allergies?.state
+    return state !== undefined && state !== "unanswered"
+  })
+  return said?.health.allergies?.state === "unknown" ? said : null
+}
+
+/**
  * La marca de una medicina en la franja: «Anticoagulante: warfarina 5 mg» o
  * «Medicina para los huesos: alendronato» si su código es de una de las dos clases; si no,
  * «Toma …». Lo dicho sin nombre («Anticoagulante (no dijo cuál)») se lee tal cual.

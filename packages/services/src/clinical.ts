@@ -1,5 +1,6 @@
 import {
   ALLERGY_SEVERITIES,
+  allergiesSaidUnknownOf,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -1064,6 +1065,44 @@ export async function allergiesSaidNoByPatient(
   if (!allergiesSaidNo("none", null, authorship)) return null
   const said = (await healthDeclarationsOf(tx, orgId, patientId)).find((row) => row.health.allergies?.state === "none")
   return said ? { by: said.by, at: said.at } : { by: UNKNOWN_DECLARANT, at: authorship.declaredAt }
+}
+
+/**
+ * Su «No sé» a las alergias, para quien ve las alergias (QA del 15 nov, K16): quién lo dijo y
+ * cuándo, si es lo último que dijo de ellas y la ficha no sabe más (`allergiesSaidUnknownOf`). No es
+ * «no se le preguntó». null si no. Nada más de su salud.
+ */
+export async function allergiesSaidUnknownByPatient(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ by: HealthDeclarant; at: Date } | null> {
+  const [header] = await tx
+    .select({ reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  if (!header) throw notFound("Paciente")
+  const state = (header.reviewStatus as { allergies?: unknown } | null)?.allergies
+  if (state === "none" || state === "recorded") return null
+  const active = await tx
+    .select({ id: patientAllergy.id })
+    .from(patientAllergy)
+    .where(
+      and(
+        eq(patientAllergy.organizationId, orgId),
+        eq(patientAllergy.patientId, patientId),
+        eq(patientAllergy.isActive, true),
+        sql`${patientAllergy.verification} <> 'descartada'`,
+      ),
+    )
+    .limit(1)
+  const said = allergiesSaidUnknownOf({
+    reviewState: "unknown",
+    activeAllergies: active.length,
+    declarations: await healthDeclarationsOf(tx, orgId, patientId),
+  })
+  return said ? { by: said.by, at: said.at } : null
 }
 
 /**

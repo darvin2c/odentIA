@@ -13,6 +13,8 @@ import { formatDate } from "../../lib/clinical-journey"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
 import {
+  allergiesSaidUnknown,
+  allergiesUnknownWords,
   askWhom,
   changedMarkWords,
   declaredGroupOf,
@@ -170,6 +172,7 @@ export function EncounterContextBody({
   }
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = data.pregnancy ? pregnancyWords(data.pregnancy) : null
+  const saidUnknownAllergies = allergiesSaidUnknown(data)
   return (
     <div className="flex flex-col gap-5 text-sm">
       {data.unchanged ? (
@@ -197,7 +200,9 @@ export function EncounterContextBody({
             {saidNo("allergies") ??
               (data.reviewStatus.allergies === "none"
                 ? "No tiene alergias."
-                : "Aún no se le preguntó por alergias.")}
+                : saidUnknownAllergies
+                  ? allergiesUnknownWords(saidUnknownAllergies, sex)
+                  : "Aún no se le preguntó por alergias.")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">

@@ -7,16 +7,18 @@
  * deduce quién fue por quién figura hoy como su representante.
  */
 import {
+  allergiesSaidUnknownOf,
   type HealthDeclarant,
   KINSHIP_LABELS,
   type PregnancyToday,
+  type RegistrationAnswers,
   saidNoWords,
   saidWhenWords,
   specificKin,
   whoWords,
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
-import type { DeclaredHealthGroup, PatientContactLink } from "./patients"
+import type { DeclaredHealthGroup, PatientContactLink, PatientHealth } from "./patients"
 
 export type { HealthDeclarant }
 // Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
@@ -47,6 +49,30 @@ export function askWhom(contacts: readonly PatientContactLink[]): string | null 
 }
 
 type Sex = string | null | undefined
+
+/**
+ * Su «No sé» a las alergias en lo que lee quien ve la historia (la regla de
+ * `allergiesSaidUnknownOf`, la misma del servidor): quién lo dijo y cuándo. null si no.
+ */
+export function allergiesSaidUnknown(
+  health: Pick<PatientHealth, "reviewStatus" | "allergies" | "declarations">,
+): { by: HealthDeclarant; at: string } | null {
+  const said = allergiesSaidUnknownOf({
+    reviewState: health.reviewStatus.allergies,
+    activeAllergies: health.allergies.filter((row) => row.isActive && row.verification !== "descartada").length,
+    declarations: (health.declarations ?? []).map((row) => ({
+      ...row,
+      health: row.health as NonNullable<RegistrationAnswers["health"]>,
+    })),
+  })
+  return said ? { by: said.by, at: said.at } : null
+}
+
+/** «Su madre dijo que no sabe si tiene alergias (13 nov).»: lo que dijo, no «no se le preguntó». */
+export function allergiesUnknownWords(said: { by: HealthDeclarant; at: string | null }, sex: Sex): string {
+  const day = said.at ? shortDay(said.at) : ""
+  return `${saidNoWords(said.by, sex, "no sabe")} si tiene alergias${day ? ` (${day})` : ""}.`
+}
 
 /**
  * «13 nov», y de otro año «13 nov 2025». Un día de calendario (`2026-11-13`) se
