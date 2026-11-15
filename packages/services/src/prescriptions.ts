@@ -2,10 +2,11 @@ import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
   duplicateWarnings,
-  findHabitualMedication,
   findMedication,
   type MedicationCatalog,
+  prescribingAlerts,
   type TakenMedication,
+  takenMedication,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -14,6 +15,7 @@ import {
   orgCounter,
   patient,
   patientAllergy,
+  patientAnamnesis,
   patientMedication,
   prescription,
   prescriptionItem,
@@ -255,22 +257,29 @@ export async function createPrescription(
       review.errors.join(" "),
       await blockedFields(prescribing, tx, { orgId, patientId, items, weightKg }),
     )
-  // La alergia y lo contraindicado en el embarazo se avisan: decide quien receta, y queda en la
-  // receta que lo vio (ADR 0143). El motivo es opcional.
-  const conflicts = [
-    ...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)),
-    ...review.warnings,
-  ]
+  // Lo que ya toma (sus antecedentes vigentes), para el AINE con un anticoagulante y los duplicados.
+  const taking = await currentMedicationsOf(tx, orgId, patientId, prescribing.catalog)
+  // Lo que avisa toda receta, en los tres productos (QA final de formularios, Y1): el embarazo y la
+  // lactancia, lo contraindicado en el embarazo y un AINE con un anticoagulante o un antiagregante.
+  const alerts = prescribingAlerts(
+    { interview: await latestInterviewOf(tx, orgId, patientId), today: await clinicToday(tx, orgId), taking },
+    items,
+    prescribing.catalog.medications,
+  )
+  // La alergia y lo demás se avisan: decide quien receta, y queda en la receta que lo vio (ADR 0143).
+  // El motivo es opcional.
+  const others = [...alerts.warnings, ...review.warnings]
+  const conflicts = [...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)), ...others]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
   const shown = input.alertsShown ? new Set(input.alertsShown.map((line) => line.trim())) : null
   // Lo de alergia o embarazo que la pantalla no mostró se muestra antes de emitir: nunca a ciegas.
   const unseen = conflicts.filter((line) => (shown ? !shown.has(line) : !input.acknowledgeAllergies))
   if (unseen.length > 0) {
-    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${unseen.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
+    const message = `${others.length > 0 ? "Aviso" : "Aviso de alergia"}: ${unseen.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
     throw new ServiceError("ALLERGY_CONFLICT", 409, message, { allergyOverrideReason: message })
   }
-  // Lo que ya toma (sus antecedentes vigentes): un duplicado por su código ATC solo informa (ADR 0143).
-  const duplicates = duplicateWarnings(items, await currentMedicationsOf(tx, orgId, patientId, prescribing.catalog), prescribing.catalog)
+  // Un duplicado por su código ATC solo informa (ADR 0143).
+  const duplicates = duplicateWarnings(items, taking, prescribing.catalog)
   // Quedan como vistos los de alergia y embarazo (ya mostrados) y los duplicados que la pantalla
   // mostró; un duplicado que no se mostró no se firma como visto. Se guardan en palabras, como se
   // leyeron: la directiva del MINSA pide guardar el aviso y la respuesta; la exportación FHIR
@@ -354,10 +363,18 @@ export async function currentMedicationsOf(
         or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
       ),
     )
-  return rows.map((row) => ({
-    name: row.name,
-    atcCode: row.atcCode ?? findHabitualMedication(row.genericName ?? row.name, catalog.habitual)?.atc ?? null,
-  }))
+  return rows.map((row) => takenMedication(row, catalog))
+}
+
+/** La última versión de su entrevista de salud: de ahí salen el embarazo y la lactancia que avisa la receta. */
+async function latestInterviewOf(tx: Db, orgId: string, patientId: string): Promise<unknown> {
+  const [latest] = await tx
+    .select({ answers: patientAnamnesis.answers })
+    .from(patientAnamnesis)
+    .where(and(eq(patientAnamnesis.organizationId, orgId), eq(patientAnamnesis.patientId, patientId)))
+    .orderBy(desc(patientAnamnesis.version))
+    .limit(1)
+  return latest?.answers ?? null
 }
 
 export async function listPrescriptions(tx: Db, orgId: string, patientId: string) {

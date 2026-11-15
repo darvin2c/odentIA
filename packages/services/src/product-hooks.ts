@@ -299,7 +299,10 @@ export const COMMON_INTERVIEW: ProductInterview = {
 export interface PrescribingReview {
   /** Lo que impide emitir (latidIA: un controlado, el peso de un niño). */
   errors: string[]
-  /** Lo que se avisa como una alergia y decide quien receta (latidIA: contraindicado en el embarazo; ADR 0143). */
+  /**
+   * Lo propio del producto que se avisa como una alergia y decide quien receta (ADR 0143). Lo que
+   * avisa toda receta (el embarazo, un AINE con un anticoagulante) lo revisa la receta misma.
+   */
   warnings: string[]
 }
 
