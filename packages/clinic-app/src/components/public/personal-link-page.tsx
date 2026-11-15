@@ -1,5 +1,6 @@
 import { Badge, Button } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
+import { FocusedTitle } from "./focused-title"
 import {
   ConfirmDialog,
   EmptyState,
@@ -937,7 +938,10 @@ export function PersonalLinkPage({
               Tus pendientes
             </Link>
           </div>
-          <h1 className="text-xl font-semibold text-balance break-words">{title}</h1>
+          {/* «Empezar» o «Corregir» abren otra pantalla: el foco va a su título. */}
+          <FocusedTitle key={title} className="text-xl font-semibold text-balance break-words">
+            {title}
+          </FocusedTitle>
           {contextLine(view, when) ? (
             <p className="text-sm text-muted-foreground">{contextLine(view, when)}</p>
           ) : null}

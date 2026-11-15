@@ -1,5 +1,6 @@
 import { EmptyState, ErrorState, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { FocusedTitle } from "../../components/public/focused-title"
 import { createFileRoute } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -55,7 +56,8 @@ function PublicRegistrationPage() {
             <CircleCheck aria-hidden className="size-6" />
           </span>
           <div className="flex flex-col gap-1.5">
-            <h1 className="font-heading text-xl font-semibold">Registro recibido</h1>
+            {/* Al enviar, el foco va a lo que pasó: la región viva quedaba vacía. */}
+            <FocusedTitle className="font-heading text-xl font-semibold">Registro recibido</FocusedTitle>
             <p className="text-sm text-pretty text-muted-foreground">
               {/* Lo mismo se registre por primera vez o ya estuviera: no revela a nadie quién es paciente. */}
               {done.forOther
