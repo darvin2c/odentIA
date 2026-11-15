@@ -166,6 +166,10 @@ const TEENS: Record<string, number> = {
 const TENS: Record<string, number> = {
   veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
 }
+/** Las unidades que pueden ir entre el número y su «y medio» («quince kilos y medio»), o tras «medio» («medio milímetro»). */
+const UNIT_WORDS = new Set(["mm", "milimetro", "milimetros", "cm", "centimetro", "centimetros", "kg", "kilo", "kilos", "kilogramos", "g", "gramos"])
+/** Las muletillas de quien dicta («digamos», «este», «a ver», «o sea»): no dicen nada de la pregunta (prueba con voz del 15 nov). */
+const MULETILLAS = new Set(["digamos", "este", "eh", "ehh", "mmm", "emm", "osea", "sea", "ver", "bueno", "pues"])
 const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 }
 
 /**
@@ -195,6 +199,11 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos";
     const word = words[index] ?? ""
     // «una clase dos», «un diente»: el artículo no es el número 1 cuando se elige una opción.
     if (options.articles === false && (word === "un" || word === "una")) continue
+    // «medio milímetro»: la mitad de esa unidad.
+    if (word === "medio" && UNIT_WORDS.has(words[index + 1] ?? "")) {
+      found.push(0.5)
+      continue
+    }
     // «al menos dos», «por lo menos dos»: no es un número negativo.
     const negative = word === "menos" && words[index - 1] !== "al" && words[index - 1] !== "lo"
     const at = negative ? index + 1 : index
@@ -203,9 +212,11 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos";
     let value = read.value
     let next = read.next
     // «seis y medio», «seis coma cinco», «seis punto cinco».
-    if (words[next] === "y" && words[next + 1] === "medio") {
+    // «seis y medio», también con la unidad en medio: «quince kilos y medio».
+    const half = UNIT_WORDS.has(words[next] ?? "") && words[next + 1] === "y" && words[next + 2] === "medio" ? next + 1 : next
+    if (words[half] === "y" && words[half + 1] === "medio") {
       value += 0.5
-      next += 2
+      next = half + 2
     } else if ((words[next] === "coma" || words[next] === "punto") && words[next + 1] !== undefined) {
       const decimal = readNumber(words, next + 1)
       if (decimal && decimal.value < 100) {
@@ -278,6 +289,12 @@ const NEGATION = /\b(no|ni|sin|niega|niegan|negativ[oa]s?|ausente|ausencia|ningu
 const denies = (said: string) => NEGATION.test(plain(said).replace(/\bsin embargo\b/g, ""))
 /** Una opción que dice que no hay nada: «No», «No tiene», «Negativa», «Ninguno», «Ausente». */
 const isNegativeOption = (option: string) => /^(no|sin|ningun[oa]?|nada|negativ[oa]|ausente)\b/.test(plain(option))
+/** Cómo se dice en la consulta lo que la opción nombra con su término: «se come las uñas» es onicofagia (prueba con voz del 15 nov). */
+const SAID_AS: Record<string, RegExp> = {
+  onicofagia: /\b(come|comia|muerde|mordia)n? las unas\b/,
+  "succion digital": /\b(chupa|chupaba|succiona)n? (el|los) dedos?\b/,
+  bruxismo: /\b(rechina|aprieta)n? los dientes\b/,
+}
 /** La opción de una prueba que dio positiva: «Positiva», «Positivo». */
 const isPositiveOption = (option: string) => /^positiv[oa]\b/.test(plain(option))
 
@@ -355,7 +372,7 @@ function namesAnother(question: DictationFormQuestion, text: string): boolean {
   const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf), ...ficha])
   const words = plain(text)
     .split(/[^a-z0-9]+/)
-    .filter((word) => (word.length >= 3 && !FILLER.has(word)) || /^[0-9]+$/.test(word))
+    .filter((word) => (word.length >= 3 && !FILLER.has(word) && !MULETILLAS.has(word)) || /^[0-9]+$/.test(word))
   return words.some((word, index) => {
     if (stemsOf(word)[0] !== head) return false
     const next = words[index + 1]
@@ -562,7 +579,12 @@ function labelNamed(question: DictationFormQuestion, said: string, site?: Produc
   const spoken = (word: string) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3)
   const own = meaningful(question.label.replace(/\([^)]*\)/g, " "))
   const proper = [...question.label.matchAll(/\(([^)]*)\)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/\p{Lu}[\p{L}-]*/gu)].flatMap((name) => meaningful(name[0])))
-  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || proper.some(spoken)
+  // La palabra del rótulo que ninguna otra pregunta de la ficha tiene basta sola: «intensidad», «frío», «sondaje».
+  const others = new Set((question.siblings ?? []).flatMap((item) => meaningful(item.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
+  // No si también es de sus opciones: «clase» de «Clase molar derecha» está en «Clase II», y «maloclusión clase dos» no es de ella.
+  const options = new Set((question.options ?? []).flatMap(stemsOf))
+  const distinctive = own.filter((word) => !others.has(word.slice(0, 5)) && !options.has(word.slice(0, 5)))
+  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || distinctive.some(spoken) || proper.some(spoken)
 }
 
 /**
@@ -628,15 +650,14 @@ export function formSentencesWithoutAnswer(
   return sentencesOf(transcript).flatMap((sentence) => {
     const said = sentence.trim()
     if (!said) return []
-    const parts = said.split(/,\s*/)
     const named = open.filter((question) => {
       if (!namesQuestion(question, said, site) || !saysValue(question, said)) return false
       if (saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered)) return false
-      // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar en una
-      // parte (entre comas) que hable de esta: en «Línea media superior centrada, la inferior desviada
-      // dos milímetros», los dos milímetros no son de la superior.
-      const another = questions.some((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, said, site))
-      return !another || parts.some((part) => talksAbout(question, new Set(stemsOf(withoutOtherTests(question, part)))) && saysValue(question, part))
+      // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar cerca de
+      // lo que distingue a esta: en «línea media superior centrada la inferior desviada dos
+      // milímetros», los dos milímetros no son de la superior.
+      const others = questions.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, said, site))
+      return !others.length || spansOf(question, others, said).some((part) => saysValue(question, part))
     })
     if (!named.length) return []
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
@@ -754,13 +775,19 @@ const meaningful = (text: string) =>
  */
 export function withoutFormPhrases(text: string, formPhrases: readonly string[]): string {
   const phrases = formPhrases.map((phrase) => plain(phrase).replace(/[.;,]+$/, "").trim()).filter((phrase) => phrase.length >= 4)
+  const covered = new Set(phrases.flatMap(meaningful).map((word) => word.slice(0, 5)))
   const sentences = sentencesOf(text)
   const kept = sentences.filter((sentence) => {
     const said = plain(sentence).replace(/[.;,]+$/, "").trim()
     if (!said) return false
     if (CORRECTION.test(said)) return false
+    // Lo que se le preguntó al paciente («¿Te duele cuando comes?») no es de la historia (prueba con voz del 15 nov).
+    if (said.startsWith("¿") || said.endsWith("?")) return false
     const hits = phrases.filter((phrase) => said.includes(phrase) || phrase.includes(said))
-    if (!hits.length) return true
+    // Lo de la ficha dicho con otras palabras («Canino derecho clase 2» por «caninos el derecho clase 2»): casi
+    // todas sus palabras son de lo que fue para la ficha.
+    const words = meaningful(said)
+    if (!hits.length) return !(words.length >= 2 && words.filter((word) => covered.has(word.slice(0, 5))).length >= Math.ceil(0.8 * words.length))
     const used = new Set(hits.flatMap(meaningful))
     return meaningful(said).filter((word) => !used.has(word)).length >= 2
   })
@@ -859,6 +886,99 @@ function sentenceOf(transcript: string | undefined, said: string | undefined): s
   return sentencesOf(transcript).find((sentence) => plain(sentence).includes(target)) ?? ""
 }
 
+/** Lo que se salta entre un número y su término, o tras una corrección: «uno con extracción», «obturados a ver 8», «no, perdón, de 4». */
+const LINKS = new Set(["con", "de", "y", "a", "ver", "este", "eh", "digamos", "mmm", "no", "perdon"])
+
+/** Las palabras sin tildes, con el decimal como punto («1,8» es 1.8), para leer números por su lugar. */
+const tokensOf = (text: string) =>
+  plain(text)
+    .replace(/(\d),(\d)/g, "$1.$2")
+    .split(/[^a-z0-9.]+/)
+    .map((word) => word.replace(/\.+$/, ""))
+    .filter(Boolean)
+
+/** El primer número desde `from`, saltando hasta dos palabras de enlace en esa dirección. */
+function numberNear(words: string[], from: number, step: 1 | -1): { value: number; next: number } | null {
+  for (let at = from, skipped = 0; at >= 0 && at < words.length && skipped <= 2; at += step, skipped += 1) {
+    const read = readNumber(words, at)
+    if (read) return read
+    if (!LINKS.has(words[at] ?? "")) return null
+  }
+  return null
+}
+
+/**
+ * En «pesa 24 kg no 22 perdón» o «de 6 no perdón de 4», el número que va enseguida después del «no»,
+ * el «perdón» o el «corrijo». `null` si no se corrigió un número: «8 de 10 no cede» no corrige nada.
+ */
+function correctedNumber(said: string): number | null {
+  const words = tokensOf(said)
+  for (let at = words.length - 1; at > 0; at -= 1) {
+    if (!["no", "perdon", "corrijo"].includes(words[at] ?? "")) continue
+    const fixed = numberNear(words, at + 1, 1)
+    if (fixed && saidNumbers(words.slice(0, at).join(" ")).length) return fixed.value
+  }
+  return null
+}
+
+/**
+ * El número que lo dicho le da a esta pregunta cuando se dicen varias seguidas sin puntuación (prueba
+ * con voz del 15 nov): cada número va con el término que tiene al lado, en el orden en que se dijo,
+ * como «tres cariados uno con extracción indicada dos obturados» (número y término) o «cariados 4
+ * obturados uno» (término y número); vale el orden con el que más términos tienen su número. Solo entre
+ * preguntas de número de la misma ficha y unidad, por la palabra que es solo de cada una. `null` si no
+ * hay dos términos dichos o los dos órdenes empatan.
+ */
+function pairedNumber(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], text: string): number | null {
+  const group = questions.filter((item) => item.responseId === question.responseId && item.type === "numero" && (item.unit ?? null) === (question.unit ?? null))
+  const wordsOf = (item: DictationFormQuestion) => meaningful(item.label.replace(/\([^)]*\)/g, " "))
+  const own = (item: DictationFormQuestion) =>
+    wordsOf(item).filter((word) => !group.some((other) => other !== item && wordsOf(other).some((theirs) => theirs.slice(0, 5) === word.slice(0, 5))))
+  const words = tokensOf(text)
+  const matches = (token: string | undefined, term: string[]) => !!token && term.some((word) => token.slice(0, 5) === word.slice(0, 5) && token.length <= word.length + 3)
+  const terms = group.flatMap((item) => {
+    const term = own(item)
+    const start = words.findIndex((token) => matches(token, term))
+    if (start < 0) return []
+    let end = start
+    while (matches(words[end + 1], term)) end += 1
+    return [{ item, start, end }]
+  })
+  const mine = terms.findIndex((term) => term.item === question)
+  if (terms.length < 2 || mine < 0) return null
+  const before = terms.map((term) => numberNear(words, term.start - 1, -1))
+  const after = terms.map((term) => {
+    const read = numberNear(words, term.end + 1, 1)
+    // «obturados a ver 8 no 7»: lo corregido enseguida.
+    const fixed = read && ["no", "perdon"].includes(words[read.next] ?? "") ? numberNear(words, read.next, 1) : null
+    return fixed ?? read
+  })
+  const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
+  if (counted(before) === counted(after)) return null
+  return (counted(before) > counted(after) ? before : after)[mine]?.value ?? null
+}
+
+/**
+ * Lo dicho cerca de esta pregunta cuando la oración nombra otras del mismo tipo: desde dos palabras
+ * antes de lo que la distingue («superior») hasta lo que distingue a otra («inferior»). Sin comas, como
+ * lo oye Chrome, es lo que separa el valor de una del de la otra. Sin nada suyo, la oración entera.
+ */
+function spansOf(question: DictationFormQuestion, others: readonly DictationFormQuestion[], said: string): string[] {
+  const mine = labelStems(question.label).filter((stem) => !others.some((other) => labelStems(other.label).includes(stem)))
+  const theirs = new Set(others.flatMap((other) => labelStems(other.label)).filter((stem) => !labelStems(question.label).includes(stem)))
+  const words = plain(said).split(/\s+/).filter(Boolean)
+  const stem = (word: string) => word.replace(/[^a-z0-9]/g, "").slice(0, 5)
+  const spans = words.flatMap((word, index) => {
+    if (!mine.includes(stem(word))) return []
+    let start = index
+    while (start > index - 2 && start > 0 && !theirs.has(stem(words[start - 1] ?? ""))) start -= 1
+    let end = index + 1
+    while (end < words.length && !theirs.has(stem(words[end] ?? ""))) end += 1
+    return [words.slice(start, end).join(" ")]
+  })
+  return spans.length ? spans : [said]
+}
+
 function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
@@ -920,6 +1040,7 @@ function checkFormAnswer(
   const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string } | null => {
     if (isNegativeOption(value)) return denies(said) && labelSaid ? { ok: true } : null
     if (isPositiveOption(value) && painOnTest(question, said)) return { ok: true }
+    if (SAID_AS[plain(value)]?.test(plain(said))) return { ok: true }
     const numbers = optionNumbers(value)
     if (numbers.length) {
       if (containsAll(heardForOptions, numbers)) return { ok: true }
@@ -970,7 +1091,7 @@ function checkFormAnswer(
     case "numero":
     case "escala":
     case "pieza": {
-      const number = Number(raw.replace(",", "."))
+      let number = Number(raw.replace(",", "."))
       if (!raw || !Number.isFinite(number)) return null
       // El número tiene que estar en lo dicho: nunca uno que el modelo dedujo o convirtió.
       // La pieza también se dice dígito a dígito («la cuatro seis»), como en el odontograma.
@@ -979,6 +1100,10 @@ function checkFormAnswer(
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
       if (question.type !== "pieza" && APPROXIMATE.test(plain(said))) return review(null, `Dijiste «${shortSaid(said)}»: es aproximado. Escríbelo tú.`)
+      // Lo que se corrigió («24 kg no 22 perdón») y el orden sin puntuación («uno con extracción indicada dos
+      // obturados»): vale el número que lo dicho le da a esta pregunta (prueba con voz del 15 nov).
+      const meant = question.type === "pieza" ? null : ((question.type === "numero" ? pairedNumber(question, questions, sentence || said) : null) ?? correctedNumber(said))
+      if (meant !== null) number = meant
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)
         return ready(number)
