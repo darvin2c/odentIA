@@ -24,6 +24,7 @@ import {
 } from "./diagnosis-codes.js"
 import { assertAttending } from "./encounter-attending.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { extractionRisksOf } from "./clinical.js"
 import { treatmentConsentStates } from "./consent-state.js"
 import { createFinishControls } from "./finish-controls.js"
 import { orgClinicalProfile } from "./locale.js"
@@ -966,8 +967,12 @@ export async function listPlanItems(
   orgId: string,
   patientId: string,
   planId?: string,
-  opts: { withoutVoided?: boolean } = {},
-): Promise<Array<PlanItemWithProgress & { waitsFor: { id: string; title: string } | null }>> {
+  /**
+   * `extractionRisks`: a la exodoncia por hacer, lo que toma y la cambia (`extractionRisksOf`). Solo
+   * lo pide quien lee lo clínico (la ruta del plan): la coordinación y el dictado no lo reciben.
+   */
+  opts: { withoutVoided?: boolean; extractionRisks?: boolean } = {},
+): Promise<Array<PlanItemWithProgress & { waitsFor: { id: string; title: string } | null; extractionRisks?: string[] }>> {
   await requirePatient(tx, orgId, patientId)
   const conditions = [
     eq(treatmentPlanItem.patientId, patientId),
@@ -999,10 +1004,34 @@ export async function listPlanItems(
   const asDecided = withProgress.map((item) => (item.decisionStatus === "pendiente" ? { ...item, decisionStatus: "aceptado" } : item))
   // El consentimiento va con el tratamiento: el Plan dice si falta firmarlo (consentimientos, 10 nov).
   const consents = await treatmentConsentStates(tx, orgId, withProgress.map((item) => item.id))
+  const risky = opts.extractionRisks ? await extractionItemsOf(tx, orgId, withProgress) : new Set<string>()
+  const risks = risky.size > 0 ? await extractionRisksOf(tx, orgId, patientId) : []
   return withProgress.map((item, index) => {
     const before = waitingFor(asDecided[index]!, asDecided, phases)
-    return { ...item, waitsFor: before ? { id: before.id, title: before.title } : null, consent: consents.get(item.id)?.state ?? null, consentMissing: consents.get(item.id)?.missing ?? [] }
+    return {
+      ...item,
+      waitsFor: before ? { id: before.id, title: before.title } : null,
+      consent: consents.get(item.id)?.state ?? null,
+      consentMissing: consents.get(item.id)?.missing ?? [],
+      ...(risky.has(item.id) && risks.length > 0 ? { extractionRisks: risks } : {}),
+    }
   })
+}
+
+/**
+ * Las exodoncias por hacer (QA final de formularios, Y2): lo que dice el producto que es una
+ * (`extractionServiceIds`), sin lo hecho, cancelado o reemplazado.
+ */
+async function extractionItemsOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<{ id: string; serviceId: string | null; status: string }>,
+): Promise<Set<string>> {
+  const open = items.filter((item) => item.serviceId && !["realizado", "cancelado", "reemplazado"].includes(item.status))
+  const { extractionServiceIds } = await productHooks(tx, orgId)
+  if (!extractionServiceIds || open.length === 0) return new Set()
+  const extractions = await extractionServiceIds(tx, orgId, [...new Set(open.map((item) => item.serviceId as string))])
+  return new Set(open.filter((item) => extractions.has(item.serviceId as string)).map((item) => item.id))
 }
 
 export async function addPlanItem(

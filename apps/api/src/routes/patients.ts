@@ -1932,7 +1932,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     const planId = c.req.query("planId") || undefined
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId, { withoutVoided: true })),
+      withOrgContext(deps.db, orgId, (tx) => listPlanItems(tx, orgId, c.req.param("id"), planId, { withoutVoided: true, extractionRisks: true })),
     )
   })
   app.post("/:id/plan/items", async (c) => {
