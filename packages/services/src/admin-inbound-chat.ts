@@ -389,6 +389,8 @@ export async function ingestInboundChat(
       media,
       receivedAt: input.receivedAt,
       adminOnly,
+      // Cuándo lo guardamos, con el reloj de nuestras respuestas: Kairós vende mira esto para saber si ya respondió.
+      createdAt: now,
     })
     .onConflictDoNothing({ target: saasInboundMessage.externalId })
     .returning()

@@ -74,13 +74,15 @@ async function write(
   address: string,
   body: string,
   at: Date,
+  /** Cuándo lo guardamos, si no es `at` (Meta da la hora en segundos y con su reloj). */
+  storedAt = at,
 ): Promise<string> {
   seq += 1
   const result = await tx((db) =>
     ingestInboundChat(
       db,
       { channel, address, externalId: `kv-${seq}`, body, displayName: "Rosa", receivedAt: at },
-      at,
+      storedAt,
     ),
   )
   return result.chatId
@@ -213,6 +215,26 @@ describe("Kairós vende en los chats", () => {
     const confirmation = (await replies(chatId)).at(-1)?.body ?? ""
     expect(confirmation).toContain("lunes, 9 de noviembre a las 10:30 (hora de Lima) con Ana Pérez")
     expect(confirmation).toContain("https://meet.example.com/ana")
+  })
+
+  it("responde lo que escribió en el mismo segundo en que salió su respuesta anterior", async () => {
+    const at = new Date(monday.getTime() + 3 * MIN)
+    const chatId = await write("whatsapp", "+51900000009", "Hola, ¿cuánto cuesta?", at)
+    const answeredAt = new Date(at.getTime() + MIN + 700)
+    await tick(answeredAt)
+    expect(await replies(chatId)).toHaveLength(1)
+    // Meta dice las 0,7 s antes (redondea al segundo), pero lo guardamos después de responder.
+    const second = new Date(at.getTime() + MIN)
+    await write(
+      "whatsapp",
+      "+51900000009",
+      "Quiero una presentación",
+      second,
+      new Date(answeredAt.getTime() + 300),
+    )
+    const next = await tick(new Date(answeredAt.getTime() + MIN))
+    expect(next.errors).toEqual([])
+    expect(await replies(chatId)).toHaveLength(2)
   })
 
   it("con una clínica con su app, pausado o «No es una clínica» no responde", async () => {

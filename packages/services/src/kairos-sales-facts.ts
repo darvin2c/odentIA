@@ -137,7 +137,11 @@ function planPrices(
     : []
   const out: string[] = []
   if (sofi.length) out.push(`Sofi cobra ${sofi.join(", ")}.`)
-  if (clio.length) out.push(`Clío cobra ${clio.join(", ")}.`)
+  // Como la web de Clío: se cobra por consulta dictada, según lo que dejó listo; sin el borrador, nada.
+  if (clio.length)
+    out.push(
+      `Clío cobra por cada consulta que deja lista con el dictado: ${clio.join(", ")}; si se descarta su borrador, no se cobra.`,
+    )
   if (m(plan.recoveryMicros))
     out.push(`Una cita recuperada por Argos cuesta ${m(plan.recoveryMicros)}.`)
   if (plan.argosPackMicros !== null && m(plan.argosPackMicros))
@@ -188,11 +192,13 @@ export function kairosSalesFactsOf(product: string, pricing: PublicPricing): Kai
       founders.trialCreditCents > 0
         ? `, con ${money(founders.trialCreditCents, "centavos")} de regalo para los agentes en los primeros ${founders.trialDays} días`
         : ` y ${founders.trialDays} días de prueba`
-    prices.push(`Programa Fundadores (${founders.name}, por invitación): ${fee}${gift}.`)
+    prices.push(
+      `Programa Fundadores (${founders.name}, por invitación): es el plan de las clínicas que entran por invitación, ${fee}${gift}.`,
+    )
     if (founders.discountPercent) {
       percents.push(founders.discountPercent)
       prices.push(
-        `Fundadores paga ${founders.discountPercent} % menos en cada trabajo que el precio de lista${founders.guaranteeMonths ? ` durante ${founders.guaranteeMonths} meses` : ""}.`,
+        `Lo que se ahorra con Fundadores: paga ${founders.discountPercent} % menos en cada trabajo de los agentes que el precio de lista${founders.guaranteeMonths ? ` durante ${founders.guaranteeMonths} meses` : ""}.`,
       )
     }
     prices.push("Al terminar la prueba, el plan Fundadores sigue solo, sin activar nada.")
@@ -214,7 +220,13 @@ export function kairosSalesFactsOf(product: string, pricing: PublicPricing): Kai
   }
   if (pricing.signupMode === "invitacion")
     prices.push(
-      `Hoy se entra por invitación: se pide en la web y Sallca responde en ${pricing.terms.waitlistAnswerDays} días hábiles.`,
+      `Hoy se entra por invitación${founders ? ", con el plan Fundadores" : ""}: se pide en la web y Sallca responde en ${pricing.terms.waitlistAnswerDays} días hábiles.`,
+    )
+  // La moneda de los planes, dicha una vez además de en cada importe.
+  const currencies = [...new Set(amounts.map((amount) => amount.currency))]
+  if (currencies.length === 1)
+    prices.push(
+      `Todos los importes están en ${currencies[0]}${currencies[0] === "USD" ? " (dólares de Estados Unidos)" : ""}.`,
     )
   return {
     product: known,

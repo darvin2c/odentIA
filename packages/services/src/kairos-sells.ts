@@ -169,7 +169,13 @@ export interface KairosChatToAnswer {
   messageId: string
 }
 
-/** Las condiciones de una conversación que Kairós responde ahora, sobre `c`, `cl` y su último mensaje `m`. */
+/**
+ * Las condiciones de una conversación que Kairós responde ahora, sobre `c`, `cl` y su último mensaje `m`.
+ * Ya respondida es con una respuesta nuestra creada después de guardar el mensaje
+ * (`m.created_at`), no después de la hora que dice Meta (`received_at`: segundos
+ * enteros y su reloj): un «Sí» escrito en el mismo segundo en que salió la
+ * respuesta anterior quedaba como ya respondido y sin turno.
+ */
 function answerableSql(now: Date) {
   const at = sql`${now.toISOString()}::timestamptz`
   return sql`${sellsEnabledSql}
@@ -178,13 +184,13 @@ function answerableSql(now: Date) {
     and m.received_at > ${at} - interval '24 hours'
     and m.received_at <= ${at} - make_interval(secs => ${KAIROS_SELL_QUIET_MS / 1000})
     and not exists (select 1 from admin.saas_outreach o where o.chat_id = c.id
-      and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.received_at)
+      and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.created_at)
     and not exists (select 1 from admin.kairos_chat_turn t where t.message_id = m.id)
     and not exists (select 1 from admin.kairos_chat_turn t where t.chat_id = c.id
       and t.outcome = 'en_curso' and t.created_at > ${at} - make_interval(secs => ${KAIROS_TURN_STALE_MS / 1000}))`
 }
 
-const lastMessageJoin = sql`join lateral (select id, received_at from admin.saas_inbound_message
+const lastMessageJoin = sql`join lateral (select id, received_at, created_at from admin.saas_inbound_message
     where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
   left join admin.saas_client cl on cl.id = c.client_id`
 

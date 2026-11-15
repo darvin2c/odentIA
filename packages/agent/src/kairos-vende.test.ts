@@ -10,6 +10,7 @@ import {
   type KairosSellInput,
   type KairosSellTools,
   SELLER_SYSTEM,
+  sellCancelledText,
   sellWhenWords,
 } from "./kairos-vende.js"
 
@@ -341,6 +342,159 @@ describe("Kairós vende: la comprobación antes de enviar", () => {
       tools().tools,
     )
     expect(earlier.kind).toBe("fallo")
+  })
+})
+
+describe("Kairós vende: lo que hizo se confirma aunque el modelo no escriba", () => {
+  const waiting = {
+    proposal: { id: "p-1", startsAt: monday10, assigneeName: "Ana Pérez" },
+    history: [{ who: "persona" as const, at: now, text: "sí, confirmado" }],
+  }
+  const moved = {
+    startsAt: monday15,
+    assigneeName: "Ana Pérez",
+    meetingUrl: null,
+    confirmation: `Tu presentación pasó al ${sellWhenWords(monday15)} (hora de Lima), con Ana Pérez. Es por videollamada: Ana Pérez te comparte el enlace antes de empezar.`,
+  }
+
+  it("agendó y el modelo no escribió nada: sale la confirmación, no el aviso fijo", async () => {
+    const { model } = scripted([{ tool: "agendar" }, { text: "" }])
+    const t = tools()
+    const result = await seller(model).seller.answer(input(waiting), t.tools)
+    expect(t.calls).toEqual(["book:p-1"])
+    expect(result.kind).toBe("respondio")
+    expect(result.text).toBe(
+      `Quedó agendada tu presentación de 45 minutos para el ${sellWhenWords(monday10)} (hora de Lima) con Ana Pérez. Es por videollamada: entra a la hora aquí https://meet.example.com/ana`,
+    )
+    if (result.kind === "respondio") expect(result.booked?.startsAt).toEqual(monday10)
+  })
+
+  it("agendó y lo que escribió no pasa la comprobación: sale solo la confirmación", async () => {
+    const { model } = scripted([
+      { tool: "agendar" },
+      { text: "¡Listo! Te espero también el martes 17 de noviembre a las 16:00." },
+    ])
+    const result = await seller(model).seller.answer(
+      input({ ...waiting, firstReply: true }),
+      tools().tools,
+    )
+    expect(result.kind).toBe("respondio")
+    expect(result.text.startsWith(KAIROS_SELL_INTRO)).toBe(true)
+    expect(result.text).toContain("Quedó agendada tu presentación")
+    expect(result.text).not.toContain("16:00")
+  })
+
+  it("agendó y después el modelo falló o no terminó: también la confirmación", async () => {
+    const broken = scripted([{ tool: "agendar" }, { throws: "503 del proveedor" }])
+    const failed = await seller(broken.model).seller.answer(input(waiting), tools().tools)
+    expect(failed.kind).toBe("respondio")
+    expect(failed.text).toContain("Quedó agendada")
+
+    const endless = scripted([
+      { tool: "agendar" },
+      ...Array.from({ length: 6 }, () => ({
+        tool: "ver_horarios",
+        args: { desde: null, hasta: null },
+      })),
+    ])
+    const looped = await seller(endless.model).seller.answer(input(waiting), tools().tools)
+    expect(looped.kind).toBe("respondio")
+    expect(looped.text).toContain("Quedó agendada")
+  })
+
+  it("movió y el modelo no escribió nada: sale la confirmación del cambio", async () => {
+    const { model } = scripted([{ tool: "mover" }, { text: "   " }])
+    const t = tools({ move: async () => moved })
+    const result = await seller(model).seller.answer(
+      input({
+        ...waiting,
+        presentation: { startsAt: monday10, assigneeName: "Ana Pérez", meetingUrl: null },
+      }),
+      t.tools,
+    )
+    expect(result).toEqual({ kind: "respondio", text: moved.confirmation, booked: moved })
+  })
+
+  it("canceló y el modelo no escribió nada: le dice que quedó cancelada", async () => {
+    const { model } = scripted([{ tool: "cancelar", args: { motivo: null } }, { text: "" }])
+    const t = tools({ cancel: async () => ({ startsAt: monday10 }) })
+    const result = await seller(model).seller.answer(
+      input({
+        history: [{ who: "persona", at: now, text: "quiero cancelar la presentación" }],
+        presentation: { startsAt: monday10, assigneeName: "Ana Pérez", meetingUrl: null },
+      }),
+      t.tools,
+    )
+    expect(result).toEqual({ kind: "respondio", text: sellCancelledText(monday10), booked: null })
+    expect(result.text).toContain("lunes, 16 de noviembre a las 10:00 (hora de Lima)")
+  })
+
+  it("sin haber hecho nada, el vacío sigue siendo el aviso fijo", async () => {
+    const { model } = scripted([{ text: "" }])
+    const result = await seller(model).seller.answer(input(), tools().tools)
+    expect(result).toMatchObject({ kind: "fallo", why: "El modelo no escribió nada" })
+  })
+})
+
+describe("Kairós vende: la hora que pidió, en cualquier forma", () => {
+  // Solo el lunes a las 15:00 libre: la hora pedida nunca la sustenta una ofrecida.
+  const onlyAfternoon = () =>
+    tools({ slots: async () => [{ startsAt: monday15, userId: "u-ana", name: "Ana Pérez" }] })
+  const cases: Array<[string, string]> = [
+    ["¿me agendas el domingo 15 de noviembre a las 10 am?", "a las 10 a. m."],
+    ["¿el domingo 15 de noviembre a las 10 a. m.?", "a las 10 am"],
+    ["¿el domingo 15 de noviembre a las 10:00?", "a las 10 de la mañana"],
+    ["¿el domingo 15 de noviembre a las 10 de la mañana?", "a las 10:00"],
+    ["¿el domingo 15 de noviembre a las 8 pm?", "a las 8 p. m."],
+    ["¿el domingo 15 de noviembre a las 8 de la noche?", "a las 20:00"],
+    ["¿el domingo 15 de noviembre a las 20:00?", "a las 8 de la noche"],
+    ["¿el domingo 15 de noviembre a las 8 p. m.?", "a las 8 pm"],
+  ]
+  it.each(cases)("pidió «%s» y responde «%s» para decir que no está", async (asked, said) => {
+    const { model } = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      {
+        text: `El domingo 15 de noviembre ${said} no tengo horarios. Te ofrezco el lunes 16 de noviembre a las 15:00. ¿Te acomoda?`,
+      },
+    ])
+    const result = await seller(model).seller.answer(
+      input({ history: [{ who: "persona", at: now, text: asked }] }),
+      onlyAfternoon().tools,
+    )
+    expect(result).toMatchObject({ kind: "respondio" })
+  })
+
+  it("en otra forma tampoco se ofrece como libre", async () => {
+    const { model } = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { text: "Perfecto, te agendo el domingo 15 de noviembre a las 10 a. m." },
+    ])
+    const result = await seller(model).seller.answer(
+      input({
+        history: [{ who: "persona", at: now, text: "¿el domingo 15 de noviembre a las 10 am?" }],
+      }),
+      onlyAfternoon().tools,
+    )
+    expect(result.kind).toBe("fallo")
+  })
+})
+
+describe("Kairós vende: lo mismo dicho dos veces sale una vez", () => {
+  it("un párrafo repetido no se envía dos veces", async () => {
+    const line =
+      "Hola, soy Kairós, el asistente de Sallca. Recibí un archivo que no puedo ver; ¿me lo escribes?"
+    const { model } = scripted([{ text: `${line}\n${line}` }])
+    const result = await seller(model).seller.answer(input({ firstReply: true }), tools().tools)
+    expect(result).toMatchObject({ kind: "respondio", text: line })
+  })
+})
+
+describe("Kairós vende: las instrucciones", () => {
+  it("piden la moneda con cada precio y no tratan Fundadores como un descuento", () => {
+    expect(SELLER_SYSTEM).toContain("cada importe con su moneda")
+    expect(SELLER_SYSTEM).toContain(
+      "por Fundadores o por cuánto se ahorra con Fundadores no es pedir un descuento",
+    )
   })
 })
 

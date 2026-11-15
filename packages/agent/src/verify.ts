@@ -513,6 +513,15 @@ function mask(text: string, pattern: RegExp): string {
   return text.replace(pattern, (found) => " ".repeat(found.length))
 }
 
+/**
+ * Las horas que dice un texto, cada una como sus lecturas en minutos del día
+ * («10 a. m.», «10 am», «a las 10 de la mañana» y «10:00» son 600; «a las 10»
+ * sin más, 600 o 1320), leídas como las lee la comprobación; las de un enlace no cuentan.
+ */
+export function clockMinutesIn(text: string): number[][] {
+  return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.map((mention) => mention.value)
+}
+
 /** Cuántas horas dice un texto, leídas como las lee la comprobación («9:00», «9 a. m.», «a las 9 y media»); las de un enlace no cuentan. */
 export function timesIn(text: string): number {
   return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.length
