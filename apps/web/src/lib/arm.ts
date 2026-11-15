@@ -223,6 +223,8 @@ export interface AltPage {
   path: string
   /** El nombre de la tarjeta de la izquierda en la escena de la portada («Tu CRM»). */
   them: string
+  /** Lo que la clínica busca en Google: va primero en el título y en la etiqueta de la portada. */
+  keyword: string
   seoTitle: string
   seoDescription: string
   title: string
@@ -231,11 +233,15 @@ export interface AltPage {
   faq: FaqItem[]
 }
 
+/** Cómo se busca el software de cada rubro (el mismo término que el título de la portada). */
+const SOFTWARE_KW = ofProduct({ dental: "Software dental", medical: "Software médico", optical: "Software para ópticas" })
+
 export const ALT_PAGES: Record<AltKey, AltPage> = {
   crm: {
     path: "/comparar/crm",
     them: "Tu CRM",
-    seoTitle: `${NAME} vs CRM: el ARM para ${WORDS.audience} que hace el trabajo`,
+    keyword: `CRM para ${WORDS.audience}`,
+    seoTitle: `CRM para ${WORDS.audience}: por qué ${NAME} es un ARM`,
     seoDescription: `Un CRM guarda lo que tu equipo anota y espera. ${NAME} es un ARM: agentes de IA que responden, agendan y traen de vuelta a tus ${P}. Compáralos fila por fila.`,
     title: "Un CRM te pide trabajo.",
     accent: `${NAME} lo hace por ti.`,
@@ -245,7 +251,8 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   chatbot: {
     path: "/comparar/chatbot",
     them: "Tu chatbot",
-    seoTitle: `${NAME} vs chatbot: agentes de IA que hacen el trabajo de ${WORDS.yourClinic}`,
+    keyword: `Chatbot para ${WORDS.audience}`,
+    seoTitle: `Chatbot para ${WORDS.audience} vs agentes de IA: ${NAME}`,
     seoDescription: `Un chatbot responde y le pasa el resto a alguien. En ${NAME}, Sofi responde por todos tus canales y agenda con el sí de la persona, y Argos sigue cuando la conversación termina.`,
     title: "Un chatbot conversa.",
     accent: `${NAME} hace el trabajo.`,
@@ -265,7 +272,8 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   software: {
     path: "/comparar/software-tradicional",
     them: "Tu software",
-    seoTitle: `${NAME} vs el software de siempre para ${WORDS.audience}`,
+    keyword: SOFTWARE_KW,
+    seoTitle: `${SOFTWARE_KW} con agentes de IA: ${NAME} vs el software de siempre`,
     seoDescription: `El software de siempre guarda tu agenda y tus historias, pero todo lo hace tu equipo a mano. ${NAME} trae ${SYSTEM}, y además agentes de IA que responden, agendan y hacen seguimiento.`,
     title: "El software de siempre espera a que lo uses.",
     accent: `${NAME} trabaja contigo.`,
@@ -282,7 +290,8 @@ export const ALT_PAGES: Record<AltKey, AltPage> = {
   manual: {
     path: "/comparar/whatsapp-y-cuaderno",
     them: "Tu cuaderno",
-    seoTitle: `De WhatsApp y cuaderno a ${NAME}: ${WORDS.yourClinic} sin depender de la memoria`,
+    keyword: `Agenda por WhatsApp para ${WORDS.audience}`,
+    seoTitle: `Agenda por WhatsApp para ${WORDS.audience}: del cuaderno a ${NAME}`,
     seoDescription: `Mensajes que esperan hasta mañana, citas en un cuaderno y ${P} que no vuelven. Con ${NAME}, Sofi responde y agenda a cualquier hora y Argos recuerda las citas a quien aceptó sus avisos.`,
     title: "WhatsApp y cuaderno dependen de tu memoria.",
     accent: `${NAME} no se olvida.`,

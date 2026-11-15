@@ -30,7 +30,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(page.faq)]
 ---
 <Base title={page.seoTitle} description={page.seoDescription} jsonLd={jsonLd}>
   <PageHero
-    tag={`Compara · ${alt.label}`}
+    tag={`Compara · ${page.keyword}`}
     title={page.title}
     accent={page.accent}
     lead={page.lead}
