@@ -4,7 +4,8 @@
  * anotado, las tareas hechas, la venta, la cuenta, los pagos, soporte, lo que
  * hizo Kairós). Cada entrada dice quién la hizo; nada se borra. Un correo que
  * llegó y la respuesta que le dimos abren ese correo al lado (`EmailDrawer`,
- * con «Responder»). El filtro vive
+ * con «Responder»); lo que entró o salió por WhatsApp, Instagram o Messenger
+ * abre su conversación (`ChatDrawer`). El filtro vive
  * en la dirección (`?historial=`) y «Ver más» trae lo anterior. Soporte no
  * recibe lo «solo administración» ni importes (lo filtra el servidor).
  */
@@ -32,6 +33,7 @@ import {
   wordOf,
 } from "./client-model"
 import { clientQueryKeys } from "./client-queries"
+import { ChatDrawer } from "./chat-drawer"
 import { EmailDrawer } from "./email-drawer"
 
 const FILTER_WORDS: Record<ClientHistoryFilter, string> = {
@@ -65,6 +67,7 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
   })
   const entries = history.data?.pages.flatMap((page) => page.items) ?? []
   const [emailId, setEmailId] = useState<string | null>(null)
+  const [chatId, setChatId] = useState<string | null>(null)
 
   return (
     <section aria-labelledby="historial-titulo" className="flex flex-col gap-4">
@@ -116,7 +119,12 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
             className="flex flex-col divide-y rounded-xl border bg-card"
           >
             {entries.map((entry) => (
-              <HistoryEntry key={entry.id} entry={entry} onOpenEmail={setEmailId} />
+              <HistoryEntry
+                key={entry.id}
+                entry={entry}
+                onOpenEmail={setEmailId}
+                onOpenChat={setChatId}
+              />
             ))}
           </ol>
           {history.hasNextPage ? (
@@ -141,6 +149,7 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
         </>
       )}
       {emailId ? <EmailDrawer emailId={emailId} open onClose={() => setEmailId(null)} /> : null}
+      {chatId ? <ChatDrawer chatId={chatId} open onClose={() => setChatId(null)} /> : null}
     </section>
   )
 }
@@ -148,11 +157,14 @@ export function ClientHistoryTab({ clientId }: ClientTabProps) {
 function HistoryEntry({
   entry,
   onOpenEmail,
+  onOpenChat,
 }: {
   entry: TimelineEntry
   onOpenEmail: (emailId: string) => void
+  onOpenChat: (chatId: string) => void
 }) {
   const emailId = entry.link?.kind === "correo" ? entry.link.id : null
+  const chatId = entry.link?.kind === "chat" ? entry.link.id : null
   const kairos = entry.who.kind === "kairos"
   return (
     <li className="flex gap-3 p-4">
@@ -185,6 +197,15 @@ function HistoryEntry({
           >
             {entry.title}
             <span className="sr-only">: abrir el correo</span>
+          </button>
+        ) : chatId ? (
+          <button
+            type="button"
+            onClick={() => onOpenChat(chatId)}
+            className="w-fit text-left text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring [overflow-wrap:anywhere]"
+          >
+            {entry.title}
+            <span className="sr-only">: abrir la conversación</span>
           </button>
         ) : (
           <p className="text-sm font-medium [overflow-wrap:anywhere]">{entry.title}</p>

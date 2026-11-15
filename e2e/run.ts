@@ -38,6 +38,7 @@ import {
   vistiaBuildEnv,
   type HarnessRuntime,
 } from "./harness-env"
+import { startMetaGraphStub } from "./meta-graph-stub"
 import { initRuntimeMeta, runtimeMetaPath, updateRuntimeMeta } from "./runtime-meta"
 import { dbSetupCommand, DB_SETUP_SCRIPTS, startStack, type DbSetupScript, type HarnessStack } from "./stack"
 
@@ -1209,6 +1210,10 @@ export async function main(args: string[]): Promise<number> {
     mark("Infraestructura (contenedores)", tInfra)
 
     const childEnv: Record<string, string> = { ...cleanEnv(process.env), ...stackEnv(runtime), NODE_ENV: "test" }
+    // La Meta de mentira de los canales de la administración: la API le habla en vez de a Meta.
+    const metaGraph = await startMetaGraphStub()
+    childEnv.ADMIN_META_GRAPH_URL = metaGraph.url
+    childEnv.E2E_META_GRAPH_URL = metaGraph.url
 
     const tDb = performance.now()
     for (const script of DB_SETUP_SCRIPTS) {

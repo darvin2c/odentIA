@@ -69,3 +69,11 @@ it("CLIENT_IP_HEADER: una sola cabecera, en minúsculas; vacía si no se pone", 
   expect(String(error)).toContain("exit 1")
   expect(logged.mock.calls[0]?.[1]).toMatchObject({ CLIENT_IP_HEADER: [expect.stringContaining("Una sola cabecera")] })
 })
+
+it("ADMIN_META_GRAPH_URL (la Meta de mentira del e2e) no deja arrancar producción", async () => {
+  const graph = { ADMIN_META_GRAPH_URL: "http://127.0.0.1:9999" }
+  const { error, logged } = await boot({ ...BASE, CHANNEL_VALIDATE_EXTERNAL: "false", ...graph })
+  expect(String(error)).toContain("exit 1")
+  expect(logged.mock.calls[0]?.[1]).toMatchObject({ ADMIN_META_GRAPH_URL: [expect.stringContaining("solo de pruebas")] })
+  expect((await boot({ ...BASE, NODE_ENV: "test", ...graph })).env).toMatchObject(graph)
+})

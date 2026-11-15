@@ -890,6 +890,20 @@
       "when": 1794704603333,
       "tag": "0126_cambio_algo",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1794711202466,
+      "tag": "0127_canales_de_la_administracion",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1794711208356,
+      "tag": "0128_canales_de_la_administracion_reglas",
+      "breakpoints": true
     }
   ]
 }

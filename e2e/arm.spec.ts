@@ -2,21 +2,23 @@
  * El ARM de la administración (ADR 0185), de punta a punta en pantalla: un
  * cliente que se agrega a mano, lo que se anota con Kairós (con LLM_MODEL=fake
  * ordena con sus reglas fijas y lo dice), una tarea, una propuesta que sale por
- * WhatsApp y la persona marca «Salió», y todo queda en su Historial. Soporte
- * no ve Reportes ni importes, y el servidor se los niega igual.
+ * WhatsApp y todo queda en su Historial. Soporte no ve Reportes ni importes, y
+ * el servidor se los niega igual.
  *
- * WhatsApp no tiene bandeja de Sallca: «Abrir WhatsApp» abre wa.me en otra
- * pestaña. Aquí esa pestaña no sale a la red: se responde en el navegador y
- * solo se comprueba a qué número y con qué texto se abrió. Que llegue es cosa
- * de la persona, que lo dice con «Salió».
+ * El harness trae el número de Sallca configurado (`harness-env.ts`): la
+ * propuesta por WhatsApp sale desde la conversación de esa persona (que ya le
+ * escribió hace un rato: dentro de las 24 h va el texto), sin wa.me, por la
+ * Meta de mentira del supervisor (`meta-graph-stub.ts`), que no acredita la
+ * Graph API real ni la entrega en un celular.
  */
 import { randomUUID } from "node:crypto"
+import { saasChat, saasInboundMessage } from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasPlan } from "@odentia/db/schema/saas-billing"
 import { ADMIN, enterAdmin, surface } from "./admin"
 import { api, expect, test } from "./fixtures"
 
-test("ARM: cliente a mano, anotar con Kairós, tarea, propuesta por WhatsApp que salió y su historial; Soporte sin importes", async ({
+test("ARM: cliente a mano, anotar con Kairós, tarea, propuesta por el WhatsApp de Sallca que salió y su historial; Soporte sin importes", async ({
   owner,
   createOwner,
   fixtureDb,
@@ -128,31 +130,51 @@ test("ARM: cliente a mano, anotar con Kairós, tarea, propuesta por WhatsApp que
   const proposal = surface(page, "Propuesta v1")
   await expect(proposal).toContainText("Sin descuento")
 
-  // wa.me no sale a la red: la pestaña que abre se responde aquí.
-  await page
-    .context()
-    .route(/^https:\/\/(wa\.me|api\.whatsapp\.com)\//, (route) =>
-      route.fulfill({ status: 200, contentType: "text/html", body: "<title>WhatsApp</title>" }),
-    )
+  // Luis le escribió a Sallca hace un rato desde su celular (sin decirse aún de quién es):
+  // dentro de las 24 h, WhatsApp deja responderle con texto.
+  const [inbound] = await fixtureDb
+    .insert(saasChat)
+    .values({ channel: "whatsapp", address: `+51${phone}`, lastInboundAt: new Date() })
+    .returning({ id: saasChat.id })
+  await fixtureDb.insert(saasInboundMessage).values({
+    chatId: inbound?.id ?? "",
+    externalId: `wamid.arm-${tag}`,
+    body: "Hola, ¿me mandan la propuesta?",
+    receivedAt: new Date(),
+  })
+  // Si algo abriera wa.me, la prueba lo vería.
+  const tabs: string[] = []
+  page.context().on("page", (opened) => tabs.push(opened.url()))
   await proposal.getByRole("button", { name: "Enviar por WhatsApp" }).click()
   const write = surface(page, "Enviar la propuesta v1")
   await expect(write.getByRole("textbox", { name: "Mensaje" })).toHaveValue(
     new RegExp(`Le preparé la propuesta para ${clinic}`),
   )
   await shot("enviar-propuesta")
-  const opened = page.context().waitForEvent("page")
-  await write.getByRole("button", { name: "Abrir WhatsApp" }).click()
-  const whatsapp = await opened
-  await whatsapp.waitForURL(/^https:\/\/wa\.me\//)
-  const link = new URL(whatsapp.url())
-  expect(`${link.host}${link.pathname}`).toBe(`wa.me/51${phone}`)
-  expect(link.searchParams.get("text")).toContain(`Le preparé la propuesta para ${clinic}`)
-  await whatsapp.close()
-  // Nada se da por enviado hasta que la persona lo dice.
-  const went = surface(page, "¿Salió el WhatsApp?")
-  await expect(went).toContainText(phone)
-  await went.getByRole("button", { name: "Salió", exact: true }).click()
-  await expect(page.getByText("Anotado: salió. Queda en su historial.")).toBeVisible()
+  await write.getByRole("button", { name: "Seguir en la conversación" }).click()
+  // Ese celular ya escribió sin decirse de quién es: el celular solo no lo liga. Primero se dice
+  // de quién es (lo sugiere por el celular) y la conversación sigue con el texto puesto.
+  const whose = surface(page, "¿De quién es este WhatsApp?")
+  await whose.getByRole("button", { name: new RegExp(`^Es de ${person}`) }).click()
+  const chat = surface(page, /^WhatsApp con /)
+  await expect(chat.getByLabel("Respuesta")).toHaveValue(
+    new RegExp(`Le preparé la propuesta para ${clinic}`),
+  )
+  await expect(chat).toContainText("Va como el envío de la propuesta")
+  await chat.getByRole("button", { name: "Enviar por WhatsApp" }).click()
+  await expect(page.getByText("Salió por WhatsApp")).toBeVisible()
+  await expect(
+    chat.getByRole("listitem").filter({ hasText: `Le preparé la propuesta para ${clinic}` }),
+  ).toContainText(/· \d\d:\d\d · Salió/)
+  const graph = process.env.E2E_META_GRAPH_URL ?? ""
+  const sent = (await (await fetch(`${graph}/__enviados`)).json()) as Array<{
+    body: { to?: string; text?: { body?: string } }
+  }>
+  const out = sent.find((entry) => entry.body?.to === `51${phone}`)
+  expect(out?.body.text?.body).toContain(`Le preparé la propuesta para ${clinic}`)
+  expect(tabs, "no se abre wa.me").toEqual([])
+  await shot("propuesta-salio")
+  await chat.getByRole("button", { name: "Cerrar" }).last().click()
   await expect(proposal.getByText("Enviada", { exact: false }).first()).toBeVisible()
   await proposal.getByRole("button", { name: "Cerrar" }).last().click()
 

@@ -1,5 +1,5 @@
 import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
-import { Badge, Button, Input, Label, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
+import { Badge, Button, toast } from "@odentia/ui"
 import {
   AgentMark,
   common,
@@ -7,20 +7,29 @@ import {
   ExpandableText,
   type FieldControl,
   FormDrawer,
-  LoadingState,
   submitErrorMessage,
   useAppForm,
   useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import {
+  CHAT_CHANNEL_WORDS,
+  chatChannelOf,
+  momentWords,
+  unassignedChatOf,
+  useChatsConfig,
+} from "./chat-api"
+import { ChatDrawer } from "./chat-drawer"
+import { ChatOwnerDrawer, type ChatOwnerSubject } from "./chat-owner-drawer"
 import { cargaMarkedWords } from "./client-files-tab"
+import { ClientSearch } from "./client-search"
 import { EmailDrawer } from "./email-drawer"
 import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./hoy-links"
 import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
@@ -29,8 +38,9 @@ import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
  * Lo que preparó Kairós y espera el sí de una persona (`/api/admin/kairos`):
  * la tarjeta con su por qué, con qué datos y cuándo vence; Enviar o Aprobar,
  * Cambiar y Ahora no. Aprobar ejecuta la misma operación de la pantalla en el
- * servidor; un correo sale una sola vez y un WhatsApp se abre por su enlace y
- * queda «¿Salió?» hasta que la persona lo dice. Nada se reintenta solo.
+ * servidor; un correo sale una sola vez, y un WhatsApp también, por el número
+ * de Sallca y desde su conversación (sin él configurado, se abre por wa.me y
+ * queda «¿Salió?» hasta que la persona lo dice). Nada se reintenta solo.
  *
  * Los correos: «responder_correo» trae el borrador de la respuesta y se envía
  * (o se cambia en el mismo cajón de «Responder»); «correo_sin_cliente» se
@@ -83,6 +93,11 @@ const decisionSchema = z.object({
       to: z.string().nullable(),
       status: z.string(),
       whatsappUrl: z.string().nullable(),
+      /** Salió por el número de Sallca: su conversación y, fuera de las 24 h, la plantilla. */
+      chatId: z.string().nullable().default(null),
+      template: z.string().nullable().default(null),
+      /** Por qué no salió, si Meta lo rechazó. */
+      why: z.string().nullable().default(null),
     })
     .nullable(),
   emailSent: z.boolean().nullable(),
@@ -90,7 +105,13 @@ const decisionSchema = z.object({
 type Decision = z.infer<typeof decisionSchema>
 
 /** Lo que solo aprueba Administración (precios, ligar personas, fusionar, la carga de datos): el servidor también lo exige. */
-const ADMIN_KINDS = new Set(["propuesta", "vinculo", "duplicado", "posible_carga"])
+const ADMIN_KINDS = new Set([
+  "propuesta",
+  "vinculo",
+  "duplicado",
+  "posible_carga",
+  "chat_sin_cliente",
+])
 
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null
@@ -110,6 +131,7 @@ export function kairosItemTab(kind: string): ClientTab {
       return "contactos"
     case "mensaje":
     case "responder_correo":
+    case "responder_chat":
       return "historial"
     case "posible_carga":
       return "documentos"
@@ -124,14 +146,18 @@ const channelOf = (item: Pick<KairosItem, "payload">): "correo" | "whatsapp" | n
 }
 
 /** El botón del sí, en palabras de lo que hace (una carga que ya pasó los 30 días lo dice antes). */
-export function approveLabel(item: Pick<KairosItem, "kind" | "payload">): string {
+export function approveLabel(
+  item: Pick<KairosItem, "kind" | "payload">,
+  /** El WhatsApp de Sallca está configurado: el mensaje sale de ahí, no se abre wa.me. */
+  throughChat = false,
+): string {
   switch (item.kind) {
     case "posible_carga":
       return item.payload.dueNow === true
         ? "Sí, es la carga: se borra al marcarlo"
         : "Sí, es la carga"
     case "mensaje":
-      return channelOf(item) === "whatsapp" ? "Abrir WhatsApp" : "Enviar"
+      return channelOf(item) === "whatsapp" && !throughChat ? "Abrir WhatsApp" : "Enviar"
     case "guion":
       return "Listo"
     case "dato":
@@ -214,6 +240,36 @@ const outreachWords = (item: KairosItem): string | null => {
     : `Por correo${to ? ` a ${to}` : ""}`
 }
 
+/**
+ * Lo que se dice después del sí de un WhatsApp que salió por el número de
+ * Sallca: salió (o la plantilla para retomar, si pasaron 24 h: el texto no
+ * va), no salió con el motivo de Meta, o no se sabe (no se reintenta).
+ */
+export function chatSendWords(outreach: {
+  status: string
+  to: string | null
+  template: string | null
+  why: string | null
+}): { tone: "success" | "error" | "warning"; text: string } {
+  const to = outreach.to ? ` a ${outreach.to}` : ""
+  if (outreach.status === "enviado")
+    return outreach.template
+      ? {
+          tone: "success",
+          text: `Salió por WhatsApp${to} la plantilla para retomar: pasaron 24 horas desde su último mensaje y el texto no va. Cuando responda, sigue en su conversación.`,
+        }
+      : { tone: "success", text: `Salió por WhatsApp${to}. Queda en su historial.` }
+  if (outreach.status === "no_salio")
+    return {
+      tone: "error",
+      text: `No salió por WhatsApp${outreach.why ? `: ${outreach.why}` : ""}`,
+    }
+  return {
+    tone: "warning",
+    text: "No se sabe si salió por WhatsApp: no se reintenta. Revísalo en su historial y di si salió.",
+  }
+}
+
 interface DecideInput {
   item: KairosItem
   action: "aprobar" | "descartar"
@@ -222,9 +278,19 @@ interface DecideInput {
   tab?: Window | null
 }
 
-/** Abre una pestaña vacía en el clic, si el sí va a dar un enlace de WhatsApp. */
-export function tabForWhatsApp(item: KairosItem, action: "aprobar" | "descartar"): Window | null {
-  if (action !== "aprobar" || item.kind !== "mensaje" || channelOf(item) !== "whatsapp") return null
+/** Abre una pestaña vacía en el clic, si el sí va a dar un enlace de WhatsApp (sin el número de Sallca). */
+export function tabForWhatsApp(
+  item: KairosItem,
+  action: "aprobar" | "descartar",
+  throughChat = false,
+): Window | null {
+  if (
+    throughChat ||
+    action !== "aprobar" ||
+    item.kind !== "mensaje" ||
+    channelOf(item) !== "whatsapp"
+  )
+    return null
   try {
     return window.open("about:blank", "_blank")
   } catch {
@@ -275,7 +341,17 @@ export function useKairosDecide() {
         toast.success("Listo: no se hace")
         return
       }
+      if (item.kind === "chat_sin_cliente") {
+        toast.success("Listo: sus mensajes, los de antes y los que vengan, quedan en su ficha")
+        return
+      }
       const outreach = decision.outreach
+      if (outreach?.channel === "whatsapp" && outreach.chatId) {
+        tab?.close()
+        const words = chatSendWords(outreach)
+        toast[words.tone](words.text)
+        return
+      }
       if (outreach?.channel === "whatsapp" && outreach.whatsappUrl) {
         const url = outreach.whatsappUrl
         openWhatsApp(url, tab)
@@ -325,12 +401,30 @@ export function KairosItemCard({
   isAdmin: boolean
   now: Date
 }) {
+  if (CHAT_KINDS.has(item.kind)) return <ChatItemCard item={item} isAdmin={isAdmin} now={now} />
+  return <DecisionCard item={item} isAdmin={isAdmin} now={now} />
+}
+
+/** Lo que llega por WhatsApp, Instagram o Messenger: se decide y se responde en la conversación. */
+const CHAT_KINDS = new Set(["chat_sin_cliente", "responder_chat"])
+
+function DecisionCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boolean; now: Date }) {
   const decide = useKairosDecide()
   const [changing, setChanging] = useState(false)
   const [replying, setReplying] = useState(false)
   const [creating, setCreating] = useState(false)
+  /** El celular del mensaje ya escribió sin decir de quién es: «¿De quién es?» de esa conversación. */
+  const [ownerChatId, setOwnerChatId] = useState<string | null>(null)
   const leave = useFocusOnLeave<HTMLLIElement>()
   const emailId = text(item.payload.emailId)
+  /** Administración dice de quién es la conversación; el mensaje sigue en espera para su sí. */
+  const decideOwnerFirst = (error: unknown): boolean => {
+    const chatId = isAdmin ? unassignedChatOf(error) : null
+    if (!chatId) return false
+    toast.info("Ese celular ya nos escribió: di primero de quién es y vuelve a enviar")
+    setOwnerChatId(chatId)
+    return true
+  }
   /** El sí del ítem con lo que se cambió: lo usan «Responder» (el texto) y «Crear cliente» (el cliente). */
   const approveWith = async (edited: Record<string, unknown>) => {
     leave.markLeaving()
@@ -344,12 +438,17 @@ export function KairosItemCard({
   const body = text(item.payload.body)
   const onlyAdmin = ADMIN_KINDS.has(item.kind) && !isAdmin
   const needsClient = item.kind === "correo_sin_cliente" && !text(item.payload.clientId)
+  const throughChat = useChatsConfig().data?.whatsapp === true
   const run = (action: "aprobar" | "descartar") => {
-    const tab = tabForWhatsApp(item, action)
+    const tab = tabForWhatsApp(item, action, throughChat)
     leave.markLeaving()
     decide.mutate(
       { item, action, tab },
-      { onError: (error) => toast.error(submitErrorMessage(error)) },
+      {
+        onError: (error) => {
+          if (!decideOwnerFirst(error)) toast.error(submitErrorMessage(error))
+        },
+      },
     )
   }
   const pending = decide.isPending
@@ -426,7 +525,7 @@ export function KairosItemCard({
             disabled={pending || (DRAFTED.has(item.kind) && !item.ready)}
             onClick={() => run("aprobar")}
           >
-            {approveLabel(item)}
+            {approveLabel(item, throughChat)}
           </Button>
         )}
         {item.kind === "responder_correo" && emailId && item.ready ? (
@@ -504,7 +603,11 @@ export function KairosItemCard({
           open={changing}
           onClose={() => setChanging(false)}
           onApproving={leave.markLeaving}
+          onUnassigned={decideOwnerFirst}
         />
+      ) : null}
+      {ownerChatId ? (
+        <ChatDrawer chatId={ownerChatId} decide open onClose={() => setOwnerChatId(null)} />
       ) : null}
       {emailId && replying ? (
         item.kind === "responder_correo" ? (
@@ -530,6 +633,156 @@ export function KairosItemCard({
           initial={newClientFromEmail(item)}
           onCreated={(clientId) => approveWith({ clientId })}
           onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </li>
+  )
+}
+
+/** «Hoy 09:05»: la hora del mensaje, con mayúscula al empezar la línea. */
+const capitalized = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
+
+/**
+ * Lo que dice debajo del título de una conversación: cuándo escribió y, sin
+ * cliente, que es solo de Administración (WhatsApp) o hasta cuándo se le
+ * puede responder (Instagram y Messenger no dejan retomar con plantilla).
+ */
+export function chatItemMeta(item: Pick<KairosItem, "kind" | "payload">, now: Date): string[] {
+  const channel = chatChannelOf(item.payload.channel)
+  const receivedAt = text(item.payload.receivedAt)
+  const when = receivedAt ? momentWords(receivedAt, now) : null
+  if (item.kind === "responder_chat") return [CHAT_CHANNEL_WORDS[channel], ...(when ? [when] : [])]
+  const until =
+    channel !== "whatsapp" && receivedAt
+      ? `Responde hasta ${momentWords(new Date(Date.parse(receivedAt) + 86_400_000).toISOString(), now)}`
+      : "Solo administración"
+  return [...(when ? [capitalized(when)] : []), until]
+}
+
+/** Lo que se sabe de la conversación sin cliente para «¿De quién es?». */
+export function chatSubjectOf(item: Pick<KairosItem, "payload">): ChatOwnerSubject | null {
+  const chatId = text(item.payload.chatId)
+  if (!chatId) return null
+  const raw = item.payload.suggestion
+  const hint = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null
+  const contactId = text(hint?.contactId)
+  const contactName = text(hint?.contactName)
+  const clientId = text(hint?.clientId)
+  const clientName = text(hint?.clientName)
+  return {
+    chatId,
+    channel: chatChannelOf(item.payload.channel),
+    address: text(item.payload.address) ?? "",
+    displayName: text(item.payload.displayName),
+    lastBody: text(item.payload.lastBody),
+    receivedAt: text(item.payload.receivedAt),
+    suggestion:
+      contactId && contactName && clientId && clientName
+        ? { contactId, contactName, clientId, clientName }
+        : null,
+  }
+}
+
+/**
+ * La tarjeta de una conversación: quién escribió, cuándo, lo que dice y
+ * «Responder»; sin cliente, además «¿De quién es?». Decir de quién es es el sí
+ * del ítem (la misma operación que «Mover a otra clínica»).
+ */
+function ChatItemCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boolean; now: Date }) {
+  const decide = useKairosDecide()
+  const leave = useFocusOnLeave<HTMLLIElement>()
+  const [replying, setReplying] = useState(false)
+  const [deciding, setDeciding] = useState(false)
+  const chatId = text(item.payload.chatId)
+  const subject = item.kind === "chat_sin_cliente" ? chatSubjectOf(item) : null
+  const onlyAdmin = ADMIN_KINDS.has(item.kind) && !isAdmin
+  const body = text(item.payload.lastBody) ?? "Mandó un archivo"
+  const pending = decide.isPending
+  return (
+    <li ref={leave.ref} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <AgentMark size="sm" />
+        <div className="min-w-0 flex-1 basis-48">
+          <p className="font-medium [overflow-wrap:anywhere]">{item.title}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            {chatItemMeta(item, now).map((words, index) => (
+              <span key={words} className="flex items-center gap-x-2">
+                {index > 0 ? <span aria-hidden>·</span> : null}
+                {words}
+              </span>
+            ))}
+            {item.product ? <ProductMark product={item.product} /> : null}
+          </p>
+        </div>
+      </div>
+      <blockquote className="rounded-lg border-l-2 bg-muted p-3 text-sm [overflow-wrap:anywhere]">
+        <ExpandableText
+          text={body}
+          lines={3}
+          label="el mensaje completo"
+          className="whitespace-pre-line"
+        />
+      </blockquote>
+      {item.payload.maybeCarga === true && isAdmin ? (
+        <p className="text-sm text-muted-foreground">
+          Trae un Excel, CSV o Word: puede ser la carga de datos.
+        </p>
+      ) : null}
+      {onlyAdmin ? (
+        <p className="text-sm text-muted-foreground">Esto lo decide Administración.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {chatId ? (
+            <Button type="button" size="sm" disabled={pending} onClick={() => setReplying(true)}>
+              Responder
+            </Button>
+          ) : null}
+          {subject ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setDeciding(true)}
+            >
+              ¿De quién es?
+            </Button>
+          ) : null}
+          {item.clientId ? (
+            <OpenClientButton clientId={item.clientId} tab="historial" label="Abrir ficha" />
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              leave.markLeaving()
+              decide.mutate(
+                { item, action: "descartar" },
+                { onError: (error) => toast.error(submitErrorMessage(error)) },
+              )
+            }}
+          >
+            Ahora no
+          </Button>
+        </div>
+      )}
+      {chatId && replying ? (
+        <ChatDrawer chatId={chatId} open onClose={() => setReplying(false)} />
+      ) : null}
+      {subject && deciding ? (
+        <ChatOwnerDrawer
+          subject={subject}
+          onAssign={async ({ clientId, contactId }) => {
+            leave.markLeaving()
+            await decide.mutateAsync({
+              item,
+              action: "aprobar",
+              edited: { clientId, ...(contactId ? { contactId } : {}) },
+            })
+          }}
+          onClose={() => setDeciding(false)}
         />
       ) : null}
     </li>
@@ -667,21 +920,31 @@ function KairosChangeDrawer({
   open,
   onClose,
   onApproving,
+  onUnassigned,
 }: {
   item: KairosItem
   open: boolean
   onClose: () => void
   /** Al dar el sí la tarjeta se va: el foco pasa a la vecina (`useFocusOnLeave`). */
   onApproving: () => void
+  /** Si el celular ya escribió sin decir de quién es: true si la tarjeta lo abre («¿De quién es?»). */
+  onUnassigned?: (error: unknown) => boolean
 }) {
   const decide = useKairosDecide()
+  const throughChat = useChatsConfig().data?.whatsapp === true
   const form = useAppForm({
     defaultValues: valuesOf(item),
     validators: { onSubmit: changeSchema(item.kind) },
     onSubmit: async ({ value, formApi }) => {
-      const tab = tabForWhatsApp(item, "aprobar")
+      const tab = tabForWhatsApp(item, "aprobar", throughChat)
       onApproving()
-      await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
+      try {
+        await decide.mutateAsync({ item, action: "aprobar", edited: editedOf(item, value), tab })
+      } catch (error) {
+        if (!onUnassigned?.(error)) throw error
+        onClose()
+        return
+      }
       formApi.reset(value)
       onClose()
     },
@@ -697,7 +960,7 @@ function KairosChangeDrawer({
           : "¿De qué cliente es este correo?"
   const submitLabel =
     item.kind === "mensaje"
-      ? channel === "whatsapp"
+      ? channel === "whatsapp" && !throughChat
         ? "Abrir WhatsApp"
         : "Enviar"
       : item.kind === "correo_sin_cliente"
@@ -736,7 +999,9 @@ function KairosChangeDrawer({
             </form.AppField>
             {channel === "whatsapp" ? (
               <p className="text-sm text-muted-foreground">
-                Se abre WhatsApp con este texto; lo envías tú. Después di si salió.
+                {throughChat
+                  ? "Sale una sola vez por el WhatsApp de Sallca y queda en su conversación. Si pasaron 24 horas desde su último mensaje, WhatsApp solo deja retomar con la plantilla: este texto no va."
+                  : "Se abre WhatsApp con este texto; lo envías tú. Después di si salió."}
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -842,13 +1107,7 @@ function KairosChangeDrawer({
   )
 }
 
-const pickedSchema = z.object({
-  items: z.array(
-    z.object({ id: z.string(), name: z.string(), product: z.enum(CLINICAL_PRODUCTS) }),
-  ),
-})
-
-/** Buscar el cliente de un correo que llegó: por nombre de la clínica o de la persona. */
+/** El cliente de un correo que llegó: quién lo escribió y la búsqueda. */
 function EmailClientPicker({
   item,
   control,
@@ -860,20 +1119,6 @@ function EmailClientPicker({
   value: string
   onChange: (clientId: string) => void
 }) {
-  const [query, setQuery] = useState(text(item.payload.fromName) ?? "")
-  const [search, setSearch] = useState(query.trim())
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(query.trim()), 300)
-    return () => window.clearTimeout(timer)
-  }, [query])
-  const found = useQuery({
-    queryKey: ["admin", "clients", "picker", search],
-    enabled: search.length >= 2,
-    queryFn: async () =>
-      pickedSchema.parse(
-        await api<unknown>(`/api/admin/clients?view=todos&limit=8&q=${encodeURIComponent(search)}`),
-      ).items,
-  })
   const from = [text(item.payload.fromName), text(item.payload.from)].filter(Boolean).join(" · ")
   return (
     <div className="flex flex-col gap-4">
@@ -888,49 +1133,13 @@ function EmailClientPicker({
           El correo y sus adjuntos se leen en la ficha, no aquí.
         </p>
       </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="kairos-buscar-cliente">Buscar por nombre</Label>
-        <Input
-          id="kairos-buscar-cliente"
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="La clínica o la persona"
-          autoComplete="off"
-        />
-      </div>
-      {search.length < 2 ? (
-        <p className="text-sm text-muted-foreground">Escribe al menos dos letras.</p>
-      ) : found.isPending ? (
-        <LoadingState message="Buscando clientes…" />
-      ) : found.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {submitErrorMessage(found.error)}
-        </p>
-      ) : found.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Ningún cliente se llama así.</p>
-      ) : (
-        <RadioGroup
-          name={control.name}
-          aria-label="Cliente"
-          aria-invalid={control.invalid || undefined}
-          aria-describedby={control.describedBy}
-          value={value}
-          onValueChange={(next) => onChange(String(next ?? ""))}
-          className="flex flex-col gap-2"
-        >
-          {found.data.map((client) => (
-            <Label
-              key={client.id}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
-            >
-              <RadioGroupItem value={client.id} />
-              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{client.name}</span>
-              <ProductMark product={client.product} />
-            </Label>
-          ))}
-        </RadioGroup>
-      )}
+      <ClientSearch
+        id="kairos-buscar-cliente"
+        initialQuery={text(item.payload.fromName) ?? ""}
+        control={control}
+        value={value}
+        onChange={(clientId) => onChange(clientId)}
+      />
     </div>
   )
 }
@@ -1008,8 +1217,13 @@ function UnconfirmedRow({ item }: { item: KairosItem }) {
           {item.product ? <ProductMark product={item.product} /> : null}
         </p>
         <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
-          {channel === "whatsapp" ? "WhatsApp abierto" : "Correo que no se sabe si salió"} ·{" "}
-          {item.title}
+          {channel === "whatsapp"
+            ? // Por el número de Sallca queda «incierto»; por wa.me, abierto y sin saberse.
+              item.result?.outreachStatus === "incierto"
+              ? "WhatsApp que no se sabe si salió"
+              : "WhatsApp abierto"
+            : "Correo que no se sabe si salió"}{" "}
+          · {item.title}
           {item.decidedAt
             ? ` · ${item.decidedByName ? `lo aprobó ${item.decidedByName} ` : ""}el ${supportDayTime(item.decidedAt)}`
             : ""}

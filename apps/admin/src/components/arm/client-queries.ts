@@ -35,9 +35,10 @@ export function useClientDetail(clientId: string) {
 }
 
 /** Las personas del cliente y, con cuenta, los miembros de su equipo que aún no son una persona ligada. */
-export function useClientContacts(clientId: string) {
+export function useClientContacts(clientId: string, enabled = true) {
   return useQuery({
     queryKey: clientQueryKeys.contacts(clientId),
+    enabled,
     queryFn: async () =>
       z
         .array(contactRowSchema)

@@ -144,6 +144,18 @@ it("envía la plantilla con sus variables y lo que devuelve cada botón", async 
   })
 })
 
+it("el id del envío viaja como biz_opaque_callback_data, y sin él no va", async () => {
+  const { calls, fetch } = fakeFetch({ json: { messages: [{ id: "wamid.cb" }] } }, { json: { messages: [{ id: "wamid.cb2" }] } })
+  await whatsappCloudApiAdapter.sendMessage(
+    fx.config,
+    { to: "wa:1", callbackData: "envio-1", kind: { type: "text", text: "Hola" } },
+    { fetch },
+  )
+  expect(calls[0]?.body).toMatchObject({ type: "text", biz_opaque_callback_data: "envio-1" })
+  await whatsappCloudApiAdapter.sendMessage(fx.config, { to: "wa:1", kind: { type: "text", text: "Hola" } }, { fetch })
+  expect(calls[1]?.body).not.toHaveProperty("biz_opaque_callback_data")
+})
+
 it("una plantilla sin variables no envía un cuerpo vacío", async () => {
   const { calls, fetch } = fakeFetch({ json: { messages: [{ id: "wamid.2" }] } })
   await whatsappCloudApiAdapter.sendMessage(
@@ -947,4 +959,39 @@ it("el motivo guardado se dice en palabras solo si es uno de los conocidos", () 
   expect(whatsappFailureWords("WhatsApp send falló: 400 (#131009) Parameter value is not valid")).toBeNull()
   expect(whatsappFailureWords(`ambiguous: ${SIN_FORMA_DE_PAGO}`)).toBeNull()
   expect(whatsappFailureWords(null)).toBeNull()
+})
+
+it("fetchMedia con tope: no baja lo que pasa de él y espera como mucho su tiempo", async () => {
+  const signals: (AbortSignal | null | undefined)[] = []
+  const stub = (async (url: unknown, init?: RequestInit) => {
+    signals.push(init?.signal)
+    if (String(url).includes("graph.facebook.com"))
+      return Response.json({ url: "https://cdn.example.com/m", mime_type: "audio/ogg" })
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 10; i++) controller.enqueue(new Uint8Array(8))
+        controller.close()
+      },
+    })
+    return new Response(stream)
+  }) as unknown as typeof fetch
+  await expect(
+    whatsappCloudApiAdapter.fetchMedia?.(fx.config, "media-1", {
+      fetch: stub,
+      media: { maxBytes: 32, timeoutMs: 20_000 },
+    }),
+  ).rejects.toThrow(/pesa más/)
+  expect(signals.at(-1)).toBeInstanceOf(AbortSignal)
+  const declared = (async (url: unknown) =>
+    String(url).includes("graph.facebook.com")
+      ? Response.json({ url: "https://cdn.example.com/m", mime_type: "audio/ogg" })
+      : new Response("x", {
+          headers: { "content-length": "5000000000" },
+        })) as unknown as typeof fetch
+  await expect(
+    whatsappCloudApiAdapter.fetchMedia?.(fx.config, "media-1", {
+      fetch: declared,
+      media: { maxBytes: 32, timeoutMs: 20_000 },
+    }),
+  ).rejects.toThrow(/pesa más/)
 })

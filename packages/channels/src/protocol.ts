@@ -281,6 +281,12 @@ export interface OutboundMessage {
    * sabe citar lo ignora: el texto sale igual.
    */
   replyToExternalId?: string
+  /**
+   * Lo que vuelve en los estados del envío (WhatsApp `biz_opaque_callback_data`,
+   * hasta 512 caracteres): con él se reconoce un envío que se cortó antes de
+   * saber su id. Quien no lo admite lo ignora.
+   */
+  callbackData?: string
   kind:
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.
@@ -344,6 +350,16 @@ export class ConnectionRejectedError extends Error {
   }
 }
 
+/**
+ * Los topes de una descarga de archivo (`ChannelAdapterDeps.media`): quien los
+ * pone no deja que un archivo de un tercero le llene la memoria ni lo deje
+ * esperando.
+ */
+export interface MediaDownloadLimits {
+  maxBytes: number
+  timeoutMs: number
+}
+
 export interface ChannelAdapterDeps {
   fetch: typeof fetch
   /**
@@ -354,6 +370,12 @@ export interface ChannelAdapterDeps {
   metaAppId?: string
   /** Clave de la conexión para firmar lo que se envía a un tercero (el aviso al sitio del chat web). */
   webhookSecret?: string
+  /**
+   * Topes de `fetchMedia` (WhatsApp, Messenger, Instagram): tamaño y tiempo de
+   * la descarga. Los pone la administración (ADR 0189); sin ellos se baja como
+   * siempre.
+   */
+  media?: MediaDownloadLimits
 }
 
 /** La cuenta que el proveedor reconoce con unas credenciales. */

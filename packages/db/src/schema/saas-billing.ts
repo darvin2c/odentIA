@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { saasClient, saasClientContact, saasProposal } from "./admin-arm.js"
+import { saasChat, saasClient, saasClientContact, saasProposal } from "./admin-arm.js"
 import { saasDemo } from "./admin-demos.js"
 import { supportCase } from "./admin-support.js"
 import { organization, user } from "./auth.js"
@@ -1031,7 +1031,7 @@ export const saasFollowUp = adminSchema.table(
      * La migración 0105 lo llenó en las entradas de antes.
      */
     clientId: uuid("client_id").references(() => saasClient.id, { onDelete: "cascade" }),
-    /** Qué fue: llamada, WhatsApp, correo, reunión, presentación, propuesta o nota. */
+    /** Qué fue: llamada, WhatsApp, Instagram, Messenger, correo, reunión, presentación, propuesta o nota. */
     kind: text("kind").notNull().default("nota"),
     /** `salio` (lo hicimos) o `entro` (nos buscó la clínica); nulo en una nota. */
     direction: text("direction"),
@@ -1044,11 +1044,17 @@ export const saasFollowUp = adminSchema.table(
     happenedAt: timestamp("happened_at", { withTimezone: true }).notNull().defaultNow(),
     /** La dejó Kairós, no una persona. */
     byKairos: boolean("by_kairos").notNull().default(false),
+    /**
+     * La conversación (WhatsApp, Instagram o Messenger) de la que salió (lo que entró o lo que
+     * respondimos): con ella pasa a otro cliente si la conversación se mueve. No cambia a otra.
+     */
+    chatId: uuid("chat_id").references(() => saasChat.id, { onDelete: "set null" }),
   },
   (table) => [
     index("saas_follow_up_request_idx").on(table.requestId, table.createdAt),
     index("saas_follow_up_org_idx").on(table.organizationId, table.createdAt),
     index("saas_follow_up_client_idx").on(table.clientId, table.happenedAt),
+    index("saas_follow_up_chat_idx").on(table.chatId),
     // El check de sujeto lo reemplaza 0105: con cliente, o una solicitud o una clínica.
     check(
       "saas_follow_up_subject_check",
@@ -1057,7 +1063,7 @@ export const saasFollowUp = adminSchema.table(
     check("saas_follow_up_body_check", sql`length(trim(${table.body})) BETWEEN 1 AND 2000`),
     check(
       "saas_follow_up_kind_check",
-      sql`${table.kind} IN ('llamada','whatsapp','correo','reunion','presentacion','propuesta','nota')`,
+      sql`${table.kind} IN ('llamada','whatsapp','correo','reunion','presentacion','propuesta','nota','instagram','messenger')`,
     ),
     check("saas_follow_up_direction_check", sql`${table.direction} IS NULL OR ${table.direction} IN ('salio','entro')`),
     check("saas_follow_up_outcome_check", sql`${table.outcome} IS NULL OR length(${table.outcome}) <= 500`),
