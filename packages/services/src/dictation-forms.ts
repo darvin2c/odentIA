@@ -481,6 +481,8 @@ export function formAnswerDropReason(
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
   const said = draft.sourceText ?? ""
+  // Lo que repite lo ya escrito («clase dos división dos» donde ya dice eso) no es algo que no se pudo usar.
+  if (where && saysWritten(question, said, questions, where.site, sentenceOf(where.transcript, said))) return null
   const tooth = where ? otherToothOf(question, questions, where.site, said, where.transcript) : null
   if (tooth) return `«${question.formTitle}» es de la ${tooth.form} y dijiste la ${tooth.said}: no la llené. Escríbelo tú o empieza otra ficha para la ${tooth.said}.`
   // Lo que dice dos preguntas hermanas por igual («cariados tres»: ¿del CPOD o del ceod?) no se pierde
@@ -508,6 +510,124 @@ export function formAnswerDropReason(
   if (question.unit && unit?.test(plain(said))) return `«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`
   if (!talksAbout(question, new Set(stemsOf(said)))) return `No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`
   return `No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`
+}
+
+/**
+ * ¿La frase dice lo que la pregunta ya tiene escrito? («overjet de seis» con 6
+ * escrito.) Se comprueba como una propuesta de ese mismo valor: no hay nada que
+ * cambiar ni que avisar.
+ */
+function saysWritten(
+  question: DictationFormQuestion,
+  said: string,
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  sentence = "",
+  /** Otro valor que ya tiene: el de una propuesta pendiente. */
+  written: unknown = question.answered,
+): boolean {
+  if (written === undefined || written === null) return false
+  const payload = Array.isArray(written) ? { question: question.number, answers: written.map(String) } : { question: question.number, answer: String(written) }
+  const check = checkFormAnswer({ payload, sourceText: said }, questions, site, sentence)
+  return check?.status === "lista" && sameAnswer(check.payload["value"], written)
+}
+
+/** Las palabras de un texto que dicen algo, sin tildes: sin las cortas ni las de relleno. */
+const wordsOf = (text: string) =>
+  plain(text)
+    .split(/[^a-z]+/)
+    .filter((word) => word.length >= 3 && !FILLER.has(word))
+
+/**
+ * ¿La oración nombra esta pregunta? Con las reglas de palabras de la
+ * comprobación: su rótulo sin lo de entre paréntesis (de varias palabras, al
+ * menos dos dichas) o el nombre propio que lleva entre paréntesis («Frankl»,
+ * «IHO-S»), que basta solo; lo que la distingue de una hermana, dicho
+ * (`talksAbout`), y su primera palabra no nombra otra cosa (`namesAnother`).
+ * La pieza también se nombra con su número y su palabra delante («la 46»,
+ * `teethIn`). Una palabra dicha es la de la pregunta o una forma de ella
+ * («molares», «desviada»), no otra más larga que empieza igual: «conductometría»
+ * no es «Conducta». El dolor a otra cosa («sin dolor a la percusión») es de
+ * esa otra cosa, no de la pregunta «Dolor».
+ */
+function namesQuestion(question: DictationFormQuestion, said: string, site: ProductSite): boolean {
+  if (question.type === "pieza" && teethIn(said, site).length) return true
+  const sentence = plain(said).replace(PAIN_ON, (phrase, test: string) => (isTestOf(question, test) ? phrase : " "))
+  const words = wordsOf(sentence)
+  const spoken = (word: string) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3)
+  const own = wordsOf(question.label.replace(/\([^)]*\)/g, " "))
+  const proper = [...question.label.matchAll(/\(([^)]*)\)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/\p{Lu}[\p{L}-]*/gu)].flatMap((name) => wordsOf(name[0])))
+  const named = own.filter(spoken).length
+  const byLabel = own.length > 0 && named >= Math.min(2, own.length)
+  if (!byLabel && !proper.some(spoken)) return false
+  return talksAbout(question, new Set(stemsOf(sentence))) && !namesAnother(question, sentence)
+}
+
+/**
+ * ¿La oración dice un valor para esta pregunta? Un número, la pieza, una
+ * palabra de sus opciones que no es del rótulo, una negación si tiene una
+ * opción de «no» o el dolor a la prueba; un sí o no se dice con solo
+ * afirmarlo. «Percusión igual que la vez pasada» nombra la pregunta sin decir
+ * nada que se pueda escribir en ella.
+ */
+function saysValue(question: DictationFormQuestion, sentence: string): boolean {
+  if (question.type === "booleano") return true
+  if (question.type === "pieza") return toothNumbersIn(sentence).length > 0
+  if (question.type === "numero" || question.type === "escala") return saidNumbers(sentence).length > 0
+  const options = question.options ?? []
+  const label = new Set(labelStems(question.label))
+  const spoken = new Set(stemsOf(sentence))
+  const heard = saidNumbers(sentence, { roman: "largos", articles: false })
+  return options.some(
+    (option) =>
+      stemsOf(option).some((stem) => !label.has(stem) && spoken.has(stem)) ||
+      optionNumbers(option).some((number) => heard.includes(number)) ||
+      (isNegativeOption(option) && denies(sentence)) ||
+      (isPositiveOption(option) && painOnTest(question, sentence)),
+  )
+}
+
+/** «Parece de «Percusión»: revísala en la ficha.»; con varias, «… «Pieza» y «Percusión»: revísalas…». */
+function looksLike(labels: string[]): string {
+  const names = labels.map((label) => `«${label}»`)
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} y ${names.at(-1)}` : (names[0] ?? "")
+  return `Parece de ${list}: ${names.length > 1 ? "revísalas" : "revísala"} en la ficha.`
+}
+
+/**
+ * La red de seguridad de las fichas (medición del 15 nov): la oración de lo
+ * dictado que nombra una pregunta de una ficha empezada, con un valor, y no
+ * dejó propuesta ni aviso para ella en la pausa va a «No pude usar esto» con
+ * esa pregunta. Así un dato de la ficha no se pierde en silencio aunque el
+ * modelo no lo haya propuesto o su frase no se encuentre en lo dictado. Lo que
+ * repite lo ya escrito, o lo que ya propone una sugerencia pendiente, no avisa.
+ * `questions`: los números de las preguntas que nombra. Lo usan el servidor y
+ * la medición.
+ */
+export function formSentencesWithoutAnswer(
+  transcript: string | undefined,
+  questions: readonly DictationFormQuestion[],
+  /** Las preguntas (su número) que ya quedaron propuestas o avisadas en esta pausa. */
+  handled: ReadonlySet<number>,
+  site: ProductSite,
+  /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta (`null`: por elegir). */
+  pending: ReadonlyMap<number, unknown> = new Map(),
+): Array<{ said: string; why: string; questions: number[] }> {
+  if (!transcript?.trim() || !questions.length) return []
+  const quiet = (question: DictationFormQuestion, said: string) => {
+    if (handled.has(question.number)) return true
+    // Una pendiente por elegir ya dice «revísala»; una con valor, solo si se dijo otro.
+    if (pending.has(question.number)) return pending.get(question.number) == null || saysWritten(question, said, questions, site, said, pending.get(question.number))
+    return saysWritten(question, said, questions, site, said)
+  }
+  return transcript.split(/(?<=[.;!?\n])\s+/).flatMap((sentence) => {
+    const said = sentence.trim()
+    if (!said) return []
+    const named = questions.filter((question) => namesQuestion(question, said, site) && saysValue(question, said) && !quiet(question, said))
+    if (!named.length) return []
+    // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
+    return [{ said, why: looksLike([...new Set(named.map((question) => question.label))]), questions: named.map((question) => question.number) }]
+  })
 }
 
 /**

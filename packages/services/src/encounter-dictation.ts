@@ -63,6 +63,7 @@ import {
   formAnswerDropReason,
   formAnswerFragments,
   formAnswerWords,
+  formSentencesWithoutAnswer,
   prepareFormAnswer,
   withDiagnosisFormAnswers,
   withFormTwins,
@@ -1612,17 +1613,32 @@ export async function saveDictationSegment(
   const fromDiagnoses = withDiagnosisFormAnswers(dictated, scope.formQuestions).slice(dictated.length)
   const { drafts, twins } = withFormTwins(withoutFormNotes([...dictated, ...fromDiagnoses], scope.formQuestions, scope.site, scope.transcript), scope.formQuestions)
   for (const draft of fromDiagnoses) twins.add(draft)
+  // Las preguntas que quedaron propuestas o avisadas en esta pausa: de las demás avisa la red de abajo.
+  const handledForms = new Set<number>()
   for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
     if (prepared) {
       preparedDrafts.push({ draft, prepared })
+      if (draft.kind === "ficha") handledForms.add(Number(draft.payload["question"]))
       if (draft.kind === "ficha" && draft.sourceText?.trim()) formSources.push(...formAnswerFragments(draft.sourceText, formQuestionOf(draft)))
     } else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim()) {
       // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov, U5).
       const why = formAnswerDropReason(draft, scope.formQuestions, { site: scope.site, transcript: scope.transcript })
+      if (why) handledForms.add(Number(draft.payload["question"]))
       if (why) for (const said of formAnswerFragments(draft.sourceText, formQuestionOf(draft))) droppedForms.push({ said, why })
     }
   }
+  // Lo dicho que nombra una pregunta sin propuesta ni aviso tampoco se pierde en silencio (medición del 15 nov).
+  // Lo que ya propone una pendiente de otra pausa solo avisa si se dijo otro valor.
+  const pendingFormValues = new Map(
+    pendingNow
+      .filter((item) => item.kind === "ficha")
+      .flatMap((item) => {
+        const question = scope.formQuestions.find((one) => one.responseId === item.payload["responseId"] && one.fieldId === item.payload["fieldId"])
+        return question ? [[question.number, item.payload["value"] ?? null] as const] : []
+      }),
+  )
+  for (const { said, why } of formSentencesWithoutAnswer(scope.transcript, scope.formQuestions, handledForms, scope.site, pendingFormValues)) droppedForms.push({ said, why })
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
   // Las alergias, antes que las recetas: la que se acaba de dictar ya avisa en este mismo tramo.
   const first = (draft: { draft: DictationDraft; prepared: Prepared }) => Number(isPlanChoice(draft.draft.kind, draft.prepared.payload)) * 2 + Number(draft.draft.kind === "alergia")

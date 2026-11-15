@@ -12,6 +12,7 @@ import {
   formAnswerDropReason,
   formAnswerFragments,
   formQuestionsOf,
+  formSentencesWithoutAnswer,
   prepareFormAnswer,
   saidNumbers,
   withDiagnosisFormAnswers,
@@ -415,6 +416,8 @@ describe("lo que la medición del 15 nov mostró que se perdía en silencio", ()
   const endo = formsOf(["evaluacion-de-endodoncia"])
   const numberOf = (forms: DictationFormQuestion[], fieldId: string) => forms.find((item) => item.fieldId === fieldId)!.number
   const ask = (fieldId: string, answer: string, said: string) => prepareFormAnswer({ payload: { question: numberOf(endo, fieldId), answer }, sourceText: said }, endo, FDI, said)
+  const net = (forms: DictationFormQuestion[], transcript: string, handled: string[] = []) =>
+    formSentencesWithoutAnswer(transcript, forms, new Set(handled.map((fieldId) => numberOf(forms, fieldId))), FDI).map(({ said, why }) => ({ said, why }))
 
   it("«dolor a la percusión» y «dolor a la palpación» son «Positiva»; con una negación, no", () => {
     expect(ask("percusion", "Positiva", "Dolor a la percusión")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
@@ -426,6 +429,42 @@ describe("lo que la medición del 15 nov mostró que se perdía en silencio", ()
     expect(ask("palpacion", "Negativa", "ni a la palpación")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
     // El dolor a la percusión no dice nada de la palpación.
     expect(ask("palpacion", "Positiva", "dolor a la percusión")).toBeNull()
+  })
+
+  it("la oración que nombra una pregunta sin propuesta ni aviso va a «No pude usar esto»", () => {
+    const kid = formsOf(["ficha-de-odontopediatria", "ficha-de-ortodoncia"])
+    expect(net(kid, "Frankl tres, colaboró bien. Overjet de tres.")).toEqual([
+      { said: "Frankl tres, colaboró bien.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+      { said: "Overjet de tres.", why: "Parece de «Overjet»: revísala en la ficha." },
+    ])
+    // Lo que ya quedó propuesto o avisado no se vuelve a avisar.
+    expect(net(kid, "Frankl tres, colaboró bien. Overjet de tres.", ["overjet"])).toEqual([
+      { said: "Frankl tres, colaboró bien.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+    ])
+    expect(net(kid, "Conducta definitivamente negativa, lloró toda la consulta.")).toEqual([
+      { said: "Conducta definitivamente negativa, lloró toda la consulta.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+    ])
+    expect(net(endo, "Dolor a la percusión en la cuatro seis, ocho de diez.", ["dolor_intensidad"])).toEqual([
+      { said: "Dolor a la percusión en la cuatro seis, ocho de diez.", why: "Parece de «Pieza» y «Percusión»: revísalas en la ficha." },
+    ])
+    expect(net(endo, "Control de la cuarenta y seis.")).toEqual([{ said: "Control de la cuarenta y seis.", why: "Parece de «Pieza»: revísala en la ficha." }])
+  })
+
+  it("sin falsos avisos: la oración que no nombra la pregunta, o no dice su valor, no avisa", () => {
+    const ortho = formsOf(["ficha-de-ortodoncia"])
+    expect(net(ortho, "El diagnóstico es maloclusión clase dos división uno.")).toEqual([])
+    expect(net(ortho, "Buena higiene, sin caries. Seguimos con el arco de acero, control en un mes.")).toEqual([])
+    // «dolor» sin su tipo no es la pregunta «Dolor», ni lo de la vez pasada un valor.
+    expect(net(endo, "Refiere un dolor de quince sobre diez.", ["dolor_intensidad"])).toEqual([])
+    expect(net(endo, "Percusión igual que la vez pasada.")).toEqual([])
+    // El dolor a una prueba es de esa prueba, no de la pregunta «Dolor».
+    expect(net(endo, "Sin dolor a la percusión ni a la palpación.", ["percusion", "palpacion"])).toEqual([])
+    // «conductometría» empieza como «conducta», pero no es la conducta del niño.
+    expect(net(formsOf(["ficha-de-odontopediatria"]), "Hicimos la conductometría de la cincuenta y cinco.")).toEqual([])
+    // Lo que repite lo ya escrito no se avisa; lo que dice otro valor, sí.
+    const written = formsOf(["ficha-de-ortodoncia"], { "ficha-de-ortodoncia": { overjet: 6 } })
+    expect(net(written, "Overjet de seis.")).toEqual([])
+    expect(net(written, "Overjet de cinco.")).toEqual([{ said: "Overjet de cinco.", why: "Parece de «Overjet»: revísala en la ficha." }])
   })
 })
 
@@ -611,6 +650,8 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const { save, fx, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
     const same = await save([{ payload: { question: 1, answer: "Clase II división 2" }, sourceText: "clase molar derecha clase dos división dos" }])
     expect(same.suggestions).toEqual([])
+    // Lo que repite lo ya escrito no es algo que no se pudo usar: no se avisa.
+    expect(same.droppedForms).toEqual([])
     const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
     expect(changed.suggestions).toHaveLength(1)
     // Lo escrito a mano lo cambia una persona: nunca «lista» (revisión final del 15 nov, dev H5).
@@ -666,6 +707,38 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis centímetros" }])
     expect(saved.suggestions).toEqual([])
     expect(saved.droppedForms).toEqual([{ said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha." }])
+  })
+
+  it("lo dicho para la ficha no se pierde en silencio: sin propuesta ni aviso, la oración vuelve con la pregunta", async () => {
+    const { fx, questions } = await startedForm()
+    const formQuestions = await questions()
+    const transcript = "Overjet de seis. El diagnóstico es maloclusión clase dos división uno. Overbite de dos."
+    // El modelo respondió el overjet sin una frase que se encuentre en lo dictado, y no respondió el overbite.
+    const saved = await fx.run((tx) =>
+      saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        drafts: [{ kind: "ficha", payload: { question: 2, answer: "6" }, sourceText: "" }],
+        transcript,
+        formQuestions,
+      }),
+    )
+    expect(saved.suggestions).toEqual([])
+    // El diagnóstico no nombra la clase molar: no se avisa como si fuera de ella.
+    expect(saved.droppedForms).toEqual([
+      { said: "Overjet de seis.", why: "Parece de «Overjet»: revísala en la ficha." },
+      { said: "Overbite de dos.", why: "Parece de «Overbite»: revísala en la ficha." },
+    ])
+  })
+
+  it("lo que ya propone una pendiente no se avisa otra vez; otro valor dicho sin corregirla, sí", async () => {
+    const { fx, questions } = await startedForm()
+    const formQuestions = await questions()
+    const pause = (transcript: string, drafts: Array<{ kind: "ficha"; payload: Record<string, unknown>; sourceText: string }> = []) =>
+      fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts, transcript, formQuestions }))
+    const first = await pause("Overjet de seis.", [{ kind: "ficha", payload: { question: 2, answer: "6" }, sourceText: "Overjet de seis" }])
+    expect(first.suggestions).toHaveLength(1)
+    expect(first.droppedForms).toEqual([])
+    expect((await pause("Como te decía, overjet de seis.")).droppedForms).toEqual([])
+    expect((await pause("Overjet de cuatro.")).droppedForms).toEqual([{ said: "Overjet de cuatro.", why: "Parece de «Overjet»: revísala en la ficha." }])
   })
 
   it("con la ficha empezada, la nota no repite lo que fue para la ficha", async () => {
