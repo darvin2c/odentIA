@@ -367,7 +367,7 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
 console.log(
-  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed} en silencio`,
+  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidasPorRevisar} por revisar de la segunda lectura, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed - totals.perdidasPorRevisar} en silencio`,
 )
 console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMas} de preguntas que el dictado no espera${netExtra.length ? `:\n  ${netExtra.join("\n  ")}` : ""}`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
