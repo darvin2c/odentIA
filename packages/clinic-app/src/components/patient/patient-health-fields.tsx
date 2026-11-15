@@ -28,9 +28,10 @@ import { ChoiceButtons } from "../choice-buttons"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { MedicationPicker } from "./medication-picker"
 
+/** Lo que respondió en una declaración, leído por el equipo: su «No sé» es «No sabe», como en la entrevista. */
 export const DECLARATION_STATE_LABELS: Record<DeclarationState, string> = {
   unanswered: "Sin responder",
-  unknown: "No sé",
+  unknown: "No sabe",
   none: "No",
   recorded: "Sí",
 }

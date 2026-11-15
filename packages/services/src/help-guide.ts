@@ -97,11 +97,11 @@ const INTEGRATIONS = `${SETTINGS} › Integraciones`
 export const PRODUCT_ONLY_SCREENS: readonly string[] = ["/orders"]
 
 /**
- * Lo que odentIA le pregunta a quien cuida a un niño, «de pequeño» (pediatría dental): las guías de
+ * Lo que odentIA le pregunta a quien cuida a un niño, «Los dientes de Thiago en casa» (pediatría dental): las guías de
  * latidIA y vistIA lo quitan de su respuesta.
  */
 export const CHILDHOOD_DENTAL_SENTENCE =
-  " En el paso «De pequeño», con el nombre del niño, se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga en Configuración › Preguntas al paciente, en «Si se atiende un niño»."
+  " En el paso «Sus dientes en casa», con el nombre del niño (los dientes de Thiago en casa), se le pregunta si toma biberón o pecho para dormir y si usa chupón o se chupa el dedo (hasta los 6 años), cuántas veces al día come dulces o toma jugos entre comidas, si su pasta de dientes tiene flúor y quién le cepilla los dientes. Todo es opcional y se apaga en Configuración › Preguntas al paciente, en «Si se atiende un niño»."
 
 const BASE_TOPICS: readonly HelpTopic[] = [
   {
@@ -657,10 +657,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       },
       {
         // Mesa del 13 nov, entrega 7. Lo de «de pequeño» es de odentIA: latidIA y vistIA lo quitan (`BY_ID`).
+        // La pregunta no dice «niño»: sus palabras anclan la pantalla, y con «niño» cualquier pregunta
+        // con un niño («una limpieza a un niño para el sábado») caía en Pacientes (QA del 15 nov, K18).
+        // Dicha con «niño» entera, la encuentra por sus formas.
         id: "que-le-preguntan-a-la-mama-de-un-nino",
-        q: "¿Qué le preguntan a la mamá de un niño?",
-        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago tiene alergia a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
-        forms: ["que se le pregunta a un niño", "biberón y chupón", "preguntas de salud de un niño"],
+        q: "¿Qué le preguntan a la mamá de un menor?",
+        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago tiene alergia a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, sus medicinas son una sola pregunta («¿Toma alguna medicina, aunque sea a veces?», que cuenta también el inhalador o el jarabe que toma cuando lo necesita), sin anticoagulantes ni medicinas para los huesos, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño; si su ficha no tiene la fecha de nacimiento, el enlace pregunta primero si responde el niño o alguien por él, y lo que cuente queda con el nombre de quien respondió.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
+        forms: ["que le preguntan a la mamá de un niño", "que se le pregunta a un niño", "biberón y chupón", "preguntas de salud de un niño"],
       },
       {
         id: "significa-faltan-datos-atencion",

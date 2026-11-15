@@ -1,6 +1,6 @@
 {
-  "id": "7adf1264-25e0-499c-8f1d-5fd000aa1a64",
-  "prevId": "d702e47f-267c-4869-a623-251e7c97f1f2",
+  "id": "fed6db70-c1b7-48bf-afc2-dcefc7dea157",
+  "prevId": "4357dedf-bd81-4eda-bf9e-d7af24eb1262",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -320,7 +320,7 @@
       "checkConstraints": {
         "kairos_item_kind_check": {
           "name": "kairos_item_kind_check",
-          "value": "\"admin\".\"kairos_item\".\"kind\" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente','responder_correo','posible_carga','chat_sin_cliente','responder_chat','ausencia_choca')"
+          "value": "\"admin\".\"kairos_item\".\"kind\" IN ('mensaje','propuesta','guion','dato','vinculo','duplicado','demo','presentacion_hecha','correo_sin_cliente','responder_correo','posible_carga','chat_sin_cliente','responder_chat')"
         },
         "kairos_item_status_check": {
           "name": "kairos_item_status_check",
@@ -329,247 +329,6 @@
         "kairos_item_text_check": {
           "name": "kairos_item_text_check",
           "value": "length(trim(\"admin\".\"kairos_item\".\"title\")) BETWEEN 1 AND 200 AND length(trim(\"admin\".\"kairos_item\".\"reason\")) BETWEEN 1 AND 1000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.kairos_proposal": {
-      "name": "kairos_proposal",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "assignee_user_id": {
-          "name": "assignee_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pendiente'"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "kairos_proposal_chat_idx": {
-          "name": "kairos_proposal_chat_idx",
-          "columns": [
-            {
-              "expression": "chat_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "kairos_proposal_pending_uidx": {
-          "name": "kairos_proposal_pending_uidx",
-          "columns": [
-            {
-              "expression": "chat_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "\"admin\".\"kairos_proposal\".\"status\" = 'pendiente'",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "kairos_proposal_chat_id_saas_chat_id_fk": {
-          "name": "kairos_proposal_chat_id_saas_chat_id_fk",
-          "tableFrom": "kairos_proposal",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "tableTo": "saas_chat",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "kairos_proposal_client_id_saas_client_id_fk": {
-          "name": "kairos_proposal_client_id_saas_client_id_fk",
-          "tableFrom": "kairos_proposal",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "tableTo": "saas_client",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
-        },
-        "kairos_proposal_assignee_user_id_user_id_fk": {
-          "name": "kairos_proposal_assignee_user_id_user_id_fk",
-          "tableFrom": "kairos_proposal",
-          "columnsFrom": [
-            "assignee_user_id"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "kairos_proposal_task_id_saas_task_id_fk": {
-          "name": "kairos_proposal_task_id_saas_task_id_fk",
-          "tableFrom": "kairos_proposal",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "tableTo": "saas_task",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "kairos_proposal_status_check": {
-          "name": "kairos_proposal_status_check",
-          "value": "\"admin\".\"kairos_proposal\".\"status\" IN ('pendiente','confirmada','reemplazada','vencida')"
-        },
-        "kairos_proposal_expires_check": {
-          "name": "kairos_proposal_expires_check",
-          "value": "\"admin\".\"kairos_proposal\".\"expires_at\" > \"admin\".\"kairos_proposal\".\"created_at\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.kairos_setting": {
-      "name": "kairos_setting",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "sells_enabled": {
-          "name": "sells_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "kairos_setting_updated_by_user_id_fk": {
-          "name": "kairos_setting_updated_by_user_id_fk",
-          "tableFrom": "kairos_setting",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "kairos_setting_single_check": {
-          "name": "kairos_setting_single_check",
-          "value": "\"admin\".\"kairos_setting\".\"id\""
         }
       },
       "isRLSEnabled": false
@@ -700,18 +459,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "kairos_paused_at": {
-          "name": "kairos_paused_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "kairos_paused_by": {
-          "name": "kairos_paused_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -821,20 +568,6 @@
           ],
           "onUpdate": "no action",
           "onDelete": "set null"
-        },
-        "saas_chat_kairos_paused_by_user_id_fk": {
-          "name": "saas_chat_kairos_paused_by_user_id_fk",
-          "tableFrom": "saas_chat",
-          "columnsFrom": [
-            "kairos_paused_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -852,10 +585,6 @@
         "saas_chat_text_check": {
           "name": "saas_chat_text_check",
           "value": "(\"admin\".\"saas_chat\".\"display_name\" IS NULL OR length(\"admin\".\"saas_chat\".\"display_name\") <= 200)\n        AND (\"admin\".\"saas_chat\".\"wa_id\" IS NULL OR length(\"admin\".\"saas_chat\".\"wa_id\") BETWEEN 1 AND 256)"
-        },
-        "saas_chat_kairos_paused_check": {
-          "name": "saas_chat_kairos_paused_check",
-          "value": "\"admin\".\"saas_chat\".\"kairos_paused_at\" IS NOT NULL OR \"admin\".\"saas_chat\".\"kairos_paused_by\" IS NULL"
         },
         "saas_chat_not_clinic_check": {
           "name": "saas_chat_not_clinic_check",
@@ -2534,13 +2263,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "by_kairos": {
-          "name": "by_kairos",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "admin_only": {
           "name": "admin_only",
           "type": "boolean",
@@ -3240,24 +2962,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "channel_chat_id": {
-          "name": "channel_chat_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "needs_new_time_at": {
-          "name": "needs_new_time_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3287,28 +2991,6 @@
           "isUnique": true,
           "with": {},
           "method": "btree",
-          "concurrently": false
-        },
-        "saas_task_presentation_idx": {
-          "name": "saas_task_presentation_idx",
-          "columns": [
-            {
-              "expression": "assignee_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "due_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "where": "\"admin\".\"saas_task\".\"kind\" = 'presentacion' AND \"admin\".\"saas_task\".\"status\" = 'abierta'",
           "concurrently": false
         },
         "saas_task_status_due_idx": {
@@ -3459,30 +3141,12 @@
           ],
           "onUpdate": "no action",
           "onDelete": "no action"
-        },
-        "saas_task_channel_chat_id_saas_chat_id_fk": {
-          "name": "saas_task_channel_chat_id_saas_chat_id_fk",
-          "tableFrom": "saas_task",
-          "columnsFrom": [
-            "channel_chat_id"
-          ],
-          "tableTo": "saas_chat",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "saas_task_ends_check": {
-          "name": "saas_task_ends_check",
-          "value": "\"admin\".\"saas_task\".\"ends_at\" IS NULL OR (\"admin\".\"saas_task\".\"due_at\" IS NOT NULL AND \"admin\".\"saas_task\".\"ends_at\" > \"admin\".\"saas_task\".\"due_at\")"
-        },
         "saas_task_kind_check": {
           "name": "saas_task_kind_check",
           "value": "\"admin\".\"saas_task\".\"kind\" IN ('llamar','escribir','presentacion','propuesta','alta','cobro','otro')"
@@ -4019,12 +3683,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "meeting_url": {
-          "name": "meeting_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4084,216 +3742,6 @@
         "admin_staff_mail_copy_check": {
           "name": "admin_staff_mail_copy_check",
           "value": "\"admin\".\"admin_staff\".\"mail_copy_to\" IS NULL OR (\"admin\".\"admin_staff\".\"mail_copy_to\" = lower(\"admin\".\"admin_staff\".\"mail_copy_to\")\n      AND length(\"admin\".\"admin_staff\".\"mail_copy_to\") BETWEEN 3 AND 254 AND \"admin\".\"admin_staff\".\"mail_copy_to\" LIKE '_%@_%._%'\n      AND strpos(\"admin\".\"admin_staff\".\"mail_copy_to\", ' ') = 0)"
-        },
-        "admin_staff_meeting_url_check": {
-          "name": "admin_staff_meeting_url_check",
-          "value": "\"admin\".\"admin_staff\".\"meeting_url\" IS NULL OR (\"admin\".\"admin_staff\".\"meeting_url\" ~ '^https://[^\\s]+$' AND length(\"admin\".\"admin_staff\".\"meeting_url\") <= 500)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.admin_staff_absence": {
-      "name": "admin_staff_absence",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_staff_absence_user_idx": {
-          "name": "admin_staff_absence_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ends_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "admin_staff_absence_user_id_admin_staff_user_id_fk": {
-          "name": "admin_staff_absence_user_id_admin_staff_user_id_fk",
-          "tableFrom": "admin_staff_absence",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "tableTo": "admin_staff",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "user_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "admin_staff_absence_created_by_user_id_fk": {
-          "name": "admin_staff_absence_created_by_user_id_fk",
-          "tableFrom": "admin_staff_absence",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "admin_staff_absence_check": {
-          "name": "admin_staff_absence_check",
-          "value": "\"admin\".\"admin_staff_absence\".\"ends_at\" > \"admin\".\"admin_staff_absence\".\"starts_at\"\n        AND (\"admin\".\"admin_staff_absence\".\"reason\" IS NULL OR length(trim(\"admin\".\"admin_staff_absence\".\"reason\")) BETWEEN 1 AND 200)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "admin.admin_staff_hours": {
-      "name": "admin_staff_hours",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "weekday": {
-          "name": "weekday",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "start_min": {
-          "name": "start_min",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "end_min": {
-          "name": "end_min",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "admin_staff_hours_user_idx": {
-          "name": "admin_staff_hours_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "weekday",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "admin_staff_hours_user_id_admin_staff_user_id_fk": {
-          "name": "admin_staff_hours_user_id_admin_staff_user_id_fk",
-          "tableFrom": "admin_staff_hours",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "tableTo": "admin_staff",
-          "schemaTo": "admin",
-          "columnsTo": [
-            "user_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "admin_staff_hours_range_check": {
-          "name": "admin_staff_hours_range_check",
-          "value": "\"admin\".\"admin_staff_hours\".\"weekday\" BETWEEN 0 AND 6 AND \"admin\".\"admin_staff_hours\".\"start_min\" >= 0 AND \"admin\".\"admin_staff_hours\".\"end_min\" <= 1440\n        AND \"admin\".\"admin_staff_hours\".\"start_min\" < \"admin\".\"admin_staff_hours\".\"end_min\""
         }
       },
       "isRLSEnabled": false
@@ -17548,6 +16996,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "health_at_signing": {
+          "name": "health_at_signing",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "visit_follow_up_id": {
           "name": "visit_follow_up_id",
           "type": "uuid",
@@ -20103,7 +19557,7 @@
         },
         "patient_allergy_removed_reason_check": {
           "name": "patient_allergy_removed_reason_check",
-          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR \"patient_allergy\".\"removed_reason\" IN ('ya_no','otra_cosa','error')"
+          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR (btrim(\"patient_allergy\".\"removed_reason\") <> '' AND char_length(\"patient_allergy\".\"removed_reason\") <= 500)"
         },
         "patient_allergy_removed_check": {
           "name": "patient_allergy_removed_check",
@@ -31836,6 +31290,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "entry_point": {
+          "name": "entry_point",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -31904,6 +31364,10 @@
         "registration_hold_match_check": {
           "name": "registration_hold_match_check",
           "value": "\"registration_hold\".\"match\" IN ('documento', 'celular')"
+        },
+        "registration_hold_entry_check": {
+          "name": "registration_hold_entry_check",
+          "value": "\"registration_hold\".\"entry_point\" IS NULL OR \"registration_hold\".\"entry_point\" IN ('qr', 'public_link', 'conversation')"
         }
       },
       "isRLSEnabled": false

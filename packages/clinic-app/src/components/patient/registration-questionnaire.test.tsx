@@ -20,6 +20,9 @@ describe("las preguntas de salud nuevas en el registro y en su enlace", () => {
     expect(html).toContain("¿Tomas algún otro medicamento todos los días?")
     expect(html).toContain("tuviste una infección en el corazón (endocarditis)?")
     expect(html).toContain("¿Tuviste algún problema con la anestesia del dentista")
+    // La anestesia y el sangrado, dos preguntas (H9).
+    expect(html).toContain("¿Sangraste mucho después de una extracción?")
+    expect(html).not.toContain("o sangraste mucho")
     expect(html).toContain("¿Tienes alguna de estas enfermedades?")
     expect(html).toContain("¿Fumas?")
     // El corazón y la anestesia son del dentista: el consultorio de latidIA no los pregunta.
@@ -77,10 +80,22 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).not.toContain("¿Fumas?")
   })
 
-  it("«Thiago de pequeño»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
+  it("K7 · a Carla, una sola pregunta de medicinas con palabras de niño: sin warfarina ni osteoporosis", () => {
+    declareProduct(bareProduct("dental"))
+    const html = childLink(4)
+    expect(html).toContain("Las medicinas de Thiago")
+    expect(html).toContain("¿Thiago toma alguna medicina, aunque sea a veces?")
+    expect(html).toContain("Por ejemplo, inhalador, medicina para las convulsiones o jarabe, todos los días o cuando lo necesita.")
+    expect(html).not.toContain("warfarina")
+    expect(html).not.toContain("osteoporosis")
+    expect(html).not.toContain("todos los días?")
+  })
+
+  it("K8 · «Los dientes de Thiago en casa»: biberón, chupón, dulces, flúor y quién le cepilla", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(6)
-    expect(html).toContain("Thiago de pequeño")
+    expect(html).toContain("Los dientes de Thiago en casa")
+    expect(html).not.toContain("de pequeño")
     expect(html).toContain("¿Thiago toma biberón o pecho para dormir?")
     expect(html).toContain("¿Usa chupón o se chupa el dedo?")
     expect(html).toContain("¿Cuántas veces al día come dulces o toma jugos entre comidas?")
@@ -89,16 +104,21 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(html).toContain("¿Quién le cepilla los dientes?")
   })
 
-  it("sin representante, el paso de quien lo cuida le habla a ella, con el nombre del niño", () => {
+  // «Sin representante, el paso de quien lo cuida le habla a ella» se prueba con la fecha escrita en
+  // `registration-dates.test.tsx`: aquí usaba un estado que el servidor no da (B7 de la 7).
+  it("K1 · el enlace sin fecha pregunta quién responde, con el género de la ficha o sin él", () => {
     declareProduct(bareProduct("dental"))
-    const fill = { missing: new Set<string>(["birthDate"]), health: true, hasRepresentative: false, firstName: "Thiago", respondentFirstName: "Carla" }
-    const child = page({ fill: { ...fill, age: 6 } }).replace(/<[^>]+>/g, "|")
-    expect(child).toContain("Thiago es menor de edad: déjanos tus datos, que respondes por Thiago.")
-    expect(child).not.toContain("Eres menor de edad")
-    expect(child).not.toContain("Tu madre, padre o tutor")
-    // Un adolescente que abre su propio enlace sigue leyéndolo para él (de 12 a 17, fuera de esta entrega).
-    const teen = page({ fill: { ...fill, age: 15, respondentFirstName: null } })
-    expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
+    const link = (sex: "F" | "M" | null, asksWho = true) =>
+      page({
+        fill: { missing: new Set(["birthDate"]), health: true, hasRepresentative: false, firstName: "Lucía", sex, asksWho },
+      }).replace(/<[^>]+>/g, "|")
+    expect(link("F")).toContain("¿Eres Lucía o respondes por ella?")
+    expect(link("F")).toContain("Respondo por ella|Eres su madre, su padre o quien la cuida")
+    expect(link("M")).toContain("¿Eres Lucía o respondes por él?")
+    expect(link(null)).toContain("¿Quién responde?")
+    expect(link(null)).toContain("Respondo por Lucía|Eres su madre, su padre o un familiar")
+    // Con la fecha en su ficha, el servidor no lo pregunta.
+    expect(link("F", false)).not.toContain("o respondes por")
   })
 
   it("en el enlace de Thiago, la casilla del aviso nombra los datos de Thiago y los de Carla, como el registro", () => {
@@ -114,10 +134,46 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
   it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(8)
-    expect(html).toContain("Thiago de pequeño")
+    expect(html).toContain("Los dientes de Thiago en casa")
     expect(html).not.toContain("biberón")
     expect(html).not.toContain("chupón")
     expect(html).toContain("¿Quién le cepilla los dientes?")
+  })
+
+  it("K8 · a una niña se le habla en femenino, o sin pronombre si no se sabe su sexo", () => {
+    declareProduct(bareProduct("dental"))
+    const asks = {
+      ...config,
+      fields: { ...config.fields, "personal.cirugias": "optional" as const, "personal.hospitalizaciones": "optional" as const },
+    }
+    const lucia = (sex: "F" | "M" | null, respondentFirstName: string | null) =>
+      page({
+        config: asks,
+        fill: {
+          missing: new Set(),
+          health: true,
+          healthKeys: new Set(
+            healthQuestionsToAsk(asks, { countryCode: "PE", product: "dental", person: { sex, age: 3 } }, new Set()),
+          ),
+          hasRepresentative: true,
+          firstName: "Lucía",
+          age: 3,
+          sex,
+          respondentFirstName,
+        },
+      }).replace(/<[^>]+>/g, "|")
+    const girl = lucia("F", null)
+    expect(girl).toContain("Lo respondes tú, que la cuidas.")
+    expect(girl).toContain("¿Han operado alguna vez a Lucía?")
+    expect(girl).toContain("¿Alguna vez internaron a Lucía en un hospital?")
+    expect(girl).not.toMatch(/lo han operado|lo cuidas|internad[oa]/)
+    expect(lucia("M", null)).toContain("Lo respondes tú, que lo cuidas.")
+    // Sin su sexo, sin pronombre.
+    const unknown = lucia(null, null)
+    expect(unknown).toContain("Lo respondes tú.")
+    expect(unknown).not.toMatch(/que l[ao] cuidas/)
+    // El paso de un niño no repite el título en su descripción.
+    expect(lucia("F", "Carmen")).toContain("Los dientes de Lucía en casa||Lo respondes tú, Carmen. Nos ayuda a cuidarlos.")
   })
 
   it("latidIA no pregunta lo de pequeño del dentista, y a un niño tampoco el tabaco", () => {
@@ -187,5 +243,19 @@ describe("lo escrito en este celular", () => {
   it("antes de saber si el navegador guarda (en el servidor), la pantalla no promete guardar", () => {
     declareProduct(bareProduct("dental"))
     expect(page({ draftKey: "odentia.borrador.x" })).not.toContain("se guarda en este celular")
+  })
+})
+
+// QA de formularios del 15 nov (K15; ux H2 y D3 de la 7): una sola opción «Madre, padre o tutor» no
+// dejaba decir «su madre, Rosa». Tres opciones, con el parentesco que se guarda en el vínculo.
+describe("¿Qué eres de…? con madre, padre y tutor legal por separado", () => {
+  it("el registro ofrece Madre, Padre y Tutor legal, no «Madre, padre o tutor»", () => {
+    declareProduct(bareProduct("dental"))
+    const html = page()
+    expect(html).toContain("¿Qué eres de")
+    expect(html).toContain(">Madre<")
+    expect(html).toContain(">Padre<")
+    expect(html).toContain(">Tutor legal<")
+    expect(html).not.toContain("Madre, padre o tutor")
   })
 })

@@ -150,13 +150,14 @@ export interface ProductHealthUi {
   validate(answers: Record<string, unknown>, today: string): SubFieldErrors
   /**
    * Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. `marks`: la marca de lo
-   * que dijo la persona y sigue sin revisar, por dato («Lo dijo ella el 14 nov, sin revisar»).
-   * `productMark`: la misma marca para lo del producto que dijo (odentIA: «de pequeño» de un niño).
+   * que dijo la persona y sigue sin revisar, por dato («Lo dijo ella el 14 nov, sin revisar»),
+   * también lo de un niño en casa. `age`: sus años cumplidos, si se saben (a un niño no se le
+   * titula con el tabaco).
    */
   Summary(props: {
     answers: Record<string, unknown>
     marks?: Partial<Record<DeclaredInterviewKey, string>>
-    productMark?: string
+    age?: number | null
   }): ReactNode
   /**
    * Lo suyo de la entrevista que va arriba de la ficha y de la atención, con la clave de quién lo
@@ -168,6 +169,11 @@ export interface ProductHealthUi {
    * respuestas, también el «No», y la clave de quién lo dijo.
    */
   saidRows?(answers: Record<string, unknown>): Array<{ keys: DeclaredInterviewKey[]; label: string; value: string }>
+  /**
+   * Lo suyo que dijo una declaración, tal como llegó, para «Ver declaración original» (odentIA: lo de
+   * un niño en casa). Sin esto, solo lo común.
+   */
+  declaredRows?(health: Record<string, unknown>): Array<{ label: string; value: string }>
 }
 
 export interface InterviewSectionsProps {

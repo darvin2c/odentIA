@@ -220,8 +220,11 @@ describe("identidad estándar", () => {
         familyName: "Quispe  Huamán",
       }),
     ).toBe("Rosa María Quispe Huamán")
-    expect(ageLabel("2025-12-15", new Date("2026-10-08T12:00:00Z"))).toBe("9 meses")
-    expect(ageLabel("1990-01-01", new Date("2026-10-08T12:00:00Z"))).toBe("36 años")
+    expect(ageLabel("2025-12-15", "2026-10-08")).toBe("9 meses")
+    expect(ageLabel("1990-01-01", "2026-10-08")).toBe("36 años")
+    // Con el día de la clínica, no el del navegador (K13 de la QA del 15 nov).
+    expect(ageLabel("2014-11-15", "2026-11-14")).toBe("11 años")
+    expect(ageLabel("2014-11-15", "2026-11-15")).toBe("12 años")
   })
 })
 

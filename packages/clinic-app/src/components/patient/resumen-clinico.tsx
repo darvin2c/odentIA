@@ -1,10 +1,12 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, type HealthDeclarant } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
+  allergiesSaidUnknown,
+  changedHistoryOf,
   declaredGroupOf,
   pregnancyGroupOf,
   pregnancyWords,
@@ -163,10 +165,17 @@ export function ClinicalAlertsCard({
   const allergies = (health?.allergies ?? [])
     .filter((allergy) => allergy.isActive && allergy.verification !== "descartada")
     .sort(bySeverity)
-  const conditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
+  const activeConditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
   // La que toma: sin fin o con fin desde hoy, la misma regla del cierre y del aviso «Pregúntale a…».
   const today = clinicToday()
-  const medications = (health?.medications ?? []).filter((medication) => isCurrentMedication(medication, today))
+  const currentMedications = (health?.medications ?? []).filter((medication) => isCurrentMedication(medication, today))
+  // Lo que dijo que cambió va como «antes», junto a lo de hoy: nunca dos anticoagulantes vigentes
+  // (revisión final del 15 nov, dev H2).
+  const history = changedHistoryOf({ changed: health?.changed, medications: currentMedications }, sex)
+  const conditions = history.current("conditions", activeConditions)
+  const medications = history.current("medications", currentMedications)
+  const beforeConditions = history.alone("conditions", activeConditions)
+  const beforeMedications = history.alone("medications", currentMedications)
   const allergyState = health?.reviewStatus.allergies ?? "unknown"
   // Lo que dijo la persona y nadie revisó, con la misma marca que la franja (lo decide el servidor).
   // Quién dijo cada cosa y cuándo lo trae su declaración, no quien figure hoy como su representante.
@@ -175,12 +184,15 @@ export function ClinicalAlertsCard({
     const group = declaredGroupOf(groups, topic, id)
     return group ? `${saidByWords(group.by, sex)} · sin revisar` : null
   }
+  // «su madre dijo que no (13 nov)», y su «No sé», «dijo que no sabe (13 nov)».
+  const saidWords = (said: { by: HealthDeclarant; at: string | null }, answer?: "no sabe") =>
+    `${saidNoWords(said.by, sex, answer).toLocaleLowerCase("es")}${said.at ? ` (${shortDay(said.at)})` : ""}`
   const saidNo = (topic: "allergies" | "conditions" | "medications"): string | null => {
     const group = saidNoGroupOf(groups, topic)
-    return group
-      ? `${saidNoWords(group.by, sex).toLocaleLowerCase("es")}${group.at ? ` (${shortDay(group.at)})` : ""}`
-      : null
+    return group ? saidWords(group) : null
   }
+  // Su «No sé» a las alergias: se le preguntó y no sabe (QA del 15 nov, K16).
+  const saidUnknown = health ? allergiesSaidUnknown(health) : null
   const pregnancyGroup = pregnancyGroupOf(groups)
   const pregnancy = health?.pregnancy ? pregnancyWords(health.pregnancy) : null
   const asa = asaLabel(health?.asaClass)
@@ -190,10 +202,10 @@ export function ClinicalAlertsCard({
   const quiet = !health
     ? []
     : [
-    conditions.length === 0
+    conditions.length === 0 && beforeConditions.length === 0
       ? `Enfermedades: ${saidNo("conditions") ?? groupWord(health?.reviewStatus.conditions, "niega", "sin enfermedades activas")}`
       : null,
-    medications.length === 0
+    medications.length === 0 && beforeMedications.length === 0
       ? `Medicación: ${saidNo("medications") ?? groupWord(health?.reviewStatus.medications, "ninguna", "sin medicación vigente")}`
       : null,
     // ASA en odentIA siempre; en latidIA solo si alguien la clasificó.
@@ -237,6 +249,7 @@ export function ClinicalAlertsCard({
               // Sin reacción no se afirma que «no dijo» algo que quizá no se le preguntó (auditor, 14 nov).
               allergy.reaction ?? "reacción sin describir",
               said("allergies", allergy.id) ?? (allergy.source === "paciente" ? "declarada" : null),
+              history.allergyMark(allergy.id),
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -256,7 +269,9 @@ export function ClinicalAlertsCard({
                 ? `Alergias: ${saidNo("allergies")} · sin revisar`
                 : allergyState === "none"
                   ? "Alergias: niega"
-                  : "Alergias: no preguntado"}
+                  : saidUnknown
+                    ? `Alergias: ${saidWords(saidUnknown, "no sabe")}`
+                    : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />
@@ -283,8 +298,15 @@ export function ClinicalAlertsCard({
             key={medication.id}
             tone="muted"
             title={[medication.name, medication.dose, medication.frequency].filter(Boolean).join(" · ")}
-            detail={said("medications", medication.id) ?? "Medicamento vigente"}
+            detail={
+              [said("medications", medication.id) ?? "Medicamento vigente", history.beforeFor("medications", medication)]
+                .filter(Boolean)
+                .join(" · ")
+            }
           />
+        ))}
+        {[...beforeConditions, ...beforeMedications].map((piece) => (
+          <Alert key={piece.line} tone="muted" title={piece.line} />
         ))}
         {quiet.length > 0 ? (
           <li className="col-span-full text-sm text-muted-foreground">{quiet.join(" · ")}</li>

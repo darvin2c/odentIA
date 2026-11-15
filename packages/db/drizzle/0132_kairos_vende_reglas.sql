@@ -1,6 +1,6 @@
 -- Kairós vende y agenda (14 nov): lo que TS no declara. Las tablas `admin_staff_hours`,
 -- `admin_staff_absence`, `kairos_setting` y `kairos_proposal` y las columnas nuevas de
--- `admin_staff`, `saas_task`, `saas_chat` y `saas_outreach` las generó 0129 desde el esquema; viven
+-- `admin_staff`, `saas_task`, `saas_chat` y `saas_outreach` las generó 0131 desde el esquema; viven
 -- en `admin` y no reciben ningún GRANT al rol de la aplicación (ADR 0063 y 0064). No llevan RLS:
 -- no tienen `organization_id`.
 

@@ -9,7 +9,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createOwnerDb, type Db } from "./client.js"
 
-// Kairós vende y agenda (0129 y 0130): el horario y las ausencias del equipo, lo general de
+// Kairós vende y agenda (0131 y 0132): el horario y las ausencias del equipo, lo general de
 // Kairós en una fila, la presentación con su fin y las propuestas en una conversación. Sin GRANT
 // al rol de la aplicación, como el resto del ARM.
 

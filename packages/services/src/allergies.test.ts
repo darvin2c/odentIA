@@ -81,11 +81,16 @@ describe("alergias una por una (tablero 7)", () => {
     const latex = await f.run((tx) =>
       addPatientAllergy(tx, org, actor, patientId, { substance: "Látex", severity: "leve" }),
     )
+    // Sin motivo, o con uno que no cabe, no se quita.
     await expect(
-      f.run((tx) => removePatientAllergy(tx, org, actor, patientId, latex.id, "porque si")),
-    ).rejects.toMatchObject({ status: 400 })
+      f.run((tx) => removePatientAllergy(tx, org, actor, patientId, latex.id, "   ")),
+    ).rejects.toMatchObject({ status: 400, fields: { reason: expect.any(String) } })
+    await expect(
+      f.run((tx) => removePatientAllergy(tx, org, actor, patientId, latex.id, "x".repeat(501))),
+    ).rejects.toMatchObject({ status: 400, fields: { reason: expect.any(String) } })
+    // Un atajo se guarda por su código, con su sentido en FHIR para la copia.
     const removed = await f.run((tx) =>
-      removePatientAllergy(tx, org, actor, patientId, latex.id, "otra_cosa"),
+      removePatientAllergy(tx, org, actor, patientId, latex.id, "Era otra cosa (malestar, efecto secundario)"),
     )
     expect(removed).toMatchObject({ isActive: false, removedReason: "otra_cosa", removedBy: actor })
     expect(removed.removedAt).toBeInstanceOf(Date)
@@ -111,6 +116,30 @@ describe("alergias una por una (tablero 7)", () => {
     ).rejects.toMatchObject({
       code: "ALLERGY_EXISTS",
     })
+  })
+
+  // Auditor, 15 nov (A11): la alergia que dijo la paciente se corregía solo con tres motivos fijos, y
+  // ninguno decía «era naproxeno y no ibuprofeno».
+  it("la que dijo la persona se corrige con su motivo en palabras, queda quién y cuándo, y cuenta como revisada", async () => {
+    const f = await clinicalFixture()
+    const [org, actor, patientId] = f.args
+    await f.run((tx) =>
+      addDeclaredAllergies(tx, org, actor, patientId, [{ substance: "Ibuprofeno", reaction: "ronchas" }], {
+        entity: "clinical_form_response",
+        entityId: "f-ibu",
+      }),
+    )
+    const [ibuprofen] = await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.substance, "Ibuprofeno"))
+    await ownerDb.update(patient).set({ allergiesReviewedAt: null, allergiesReviewedBy: null }).where(eq(patient.id, patientId))
+    const corrected = await f.run((tx) =>
+      removePatientAllergy(tx, org, actor, patientId, ibuprofen!.id, "  Era naproxeno y no ibuprofeno  "),
+    )
+    expect(corrected).toMatchObject({ isActive: false, removedReason: "Era naproxeno y no ibuprofeno", removedBy: actor })
+    expect(corrected.removedAt).toBeInstanceOf(Date)
+    // Lo que dijo ya no queda «sin revisar»: lo revisó quien la corrigió.
+    const health = await f.run((tx) => getPatientHealth(tx, org, patientId))
+    expect(health.allergiesReviewedBy).toBe(actor)
+    expect(health.declared.flatMap((group) => group.allergies)).toEqual([])
   })
 
   it("«Elegir de la lista» agrega el código y conserva lo escrito", async () => {

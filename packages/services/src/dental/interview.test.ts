@@ -69,15 +69,9 @@ describe("la entrevista de odentIA", () => {
     expect(dentalInterview.check(ok, today)).toBe(ok)
   })
 
-  it("«de pequeño», lo que contó la mamá de un niño, entra a su boca y se lee en palabras", () => {
+  it("lo de un niño en casa que contó la mamá entra a su boca, con las mismas claves", () => {
     const said = { dental: { biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" } } as const
     expect(dentalInterview.declared(said, today)).toEqual({ antecedentesOdontologicos: said.dental })
     expect(dentalInterview.check({ antecedentesOdontologicos: said.dental }, today)).toEqual({ antecedentesOdontologicos: said.dental })
-    expect(dentalInterview.declaredLines?.(said)).toEqual([
-      { label: "De pequeño", value: "ya no toma biberón · se chupa el dedo" },
-      { label: "Dulces o jugos entre comidas", value: "4 o más veces al día" },
-      { label: "Dientes", value: "pasta con flúor · se cepilla sin ayuda" },
-    ])
-    expect(dentalInterview.declaredLines?.({ dental: { corazon: { riesgoEndocarditis: "no" } } })).toEqual([])
   })
 })

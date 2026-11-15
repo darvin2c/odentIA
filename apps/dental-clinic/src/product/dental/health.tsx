@@ -6,7 +6,7 @@ import {
 } from "@odentia/clinic-app/product/product-ui"
 import {
   CHILDHOOD_WORDS,
-  childhoodLines,
+  childhoodEntries,
   DENTAL_BRUSHINGS_MAX,
   DENTAL_HABITS_MAX,
   dentalHabitsErrors,
@@ -16,7 +16,15 @@ import {
 } from "@odentia/dental"
 import { shortDay } from "@odentia/clinic-app/lib/declared-health"
 import type { DeclaredInterviewKey } from "@odentia/clinic-app/lib/patients"
-import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS, EARLY_CHILDHOOD_MAX_AGE, isChildAge } from "@odentia/clinical"
+import {
+  ANESTHESIA_TROUBLE_WORDS,
+  ANESTHESIA_TROUBLES,
+  anesthesiaAnswersOf,
+  CIGARETTE_BAND_LABELS,
+  CIGARETTE_BANDS,
+  EARLY_CHILDHOOD_MAX_AGE,
+  isChildAge,
+} from "@odentia/clinical"
 import { regionToday } from "@odentia/ui-patterns"
 import {
   Checkbox,
@@ -273,6 +281,11 @@ function DentalInterviewSections({
 }
 
 const ANSWER_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No", no_sabe: "No sabe" }
+/** «¿Qué pasó?» con la anestesia, con el Sí (H9). */
+const ANESTHESIA_TROUBLE_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  ...Object.fromEntries(ANESTHESIA_TROUBLES.map((value) => [value, ANESTHESIA_TROUBLE_WORDS[value].other])),
+}
 const TOBACCO_ITEMS: Record<string, string> = {
   "sin-indicar": "Sin indicar",
   nunca: "Nunca fumó",
@@ -352,11 +365,28 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
     if (value === undefined) delete next[key]
     update("antecedentesOdontologicos", "corazon", Object.keys(next).length ? next : undefined)
   }
+  // La anestesia (y qué pasó) y el sangrado, por separado (H9). Lo guardado antes con una sola
+  // respuesta para los dos: su «No» vale para los dos; un «Sí» o un «No sabe» no se parte, se dice.
+  const anesthesia = anesthesiaAnswersOf(odontologicos["problemaAnestesia"])
+  const anesthesiaNow: Record<string, string> = {
+    ...(anesthesia.joint === "no" ? { anestesia: "no", sangrado: "no" } : {}),
+    ...(anesthesia.anesthesia ? { anestesia: anesthesia.anesthesia } : {}),
+    ...(anesthesia.what ? { quePaso: anesthesia.what } : {}),
+    ...(anesthesia.bleeding ? { sangrado: anesthesia.bleeding } : {}),
+  }
+  const setAnesthesia = (key: "anestesia" | "quePaso" | "sangrado", value: string | undefined) => {
+    const next: Record<string, string> = { ...anesthesiaNow }
+    if (value === undefined) delete next[key]
+    else next[key] = value
+    // «¿Qué pasó?» va solo con el Sí a la anestesia.
+    if (key === "anestesia" && value !== "si") delete next.quePaso
+    update("antecedentesOdontologicos", "problemaAnestesia", next.anestesia || next.sangrado ? next : undefined)
+  }
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          Corazón, anestesia, tabaco y alcohol <ChevronDown aria-hidden className="size-4" />
+          {child ? "Corazón y anestesia" : "Corazón, anestesia, tabaco y alcohol"} <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -381,13 +411,39 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
           />
           <Pick
             id={fid("od-anestesia")}
-            label="Problema con la anestesia o sangrado largo tras una extracción"
+            label="Problema con la anestesia"
             items={ANSWER_ITEMS}
-            value={strOf(odontologicos["problemaAnestesia"])}
-            onChange={(v) => update("antecedentesOdontologicos", "problemaAnestesia", v)}
+            value={strOf(anesthesiaNow.anestesia)}
+            onChange={(v) => setAnesthesia("anestesia", v)}
             disabled={disabled}
             error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia", fid("od-anestesia"))}
           />
+          {anesthesiaNow.anestesia === "si" ? (
+            <Pick
+              id={fid("od-anestesia-que")}
+              label="¿Qué pasó con la anestesia?"
+              items={ANESTHESIA_TROUBLE_ITEMS}
+              value={strOf(anesthesiaNow.quePaso)}
+              onChange={(v) => setAnesthesia("quePaso", v)}
+              disabled={disabled}
+              error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia.quePaso", fid("od-anestesia-que"))}
+            />
+          ) : null}
+          <Pick
+            id={fid("od-sangrado")}
+            label="Sangrado largo tras una extracción"
+            items={ANSWER_ITEMS}
+            value={strOf(anesthesiaNow.sangrado)}
+            onChange={(v) => setAnesthesia("sangrado", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia.sangrado", fid("od-sangrado"))}
+          />
+          {anesthesia.joint && anesthesia.joint !== "no" ? (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Antes se preguntaba junto: «Problema con la anestesia o sangrado tras una extracción: {ANSWER_ITEMS[anesthesia.joint]}».
+              Pregúntale cuál de las dos fue.
+            </p>
+          ) : null}
           {child && strOf(habits["tabaco"]) === "" ? null : (
           <Pick
             id={fid("od-tabaco")}
@@ -449,7 +505,7 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
   )
 }
 
-/** Una respuesta de «de pequeño» por lista, con «Sin indicar» primero. */
+/** Una respuesta de «los dientes en casa» por lista, con «Sin indicar» primero. */
 const childItems = (words: Record<string, string>): Record<string, string> => ({
   "sin-indicar": "Sin indicar",
   ...Object.fromEntries(Object.entries(words).map(([key, text]) => [key, text.replace(/^./, (letter) => letter.toLocaleUpperCase("es"))])),
@@ -463,7 +519,7 @@ const CHILD_FIELDS = [
 ] as const
 
 /**
- * «De pequeño» (mesa del 13 nov, entrega 7): lo que cuenta quien cuida a un menor
+ * «Los dientes en casa» (mesa del 13 nov, entrega 7; el nombre, revisión final del 15 nov, K8): lo que cuenta quien cuida a un menor
  * de 12, con las claves de `antecedentesOdontologicos`. Sale para un niño, o si ya
  * hay algo anotado; biberón y chupón, hasta los 6 años.
  */
@@ -483,7 +539,7 @@ function ChildhoodSections({ answers, update, disabled, idPrefix, age, errors }:
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
         <span className="flex items-center gap-1">
-          De pequeño <ChevronDown aria-hidden className="size-4" />
+          Los dientes en casa <ChevronDown aria-hidden className="size-4" />
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -513,28 +569,30 @@ const withDay = (item: DentalInterviewItem, text: string): string => {
 }
 
 /**
- * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de pequeño, debajo del
- * resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato: lo
- * del equipo queda sin ella (QA del 14 nov, causa raíz).
+ * Lo guardado del corazón, la anestesia, el tabaco y la lactancia, y lo de un niño en casa, debajo
+ * del resumen de antecedentes. Lo que dijo la persona y nadie revisó lleva su marca, dato por dato:
+ * lo del equipo queda sin ella (QA del 14 nov, causa raíz; lo de un niño, revisión final del 15 nov,
+ * K2). Cada tarjeta se llama como su sección del cajón, y a un niño no se le titula con el tabaco.
  */
 function DentalHistorySummary({
   answers,
   marks,
-  productMark,
+  age,
 }: {
   answers: Rec
   marks?: Partial<Record<DeclaredInterviewKey, string>>
-  productMark?: string
+  age?: number | null
 }) {
   const items = dentalInterviewItems(answers)
   const raw = answers.antecedentesOdontologicos
-  const childhood = childhoodLines(raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Rec) : null)
+  const childhood = childhoodEntries(raw)
   if (items.length === 0 && childhood.length === 0) return null
+  const heartTitle = isChildAge(age) ? "Corazón y anestesia" : "Corazón, anestesia, tabaco y alcohol"
   return (
     <>
       {items.length > 0 ? (
-        <section aria-label="Corazón, anestesia y tabaco" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-          <h3 className="font-heading text-sm font-medium">Corazón, anestesia y tabaco</h3>
+        <section aria-label={heartTitle} className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">{heartTitle}</h3>
           <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
             {items.map((item) => {
               const mark = item.said.map((key) => marks?.[key]).find(Boolean)
@@ -549,20 +607,17 @@ function DentalHistorySummary({
         </section>
       ) : null}
       {childhood.length > 0 ? (
-        <section aria-label="De pequeño" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
-          <div className="flex flex-col gap-0.5">
-            <h3 className="font-heading text-sm font-medium">De pequeño</h3>
-            {/* Lo contó quien cuida al niño y nadie lo revisó: lleva su marca, como lo de arriba. */}
-            {productMark ? <p className="text-xs text-warning">{productMark}</p> : null}
-          </div>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+        <section aria-label="Los dientes en casa" className="flex flex-col gap-2 elevated rounded-xl border bg-card p-4">
+          <h3 className="font-heading text-sm font-medium">Los dientes en casa</h3>
+          {/* Cada dato con su marca si lo contó quien cuida al niño y sigue así: lo del equipo, sin ella. */}
+          <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
             {childhood.map((row) => (
-              <div key={row.label} className="contents">
-                <dt className="text-muted-foreground">{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
+              <li key={row.key}>
+                {row.label}: {row.value}
+                {marks?.[row.key] ? <span className="text-warning"> · {marks[row.key]}</span> : null}
+              </li>
             ))}
-          </dl>
+          </ul>
         </section>
       ) : null}
     </>
@@ -586,10 +641,20 @@ export const dentalHealth: ProductHealthUi = {
     dentalInterviewItems(answers).flatMap((item) =>
       item.alert ? [{ keys: item.said, label: withDay(item, item.alert) }] : [],
     ),
-  saidRows: (answers) =>
-    dentalInterviewItems(answers).map((item) => {
+  saidRows: (answers) => [
+    ...dentalInterviewItems(answers).map((item) => {
       // «Corazón: válvula…: sí» → «Corazón» y lo que dijo.
       const [label, ...rest] = withDay(item, item.text).split(": ")
-      return { keys: item.said, label: label ?? item.key, value: rest.join(": ") }
+      return { keys: item.said as DeclaredInterviewKey[], label: label ?? item.key, value: rest.join(": ") }
     }),
+    // Lo de un niño en casa, dato por dato, cada uno con su marca (revisión final del 15 nov, K2).
+    ...childhoodEntries(answers.antecedentesOdontologicos).map((row) => ({
+      keys: [row.key] as DeclaredInterviewKey[],
+      label: row.label,
+      value: row.value,
+    })),
+  ],
+  // «Ver declaración original» con lo de un niño en casa, tal como llegó (revisión final del 15 nov, K3).
+  declaredRows: (health) =>
+    childhoodEntries(health.dental).map((row) => ({ label: row.label, value: row.value.replace(/^./, (letter) => letter.toLocaleUpperCase("es")) })),
 }

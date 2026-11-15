@@ -44,4 +44,4 @@ En un chat, la clínica que pregunta espera respuesta en minutos, también de no
 
 - Agente: `packages/agent/src/kairos-vende.ts` (`SELLER_SYSTEM`), banco `packages/agent/eval/kairos-vende.json` y sus mediciones.
 - Servicios: `packages/services/src/kairos-sells.ts`, `admin-staff-schedule.ts`, `kairos-sales-facts.ts`, `admin-kairos.ts` (`ausencia_choca`).
-- Worker: la cola `kairos-vende`. Migraciones `0129_kairos_vende`, `0130_kairos_vende_reglas`, `0131_kairos_responde` y `0132_kairos_avisos`.
+- Worker: la cola `kairos-vende`. Migraciones `0131_kairos_vende` y `0132_kairos_vende_reglas`.

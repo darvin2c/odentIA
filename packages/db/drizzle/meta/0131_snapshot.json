@@ -1,6 +1,6 @@
 {
-  "id": "5859682c-d876-4c69-8533-8a9ec96909e2",
-  "prevId": "7adf1264-25e0-499c-8f1d-5fd000aa1a64",
+  "id": "3dda7a1f-c964-4195-8460-ea480720984a",
+  "prevId": "fed6db70-c1b7-48bf-afc2-dcefc7dea157",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2695,6 +2695,13 @@
           "notNull": true,
           "default": false
         },
+        "purpose": {
+          "name": "purpose",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'respuesta'"
+        },
         "admin_only": {
           "name": "admin_only",
           "type": "boolean",
@@ -2946,6 +2953,10 @@
         "saas_outreach_status_check": {
           "name": "saas_outreach_status_check",
           "value": "\"admin\".\"saas_outreach\".\"status\" IN ('pendiente','enviado','incierto','no_salio')"
+        },
+        "saas_outreach_purpose_check": {
+          "name": "saas_outreach_purpose_check",
+          "value": "\"admin\".\"saas_outreach\".\"purpose\" IN ('respuesta','aviso')"
         },
         "saas_outreach_text_check": {
           "name": "saas_outreach_text_check",
@@ -17702,6 +17713,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "health_at_signing": {
+          "name": "health_at_signing",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "visit_follow_up_id": {
           "name": "visit_follow_up_id",
           "type": "uuid",
@@ -20257,7 +20274,7 @@
         },
         "patient_allergy_removed_reason_check": {
           "name": "patient_allergy_removed_reason_check",
-          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR \"patient_allergy\".\"removed_reason\" IN ('ya_no','otra_cosa','error')"
+          "value": "\"patient_allergy\".\"removed_reason\" IS NULL OR (btrim(\"patient_allergy\".\"removed_reason\") <> '' AND char_length(\"patient_allergy\".\"removed_reason\") <= 500)"
         },
         "patient_allergy_removed_check": {
           "name": "patient_allergy_removed_check",
@@ -31990,6 +32007,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "entry_point": {
+          "name": "entry_point",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -32058,6 +32081,10 @@
         "registration_hold_match_check": {
           "name": "registration_hold_match_check",
           "value": "\"registration_hold\".\"match\" IN ('documento', 'celular')"
+        },
+        "registration_hold_entry_check": {
+          "name": "registration_hold_entry_check",
+          "value": "\"registration_hold\".\"entry_point\" IS NULL OR \"registration_hold\".\"entry_point\" IN ('qr', 'public_link', 'conversation')"
         }
       },
       "isRLSEnabled": false
