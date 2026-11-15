@@ -119,13 +119,17 @@ const trust = [
   <section class="hero lh" data-lh-hero>
     <div class="wrap lh-in">
       <div class="lh-copy">
-        <span class="arm-badge"><b>ARM</b><span>Agentic Relationship Management <i>· para consultorios médicos</i></span></span>
+        <span class="arm-badge"><b>ARM</b><span>Agentic Relationship Management <i>· consultorios médicos</i></span></span>
         <h1 class="lh-h1">Más pacientes que vuelven.<br /><span>Menos trabajo para tu equipo.</span></h1>
         <p class="lh-lead">
-          <b>latidIA es un ARM: agentes de IA que hacen el trabajo de tu consultorio, no solo conversan.</b>{" "}
-          En la recepción, <b class="c-sofi">Sofi</b> responde y agenda. En la consulta, <b class="c-clio">Clío</b> ordena lo que dictas, con la receta y el descanso. En la administración, <b class="c-argos">Argos</b> trae de vuelta a quien no volvió.{" "}
-          <a class="lh-arm" href={ARM_PATH}>¿Usas un CRM? Compáralo <span aria-hidden="true">→</span></a>
+          <b>latidIA es un ARM: agentes de IA que hacen el trabajo de tu consultorio, no solo conversan.</b>
         </p>
+        <ul class="arm-areas">
+          <li><span class="area">Recepción</span><span><b class="sofi">Sofi</b> responde y agenda.</span></li>
+          <li><span class="area">Consulta</span><span><b class="clio">Clío</b> ordena lo que dictas, con la receta y el descanso.</span></li>
+          <li><span class="area">Administración</span><span><b class="argos">Argos</b> trae de vuelta a quien no volvió.</span></li>
+        </ul>
+        <a class="arm-cmp" href={ARM_PATH}>¿Usas un CRM? Compáralo <span aria-hidden="true">→</span></a>
         <div class="lh-ctas">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
           <a class="btn btn-g" href="#caso">Ver cómo funciona</a>
@@ -408,7 +412,6 @@ const trust = [
   .lh-h1 { font-size: clamp(40px, 3.9vw, 56px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
   .lh-h1 span { color: var(--sky); }
   .lh-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); max-width: 520px; }
-  .lh-arm { color: var(--sky); font-weight: 700; white-space: nowrap; text-underline-offset: 3px; }
   .lh-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
   .lh-note { font-size: 15px; line-height: 1.5; color: var(--on-night-3); }
   .lh-specs { list-style: none; margin: 0; padding: 6px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }

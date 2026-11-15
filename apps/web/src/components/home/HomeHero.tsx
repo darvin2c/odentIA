@@ -409,21 +409,38 @@ export default function HomeHero({ ctaHref, ctaLabel, note }: Props) {
           <span className="arm-badge rise">
             <b>ARM</b>
             <span>
-              Agentic Relationship Management <i>· para clínicas dentales</i>
+              Agentic Relationship Management <i>· clínicas dentales</i>
             </span>
           </span>
           <h1 id="inicio-titulo" className="hh-title rise d1">
             Más pacientes que vuelven. <span>Menos trabajo para tu equipo.</span>
           </h1>
           <p className="hh-lead rise d2">
-            <b>odentIA es un ARM: agentes de IA que hacen el trabajo de tu clínica, no solo conversan.</b>{" "}
-            En la recepción, Sofi responde y agenda. En la consulta, Clío prepara la nota y el
-            presupuesto. En la administración, Argos retoma los presupuestos y trae de vuelta a quien
-            no volvió.{" "}
-            <a className="hh-arm" href={ARM_PATH}>
-              ¿Usas un CRM? Compáralo <span aria-hidden="true">→</span>
-            </a>
+            <b>odentIA es un ARM: agentes de IA que hacen el trabajo de tu clínica, no solo conversan.</b>
           </p>
+          <ul className="arm-areas rise d2">
+            <li>
+              <span className="area">Recepción</span>
+              <span>
+                <b className="sofi">Sofi</b> responde y agenda.
+              </span>
+            </li>
+            <li>
+              <span className="area">Consulta</span>
+              <span>
+                <b className="clio">Clío</b> prepara la nota y el presupuesto.
+              </span>
+            </li>
+            <li>
+              <span className="area">Administración</span>
+              <span>
+                <b className="argos">Argos</b> retoma presupuestos y trae de vuelta a quien no volvió.
+              </span>
+            </li>
+          </ul>
+          <a className="arm-cmp rise d2" href={ARM_PATH}>
+            ¿Usas un CRM? Compáralo <span aria-hidden="true">→</span>
+          </a>
           <div className="hh-ctas rise d3">
             <a className="btn btn-p" href={ctaHref}>
               {ctaLabel}
