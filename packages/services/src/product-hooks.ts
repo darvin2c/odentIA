@@ -300,12 +300,13 @@ export const COMMON_INTERVIEW: ProductInterview = {
   record: commonInterviewEntries,
 }
 
-/** Lo que el producto revisa al emitir una receta, además de las alergias. */
+/**
+ * Lo que el producto revisa al emitir una receta, además de lo que avisa toda receta (las alergias,
+ * el embarazo y un AINE con un anticoagulante, `prescribingAlerts`), que revisa la receta misma.
+ */
 export interface PrescribingReview {
   /** Lo que impide emitir (latidIA: un controlado, el peso de un niño). */
   errors: string[]
-  /** Lo que se avisa como una alergia y decide quien receta (latidIA: contraindicado en el embarazo; ADR 0143). */
-  warnings: string[]
 }
 
 /**
@@ -328,7 +329,7 @@ export interface ProductPrescribing {
 /** La receta de siempre: la lista dental y solo las alergias. */
 export const DENTAL_PRESCRIBING: ProductPrescribing = {
   catalog: DENTAL_MEDICATION_CATALOG,
-  review: async () => ({ errors: [], warnings: [] }),
+  review: async () => ({ errors: [] }),
 }
 
 /** Una sugerencia de Clío ya revisada: lista para confirmar, o por revisar con su motivo. */
@@ -507,6 +508,11 @@ export interface ProductHooks {
    * la clave.
    */
   treatmentFamiliesOf?(tx: Db, templateIds: readonly string[]): Promise<Map<string, string[]>>
+  /**
+   * De estos servicios, los que son una exodoncia (odentIA: los que dejan la pieza ausente): al
+   * indicarla, el plan dice lo que toma y la cambia (`extractionRisksOf`). Sin él, ninguno.
+   */
+  extractionServiceIds?(tx: Db, orgId: string, serviceIds: readonly string[]): Promise<Set<string>>
   /**
    * Los tipos de tratamiento de la biblioteca que se hacen de una vez y nunca piden otra sesión
    * (odentIA: consultas, evaluaciones y radiografías). Sin él, ninguno.

@@ -1,6 +1,6 @@
 import type { DemoCountry, DemoKindRecipe } from "../demo-recipes.js"
 import { birthDateForAge } from "../demo-recipes.js"
-import type { Random, ReportsSeedNote, ReportsSeedPerson } from "../seed-reports.js"
+import { ageOn, type Random, type ReportsSeedNote, type ReportsSeedPerson } from "../seed-reports.js"
 
 /**
  * Los tipos de demo de latidIA (lienzo «Demos para presentar», tablero 5):
@@ -653,8 +653,10 @@ function episodeNote(
   person: ReportsSeedPerson | null,
   at: Date,
 ): ReportsSeedNote {
-  // Lo que le puede pasar a esa edad; si nada calza, lo de siempre.
-  const age = ageAt(person, at)
+  // Lo que le puede pasar a esa edad; si nada calza, lo de siempre. Con los años cumplidos ese día
+  // (`ageOn`), como se cuenta una edad: con años de 365,25 días, el día que cumplía 50 todavía tenía
+  // 49 y le tocaba la anticoncepción (CI de main del 15 nov).
+  const age = person ? ageOn(person.birthDate, at) : ageAt(person, at)
   const fitting = episodes.filter((item) => (item.minAge ?? 0) <= age && age < (item.maxAge ?? 200))
   const episode = random.weighted(fitting.length > 0 ? fitting : episodes)
   return issued(

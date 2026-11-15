@@ -10,6 +10,7 @@ import {
   type DictationFormQuestion,
   dictationFormQuestions,
   formAnswerDropReason,
+  formAnswerFragments,
   formQuestionsOf,
   prepareFormAnswer,
   saidNumbers,
@@ -26,6 +27,7 @@ import {
 import { voidEncounter } from "./encounters.js"
 import { loadFormRecords } from "./form-record.js"
 import type { ProductSite } from "./product-hooks.js"
+import { productHooksFor } from "./products.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -206,6 +208,58 @@ describe("lo que el servidor dejaba pasar (QA del 14 nov)", () => {
     expect(saidNumbers("por lo menos dos")).toEqual([2])
     expect(saidNumbers("menos dos")).toEqual([-2])
     expect(ask("pieza", "46", "en la cuatro seis")).toMatchObject({ status: "lista", payload: { value: 46 } })
+  })
+})
+
+describe("lo que la revisión final del 15 nov mostró", () => {
+  // La ficha odontoestomatológica de odentIA, por el registro de productos (ADR 0079): tiene CPOD y ceod.
+  const STOMATOLOGIC = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-odontoestomatologica")!.schema
+  const ENDO: DictationFormQuestion[] = [
+    question(1, { responseId: "endo", formTitle: "Evaluación de endodoncia", fieldId: "pieza", label: "Pieza", type: "pieza", answered: 36 }),
+    question(2, { responseId: "endo", formTitle: "Evaluación de endodoncia", fieldId: "dolor", label: "Dolor", type: "opcion_unica", options: ["Sin dolor", "Provocado", "Espontáneo"] }),
+    question(3, { responseId: "endo", formTitle: "Evaluación de endodoncia", fieldId: "movilidad", label: "Movilidad", type: "opcion_unica", options: ["Grado 1", "Grado 2"] }),
+  ]
+  it("lo escrito a mano no queda «lista»: lo que lo cambia queda por revisar, con su valor", () => {
+    const written = QUESTIONS.map((item) => (item.fieldId === "overjet" ? { ...item, answered: 3 } : item))
+    expect(prepareFormAnswer({ payload: { question: 2, answer: "1" }, sourceText: "overjet de un milímetro" }, written, FDI)).toEqual({
+      payload: expect.objectContaining({ value: 1, replaces: 3 }),
+      status: "por_revisar",
+      note: "Ya dice «3 mm».",
+    })
+  })
+  it("la ficha de la 36 no recibe lo dictado para la 46, y se dice por qué", () => {
+    const transcript = "Pieza cuarenta y seis con dolor espontáneo. Movilidad grado dos."
+    const pain = { payload: { question: 2, answer: "Espontáneo" }, sourceText: "dolor espontáneo" }
+    expect(prepareFormAnswer(pain, ENDO, FDI, transcript)).toBeNull()
+    expect(prepareFormAnswer({ payload: { question: 3, answer: "Grado 2" }, sourceText: "movilidad grado dos" }, ENDO, FDI, transcript)).toBeNull()
+    expect(formAnswerDropReason(pain, ENDO, { site: FDI, transcript })).toBe(
+      "«Evaluación de endodoncia» es de la 36 y dijiste la 46: no la llené. Escríbelo tú o empieza otra ficha para la 46.",
+    )
+    // Dicho de su pieza, o sin nombrar ninguna, sí se propone; «dolor de ocho» no es una pieza.
+    expect(prepareFormAnswer(pain, ENDO, FDI, "En la treinta y seis, dolor espontáneo.")).toMatchObject({ status: "lista" })
+    expect(prepareFormAnswer(pain, ENDO, FDI, "Dolor espontáneo, ocho de diez.")).toMatchObject({ status: "lista" })
+    expect(prepareFormAnswer(pain, ENDO, FDI, "La cuatro seis con dolor espontáneo.")).toBeNull()
+    // Sin pieza escrita en la ficha, la pieza dicha no frena nada.
+    const open = ENDO.map((item) => (item.fieldId === "pieza" ? { ...item, answered: undefined } : item))
+    expect(prepareFormAnswer(pain, open, FDI, transcript)).toMatchObject({ status: "lista" })
+  })
+  it("«cariados tres» sin decir de qué índice va a «No pude usar esto» con entre cuáles; «perdidos uno» se propone", () => {
+    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: STOMATOLOGIC, answers: {} }])
+    const ask = (fieldId: string, answer: string, said: string) => ({ payload: { question: forms.find((item) => item.fieldId === fieldId)?.number, answer }, sourceText: said })
+    const transcript = "En la ficha, cariados tres, perdidos uno, obturados dos."
+    expect(prepareFormAnswer(ask("cpod_c", "3", "cariados tres"), forms, FDI, transcript)).toBeNull()
+    expect(formAnswerDropReason(ask("cpod_c", "3", "cariados tres"), forms)).toBe(
+      "No quedó claro si era «CPOD · C, cariados» o «ceod · c, cariados»: nómbrala o escríbela en la ficha.",
+    )
+    expect(formAnswerDropReason(ask("cpod_o", "2", "obturados dos"), forms)).toContain("«CPOD · O, obturados» o «ceod · o, obturados»")
+    expect(prepareFormAnswer(ask("cpod_p", "1", "perdidos uno"), forms, FDI, transcript)).toMatchObject({ status: "lista", payload: { value: 1 } })
+  })
+  it("lo usado se resalta por dato, no por frase", () => {
+    const forms = formQuestionsOf([{ id: "norma", title: "Ficha odontoestomatológica", snapshot: STOMATOLOGIC, answers: {} }])
+    const of = (fieldId: string) => forms.find((item) => item.fieldId === fieldId)
+    expect(formAnswerFragments("cariados tres, perdidos uno, obturados dos", of("cpod_p"))).toEqual(["perdidos uno"])
+    expect(formAnswerFragments("higiene oral regular", of("higiene"))).toEqual(["higiene oral regular"])
+    expect(formAnswerFragments("perdidos uno y obturados dos", of("cpod_o"))).toEqual(["obturados dos"])
   })
 })
 
@@ -527,14 +581,15 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(pending.find((item) => item.id === id)).toMatchObject({ payload: { value: 7 }, sourceText: "no, el overjet es de siete" })
   })
 
-  it("sobre una ya respondida, lo que la cambia dice lo que ya dice y «Confirmar» la cambia; lo mismo no se propone", async () => {
+  it("sobre una ya respondida, lo que la cambia queda por revisar, dice lo que ya dice y se cambia de a una; lo mismo no se propone", async () => {
     const { save, fx, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
     const same = await save([{ payload: { question: 1, answer: "Clase II división 2" }, sourceText: "clase molar derecha clase dos división dos" }])
     expect(same.suggestions).toEqual([])
     const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
     expect(changed.suggestions).toHaveLength(1)
+    // Lo escrito a mano lo cambia una persona: nunca «lista» (revisión final del 15 nov, dev H5).
     expect(changed.suggestions[0]).toMatchObject({
-      status: "lista",
+      status: "por_revisar",
       payload: { value: "Clase II división 1", replaces: "Clase II división 2" },
       note: "Ya dice «Clase II división 2».",
     })
@@ -564,6 +619,20 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const overjet = record?.sections.flatMap((section) => section.items).find((item) => item.id === "overjet")
     expect(overjet?.clio).toMatch(/^Clío · confirmó al firmar .+ el /)
     expect(record?.sections.flatMap((section) => section.items).find((item) => item.id === "overbite")?.clio).toBeNull()
+  })
+
+  it("la respuesta que cambia lo escrito no entra sola: se confirma de a una, solo esa", async () => {
+    const { save, fx, answersNow } = await startedForm({ overjet: 3 })
+    const saved = await save([
+      { payload: { question: 2, answer: "1" }, sourceText: "overjet de un milímetro" },
+      { payload: { question: 3, answer: "2" }, sourceText: "overbite de dos" },
+    ])
+    const byField = (field: string) => saved.suggestions.find((item) => item.payload["fieldId"] === field)!
+    expect(byField("overjet")).toMatchObject({ status: "por_revisar", payload: { value: 1, replaces: 3 } })
+    expect(byField("overbite")).toMatchObject({ status: "lista" })
+    expect(saved.formSources).toEqual(["overjet de un milímetro", "overbite de dos"])
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, byField("overjet").id, { expectedValue: 1 }))
+    expect(await answersNow()).toMatchObject({ overjet: 1 })
   })
 
   it("lo dicho para la ficha que no queda como propuesta vuelve con su motivo", async () => {

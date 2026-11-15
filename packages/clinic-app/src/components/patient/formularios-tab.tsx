@@ -33,14 +33,16 @@ import {
   finalizedWords,
   finalizeFormResponse,
   startFormResponse,
+  sectionTotal,
   updateFormResponse,
+  writesForm,
 } from "../../lib/clinical-forms"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
 import { DeclaredResponse } from "./declared-response"
 import { X } from "lucide-react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { proposalsOf, proposedWords, useClioFormProposals } from "./clio-form-proposals"
+import { answersWords, changesWritten, proposalsOf, proposedWords, proposesValue, useClioFormProposals } from "./clio-form-proposals"
 import type { DictationSuggestion } from "./dictation-session"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
@@ -53,7 +55,7 @@ import {
   missingRequired,
 } from "./form-fields"
 import { templateOptionLabel } from "../../lib/form-templates"
-import { answerWords, defaultResponsible, draftOf, newFormSubmitWords, reusableAnswer } from "../../lib/consultation-forms"
+import { answersFromPrevious, answerWords, defaultResponsible, draftOf, newFormSubmitWords, reusableAnswer } from "../../lib/consultation-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const when = (value: string | null | undefined) =>
@@ -335,6 +337,15 @@ export function ResponseDetail({
   return <StaffResponseDetail response={response} previous={latest} first={first} canWrite={canWrite} onChanged={onChanged} />
 }
 
+/** «ceod: 6», debajo de la sección que lleva total. */
+function SectionTotal({ words }: { words: string | null }) {
+  return words ? (
+    <p className="text-sm font-medium" aria-live="polite">
+      {words}
+    </p>
+  ) : null
+}
+
 /** Otra pestaña o persona guardó esta ficha mientras se escribía. */
 const isStale = (error: unknown) => error instanceof ApiError && error.shape.code === "STALE_DRAFT"
 
@@ -363,10 +374,15 @@ function StaffResponseDetail({
   const queryClient = useQueryClient()
   // Con qué se compara: la anterior, o la de inicio en un tratamiento largo.
   const [against, setAgainst] = useState<"anterior" | "inicio">("anterior")
-  const previous = against === "inicio" && first ? first : latest
+  const fromStart = against === "inicio" && !!first
+  const previous = fromStart ? first : latest
   const memberName = useMemberName()
   const schema = response.templateSnapshot
-  const editable = response.status === "borrador" && canWrite
+  // La ficha de una atención la llena quien la lleva (o tomó el relevo): los demás la leen.
+  const leads = writesForm(response, useMyUserId())
+  const editable = response.status === "borrador" && canWrite && leads
+  // Dentro de una atención en curso, la ficha se cierra con la firma.
+  const inAttention = response.encounterId !== null && response.encounterStatus === "borrador"
   const articleRef = useRef<HTMLElement | null>(null)
   const [saveState, setSaveState] = useState<SaveState>("guardado")
   const [finalizeOpen, setFinalizeOpen] = useState(false)
@@ -428,11 +444,22 @@ function StaffResponseDetail({
   })
   const answers = useStore(form.store, (state) => state.values.answers)
   const formError = useFormSubmitError(form)
+  // «Usar lo de la anterior»: lo que respondió en cada pregunta que hoy sigue vacía.
+  const fromPrevious = editable && previous ? answersFromPrevious(response, previous, answers, isEmptyAnswer) : {}
+  const copyPrevious = () => {
+    const entries = Object.entries(fromPrevious)
+    for (const [id, value] of entries) form.setFieldValue(`answers.${id}`, value)
+    setAnnouncement(entries.length === 1 ? "Se copió 1 respuesta de la anterior." : `Se copiaron ${entries.length} respuestas de la anterior.`)
+    focusAfter(null)
+  }
 
   // Lo que propuso Clío al dictar (entrega 11, forma B): se confirma aquí, en cada pregunta.
   const clio = useClioFormProposals()
   const proposals = editable ? proposalsOf(clio, response.id) : []
+  // Lo que se confirma junto; lo que cambia lo escrito a mano se decide de a una, en su pregunta.
   const readyProposals = proposals.filter((item) => item.status === "lista")
+  const valued = proposals.filter(proposesValue)
+  const overWritten = valued.filter(changesWritten).length
   const proposalFor = (fieldId: string) => proposals.find((item) => item.payload["fieldId"] === fieldId) ?? null
   // Las preguntas que se escribieron en este panel: si otra persona respondió otra, el descarte lo dice.
   const typedHere = useRef(new Set<string>())
@@ -444,8 +471,8 @@ function StaffResponseDetail({
   const [announcement, setAnnouncement] = useState("")
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llegan propuestas nuevas.
   useEffect(() => {
-    if (readyProposals.length > 0) setAnnouncement(`${CLINICAL_NAME} propone ${readyProposals.length === 1 ? "1 respuesta" : `${readyProposals.length} respuestas`} en esta ficha.`)
-  }, [readyProposals.length])
+    if (valued.length > 0) setAnnouncement(`${CLINICAL_NAME} propone ${answersWords(valued.length)} en esta ficha.`)
+  }, [valued.length])
   const busy = confirming || !!clio?.busy
   /** Tras confirmar o descartar el botón desaparece: el foco vuelve a la pregunta, o a la ficha. */
   const focusAfter = (fieldId: string | null) =>
@@ -469,7 +496,7 @@ function StaffResponseDetail({
       if (isEmptyAnswer(value) || same(item.payload["value"]) || correcting || discardSent.current.has(item.id)) continue
       discardSent.current.add(item.id)
       clio.discard(item)
-      if (item.status === "lista" && !typedHere.current.has(fieldId)) {
+      if (proposesValue(item) && !typedHere.current.has(fieldId)) {
         const field = schema.sections.flatMap((section) => section.fields).find((candidate) => candidate.id === fieldId)
         toast(`${CLINICAL_NAME} proponía «${proposedWords(item)}» en «${field?.label ?? "una pregunta"}»; quedó «${proposedWords({ ...item, payload: { ...item.payload, value } })}», que escribió otra persona.`)
       }
@@ -504,7 +531,7 @@ function StaffResponseDetail({
     setAnnouncement("Propuesta descartada.")
     focusAfter(String(item.payload["fieldId"]))
     // Como los demás «Deshacer» de la app: tiempo para leerlo y volver atrás.
-    toast(item.status === "lista" ? `Descartaste lo que proponía ${CLINICAL_NAME}: «${proposedWords(item)}».` : "Descartaste el aviso de esa pregunta.", {
+    toast(proposesValue(item) ? `Descartaste lo que proponía ${CLINICAL_NAME}: «${proposedWords(item)}».` : "Descartaste el aviso de esa pregunta.", {
       duration: 10_000,
       action: {
         label: "Deshacer",
@@ -801,6 +828,13 @@ function StaffResponseDetail({
           ) : null}
         </span>
       </header>
+      {response.status === "borrador" && canWrite && !leads ? (
+        <p className="rounded-md bg-muted p-3 text-sm">
+          La llena quien lleva la atención
+          {response.encounterProfessionalUserId ? ` (${memberName(response.encounterProfessionalUserId)})` : ""}. Cuando la
+          finalice, puedes agregarle una adenda.
+        </p>
+      ) : null}
       {response.status === "descartado" ? (
         <p className="rounded-md bg-muted p-3 text-sm">
           Descartado {when(response.discardedAt)} · {response.discardReason}
@@ -825,23 +859,34 @@ function StaffResponseDetail({
         </div>
       ) : null}
       {previous ? (
-        <p className="rounded-md bg-muted p-3 text-sm">
-          Debajo de cada pregunta, {against === "inicio" && first ? "lo de la de inicio" : "lo de la anterior"}:{" "}
-          {previousWhen(previous)}
-          {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm">
+          <p>
+            Debajo de cada pregunta, {fromStart ? "lo de la de inicio" : "lo de la anterior"}:{" "}
+            {previousWhen(previous)}
+            {previous.professionalUserId ? ` · ${memberName(previous.professionalUserId)}` : " · sin profesional asignado"}.
+          </p>
+          {/* Copia de un toque lo de la anterior en lo que hoy sigue vacío; lo escrito hoy no se toca. */}
+          {editable && Object.keys(fromPrevious).length > 0 ? (
+            <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={copyPrevious}>
+              Usar lo de {fromStart ? "la de inicio" : "la anterior"}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       {proposals.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
           <span className="flex items-start gap-2">
             <AgentMark size="sm" />
             <span>
-              {readyProposals.length > 0 ? (
+              {valued.length > 0 ? (
                 <>
                   <strong>
-                    {CLINICAL_NAME} propone {readyProposals.length === 1 ? "1 respuesta" : `${readyProposals.length} respuestas`}
+                    {CLINICAL_NAME} propone {answersWords(valued.length)}
                   </strong>{" "}
-                  de lo que dictaste. {readyProposals.length === 1 ? "No entra hasta que la confirmes." : "Ninguna entra hasta que la confirmes."}
+                  de lo que dictaste. {valued.length === 1 ? "No entra hasta que la confirmes." : "Ninguna entra hasta que la confirmes."}
+                  {overWritten > 0
+                    ? ` ${overWritten === 1 ? "Una cambia" : `${overWritten} cambian`} lo que ya estaba escrito: ${overWritten === 1 ? "decídela" : "decídelas"} en su pregunta.`
+                    : ""}
                 </>
               ) : (
                 <>
@@ -879,6 +924,9 @@ function StaffResponseDetail({
                     const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
                     const beforeId = `${ids}-antes-${field.id}`
                     const proposal = proposalFor(field.id)
+                    const changes = proposal ? changesWritten(proposal) : false
+                    const valued = proposal ? proposesValue(proposal) : false
+                    const late = response.afterSigning?.[field.id]
                     // Lo aceptado de Clío, mientras siga siendo eso: si se cambia a mano, ya es de la persona.
                     const mark = response.clioAccepted?.[field.id]
                     const marked = mark && JSON.stringify(answers[field.id] ?? null) === JSON.stringify(response.answers?.[field.id] ?? null) && !typedHere.current.has(field.id)
@@ -895,19 +943,19 @@ function StaffResponseDetail({
                           <div
                             role="group"
                             aria-label={`Propuesta de ${CLINICAL_NAME} para «${field.label}»`}
-                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${proposal.status === "lista" ? "bg-agent-soft" : "bg-muted"}`}
+                            className={`flex flex-wrap items-center justify-between gap-1 rounded-lg px-2 py-1 text-sm ${valued ? "bg-agent-soft" : "bg-muted"}`}
                           >
                             <span className="min-w-0 [overflow-wrap:anywhere]">
-                              {proposal.status === "lista" && proposal.payload["replaces"] !== undefined ? (
+                              {changes ? (
                                 <>
-                                  {/* Corrige lo ya escrito: dice lo que hay y lo que dijo; «Confirmar» la cambia. */}
-                                  <strong>{CLINICAL_NAME}:</strong> {proposedWords(proposal)} · ya dice «
+                                  {/* Cambia lo ya escrito: dice lo que hay y lo que dijo; lo decide quien escribió, de a una. */}
+                                  <strong>{CLINICAL_NAME} propone:</strong> {proposedWords(proposal)} · ya dice «
                                   {proposedWords({ ...proposal, payload: { ...proposal.payload, value: proposal.payload["replaces"] } })}»
-                                  {proposal.sourceText ? `; dijiste «${proposal.sourceText}»` : ""}. «Confirmar» la cambia.
+                                  {proposal.sourceText ? `; dijiste «${proposal.sourceText}»` : ""}.
                                 </>
                               ) : proposal.status === "lista" ? (
                                 <>
-                                  <strong>{CLINICAL_NAME}:</strong> {proposedWords(proposal)}
+                                  <strong>{CLINICAL_NAME} propone:</strong> {proposedWords(proposal)}
                                   {proposal.sourceText ? ` · dijiste «${proposal.sourceText}»` : ""}
                                 </>
                               ) : (
@@ -917,16 +965,21 @@ function StaffResponseDetail({
                               )}
                             </span>
                             <span className="flex items-center gap-1">
-                              {proposal.status === "lista" ? (
+                              {valued ? (
                                 <Button
                                   type="button"
                                   size="sm"
+                                  variant={changes ? "outline" : "default"}
                                   className="min-h-11 sm:min-h-8"
-                                  aria-label={`Confirmar ${proposedWords(proposal)} en «${field.label}»`}
+                                  aria-label={
+                                    changes
+                                      ? `Cambiar «${field.label}» a ${proposedWords(proposal)}`
+                                      : `Confirmar ${proposedWords(proposal)} en «${field.label}»`
+                                  }
                                   disabled={busy}
                                   onClick={() => void accept([proposal])}
                                 >
-                                  Confirmar
+                                  {changes ? `Cambiar a ${proposedWords(proposal)}` : "Confirmar"}
                                 </Button>
                               ) : null}
                               <Button
@@ -946,6 +999,12 @@ function StaffResponseDetail({
                         {marked ? (
                           <p className="text-xs text-muted-foreground">
                             {CLINICAL_NAME} · {mark.atSign ? "confirmó al firmar" : "confirmó"} {mark.by ? memberName(mark.by) : "alguien del equipo"}, {whenAt(mark.at)}
+                          </p>
+                        ) : null}
+                        {/* Cambiada con la atención ya firmada: queda dicho en su pregunta, con quién y cuándo. */}
+                        {late ? (
+                          <p className="text-xs text-muted-foreground">
+                            Respondida después de firmar la atención: {late.by ? memberName(late.by) : "alguien del equipo"}, {whenAt(late.at)}
                           </p>
                         ) : null}
                         {previous && before ? (
@@ -973,6 +1032,7 @@ function StaffResponseDetail({
                 </form.AppField>
               )
             })}
+          <SectionTotal words={sectionTotal(section, answers)} />
         </section>
       ))}
       {formError ? (
@@ -986,7 +1046,7 @@ function StaffResponseDetail({
         </p>
       ) : null}
       {editable ? (
-        <div className="flex flex-wrap justify-between gap-2 border-t pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <Button
             type="button"
             variant="ghost"
@@ -997,9 +1057,14 @@ function StaffResponseDetail({
           >
             Descartar borrador…
           </Button>
-          <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
-            Finalizar…
-          </Button>
+          {/* En una atención en curso, la ficha se cierra con la firma: sin otro cierre (revisión final del 15 nov). */}
+          {inAttention ? (
+            <span className="text-sm text-muted-foreground">Se finaliza al firmar la atención.</span>
+          ) : (
+            <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
+              Finalizar…
+            </Button>
+          )}
         </div>
       ) : null}
       {response.status === "finalizado" ? (

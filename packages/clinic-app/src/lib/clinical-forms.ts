@@ -53,6 +53,23 @@ export interface FormSectionDef {
   id: string
   title: string
   fields: FormFieldDef[]
+  /** El nombre de la suma de sus preguntas de número («ceod»), que la ficha muestra mientras se llena. */
+  total?: string | null
+}
+
+/**
+ * La suma de las preguntas de número de una sección con `total` («ceod: 6»),
+ * con las que tienen respuesta; null si no lleva total o ninguna tiene número.
+ */
+export function sectionTotal(section: FormSectionDef, answers: Record<string, unknown>): string | null {
+  if (!section.total) return null
+  const numbers = section.fields
+    .filter((field) => field.type === "numero")
+    .map((field) => answers[field.id])
+    .filter((value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)))
+    .map(Number)
+  if (numbers.length === 0) return null
+  return `${section.total}: ${String(numbers.reduce((sum, value) => sum + value, 0)).replace(".", ",")}`
 }
 
 export interface FormSchemaDef {
@@ -123,6 +140,10 @@ export interface FormResponse {
   /** Lo de su atención, si tiene: firmada («finalizada», y desde cuándo) o anulada. Viene en la lista. */
   encounterStatus?: "borrador" | "finalizada" | "anulada" | null
   encounterFinalizedAt?: string | null
+  /** Quien lleva su atención o tomó el relevo: solo esa persona la llena (`writesForm`). Viene en la lista. */
+  encounterProfessionalUserId?: string | null
+  /** Las preguntas respondidas o cambiadas después de firmar la atención: quién y cuándo. Viene en la lista. */
+  afterSigning?: Record<string, { by: string | null; at: string }>
   /** La anterior del mismo tipo, ya finalizada: se lee al lado de esta. Viene en la lista. */
   previousId?: string | null
   /** La de inicio del mismo tipo, si no es la anterior (desde el tercer control). Viene en la lista. */
@@ -557,22 +578,33 @@ export async function startFormResponse(
 /**
  * En la atención, un formulario se llena mientras se pueda trabajar en ella. Ya
  * firmada, la atención no se trabaja, pero el formulario que quedó a medias se
- * termina igual: la firma de la atención no cierra sus formularios.
+ * termina igual: la firma de la atención no cierra sus formularios. En los dos
+ * casos lo llena quien la lleva (`leads`), como dice el servidor.
  */
-export function canFillFormInAttention(canWrite: boolean, attentionLocked: boolean, attentionStatus: string): boolean {
-  return canWrite && (!attentionLocked || attentionStatus === "finalizada")
+export function canFillFormInAttention(canWrite: boolean, attentionLocked: boolean, attentionStatus: string, leads: boolean): boolean {
+  return canWrite && leads && (!attentionLocked || attentionStatus === "finalizada")
+}
+
+/**
+ * La ficha de una atención la escribe quien la lleva o quien tomó el relevo
+ * (la misma regla que el servidor, `NOT_ATTENDING`); los demás la leen y, ya
+ * finalizada, le agregan una adenda. La suelta y lo que envió el paciente, el
+ * equipo clínico. Sin saber quién la lleva (no vino en la lista), decide el servidor.
+ */
+export function writesForm(
+  response: Pick<FormResponse, "encounterId" | "source" | "encounterProfessionalUserId">,
+  me: string | null | undefined,
+): boolean {
+  if (!response.encounterId || response.source !== "staff" || response.encounterProfessionalUserId === undefined) return true
+  return response.encounterProfessionalUserId === me
 }
 
 /** Los formularios del equipo que una atención ya firmada dejó a medias: los dice arriba, con «Completar». */
 export function unfinishedAfterSigning<T extends Pick<FormResponse, "id" | "status" | "source">>(
   forms: readonly T[],
   attentionStatus: string,
-  /** Las que se finalizaron con la firma («Finalizarla al firmar»): la lista puede no traerlo aún. */
-  finishedNow: readonly string[] = [],
 ): T[] {
-  return attentionStatus === "finalizada"
-    ? forms.filter((form) => form.status === "borrador" && form.source === "staff" && !finishedNow.includes(form.id))
-    : []
+  return attentionStatus === "finalizada" ? forms.filter((form) => form.status === "borrador" && form.source === "staff") : []
 }
 
 /**
@@ -597,10 +629,8 @@ export function formStateWords(response: Pick<FormResponse, "status" | "submitte
   if (response.status === "finalizado")
     return response.encounterStatus === "anulada" ? "Finalizado · de una atención anulada" : "Finalizado"
   if (response.status === "descartado") return "Descartado"
-  if (response.submittedAt) return "Lo declaró la persona · por revisar"
-  return response.encounterStatus === "finalizada"
-    ? "Quedó a medias al firmar la atención: falta terminarla"
-    : "Sin finalizar"
+  if (response.submittedAt) return "Lo declaró la persona · sin revisar"
+  return response.encounterStatus === "finalizada" ? "A medias: no se finalizó al firmar la atención" : "A medias"
 }
 
 /**
@@ -819,8 +849,9 @@ export const FIELD_TYPE_LABELS: Record<FormFieldType, string> = {
   adjunto: "Archivo del paciente",
 }
 
+// Una palabra por estado (revisión final del 15 nov, propuesta 2): la ficha sin finalizar está «a medias».
 export const FORM_RESPONSE_STATUS_LABELS: Record<FormResponse["status"], string> = {
-  borrador: "Borrador",
+  borrador: "A medias",
   finalizado: "Finalizado",
   descartado: "Descartado",
 }

@@ -595,6 +595,18 @@ export interface TakenMedication {
 }
 
 /**
+ * Una medicina de sus antecedentes como la lee la receta: con su código, o el de la medicación
+ * habitual que se llama igual. La misma regla en la pantalla y en el servidor, para que los dos
+ * avisen lo mismo.
+ */
+export function takenMedication(
+  row: { name: string; genericName?: string | null; atcCode?: string | null },
+  catalog: MedicationCatalog,
+): TakenMedication {
+  return { name: row.name, atcCode: row.atcCode ?? findHabitualMedication(row.genericName ?? row.name, catalog.habitual)?.atc ?? null }
+}
+
+/**
  * El duplicado por código ATC (ADR 0143): lo que se receta y ya toma, o que va
  * dos veces en la receta, con el mismo principio activo (el mismo ATC) o del mismo grupo
  * (`medicationGroupOfAtc`). Solo informa: «todo lo que mostramos es informativo; decide quien

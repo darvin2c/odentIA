@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { FormTemplate } from "./clinical-forms"
 import {
+  answersFromPrevious,
   answerWords,
   defaultResponsible,
   appearsWords,
@@ -69,6 +70,9 @@ describe("fichas ofrecidas en la atención", () => {
     expect(offerWhyWords({ why: "profesional", specialtyName: "Endodoncia", underYears: null })).toBe(
       "Por la especialidad de quien atiende: Endodoncia",
     )
+    // La que ya tiene y la que se empezó aquí también se ofrecen (revisión final del 15 nov).
+    expect(offerWhyWords({ why: "tiene", specialtyName: "", underYears: null })).toBe("Ya la tiene de una atención anterior")
+    expect(offerWhyWords({ why: "empezada", specialtyName: "", underYears: null })).toBe("La empezaste en esta atención")
   })
 
   it("«Otra ficha…» está siempre: sin ninguna ofrecida queda sola, en una línea", () => {
@@ -130,6 +134,20 @@ it("«Usar» copia la respuesta anterior si la pregunta de hoy la admite, y nunc
   expect(reusableAnswer({ type: "numero" }, { type: "texto" }, "5")).toBeUndefined()
   expect(reusableAnswer({ type: "firma" }, { type: "firma" }, { strokes: [] })).toBeUndefined()
   expect(reusableAnswer({ type: "texto" }, { type: "texto" }, "")).toBeUndefined()
+})
+
+// Revisión final del 15 nov (propuesta 5): copiar cada respuesta costaba un clic por pregunta.
+it("«Usar lo de la anterior» copia todo lo que hoy sigue vacío, sin tocar lo escrito hoy", () => {
+  const fields = [
+    { id: "overjet", label: "Overjet", type: "numero" as const },
+    { id: "overbite", label: "Overbite", type: "numero" as const },
+    { id: "firma", label: "Firma", type: "firma" as const },
+  ]
+  const today = { templateSnapshot: { sections: [{ fields }] } }
+  const previous = { templateSnapshot: { sections: [{ fields }] }, answers: { overjet: 6, overbite: 4, firma: { strokes: [] } } }
+  const empty = (value: unknown) => value === undefined || value === null || value === ""
+  expect(answersFromPrevious(today, previous, { overjet: 5 }, empty)).toEqual({ overbite: 4 })
+  expect(answersFromPrevious(today, previous, {}, empty)).toEqual({ overjet: 6, overbite: 4 })
 })
 
 // QA del 14 nov (desarrollo H8, UX U7): el total cambiaba al dejar de usar una, y la que faltaba quedaba al final.

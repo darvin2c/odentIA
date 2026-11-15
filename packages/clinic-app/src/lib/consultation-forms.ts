@@ -9,8 +9,11 @@ import type { FormFieldDef, FormResponse, FormTemplate } from "./clinical-forms"
 
 const BASE = "/api/clinical-forms"
 
-/** Por qué la atención ofrece una ficha: por la cita, por la edad o por quien atiende. */
-export type FormOfferWhy = "cita" | "edad" | "profesional"
+/**
+ * Por qué la atención ofrece una ficha: por la cita, por la edad, por quien atiende, porque el
+ * paciente ya la tiene de antes o porque se empezó aquí con «Otra ficha…».
+ */
+export type FormOfferWhy = "cita" | "edad" | "profesional" | "tiene" | "empezada"
 
 /** Una ficha que la atención ofrece sola. Ofrecer no es pedir: nada la exige. */
 export interface FormOffer {
@@ -41,6 +44,8 @@ export function markFormTemplateLooked(id: string) {
 export function offerWhyWords(offer: Pick<FormOffer, "why" | "specialtyName" | "underYears">): string {
   if (offer.why === "edad") return `Por su edad: menor de ${offer.underYears ?? 12} años`
   if (offer.why === "cita") return `Por la especialidad de su cita: ${offer.specialtyName}`
+  if (offer.why === "tiene") return "Ya la tiene de una atención anterior"
+  if (offer.why === "empezada") return "La empezaste en esta atención"
   return `Por la especialidad de quien atiende: ${offer.specialtyName}`
 }
 
@@ -203,6 +208,28 @@ export function reusableAnswer(
     return kept.length > 0 ? kept : undefined
   }
   return value
+}
+
+/**
+ * «Usar lo de la anterior» (revisión final del 15 nov, propuesta 5): lo que la
+ * anterior respondió en cada pregunta que hoy sigue vacía, con la misma regla
+ * que el «Usar» de cada pregunta (`reusableAnswer`). Lo escrito hoy no se toca.
+ */
+export function answersFromPrevious(
+  today: { templateSnapshot: { sections: ReadonlyArray<{ fields: ReadonlyArray<FormFieldDef> }> } },
+  previous: { templateSnapshot: { sections: ReadonlyArray<{ fields: ReadonlyArray<FormFieldDef> }> }; answers: Record<string, unknown> | null },
+  answers: Record<string, unknown>,
+  isEmpty: (value: unknown) => boolean,
+): Record<string, unknown> {
+  const before = new Map(previous.templateSnapshot.sections.flatMap((section) => section.fields.map((field) => [field.id, field] as const)))
+  const copied: Record<string, unknown> = {}
+  for (const field of today.templateSnapshot.sections.flatMap((section) => section.fields)) {
+    const earlier = before.get(field.id)
+    if (!earlier || !isEmpty(answers[field.id])) continue
+    const value = reusableAnswer(field, earlier, previous.answers?.[field.id])
+    if (value !== undefined) copied[field.id] = value
+  }
+  return copied
 }
 
 /**

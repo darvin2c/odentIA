@@ -46,11 +46,13 @@ it("nada traba la atención: solo la pieza de la endodoncia se pide, y al finali
   expect(required).toEqual(["evaluacion-de-endodoncia:pieza"])
 })
 
-it("la ficha de odontopediatría no pide el peso (está en los signos vitales) y se ofrece a menores de 12", () => {
+// Revisión final del 15 nov (clínica H5 y D4): el peso, para la dosis máxima de anestésico; la higiene, y el total del ceod.
+it("la ficha de odontopediatría pide el peso y la higiene, suma el ceod y se ofrece a menores de 12", () => {
   const pediatric = DENTAL_FORMS.suggestions.find((form) => form.kind === "odontopediatria")
-  const labels =
-    pediatric?.schema.sections.flatMap((section) => section.fields.map((field) => field.label.toLowerCase())) ?? []
-  expect(labels.some((label) => label.includes("peso"))).toBe(false)
+  const fields = pediatric?.schema.sections.flatMap((section) => section.fields) ?? []
+  expect(fields.find((field) => field.id === "peso")).toMatchObject({ type: "numero", unit: "kg" })
+  expect(fields.find((field) => field.id === "higiene")).toMatchObject({ type: "opcion_unica", options: ["Buena", "Regular", "Mala"] })
+  expect(pediatric?.schema.sections.find((section) => section.id === "ceod")?.total).toBe("ceod")
   expect(DENTAL_FORMS.byAge).toEqual({ underYears: 12, kind: "odontopediatria" })
 })
 

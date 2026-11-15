@@ -32,6 +32,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import {
+  clinicalFormResponse,
   clinicalOrder,
   consentDocument,
   consentEvent,
@@ -53,6 +54,7 @@ import {
   ne,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm"
 import { acceptedBudgetLines } from "./agreed-lines.js"
@@ -83,6 +85,7 @@ import {
   cancelDerivationTask,
   discardVoidedEncounterForms,
   getEncounterConsentNeeds,
+  hasAnswersSql,
   listOpenEncounterForms,
 } from "./clinical-forms.js"
 import { type FormRecord, loadFormRecords } from "./form-record.js"
@@ -646,48 +649,88 @@ export async function getOpenEncounterRef(
 /**
  * Si la atención tiene algo registrado: lo escrito de la consulta (relato, examen, signos,
  * evolución, indicaciones, pronóstico), hallazgos, diagnósticos, procedimientos, documentos
- * (consentimientos, recetas, órdenes, descansos, formularios, archivos), lo indicado en el
+ * (consentimientos, recetas, órdenes, descansos, fichas, archivos), lo indicado en el
  * Plan, controles, materiales o cobros (que salen de sus procedimientos). El motivo no cuenta:
- * suele venir de la cita. Lo que no está aquí lo frena igual la base al descartar.
+ * suele venir de la cita, ni una ficha empezada sin ninguna respuesta (revisión final del 15
+ * nov, A6). Lo que no está aquí lo frena igual la base al descartar.
  */
-export async function encounterHasRecords(
-  tx: Db,
-  orgId: string,
-  row: Pick<
-    EncounterRow,
-    "id" | "presentIllness" | "illnessDuration" | "vitals" | "evolution" | "indications" | "prognosis" | "examination"
-  >,
-): Promise<boolean> {
+type EncounterRecordRow = Pick<
+  EncounterRow,
+  "id" | "presentIllness" | "illnessDuration" | "vitals" | "evolution" | "indications" | "prognosis" | "examination"
+>
+
+export async function encounterHasRecords(tx: Db, orgId: string, row: EncounterRecordRow): Promise<boolean> {
+  return (await encounterRecordWords(tx, orgId, row)) !== null
+}
+
+/**
+ * Lo primero que la atención tiene registrado, dicho para quien quiere descartarla («una
+ * ficha con respuestas»); null si no tiene nada. Así «Descartar esta atención» dice por qué no
+ * puede (revisión final del 15 nov, ux U14).
+ */
+export async function encounterRecordWords(tx: Db, orgId: string, row: EncounterRecordRow): Promise<string | null> {
   const written = [row.presentIllness, row.illnessDuration, row.evolution, row.indications, row.prognosis]
-  if (written.some((text) => typeof text === "string" && text.trim().length > 0)) return true
+  if (written.some((text) => typeof text === "string" && text.trim().length > 0)) return "lo escrito de la consulta"
   const filled = (value: unknown): boolean =>
     value !== null &&
     value !== undefined &&
     (typeof value !== "object" || Object.values(value as Record<string, unknown>).some((item) => filled(item))) &&
     !(typeof value === "string" && value.trim() === "")
-  if (filled(row.vitals) || filled(row.examination)) return true
-  const [found] = await tx.execute<{ any: boolean }>(sql`
-    select (
-      exists (select 1 from encounter_procedure where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from encounter_diagnosis where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from clinical_note where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from clinical_form_response where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from clinical_order where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from consent_document where organization_id = ${orgId}
-        and (encounter_id = ${row.id} or informed_encounter_id = ${row.id}))
-      or exists (select 1 from medical_leave where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from patient_document_context where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from prescription where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from stock_movement where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from treatment_plan where organization_id = ${orgId} and origin_encounter_id = ${row.id})
-      or exists (select 1 from treatment_plan_item where organization_id = ${orgId} and source_encounter_id = ${row.id})
-      or exists (select 1 from clinical_follow_up where organization_id = ${orgId}
-        and (origin_encounter_id = ${row.id} or completed_encounter_id = ${row.id}))
-      or exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id})
-      or exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id})
-    ) as any`)
-  return found?.any === true
+  if (filled(row.vitals)) return "signos vitales"
+  if (filled(row.examination)) return "el examen"
+  // El primero que tiene, en este orden: la base deja de buscar en cuanto lo encuentra.
+  const [found] = await tx.execute<{ first: string | null }>(sql`
+    select case
+      when exists (select 1 from encounter_procedure where organization_id = ${orgId} and encounter_id = ${row.id}) then 'procedimiento'
+      when exists (select 1 from encounter_diagnosis where organization_id = ${orgId} and encounter_id = ${row.id}) then 'diagnostico'
+      when exists (select 1 from clinical_note where organization_id = ${orgId} and encounter_id = ${row.id}) then 'nota'
+      -- Una ficha empezada que sigue sin respuestas no cuenta: se descarta con la atención.
+      when exists (select 1 from clinical_form_response f where f.organization_id = ${orgId} and f.encounter_id = ${row.id}
+        and not (${emptyStaffDraft(sql`f`)})) then 'ficha'
+      when exists (select 1 from clinical_order where organization_id = ${orgId} and encounter_id = ${row.id}) then 'orden'
+      when exists (select 1 from consent_document where organization_id = ${orgId}
+        and (encounter_id = ${row.id} or informed_encounter_id = ${row.id})) then 'consentimiento'
+      when exists (select 1 from medical_leave where organization_id = ${orgId} and encounter_id = ${row.id}) then 'descanso'
+      when exists (select 1 from patient_document_context where organization_id = ${orgId} and encounter_id = ${row.id}) then 'archivo'
+      when exists (select 1 from prescription where organization_id = ${orgId} and encounter_id = ${row.id}) then 'receta'
+      when exists (select 1 from stock_movement where organization_id = ${orgId} and encounter_id = ${row.id}) then 'material'
+      when exists (select 1 from treatment_plan where organization_id = ${orgId} and origin_encounter_id = ${row.id})
+        or exists (select 1 from treatment_plan_item where organization_id = ${orgId} and source_encounter_id = ${row.id}) then 'plan'
+      when exists (select 1 from clinical_follow_up where organization_id = ${orgId}
+        and (origin_encounter_id = ${row.id} or completed_encounter_id = ${row.id})) then 'control'
+      when exists (select 1 from dental.odontogram_assessment where organization_id = ${orgId} and encounter_id = ${row.id}) then 'odontograma'
+      when exists (select 1 from dental.periodontal_chart where organization_id = ${orgId} and encounter_id = ${row.id}) then 'periodontograma'
+      when exists (select 1 from optical.lens_prescription where organization_id = ${orgId} and encounter_id = ${row.id}) then 'lentes'
+    end as first`)
+  // Lo que la consulta encuentra y no tiene palabras propias igual cuenta: nunca se da por vacía.
+  return found?.first ? (RECORD_WORDS[found.first] ?? "algo registrado") : null
+}
+
+/** Cómo se dice cada cosa que tiene una atención, para quien quiere descartarla. */
+const RECORD_WORDS: Record<string, string> = {
+  procedimiento: "un procedimiento",
+  diagnostico: "un diagnóstico",
+  nota: "una nota",
+  ficha: "una ficha con respuestas",
+  orden: "una orden",
+  consentimiento: "un consentimiento",
+  descanso: "un descanso médico",
+  archivo: "un archivo unido a ella",
+  receta: "una receta",
+  material: "materiales usados",
+  plan: "algo indicado en el Plan",
+  control: "un control",
+  odontograma: "el odontograma",
+  periodontograma: "el periodontograma",
+  lentes: "una medida de lentes",
+}
+
+/**
+ * La ficha del equipo empezada en la atención y sin ninguna respuesta: no es un registro
+ * clínico. «Sin respuestas» es la misma regla que en la pantalla (`hasAnswersSql`).
+ */
+function emptyStaffDraft(form: SQL): SQL {
+  return sql`${form}.source = 'staff' and ${form}.status = 'borrador' and not ${hasAnswersSql(sql`${form}.answers`)}`
 }
 
 /**
@@ -706,11 +749,34 @@ export async function discardEmptyEncounter(
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(locked, actorUserId)
-  const notEmpty = () =>
-    conflict("ENCOUNTER_NOT_EMPTY", "Tiene algo registrado: termínala o anúlala con su motivo")
-  if (await encounterHasRecords(tx, orgId, locked)) throw notEmpty()
+  const notEmpty = (what = "algo registrado") =>
+    conflict("ENCOUNTER_NOT_EMPTY", `Tiene ${what}: termínala o anúlala con su motivo`)
+  const what = await encounterRecordWords(tx, orgId, locked)
+  if (what) throw notEmpty(what)
   try {
     await tx.transaction(async (inner) => {
+      // La ficha empezada y vacía se descarta con la atención: queda suelta, con su motivo.
+      const now = new Date()
+      const forms = await inner
+        .update(clinicalFormResponse)
+        .set({
+          status: "descartado",
+          encounterId: null,
+          discardedAt: now,
+          discardedBy: actorUserId,
+          discardReason: "Se descartó la atención antes de llenarla",
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(clinicalFormResponse.organizationId, orgId),
+            eq(clinicalFormResponse.encounterId, encounterId),
+            emptyStaffDraft(sql`${clinicalFormResponse}`),
+          ),
+        )
+        .returning({ id: clinicalFormResponse.id })
+      for (const form of forms)
+        await audit(inner, orgId, actorUserId, "form_response.discard", "clinical_form_response", form.id, { encounterId, reason: "Se descartó la atención" })
       await inner
         .delete(encounter)
         .where(and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.status, "borrador")))

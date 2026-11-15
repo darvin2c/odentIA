@@ -17,10 +17,12 @@ import {
   medicineClassAnswers,
   medicationClassOf,
   type RegistrationFieldKey,
+  saidWhenWords,
   DOSE_UNITS,
   type DoseUnit,
   doseText,
   findHabitualMedication,
+  HABITUAL_MEDICATIONS,
   type MedicationCatalog,
   MEDICATION_FREQUENCIES,
   MEDICATION_FREQUENCY_LABELS,
@@ -39,6 +41,7 @@ import {
   healthReviewPending,
   KINSHIP_LABELS,
   legacyPregnancySaidOn,
+  lowerFirst,
   pregnancyRecordOf,
   isImageDocumentCategory,
   type PregnancyToday,
@@ -81,6 +84,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
+import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
@@ -1444,6 +1448,67 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
       "no sabe si tuvo problemas con la anestesia",
     ),
   ]
+}
+
+/** Los antagonistas de la vitamina K (warfarina, acenocumarol): con ellos, el INR del día antes de extraer. */
+const VITAMIN_K_ANTAGONISTS_ATC = "B01AA"
+/**
+ * Sus nombres (DCI): la clase la marca el código, pero quien la dijo con su dosis («warfarina 5 mg»)
+ * queda con el código del grupo; dentro de la clase ya marcada, el nombre dice si es una de estas.
+ */
+const VITAMIN_K_ANTAGONISTS = HABITUAL_MEDICATIONS.filter((entry) => entry.atc.startsWith(VITAMIN_K_ANTAGONISTS_ATC)).map(
+  (entry) => normalizeDrugText(entry.dci),
+)
+
+/**
+ * Lo que cambia una exodoncia de lo que toma (QA final de formularios, Y2 de la voz clínica; §D de la
+ * entrega 6): un anticoagulante o antiagregante (SDCEP: con warfarina, su INR de las últimas 24 horas)
+ * y una medicina para los huesos, también la que ya dejó (AAOMS 2022: el riesgo de osteonecrosis sigue).
+ * Con quién lo dijo y cuándo, si nadie lo revisó: «Toma warfarina 5 mg (lo dijo ella el 14 nov): pide
+ * su INR del día». Es un aviso: no frena indicar ni hacer nada.
+ */
+export async function extractionRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
+  // Primero, si toma alguna de esas clases: la salud entera (quién lo dijo) se lee solo entonces.
+  const coded = await tx
+    .select({ atcCode: patientMedication.atcCode })
+    .from(patientMedication)
+    .where(and(eq(patientMedication.organizationId, orgId), eq(patientMedication.patientId, patientId)))
+  if (!coded.some((row) => medicationClassOf(row.atcCode) !== null)) return []
+  const health = await getPatientHealth(tx, orgId, patientId)
+  const today = await clinicToday(tx, orgId)
+  const { locale, timezone } = await findOrgLocale(tx, orgId)
+  const sex = (await requirePatient(tx, orgId, patientId)).sex ?? null
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: timezone }).format(at).replace(".", "")
+  const said = (id: string) => {
+    const group = health.declared.find((item) => item.medications.includes(id))
+    return group ? ` (${lowerFirst(saidWhenWords(group.by, group.at ? day(group.at) : "", sex))})` : ""
+  }
+  const lines: string[] = []
+  for (const row of health.medications) {
+    const group = medicationClassOf(row.atcCode)
+    if (!group) continue
+    const ended = !!row.endDate && row.endDate < today
+    // Lo que ya no toma no cambia el sangrado de hoy; la medicina para los huesos, sí (B3).
+    if (group === "anticoagulants" && ended) continue
+    const what =
+      row.name === MEDICATION_CLASSES[group].unnamed
+        ? `${group === "anticoagulants" ? "un anticoagulante" : "una medicina para los huesos"} y no dijo cuál`
+        : row.name
+    const vitaminK =
+      row.atcCode?.startsWith(VITAMIN_K_ANTAGONISTS_ATC) || VITAMIN_K_ANTAGONISTS.some((dci) => normalizeDrugText(row.name).startsWith(dci))
+    // Con el código del grupo y otro nombre (o sin nombre) no se sabe cuál es: se dice qué pedir si es una.
+    const advice =
+      group === "boneMedicines"
+        ? "riesgo de osteonecrosis de los maxilares"
+        : vitaminK
+          ? "pide su INR del día"
+          : row.atcCode === MEDICATION_CLASSES.anticoagulants.atc
+            ? "riesgo de sangrado; si es warfarina o acenocumarol, pide su INR del día"
+            : "riesgo de sangrado"
+    lines.push(`${ended ? "Tomó" : "Toma"} ${what}${said(row.id)}: ${advice}.`)
+  }
+  return lines
 }
 
 /**

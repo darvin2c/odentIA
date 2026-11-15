@@ -76,7 +76,7 @@ const PHASE_HINTS: Record<TreatmentPhase, string> = {
 
 /** La receta de odentIA no tiene reglas propias: solo las alergias, que son comunes. */
 const NO_PRESCRIBING_RULES: PrescribingRulesUi = {
-  check: () => ({ errors: [], warnings: [], reminders: [] }),
+  check: () => ({ errors: [] }),
   weight: { required: false, suggested: null },
 }
 

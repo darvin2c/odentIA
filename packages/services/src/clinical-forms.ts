@@ -48,7 +48,7 @@ import {
 import { appointment } from "@odentia/db/schema/agenda"
 import { contact, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, type SQL, sql } from "drizzle-orm"
 import { findOrgLocale } from "./locale.js"
 import { requireCanAttend } from "./attending.js"
 import {
@@ -565,6 +565,11 @@ export interface FormSectionDef {
   id: string
   title: string
   fields: FormFieldDef[]
+  /**
+   * El nombre de la suma de sus preguntas de número («ceod»): la ficha la muestra mientras se
+   * llena. No se guarda como respuesta: sale de las que hay.
+   */
+  total?: string | null
 }
 
 export interface FormSchemaDef {
@@ -605,6 +610,8 @@ export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
     const id: unknown = "id" in s ? s.id : undefined
     const title: unknown = "title" in s ? s.title : undefined
     const fields: unknown = "fields" in s ? s.fields : undefined
+    const rawTotal: unknown = "total" in s ? s.total : undefined
+    const total = typeof rawTotal === "string" ? rawTotal.trim().slice(0, 40) : ""
     const sectionTitle = typeof title === "string" ? title.trim() : ""
     const sectionName = sectionTitle ? `«${sectionTitle}»` : String(si + 1)
     if (!sectionTitle) fail(`${sectionPath}.title`, `Escribe el título de la sección ${si + 1}`)
@@ -743,7 +750,7 @@ export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
       seenFieldDefs.set(fieldId, field)
       parsedFields.push(field)
     })
-    parsed.push({ id: sectionId, title: sectionTitle, fields: parsedFields })
+    parsed.push({ id: sectionId, title: sectionTitle, fields: parsedFields, ...(total ? { total } : {}) })
   })
   const failure = fieldsError(errors)
   if (failure) throw failure
@@ -796,6 +803,14 @@ export function isEmptyAnswer(value: unknown): boolean {
   if (typeof value === "string") return value.trim() === ""
   if (Array.isArray(value)) return value.length === 0
   return false
+}
+
+/** `isEmptyAnswer` en la base: ¿las respuestas (`answers`, jsonb) tienen alguna que no esté vacía? */
+export function hasAnswersSql(answers: SQL): SQL {
+  return sql`exists (select 1 from jsonb_each(coalesce(${answers}, '{}'::jsonb)) answer where not (
+    answer.value = 'null'::jsonb
+    or (jsonb_typeof(answer.value) = 'string' and btrim(answer.value #>> '{}') = '')
+    or (jsonb_typeof(answer.value) = 'array' and jsonb_array_length(answer.value) = 0)))`
 }
 
 /**
@@ -1405,6 +1420,8 @@ export async function reuseFormTemplate(
     )
     .limit(1)
   if (!current) throw notFound("Ficha")
+  // Lo que respondía el paciente se retiró: no vuelve a usarse (revisión final del 15 nov, A7).
+  if (current.respondent === "portal") throw retiredPatientForm()
   // Un «Volver a usar» a la vez por formulario: el segundo espera aquí y, al leer las versiones,
   // ya ve la que publicó el primero. Bloquear las filas no alcanza, porque el primero solo inserta.
   await tx.execute(
@@ -1565,6 +1582,33 @@ export async function discardVoidedEncounterForms(
 const DOUBLE_START_MINUTES = 2
 
 /**
+ * La ficha de una atención la escribe quien la lleva, o quien tomó el relevo
+ * (`encounter.professionalUserId`), como el dictado (`NOT_ATTENDING`, ADR
+ * 0002): los demás la leen y, ya finalizada, le agregan una adenda. Vale
+ * también después de firmar, para terminar la que quedó a medias. Lo que
+ * respondió el paciente y la ficha suelta, sin atención, no son de nadie en
+ * particular: las sigue el equipo clínico.
+ */
+async function assertFormWriter(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  form: { encounterId: string | null; source: string },
+): Promise<{ status: string } | null> {
+  if (!form.encounterId || form.source !== "staff") return null
+  const [visit] = await tx
+    .select({ professionalUserId: encounter.professionalUserId, status: encounter.status })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, form.encounterId)))
+    .limit(1)
+  if (!visit) return null
+  if (visit.status === "borrador") assertAttending(visit, actorUserId)
+  else if (visit.professionalUserId !== actorUserId)
+    throw new ServiceError("NOT_ATTENDING", 409, "Esta ficha la termina quien atendió. Cuando la finalice, puedes agregarle una adenda")
+  return { status: visit.status }
+}
+
+/**
  * Los formularios del equipo que la atención tiene a medias. El cierre los
  * avisa y no frena: se terminan después de firmar, con su propia fecha.
  */
@@ -1632,6 +1676,8 @@ export async function createFormResponse(
           ? "La atención está anulada: la ficha se empieza sin unirla a ella"
           : "La atención ya está firmada: la ficha se empieza sin unirla a ella",
       )
+    // Empezar una ficha en la atención también es escribir en ella: la lleva quien atiende.
+    assertAttending(visible, actorUserId)
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
   }
@@ -1741,6 +1787,7 @@ export async function updateFormResponseDraft(
         : "Lo está respondiendo el paciente y todavía no lo envió",
     )
   }
+  const visit = await assertFormWriter(tx, orgId, actorUserId, current)
   const schema = assertFormSchema(current.templateSnapshot)
   const rejected: Record<string, string> = {}
   const answers = assertAnswers(schema, input.answers, {
@@ -1783,9 +1830,12 @@ export async function updateFormResponseDraft(
     )
     .returning()
   if (!row) throw notFound("Ficha")
+  // Qué preguntas cambió (sin su valor clínico) y si fue con la atención ya firmada: la ficha lo
+  // dice en esa pregunta, también si la había confirmado Clío (revisión final del 15 nov, A5).
   await audit(tx, orgId, actorUserId, "form_response.update", "clinical_form_response", row.id, {
     ...input.auditMetadata,
     questions: changedQuestions(current.answers, answers),
+    ...(visit?.status === "finalizada" ? { afterSigning: true } : {}),
   })
   return { ...row, rejected }
 }
@@ -1826,6 +1876,7 @@ export async function finalizeFormResponse(
   // Lo que el paciente aún no envió no se da por revisado: lo sigue respondiendo.
   if (current.source === "portal" && !current.submittedAt)
     throw conflict("NOT_SUBMITTED", "El paciente todavía no lo envió: se revisa cuando lo envíe")
+  await assertFormWriter(tx, orgId, actorUserId, current)
   const schema = assertFormSchema(current.templateSnapshot)
   // Revalida completitud al cerrar (obligatorios con valor real).
   const answers = assertAnswers(schema, current.answers, { requireAll: true, site: await siteOf(tx, orgId) })
@@ -1922,6 +1973,7 @@ export async function discardFormResponse(
   if (!current) throw notFound("Ficha")
   if (current.status !== "borrador")
     throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
+  await assertFormWriter(tx, orgId, actorUserId, current)
   const clean = (reason ?? "").trim()
   if (!clean || clean.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [row] = await tx
@@ -2009,6 +2061,10 @@ export type ListedFormResponse = FormResponseRow & {
   editedByTeamAt: Date | null
   encounterStatus: string | null
   encounterFinalizedAt: Date | null
+  /** Quien lleva su atención (o tomó el relevo): solo esa persona escribe en la ficha (`assertFormWriter`). */
+  encounterProfessionalUserId: string | null
+  /** Las preguntas respondidas o cambiadas después de firmar su atención: quién y cuándo, la última vez. */
+  afterSigning: Record<string, { by: string | null; at: Date }>
   /**
    * Las respuestas que propuso Clío al dictar y aceptó una persona, mientras
    * sigan siendo esas (si alguien las cambia a mano, ya son suyas): por pregunta,
@@ -2088,6 +2144,7 @@ export async function listFormResponses(
       kinship: patientContact.kinship,
       encounterStatus: encounter.status,
       encounterFinalizedAt: encounter.finalizedAt,
+      encounterProfessionalUserId: encounter.professionalUserId,
     })
     .from(clinicalFormResponse)
     .leftJoin(
@@ -2142,6 +2199,32 @@ export async function listFormResponses(
   // Lo que confirmó una persona de lo que propuso Clío (entrega 11), solo si hay fichas del equipo.
   const staff = rows.some((row) => row.response.source === "staff" && row.response.encounterId)
   const marksOf = staff ? await clioMarksFor(tx, orgId, query.patientId) : (): Record<string, ClioMark> => ({})
+  // Lo cambiado después de firmar la atención, por pregunta (lo anota `updateFormResponseDraft`).
+  const signed = rows.filter((row) => row.response.source === "staff" && row.encounterStatus === "finalizada").map((row) => row.response.id)
+  const late = signed.length
+    ? await tx
+        .select({ entityId: auditEvent.entityId, by: auditEvent.actorUserId, at: auditEvent.createdAt, metadata: auditEvent.metadata })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.entity, "clinical_form_response"),
+            eq(auditEvent.action, "form_response.update"),
+            inArray(auditEvent.entityId, signed),
+            sql`${auditEvent.metadata}->>'afterSigning' = 'true'`,
+          ),
+        )
+        .orderBy(asc(auditEvent.createdAt))
+    : []
+  // Por ficha y pregunta, la última vez (vienen en orden).
+  const afterSigning = new Map<string, ListedFormResponse["afterSigning"]>()
+  for (const event of late) {
+    if (!event.entityId) continue
+    const fields = (event.metadata as { questions?: unknown } | null)?.questions
+    const own = afterSigning.get(event.entityId) ?? {}
+    for (const field of Array.isArray(fields) ? fields : []) if (typeof field === "string") own[field] = { by: event.by, at: event.at }
+    afterSigning.set(event.entityId, own)
+  }
   const clioAccepted = (response: FormResponseRow): ListedFormResponse["clioAccepted"] =>
     Object.fromEntries(
       Object.entries(marksOf(response)).map(([fieldId, mark]) => [fieldId, { by: mark.by, at: mark.at, ...(mark.atSign ? { atSign: true as const } : {}) }]),
@@ -2164,6 +2247,8 @@ export async function listFormResponses(
     editedByTeamAt: editedAt(row.response),
     encounterStatus: row.encounterStatus,
     encounterFinalizedAt: row.encounterFinalizedAt,
+    encounterProfessionalUserId: row.encounterProfessionalUserId,
+    afterSigning: afterSigning.get(row.response.id) ?? {},
   }))
 }
 

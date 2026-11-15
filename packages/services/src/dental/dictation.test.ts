@@ -8,6 +8,7 @@ import {
   encounterProcedure,
   patient,
   patientAllergy,
+  patientMedication,
   prescriptionItem,
   serviceCatalog,
   treatmentBudgetItem,
@@ -234,6 +235,18 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     const [warned] = (await segment({ drafts: [{ kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada 8 horas", duration: "7 días" } }] })).suggestions
     expect(warned).toMatchObject({ status: "por_revisar", payload: { allergyWarnings: [expect.stringContaining("Penicilinas")] } })
     await expect(fx.run((tx) => issueDictationPrescription(tx, ...fx.args, fx.encounter.id))).rejects.toMatchObject({ code: "SUGGESTION_NEEDS_REVIEW" })
+
+    // Con warfarina, el ibuprofeno dictado avisa como al emitirlo (QA final de formularios, Y1): antes la
+    // tarjeta decía «lista» y la receta se rechazaba al emitirla.
+    await ownerDb
+      .insert(patientMedication)
+      .values({ organizationId: ORG, patientId: fx.patient.id, name: "Warfarina 5 mg", genericName: "warfarina", atcCode: "B01AA03" })
+    const [nsaid] = (await segment({ drafts: [{ kind: "receta", payload: { genericName: "ibuprofeno", strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", frequency: "cada 8 horas", duration: "3 días" } }] })).suggestions
+    expect(nsaid).toMatchObject({
+      status: "por_revisar",
+      note: expect.stringContaining("Aviso: Ibuprofeno: toma Warfarina 5 mg (anticoagulante o antiagregante)"),
+      payload: { prescribingWarnings: [expect.stringContaining("aumentan el riesgo de sangrado")] },
+    })
     await enable(false)
   })
 
@@ -688,7 +701,7 @@ describe("dictado en la atención", () => {
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
-    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], repeated: true })
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true })
     expect(await list()).toHaveLength(2)
 
     // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.

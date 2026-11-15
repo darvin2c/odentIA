@@ -1556,7 +1556,7 @@ export async function listWorkspaceAudit(
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
         case when a.entity_id ~ ${uuid} then a.entity_id::uuid end as eid,
         -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
-        case when a.actor_user_id like 'contact:%' then 'patient' else a.metadata->>'origin' end as origin
+        case when a.actor_user_id like 'contact:%' then 'patient' when a.metadata->>'by' = 'clio' then 'clio' else a.metadata->>'origin' end as origin
       from audit_event a
       where a.organization_id=${orgId}
       ${input.action ? sql`and a.action = ${input.action}` : sql``}
@@ -1579,9 +1579,11 @@ export async function listWorkspaceAudit(
     left join conversation cv on ev.entity = 'conversation' and cv.organization_id = ${orgId} and cv.id = ev.eid
     left join opportunity op on ev.entity = 'opportunity' and op.organization_id = ${orgId} and op.id = ev.eid
     left join clinical_form_template ft on ev.entity = 'clinical_form_template' and ft.organization_id = ${orgId} and ft.id = ev.eid
+    -- La ficha de un paciente dice de quién es («Sobre qué»), como su atención (revisión final del 15 nov, A14).
+    left join clinical_form_response fr on ev.entity = 'clinical_form_response' and fr.organization_id = ${orgId} and fr.id = ev.eid
     left join patient pt on pt.organization_id = ${orgId} and pt.id = coalesce(
       ap.patient_id, tk.patient_id, pm.patient_id, pa.patient_id, ch.patient_id, rf.patient_id, pr.patient_id,
-      cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, case when ev.entity = 'patient' then ev.eid end)
+      cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, fr.patient_id, case when ev.entity = 'patient' then ev.eid end)
     left join contact person on person.organization_id = ${orgId}
       and person.id = coalesce(pt.person_id, cv.contact_id, op.contact_id, case when ev.entity = 'contact' then ev.eid end)
     ${

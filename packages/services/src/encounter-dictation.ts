@@ -17,7 +17,8 @@ import {
   sumByCurrency,
   normalizeDrugText,
   quantityWords,
-  type TakenMedication,
+  prescribingAlerts,
+  type PrescribingSituation,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -52,13 +53,15 @@ import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./loc
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
-import { createPrescription, currentMedicationsOf } from "./prescriptions.js"
+import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import {
   answerFormFromDictation,
+  changesWrittenAnswer,
   type DictationFormQuestion,
   dictationFormQuestions,
   formAnswerDropReason,
+  formAnswerFragments,
   formAnswerWords,
   prepareFormAnswer,
   withDiagnosisFormAnswers,
@@ -859,8 +862,11 @@ interface PatientChecks {
   /** Por qué no cabe otra elección de caminos (decisión 3), o null si cabe. */
   choiceBlocked: string | null
   planItems: OpenPlanItem[]
-  /** Lo que ya toma, para avisar el duplicado por ATC (solo informa). */
-  taking: TakenMedication[]
+  /**
+   * Lo de la persona que mira toda receta (`prescribingSituationOf`): lo que ya toma (el duplicado por
+   * ATC solo informa), y el embarazo y el anticoagulante que avisa `prescribingAlerts`, como al emitir.
+   */
+  prescribing: PrescribingSituation
 }
 
 /** Lo que se puede hacer hoy de un tratamiento: no está cerrado ni suspendido, y está aceptado o espera respuesta. */
@@ -921,7 +927,7 @@ async function patientChecks(tx: Db, orgId: string, patientId: string, encounter
     dictatedAllergies,
     choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null,
     planItems,
-    taking: await currentMedicationsOf(tx, orgId, patientId, catalog),
+    prescribing: await prescribingSituationOf(tx, orgId, patientId, catalog),
   }
 }
 
@@ -1217,18 +1223,31 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  */
 function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, medications: MedicationCatalog, dictation: ProductDictation): Prepared {
   if (kind === "receta") {
-    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, ...rest } = prepared.payload
+    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, prescribingWarnings: _oldAlerts, ...rest } = prepared.payload
     const genericName = String(rest["genericName"] ?? "")
     // Lo que ya toma del mismo principio o grupo: solo informa, en la tarjeta (ADR 0143).
-    const duplicates = duplicateWarnings([{ genericName }], checks.taking, medications)
+    const duplicates = duplicateWarnings([{ genericName }], checks.prescribing.taking, medications)
     const payload = duplicates.length ? { ...rest, duplicateWarnings: duplicates } : rest
     const onFile = allergyWarnings(genericName, checks.allergies as never, medications)
     // La alergia que se acaba de dictar avisa igual, aunque aún no se confirme.
     const dictated = allergyWarnings(genericName, checks.dictatedAllergies as never, medications).filter((line) => !onFile.includes(line))
     const warnings = [...onFile, ...dictated]
-    if (!warnings.length) return { ...prepared, payload }
-    const note = [onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "", dictated.length ? `Aviso de la alergia que dictaste hoy: ${dictated.join(" ")}` : ""].filter(Boolean).join(" ")
-    return { payload: { ...payload, allergyWarnings: warnings }, status: "por_revisar", note }
+    // Lo que avisa toda receta, como al emitirla (QA final de formularios, Y1): el embarazo, un AINE con
+    // un anticoagulante. Sin esto la tarjeta decía «lista» y al emitir se rechazaba con el aviso.
+    const alerts = prescribingAlerts(checks.prescribing, [{ genericName }], medications.medications).warnings
+    if (!warnings.length && !alerts.length) return { ...prepared, payload }
+    const note = [
+      onFile.length ? `Aviso de alergia: ${onFile.join(" ")}` : "",
+      dictated.length ? `Aviso de la alergia que dictaste hoy: ${dictated.join(" ")}` : "",
+      alerts.length ? `Aviso: ${alerts.join(" ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+    return {
+      payload: { ...payload, ...(warnings.length ? { allergyWarnings: warnings } : {}), ...(alerts.length ? { prescribingWarnings: alerts } : {}) },
+      status: "por_revisar",
+      note,
+    }
   }
   if (kind === "alergia") {
     const { review: _review, known: _known, ...payload } = prepared.payload
@@ -1402,6 +1421,11 @@ export interface DictationSegmentResult {
   alreadyDone: string[]
   /** Lo dicho para una ficha que no quedó como propuesta, con por qué: va a «No pude usar esto». */
   droppedForms: Array<{ said: string; why: string }>
+  /**
+   * Lo dicho para una ficha que sí quedó como propuesta, por dato («perdidos uno», no la frase
+   * entera): es lo único de la ficha que la pantalla resalta como usado (revisión final del 15 nov).
+   */
+  formSources: string[]
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
 }
@@ -1443,7 +1467,7 @@ export async function saveDictationSegment(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const segmentId = segment.segmentId
   if (segmentId && (await dictationSegmentSeen(tx, orgId, patientId, encounterId, segmentId))) {
-    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], repeated: true }
+    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   // Las preguntas con el número que vio Clío y lo que dicen ahora, menos las que alguien respondió
@@ -1579,6 +1603,8 @@ export async function saveDictationSegment(
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   const droppedForms: Array<{ said: string; why: string }> = []
+  const formSources: string[] = []
+  const formQuestionOf = (draft: DictationDraft) => scope.formQuestions.find((item) => item.number === draft.payload["question"])
   // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada, y lo
   // que fue para una ficha no se repite en el texto de la consulta.
   // Un diagnóstico dicho que también pregunta una ficha va a los dos lugares.
@@ -1588,10 +1614,13 @@ export async function saveDictationSegment(
   for (const draft of fromDiagnoses) twins.add(draft)
   for (const draft of drafts) {
     const prepared = await prepare(tx, draft, scope)
-    if (prepared) preparedDrafts.push({ draft, prepared })
-    else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim()) {
-      const why = formAnswerDropReason(draft, scope.formQuestions)
-      if (why) droppedForms.push({ said: draft.sourceText.trim(), why })
+    if (prepared) {
+      preparedDrafts.push({ draft, prepared })
+      if (draft.kind === "ficha" && draft.sourceText?.trim()) formSources.push(...formAnswerFragments(draft.sourceText, formQuestionOf(draft)))
+    } else if (draft.kind === "ficha" && !twins.has(draft) && draft.sourceText?.trim()) {
+      // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov, U5).
+      const why = formAnswerDropReason(draft, scope.formQuestions, { site: scope.site, transcript: scope.transcript })
+      if (why) for (const said of formAnswerFragments(draft.sourceText, formQuestionOf(draft))) droppedForms.push({ said, why })
     }
   }
   // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
@@ -1743,7 +1772,7 @@ export async function saveDictationSegment(
     })
   }
   const zone = await findOrgLocale(tx, orgId)
-  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, alreadyDone, droppedForms, repeated: false }
+  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, alreadyDone, droppedForms, formSources, repeated: false }
 }
 
 /**
@@ -2165,7 +2194,10 @@ export async function confirmDictationSuggestion(
   const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
-  if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
+  // La respuesta de ficha que cambia lo ya escrito queda por revisar, y la cambia una persona en su
+  // pregunta, de a una (revisión final del 15 nov, decisión 2): esa sí se confirma.
+  const changesWritten = row.kind === "ficha" && changesWrittenAnswer(splitMeta(row.payload).data)
+  if (row.status === "por_revisar" && !changesWritten) throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
   if (row.kind === "ficha" && options.expectedValue !== undefined) {
     const data = splitMeta(row.payload).data
     if (JSON.stringify(data["value"] ?? null) !== JSON.stringify(options.expectedValue ?? null)) {

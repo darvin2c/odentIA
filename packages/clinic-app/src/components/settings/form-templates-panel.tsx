@@ -446,11 +446,12 @@ export function FormTemplatesPanel() {
                       <p className="font-medium">{last.title}</p>
                       <p className="text-sm text-muted-foreground">
                         Se dejó de usar el {formatDate(leftAt)}
-                        {last.respondent === "portal" ? " · lo responde el paciente" : ""}
+                        {/* Lo que respondía el paciente ya no vuelve: se pregunta en «Preguntas al paciente». */}
+                        {last.respondent === "portal" ? " · lo respondía el paciente: ahora se pregunta en Preguntas al paciente" : ""}
                         {twinDetail(last, shownTogether, formatDateTime) ? ` · ${twinDetail(last, shownTogether, formatDateTime)}` : ""}
                       </p>
                     </div>
-                    {canAdmin ? (
+                    {canAdmin && last.respondent !== "portal" ? (
                       <Button
                         type="button"
                         size="sm"

@@ -378,19 +378,73 @@ export function prepareFormAnswer(
   /** Lo dictado en la pausa: la oración de la frase dice de qué pregunta habla («CPOD: cinco cariados»). */
   transcript?: string,
 ): PreparedFormAnswer | null {
-  const proposed = checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
   const question = questions.find((item) => item.number === draft.payload["question"])
+  // La ficha de otra pieza no recibe lo dictado para esta (revisión final del 15 nov, A4).
+  if (question && otherToothOf(question, questions, site, draft.sourceText, transcript) !== null) return null
+  const proposed = checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
   if (!proposed || question?.answered === undefined) return proposed
   const value = proposed.payload["value"]
   if (value === null || value === undefined || sameAnswer(value, question.answered)) return null
-  // Lo que cambia una respuesta ya escrita («corrijo, es división uno»): «Confirmar» la cambia, y
-  // solo si la pregunta sigue diciendo lo que decía (`replaces`); si no, gana lo escrito.
+  // Lo que cambia una respuesta ya escrita («corrijo, es división uno») queda siempre por revisar:
+  // lo escrito lo cambia una persona, en su pregunta y de a una (revisión final del 15 nov,
+  // decisión 2). No entra con «Confirmar las N» y al firmar viene desmarcada. Solo cambia si la
+  // pregunta sigue diciendo lo que decía (`replaces`); si no, gana lo escrito.
   const now = formAnswerWords({ value: question.answered, unit: question.unit })
   return {
     payload: { ...proposed.payload, replaces: question.answered },
-    status: proposed.status,
-    note: proposed.status === "lista" ? `Ya dice «${now}».` : proposed.note,
+    status: "por_revisar",
+    note: `Ya dice «${now}».`,
   }
+}
+
+/** Una respuesta de ficha que cambia lo ya escrito: queda por revisar y se cambia de a una. */
+export const changesWrittenAnswer = (payload: Record<string, unknown>): boolean => payload["replaces"] !== undefined && payload["value"] != null
+
+/** Lo que nombra una pieza delante de su número: «la 46», «pieza cuarenta y seis», «en la cuatro seis». */
+const TOOTH_WORDS = new Set(["la", "pieza", "piezas", "diente", "molar", "premolar", "canino", "incisivo"])
+
+/**
+ * Las piezas que se nombran en un texto, solo con su palabra delante («en la
+ * cuarenta y seis», «pieza 36», «la cuatro seis»): así «sondaje de doce» o
+ * «quince sobre diez» no son piezas. Solo las que existen en el producto.
+ */
+function teethIn(text: string, site: ProductSite): number[] {
+  const words = plain(text).split(/[^a-z0-9]+/).filter(Boolean)
+  const found = new Set<number>()
+  const valid = (value: number) => Number.isInteger(value) && value >= 11 && site.code(value) !== null
+  for (let index = 1; index < words.length; index += 1) {
+    if (!TOOTH_WORDS.has(words[index - 1] ?? "")) continue
+    const read = readNumber(words, index)
+    if (!read) continue
+    // Dígito a dígito, como en el odontograma: «la cuatro seis» es la 46.
+    const unit = read.value >= 1 && read.value <= 8 ? readNumber(words, read.next) : null
+    const value = unit && unit.value >= 1 && unit.value <= 8 ? read.value * 10 + unit.value : read.value
+    if (valid(value)) found.add(value)
+  }
+  return [...found]
+}
+
+/**
+ * La pieza dicha cuando no es la de la ficha (revisión final del 15 nov, A4):
+ * la ficha tiene su «Pieza» escrita (la 36) y lo dicho habla de otra (la 46).
+ * Manda la oración de la frase; si no nombra ninguna, lo dictado en la pausa.
+ * `null`: la ficha no tiene pieza escrita, o se habló de la suya.
+ */
+export function otherToothOf(
+  question: DictationFormQuestion,
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  said: string | undefined,
+  transcript: string | undefined,
+): { form: number; said: number } | null {
+  if (question.type === "pieza") return null
+  const own = questions.find((item) => item.responseId === question.responseId && item.type === "pieza" && item.answered !== undefined)
+  const form = Number(own?.answered)
+  if (!own || !Number.isInteger(form)) return null
+  const near = teethIn(`${sentenceOf(transcript, said)} ${said ?? ""}`, site)
+  const teeth = near.length ? near : teethIn(transcript ?? "", site)
+  const other = teeth.find((tooth) => tooth !== form)
+  return other !== undefined && !teeth.includes(form) ? { form, said: other } : null
 }
 
 /**
@@ -400,10 +454,30 @@ export function prepareFormAnswer(
 export function formAnswerDropReason(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
+  /** Con el producto y lo dictado en la pausa se dice también la pieza que no es la de la ficha. */
+  where?: { site: ProductSite; transcript?: string | undefined },
 ): string | null {
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
   const said = draft.sourceText ?? ""
+  const tooth = where ? otherToothOf(question, questions, where.site, said, where.transcript) : null
+  if (tooth) return `«${question.formTitle}» es de la ${tooth.form} y dijiste la ${tooth.said}: no la llené. Escríbelo tú o empieza otra ficha para la ${tooth.said}.`
+  // Lo que dice dos preguntas hermanas por igual («cariados tres»: ¿del CPOD o del ceod?) no se pierde
+  // en silencio: se dice entre cuáles (revisión final del 15 nov, U5).
+  const spoken = new Set(stemsOf(said))
+  const own = labelStems(question.label)
+  const twins = questions.filter((other) => {
+    if (other === question || other.responseId !== question.responseId || other.type !== question.type) return false
+    const theirs = labelStems(other.label)
+    const shared = own.filter((stem) => theirs.includes(stem))
+    const diff = own.filter((stem) => !theirs.includes(stem))
+    // Hermanas que se distinguen en una sola palabra (CPOD o ceod), con todo lo demás dicho.
+    return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && diff.length === 1 && !diff.some((stem) => spoken.has(stem))
+  })
+  if (twins.length > 0) {
+    const names = [question, ...twins].map((item) => `«${item.label}»`)
+    return `No quedó claro si era ${names.slice(0, -1).join(", ")} o ${names.at(-1)}: nómbrala o escríbela en la ficha.`
+  }
   // La frase que no nombra la pregunta no era de la ficha («el diagnóstico es maloclusión clase dos»
   // no nombra «Clase molar derecha»): no se avisa como si lo fuera. Con un rótulo de varias palabras,
   // al menos dos dichas.
@@ -413,6 +487,27 @@ export function formAnswerDropReason(
   if (question.unit && unit?.test(plain(said))) return `«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`
   if (!talksAbout(question, new Set(stemsOf(said)))) return `No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`
   return `No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`
+}
+
+/**
+ * La parte de la frase que dice esta respuesta, para resaltarla por dato y no
+ * por frase (revisión final del 15 nov, U5): en «cariados tres, perdidos uno,
+ * obturados dos», lo del P es «perdidos uno». Cada parte es un tramo tal cual de
+ * la frase, así se encuentra en lo dictado. Si ninguna parte nombra la
+ * pregunta, la frase entera.
+ */
+export function formAnswerFragments(said: string, question: DictationFormQuestion | undefined): string[] {
+  const whole = said.trim()
+  if (!question || !whole) return whole ? [whole] : []
+  const parts = whole
+    .split(/[,;.:]\s*|\s+y\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length <= 1) return [whole]
+  const label = labelStems(question.label)
+  const options = (question.options ?? []).flatMap(stemsOf)
+  const own = parts.filter((part) => stemsOf(part).some((stem) => label.includes(stem) || options.includes(stem)))
+  return own.length ? own : [whole]
 }
 
 /**

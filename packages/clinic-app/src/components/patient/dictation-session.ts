@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { byFormOrder, signOrder } from "./clio-form-proposals"
+import { byFormOrder, changesWritten, proposesValue, signOrder } from "./clio-form-proposals"
 
 export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material" | "ficha"
 
@@ -65,8 +65,13 @@ const CONTEXT_CHARS = 600
  * tampoco: se confirma en su pregunta, dentro de la ficha (forma B, ADR 0188).
  */
 export const confirmable = (item: DictationSuggestion) => item.status === "lista" && item.kind !== "receta" && item.kind !== "descanso" && item.kind !== "ficha"
-/** Lo que se confirma al firmar si está marcado: también las respuestas de ficha. */
-export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && item.status === "lista")
+/**
+ * Lo que se confirma al firmar si está marcado: también las respuestas de ficha, y la que cambia lo
+ * escrito, que viene desmarcada (`markedByDefault`).
+ */
+export const confirmableAtSign = (item: DictationSuggestion) => confirmable(item) || (item.kind === "ficha" && proposesValue(item))
+/** Al firmar viene marcado lo que se puede confirmar, menos lo que cambia lo escrito a mano: eso lo decide una persona. */
+export const markedByDefault = (item: DictationSuggestion) => confirmableAtSign(item) && !changesWritten(item)
 /** La que ya se decidió (otro toque, otra pestaña): para quien confirmaba, ya está. */
 const alreadyDecided = (error: unknown) => error instanceof ApiError && error.shape.code === "SUGGESTION_DECIDED"
 /**
@@ -595,7 +600,7 @@ export function useDictationSession({
       const done: DictationSuggestion[] = []
       const notes: string[] = []
       try {
-        for (const item of items.filter((candidate) => candidate.kind === "ficha" && candidate.status === "lista").sort(byFormOrder)) {
+        for (const item of items.filter((candidate) => candidate.kind === "ficha" && confirmableAtSign(candidate)).sort(byFormOrder)) {
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, confirmBody(item)).catch((error: unknown) => {
             if (alreadyDecided(error)) return undefined
             throw error
