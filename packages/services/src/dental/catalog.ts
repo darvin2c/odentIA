@@ -33,6 +33,7 @@ const EVERYDAY_WORDS: Record<string, readonly string[]> = {
   obturacion: ["restauracion"],
   restauracion: ["obturacion"],
   profilaxis: ["limpieza"],
+  fluorizacion: ["fluor"],
   extraccion: ["exodoncia"],
   sacar: ["exodoncia", "extraccion"],
   nervio: ["endodoncia"],

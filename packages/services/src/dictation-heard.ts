@@ -198,12 +198,13 @@ export function groundHeard(said: string, transcript: string, vocabulary: HeardV
 const BRIDGE_WORDS = 4
 
 /**
- * Cómo empieza un tramo que sigue una frase: sin sujeto, con lo que se dice de
- * algo ya nombrado («sin respuesta», «positiva», «grado uno», «también»,
- * «igual») o con un número.
+ * Cómo empieza un tramo que sigue una frase: sin sujeto, con el valor de algo
+ * ya nombrado («sin respuesta», «positiva», «grado uno», «también», «igual») o
+ * con una medida («3 mm», «de 4»). No con «en la 46» ni «y…»: eso empieza
+ * otra cosa, y leerlo con lo anterior la uniría a lo que no es suyo.
  */
 const CONTINUES =
-  /^(?:(?:este|eh+|m+|bueno|ya)\s+)*(?:tambi[eé]n|igual|tampoco|y|o|ni|pero|con|sin|de|del|que|en|a|al|m[aá]s|menos|positiv[oa]s?|negativ[oa]s?|normal(?:es)?|aumentad[oa]s?|disminuid[oa]s?|ausentes?|presentes?|leves?|moderad[oa]s?|sever[oa]s?|grado|\d+(?:[.,]\d+)?)(?=[\s,.;]|$)/i
+  /^(?:(?:este|eh+|m+|bueno|ya|pues|digamos|o sea|a ver)\s+)*(?:tambi[eé]n|igual|tampoco|sin|positiv[oa]s?|negativ[oa]s?|normal(?:es)?|aumentad[oa]s?|disminuid[oa]s?|ausentes?|presentes?|leves?|moderad[oa]s?|sever[oa]s?|grado|de\s+\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*(?:mm|mil[ií]metros?|kg|kilos?|%|de\s+10))(?=[\s,.;]|$)/i
 
 /**
  * El final del tramo anterior que se lee con el nuevo, si el nuevo sigue su

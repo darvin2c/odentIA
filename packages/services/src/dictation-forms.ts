@@ -945,12 +945,16 @@ const saidOf = (sentence: string) => plain(sentence).replace(/[.;,]+$/, "").trim
 /** Lo que se le preguntó al paciente («¿Te duele cuando comes?») no es de la historia (prueba con voz del 15 nov). */
 const asked = (said: string) => said.startsWith("¿") || said.endsWith("?")
 
-/** El texto de la consulta sin lo que se le preguntó al paciente, en toda pausa, con ficha o sin ella. */
-const withoutAsked = (text: string) =>
-  sentencesOf(text)
-    .filter((sentence) => !asked(saidOf(sentence)))
-    .join(" ")
-    .trim()
+/**
+ * El texto de la consulta sin fichas, sin las preguntas al paciente («¿Te duele cuando comes?»): solo
+ * la oración que es una pregunta entera; «Refiere dolor al masticar, ¿verdad?» se queda. Si no hay
+ * ninguna, el texto queda tal cual, con sus saltos de línea.
+ */
+function withoutAsked(text: string): string {
+  const sentences = sentencesOf(text)
+  const kept = sentences.filter((sentence) => !saidOf(sentence).startsWith("¿"))
+  return kept.length === sentences.length ? text : kept.join(" ").trim()
+}
 
 /**
  * Lo dicho de una pausa con el texto de la consulta limpio de lo que fue para

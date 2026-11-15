@@ -320,10 +320,18 @@ const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "
 
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
 
-/** Lo que se dice al nombrar una prestación y no dice cuál es: el artículo, «hoy», «tratamiento». */
-const NOT_SERVICE_WORDS = new Set(["una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro", "tratamiento", "procedimiento"])
+/**
+ * Lo que se dice al nombrar una prestación y no dice cuál es: el artículo, «hoy», «tratamiento», el
+ * cambio de algo («cambio de arco») o el envase de un material («un par de guantes»).
+ */
+const NOT_SERVICE_WORDS = new Set([
+  "una", "uno", "unos", "unas", "del", "las", "los", "con", "por", "para", "que", "hoy", "ahora", "nueva", "nuevo", "otra", "otro",
+  "tratamiento", "procedimiento", "cambio", "cambios", "par", "pares", "caja", "cajas", "sobre", "sobres", "unidad", "unidades",
+])
 /** Lo que se hizo, no la prestación: «cambiamos», «hicimos», «le hice», «coloqué». */
 const DONE_VERB = /^(?:[a-z]{3,}(?:amos|emos|imos)|hice|hizo|puse|puso|coloque|termine|realice|cambie|cemente|aplique|saque)$/
+/** Un número dicho («la cinco cinco», «de dos caras»): dice dónde o cuánto, no cuál prestación. */
+const NUMBER_WORD = /^(?:\d+|cero|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/
 
 /**
  * Con qué palabras se busca en el tarifario lo dicho (`matchService`): las de
@@ -343,26 +351,38 @@ function serviceWordsOf(hooks: Pick<ProductHooks, "catalog" | "dictation">): Ser
   return { everyday: hooks.catalog.everydayWords, place: new Set(hooks.dictation?.placeWords ?? []) }
 }
 
-/** La misma palabra con otra terminación: «resina» y «resinas», «flúor» y «fluorización». */
-const sameWord = (a: string, b: string) =>
-  a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a) || (a.slice(0, 5) === b.slice(0, 5) && Math.abs(a.length - b.length) <= 3)))
+/**
+ * La misma palabra con otra terminación: «resina» y «resinas», «obturación» y «obturaciones». Una
+ * palabra que solo empieza como otra no es la misma: «cera» no es «cerámica», ni «poste»
+ * «posterior», ni «protector» «prótesis».
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  if (short.length < 4 || long.length - short.length > 3) return false
+  let common = 0
+  while (common < short.length && short[common] === long[common]) common += 1
+  return common >= Math.max(4, short.length - 2)
+}
 
 /**
  * La prestación del tarifario (o el producto de Inventario) que nombró el
- * profesional, o las que calzan si no hay una sola. Calza la que tiene en su
- * nombre cada palabra de lo dicho que dice cuál es, también dicha con las
- * palabras de todos los días de su catálogo (prueba con voz del 15 nov):
- * «cambiamos el arco» no calza con «Apexificación, cambio de medicación» (no
- * dice «arco», y «cambiamos» es lo que se hizo), ni «cera de ortodoncia» con
- * «Aparatología fija de ortodoncia». Lo que no calza con ninguna no propone
- * ninguna: un servicio lleva precio, y nunca se ofrece otro procedimiento. Lo
- * que calza por otra palabra se ofrece para elegir, nunca se da por bueno.
+ * profesional, o las que calzan si no hay una sola (prueba con voz del 15 nov).
+ * Calza la que tiene en su nombre la palabra con que empieza lo dicho, la que
+ * dice qué es («cera» en «cera de ortodoncia», «arco» en «cambiamos el arco»), y
+ * además tiene todo lo demás que dice cuál es, o todo su nombre está en lo dicho
+ * («nebulización con salbutamol» es la nebulización). Lo dicho también se lee con
+ * las palabras de todos los días de su catálogo. Así «cambiamos el arco» no calza
+ * con «Apexificación, cambio de medicación», ni «cera de ortodoncia» con
+ * «Aparatología fija de ortodoncia»: lo que no calza con ninguna no propone
+ * ninguna, porque un servicio lleva precio y nunca se ofrece otro procedimiento.
+ * Lo que calza por otra palabra se ofrece para elegir, nunca se da por bueno.
  */
 function matchService<T extends { name: string }>(spoken: string, services: T[], lookup: ServiceWords = NO_SERVICE_WORDS): { match: T | null; candidates: T[] } {
   const wanted = normalizeForSearch(spoken)
   const exact = services.filter((service) => normalizeForSearch(service.name) === wanted)
   if (exact.length === 1) return { match: exact[0] ?? null, candidates: [] }
-  const keysOf = (text: string) => words(text).filter((word) => !NOT_SERVICE_WORDS.has(word) && !lookup.place.has(word) && !DONE_VERB.test(word) && !/^\d+$/.test(word))
+  const keysOf = (text: string) => words(text).filter((word) => !NOT_SERVICE_WORDS.has(word) && !lookup.place.has(word) && !DONE_VERB.test(word) && !NUMBER_WORD.test(word))
   const keys = keysOf(spoken)
   if (!keys.length) return { match: null, candidates: [] }
   const otherKeys = everydayServiceVariants(spoken, lookup.everyday).map(keysOf)
@@ -371,11 +391,17 @@ function matchService<T extends { name: string }>(spoken: string, services: T[],
     .flatMap((service) => {
       const name = normalizeForSearch(service.name)
       const own = name.split(" ").filter((word) => word.length >= 3)
-      const fits = (said: string[]) => said.length > 0 && said.every((key) => own.some((word) => sameWord(key, word)))
+      const nameKeys = keysOf(name)
+      const has = (list: readonly string[], word: string) => list.some((other) => sameWord(word, other))
+      const fits = (keys: string[]) =>
+        keys.length > 0 && has(own, keys[0] ?? "") && (keys.every((key) => has(own, key)) || (nameKeys.length > 0 && nameKeys.every((key) => has(keys, key))))
       const byName = fits(keys)
       if (!byName && !otherKeys.some(fits)) return []
-      const shared = tokens.filter((token) => own.some((word) => sameWord(token, word))).length
-      return [{ service, shared, byName, contains: byName && (name.includes(wanted) || wanted.includes(name)), extra: own.length - shared }]
+      const shared = tokens.filter((token) => has(own, token)).length
+      // Contiene lo dicho, o está en lo dicho, por palabras enteras (con otra terminación): «guante» está en
+      // «Guantes de nitrilo», pero «cera» no está en «Corona cerámica».
+      const contains = byName && (tokens.every((token) => has(own, token)) || own.every((word) => has(tokens, word)))
+      return [{ service, shared, byName, contains, extra: own.length - shared }]
     })
     .sort((a, b) => Number(b.contains) - Number(a.contains) || Number(b.byName) - Number(a.byName) || b.shared - a.shared || a.extra - b.extra)
   const [best, second] = scored

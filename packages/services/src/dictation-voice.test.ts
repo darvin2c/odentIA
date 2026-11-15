@@ -57,13 +57,30 @@ describe("un procedimiento del tarifario solo se propone si calza con lo dicho",
   it("lo que sí se dijo se sigue encontrando, también con otra palabra del mismo sentido", () => {
     expect(dictatedService("Control de ortodoncia", DEMO, "dental").match).toBe("Control de ortodoncia")
     expect(dictatedService("profilaxis", DEMO, "dental").match).toBe("Limpieza dental (profilaxis)")
-    expect(dictatedService("la limpieza", DEMO, "dental").candidates).toEqual(["Limpieza dental (profilaxis)"])
+    expect(dictatedService("la limpieza", DEMO, "dental").match).toBe("Limpieza dental (profilaxis)")
     expect(dictatedService("endodoncia", DEMO, "dental").candidates).toEqual(["Endodoncia anterior vital", "Endodoncia posterior vital"])
     expect(dictatedService("extracción", DEMO, "dental").candidates).toEqual(["Exodoncia simple"])
     expect(dictatedService("resina oclusal", DEMO, "dental").candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
     expect(dictatedService("restauración con resina", DEMO, "dental").match).toBe("Restauración con resina compuesta, una superficie")
     expect(dictatedService("hicimos la exodoncia simple", DEMO, "dental").match).toBe("Exodoncia simple")
-    expect(dictatedService("obturación de la 36", DEMO, "dental").candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
+    expect(dictatedService("obturación de la 36", DEMO, "dental").match).toBe("Obturación con resina")
+    expect(dictatedService("obturación de la 36", DEMO.filter((name) => !name.startsWith("Obturación")), "dental").candidates).toEqual(["Restauración con resina compuesta, una superficie"])
+  })
+
+  it("lo que se dice de más (la pieza, un fármaco, «completa») no deja fuera al que sí es", () => {
+    expect(dictatedService("obturación con resina compuesta", DEMO, "dental").match).toBe("Obturación con resina")
+    expect(dictatedService("control de ortodoncia mensual", DEMO, "dental").match).toBe("Control de ortodoncia")
+    expect(dictatedService("endodoncia posterior vital de la molar", DEMO, "dental").match).toBe("Endodoncia posterior vital")
+    expect(dictatedService("endodoncia de molar", DEMO, "dental").candidates).toEqual(["Endodoncia anterior vital", "Endodoncia posterior vital"])
+    expect(dictatedService("exodoncia simple de la cuatro ocho", DEMO, "dental").match).toBe("Exodoncia simple")
+    expect(dictatedService("resina de dos caras", DEMO, "dental").candidates).toEqual(["Obturación con resina", "Restauración con resina compuesta, una superficie"])
+    expect(dictatedService("cambio de arco", DEMO, "dental").candidates).toEqual(["Control de ortodoncia"])
+    // Un nombre que solo empieza igual no es lo dicho: «cera» no es la corona cerámica.
+    expect(dictatedService("cera", [...DEMO, "Corona cerámica"], "dental")).toEqual({ match: null, candidates: [] })
+    // Dos que contienen lo dicho: elige el profesional.
+    expect(dictatedService("consulta de control", ["Consulta", "Consulta de control postoperatorio"], "dental")).toEqual({ match: null, candidates: ["Consulta de control postoperatorio", "Consulta"] })
+    // Un material dicho en singular sigue siendo el de Inventario.
+    expect(dictatedService("guante", ["Guantes de nitrilo", "Mascarilla quirúrgica"], "dental").match).toBe("Guantes de nitrilo")
   })
 
   it("en latidIA, igual: lo que no calza no propone otro servicio", () => {
@@ -71,6 +88,9 @@ describe("un procedimiento del tarifario solo se propone si calza con lo dicho",
     expect(dictatedService("le pusimos una inyección intramuscular", LATIDIA, "medical").candidates).toEqual(["Inyectable intramuscular"])
     expect(dictatedService("cambiamos el vendaje", LATIDIA, "medical")).toEqual({ match: null, candidates: [] })
     expect(dictatedService("ecografía de partes blandas", LATIDIA, "medical")).toEqual({ match: null, candidates: [] })
+    expect(dictatedService("nebulización con salbutamol", LATIDIA, "medical").match).toBe("Nebulización")
+    expect(dictatedService("ecografía abdominal completa", LATIDIA, "medical").match).toBe("Ecografía abdominal")
+    expect(dictatedService("electrocardiograma de reposo", LATIDIA, "medical").match).toBe("Electrocardiograma")
   })
 })
 
@@ -83,6 +103,9 @@ describe("una frase partida por la pausa se lee junta (v07)", () => {
     expect(withPauseBridge(before, now)).toBe(`frío sin respuesta calor ${now}`)
     // El que empieza otra frase, o sigue a uno que la cerró, se lee solo.
     expect(pauseBridge(before, "percusión negativa palpación positiva")).toBe("")
+    // «en la 46…» o «y…» empiezan otra cosa: no se unen a lo anterior.
+    expect(pauseBridge("hoy hicimos una profilaxis completa", "en la 46 caries oclusal")).toBe("")
+    expect(pauseBridge("sondaje", "de 3 mm")).toBe("sondaje")
     expect(pauseBridge("Frío sin respuesta, calor sin respuesta.", "sin dolor a la percusión")).toBe("")
     expect(pauseBridge("", now)).toBe("")
     expect(withPauseBridge(undefined, now)).toBe(now)
@@ -146,5 +169,8 @@ describe("el relato no recoge lo que no es del paciente", () => {
     const drafts = [{ kind: "nota", payload: { presentIllness: "¿Te duele cuando comes? Refiere dolor al masticar desde hace una semana." } }]
     expect(withoutFormNotes(drafts, [], FDI)).toEqual([{ kind: "nota", payload: { presentIllness: "Refiere dolor al masticar desde hace una semana." } }])
     expect(withoutFormNotes([{ kind: "nota", payload: { presentIllness: "¿Te duele aquí?" } }], [], FDI)).toEqual([])
+    // Una pregunta al final de lo que cuenta no es una pregunta al paciente, y sin nada que quitar el texto queda tal cual.
+    const told = { kind: "nota", payload: { presentIllness: "Refiere dolor al masticar, ¿verdad? Desde hace una semana.", indications: "Enjuague dos veces al día.\nDieta blanda." } }
+    expect(withoutFormNotes([told], [], FDI)).toEqual([told])
   })
 })
