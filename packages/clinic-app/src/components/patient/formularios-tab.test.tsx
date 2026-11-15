@@ -20,6 +20,7 @@ vi.mock("../../lib/clinical-forms", async (original) => ({
 
 const { ResponseDetail } = await import("./formularios-tab")
 const { ClioFormProposalsContext } = await import("./clio-form-proposals")
+type FormHint = import("./clio-form-proposals").FormHint
 
 beforeAll(() => {
   window.ResizeObserver ??= class {
@@ -206,7 +207,10 @@ describe("lo que propone Clío en la ficha", () => {
     voice: null,
     removal: null,
   })
-  const withClio = (items: ReturnType<typeof proposal>[], clio: { accept?: () => Promise<void>; discard?: () => void } = {}) => {
+  const withClio = (
+    items: ReturnType<typeof proposal>[],
+    clio: { accept?: () => Promise<void>; discard?: () => void; hint?: FormHint | null; clearHint?: () => void } = {},
+  ) => {
     const value = {
       items,
       accept: clio.accept ?? (async () => {}),
@@ -214,6 +218,9 @@ describe("lo que propone Clío en la ficha", () => {
       restore: () => {},
       busy: false,
       setFormOpen: () => {},
+      hint: clio.hint ?? null,
+      openAt: () => {},
+      clearHint: clio.clearHint ?? (() => {}),
     }
     return render(
       <QueryClientProvider client={new QueryClient()}>
@@ -239,6 +246,34 @@ describe("lo que propone Clío en la ficha", () => {
     const discard = vi.fn()
     withClio([proposal({ value: 6, replaces: 5 })], { discard })
     await waitFor(() => expect(discard).toHaveBeenCalledTimes(1))
+  })
+
+  // Prueba con voz del 15 nov: lo que la red avisaba y Clío leyó de nuevo propone un valor, por revisar.
+  it("la de la segunda lectura propone su valor por revisar: se confirma en su pregunta y no entra con «Confirmar las N»", async () => {
+    withClio([
+      { ...proposal({ fieldId: "hallazgos", value: "Fístula", reread: true }), status: "por_revisar" as const },
+      { ...proposal({ fieldId: "otra", value: 2 }), id: "s2" },
+      { ...proposal({ fieldId: "mas", value: 3 }), id: "s3" },
+    ])
+    await screen.findByText(/propone, revísala:/)
+    expect(screen.getByRole("button", { name: /Confirmar Fístula en «Hallazgos»/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Confirmar las 2" })).toBeTruthy()
+  })
+
+  it("«Usar en…»: lo dictado va al lado de su pregunta vacía, se oye en ella y se quita con la ×", async () => {
+    const clearHint = vi.fn()
+    withClio([], { hint: { responseId: "r1", fieldId: "hallazgos", label: "Hallazgos", said: "fístula a nivel apical" }, clearHint })
+    const note = await screen.findByText(/«fístula a nivel apical»\. Elige o escribe la respuesta\./, { selector: "span" })
+    const input = screen.getByRole("textbox", { name: /Hallazgos/ })
+    expect(input.getAttribute("aria-describedby")).toContain(note.id)
+    fireEvent.click(screen.getByRole("button", { name: "Quitar lo dictado de «Hallazgos»" }))
+    expect(clearHint).toHaveBeenCalledTimes(1)
+  })
+
+  it("con la pregunta ya respondida, o de otra ficha, lo dictado no se pone al lado", async () => {
+    withClio([], { hint: { responseId: "r1", fieldId: "intensidad", label: "Intensidad", said: "intensidad seis" } })
+    await screen.findByRole("textbox", { name: /Hallazgos/ })
+    expect(screen.queryByText(/Dictaste:/)).toBeNull()
   })
 
   // El doble toque real (dos clics antes de volver a pintar) no se reproduce aquí: lo ve el verificador.

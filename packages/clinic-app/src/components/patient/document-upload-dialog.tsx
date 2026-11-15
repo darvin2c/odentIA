@@ -19,6 +19,7 @@ import {
 } from "@odentia/ui"
 import {
   type ApiErrorShape,
+  common,
   DatePickerButton,
   FormDrawer,
   focusFirstInvalid,
@@ -39,6 +40,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { readChosenFile } from "../../lib/chosen-file"
 import { orgSlugFromHostname } from "../../lib/host"
 import { mayHoldStudy, type SelectedFile } from "../../lib/imaging-scan"
 import type { Encounter, PlanItem } from "../../lib/patients"
@@ -117,8 +119,13 @@ const NO_LINKS: DocumentLinkValue = {
 
 const EMPTY_UPLOAD: UploadValues = { encounterId: "", allCategory: "", allCapturedAt: "", rows: [] }
 
+/** Lo que dice la fila sin respuesta del servidor; su estado ya dice «Resultado no confirmado». */
 const UNCONFIRMED_ROW =
-  "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar."
+  "No llegó la respuesta del servidor: puede que se haya guardado. Revisa la lista de Documentos antes de reenviar para no duplicar."
+
+/** El archivo no se pudo leer del equipo al elegirlo: no se subió nada. */
+const UNREADABLE_FILE =
+  "No se pudo leer desde tu equipo: puede que haya cambiado o que esté solo en la nube. Ábrelo una vez o cópialo a otra carpeta y vuelve a elegirlo."
 
 /**
  * Lo que se comprueba de cada fila antes de subirla: los mismos límites que
@@ -179,7 +186,11 @@ const EXTRAS_FIELDS: Partial<Record<keyof RowValues, true>> = {
   links: true,
 }
 
-type RowOutcome = { ok: true } | { ok: false; message: string | null; fields: Record<string, string> }
+type RowOutcome =
+  | { ok: true }
+  /** Sin respuesta del servidor: su fila ya lo dice. */
+  | { ok: false; unconfirmed: true }
+  | { ok: false; unconfirmed?: never; message: string | null; fields: Record<string, string> }
 
 export interface DocumentUploadDialogProps {
   patientId: string
@@ -207,29 +218,31 @@ function draftEncounters(encounters: Encounter[]): Encounter[] {
 
 let rowSeq = 0
 
+/** Por qué un archivo no entra a la cola, antes de leerlo; null si entra. */
+function fileProblem(file: File): string | null {
+  if (!isAcceptedFile(file)) return unsupportedFormatMessage(file.name)
+  if (file.size === 0) return "El archivo está vacío."
+  if (file.size > maxBytesFor(file))
+    return maxBytesFor(file) > MAX_BYTES
+      ? "La radiografía DICOM no puede superar 30 MB."
+      : "El archivo no puede superar 10 MB (la radiografía DICOM, 30 MB)."
+  return null
+}
+
 function toRow(
   file: File,
   initialTeeth: number[],
   defaultPlanItemId?: string,
-  common: { category: string; capturedAt: string } = { category: "", capturedAt: "" },
-): { values: RowValues; meta: RowFile } | { fileError: string } {
-  if (!isAcceptedFile(file)) return { fileError: unsupportedFormatMessage(file.name) }
-  if (file.size === 0) return { fileError: "El archivo está vacío." }
-  if (file.size > maxBytesFor(file))
-    return {
-      fileError:
-        maxBytesFor(file) > MAX_BYTES
-          ? "La radiografía DICOM no puede superar 30 MB."
-          : "El archivo no puede superar 10 MB (la radiografía DICOM, 30 MB).",
-    }
+  forAll: { category: string; capturedAt: string } = { category: "", capturedAt: "" },
+): { values: RowValues; meta: RowFile } {
   rowSeq += 1
   return {
     values: {
       key: `${Date.now()}-${rowSeq}`,
       title: basenameWithoutExtension(file.name),
-      category: common.category,
+      category: forAll.category,
       imageType: "",
-      capturedAt: common.capturedAt,
+      capturedAt: forAll.capturedAt,
       source: "",
       teeth: [...initialTeeth],
       tags: [],
@@ -335,15 +348,16 @@ export function DocumentUploadDialog({
         return { ok: false, message, fields }
       }
       patchFile(row.key, { status: "saved", error: null })
-      await onSuccess()
+      // Ya está guardado: que la lista tarde en refrescarse no lo vuelve dudoso.
+      await onSuccess().catch(() => {})
       return { ok: true }
     } catch {
       // Fallo de red o respuesta ilegible: el archivo pudo haberse guardado.
       // No se reintenta a ciegas: se refresca el listado y la fila exige
       // decisión explícita (verificar en Documentos o reenviar).
       patchFile(row.key, { status: "unconfirmed", error: UNCONFIRMED_ROW })
-      await onSuccess()
-      return { ok: false, message: null, fields: {} }
+      await onSuccess().catch(() => {})
+      return { ok: false, unconfirmed: true }
     }
   }
 
@@ -357,12 +371,9 @@ export function DocumentUploadDialog({
     validators: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
-        const queued = value.rows.filter((row) => targets.current.has(row.key))
-        if (queued.length === 0)
-          fields.rows =
-            value.rows.length === 0
-              ? "Elige los archivos que quieres subir."
-              : "No queda ningún archivo por subir: los no confirmados se reenvían desde su fila."
+        // Con filas y nada por subir no se llega aquí: el pie ya no ofrece subir.
+        if (!value.rows.some((row) => targets.current.has(row.key)))
+          fields.rows = "Elige los archivos que quieres subir."
         value.rows.forEach((row, index) => {
           if (!targets.current.has(row.key)) return
           const parsed = rowSchema.safeParse(row)
@@ -389,7 +400,8 @@ export function DocumentUploadDialog({
         let failures = 0
         for (const { row, index, file } of queue) {
           const outcome = await uploadRow(row, file, value.encounterId)
-          if (outcome.ok) continue
+          // Lo no confirmado lo dice su fila, una sola vez: no es «sin guardar».
+          if (outcome.ok || outcome.unconfirmed) continue
           failures += 1
           const loose: string[] = []
           let inExtras = false
@@ -457,7 +469,8 @@ export function DocumentUploadDialog({
   const pendingKeys = rows
     .filter((row) => statusOf(row.key) === "pending" || statusOf(row.key) === "error")
     .map((row) => row.key)
-  const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
+  // Todo guardado o por verificar en su fila: no queda nada que subir y el pie no ofrece «Subir 0».
+  const nothingLeft = !uploading && rows.length > 0 && pendingKeys.length === 0
 
   /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
   const lastCommon = useRef({ category: "", capturedAt: "" })
@@ -479,18 +492,25 @@ export function DocumentUploadDialog({
     })
   }
 
-  const addFiles = (list: File[]) => {
+  const addFiles = async (list: File[]) => {
     if (disabled || !list.length) return
     const bad: string[] = []
     const added: Record<string, RowFile> = {}
     // Lo elegido en «Para todos» vale también para los archivos que se agregan después.
-    const common = { category: form.getFieldValue("allCategory"), capturedAt: form.getFieldValue("allCapturedAt") }
-    for (const file of list) {
-      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId, common)
-      if ("fileError" in row) {
-        bad.push(`${file.name}: ${row.fileError}`)
+    const forAll = { category: form.getFieldValue("allCategory"), capturedAt: form.getFieldValue("allCapturedAt") }
+    // Se sube la copia leída ahora, no el archivo del disco (`readChosenFile`); se leen a la vez.
+    const read = await Promise.all(
+      list.map(async (chosen) => {
+        const problem = fileProblem(chosen)
+        return { chosen, problem, file: problem ? null : await readChosenFile(chosen) }
+      }),
+    )
+    for (const { chosen, problem, file } of read) {
+      if (!file) {
+        bad.push(`${chosen.name}: ${problem ?? UNREADABLE_FILE}`)
         continue
       }
+      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId, forAll)
       added[row.values.key] = row.meta
       form.pushFieldValue("rows", row.values)
     }
@@ -509,7 +529,7 @@ export function DocumentUploadDialog({
       tomography.reset()
       if (volume) {
         setStudyNotStored(true)
-        addFiles(
+        await addFiles(
           selection
             .map((item) =>
               item.file instanceof File
@@ -530,7 +550,7 @@ export function DocumentUploadDialog({
       const fromFolder = selection.some((item) => item.name.includes("/") || /[.]zip$/i.test(item.name))
       if (fromFolder) {
         setNoStudy(true)
-        addFiles(
+        await addFiles(
           selection
             .map((item) =>
               item.file instanceof File
@@ -542,7 +562,7 @@ export function DocumentUploadDialog({
         return
       }
     }
-    addFiles(selection.map((item) => item.file as File))
+    await addFiles(selection.map((item) => item.file as File))
   }
 
   const removeRow = (index: number) => {
@@ -632,6 +652,10 @@ export function DocumentUploadDialog({
       title="Subir imágenes o documentos"
       description={`JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo y 30 MB la radiografía DICOM${storesTomography() ? "; la tomografía, hasta 1,5 GB" : ""}. El formato se verifica por contenido. Sin atención queda como General.`}
       onSubmit={(event) => {
+        if (nothingLeft) {
+          event.preventDefault()
+          return
+        }
         targets.current = new Set(pendingKeys)
         surface.onSubmit(event)
       }}
@@ -639,7 +663,11 @@ export function DocumentUploadDialog({
       error={surface.error}
       // Solo por permiso: lo que falta en una fila se dice en su campo al subir.
       submitDisabled={disabled}
-      submitLabel={uploading ? "Subiendo…" : `Subir ${pendingKeys.length}`}
+      submitLabel={uploading ? "Subiendo…" : pendingKeys.length > 0 ? `Subir ${pendingKeys.length}` : "Subir"}
+      // Sin nada por subir, lo único que queda es cerrar: «Cerrar» es la «×» de arriba
+      // (el pie no repite un botón que solo cierra) y no hay «Subir 0» ni «Cancelar».
+      hideSubmit={nothingLeft}
+      cancelLabel={nothingLeft ? common.actions.close : undefined}
     >
       <fieldset disabled={uploading || disabled} className="flex flex-col gap-3">
         <form.AppField name="encounterId">
@@ -817,13 +845,6 @@ export function DocumentUploadDialog({
             </>
           )}
         </form.AppField>
-
-        {unconfirmedCount > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Hay {unconfirmedCount} archivo(s) con resultado no confirmado. La lista de Documentos ya se
-            actualizó: verifica si aparecen antes de reenviar.
-          </p>
-        )}
       </fieldset>
     </FormDrawer>
   )

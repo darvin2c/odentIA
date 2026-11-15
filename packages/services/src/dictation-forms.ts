@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { and, desc, eq } from "drizzle-orm"
 import { assertFormSchema, conditionMet, type FormFieldDef, isEmptyAnswer as isEmpty, updateFormResponseDraft } from "./clinical-forms.js"
+import { asHeard, formVocabulary, type HeardVocabulary, plain } from "./dictation-heard.js"
 import { ServiceError } from "./errors.js"
 import type { ProductSite } from "./product-hooks.js"
 
@@ -143,13 +144,61 @@ export function formQuestionsOf(
 
 /* ---------- Comprobar lo propuesto contra la frase dicha ---------- */
 
-const plain = (text: string) =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
+/** De qué ficha son los términos de una pregunta: sus rótulos y opciones, los mismos para todas las de su ficha. */
+const vocabularyKeys = new WeakMap<DictationFormQuestion, string>()
+/** Los términos de cada ficha, por esa clave: salen de la plantilla, no de lo dictado. */
+const vocabularies = new Map<string, HeardVocabulary>()
+
+function vocabularyKeyOf(question: DictationFormQuestion): string {
+  let key = vocabularyKeys.get(question)
+  if (key === undefined) {
+    key = [question, ...(question.siblings ?? [])]
+      .flatMap((item) => [item.label, ...(item.options ?? [])])
+      .sort()
+      .join("\u0000")
+    vocabularyKeys.set(question, key)
+  }
+  return key
+}
+
+/** Los términos de la ficha de una pregunta (su rótulo, sus opciones y los de sus hermanas), como los lee `asHeard`. */
+export function heardVocabularyOf(question: DictationFormQuestion): HeardVocabulary {
+  const key = vocabularyKeyOf(question)
+  let vocabulary = vocabularies.get(key)
+  if (!vocabulary) {
+    if (vocabularies.size >= 100) vocabularies.clear()
+    vocabulary = formVocabulary([question, ...(question.siblings ?? [])])
+    vocabularies.set(key, vocabulary)
+  }
+  return vocabulary
+}
+
+/**
+ * Lo último leído, por ficha y texto. Chrome no pone puntos: un tramo de
+ * minutos es una sola oración, y en una pausa se lee con cada pregunta y cada
+ * respuesta (medido el 15 nov: hasta 1,4 s por pausa sin esto). Solo en memoria
+ * y pocas entradas, que la pausa siguiente reemplaza.
+ */
+const lastHeard = new Map<string, string>()
+const LAST_HEARD = 32
+
+/**
+ * Lo dicho leído con los términos de la ficha de la pregunta (`asHeard`): «volar
+ * derecha» es «molar derecha», «sé o d» es «ceod». Solo para comprobar; lo que
+ * se muestra sigue siendo lo dictado (prueba con voz del 15 nov). Se lee una vez
+ * en cada entrada (la propuesta, la oración de la red, el motivo); lo de adentro
+ * recibe lo ya leído.
+ */
+function heardBy(question: DictationFormQuestion, text: string): string {
+  if (!text) return text
+  const key = `${vocabularyKeyOf(question)}\u0001${text}`
+  const cached = lastHeard.get(key)
+  if (cached !== undefined) return cached
+  const heard = asHeard(text, heardVocabularyOf(question))
+  if (lastHeard.size >= LAST_HEARD) lastHeard.delete(lastHeard.keys().next().value as string)
+  lastHeard.set(key, heard)
+  return heard
+}
 
 /** Las oraciones de lo dictado: la misma división para todo lo que mira una oración. */
 const sentencesOf = (text: string) => text.split(/(?<=[.;!?\n])\s+/)
@@ -357,7 +406,7 @@ function talksAbout(question: DictationFormQuestion, said: Set<string>): boolean
 }
 
 /**
- * ¿La frase nombra otra cosa con la primera palabra de la pregunta? «mordida
+ * ¿La frase (ya leída, `heardBy`) nombra otra cosa con la primera palabra de la pregunta? «mordida
  * abierta» no es «Mordida cruzada», ni «riesgo de caries» es «Riesgo
  * estomatológico»: la palabra que sigue no es de la pregunta ni de sus opciones.
  * «intensidad ocho», «higiene regular» o «sondaje de cuatro» sí hablan de ella.
@@ -416,12 +465,36 @@ const shortSaid = (said: string) => (said.length > 80 ? `${said.slice(0, 77)}…
  * cambia una persona.
  */
 export function prepareFormAnswer(
-  draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
+  draft: FormAnswerDraft,
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
   /** Lo dictado en la pausa: la oración de la frase dice de qué pregunta habla («CPOD: cinco cariados»). */
   transcript?: string,
 ): PreparedFormAnswer | null {
+  const checked = checkWithWritten(draft, questions, site, transcript)
+  if (!draft.reread || !checked) return checked
+  // La segunda lectura de una oración de la red: solo un valor que calza, y siempre por revisar.
+  // Sin valor no se propone: el aviso de la red se queda.
+  if (checked.payload["value"] == null) return null
+  return { payload: { ...checked.payload, reread: true }, status: "por_revisar", note: checked.note ?? REREAD_NOTE }
+}
+
+/** La respuesta de ficha que propone Clío, con la frase de la que sale. */
+export interface FormAnswerDraft {
+  payload: Record<string, unknown>
+  sourceText?: string | undefined
+  /** De la segunda lectura de una oración que la red avisó (`formNetMisses`): queda por revisar. */
+  reread?: boolean | undefined
+}
+
+/** Una sugerencia del dictado, de cualquier clase, como la miran las fichas. */
+type FormDraftLike = FormAnswerDraft & { kind: string }
+
+/** Lo que dice la propuesta de la segunda lectura en su pregunta. */
+const REREAD_NOTE = "La leí de nuevo en lo que dictaste: revísala antes de confirmarla."
+
+/** `prepareFormAnswer` sin la segunda lectura: la comprobación y lo ya escrito. */
+function checkWithWritten(draft: FormAnswerDraft, questions: readonly DictationFormQuestion[], site: ProductSite, transcript?: string): PreparedFormAnswer | null {
   const question = questions.find((item) => item.number === draft.payload["question"])
   // La ficha de otra pieza no recibe lo dictado para esta (revisión final del 15 nov, A4).
   if (question && otherToothOf(question, questions, site, draft.sourceText, transcript) !== null) return null
@@ -443,6 +516,7 @@ export function prepareFormAnswer(
 
 /** Una respuesta de ficha que cambia lo ya escrito: queda por revisar y se cambia de a una. */
 export const changesWrittenAnswer = (payload: Record<string, unknown>): boolean => payload["replaces"] !== undefined && payload["value"] != null
+
 
 /** Lo que nombra una pieza delante de su número: «la 46», «pieza cuarenta y seis», «en la cuatro seis». */
 const TOOTH_WORDS = new Set(["la", "pieza", "piezas", "diente", "molar", "premolar", "canino", "incisivo"])
@@ -496,23 +570,41 @@ export function otherToothOf(
  * esto»: la frase no se pierde en silencio (QA del 14 nov, D21).
  */
 export function formAnswerDropReason(
-  draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
+  draft: FormAnswerDraft,
   questions: readonly DictationFormQuestion[],
   /** Con el producto y lo dictado en la pausa se dice también la pieza que no es la de la ficha. */
   where?: { site: ProductSite; transcript?: string | undefined },
 ): string | null {
+  return dropReasonOf(draft, questions, where)?.why ?? null
+}
+
+/**
+ * El motivo de lo parado y las preguntas que nombra, para «Usar en…» de «No
+ * pude usar esto»: la suya, o ella y sus hermanas si no quedó claro cuál. Sin
+ * ninguna cuando no hay dónde escribirlo (la pregunta ya no está libre, la
+ * ficha es de otra pieza).
+ */
+function dropReasonOf(
+  draft: FormAnswerDraft,
+  questions: readonly DictationFormQuestion[],
+  where?: { site: ProductSite; transcript?: string | undefined },
+): { why: string; questions: number[] } | null {
+  // Lo de la segunda lectura que no calzó no tiene otro motivo: la red sigue avisando su oración.
+  if (draft.reread) return null
   const question = questions.find((item) => item.number === draft.payload["question"])
-  if (!question) return "Esa pregunta ya no estaba libre en la ficha: respóndela ahí."
+  if (!question) return { why: "Esa pregunta ya no estaba libre en la ficha: respóndela ahí.", questions: [] }
+  const about = (why: string, numbers = [question.number]) => ({ why, questions: numbers })
   const said = draft.sourceText ?? ""
   // Lo que repite lo ya escrito («clase dos división dos» donde ya dice eso) no es algo que no se pudo usar.
   // Ni el pedazo de otra prueba («sin dolor» de «sin dolor a la percusión»): no era de esta pregunta.
   if (where && saysWritten(question, said, questions, where.site, sentenceOf(where.transcript, said), question.answered)) return null
   if (partOfOtherTest(question, said, sentenceOf(where?.transcript, said))) return null
   const tooth = where ? otherToothOf(question, questions, where.site, said, where.transcript) : null
-  if (tooth) return `«${question.formTitle}» es de la ${tooth.form} y dijiste la ${tooth.said}: no la llené. Escríbelo tú o empieza otra ficha para la ${tooth.said}.`
+  if (tooth) return about(`«${question.formTitle}» es de la ${tooth.form} y dijiste la ${tooth.said}: no la llené. Escríbelo tú o empieza otra ficha para la ${tooth.said}.`, [])
   // Lo que dice dos preguntas hermanas por igual («cariados tres»: ¿del CPOD o del ceod?) no se pierde
   // en silencio: se dice entre cuáles (revisión final del 15 nov, U5).
-  const spoken = new Set(stemsOf(said))
+  const heard = heardBy(question, said)
+  const spoken = new Set(stemsOf(heard))
   const own = labelStems(question.label)
   const twins = questions.filter((other) => {
     if (other === question || other.responseId !== question.responseId || other.type !== question.type) return false
@@ -523,15 +615,16 @@ export function formAnswerDropReason(
     return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && diff.length === 1 && !diff.some((stem) => spoken.has(stem))
   })
   if (twins.length > 0) {
-    return `No quedó claro si era ${listOf([question, ...twins].map((item) => `«${item.label}»`), "o")}: nómbrala o escríbela en la ficha.`
+    const named = [question, ...twins]
+    return about(`No quedó claro si era ${listOf(named.map((item) => `«${item.label}»`), "o")}: nómbrala o escríbela en la ficha.`, named.map((item) => item.number))
   }
   // La frase que no nombra la pregunta no era de la ficha («el diagnóstico es maloclusión clase dos»
   // no nombra «Clase molar derecha»): no se avisa como si lo fuera. La misma regla que la red (`labelNamed`).
-  if (!labelNamed(question, said, where?.site)) return null
+  if (!labelNamed(question, heard, where?.site)) return null
   const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
-  if (question.unit && unit?.test(plain(said))) return `«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`
-  if (!talksAbout(question, new Set(stemsOf(said)))) return `No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`
-  return `No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`
+  if (question.unit && unit?.test(plain(said))) return about(`«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`)
+  if (!talksAbout(question, spoken)) return about(`No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`)
+  return about(`No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`)
 }
 
 /**
@@ -573,9 +666,9 @@ function partOfOtherTest(question: DictationFormQuestion, said: string, sentence
  * «desviada»), no otra más larga que empieza igual: «conductometría» no es
  * «Conducta». La usan el motivo de lo parado y la red.
  */
-function labelNamed(question: DictationFormQuestion, said: string, site?: ProductSite): boolean {
-  if (question.type === "pieza" && site && teethIn(said, site).length) return true
-  const words = meaningful(withoutOtherTests(question, said))
+function labelNamed(question: DictationFormQuestion, heard: string, site?: ProductSite): boolean {
+  if (question.type === "pieza" && site && teethIn(heard, site).length) return true
+  const words = meaningful(withoutOtherTests(question, heard))
   const spoken = (word: string) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3)
   const own = meaningful(question.label.replace(/\([^)]*\)/g, " "))
   const proper = [...question.label.matchAll(/\(([^)]*)\)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/\p{Lu}[\p{L}-]*/gu)].flatMap((name) => meaningful(name[0])))
@@ -594,9 +687,9 @@ function labelNamed(question: DictationFormQuestion, said: string, site?: Produc
  * distingue de una hermana, dicho (`talksAbout`), y su primera palabra no
  * nombra otra cosa (`namesAnother`).
  */
-function namesQuestion(question: DictationFormQuestion, said: string, site: ProductSite): boolean {
-  if (!labelNamed(question, said, site)) return false
-  const sentence = withoutOtherTests(question, said)
+function namesQuestion(question: DictationFormQuestion, heard: string, site: ProductSite): boolean {
+  if (!labelNamed(question, heard, site)) return false
+  const sentence = withoutOtherTests(question, heard)
   return talksAbout(question, new Set(stemsOf(sentence))) && !namesAnother(question, sentence)
 }
 
@@ -653,13 +746,16 @@ export function formSentencesWithoutAnswer(
     const said = sentence.trim()
     if (!said) return []
     const named = open.filter((question) => {
-      if (!namesQuestion(question, said, site) || !saysValue(question, said)) return false
+      const heard = heardBy(question, said)
+      if (!namesQuestion(question, heard, site) || !saysValue(question, heard)) return false
       if (saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered)) return false
       // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar cerca de
       // lo que distingue a esta: en «línea media superior centrada la inferior desviada dos
       // milímetros», los dos milímetros no son de la superior.
-      const others = questions.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, said, site))
-      return !others.length || spansOf(question, others, said).some((part) => saysValue(question, part))
+      const others = questions.filter(
+        (other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, heardBy(other, said), site),
+      )
+      return !others.length || spansOf(question, others, heard).some((part) => saysValue(question, part))
     })
     if (!named.length) return []
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
@@ -675,7 +771,7 @@ export function formSentencesWithoutAnswer(
  * gemelas agregadas que no pasan no son algo que no se pudo usar. Lo usan el
  * servidor y la medición.
  */
-export function formDropNotices<T extends { kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>(
+export function formDropNotices<T extends FormDraftLike>(
   outcomes: ReadonlyArray<{ draft: T; ready: boolean }>,
   twins: ReadonlySet<T>,
   questions: readonly DictationFormQuestion[],
@@ -691,15 +787,59 @@ export function formDropNotices<T extends { kind: string; payload: Record<string
     const number = Number(draft.payload["question"])
     if (ready) handled.add(number)
     if (ready || twins.has(draft) || !draft.sourceText?.trim()) continue
-    const why = formAnswerDropReason(draft, questions, where)
-    if (!why) continue
+    const reason = dropReasonOf(draft, questions, where)
+    if (!reason) continue
     handled.add(number)
     const question = questions.find((item) => item.number === number)
-    for (const said of formAnswerFragments(draft.sourceText, question)) notices.push({ said, why, questions: [number], by: "motivo" })
+    for (const said of formAnswerFragments(draft.sourceText, question)) notices.push({ said, why: reason.why, questions: reason.questions, by: "motivo" })
   }
   const proposed = new Map([...pending].filter(([, value]) => value != null))
   for (const item of formSentencesWithoutAnswer(where.transcript, questions, handled, where.site, proposed)) notices.push({ ...item, by: "red" })
   return notices
+}
+
+/**
+ * Las oraciones de lo dictado que la red avisaría (`formDropNotices`, «Parece
+ * de «X»»), con sus preguntas: las que Clío lee una vez más, solas, antes de
+ * guardar la pausa. La misma cuenta que al guardar (las gemelas, el diagnóstico
+ * que también es de la ficha y lo que ya proponen las pendientes); la usan la
+ * atención y la medición.
+ */
+export function formNetMisses<T extends FormDraftLike>(
+  drafts: readonly T[],
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  transcript: string | undefined,
+  /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta (`pendingFormValues`). */
+  pending: ReadonlyMap<number, unknown> = new Map(),
+): Array<{ said: string; questions: number[] }> {
+  if (!questions.length || !transcript?.trim()) return []
+  const all = withDiagnosisFormAnswers(drafts, questions)
+  const { drafts: expanded, twins } = withFormTwins(all, questions)
+  for (const draft of all.slice(drafts.length)) twins.add(draft)
+  const outcomes = expanded
+    .filter((draft) => draft.kind === "ficha")
+    .map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, site, transcript) !== null }))
+  return formDropNotices(outcomes, twins, questions, { site, transcript }, pending).flatMap((notice) => (notice.by === "red" ? [{ said: notice.said, questions: notice.questions }] : []))
+}
+
+/**
+ * Lo que proponen las sugerencias de ficha pendientes, por el número de su
+ * pregunta en esta pausa (`null`: la que pide elegir). La red no avisa lo que
+ * ya está propuesto.
+ */
+export function pendingFormValues(
+  pending: ReadonlyArray<{ kind: string; payload: Record<string, unknown> }>,
+  questions: readonly DictationFormQuestion[],
+): Map<number, unknown> {
+  return new Map(
+    pending
+      .filter((item) => item.kind === "ficha")
+      .flatMap((item) => {
+        const question = questions.find((one) => one.responseId === item.payload["responseId"] && one.fieldId === item.payload["fieldId"])
+        return question ? [[question.number, item.payload["value"] ?? null] as const] : []
+      }),
+  )
 }
 
 /**
@@ -719,7 +859,7 @@ export function formAnswerFragments(said: string, question: DictationFormQuestio
   if (parts.length <= 1) return [whole]
   const label = labelStems(question.label)
   const options = (question.options ?? []).flatMap(stemsOf)
-  const own = parts.filter((part) => stemsOf(part).some((stem) => label.includes(stem) || options.includes(stem)))
+  const own = parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem) || options.includes(stem)))
   return own.length ? own : [whole]
 }
 
@@ -803,7 +943,7 @@ export function withoutFormPhrases(text: string, formPhrases: readonly string[])
  * perderlo. Una nota que queda vacía no se propone. Solo con fichas empezadas:
  * sin ellas, lo de siempre. Lo usan el servidor y la medición.
  */
-export function withoutFormNotes<T extends { kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>(
+export function withoutFormNotes<T extends FormDraftLike>(
   drafts: readonly T[],
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
@@ -821,7 +961,7 @@ export function withoutFormNotes<T extends { kind: string; payload: Record<strin
       const question = questions.find((item) => item.number === draft.payload["question"])
       if (parts.length <= 1 || !question) return [said]
       const label = labelStems(question.label)
-      return parts.filter((part) => stemsOf(part).some((stem) => label.includes(stem)))
+      return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
     })
   return drafts.flatMap((draft) => {
     if (draft.kind !== "nota") return [draft]
@@ -848,7 +988,7 @@ export interface DerivedFormDraft {
  * opción de dos o más palabras, todas dichas, y la única de su pregunta; la
  * pregunta vacía que el modelo no respondió. Se comprueba como las demás.
  */
-export function withDiagnosisFormAnswers<T extends { kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>(
+export function withDiagnosisFormAnswers<T extends FormDraftLike>(
   drafts: readonly T[],
   questions: readonly DictationFormQuestion[],
 ): Array<T | DerivedFormDraft> {
@@ -856,9 +996,9 @@ export function withDiagnosisFormAnswers<T extends { kind: string; payload: Reco
   const answered = new Set(drafts.filter((draft) => draft.kind === "ficha").map((draft) => draft.payload["question"]))
   for (const draft of drafts) {
     if (draft.kind !== "diagnostico" || !draft.sourceText?.trim()) continue
-    const spoken = new Set(stemsOf(draft.sourceText))
     for (const question of questions) {
       if (question.type !== "opcion_unica" || question.answered !== undefined || answered.has(question.number)) continue
+      const spoken = new Set(stemsOf(heardBy(question, draft.sourceText)))
       const hits = (question.options ?? []).filter((option) => {
         const stems = stemsOf(option)
         return stems.length >= 2 && stems.every((stem) => spoken.has(stem))
@@ -935,28 +1075,14 @@ function correctedNumber(said: string, sentence = ""): number | null {
  * preguntas de número de la misma ficha y unidad, por la palabra que es solo de cada una. `null` si no
  * hay dos términos dichos o los dos órdenes empatan.
  */
-function pairedNumber(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], text: string): number | null {
-  const group = questions.filter((item) => item.responseId === question.responseId && item.type === "numero" && (item.unit ?? null) === (question.unit ?? null))
-  const wordsOf = (item: DictationFormQuestion) => meaningful(item.label.replace(/\([^)]*\)/g, " "))
-  const own = (item: DictationFormQuestion) =>
-    wordsOf(item).filter((word) => !group.some((other) => other !== item && wordsOf(other).some((theirs) => theirs.slice(0, 5) === word.slice(0, 5))))
-  const words = tokensOf(text)
-  const matches = (token: string | undefined, term: string[]) => !!token && term.some((word) => token.slice(0, 5) === word.slice(0, 5) && token.length <= word.length + 3)
-  const terms = group.flatMap((item) => {
-    const term = own(item)
-    const start = words.findIndex((token) => matches(token, term))
-    if (start < 0) return []
-    let end = start
-    while (matches(words[end + 1], term)) end += 1
-    return [{ item, start, end }]
-  })
+function pairedNumber(question: DictationFormQuestion, { words, terms }: NumberTerms): number | null {
   const mine = terms.findIndex((term) => term.item === question)
   if (terms.length < 2 || mine < 0) return null
   const before = terms.map((term) => numberNear(words, term.start - 1, -1))
   const after = terms.map((term) => {
     const read = numberNear(words, term.end + 1, 1)
-    // «obturados a ver 8 no 7»: lo corregido enseguida.
-    const fixed = read && ["no", "perdon"].includes(words[read.next] ?? "") ? numberNear(words, read.next, 1) : null
+    // «obturados a ver 8 no 7», «de 6 no perdón de 4»: lo corregido enseguida, desde lo que sigue al «no».
+    const fixed = read && ["no", "perdon"].includes(words[read.next] ?? "") ? numberNear(words, read.next + 1, 1) : null
     return fixed ?? read
   })
   const counted = (list: Array<{ value: number } | null>) => list.filter(Boolean).length
@@ -965,15 +1091,52 @@ function pairedNumber(question: DictationFormQuestion, questions: readonly Dicta
 }
 
 /**
+ * Los términos de las preguntas de número de la ficha que se dijeron en el texto, con dónde: la
+ * palabra que es solo de cada una («cariados», «extracción indicada», «obturados»), entre las de la
+ * misma ficha y unidad. `own`: la de esta pregunta (vacía si no tiene una suya).
+ */
+function numberTerms(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], text: string) {
+  const group = questions.filter((item) => item.responseId === question.responseId && item.type === "numero" && (item.unit ?? null) === (question.unit ?? null))
+  const wordsOf = (item: DictationFormQuestion) => meaningful(item.label.replace(/\([^)]*\)/g, " "))
+  const ownOf = (item: DictationFormQuestion) =>
+    wordsOf(item).filter((word) => !group.some((other) => other !== item && wordsOf(other).some((theirs) => theirs.slice(0, 5) === word.slice(0, 5))))
+  const words = tokensOf(text)
+  const matches = (token: string | undefined, term: string[]) => !!token && term.some((word) => token.slice(0, 5) === word.slice(0, 5) && token.length <= word.length + 3)
+  const terms = group.flatMap((item) => {
+    const term = ownOf(item)
+    const start = words.findIndex((token) => matches(token, term))
+    if (start < 0) return []
+    let end = start
+    while (matches(words[end + 1], term)) end += 1
+    return [{ item, start, end }]
+  })
+  return { words, terms, own: ownOf(question) }
+}
+
+type NumberTerms = ReturnType<typeof numberTerms>
+
+/**
+ * ¿El número es de otro término dicho, y el de esta pregunta no se oyó? En «descarriados uno con
+ * extracción indicada» (Chrome oyó «tres cariados» así, prueba con voz del 15 nov) el «uno» va con la
+ * extracción: no es de los cariados. Sin otro término al lado, el número dicho vale («déjame medir 7
+ * mm» del overjet).
+ */
+function numberOfAnother(question: DictationFormQuestion, { words, terms, own }: NumberTerms, number: number): boolean {
+  if (!own.length || terms.some((term) => term.item === question)) return false
+  const same = (read: { value: number } | null) => !!read && Math.abs(read.value - number) < 1e-9
+  return terms.some((term) => same(numberNear(words, term.start - 1, -1)) || same(numberNear(words, term.end + 1, 1)))
+}
+
+/**
  * Lo dicho cerca de esta pregunta cuando la oración nombra otras del mismo tipo: desde lo que la
  * distingue («superior»; un número, también dos palabras antes: «dos perdidos») hasta lo que distingue
  * a otra («inferior»). Sin comas, como
  * lo oye Chrome, es lo que separa el valor de una del de la otra. Sin nada suyo, la oración entera.
  */
-function spansOf(question: DictationFormQuestion, others: readonly DictationFormQuestion[], said: string): string[] {
+function spansOf(question: DictationFormQuestion, others: readonly DictationFormQuestion[], heard: string): string[] {
   const mine = labelStems(question.label).filter((stem) => !others.some((other) => labelStems(other.label).includes(stem)))
   const theirs = new Set(others.flatMap((other) => labelStems(other.label)).filter((stem) => !labelStems(question.label).includes(stem)))
-  const words = plain(said).split(/\s+/).filter(Boolean)
+  const words = plain(heard).split(/\s+/).filter(Boolean)
   const stem = (word: string) => word.replace(/[^a-z0-9]/g, "").slice(0, 5)
   const spans = words.flatMap((word, index) => {
     if (!mine.includes(stem(word))) return []
@@ -984,22 +1147,29 @@ function spansOf(question: DictationFormQuestion, others: readonly DictationForm
     while (end < words.length && !theirs.has(stem(words[end] ?? ""))) end += 1
     return [words.slice(start, end).join(" ")]
   })
-  return spans.length ? spans : [said]
+  return spans.length ? spans : [heard]
 }
 
 function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
   site: ProductSite,
-  sentence = "",
+  heardSentence = "",
 ): PreparedFormAnswer | null {
-  const said = (draft.sourceText ?? "").trim()
+  const dictated = (draft.sourceText ?? "").trim()
   // Sin frase comprobada no se guarda: es lo que la persona ve para decidir.
-  if (!said) return null
+  if (!dictated) return null
   const question = questions.find((item) => item.number === draft.payload["question"])
   if (!question) return null
-  const raw = typeof draft.payload["answer"] === "string" ? draft.payload["answer"].trim() : ""
+  // Se comprueba con lo mal oído leído como el término de la ficha; lo que se le muestra a la
+  // persona («Dijiste «…»») es lo dictado, tal cual.
+  const said = heardBy(question, dictated)
+  const sentence = heardBy(question, heardSentence)
   const list = Array.isArray(draft.payload["answers"]) ? draft.payload["answers"].filter((item): item is string => typeof item === "string" && !!item.trim()) : []
+  // Una sola opción en la lista de varias, en una pregunta de una sola, es esa respuesta: el modelo a
+  // veces la escribe ahí (medición del 15 nov, la segunda lectura). Se comprueba igual que las demás.
+  const answer = typeof draft.payload["answer"] === "string" ? draft.payload["answer"].trim() : ""
+  const raw = answer || (question.type !== "opcion_multiple" && list.length === 1 ? (list[0] ?? "").trim() : "")
   const base = {
     responseId: question.responseId,
     fieldId: question.fieldId,
@@ -1035,7 +1205,7 @@ function checkFormAnswer(
   const score = (item: string) => ownStems(item).filter((stem) => spoken.has(stem)).length
   const listNumbers = options.flatMap(optionNumbers)
   const elige = (between: string[]) =>
-    `Dijiste «${shortSaid(said)}»: ${between.length >= 2 ? `no alcanza para elegir entre ${between.map((item) => `«${item}»`).join(" y ")}` : "elige tú la opción"}. Elige tú.`
+    `Dijiste «${shortSaid(dictated)}»: ${between.length >= 2 ? `no alcanza para elegir entre ${between.map((item) => `«${item}»`).join(" y ")}` : "elige tú la opción"}. Elige tú.`
   /**
    * ¿Lo dicho elige esta opción? `null`: no la dijo (no se propone). Una opción
    * que dice que no hay nada exige una negación dicha y que se nombre la
@@ -1077,7 +1247,7 @@ function checkFormAnswer(
       const word = plain(raw)
       // Sí o no, de esta pregunta: si no se la nombra, no se sabe a qué responde.
       if (!labelSaid) return null
-      if (TRUE_WORDS.has(word)) return denies(said) ? review(null, `Dijiste «${shortSaid(said)}»: ¿es sí o no? Elige tú.`) : ready(true)
+      if (TRUE_WORDS.has(word)) return denies(said) ? review(null, `Dijiste «${shortSaid(dictated)}»: ¿es sí o no? Elige tú.`) : ready(true)
       if (FALSE_WORDS.has(word)) return denies(said) ? ready(false) : null
       return null
     }
@@ -1107,10 +1277,13 @@ function checkFormAnswer(
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
-      if (question.type !== "pieza" && APPROXIMATE.test(plain(said))) return review(null, `Dijiste «${shortSaid(said)}»: es aproximado. Escríbelo tú.`)
+      if (question.type !== "pieza" && APPROXIMATE.test(plain(said))) return review(null, `Dijiste «${shortSaid(dictated)}»: es aproximado. Escríbelo tú.`)
       // Lo que se corrigió («24 kg no 22 perdón») y el orden sin puntuación («uno con extracción indicada dos
       // obturados»): vale el número que lo dicho le da a esta pregunta (prueba con voz del 15 nov).
-      const meant = question.type === "pieza" ? null : ((question.type === "numero" ? pairedNumber(question, questions, sentence || said) : null) ?? correctedNumber(said, sentence))
+      // El número de otro término dicho no es de esta pregunta, si su término no se oyó.
+      const terms = question.type === "numero" ? numberTerms(question, questions, sentence || said) : null
+      if (terms && numberOfAnother(question, terms, number)) return null
+      const meant = question.type === "pieza" ? null : ((terms ? pairedNumber(question, terms) : null) ?? correctedNumber(said, sentence))
       if (meant !== null) number = meant
       if (question.type === "pieza") {
         if (!Number.isInteger(number) || site.code(number) === null) return review(null, `${site.invalid(number) ?? "Esa pieza no existe"}. Elige tú.`)

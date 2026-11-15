@@ -801,15 +801,18 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(await answersNow()).toMatchObject({ overjet: 1 })
   })
 
-  it("lo dicho para la ficha que no queda como propuesta vuelve con su motivo", async () => {
-    const { save } = await startedForm()
+  it("lo dicho para la ficha que no queda como propuesta vuelve con su motivo y su pregunta", async () => {
+    const { save, form } = await startedForm()
     const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis centímetros" }])
     expect(saved.suggestions).toEqual([])
-    expect(saved.droppedForms).toEqual([{ said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha." }])
+    // Con la pregunta que nombra: «Usar en Overjet» la abre con la frase al lado.
+    expect(saved.droppedForms).toEqual([
+      { said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha.", targets: [{ responseId: form.id, fieldId: "overjet", label: "Overjet" }] },
+    ])
   })
 
   it("lo dicho para la ficha no se pierde en silencio: sin propuesta ni aviso, la oración vuelve con la pregunta", async () => {
-    const { fx, questions } = await startedForm()
+    const { fx, questions, form } = await startedForm()
     const formQuestions = await questions()
     const transcript = "Overjet de seis. El diagnóstico es maloclusión clase dos división uno. Overbite de dos."
     // El modelo respondió el overjet sin una frase que se encuentre en lo dictado, y no respondió el overbite.
@@ -823,13 +826,32 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(saved.suggestions).toEqual([])
     // El diagnóstico no nombra la clase molar: no se avisa como si fuera de ella.
     expect(saved.droppedForms).toEqual([
-      { said: "Overjet de seis.", why: "Parece de «Overjet»: revísala en la ficha." },
-      { said: "Overbite de dos.", why: "Parece de «Overbite»: revísala en la ficha." },
+      { said: "Overjet de seis.", why: "Parece de «Overjet»: revísala en la ficha.", targets: [{ responseId: form.id, fieldId: "overjet", label: "Overjet" }] },
+      { said: "Overbite de dos.", why: "Parece de «Overbite»: revísala en la ficha.", targets: [{ responseId: form.id, fieldId: "overbite", label: "Overbite" }] },
+    ])
+  })
+
+  it("la segunda lectura que calza queda por revisar y se confirma de a una; la que no calza deja el aviso", async () => {
+    const { fx, questions, form, answersNow } = await startedForm()
+    const formQuestions = await questions()
+    const pause = (transcript: string, drafts: Array<{ kind: "ficha"; payload: Record<string, unknown>; sourceText: string; reread?: boolean }>) =>
+      fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts, transcript, formQuestions }))
+    const read = await pause("a ver over byte de 4 succión", [{ kind: "ficha", payload: { question: 3, answer: "4" }, sourceText: "over byte de 4", reread: true }])
+    expect(read.droppedForms).toEqual([])
+    const [proposal] = read.suggestions
+    expect(proposal).toMatchObject({ status: "por_revisar", payload: { fieldId: "overbite", value: 4, reread: true } })
+    await fx.run((tx) => confirmDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, proposal!.id, { expectedValue: 4 }))
+    expect(await answersNow()).toMatchObject({ overbite: 4 })
+    // Lo que no calza no se propone ni cambia el aviso: la red sigue diciendo de qué pregunta parece.
+    const missed = await pause("Overjet de seis.", [{ kind: "ficha", payload: { question: 2, answer: "5" }, sourceText: "Overjet de seis", reread: true }])
+    expect(missed.suggestions).toEqual([])
+    expect(missed.droppedForms).toEqual([
+      { said: "Overjet de seis.", why: "Parece de «Overjet»: revísala en la ficha.", targets: [{ responseId: form.id, fieldId: "overjet", label: "Overjet" }] },
     ])
   })
 
   it("lo que ya propone una pendiente no se avisa otra vez; otro valor dicho sin corregirla, sí", async () => {
-    const { fx, questions } = await startedForm()
+    const { fx, questions, form } = await startedForm()
     const formQuestions = await questions()
     const pause = (transcript: string, drafts: Array<{ kind: "ficha"; payload: Record<string, unknown>; sourceText: string }> = []) =>
       fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts, transcript, formQuestions }))
@@ -837,7 +859,9 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     expect(first.suggestions).toHaveLength(1)
     expect(first.droppedForms).toEqual([])
     expect((await pause("Como te decía, overjet de seis.")).droppedForms).toEqual([])
-    expect((await pause("Overjet de cuatro.")).droppedForms).toEqual([{ said: "Overjet de cuatro.", why: "Parece de «Overjet»: revísala en la ficha." }])
+    expect((await pause("Overjet de cuatro.")).droppedForms).toEqual([
+      { said: "Overjet de cuatro.", why: "Parece de «Overjet»: revísala en la ficha.", targets: [{ responseId: form.id, fieldId: "overjet", label: "Overjet" }] },
+    ])
   })
 
   it("con la ficha empezada, la nota no repite lo que fue para la ficha", async () => {

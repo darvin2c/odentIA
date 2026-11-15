@@ -18,7 +18,10 @@
  *   - de lo perdido, si el profesional lo ve en «No pude usar esto» (por el
  *     motivo de lo parado o por la red de la oración, con `formDropNotices`,
  *     la misma función del servidor) o se perdió en silencio, y cuántos
- *     avisos da la red sobre preguntas que el dictado no espera.
+ *     avisos da la red sobre preguntas que el dictado no espera;
+ *   - la segunda lectura, como en la atención (`formNetMisses` y
+ *     `rereadFormSentences`): cuántas oraciones lee de nuevo, cuántas quedan por
+ *     revisar con el valor esperado o con otro, y lo que cuesta aparte.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
  *
@@ -33,6 +36,7 @@ import { dirname, join, resolve } from "node:path"
 import {
   type DictationFormQuestion,
   formDropNotices,
+  formNetMisses,
   formQuestionsOf,
   prepareFormAnswer,
   productHooksFor,
@@ -40,8 +44,8 @@ import {
   withFormTwins,
   withoutFormNotes,
 } from "@odentia/services"
-import { costMicrosOf } from "./ai-usage.js"
-import { askDictationModel, type DictationProfile } from "./dictation.js"
+import { costMicrosOf, withAiMeter } from "./ai-usage.js"
+import { askDictationModel, type DictationProfile, rereadFormSentences } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
 
@@ -105,7 +109,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "").split(",").filter(Boolean)
-const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0 }
 /** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
 const netExtra: string[] = []
 const now = new Date()
@@ -139,8 +143,9 @@ for (const dictation of cases) {
     }),
   )
   if (questions.length) totals.conFichas += 1
+  const model = await modelOf(product.profile)
   const { read, reply, raw } = await askDictationModel(
-    await modelOf(product.profile),
+    model,
     spec,
     {
       provider: spec.provider,
@@ -171,25 +176,45 @@ for (const dictation of cases) {
     saveRaw({ id: dictation.id, texto: dictation.texto, notas: ["no respondió con la herramienta"], crudo: rawOf(raw, reply.content) })
     continue
   }
+  // Como la atención (`extractDictation`): lo que la red avisaría se lee una vez más, y su costo se cuenta aparte.
+  const misses = formNetMisses(read.drafts, questions, product.site, dictation.texto)
+  let reread: typeof read.drafts = []
+  if (misses.length) {
+    totals.relecturas += 1
+    totals.releidas += misses.length
+    reread = await withAiMeter(
+      () => rereadFormSentences(model, spec, misses, questions),
+      async (entries) => {
+        for (const entry of entries) {
+          if (entry.costMicros === null) totals.relecturaSinCosto += 1
+          else totals.relecturaCosto += entry.costMicros
+        }
+      },
+    )
+  }
+  const dictated = [...read.drafts, ...reread]
   // Como el servidor: el diagnóstico que también pregunta una ficha va a los dos lugares, y la nota
   // pierde lo que fue para la ficha y las frases que solo corrigen.
-  const all = withDiagnosisFormAnswers(read.drafts, questions)
-  const derived = new Set(all.slice(read.drafts.length))
+  const all = withDiagnosisFormAnswers(dictated, questions)
+  const derived = new Set(all.slice(dictated.length))
   const answers = all.filter((draft) => draft.kind === "ficha")
   const noteText = withoutFormNotes(all, questions, product.site, dictation.texto)
     .filter((draft) => draft.kind === "nota")
     .flatMap((draft) => Object.values(draft.payload).filter((value): value is string => typeof value === "string"))
     .join(" ")
     .toLowerCase()
-  totals.leidas += answers.length
+  totals.leidas += read.drafts.filter((draft) => draft.kind === "ficha").length
   const notes: string[] = []
   const listed = new Map<string, unknown>()
   const reviewed = new Map<string, unknown>()
+  /** Lo que la segunda lectura dejó por revisar, con su valor. */
+  const rereadValues = new Map<string, unknown>()
   // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
   // la misma pregunta en una pausa vale la última.
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
   for (const draft of derived) twins.add(draft)
-  const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
+  // La respuesta tal cual, con su marca de la segunda lectura: lo que la atención deja por revisar.
+  const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, product.site, dictation.texto) }))
   const keyOf = ({ responseId, fieldId }: { responseId?: unknown; fieldId?: unknown }) => `${String(responseId)}.${String(fieldId)}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
   // Lo que va a «No pude usar esto», con la misma función que el servidor: lo parado con su motivo y
@@ -228,6 +253,7 @@ for (const dictation of cases) {
     if (last.get(key) !== index) continue
     if (ready.status === "lista") listed.set(key, ready.payload["value"])
     else reviewed.set(key, ready.payload["value"])
+    if (ready.payload["reread"] === true) rereadValues.set(key, ready.payload["value"])
   }
   const expected = dictation.espera.fichas ?? {}
   for (const [key, value] of Object.entries(expected)) {
@@ -237,7 +263,10 @@ for (const dictation of cases) {
       totals.perdidas += 1
       // ¿Lo supo el profesional? Por el motivo de lo parado, por la red, o en silencio.
       let how = "en silencio"
-      if (noticedKeys.has(key)) {
+      if (rereadValues.has(key)) {
+        totals.perdidasPorRevisar += 1
+        how = same(rereadValues.get(key), value) ? "por revisar con su valor, de la segunda lectura" : `por revisar con otro valor (${JSON.stringify(rereadValues.get(key))}), de la segunda lectura`
+      } else if (noticedKeys.has(key)) {
         totals.perdidasAvisadas += 1
         how = "con aviso"
       } else if (caughtKeys.has(key)) {
@@ -268,6 +297,20 @@ for (const dictation of cases) {
       notes.push(`LISTA SOBRE LO ESCRITO ${key} = ${JSON.stringify(listed.get(key))}`)
     } else if (reviewed.has(key) && same(reviewed.get(key), value)) totals.cambiaBien += 1
     else notes.push(`no propuso el cambio de ${key}`)
+  }
+  // La segunda lectura: por revisar con el valor esperado, con otro, o en una pregunta que no se espera.
+  for (const [key, value] of rereadValues) {
+    totals.relecturaRevisar += 1
+    if (key in expected) {
+      if (same(expected[key], value)) totals.relecturaBien += 1
+      else {
+        totals.relecturaOtroValor += 1
+        notes.push(`la segunda lectura propone ${key} = ${JSON.stringify(value)} por revisar`)
+      }
+    } else if (!dictation.ignora?.includes(key) && !(key in changes)) {
+      totals.relecturaDeMas += 1
+      notes.push(`la segunda lectura propone ${key} = ${JSON.stringify(value)} por revisar, sin esperarlo`)
+    }
   }
   for (const key of dictation.espera.revisar ?? []) {
     totals.revisarEsperadas += 1
@@ -311,6 +354,7 @@ for (const dictation of cases) {
       // Lo que vería en «No pude usar esto»: por el motivo de lo parado o por la red.
       avisos: notices,
       noUsado: read.unused,
+      ...(misses.length ? { segundaLectura: { oraciones: misses, respuestas: reread } } : {}),
     })
   }
   if (solo.length === 1) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
@@ -323,11 +367,16 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
 console.log(
-  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed} en silencio`,
+  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidasPorRevisar} por revisar de la segunda lectura, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed - totals.perdidasPorRevisar} en silencio`,
 )
 console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMas} de preguntas que el dictado no espera${netExtra.length ? `:\n  ${netExtra.join("\n  ")}` : ""}`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
-console.log(`Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`)
+console.log(
+  `Segunda lectura: ${totals.relecturas} pausas, ${totals.releidas} oraciones leídas de nuevo; ${totals.relecturaRevisar} respuestas por revisar (${totals.relecturaBien} con el valor esperado, ${totals.relecturaOtroValor} con otro valor, ${totals.relecturaDeMas} donde no se esperaba); de las perdidas, ${totals.perdidasPorRevisar} quedaron por revisar`,
+)
+console.log(
+  `Costo: USD ${((totals.costo + totals.relecturaCosto) / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}; la segunda lectura, USD ${(totals.relecturaCosto / 1_000_000).toFixed(4)} (${totals.costo ? Math.round((100 * totals.relecturaCosto) / totals.costo) : 0} % más)${totals.relecturaSinCosto ? `, ${totals.relecturaSinCosto} sin costo informado` : ""}`,
+)
 if (rawSaved) console.log(`Lo que respondió el modelo en los ${rawSaved} dictados con algo perdido o inventado: ${rawFile}`)

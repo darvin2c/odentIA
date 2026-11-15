@@ -22,7 +22,7 @@ describe("«Fichas para esta atención» en la atención", () => {
 describe("la anterior, debajo de cada pregunta", () => {
   it("queda unida a su pregunta y dice «debajo», no «al lado»", () => {
     const detail = source("./formularios-tab.tsx")
-    expect(detail).toContain("describedBy={previous && before ? beforeId : undefined}")
+    expect(detail).toContain("describedBy={[previous && before ? beforeId : null, said ? saidId : null].filter(Boolean).join(\" \") || undefined}")
     expect(detail).toContain("<span id={beforeId}>")
     expect(detail).not.toMatch(/Al lado, la anterior/)
     expect(source("./form-fields.tsx")).toContain("[control.describedBy, describedBy]")

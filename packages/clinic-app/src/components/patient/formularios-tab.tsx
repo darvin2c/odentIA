@@ -529,11 +529,33 @@ function StaffResponseDetail({
     if (valued.length > 0) setAnnouncement(`${CLINICAL_NAME} propone ${answersWords(valued.length)} en esta ficha.`)
   }, [valued.length])
   const busy = confirming || !!clio?.busy
+  /** Lo que se escribe o elige en una pregunta de esta ficha. */
+  const fieldControl = (fieldId: string) =>
+    articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, textarea, button, [role="combobox"])`) ?? null
+  // «Usar en Percusión» de «No pude usar esto»: lo dictado va al lado de su pregunta mientras siga
+  // vacía, y el foco va a ella. No llena nada: la respuesta la elige o la escribe la persona.
+  const hint = editable && clio?.hint?.responseId === response.id ? clio.hint : null
+  const hintFor = (fieldId: string) => (hint?.fieldId === fieldId && isEmptyAnswer(answers[fieldId]) ? hint : null)
+  useEffect(() => {
+    if (!hint) return
+    const focus = () => {
+      const control = fieldControl(hint.fieldId)
+      if (!control || control.closest("[data-field]")?.contains(document.activeElement)) return
+      control.scrollIntoView?.({ block: "center" })
+      control.focus()
+    }
+    const frame = requestAnimationFrame(focus)
+    // El cajón pone el foco al abrirse: cuando termina, vuelve a la pregunta.
+    const later = setTimeout(focus, 300)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(later)
+    }
+  }, [hint])
   /** Tras confirmar o descartar el botón desaparece: el foco vuelve a la pregunta, o a la ficha. */
   const focusAfter = (fieldId: string | null) =>
     requestAnimationFrame(() => {
-      const question = fieldId ? articleRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(fieldId)}"] :is(input, button, [role="combobox"])`) : null
-      ;(question ?? articleRef.current)?.focus()
+      ;((fieldId ? fieldControl(fieldId) : null) ?? articleRef.current)?.focus()
     })
   // Respondida a mano, la pregunta ya es de la persona: lo que proponía Clío ahí se descarta solo,
   // y no aparece después en «Firmar la atención». Si la respondió otra persona, se dice qué quedó.
@@ -1015,6 +1037,8 @@ function StaffResponseDetail({
                     // «Usar»: copia la respuesta anterior a la de hoy con un clic (la pieza, la clase…); nada se copia solo.
                     const reusable = editable && before ? reusableAnswer(field, before, earlier) : undefined
                     const beforeId = `${ids}-antes-${field.id}`
+                    const said = hintFor(field.id)
+                    const saidId = `${ids}-dictado-${field.id}`
                     const proposal = proposalFor(field.id)
                     const changes = proposal ? changesWritten(proposal) : false
                     const valued = proposal ? proposesValue(proposal) : false
@@ -1029,9 +1053,29 @@ function StaffResponseDetail({
                           hideLabel={field === twin}
                           disabled={!editable}
                           attachments={attachments}
-                          // La respuesta anterior se oye al llegar a la pregunta, no solo se ve.
-                          describedBy={previous && before ? beforeId : undefined}
+                          // La respuesta anterior y lo dictado se oyen al llegar a la pregunta, no solo se ven.
+                          describedBy={[previous && before ? beforeId : null, said ? saidId : null].filter(Boolean).join(" ") || undefined}
                         />
+                        {said ? (
+                          <div className="flex flex-wrap items-center justify-between gap-1 rounded-lg bg-agent-soft px-2 py-1 text-sm">
+                            <span id={saidId} className="min-w-0 [overflow-wrap:anywhere]">
+                              <strong>Dictaste:</strong> «{said.said}». Elige o escribe la respuesta.
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="size-11 sm:size-8"
+                              aria-label={`Quitar lo dictado de «${field.label}»`}
+                              onClick={() => {
+                                clio?.clearHint()
+                                focusAfter(field.id)
+                              }}
+                            >
+                              <X className="size-4" aria-hidden />
+                            </Button>
+                          </div>
+                        ) : null}
                         {proposal ? (
                           <div
                             role="group"
@@ -1046,9 +1090,10 @@ function StaffResponseDetail({
                                   {proposedWords({ ...proposal, payload: { ...proposal.payload, value: proposal.payload["replaces"] } })}»
                                   {proposal.sourceText ? `; dijiste «${proposal.sourceText}»` : ""}.
                                 </>
-                              ) : proposal.status === "lista" ? (
+                              ) : proposal.status === "lista" || valued ? (
                                 <>
-                                  <strong>{CLINICAL_NAME} propone:</strong> {proposedWords(proposal)}
+                                  {/* La de la segunda lectura también propone un valor, pero por revisar: se dice. */}
+                                  <strong>{CLINICAL_NAME} propone{proposal.status === "lista" ? "" : ", revísala"}:</strong> {proposedWords(proposal)}
                                   {proposal.sourceText ? ` · dijiste «${proposal.sourceText}»` : ""}
                                 </>
                               ) : (
