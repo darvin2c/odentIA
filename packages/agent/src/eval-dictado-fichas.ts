@@ -12,6 +12,8 @@
  *   - inventadas: lo que quedaría listo y no se dijo así (otra pregunta, otro
  *     valor, o algo con la ficha sin empezar). El criterio es cero;
  *   - perdidas: lo esperado que no quedó listo. Callar es el error barato;
+ *   - lo que cambia una respuesta ya escrita: tiene que quedar por revisar, con
+ *     el valor dicho, y nunca lista (revisión final del 15 nov, decisión 2);
  *   - lo que el modelo respondió y la comprobación del servidor paró.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
@@ -37,8 +39,11 @@ interface FormCase {
   producto?: "odentia" | "latidia"
   texto: string
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
-  /** `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones). */
-  espera: { fichas?: Record<string, unknown>; revisar?: string[]; nota?: string[]; noEnNota?: string[] }
+  /**
+   * `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones).
+   * `cambia`: lo que cambia una respuesta ya escrita, que queda por revisar con ese valor.
+   */
+  espera: { fichas?: Record<string, unknown>; revisar?: string[]; cambia?: Record<string, unknown>; nota?: string[]; noEnNota?: string[] }
 }
 
 function arg(name: string, fallback: string): string {
@@ -85,7 +90,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "")
-const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
 const now = new Date()
 const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo || item.id === solo))
 
@@ -144,7 +149,7 @@ for (const dictation of cases) {
   totals.leidas += answers.length
   const notes: string[] = []
   const listed = new Map<string, unknown>()
-  const reviewed = new Set<string>()
+  const reviewed = new Map<string, unknown>()
   // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
   // la misma pregunta en una pausa vale la última.
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
@@ -160,7 +165,7 @@ for (const dictation of cases) {
     const key = keyOf(ready.payload)
     if (last.get(key) !== index) continue
     if (ready.status === "lista") listed.set(key, ready.payload["value"])
-    else reviewed.add(key)
+    else reviewed.set(key, ready.payload["value"])
   }
   const expected = dictation.espera.fichas ?? {}
   for (const [key, value] of Object.entries(expected)) {
@@ -171,8 +176,11 @@ for (const dictation of cases) {
       notes.push(`perdió ${key}`)
     }
   }
+  const changes = dictation.espera.cambia ?? {}
   for (const [key, value] of listed) {
     if (key in expected && same(expected[key], value)) continue
+    // Cambia lo escrito y quedó lista: el error de la decisión 2, contado aparte.
+    if (key in changes) continue
     // Varias opciones, solo parte de lo esperado: se perdió una, no se inventó nada (ya cuenta como perdida).
     const want = expected[key]
     if (Array.isArray(want) && Array.isArray(value) && value.length > 0 && value.every((item) => want.includes(item))) {
@@ -181,6 +189,14 @@ for (const dictation of cases) {
     }
     totals.inventadas += 1
     notes.push(`INVENTÓ ${key} = ${JSON.stringify(value)}`)
+  }
+  for (const [key, value] of Object.entries(changes)) {
+    totals.cambiaEsperadas += 1
+    if (listed.has(key)) {
+      totals.cambiaListas += 1
+      notes.push(`LISTA SOBRE LO ESCRITO ${key} = ${JSON.stringify(listed.get(key))}`)
+    } else if (reviewed.has(key) && same(reviewed.get(key), value)) totals.cambiaBien += 1
+    else notes.push(`no propuso el cambio de ${key}`)
   }
   for (const key of dictation.espera.revisar ?? []) {
     totals.revisarEsperadas += 1
@@ -200,7 +216,7 @@ for (const dictation of cases) {
   }
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   const shown = [...listed].map(([key, value]) => `${key.split(".").at(-1)}=${JSON.stringify(value)}`).join(", ")
-  console.log(`${notes.some((note) => note.startsWith("INVENTÓ")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
+  console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
   if (solo) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
 }
 
@@ -211,5 +227,6 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
+console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
 console.log(`Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`)
