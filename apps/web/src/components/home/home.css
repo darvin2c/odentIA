@@ -124,7 +124,7 @@
   max-width: 500px;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 22px;
   pointer-events: auto;
 }
 .home .hh-title {

@@ -450,16 +450,21 @@ details.q p {
 
 /* Las áreas de la clínica donde trabaja cada agente, debajo del título de las portadas: el área en
    versalitas y el agente con su color. */
+.arm-pitch {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 .arm-areas {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 .arm-areas li {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-columns: 128px minmax(0, 1fr);
   align-items: baseline;
   gap: 12px;
   font-size: 17px;
