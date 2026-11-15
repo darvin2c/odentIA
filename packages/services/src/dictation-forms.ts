@@ -476,13 +476,28 @@ export function prepareFormAnswer(
   const checked = checkWithWritten(draft, questions, site, transcript)
   if (!draft.reread || !checked) return checked
   // La segunda lectura de una oración de la red: solo un valor que calza, y siempre por revisar.
-  // Sin valor no se propone: el aviso de la red se queda. Su frase tiene que nombrar la pregunta: la
-  // oración releída puede ser todo lo dictado sin puntos, y en ella «de 6 no perdón de 4 mm» es del
-  // overjet, no del overbite (prueba con voz del 15 nov, c3, v02).
+  // Sin valor no se propone: el aviso de la red se queda. Su frase tiene que estar en lo que la
+  // oración dice de esa pregunta: sin puntos, la oración releída puede ser todo lo dictado, y en ella
+  // «de 6 no perdón de 4 mm» es del overjet, no del overbite (prueba con voz del 15 nov, c3, v02).
   if (checked.payload["value"] == null) return null
   const question = questions.find((item) => item.number === draft.payload["question"])
-  if (!question || !namesQuestion(question, heardBy(question, draft.sourceText ?? ""), site)) return null
+  if (!question || !saidAboutQuestion(question, questions, site, draft.sourceText ?? "", transcript)) return null
   return { ...checked, payload: { ...checked.payload, reread: true }, status: "por_revisar", note: checked.note ?? REREAD_NOTE }
+}
+
+/**
+ * ¿La frase habla de esta pregunta? La nombra («dolor a la percusión») o está en lo que su oración
+ * dice de ella: si la oración nombra otra del mismo tipo de su ficha, entre el término de esta y el
+ * de la otra (`spansOf`, como la red); si no, en cualquier parte de la oración.
+ */
+function saidAboutQuestion(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], site: ProductSite, said: string, transcript: string | undefined): boolean {
+  if (namesQuestion(question, heardBy(question, said), site)) return true
+  const sentence = sentenceOf(transcript, said) || said
+  const others = questions.filter(
+    (other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, heardBy(other, sentence), site),
+  )
+  const phrase = plain(heardBy(question, said))
+  return spansOf(question, others, heardBy(question, sentence)).some((span) => plain(span).includes(phrase))
 }
 
 /** La respuesta de ficha que propone Clío, con la frase de la que sale. */
@@ -1290,6 +1305,12 @@ function checkFormAnswer(
   // La frase (o su oración) tiene que hablar de esta pregunta: el lado, canina o molar, superior o inferior.
   const context = new Set([...spoken, ...stemsOf(withoutOtherTests(question, sentence))])
   if (!talksAbout(question, context) || namesAnother(question, said) || partOfOtherTest(question, said, sentence)) return null
+  // La frase que nombra otra pregunta del mismo tipo de su ficha, y no esta, es de la otra: «Overbite
+  // de tres, no, perdón, de dos y medio» no responde el overjet (medición del 15 nov, orto-21).
+  const namesSibling = questions.some(
+    (other) => other !== question && other.responseId === question.responseId && other.type === question.type && labelNamed(other, heardBy(other, dictated), site),
+  )
+  if (namesSibling && !labelNamed(question, said, site)) return null
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })

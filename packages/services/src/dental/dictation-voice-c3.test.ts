@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-// Por el índice, que carga primero los productos (ver `dental/index.ts`).
-import { anatomyFromName } from "./dental/index.js"
-import { type DictationFormQuestion, formNetMisses, formQuestionsOf, prepareFormAnswer } from "./dictation-forms.js"
-import { dictatedService } from "./encounter-dictation.js"
-import type { ProductSite } from "./product-hooks.js"
-import { productHooksFor } from "./products.js"
+// Por el índice, que carga primero los productos (ver `index.ts`).
+import { anatomyFromName } from "./index.js"
+import { type DictationFormQuestion, formNetMisses, formQuestionsOf, prepareFormAnswer } from "../dictation-forms.js"
+import { dictatedService } from "../encounter-dictation.js"
+import type { ProductSite } from "../product-hooks.js"
+import { productHooksFor } from "../products.js"
 
 /**
  * Lo que encontró la tercera prueba con voz del 15 nov (corrida c3, sobre
@@ -106,5 +106,16 @@ describe("la segunda lectura vale solo con una frase que nombra su pregunta (v02
 
   it("con la frase que nombra el overbite, queda por revisar con su valor", () => {
     expect(reread("3", "over byte de Point de tres")).toMatchObject({ status: "por_revisar", payload: { value: 3, reread: true } })
+  })
+
+  it("la frase que nombra el overbite no responde el overjet (medición del 15 nov, orto-21)", () => {
+    const said = "Overbite de tres, no, perdón, de dos y medio."
+    expect(prepareFormAnswer({ payload: { question: number("overjet"), answer: "2.5" }, sourceText: said }, ortho, FDI, said)).toBeNull()
+  })
+
+  it("en una oración que solo habla del overbite, la corrección dicha vale aunque no lo repita", () => {
+    const said = "Overbite de tres, no, perdón, de dos y medio."
+    const draft = { payload: { question: number("overbite"), answer: "2.5" }, sourceText: "de dos y medio", reread: true }
+    expect(prepareFormAnswer(draft, ortho, FDI, `Control de ortodoncia. ${said} La derecha en clase dos.`)).toMatchObject({ status: "por_revisar", payload: { value: 2.5 } })
   })
 })
