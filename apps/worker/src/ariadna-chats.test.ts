@@ -256,6 +256,20 @@ describe("Ariadna en los chats", () => {
     await tx((db) => setKairosSells(db, ana, false, at))
   })
 
+  it("si Soporte escribe a mano, Ariadna deja de responder en esa conversación", async () => {
+    const at = new Date(monday.getTime() + 80 * MIN)
+    const chatId = await clinicChat("+51911000009", "¿cómo anulo una cita?", at)
+    await tx((db) => prepareChatReply(db, sol, chatId, { body: "Hola, te ayudo yo." }, at))
+    const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
+    expect(chat).toMatchObject({ kairosPausedBy: sol.userId })
+    expect(chat?.kairosPausedAt).not.toBeNull()
+    await write("+51911000009", "gracias, ¿y cómo la muevo?", new Date(at.getTime() + MIN))
+    await tick(new Date(at.getTime() + 2 * MIN))
+    const out = await replies(chatId)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ byAriadna: false, createdBy: sol.userId })
+  })
+
   it("pasado el tope del día en una conversación, pasa a Soporte sin llamar a Ariadna", async () => {
     const at = new Date(monday.getTime() + 100 * MIN)
     let chatId = await clinicChat("+51911000008", "hola", new Date(at.getTime() - 41 * MIN))
