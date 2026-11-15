@@ -12,9 +12,11 @@ import {
   formAnswerDropReason,
   formAnswerFragments,
   formQuestionsOf,
+  formSentencesWithoutAnswer,
   prepareFormAnswer,
   saidNumbers,
   withDiagnosisFormAnswers,
+  withoutFormNotes,
   withoutFormPhrases,
 } from "./dictation-forms.js"
 import {
@@ -126,8 +128,10 @@ describe("lo que propone Clío se comprueba contra lo que se dijo", () => {
   })
   it("varias opciones: solo las que están en la lista", () => {
     expect(propose({ question: 6, answers: ["Onicofagia", "Bruxismo"] }, "hábitos: onicofagia")).toMatchObject({ status: "lista", payload: { value: ["Onicofagia"] } })
-    // La opción exige su palabra: «se come las uñas» no dice «Onicofagia» (decidido el 14 nov).
-    expect(propose({ question: 6, answers: ["Onicofagia"] }, "se come las uñas")).toBeNull()
+    // La opción exige su palabra o cómo se dice en la consulta: «se come las uñas» es «Onicofagia» (prueba con voz
+    // del 15 nov; el 14 nov se había decidido que no). «las uñas» sola no.
+    expect(propose({ question: 6, answers: ["Onicofagia"] }, "se come las uñas")).toMatchObject({ status: "lista", payload: { value: ["Onicofagia"] } })
+    expect(propose({ question: 6, answers: ["Onicofagia"] }, "tiene las uñas cortas")).toBeNull()
   })
 })
 
@@ -403,6 +407,166 @@ describe("lo que la medición del 14 nov mostró que se perdía", () => {
   })
 })
 
+describe("lo que la medición del 15 nov mostró que se perdía en silencio", () => {
+  // Las fichas de odentIA por el registro de productos (ADR 0079), con su clave como id.
+  const formsOf = (keys: string[], answers: Record<string, Record<string, unknown>> = {}) =>
+    formQuestionsOf(
+      keys.map((key) => {
+        const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === key)!
+        return { id: key, title: form.title, snapshot: form.schema, answers: answers[key] ?? {} }
+      }),
+    )
+  const endo = formsOf(["evaluacion-de-endodoncia"])
+  const numberOf = (forms: DictationFormQuestion[], fieldId: string) => forms.find((item) => item.fieldId === fieldId)!.number
+  const ask = (fieldId: string, answer: string, said: string) => prepareFormAnswer({ payload: { question: numberOf(endo, fieldId), answer }, sourceText: said }, endo, FDI, said)
+  const net = (forms: DictationFormQuestion[], transcript: string, handled: string[] = []) =>
+    formSentencesWithoutAnswer(transcript, forms, new Set(handled.map((fieldId) => numberOf(forms, fieldId))), FDI).map(({ said, why }) => ({ said, why }))
+
+  it("«dolor a la percusión» y «dolor a la palpación» son «Positiva»; con una negación, no", () => {
+    expect(ask("percusion", "Positiva", "Dolor a la percusión")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("palpacion", "Positiva", "duele a la palpación en el fondo de vestíbulo")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("palpacion", "Positiva", "dolor al palpar")).toMatchObject({ status: "lista", payload: { value: "Positiva" } })
+    expect(ask("percusion", "Positiva", "no hay dolor a la percusión")).toBeNull()
+    expect(ask("percusion", "Negativa", "sin dolor a la percusión")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
+    // «ni» también niega: «sin dolor a la percusión ni a la palpación».
+    expect(ask("palpacion", "Negativa", "ni a la palpación")).toMatchObject({ status: "lista", payload: { value: "Negativa" } })
+    // El dolor a la percusión no dice nada de la palpación.
+    expect(ask("palpacion", "Positiva", "dolor a la percusión")).toBeNull()
+    // Ni de la pregunta «Dolor»: «sin dolor a la percusión» no es «Sin dolor» (lo inventaba en el caso nuevo).
+    expect(ask("dolor", "Sin dolor", "Sin dolor a la percusión ni a la palpación")).toBeNull()
+    expect(ask("dolor", "Sin dolor", "sin dolor")).toMatchObject({ status: "lista", payload: { value: "Sin dolor" } })
+    // Tampoco si cita solo el pedazo «Sin dolor» de esa oración.
+    const pain = { payload: { question: numberOf(endo, "dolor"), answer: "Sin dolor" }, sourceText: "Sin dolor" }
+    expect(prepareFormAnswer(pain, endo, FDI, "Pieza cuarenta y seis. Sin dolor a la percusión ni a la palpación.")).toBeNull()
+    expect(prepareFormAnswer(pain, endo, FDI, "Pieza cuarenta y seis. Sin dolor.")).toMatchObject({ status: "lista" })
+  })
+
+  it("la opción respondida con su número («4») es la que empieza con ese número, y se comprueba igual", () => {
+    const kid = formsOf(["ficha-de-odontopediatria"])
+    const frankl = (answer: string, said: string) => prepareFormAnswer({ payload: { question: numberOf(kid, "conducta"), answer }, sourceText: said }, kid, FDI, said)
+    expect(frankl("4", "Frankl cuatro")).toMatchObject({ status: "lista", payload: { value: "4 · Definitivamente positiva" } })
+    // El número tiene que estar dicho, como con la opción escrita entera.
+    expect(frankl("4", "Frankl tres")).not.toMatchObject({ status: "lista" })
+    // «Grado 1» no empieza con su número: «1» no la elige.
+    expect(ask("movilidad", "1", "movilidad grado uno")).toBeNull()
+  })
+
+  it("la oración que nombra una pregunta sin propuesta ni aviso va a «No pude usar esto»", () => {
+    const kid = formsOf(["ficha-de-odontopediatria", "ficha-de-ortodoncia"])
+    expect(net(kid, "Frankl tres, colaboró bien. Overjet de tres.")).toEqual([
+      { said: "Frankl tres, colaboró bien.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+      { said: "Overjet de tres.", why: "Parece de «Overjet»: revísala en la ficha." },
+    ])
+    // Lo que ya quedó propuesto o avisado no se vuelve a avisar.
+    expect(net(kid, "Frankl tres, colaboró bien. Overjet de tres.", ["overjet"])).toEqual([
+      { said: "Frankl tres, colaboró bien.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+    ])
+    expect(net(kid, "Conducta definitivamente negativa, lloró toda la consulta.")).toEqual([
+      { said: "Conducta definitivamente negativa, lloró toda la consulta.", why: "Parece de «Conducta (escala de Frankl)»: revísala en la ficha." },
+    ])
+    expect(net(endo, "Dolor a la percusión en la cuatro seis, ocho de diez.", ["dolor_intensidad"])).toEqual([
+      { said: "Dolor a la percusión en la cuatro seis, ocho de diez.", why: "Parece de «Pieza» y «Percusión»: revísalas en la ficha." },
+    ])
+    expect(net(endo, "Control de la cuarenta y seis.")).toEqual([{ said: "Control de la cuarenta y seis.", why: "Parece de «Pieza»: revísala en la ficha." }])
+  })
+
+  it("sin falsos avisos: la oración que no nombra la pregunta, o no dice su valor, no avisa", () => {
+    const ortho = formsOf(["ficha-de-ortodoncia"])
+    expect(net(ortho, "El diagnóstico es maloclusión clase dos división uno.")).toEqual([])
+    expect(net(ortho, "Buena higiene, sin caries. Seguimos con el arco de acero, control en un mes.")).toEqual([])
+    // «dolor» sin su tipo no es la pregunta «Dolor», ni lo de la vez pasada un valor.
+    expect(net(endo, "Refiere un dolor de quince sobre diez.", ["dolor_intensidad"])).toEqual([])
+    expect(net(endo, "Percusión igual que la vez pasada.")).toEqual([])
+    // El dolor a una prueba es de esa prueba, no de la pregunta «Dolor».
+    expect(net(endo, "Sin dolor a la percusión ni a la palpación.", ["percusion", "palpacion"])).toEqual([])
+    // Con las dos hermanas en la oración, el valor es de la parte que nombra a cada una: los dos
+    // milímetros son de la inferior, no de la superior.
+    expect(
+      net(ortho, "Línea media superior centrada, la inferior desviada a la izquierda dos milímetros.", ["linea_media_superior", "linea_media_inferior", "linea_media_inferior_mm"]),
+    ).toEqual([])
+    expect(net(ortho, "Línea media superior desviada a la derecha, dos milímetros.", ["linea_media_superior"])).toEqual([
+      { said: "Línea media superior desviada a la derecha, dos milímetros.", why: "Parece de «Desviación de la línea media superior»: revísala en la ficha." },
+    ])
+    // «conductometría» empieza como «conducta», pero no es la conducta del niño.
+    expect(net(formsOf(["ficha-de-odontopediatria"]), "Hicimos la conductometría de la cincuenta y cinco.")).toEqual([])
+    // Lo que repite lo ya escrito no se avisa; lo que dice otro valor, sí.
+    const written = formsOf(["ficha-de-ortodoncia"], { "ficha-de-ortodoncia": { overjet: 6 } })
+    expect(net(written, "Overjet de seis.")).toEqual([])
+    expect(net(written, "Overjet de cinco.")).toEqual([{ said: "Overjet de cinco.", why: "Parece de «Overjet»: revísala en la ficha." }])
+  })
+})
+
+describe("lo que la prueba con voz mostró (15 nov): lo que oye Chrome, sin puntuación ni comas", () => {
+  const formsOf = (key: string) => {
+    const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === key)!
+    return formQuestionsOf([{ id: key, title: form.title, snapshot: form.schema, answers: {} }])
+  }
+  const kid = formsOf("ficha-de-odontopediatria")
+  const endo = formsOf("evaluacion-de-endodoncia")
+  const ortho = formsOf("ficha-de-ortodoncia")
+  const at = (forms: DictationFormQuestion[], fieldId: string) => forms.find((item) => item.fieldId === fieldId)!.number
+  const ask = (forms: DictationFormQuestion[], fieldId: string, answer: string | string[], said: string, transcript = said) =>
+    prepareFormAnswer({ payload: Array.isArray(answer) ? { question: at(forms, fieldId), answers: answer } : { question: at(forms, fieldId), answer }, sourceText: said }, forms, FDI, transcript)
+
+  it("las muletillas no cortan la relación con la pregunta", () => {
+    expect(ask(endo, "dolor_intensidad", "6", "intensidad digamos 6 de 10")).toMatchObject({ status: "lista", payload: { value: 6 } })
+    expect(ask(endo, "dolor_intensidad", "6", "intensidad eh a ver 6 de 10")).toMatchObject({ status: "lista", payload: { value: 6 } })
+  })
+  it("«se come las uñas» es onicofagia", () => {
+    expect(ask(ortho, "habitos", ["Respiración bucal", "Onicofagia"], "hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas")).toMatchObject({
+      status: "lista",
+      payload: { value: ["Respiración bucal", "Onicofagia"] },
+    })
+  })
+  it("«15 kg y medio» es 15,5 y «medio milímetro», 0,5", () => {
+    expect(saidNumbers("peso 15 kg y medio")).toEqual([15.5])
+    expect(saidNumbers("desviada a la derecha eh medio milímetro")).toEqual([0.5])
+    expect(saidNumbers("un milímetro y medio")).toEqual([1.5])
+    expect(ask(kid, "peso", "15.5", "peso 15 kg y medio")).toMatchObject({ status: "lista", payload: { value: 15.5 } })
+  })
+  it("en una corrección vale el número que va después del «no» o del «perdón»", () => {
+    expect(ask(kid, "peso", "24", "la niña pesa 24 kg no 22 perdón")).toMatchObject({ status: "lista", payload: { value: 22 } })
+    expect(ask(ortho, "overjet", "4", "overjat de 6 no perdón de 4 mm")).toMatchObject({ status: "lista", payload: { value: 4 } })
+    expect(ask(endo, "dolor_intensidad", "8", "intensidad 8 de 10 no cede con nada")).toMatchObject({ status: "lista", payload: { value: 8 } })
+    // Con su «y medio», y aunque la corrección venga después de lo que citó el modelo.
+    expect(ask(ortho, "overbite", "2.5", "Overbite de tres, no, perdón, de dos y medio")).toMatchObject({ status: "lista", payload: { value: 2.5 } })
+    expect(ask(kid, "peso", "24", "la niña pesa 24 kg", "Okay este la niña pesa 24 kg no 22 perdón succión por favor")).toMatchObject({ status: "lista", payload: { value: 22 } })
+  })
+  it("la red sin falsos avisos: el valor de antes es de la pregunta anterior, y «odontograma» no es «odontológica»", () => {
+    const heard = "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor"
+    const handled = new Set(["dolor", "fistula", "tumefaccion", "frio"].map((fieldId) => at(endo, fieldId)))
+    expect(formSentencesWithoutAnswer(heard, endo, handled, FDI)).toEqual([])
+    const adult = formsOf("ficha-odontoestomatologica")
+    const spoken = "higiene regular riesgo estomatológico moderado en el odontograma caries en la 16 y la 26 oclusales"
+    const done = new Set(["higiene", "riesgo"].map((fieldId) => at(adult, fieldId)))
+    expect(formSentencesWithoutAnswer(spoken, adult, done, FDI)).toEqual([])
+  })
+  it("cada número va con el término que tiene al lado, en el orden en que se dijo", () => {
+    const heard = "beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá"
+    expect(ask(kid, "ceod_e", "2", "con extracción indicada dos", heard)).toMatchObject({ status: "lista", payload: { value: 1 } })
+    expect(ask(kid, "ceod_o", "2", "dos obturados", heard)).toMatchObject({ status: "lista", payload: { value: 2 } })
+    const after = "cariados 4 obturados uno extracción indicada 0 te duele cuando muerdes"
+    expect(ask(kid, "ceod_c", "4", "cariados 4", after)).toMatchObject({ status: "lista", payload: { value: 4 } })
+    expect(ask(kid, "ceod_o", "1", "obturados uno", after)).toMatchObject({ status: "lista", payload: { value: 1 } })
+    expect(ask(kid, "ceod_e", "0", "extracción indicada 0", after)).toMatchObject({ status: "lista", payload: { value: 0 } })
+  })
+  it("la red sin comas: el medio milímetro es de la línea media inferior, no de la superior", () => {
+    const heard = "caninos el derecho clase 2 El izquierdo clase 1 línea Media Superior centrada la inferior desviada a la derecha eh medio milímetro"
+    const handled = new Set(["clase_canina_derecha", "clase_canina_izquierda", "linea_media_superior", "linea_media_inferior"].map((fieldId) => at(ortho, fieldId)))
+    expect(formSentencesWithoutAnswer(heard, ortho, handled, FDI).map((item) => item.why)).toEqual(["Parece de «Desviación de la línea media inferior»: revísala en la ficha."])
+  })
+  it("la nota no repite con otras palabras lo que fue para la ficha, ni lo que se le preguntó al paciente", () => {
+    const heard = "caninos el derecho clase 2 El izquierdo clase 1 te duele cuando comes cuando mastico"
+    const drafts = [
+      { kind: "ficha", payload: { question: at(ortho, "clase_canina_derecha"), answer: "Clase II" }, sourceText: "caninos el derecho clase 2" },
+      { kind: "ficha", payload: { question: at(ortho, "clase_canina_izquierda"), answer: "Clase I" }, sourceText: "El izquierdo clase 1" },
+      { kind: "nota", payload: { evolution: "Canino derecho clase 2, canino izquierdo clase 1; se cementó el bracket.", presentIllness: "Se le soltó un bracket. ¿Te duele cuando comes? Cuando mastico." }, sourceText: "" },
+    ]
+    const note = withoutFormNotes(drafts, ortho, FDI, heard).find((draft) => draft.kind === "nota")
+    expect(note?.payload).toEqual({ evolution: "se cementó el bracket.", presentIllness: "Se le soltó un bracket. Cuando mastico." })
+  })
+})
+
 setupTestDb()
 const ORG = "org_a"
 
@@ -585,6 +749,8 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const { save, fx, answersNow } = await startedForm({ clase_molar_derecha: "Clase II división 2" })
     const same = await save([{ payload: { question: 1, answer: "Clase II división 2" }, sourceText: "clase molar derecha clase dos división dos" }])
     expect(same.suggestions).toEqual([])
+    // Lo que repite lo ya escrito no es algo que no se pudo usar: no se avisa.
+    expect(same.droppedForms).toEqual([])
     const changed = await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "corrijo, clase molar derecha clase dos división uno" }])
     expect(changed.suggestions).toHaveLength(1)
     // Lo escrito a mano lo cambia una persona: nunca «lista» (revisión final del 15 nov, dev H5).
@@ -640,6 +806,38 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     const saved = await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis centímetros" }])
     expect(saved.suggestions).toEqual([])
     expect(saved.droppedForms).toEqual([{ said: "overjet de seis centímetros", why: "«Overjet» va en mm: dilo en mm o escríbelo en la ficha." }])
+  })
+
+  it("lo dicho para la ficha no se pierde en silencio: sin propuesta ni aviso, la oración vuelve con la pregunta", async () => {
+    const { fx, questions } = await startedForm()
+    const formQuestions = await questions()
+    const transcript = "Overjet de seis. El diagnóstico es maloclusión clase dos división uno. Overbite de dos."
+    // El modelo respondió el overjet sin una frase que se encuentre en lo dictado, y no respondió el overbite.
+    const saved = await fx.run((tx) =>
+      saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, {
+        drafts: [{ kind: "ficha", payload: { question: 2, answer: "6" }, sourceText: "" }],
+        transcript,
+        formQuestions,
+      }),
+    )
+    expect(saved.suggestions).toEqual([])
+    // El diagnóstico no nombra la clase molar: no se avisa como si fuera de ella.
+    expect(saved.droppedForms).toEqual([
+      { said: "Overjet de seis.", why: "Parece de «Overjet»: revísala en la ficha." },
+      { said: "Overbite de dos.", why: "Parece de «Overbite»: revísala en la ficha." },
+    ])
+  })
+
+  it("lo que ya propone una pendiente no se avisa otra vez; otro valor dicho sin corregirla, sí", async () => {
+    const { fx, questions } = await startedForm()
+    const formQuestions = await questions()
+    const pause = (transcript: string, drafts: Array<{ kind: "ficha"; payload: Record<string, unknown>; sourceText: string }> = []) =>
+      fx.run((tx) => saveDictationSegment(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, { drafts, transcript, formQuestions }))
+    const first = await pause("Overjet de seis.", [{ kind: "ficha", payload: { question: 2, answer: "6" }, sourceText: "Overjet de seis" }])
+    expect(first.suggestions).toHaveLength(1)
+    expect(first.droppedForms).toEqual([])
+    expect((await pause("Como te decía, overjet de seis.")).droppedForms).toEqual([])
+    expect((await pause("Overjet de cuatro.")).droppedForms).toEqual([{ said: "Overjet de cuatro.", why: "Parece de «Overjet»: revísala en la ficha." }])
   })
 
   it("con la ficha empezada, la nota no repite lo que fue para la ficha", async () => {

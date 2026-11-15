@@ -2,7 +2,7 @@
  * Medición de lo que Clío propone en una ficha de consulta empezada
  * (entrega 11, ADR 0188). Uso:
  *
- *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>]
+ *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>[,<id>…]] [--crudo=<archivo>]
  *
  * Pasa cada dictado por el modelo real con la misma llamada que la atención
  * (`askDictationModel`), con las preguntas de sus fichas armadas con la misma
@@ -14,14 +14,25 @@
  *   - perdidas: lo esperado que no quedó listo. Callar es el error barato;
  *   - lo que cambia una respuesta ya escrita: tiene que quedar por revisar, con
  *     el valor dicho, y nunca lista (revisión final del 15 nov, decisión 2);
- *   - lo que el modelo respondió y la comprobación del servidor paró.
+ *   - lo que el modelo respondió y la comprobación del servidor paró;
+ *   - de lo perdido, si el profesional lo ve en «No pude usar esto» (por el
+ *     motivo de lo parado o por la red de la oración, con `formDropNotices`,
+ *     la misma función del servidor) o se perdió en silencio, y cuántos
+ *     avisos da la red sobre preguntas que el dictado no espera.
  * No toca ninguna base ni envía nada. Es evidencia de este banco, no de cómo
  * oye un navegador.
+ *
+ * De cada dictado que pierde o inventa algo guarda lo que respondió el modelo,
+ * tal cual, y qué hizo el servidor con cada respuesta, en un archivo de la
+ * corrida fuera del repositorio (`--crudo=<archivo>`, o uno nuevo en la carpeta
+ * temporal): así la causa se lee, no se supone.
  */
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
 import {
   type DictationFormQuestion,
+  formDropNotices,
   formQuestionsOf,
   prepareFormAnswer,
   productHooksFor,
@@ -38,7 +49,11 @@ interface FormCase {
   id: string
   producto?: "odentia" | "latidia"
   texto: string
+  /** Lo dictado en la pausa anterior, como lo recibe Clío («lo último ya ordenado»): una frase partida por una pausa. */
+  contexto?: string
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
+  /** Preguntas que no se cuentan: lo que el reconocimiento de voz oyó mal y no se puede saber de lo oído. */
+  ignora?: string[]
   /**
    * `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones).
    * `cambia`: lo que cambia una respuesta ya escrita, que queda por revisar con ese valor.
@@ -89,10 +104,29 @@ const same = (a: unknown, b: unknown) =>
   Array.isArray(a) && Array.isArray(b) ? JSON.stringify([...a].sort()) === JSON.stringify([...b].sort()) : JSON.stringify(a) === JSON.stringify(b)
 
 const only = arg("producto", "")
-const solo = arg("solo", "")
-const totals = { esperadas: 0, bien: 0, perdidas: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0 }
+const solo = arg("solo", "").split(",").filter(Boolean)
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0 }
+/** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
+const netExtra: string[] = []
 const now = new Date()
-const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo || item.id === solo))
+const cases = bank.dictados.filter((item) => (!only || (item.producto ?? "odentia") === only) && (!solo.length || solo.includes(item.id)))
+/** Lo crudo de cada dictado con algo perdido o inventado, una línea JSON por dictado. */
+const rawFile = resolve(arg("crudo", join(tmpdir(), "odentia-eval", `dictado-fichas-${now.toISOString().replace(/[:.]/g, "-")}.jsonl`)))
+let rawSaved = 0
+function saveRaw(entry: Record<string, unknown>) {
+  if (!rawSaved) mkdirSync(dirname(rawFile), { recursive: true })
+  appendFileSync(rawFile, `${JSON.stringify(entry)}\n`)
+  rawSaved += 1
+}
+/** Lo que respondió el modelo, leído si es JSON; si no, el texto tal cual. */
+function rawOf(raw: string | null, content: unknown): unknown {
+  if (raw === null) return { sinHerramienta: content }
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
 
 for (const dictation of cases) {
   const productKey = dictation.producto ?? "odentia"
@@ -105,7 +139,7 @@ for (const dictation of cases) {
     }),
   )
   if (questions.length) totals.conFichas += 1
-  const { read, reply } = await askDictationModel(
+  const { read, reply, raw } = await askDictationModel(
     await modelOf(product.profile),
     spec,
     {
@@ -116,7 +150,7 @@ for (const dictation of cases) {
       zone: { locale: "es-PE", timezone: "America/Lima" },
       now,
       transcript: dictation.texto,
-      context: "",
+      context: dictation.contexto ?? "",
       pending: [],
       forms: questions,
     },
@@ -134,6 +168,7 @@ for (const dictation of cases) {
   else totals.costo += cost
   if (!read) {
     console.log(`✗ ${dictation.id}: el modelo no respondió con la herramienta`)
+    saveRaw({ id: dictation.id, texto: dictation.texto, notas: ["no respondió con la herramienta"], crudo: rawOf(raw, reply.content) })
     continue
   }
   // Como el servidor: el diagnóstico que también pregunta una ficha va a los dos lugares, y la nota
@@ -155,8 +190,35 @@ for (const dictation of cases) {
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
   for (const draft of derived) twins.add(draft)
   const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer({ payload: draft.payload, sourceText: draft.sourceText }, questions, product.site, dictation.texto) }))
-  const keyOf = (payload: Record<string, unknown>) => `${String(payload["responseId"])}.${String(payload["fieldId"])}`
+  const keyOf = ({ responseId, fieldId }: { responseId?: unknown; fieldId?: unknown }) => `${String(responseId)}.${String(fieldId)}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
+  // Lo que va a «No pude usar esto», con la misma función que el servidor: lo parado con su motivo y
+  // la oración que nombra una pregunta sin propuesta ni aviso (la red).
+  const notices = formDropNotices(
+    prepared.map(({ draft, ready }) => ({ draft, ready: ready !== null })),
+    twins,
+    questions,
+    { site: product.site, transcript: dictation.texto },
+  )
+  const byNumber = new Map(questions.map((question) => [question.number, question]))
+  const keysOf = (items: typeof notices) =>
+    new Set(items.flatMap((item) => item.questions.flatMap((number) => (byNumber.has(number) ? [keyOf(byNumber.get(number) ?? {})] : []))))
+  const net = notices.filter((item) => item.by === "red")
+  const noticedKeys = keysOf(notices.filter((item) => item.by === "motivo"))
+  const caughtKeys = keysOf(net)
+  // Lo que la red nombra y el dictado no espera de esa pregunta: un aviso de más, que se lee a mano.
+  const wanted = new Set([
+    ...Object.keys(dictation.espera.fichas ?? {}),
+    ...(dictation.espera.revisar ?? []),
+    ...Object.keys(dictation.espera.cambia ?? {}),
+    ...(dictation.ignora ?? []),
+  ])
+  totals.avisosRed += net.length
+  for (const item of net) {
+    if ([...keysOf([item])].some((key) => wanted.has(key))) continue
+    totals.avisosRedDeMas += 1
+    netExtra.push(`${dictation.id}: «${item.said}» → ${item.why}`)
+  }
   for (const [index, { draft, ready }] of prepared.entries()) {
     if (!ready) {
       if (!twins.has(draft)) totals.paradas += 1
@@ -173,14 +235,23 @@ for (const dictation of cases) {
     if (listed.has(key) && same(listed.get(key), value)) totals.bien += 1
     else {
       totals.perdidas += 1
-      notes.push(`perdió ${key}`)
+      // ¿Lo supo el profesional? Por el motivo de lo parado, por la red, o en silencio.
+      let how = "en silencio"
+      if (noticedKeys.has(key)) {
+        totals.perdidasAvisadas += 1
+        how = "con aviso"
+      } else if (caughtKeys.has(key)) {
+        totals.perdidasRed += 1
+        how = "con aviso de la red"
+      }
+      notes.push(`perdió ${key} (${how})`)
     }
   }
   const changes = dictation.espera.cambia ?? {}
   for (const [key, value] of listed) {
     if (key in expected && same(expected[key], value)) continue
     // Cambia lo escrito y quedó lista: el error de la decisión 2, contado aparte.
-    if (key in changes) continue
+    if (key in changes || dictation.ignora?.includes(key)) continue
     // Varias opciones, solo parte de lo esperado: se perdió una, no se inventó nada (ya cuenta como perdida).
     const want = expected[key]
     if (Array.isArray(want) && Array.isArray(value) && value.length > 0 && value.every((item) => want.includes(item))) {
@@ -217,7 +288,32 @@ for (const dictation of cases) {
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   const shown = [...listed].map(([key, value]) => `${key.split(".").at(-1)}=${JSON.stringify(value)}`).join(", ")
   console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
-  if (solo) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
+  if (notes.length) {
+    const labelOf = (number: unknown) => {
+      const question = byNumber.get(Number(number))
+      return question ? `${question.formTitle}: ${question.label}` : `pregunta ${String(number)} (no existe)`
+    }
+    saveRaw({
+      id: dictation.id,
+      texto: dictation.texto,
+      notas: notes,
+      preguntas: questions.map((item) => `${item.number}. ${item.formTitle}: ${item.label}`),
+      crudo: rawOf(raw, reply.content),
+      // Qué hizo el servidor con cada respuesta de ficha que leyó del modelo.
+      servidor: prepared.map(({ draft, ready }) => ({
+        pregunta: labelOf(draft.payload["question"]),
+        respuesta: draft.payload["answers"] ?? draft.payload["answer"],
+        dicho: draft.sourceText ?? "",
+        ...(twins.has(draft) ? { gemela: true } : {}),
+        queda: ready ? ready.status : "parada",
+        ...(ready?.note ? { motivo: ready.note } : {}),
+      })),
+      // Lo que vería en «No pude usar esto»: por el motivo de lo parado o por la red.
+      avisos: notices,
+      noUsado: read.unused,
+    })
+  }
+  if (solo.length === 1) console.log(JSON.stringify({ crudo: (reply.tool_calls ?? []).map((call) => call.args["fichas"]), fichas: answers, otras: read.drafts.filter((draft) => draft.kind !== "ficha"), nota: noteText, unused: read.unused }, null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")
@@ -226,7 +322,12 @@ console.log(`Modelo: ${spec.modelName} · ${cases.length} dictados`)
 // La línea que cuenta que el camino nuevo corrió: sin pausas con fichas ni respuestas leídas, la medición no dice nada.
 console.log(`Camino de fichas: ${totals.conFichas} pausas con fichas empezadas, ${totals.leidas} respuestas de ficha leídas del modelo, ${totals.paradas} paradas por la comprobación del servidor`)
 console.log(`Respuestas: ${totals.bien} de ${totals.esperadas} bien (${pct(totals.bien, totals.esperadas)}), ${totals.perdidas} perdidas, ${totals.inventadas} inventadas`)
+console.log(
+  `Las perdidas, en «No pude usar esto»: ${totals.perdidasAvisadas} con el motivo de lo parado, ${totals.perdidasRed} por la red de la oración, ${totals.perdidas - totals.perdidasAvisadas - totals.perdidasRed} en silencio`,
+)
+console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMas} de preguntas que el dictado no espera${netExtra.length ? `:\n  ${netExtra.join("\n  ")}` : ""}`)
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
 console.log(`Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, cases.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`)
+if (rawSaved) console.log(`Lo que respondió el modelo en los ${rawSaved} dictados con algo perdido o inventado: ${rawFile}`)

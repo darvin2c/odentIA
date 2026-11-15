@@ -91,6 +91,21 @@ describe("dictado en modo de demostración", () => {
     expect(groundSource("Caries profunda en la pieza 16", heard)).toBe("")
     expect(groundSource(undefined, heard)).toBe("")
   })
+
+  it("las comillas con que el modelo copia lo dictado no lo dejan sin frase (medición del 15 nov)", () => {
+    // Lo dictado le llega entre comillas y a veces las copia: «Frankl tres» sigue siendo lo que dijo.
+    expect(groundSource("«Frankl tres»", "Frankl tres, colaboró bien.")).toBe("Frankl tres")
+    expect(groundSource("«Frankl tres».", "Frankl tres, colaboró bien.")).toBe("Frankl tres")
+    expect(groundSource("«Dolor a la percusión en la cuatro seis, ocho de diez.»", "Dolor a la percusión en la cuatro seis, ocho de diez.")).toBe(
+      "Dolor a la percusión en la cuatro seis, ocho de diez.",
+    )
+    // Ni los puntos suspensivos con que marca que cita un pedazo.
+    expect(groundSource("«...en la cuarenta y seis.»", "Dolor espontáneo desde hace tres días en la cuarenta y seis.")).toBe("en la cuarenta y seis.")
+    expect(groundSource("…en la cuarenta y seis", "Dolor espontáneo en la cuarenta y seis.")).toBe("en la cuarenta y seis")
+    // Sin las comillas, lo que no se dijo sigue sin valer; y lo citado de verdad se conserva tal cual.
+    expect(groundSource("«Frankl cuatro»", "Frankl tres, colaboró bien.")).toBe("")
+    expect(groundSource("dice «me duele»", "La mamá dice «me duele» al masticar.")).toBe("dice «me duele»")
+  })
 })
 
 /**

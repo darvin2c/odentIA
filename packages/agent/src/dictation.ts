@@ -278,6 +278,8 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
     "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.",
     "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
     "- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta. Lo demás que dijo (lo que siente el paciente, desde cuándo, lo que se hizo) sí va en la consulta, como siempre.",
+    "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
+    "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte.",
     ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
   ].join("\n")
 }
@@ -332,17 +334,24 @@ const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
  */
 export function groundSource(said: string | undefined, transcript: string): string {
   // La puntuación del final no es lo dicho: el modelo cierra con punto lo que en el dictado seguía con coma.
-  const bare = (text: string) => text.trim().replace(/[\s.,;:!?…]+$/u, "")
   const fragment = (said ?? "").trim()
   if (!fragment) return ""
+  const bare = (text: string) => text.trim().replace(/[\s.,;:!?…]+$/u, "")
   const heard = loose(transcript)
-  if (heard.includes(loose(fragment))) return fragment
-  if (bare(fragment).length >= 3 && heard.includes(loose(bare(fragment)))) return bare(fragment)
-  return fragment
-    .split(/(?<=[.;!?])\s+/)
-    .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
-    .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
-    .join(" ")
+  const ground = (text: string) => {
+    if (!text) return ""
+    if (heard.includes(loose(text))) return text
+    if (bare(text).length >= 3 && heard.includes(loose(bare(text)))) return bare(text)
+    return text
+      .split(/(?<=[.;!?])\s+/)
+      .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
+      .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
+      .join(" ")
+  }
+  // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
+  // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
+  // respuestas de ficha perdidas eran las comillas.
+  return ground(fragment) || ground(fragment.replace(/[«»“”"]/gu, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim())
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -629,7 +638,13 @@ export async function askDictationModel(
   spec: Pick<LlmSpec, "provider" | "modelName">,
   ask: DictationAsk,
   profile: DictationProfile,
-): Promise<{ read: Omit<DictationExtraction, "model"> | null; reply: AIMessage; repeated: string[] }> {
+): Promise<{
+  read: Omit<DictationExtraction, "model"> | null
+  reply: AIMessage
+  repeated: string[]
+  /** Los argumentos tal como llegaron del modelo: la medición los guarda para ver qué respondió. */
+  raw: string | null
+}> {
   const record = tool(async () => "registrado", {
     name: DICTATION_TOOL,
     description: profile.toolDescription,
@@ -663,5 +678,6 @@ export async function askDictationModel(
       : null,
     reply,
     repeated: parsed?.repeated ?? [],
+    raw,
   }
 }
