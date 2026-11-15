@@ -43,6 +43,7 @@ import {
   withDiagnosisFormAnswers,
   withFormTwins,
   withoutFormNotes,
+  withPauseBridge,
 } from "@odentia/services"
 import { costMicrosOf, withAiMeter } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile, rereadFormSentences } from "./dictation.js"
@@ -55,6 +56,11 @@ interface FormCase {
   texto: string
   /** Lo dictado en la pausa anterior, como lo recibe Clío («lo último ya ordenado»): una frase partida por una pausa. */
   contexto?: string
+  /**
+   * Lo que la pausa anterior dejó propuesto en la ficha, «ficha.pregunta»: valor, como lo ve el
+   * servidor (`pendingFormValues`): la red no lo avisa otra vez y lo mismo no se propone dos veces.
+   */
+  previas?: Record<string, unknown>
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
   /** Preguntas que no se cuentan: lo que el reconocimiento de voz oyó mal y no se puede saber de lo oído. */
   ignora?: string[]
@@ -62,7 +68,17 @@ interface FormCase {
    * `nota`: lo que debe seguir en el texto de la consulta; `noEnNota`: lo que no debe estar (lo de la ficha, las correcciones).
    * `cambia`: lo que cambia una respuesta ya escrita, que queda por revisar con ese valor.
    */
-  espera: { fichas?: Record<string, unknown>; revisar?: string[]; cambia?: Record<string, unknown>; nota?: string[]; noEnNota?: string[] }
+  espera: {
+    fichas?: Record<string, unknown>
+    revisar?: string[]
+    cambia?: Record<string, unknown>
+    nota?: string[]
+    noEnNota?: string[]
+    /** Diagnósticos que también se proponen en Diagnóstico, por su código («K04.6|K04.7»: basta con uno). */
+    diagnosticos?: string[]
+    /** La frase que se muestra en una respuesta: la del número que se usó (prueba con voz del 15 nov). */
+    dicho?: Record<string, string>
+  }
 }
 
 function arg(name: string, fallback: string): string {
@@ -109,7 +125,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "").split(",").filter(Boolean)
-const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0, diagnosticosEsperados: 0, diagnosticosBien: 0, dichoEsperado: 0, dichoBien: 0 }
 /** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
 const netExtra: string[] = []
 const now = new Date()
@@ -176,8 +192,13 @@ for (const dictation of cases) {
     saveRaw({ id: dictation.id, texto: dictation.texto, notas: ["no respondió con la herramienta"], crudo: rawOf(raw, reply.content) })
     continue
   }
+  // Como la atención y el servidor: lo nuevo que sigue la frase del tramo anterior se comprueba con su final delante.
+  const heard = withPauseBridge(dictation.contexto, dictation.texto)
   // Como la atención (`extractDictation`): lo que la red avisaría se lee una vez más, y su costo se cuenta aparte.
-  const misses = formNetMisses(read.drafts, questions, product.site, dictation.texto)
+  const keyOfQuestion = (question: DictationFormQuestion) => `${question.responseId}.${question.fieldId}`
+  const previous = dictation.previas ?? {}
+  const pending = new Map(questions.filter((question) => keyOfQuestion(question) in previous).map((question) => [question.number, previous[keyOfQuestion(question)]] as const))
+  const misses = formNetMisses(read.drafts, questions, product.site, heard, pending)
   let reread: typeof read.drafts = []
   if (misses.length) {
     totals.relecturas += 1
@@ -198,7 +219,7 @@ for (const dictation of cases) {
   const all = withDiagnosisFormAnswers(dictated, questions)
   const derived = new Set(all.slice(dictated.length))
   const answers = all.filter((draft) => draft.kind === "ficha")
-  const noteText = withoutFormNotes(all, questions, product.site, dictation.texto)
+  const noteText = withoutFormNotes(all, questions, product.site, heard)
     .filter((draft) => draft.kind === "nota")
     .flatMap((draft) => Object.values(draft.payload).filter((value): value is string => typeof value === "string"))
     .join(" ")
@@ -209,12 +230,14 @@ for (const dictation of cases) {
   const reviewed = new Map<string, unknown>()
   /** Lo que la segunda lectura dejó por revisar, con su valor. */
   const rereadValues = new Map<string, unknown>()
+  /** La frase que se mostraría en cada respuesta propuesta. */
+  const shownSaid = new Map<string, string>()
   // Como el servidor (`saveDictationSegment`): la gemela de otra ficha también, y de dos respuestas a
   // la misma pregunta en una pausa vale la última.
   const { drafts: expanded, twins } = withFormTwins(answers, questions)
   for (const draft of derived) twins.add(draft)
   // La respuesta tal cual, con su marca de la segunda lectura: lo que la atención deja por revisar.
-  const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, product.site, dictation.texto) }))
+  const prepared = expanded.map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, product.site, heard) }))
   const keyOf = ({ responseId, fieldId }: { responseId?: unknown; fieldId?: unknown }) => `${String(responseId)}.${String(fieldId)}`
   const last = new Map(prepared.flatMap((item, index) => (item.ready ? [[keyOf(item.ready.payload), index] as const] : [])))
   // Lo que va a «No pude usar esto», con la misma función que el servidor: lo parado con su motivo y
@@ -223,7 +246,8 @@ for (const dictation of cases) {
     prepared.map(({ draft, ready }) => ({ draft, ready: ready !== null })),
     twins,
     questions,
-    { site: product.site, transcript: dictation.texto },
+    { site: product.site, transcript: heard },
+    pending,
   )
   const byNumber = new Map(questions.map((question) => [question.number, question]))
   const keysOf = (items: typeof notices) =>
@@ -251,8 +275,11 @@ for (const dictation of cases) {
     }
     const key = keyOf(ready.payload)
     if (last.get(key) !== index) continue
+    // Lo mismo que ya propuso la pausa anterior no se propone otra vez (`saveDictationSegment`).
+    if (key in previous && same(previous[key], ready.payload["value"])) continue
     if (ready.status === "lista") listed.set(key, ready.payload["value"])
     else reviewed.set(key, ready.payload["value"])
+    shownSaid.set(key, ready.said ?? draft.sourceText ?? "")
     if (ready.payload["reread"] === true) rereadValues.set(key, ready.payload["value"])
   }
   const expected = dictation.espera.fichas ?? {}
@@ -321,6 +348,17 @@ for (const dictation of cases) {
     if (noteText.includes(want.toLowerCase())) totals.notaBien += 1
     else notes.push(`la nota perdió «${want}» (nota: «${noteText.slice(0, 160)}»; sin limpiar: «${read.drafts.filter((draft) => draft.kind === "nota").flatMap((draft) => Object.values(draft.payload)).join(" ").slice(0, 160)}»)`)
   }
+  const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? "").toUpperCase())
+  for (const code of dictation.espera.diagnosticos ?? []) {
+    totals.diagnosticosEsperados += 1
+    if (code.split("|").some((one) => codes.some((item) => item.startsWith(one)))) totals.diagnosticosBien += 1
+    else notes.push(`no propuso el diagnóstico ${code} (propuso: ${codes.join(", ") || "ninguno"})`)
+  }
+  for (const [key, said] of Object.entries(dictation.espera.dicho ?? {})) {
+    totals.dichoEsperado += 1
+    if ((shownSaid.get(key) ?? "").toLowerCase() === said.toLowerCase()) totals.dichoBien += 1
+    else notes.push(`${key} dice «${shownSaid.get(key) ?? ""}» en vez de «${said}»`)
+  }
   for (const unwanted of dictation.espera.noEnNota ?? []) {
     totals.notaSobraEsperada += 1
     if (noteText.includes(unwanted.toLowerCase())) {
@@ -373,6 +411,7 @@ console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMa
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
+console.log(`Diagnóstico dicho que también va a Diagnóstico: ${totals.diagnosticosBien} de ${totals.diagnosticosEsperados}; frase del número usado: ${totals.dichoBien} de ${totals.dichoEsperado}`)
 console.log(
   `Segunda lectura: ${totals.relecturas} pausas, ${totals.releidas} oraciones leídas de nuevo; ${totals.relecturaRevisar} respuestas por revisar (${totals.relecturaBien} con el valor esperado, ${totals.relecturaOtroValor} con otro valor, ${totals.relecturaDeMas} donde no se esperaba); de las perdidas, ${totals.perdidasPorRevisar} quedaron por revisar`,
 )

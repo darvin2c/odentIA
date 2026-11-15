@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa.",
+  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato.",
   "servicios": [
     "Obturación con resina",
     "Endodoncia multirradicular",
@@ -10,7 +10,10 @@
     "Blanqueamiento dental",
     "Retiro de puntos",
     "Control de ortodoncia",
-    "Ajuste de prótesis"
+    "Ajuste de prótesis",
+    "Apexificación, cambio de medicación",
+    "Aparatología fija de ortodoncia",
+    "Aparatología removible de ortodoncia"
   ],
   "dictados": [
     {
@@ -239,6 +242,86 @@
           "tiempo": "sabado",
           "relato": [
             "abrir"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v03-1-lo-hecho",
+      "texto": "Sí señor este paciente que viene a su control de ortodoncia va en el primer año de tratamiento prefiere que hace como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "control"
+          ],
+          "tiempo": "semana",
+          "relato": [
+            "bracket"
+          ],
+          "relatoSin": [
+            "te duele"
+          ]
+        },
+        "serviciosNo": [
+          "Apexificación, cambio de medicación"
+        ],
+        "serviciosSi": [
+          "Control de ortodoncia"
+        ]
+      }
+    },
+    {
+      "id": "voz-v03-2-lo-indicado",
+      "texto": "le indico cera de ortodoncia y que regrese en un mes no hay problema me confirma su número de dni",
+      "contexto": "ce como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
+      "espera": {
+        "indicaciones": [
+          "cera"
+        ],
+        "sinPlan": true,
+        "controles": 1,
+        "serviciosNo": [
+          "Aparatología fija de ortodoncia",
+          "Aparatología removible de ortodoncia"
+        ]
+      }
+    },
+    {
+      "id": "voz-v07-1-golpe",
+      "texto": "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "tiempo": "2 años|dos años",
+          "relato": [
+            "golpe"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v07-3-diagnostico",
+      "texto": "sin respuesta también percusión negativa palpación positiva sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico",
+      "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+      "espera": {
+        "diagnosticos": [
+          "K04"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v08-1-llanto",
+      "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
+      "espera": {
+        "consulta": {
+          "relatoSin": [
+            "dolor|duele",
+            "tranquil|termin",
+            "madre|mama"
           ]
         },
         "soloConsulta": true

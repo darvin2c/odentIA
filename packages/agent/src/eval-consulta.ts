@@ -17,6 +17,11 @@ export interface ExpectedConsulta {
   tiempoSin?: string[]
   /** Palabras que debe tener el relato. */
   relato?: string[]
+  /**
+   * Lo que no debe estar en el relato: lo que se le dijo al paciente o lo que lloró mientras lo
+   * atendían (prueba con voz del 15 nov). Sin relato, no está: cuenta como bien.
+   */
+  relatoSin?: string[]
 }
 
 type Field = "motivo" | "tiempo" | "relato"
@@ -56,9 +61,10 @@ export function scoreConsulta(
 ): void {
   if (!expected) return
   const got = consultaOf(drafts)
-  const check = (field: Field, label: string, ok: boolean) => {
-    // Sin nota, nada de la consulta salió bien: ni lo que debía estar ni lo que debía faltar.
-    const passed = got.hasNote && ok
+  const check = (field: Field, label: string, ok: boolean, withoutNote = false) => {
+    // Sin nota, nada de la consulta salió bien: ni lo que debía estar ni lo que debía faltar. Lo que no
+    // debía ir en el relato (`withoutNote`) sí: sin relato, no está.
+    const passed = (got.hasNote || withoutNote) && ok
     totals[field].total += 1
     if (passed) totals[field].bien += 1
     other(label, passed)
@@ -72,6 +78,7 @@ export function scoreConsulta(
     for (const word of expected.tiempoSin ?? []) check("tiempo", `tiempo sin «${word}»`, !has(got.tiempo, word))
   }
   for (const word of expected.relato ?? []) check("relato", `relato con «${word}»`, has(got.relato, word))
+  for (const word of expected.relatoSin ?? []) check("relato", `relato sin «${word}»`, !has(got.relato, word), true)
 }
 
 /** El resumen por campo, para imprimir al final de la medición; vacío si ningún dictado lo midió. */
