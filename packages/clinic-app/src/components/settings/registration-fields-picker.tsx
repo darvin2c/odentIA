@@ -203,7 +203,8 @@ function Row({
   const errorId = useId()
   const error = item.keys.map((key) => errors[key]).find(Boolean)
   return (
-    <div className="flex flex-col gap-1 border-b py-3 last:border-b-0">
+    // `data-new-question`: a donde lleva «Ver las preguntas nuevas» del aviso.
+    <div className="flex flex-col gap-1 border-b py-3 last:border-b-0" data-new-question={isNew ? "" : undefined}>
       <div className="@container flex min-w-0 flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
         <div className="flex min-w-0 flex-col">
           <span id={labelId} className="text-sm font-medium">

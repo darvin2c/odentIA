@@ -134,8 +134,14 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
       {
         id: "pacientes-donde-esta-su-enlace",
         q: "¿Dónde copio o envío el enlace de una persona y veo hasta cuándo le sirve?",
-        a: "En su página › Datos › Enlace y portal. Arriba, «Su enlace» dice hasta cuándo sirve el que tiene y trae «Enviarle su enlace», «Copiar enlace», «Mostrar su código» y «Quitar enlace». Debajo está su portal: quién tiene acceso, cuándo entró por última vez, si guardó su acceso en su teléfono y la marca «Pidió volver a entrar». «Su enlace» lo ven recepción y Administración.",
-        forms: ["donde copio el enlace del paciente", "hasta cuando le sirve su enlace", "como se si ya entro al portal"],
+        // Revisión final de formularios del 15 nov (novato H1): recepción lo buscaba en Configuración, que no abre.
+        a: "En su página, no en Configuración: en Datos › Enlace y portal, «Su enlace» dice hasta cuándo sirve el que tiene y trae «Enviarle su enlace» (por WhatsApp o por correo), «Mostrar su código» para que lo escanee ahí mismo y «Quitar enlace»; si no se le puede enviar, dice por qué y deja «Copiar enlace» para pegarlo cuando escriba. Los mismos botones salen en su Resumen, en «Pendientes», junto a «Completar» cuando le faltan datos, y bajo su próxima cita, en «Antes de su cita:» cuando dice «por responder». Con él completa sus datos y su salud desde su celular. Debajo está su portal: quién tiene acceso, cuándo entró por última vez, si guardó su acceso en su teléfono y la marca «Pidió volver a entrar». «Su enlace» lo ven recepción y Administración.",
+        forms: [
+          "como le consigo su enlace para que llene su salud desde su celular",
+          "donde copio el enlace del paciente",
+          "hasta cuando le sirve su enlace",
+          "como se si ya entro al portal",
+        ],
         area: "ficha",
         needs: "patients.write",
       },

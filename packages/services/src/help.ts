@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
-import { withoutPersonData } from "@odentia/clinical"
+import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, platformPathPermission, roleLabel } from "@odentia/auth/permissions"
+import { type ClinicalProduct, withoutPersonData } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
@@ -17,6 +18,7 @@ import {
   HELP_OFFERED,
   type HelpDecider,
   helpAnswerText,
+  helpAreaOf,
   helpAreaQuestion,
   helpAreas,
   helpCandidates,
@@ -44,6 +46,9 @@ import {
 } from "./help-decision.js"
 import {
   type HelpTopic,
+  helpGuideFor,
+  helpItemScreen,
+  helpPermissionList,
   helpSuggestions,
   helpTopic,
   helpTopicForScreen,
@@ -136,7 +141,29 @@ export interface HelpAsker {
   whoCan: (permission: string) => string[]
 }
 
+/**
+ * Quién pregunta, visto con la matriz canónica de permisos: la Ayuda no decide
+ * accesos, los lee. Los roles se nombran como en el producto de la clínica. Lo
+ * arma la API con su miembro; las pruebas, con un rol.
+ */
+export function helpAskerOf(userId: string, memberRole: string, product: ClinicalProduct): HelpAsker {
+  const role = (ORG_ROLES as readonly string[]).includes(memberRole) ? (memberRole as OrgRole) : null
+  return {
+    userId,
+    roleLabel: role ? roleLabel(role, product) : memberRole,
+    canOpen: (path) => {
+      const needed = platformPathPermission(path)
+      return needed === null || canAccessAny(memberRole, needed)
+    },
+    can: (permission) => canAccess(memberRole, permission),
+    whoCan: (permission) => ORG_ROLES.filter((item) => canAccess(item, permission)).map((item) => roleLabel(item, product)),
+  }
+}
+
 const WHY_NOT = /\b(por que no|porque no|no puedo|no me deja|no me permite|no aparece|no sale|no funciona|bloquead)/
+
+/** Cómo dice «Llévame» la página de una persona cuando ya está en ella. */
+const ITEM_PAGE = "su página"
 
 const list = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`)
 
@@ -149,16 +176,18 @@ const whoCanChange = (topic: HelpTopic, asker: HelpAsker): string[] => [...new S
 
 /**
  * Lo que explica una respuesta puede pedir otro permiso que el de su pantalla
- * (`HelpFaq.needs`): quien entra y cambia cosas ahí, pero no puede hacer eso,
- * lo sabe antes de ir.
+ * (`HelpFaq.needs`): quien entra a ella, pero no puede hacer eso, lo sabe antes
+ * de ir. Eso va antes que lo de la pantalla: a caja, «puede verla, pero no
+ * cambiarla» de Pacientes le prometía lo clínico (QA de formularios del 15 nov,
+ * H8 de desarrollo). Sin la pantalla, manda eso.
  */
 function needsFor(
   option: HelpOption,
   access: { path: string | null; restriction: string | null },
   asker: HelpAsker,
 ): { path: string | null; restriction: string | null } {
-  const needed = option.kind === "faq" && option.faq.needs ? [option.faq.needs].flat() : []
-  if (needed.length === 0 || access.restriction || needed.some((permission) => asker.can(permission))) return access
+  const needed = option.kind === "faq" ? helpPermissionList(option.faq.needs) : []
+  if (needed.length === 0 || access.path === null || needed.some((permission) => asker.can(permission))) return access
   const roles = [...new Set(needed.flatMap((permission) => asker.whoCan(permission)))]
   return { path: access.path, restriction: `Tu rol (${asker.roleLabel}) no puede hacer esto.${roles.length ? ` Pueden hacerlo: ${list(roles)}.` : ""}` }
 }
@@ -543,7 +572,9 @@ export async function askHelp(
     const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
     return { askId, topics, texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
   })
-  const { topics, askId } = ready
+  const { askId } = ready
+  // Lo que no es para su rol no se elige ni se reconoce escrito igual (`HelpFaq.notFor`).
+  const topics = helpGuideFor(ready.topics, asker.can)
   const here = helpTopicForScreen(screen, topics)
   // La guía dice «Sofi»: una clínica que le puso otro nombre pregunta con el suyo.
   const asked = withGuideName(question, ready.personaName)
@@ -626,16 +657,24 @@ export async function askHelp(
       // Los videos son de odentIA y públicos: se muestran aunque el rol no abra esa pantalla.
       const videoTarget = (option: HelpOption) => (option.kind === "faq" ? option.faq.id : helpTopicTarget(option.topic.id))
       const videos = await helpVideosFor(tx, await orgProduct(tx, orgId), selection.shown.map(videoTarget))
-      const answers = selection.shown.map((option): HelpAnswer => {
+      const built = selection.shown.map((option): { option: HelpOption; answer: HelpAnswer } => {
         const seen = videos.get(videoTarget(option)) ?? []
         // Lo que no es de una pantalla (quién es Ariadna, su contraseña) no lleva a ninguna.
-        if (option.kind === "faq" && option.faq.general) return { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null, videos: seen }
+        if (option.kind === "faq" && option.faq.general) return { option, answer: { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null, videos: seen } }
         const access = needsFor(option, restrictionFor(option.topic, asker), asker)
         // Quien solo ve lo suyo la encuentra con el nombre de su menú: «Gestión › Mis honorarios».
         const where = helpTopicLabel(option.topic, { own: asker.canOpen(option.topic.path) && !canChange(option.topic, asker) })
-        return { topicId: option.topic.id, where, text: helpAnswerText(option, where), ...access, videos: seen }
+        return { option, answer: { topicId: option.topic.id, where, text: helpAnswerText(option, where), ...access, videos: seen } }
       })
-      const places = [...new Set(answers.map((answer) => answer.where).filter(Boolean))]
+      const places = [...new Set(built.map(({ answer }) => answer.where).filter(Boolean))]
+      // Dentro de una persona, lo que se hace en su atención o en su plan (`inItem`) no la saca a la lista:
+      // «Llévame» la deja donde está, que es donde se hace (pendiente de la entrega 11 de formularios).
+      const inside = helpItemScreen(screen, here)
+      const inItem = new Set(here?.areas?.filter((area) => area.inItem).map((area) => area.id))
+      const answers = built.map(({ option, answer }) => {
+        const stays = inside && answer.path && option.topic.id === here?.id && inItem.has(helpAreaOf(option))
+        return stays ? { ...answer, path: screen, where: inside.named ? inside.label : ITEM_PAGE } : answer
+      })
       return reply("guia", {
         askId: await log(first.topic.id, first.kind === "faq" ? first.faq.q : null),
         written: decided.written ?? null,
@@ -711,11 +750,10 @@ export function describeHelpScreen(
 ): { title: string | null; suggestions: string[] } {
   // En la pantalla se nombra como la llama su menú («Mis honorarios»), no como el tema.
   const topic = helpTopicForScreen(screen, topics)
-  // Dentro de la página de una sola cosa de la lista (la ficha), se nombra esa página.
-  const clean = screen.replace(/\/+$/, "")
-  const inItem = !!topic?.itemLabel && [topic.path, ...(topic.alsoAt ?? [])].some((base) => clean.startsWith(`${base}/`))
+  // Dentro de la página de una sola cosa de la lista (la ficha, su atención), se nombra esa página.
+  const inside = helpItemScreen(screen, topic)
   return {
-    title: topic ? (inItem ? topic.itemLabel! : (topic.menuLabel ?? topic.title)) : null,
+    title: topic ? (inside?.label ?? topic.menuLabel ?? topic.title) : null,
     suggestions: helpSuggestions(screen, topics),
   }
 }

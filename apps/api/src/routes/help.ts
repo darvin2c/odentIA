@@ -10,8 +10,6 @@ import {
   resolveLlmSpec,
   watchDecisionKey,
 } from "@odentia/agent"
-import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, roleLabel } from "@odentia/auth/permissions"
-import type { ClinicalProduct } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   askHelp,
@@ -23,6 +21,8 @@ import {
   describeHelpScreen,
   getAgentConfig,
   getMySupportCase,
+  helpAskerOf,
+  helpGuideFor,
   giveSupportAccessFromHelp,
   grantSupportAccess,
   type HelpAsker,
@@ -69,24 +69,6 @@ const grantInput = z.object({
 const giveInput = grantInput.extend({ screen: z.string().max(200).optional() })
 const grantRevokeInput = z.object({ grantId: z.uuid() })
 
-/**
- * Quién pregunta, visto con la matriz canónica de permisos: la Ayuda no decide
- * accesos, los lee. Los roles se nombran como en el producto de la clínica.
- */
-function askerOf(userId: string, memberRole: string, product: ClinicalProduct): HelpAsker {
-  const role = (ORG_ROLES as readonly string[]).includes(memberRole) ? (memberRole as OrgRole) : null
-  return {
-    userId,
-    roleLabel: role ? roleLabel(role, product) : memberRole,
-    canOpen: (path) => {
-      const needed = platformPathPermission(path)
-      return needed === null || canAccessAny(memberRole, needed)
-    },
-    can: (permission) => canAccess(memberRole, permission as Permission),
-    whoCan: (permission) => ORG_ROLES.filter((item) => canAccess(item, permission as Permission)).map((item) => roleLabel(item, product)),
-  }
-}
-
 type HelpRouteDeps = CrmDeps & { appVersion?: string | null; llm: PlatformLlm; decisions?: PlatformDecisions | undefined; ownerDb?: Db | undefined }
 
 /**
@@ -126,13 +108,14 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const path = (c.req.query("path") ?? "/").slice(0, 200)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, async (tx) => ({
-        ...describeHelpScreen(path, await productHelpTopics(tx, orgId)),
-        attached: await describeHelpAttachments(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), {
-          screen: path,
-          appVersion: deps.appVersion ?? null,
-        }),
-      })),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const asker = helpAskerOf(userId, memberRole, await orgProduct(tx, orgId))
+        return {
+          // Lo que sugiere su pantalla también es de su rol: la respuesta de recepción no se le sugiere a quien atiende.
+          ...describeHelpScreen(path, helpGuideFor(await productHelpTopics(tx, orgId), asker.can)),
+          attached: await describeHelpAttachments(tx, orgId, asker, { screen: path, appVersion: deps.appVersion ?? null }),
+        }
+      }),
     )
   })
 
@@ -143,7 +126,7 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     // A Jev viajan la pregunta, la anterior y el nombre de la pantalla; a quien redacta, la pregunta y textos de
     // la guía. Nada de la clínica. Lo que cuesta lo paga odentIA (origen «ayuda»).
     return runService(c, 200, async () => {
-      const asker = askerOf(userId, memberRole, await withOrgContext(deps.db, orgId, (tx) => orgProduct(tx, orgId)))
+      const asker = helpAskerOf(userId, memberRole, await withOrgContext(deps.db, orgId, (tx) => orgProduct(tx, orgId)))
       // Quien redacta es el modelo de la plataforma, y solo entra si Jev decide: sin Jev no se redacta.
       return meterAiUse(deps.db, orgId, "ayuda", async () => {
         const decider = await helpDecider(deps, orgId)
@@ -186,7 +169,7 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const asker = askerOf(userId, memberRole, await orgProduct(tx, orgId))
+        const asker = helpAskerOf(userId, memberRole, await orgProduct(tx, orgId))
         const kase = await sendHelpRequest(tx, orgId, asker, { ...parsed.data, appVersion: deps.appVersion ?? null })
         return { ...kase, caseId: kase.id }
       }),
@@ -346,7 +329,7 @@ export function createHelpRoute(deps: HelpRouteDeps) {
     const canGrant = memberRole === "owner" || memberRole === "admin"
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const asker = askerOf(userId, memberRole, await orgProduct(tx, orgId))
+        const asker = helpAskerOf(userId, memberRole, await orgProduct(tx, orgId))
         return giveSupportAccessFromHelp(tx, orgId, userId, canGrant, {
           minutes: parsed.data.minutes ?? 30,
           viewRole: parsed.data.viewRole ?? null,
