@@ -270,6 +270,7 @@ Después revisa la tarea contra esta lista, y cada falla es un hallazgo:
 - **Intuitivo:** ¿lo frecuente se descubre sin explicación? ¿Lo poco frecuente está a mano sin estorbar? ¿Las palabras son las de quien lo usa?
 - **Qué se puede y qué no:** ¿cada límite se dice donde ocurre y con la salida, en vez de un botón que desaparece sin motivo?
 - **En su sitio:** jerarquía visual (lo importante arriba y a la vista), alineación, espaciado, densidad, agrupación y orden en que se lee. ¿Cada cosa está donde la persona la busca? ¿Algo sobra o compite?
+- **Formularios largos:** propone cómo organizarlos: grupos con título según cómo se trabaja (`FieldSet`/`FieldGroup`); dos columnas en escritorio para campos cortos que van juntos (mm y lado, fecha y hora); orden según el examen o la tarea; lo poco frecuente plegado; y el ancho del cajón o del panel acorde al formulario. En el celular, siempre una columna. Mide cuánto hay que desplazarse y cuántas veces se salta de un lado a otro, antes y después.
 - **Estados:** vacío, cargando, error, a medias y hecho. ¿Cada uno se ve y se distingue? ¿Lo pendiente se distingue de lo confirmado?
 - **Recuperación:** ¿se conserva el borrador? ¿Se puede deshacer o corregir sin rehacer todo?
 - **Accesible:** teclado de punta a punta, foco visible, nombres que lee el lector de pantalla, contraste y 390 px sin desplazamiento lateral. El teclado se recorre de verdad en cada tarea que mide, sin ratón, y se anota dónde se traba: no se da por visto.
