@@ -34,6 +34,8 @@ interface PracticeDictation {
   pendientes?: string[]
   /** Lo ya ordenado antes en el mismo dictado, que llega como contexto. */
   contexto?: string
+  /** Si el paciente es adulto: a un adulto no se le propone lo de diente de leche (`fitsService`). */
+  adulto?: boolean
   espera: {
     hallazgos?: ExpectedFinding[]
     diagnosticos?: string[]
@@ -247,11 +249,12 @@ for (const dictation of bank.dictados) {
     )
   }
   if (dictation.espera.materiales) other("ningún material de más", materials.length === dictation.espera.materiales.length)
-  // Lo que el servidor propone del tarifario para lo hecho y el plan, con la misma búsqueda (`dictatedService`).
+  // Lo que el servidor propone del tarifario para lo hecho y el plan, con la misma búsqueda (`dictatedService`):
+  // solo entre lo que puede ir en la pieza dicha y para el paciente, con lo que dice el nombre de cada servicio.
   const offered = read.drafts
     .filter((draft) => draft.kind === "procedimiento" || draft.kind === "plan")
     .flatMap((draft) => {
-      const found = dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, "dental")
+      const found = dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, "dental", draft.payload, { adult: dictation.adulto ?? null })
       return [found.match ?? [], found.candidates].flat()
     })
   for (const name of dictation.espera.serviciosNo ?? []) {

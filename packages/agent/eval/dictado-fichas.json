@@ -530,8 +530,7 @@
       "id": "voz-v02-1",
       "texto": "Okay este seguimos con la ficha overjat de 6 no perdón de 4 mm Pásame el espejo por favor abre un poquito más ya así over byte de Point de tres molar derecha clase 2 división 1 la izquierda clase 1",
       "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4, "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I" } },
-      "ignora": ["ficha-de-ortodoncia.overbite"]
+      "espera": { "fichas": { "ficha-de-ortodoncia.overjet": 4, "ficha-de-ortodoncia.overbite": 3, "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase I" } }
     },
     {
       "id": "voz-v02-2",
