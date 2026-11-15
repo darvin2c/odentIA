@@ -1,6 +1,8 @@
 import {
   ALLERGY_SEVERITIES,
   allergiesSaidUnknownOf,
+  anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
   isCurrentMedication,
   PATIENT_DOCUMENT_CATEGORIES,
   BLOOD_GROUPS,
@@ -359,7 +361,9 @@ export function declaredTakesNoMedicine(declared: Pick<DeclaredPatientHealthInpu
 export const DECLARED_INTERVIEW = {
   corazon: { said: ["dental", "corazon", "riesgoEndocarditis"], kept: ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"] },
   antibiotico: { said: ["dental", "corazon", "antibioticoPrevio"], kept: ["antecedentesOdontologicos", "corazon", "antibioticoPrevio"] },
+  // La anestesia y el sangrado viven juntos (`problemaAnestesia`) y se comparan cada uno por su lado (H9).
   anestesia: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
+  sangrado: { said: ["dental", "problemaAnestesia"], kept: ["antecedentesOdontologicos", "problemaAnestesia"] },
   tabaco: { said: ["medical", "tabaco"], kept: ["habitos", "tabaco"] },
   alcohol: { said: ["medical", "alcohol"], kept: ["habitos", "alcohol"] },
   lactancia: { said: ["medical", "lactancia"], kept: ["embarazoLactancia", "lactancia"] },
@@ -380,6 +384,8 @@ export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 export const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
   "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
   "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.anestesia": ["anestesia"],
+  "antecedentesOdontologicos.problemaAnestesia.sangrado": ["sangrado"],
   "habitos.tabaco": ["tabaco"],
   "habitos.alcohol": ["alcohol"],
   "embarazoLactancia.lactancia": ["lactancia"],
@@ -392,11 +398,25 @@ export const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
   "antecedentesOdontologicos.quienCepilla": ["quienCepilla"],
 }
 
-/** Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día. */
-function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
-  if (said === undefined) return false
-  if (key === "lactancia") return isPlainObject(kept) && kept.estado === (said === true ? "si" : said === false ? "no" : undefined)
-  return said === kept
+/**
+ * Si lo que dijo es lo que está en la entrevista (`kept`), para buscarlo entre sus declaraciones: la
+ * lactancia se dice Sí o No y se guarda con su día. La anestesia (con qué pasó) y el sangrado, cada
+ * uno por su lado; lo guardado antes con una sola respuesta para los dos es de la anestesia.
+ */
+function saidAsKept(key: DeclaredInterviewKey, kept: unknown): (said: unknown) => boolean {
+  if (key === "lactancia") {
+    const estado = isPlainObject(kept) ? kept.estado : undefined
+    return (said) => said !== undefined && estado === (said === true ? "si" : said === false ? "no" : undefined)
+  }
+  if (key === "anestesia" || key === "sangrado") {
+    const now = anesthesiaAnswersOf(kept)
+    return (said) => {
+      const told = anesthesiaAnswersOf(said)
+      if (key === "sangrado") return told.bleeding !== null && told.bleeding === now.bleeding
+      return (told.joint ?? told.anesthesia) !== null && told.joint === now.joint && told.anesthesia === now.anesthesia && told.what === now.what
+    }
+  }
+  return (said) => said !== undefined && said === kept
 }
 
 /** Lo que hay en `value` siguiendo `path`, o undefined. */
@@ -1025,7 +1045,8 @@ function declaredGroupsOf(input: {
         const kept = atPath(latest.answers, where.kept)
         if (kept === undefined) continue
         // Lo que anotó el equipo no lleva la marca de ella aunque ella haya dicho otra cosa.
-        const said = declarations.find((row) => sameInterviewValue(key, atPath(row.health, where.said), kept))
+        const matches = saidAsKept(key, kept)
+        const said = declarations.find((row) => matches(atPath(row.health, where.said)))
         if (said) groupOf(said, latest.createdAt).interview.push(key)
       }
     }
@@ -1209,11 +1230,15 @@ export function declarantOfLink(link: {
 export function declarantOfRegistration(answers: Pick<RegistrationAnswers, "respondent" | "representative">): HealthDeclarant {
   if (answers.respondent === "staff") return { kind: "staff", name: null, relation: null }
   if (answers.respondent === "patient") return { kind: "patient", name: null, relation: null }
-  return {
-    kind: "representative",
-    name: answers.representative?.displayName?.trim() || null,
-    relation: answers.representative?.relationshipDetail?.trim().toLocaleLowerCase("es") || null,
-  }
+  return writtenDeclarant(answers.representative?.displayName, answers.representative?.relationshipDetail)
+}
+
+/**
+ * Quien habla por la persona, con su nombre y su vínculo como los escribió: el registro y quien dijo
+ * «Respondo por ella» en su enlace lo guardan igual.
+ */
+export function writtenDeclarant(name: string | null | undefined, relation: string | null | undefined): HealthDeclarant {
+  return { kind: "representative", name: name?.trim() || null, relation: relation?.trim().toLocaleLowerCase("es") || null }
 }
 
 /**
@@ -1447,8 +1472,9 @@ export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
 
 /**
  * Lo que dijo y cambia una anestesia (QA del 14 nov, causa raíz): el corazón (válvula, problema de
- * nacimiento o endocarditis, antibiótico indicado antes) y un problema con la anestesia o un sangrado
- * tras una extracción, con «Sí» o «No sabe». El cierre lo dice junto a la anestesia; nunca frena.
+ * nacimiento o endocarditis, antibiótico indicado antes), un problema con la anestesia (y qué pasó) y
+ * un sangrado largo tras una extracción, cada uno con «Sí» o «No sabe». El cierre lo dice junto a la
+ * anestesia; nunca frena.
  */
 export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string): Promise<string[]> {
   const [latest] = await tx
@@ -1459,6 +1485,7 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
     .limit(1)
   const answers = latest?.answers
   const say = (value: unknown, yes: string, unknown: string) => (value === "si" ? [yes] : value === "no_sabe" ? [unknown] : [])
+  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]))
   return [
     ...say(
       atPath(answers, ["antecedentesOdontologicos", "corazon", "riesgoEndocarditis"]),
@@ -1470,11 +1497,15 @@ export async function anesthesiaRisksOf(tx: Db, orgId: string, patientId: string
       "su médico le indicó antibiótico antes del dentista",
       "no sabe si debe tomar antibiótico antes",
     ),
+    // Lo guardado antes con una sola pregunta para los dos se dice como se preguntó.
+    ...say(joint, "tuvo problemas con la anestesia o sangró tras una extracción", "no sabe si tuvo problemas con la anestesia"),
+    // Por separado (H9): con un anticoagulante, el sangrado no se confunde con una reacción a la anestesia.
     ...say(
-      atPath(answers, ["antecedentesOdontologicos", "problemaAnestesia"]),
-      "tuvo problemas con la anestesia o sangró tras una extracción",
+      anesthesia,
+      `tuvo problemas con la anestesia${what ? `: ${anesthesiaTroubleWords(what)}` : ""}`,
       "no sabe si tuvo problemas con la anestesia",
     ),
+    ...say(bleeding, "sangró mucho tras una extracción", "no sabe si sangró mucho tras una extracción"),
   ]
 }
 

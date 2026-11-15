@@ -4,6 +4,7 @@ import { setOrgLocale } from "./locale"
 import {
   askWhom,
   changedHistoryOf,
+  declaredInterviewRows,
   declaredGroupOf,
   declaredMarkWords,
   pregnancyChip,
@@ -249,5 +250,18 @@ describe("lo que dijo que cambió, por dato", () => {
     const history = changedHistoryOf({ ...health, changed: null })
     expect(history.current("medications", meds)).toHaveLength(5)
     expect(history.alone("medications", meds)).toEqual([])
+  })
+})
+
+// Revisión final de formularios (H9): la anestesia y el sangrado se preguntan por separado.
+describe("«Ver declaración original»: la anestesia y el sangrado", () => {
+  it("trae la anestesia con qué pasó y el sangrado por separado; lo de antes, con su pregunta doble", () => {
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: { anestesia: "si", quePaso: "alergia", sangrado: "no" } } })).toEqual([
+      { label: "Problema con la anestesia", value: "Sí, alergia o ronchas" },
+      { label: "Sangrado largo tras una extracción", value: "No" },
+    ])
+    expect(declaredInterviewRows({ dental: { problemaAnestesia: "no_sabe" } })).toEqual([
+      { label: "Problema con la anestesia o sangrado tras una extracción", value: "No sabe" },
+    ])
   })
 })

@@ -243,6 +243,7 @@ export type DeclaredInterviewKey =
   | "corazon"
   | "antibiotico"
   | "anestesia"
+  | "sangrado"
   | "tabaco"
   | "alcohol"
   | "lactancia"

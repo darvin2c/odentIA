@@ -4224,7 +4224,9 @@ await db.transaction((tx) =>
 // Marta (mesa del 13 nov, entrega 6) se registró sola y respondió «Tus medicinas»: toma warfarina y
 // alendronato. Arriba de su ficha y de la atención salen «Anticoagulante: warfarina 5 mg» y «Huesos:
 // alendronato…», con la marca de lo que dijo ella y sin revisar; el código ATC de su grupo (B01A, M05B)
-// sale de su Sí, no del nombre que escribió.
+// sale de su Sí, no del nombre que escribió. La anestesia y el sangrado se preguntan por separado
+// (revisión final de formularios, H9): la anestesia nunca le dio problema, pero sangró mucho tras una
+// extracción, y con la warfarina el cierre de la atención lo dice aparte.
 await db.transaction((tx) =>
   registerPatient(
     tx,
@@ -4258,7 +4260,10 @@ await db.transaction((tx) =>
           anticoagulants: { state: "recorded", detail: "warfarina 5 mg" },
           boneMedicines: { state: "recorded", detail: "alendronato 70 mg semanal, pastillas, desde 2023" },
           medications: { state: "none", items: [] },
-          dental: { corazon: { riesgoEndocarditis: "no", antibioticoPrevio: "no" }, problemaAnestesia: "no" },
+          dental: {
+            corazon: { riesgoEndocarditis: "no", antibioticoPrevio: "no" },
+            problemaAnestesia: { anestesia: "no", sangrado: "si" },
+          },
           medical: { tabaco: "nunca" },
         },
       },
@@ -4283,8 +4288,8 @@ await savePatientHealth(db, ORG_A, ANA_ID, julia.id, {
   medications: [],
 })
 // Thiago, 6 años y asmático (mesa del 13 nov, entrega 7, caso C3): lo registra su mamá, Carla, por el QR.
-// Su salud se le pregunta a ella con ejemplos de niño, sin embarazo ni tabaco, y en «Thiago de pequeño»
-// cuenta que ya no toma biberón, que se chupa el dedo, que come dulces 4 o más veces al día y que se
+// Su salud se le pregunta a ella con ejemplos de niño, sin embarazo ni tabaco; sus medicinas son una
+// sola pregunta, sin anticoagulantes ni huesos (K7), y en «Los dientes de Thiago en casa» cuenta que ya no toma biberón, que se chupa el dedo, que come dulces 4 o más veces al día y que se
 // cepilla solo. La odontóloga lo lee sin clics en la atención, con «Lo dijo su madre, Carla…».
 // Siempre tiene 6 años: nació hace 6 años y 2 meses.
 const thiagoBirth = new Date()
@@ -4320,12 +4325,10 @@ await db.transaction((tx) =>
         health: {
           allergies: { state: "none", items: [] },
           conditions: { state: "recorded", items: [{ name: "Asma" }] },
-          anticoagulants: { state: "none" },
-          boneMedicines: { state: "none" },
           medications: { state: "recorded", items: [{ name: "Salbutamol inhalador cuando tiene crisis" }] },
           dental: {
             corazon: { riesgoEndocarditis: "no" },
-            problemaAnestesia: "no",
+            problemaAnestesia: { anestesia: "no", sangrado: "no" },
             biberon: "ya_no",
             chupon: "dedo",
             dulcesEntreComidas: "4_o_mas",

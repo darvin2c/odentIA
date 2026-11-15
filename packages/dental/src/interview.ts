@@ -5,6 +5,9 @@
  */
 
 import {
+  anesthesiaAnswersOf,
+  anesthesiaAnswersSchema,
+  anesthesiaTroubleWords,
   BOTTLE_ANSWERS,
   BRUSHER_ANSWERS,
   CIGARETTE_BAND_LABELS,
@@ -97,8 +100,10 @@ export function dentalInterviewErrors(answers: Record<string, unknown>): Record<
     if (!heart || !isAnswer(heart.riesgoEndocarditis) || !isAnswer(heart.antibioticoPrevio))
       errors["antecedentesOdontologicos.corazon"] = "Corazón: elige Sí, No o No sabe."
   }
-  if (!isAnswer(problemaAnestesia))
-    errors["antecedentesOdontologicos.problemaAnestesia"] = "Problemas con la anestesia: elige Sí, No o No sabe."
+  // La anestesia y el sangrado, cada uno con su respuesta (H9); lo guardado antes, una sola para los dos.
+  if (!isAnswer(problemaAnestesia) && !anesthesiaAnswersSchema.safeParse(problemaAnestesia).success)
+    errors["antecedentesOdontologicos.problemaAnestesia"] =
+      "Anestesia y sangrado: elige Sí, No o No sabe, y qué pasó solo con el Sí a la anestesia."
   // «De pequeño»: cada respuesta, una de su lista.
   const childhood = group as Record<string, unknown>
   for (const [key, allowed, label] of CHILDHOOD_CHOICES) {
@@ -170,11 +175,11 @@ const ALCOHOL_WORDS: Record<string, string> = { no: "no toma", ocasional: "de ve
 
 /** Un dato de lo que odentIA suma a la entrevista, con la clave de quién lo dijo (`DECLARED_INTERVIEW`). */
 export interface DentalInterviewItem {
-  key: "corazon" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
+  key: "corazon" | "anestesia" | "sangrado" | "tabaco" | "alcohol" | "lactancia"
   /** Dónde está en la entrevista («habitos.tabaco»): la clave con que la copia sabe quién lo dijo. */
   path: string
   /** De qué preguntas de la persona sale (las claves de quién lo dijo): el corazón son dos. */
-  said: Array<"corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia">
+  said: Array<"corazon" | "antibiotico" | "anestesia" | "sangrado" | "tabaco" | "alcohol" | "lactancia">
   text: string
   /**
    * Lo que va arriba de la ficha y de la atención: el corazón, el antibiótico y la anestesia solo
@@ -208,21 +213,37 @@ export function dentalInterviewItems(answers: Record<string, unknown>): DentalIn
   ].filter(Boolean)
   if (heartParts.length)
     items.push({ key: "corazon", path: "antecedentesOdontologicos.corazon", said: ["corazon", "antibiotico"], text: `Corazón: ${heartParts.join(" · ")}`, alert: heartAlert.length ? `Corazón: ${heartAlert.join(" · ")}` : null })
-  if (typeof dental.problemaAnestesia === "string") {
-    const answer = dental.problemaAnestesia
+  const { joint, anesthesia, what, bleeding } = anesthesiaAnswersOf(dental.problemaAnestesia)
+  // Arriba va el «Sí» y el «No sabe»; el «No» se lee en Antecedentes.
+  const alertOf = (answer: string, yes: string, unknown: string) => (answer === "si" ? yes : answer === "no_sabe" ? unknown : null)
+  // Lo guardado antes con una sola pregunta para los dos: se lee como se preguntó.
+  if (joint)
     items.push({
       key: "anestesia",
       path: "antecedentesOdontologicos.problemaAnestesia",
       said: ["anestesia"],
-      text: `Problemas con la anestesia o sangrado tras una extracción: ${ANSWER_WORDS[answer] ?? answer}`,
-      alert:
-        answer === "si"
-          ? "Tuvo problemas con la anestesia o sangró tras una extracción"
-          : answer === "no_sabe"
-            ? "Anestesia o sangrado tras una extracción: no sabe"
-            : null,
+      text: `Problemas con la anestesia o sangrado tras una extracción: ${ANSWER_WORDS[joint]}`,
+      alert: alertOf(joint, "Tuvo problemas con la anestesia o sangró tras una extracción", "Anestesia o sangrado tras una extracción: no sabe"),
+    })
+  // Desde la revisión final (H9), por separado y con qué pasó: con una warfarina, lo que importa es el sangrado.
+  if (anesthesia) {
+    const how = what ? anesthesiaTroubleWords(what) : null
+    items.push({
+      key: "anestesia",
+      path: "antecedentesOdontologicos.problemaAnestesia.anestesia",
+      said: ["anestesia"],
+      text: `Problema con la anestesia: ${ANSWER_WORDS[anesthesia]}${how ? `, ${how}` : ""}`,
+      alert: alertOf(anesthesia, `Problema con la anestesia${how ? `: ${how}` : ""}`, "Anestesia: no sabe si tuvo un problema"),
     })
   }
+  if (bleeding)
+    items.push({
+      key: "sangrado",
+      path: "antecedentesOdontologicos.problemaAnestesia.sangrado",
+      said: ["sangrado"],
+      text: `Sangrado largo tras una extracción: ${ANSWER_WORDS[bleeding]}`,
+      alert: alertOf(bleeding, "Sangró mucho tras una extracción", "Sangrado tras una extracción: no sabe"),
+    })
   const habits = rec(answers.habitos)
   if (typeof habits.tabaco === "string") {
     const band = typeof habits.cigarrillos === "string" ? CIGARETTE_BAND_LABELS[habits.cigarrillos as CigaretteBand] : ""

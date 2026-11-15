@@ -18,6 +18,28 @@ describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lac
     expect(dentalInterviewLines({ antecedentesOdontologicos: { bruxismo: true } })).toEqual([])
   })
 
+  it("H9 · la anestesia y el sangrado, en dos filas y con qué pasó; lo guardado antes, en una", () => {
+    const apart = { antecedentesOdontologicos: { problemaAnestesia: { anestesia: "si", quePaso: "desmayo", sangrado: "si" } } }
+    expect(dentalInterviewItems(apart).map((item) => [item.key, item.text, item.alert])).toEqual([
+      ["anestesia", "Problema con la anestesia: sí, se desmayó o le bajó la presión", "Problema con la anestesia: se desmayó o le bajó la presión"],
+      ["sangrado", "Sangrado largo tras una extracción: sí", "Sangró mucho tras una extracción"],
+    ])
+    expect(dentalInterviewItems({ antecedentesOdontologicos: { problemaAnestesia: { sangrado: "no" } } }).map((item) => [item.text, item.alert])).toEqual([
+      ["Sangrado largo tras una extracción: no", null],
+    ])
+    // Lo que se guardó con la pregunta doble se sigue leyendo con su nombre de entonces.
+    expect(dentalInterviewLines({ antecedentesOdontologicos: { problemaAnestesia: "si" } })).toEqual([
+      "Problemas con la anestesia o sangrado tras una extracción: sí",
+    ])
+    expect(dentalInterviewErrors(apart)).toEqual({})
+    expect(dentalInterviewErrors({ antecedentesOdontologicos: { problemaAnestesia: { anestesia: "quizá" } } })).toHaveProperty(
+      "antecedentesOdontologicos.problemaAnestesia",
+    )
+    expect(
+      dentalInterviewErrors({ antecedentesOdontologicos: { problemaAnestesia: { anestesia: "no", quePaso: "desmayo" } } }),
+    ).toHaveProperty("antecedentesOdontologicos.problemaAnestesia")
+  })
+
   it("solo se guardan las respuestas de la lista", () => {
     expect(dentalInterviewErrors({ antecedentesOdontologicos: { corazon: { riesgoEndocarditis: "tal vez" } } })).toHaveProperty(
       "antecedentesOdontologicos.corazon",

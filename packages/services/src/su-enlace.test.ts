@@ -61,12 +61,12 @@ import {
   publishFormTemplate,
 } from "./clinical-forms.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { getPatientHealth, savePatientHealth } from "./clinical.js"
+import { getPatientHealth, recordHealthDeclaration, savePatientHealth } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
 import { getPatientSummary } from "./patient-history.js"
 import { addPlanItem } from "./plan.js"
-import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
+import { getPatientRegistrationConfig, patientHealthQuestions, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
@@ -1871,7 +1871,7 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   await f.run((tx) => grantResponsibility(tx, ORG, f.actor, thiago.patientId, { contactId: carla!.id, kind: "representante_legal", startsAt: "2020-01-01" }))
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla!.id, patientId: thiago.patientId }, { secretsKey: KEY }))
   const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
-  expect(form).toMatchObject({ firstName: "Thiago", age: 6, respondentFirstName: "Carla" })
+  expect(form).toMatchObject({ firstName: "Thiago", age: 6, sex: "M", respondentFirstName: "Carla" })
   expect(form.healthQuestions).toEqual(expect.arrayContaining(["dental.biberon", "dental.chupon", "dental.quienCepilla"]))
   expect(form.healthQuestions).not.toContain("medical.tabaco")
   expect(form.healthQuestions).not.toContain("personal.embarazo")
@@ -1884,6 +1884,167 @@ it("el enlace de un niño de 6 años: se le pregunta a su mamá lo de un niño, 
   )
   const health = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
   expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "ya_no", quienCepilla: "adulto" } })
+})
+
+// Revisión final de formularios (K12): el enlace guardaba lo que la clínica marcó «No se pide».
+it("el enlace guarda solo lo que la clínica pregunta: lo que marcó «No se pide» no entra aunque llegue", async () => {
+  const f = await clinicalFixture()
+  const config = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+  await f.run((tx) =>
+    savePatientRegistrationConfig(tx, ORG, f.actor, {
+      expectedVersion: config.version,
+      enabled: true,
+      fields: { ...config.fields, bloodGroup: "hidden", "personal.hospitalizaciones": "hidden", "dental.biberon": "hidden" },
+      privacyNotice: "Tus datos se usan solo para tu atención.",
+    }),
+  )
+  // La base sigue entre las pruebas de este archivo: las demás ven las preguntas como estaban.
+  onTestFinished(async () => {
+    const now = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+    await f.run((tx) =>
+      savePatientRegistrationConfig(tx, ORG, f.actor, {
+        expectedVersion: now.version,
+        enabled: config.enabled,
+        fields: config.fields,
+        privacyNotice: config.privacyNotice || "Tus datos se usan solo para tu atención.",
+      }),
+    )
+  })
+  const lia = await minimal(f, { given: "Lía", surname: "Soto" })
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lia.personId, patientId: lia.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form.healthQuestions).not.toContain("bloodGroup")
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1990-05-05" },
+      health: {
+        allergies: { state: "none", items: [] },
+        bloodGroup: "O+",
+        personal: { hospitalizaciones: "Apendicitis" },
+      },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, lia.patientId))
+  expect(health.bloodGroup).toBeNull()
+  expect(health.declarations[0]?.health).toEqual({ allergies: { state: "none", items: [] } })
+
+  // A la mamá de un niño, «Si se atiende un niño» apagado tampoco entra.
+  const thiago = await minimal(f, { given: "Thiago", surname: "Soto" })
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 4, birth.getUTCMonth() - 2, 1)
+  await ownerDb.update(contact).set({ birthDate: birth.toISOString().slice(0, 10), sex: "M" }).where(eq(contact.id, thiago.personId))
+  const [carla] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Carla Soto", givenNames: "Carla", familyName: "Soto" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: thiago.patientId, contactId: carla!.id, relationship: "guardian", createdBy: f.actor })
+  await f.run((tx) => grantResponsibility(tx, ORG, f.actor, thiago.patientId, { contactId: carla!.id, kind: "representante_legal", startsAt: "2020-01-01" }))
+  const childLink = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla!.id, patientId: thiago.patientId }, { secretsKey: KEY }))
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, childLink.token, { data: {}, health: { dental: { biberon: "si", quienCepilla: "adulto" } } }),
+  )
+  const child = await f.run((tx) => getPatientHealth(tx, ORG, thiago.patientId))
+  expect(child.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { quienCepilla: "adulto" } })
+})
+
+// K7: a un niño ya no se le preguntan las dos clases de medicina; que no estén no dice que lo
+// respondió con la lista de antes.
+it("la mamá que registró a su niño con la lista de hoy no recibe otra vez lo que dejó en blanco", async () => {
+  const f = await clinicalFixture()
+  const mateo = await minimal(f, { given: "Mateo", surname: "Vera" })
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 5, birth.getUTCMonth() - 2, 1)
+  await ownerDb.update(contact).set({ birthDate: birth.toISOString().slice(0, 10), sex: "M" }).where(eq(contact.id, mateo.personId))
+  await f.run((tx) =>
+    recordHealthDeclaration(tx, ORG, mateo.patientId, {
+      via: "registro",
+      by: { kind: "representative", name: "Rosa Vera", relation: "madre" },
+      health: { allergies: { state: "none", items: [] }, medications: { state: "unanswered", items: [] } },
+    }),
+  )
+  expect(await f.run((tx) => patientHealthQuestions(tx, ORG, mateo.patientId))).toEqual([])
+})
+
+// K1 (M2 y B3 de la 7): recepción registró a Lucía por teléfono, sin fecha, con el celular de su
+// mamá. Su enlace no sabe quién responde: lo pregunta, y lo dicho queda de quien lo dijo.
+it("sin fecha en la ficha, el enlace pregunta quién responde: lo de la mamá queda de ella y se le pregunta lo de una niña", async () => {
+  const f = await clinicalFixture()
+  const lucia = await minimal(f, { given: "Lucía", surname: "Paredes" })
+  await ownerDb.update(contact).set({ sex: "F" }).where(eq(contact.id, lucia.personId))
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form).toMatchObject({ asksWho: true, firstName: "Lucía", age: null, sex: "F", respondentFirstName: null })
+  // Sin la fecha no se presume niña, pero la pantalla tiene lo de una niña por si la fecha que escribe lo es.
+  expect(form.healthQuestions).toEqual(expect.arrayContaining(["dental.biberon", "dental.quienCepilla", "medical.tabaco"]))
+  const birth = new Date()
+  birth.setUTCFullYear(birth.getUTCFullYear() - 3, birth.getUTCMonth() - 2, 1)
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: birth.toISOString().slice(0, 10) },
+      respondent: "representative",
+      representative: {
+        displayName: "Carmen Paredes Ruiz",
+        relationshipDetail: "Madre, padre o tutor",
+        docType: "DNI",
+        docNumber: "42345678",
+        phone: "+51955111222",
+      },
+      // Lo de una niña de 3 años se guarda (con la fecha que escribió); lo de un adulto, no.
+      health: { allergies: { state: "none", items: [] }, dental: { biberon: "si" }, medical: { tabaco: "nunca" } },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, lucia.patientId))
+  expect(health.declarations[0]).toMatchObject({
+    by: { kind: "representative", name: "Carmen Paredes Ruiz", relation: "madre, padre o tutor" },
+    health: { allergies: { state: "none", items: [] }, dental: { biberon: "si" } },
+  })
+  expect(health.latestAnamnesis?.answers).toEqual({ antecedentesOdontologicos: { biberon: "si" } })
+  // Desde el enlace no se registra a nadie: la fecha espera a recepción, con la tarea de siempre.
+  expect((await f.run((tx) => requirePatient(tx, ORG, lucia.patientId))).birthDate).toBeNull()
+  const notes = await ownerDb.select({ body: crmNote.body }).from(crmNote).where(eq(crmNote.contactId, lucia.personId))
+  expect(notes.map((note) => note.body).join(" ")).toContain("Lo respondió Carmen Paredes Ruiz (madre, padre o tutor)")
+})
+
+it("quien responde por una adulta queda como quien lo dijo; responder por otra persona solo se acepta donde se pregunta", async () => {
+  const f = await clinicalFixture()
+  const rosa = await minimal(f, { given: "Rosa", surname: "Quispe" })
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: rosa.personId, patientId: rosa.patientId }, { secretsKey: KEY }))
+  // Sin su nombre, no.
+  await expect(
+    f.run((tx) =>
+      submitPersonalLinkData(tx, ORG, link.token, {
+        data: { birthDate: "1950-02-01" },
+        respondent: "representative",
+        representative: { displayName: "  " },
+        health: { allergies: { state: "none", items: [] } },
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION", fields: { "representative.displayName": expect.any(String) } })
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1950-02-01" },
+      respondent: "representative",
+      representative: { displayName: "Elena Quispe", relationshipDetail: "Familiar" },
+      health: { allergies: { state: "none", items: [] } },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, rosa.patientId))
+  expect(health.declarations[0]?.by).toEqual({ kind: "representative", name: "Elena Quispe", relation: "familiar" })
+  // Una adulta, con la fecha guardada.
+  expect((await f.run((tx) => requirePatient(tx, ORG, rosa.patientId))).birthDate).toBe("1950-02-01")
+
+  // Con la fecha en su ficha, su enlace no pregunta quién responde ni lo acepta.
+  const marta = await minimal(f, { given: "Marta", surname: "Lima" })
+  await ownerDb.update(contact).set({ birthDate: "1980-01-01" }).where(eq(contact.id, marta.personId))
+  const own = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: marta.personId, patientId: marta.patientId }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkDataForm(tx, ORG, own.token))).asksWho).toBe(false)
+  await expect(
+    f.run((tx) =>
+      submitPersonalLinkData(tx, ORG, own.token, {
+        data: {},
+        respondent: "representative",
+        representative: { displayName: "Otra Persona" },
+        health: { allergies: { state: "none", items: [] } },
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION", fields: { respondent: expect.any(String) } })
 })
 
 // QA de la entrega 3 (14 nov): «Lo que nos contaste» desaparecía a la hora en que empezaba la cita

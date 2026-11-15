@@ -8,6 +8,8 @@
  */
 import {
   allergiesSaidUnknownOf,
+  anesthesiaAnswersOf,
+  anesthesiaTroubleWords,
   changedWhenWords,
   type HealthDeclarant,
   KINSHIP_LABELS,
@@ -300,10 +302,18 @@ export function declaredInterviewRows(health: Record<string, unknown>): Array<{ 
   const medical = rec(health["medical"])
   const personal = rec(health["personal"])
   const answer = (value: unknown) => (typeof value === "string" ? (INTERVIEW_ANSWER_WORDS[value] ?? value) : null)
+  // La anestesia (con qué pasó) y el sangrado, por separado (H9); lo de antes, con su pregunta doble.
+  const anesthesia = anesthesiaAnswersOf(dental["problemaAnestesia"])
+  const how = anesthesia.what ? anesthesiaTroubleWords(anesthesia.what) : null
   const rows: Array<{ label: string; value: string | null }> = [
     { label: "Válvula, problema del corazón de nacimiento o endocarditis", value: answer(heart["riesgoEndocarditis"]) },
     { label: "Su médico le indicó antibiótico antes del dentista", value: answer(heart["antibioticoPrevio"]) },
-    { label: "Problema con la anestesia o sangrado tras una extracción", value: answer(dental["problemaAnestesia"]) },
+    { label: "Problema con la anestesia o sangrado tras una extracción", value: answer(anesthesia.joint) },
+    {
+      label: "Problema con la anestesia",
+      value: anesthesia.anesthesia ? `${answer(anesthesia.anesthesia)}${how ? `, ${how}` : ""}` : null,
+    },
+    { label: "Sangrado largo tras una extracción", value: answer(anesthesia.bleeding) },
     {
       label: "Tabaco",
       value:

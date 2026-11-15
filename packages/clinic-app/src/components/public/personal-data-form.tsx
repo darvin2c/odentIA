@@ -1,4 +1,4 @@
-import { declaredHealthAnswered, isChildAge, type RegistrationAnswers, type VisitAnswerInput } from "@odentia/clinical"
+import { ageInYears, declaredHealthAnswered, isChildAge, type RegistrationAnswers, type VisitAnswerInput } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -46,6 +46,8 @@ function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pe
   const rep = answers.representative
   return {
     data,
+    // «Respondo por ella» (K1): el servidor lo acepta solo donde lo preguntó.
+    ...(answers.respondent === "representative" ? { respondent: "representative" as const } : {}),
     representative: rep
       ? {
           displayName: rep.displayName,
@@ -80,21 +82,54 @@ function listed(parts: string[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : (parts[0] ?? "")
 }
 
+type LinkPerson = Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">
+/** A quién se le habla al terminar: lo de su ficha y lo que escribió en este envío. */
+type SentFor = LinkPerson & {
+  /** Dijo «Respondo por ella»: se le habla a quien respondió, sea niña o adulta. */
+  forOther?: boolean
+}
+
+/** Se le habla a quien responde por la persona (un niño, o dijo «Respondo por ella»), con su nombre. */
+const toRespondent = (form: Pick<SentFor, "firstName" | "age" | "forOther">): boolean =>
+  (isChildAge(form.age) || form.forOther === true) && !!form.firstName
+
 /**
- * Lo que dice la página al terminar. Del enlace de un niño (menor de 12) se le
- * habla a quien lo cuida, con el nombre del niño: «Listo, Carla», «ya tiene lo
- * que nos contaste de la salud de Thiago» (mesa del 13 nov, entrega 7). Con «Tu
- * visita» (entrega 8) dice todo lo que llegó en ese envío y quién lo lee antes de
- * atenderla: «Listo, Marta. Dental Smile ya tiene tus datos, tu salud y a qué
- * vienes. Lo lee el Dr. Luis Prado antes de atenderte.»
+ * Quién respondió y por quién, con lo que escribió en el mismo envío (K1): sus años, de la fecha que
+ * escribió si su ficha no la tenía, y si dijo «Respondo por ella», el nombre de quien respondió.
+ */
+export function answeredFor(
+  form: LinkPerson,
+  answers: Pick<RegistrationAnswers, "demographics" | "respondent" | "representative">,
+  today: string,
+): SentFor {
+  const forOther = answers.respondent === "representative"
+  const written = answers.demographics.birthDate ? ageInYears(answers.demographics.birthDate, today) : null
+  return {
+    ...form,
+    age: form.age ?? written,
+    respondentFirstName: forOther
+      ? answers.representative?.displayName.trim().split(/\s+/)[0] || form.respondentFirstName
+      : form.respondentFirstName,
+    forOther,
+  }
+}
+
+/**
+ * Lo que dice la página al terminar. Del enlace de un niño (menor de 12), o si
+ * dijo «Respondo por ella», se le habla a quien respondió, con el nombre de la
+ * persona: «Listo, Carla», «ya tiene lo que nos contaste de la salud de Thiago»
+ * (mesa del 13 nov, entrega 7). Con «Tu visita» (entrega 8) dice todo lo que
+ * llegó en ese envío y quién lo lee antes de atenderla: «Listo, Marta. Dental
+ * Smile ya tiene tus datos, tu salud y a qué vienes. Lo lee el Dr. Luis Prado
+ * antes de atenderte.»
  */
 export function personalDataSentWords(
-  form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName" | "missing">,
+  form: SentFor,
   clinicName: string,
   outcome: "nada" | "con-salud" | "sin-salud" | "ya-enviado",
   visit?: { reader: string | null; askedReason: boolean } | null,
 ): { title: string; text: string } {
-  const child = isChildAge(form.age) && !!form.firstName
+  const child = toRespondent(form)
   const greeted = child ? form.respondentFirstName : form.firstName
   const listo = greeted ? `Listo, ${greeted}` : "Listo"
   const health = child ? `la salud de ${form.firstName}` : "tu salud"
@@ -153,11 +188,11 @@ export function healthCheckQuestion(
 
 /** Lo que dice la página al responder «¿Cambió algo?» o al corregir su salud. */
 export function healthAnswerWords(
-  form: Pick<PersonalDataFormView, "firstName" | "age" | "respondentFirstName">,
+  form: Pick<SentFor, "firstName" | "age" | "respondentFirstName" | "forOther">,
   clinicName: string,
   outcome: "sin_cambios" | "correccion",
 ): { title: string; text: string } {
-  const child = isChildAge(form.age) && !!form.firstName && !!form.respondentFirstName
+  const child = toRespondent(form) && !!form.respondentFirstName
   const greeted = child ? form.respondentFirstName : form.firstName
   const listo = greeted ? `Listo, ${greeted}` : "Listo"
   if (outcome === "sin_cambios")
@@ -283,6 +318,8 @@ export function PersonalDataForm({
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
           age: form.age ?? null,
+          sex: form.sex ?? null,
+          asksWho: form.asksWho ?? false,
           respondentFirstName: form.respondentFirstName ?? null,
           privacy: form.pending.privacy,
           promotions: form.pending.promotions,
@@ -295,6 +332,8 @@ export function PersonalDataForm({
         draftKey={draftKey}
         resume={resume}
         onSubmit={async (answers, extra) => {
+          // A quién se le habla al terminar: con la fecha que escribió y quién respondió (K1).
+          const said = answeredFor(form, answers, form.today)
           const input: PersonalDataInput = {
             ...toInput(answers, form.pending, extra.visit),
             ...(healthCheck && check ? { healthCheck: check } : {}),
@@ -303,7 +342,7 @@ export function PersonalDataForm({
           if (correcting) {
             try {
               await send.mutateAsync(input)
-              onSent(healthAnswerWords(form, clinicName, "correccion"))
+              onSent(healthAnswerWords(said, clinicName, "correccion"))
             } catch (error) {
               if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
               throw new Error(
@@ -322,16 +361,16 @@ export function PersonalDataForm({
             // Queda dicho que ya respondió, para no volver a pedírselo; si falla, no pasa nada.
             if (form.missing.length === 0) void submitPersonalData(slug, token, input).catch(() => undefined)
             // Solo su salud y no contó nada: no hay nada que enviar; la tarjeta sigue ahí, opcional.
-            onSent(personalDataSentWords(form, clinicName, "nada"))
+            onSent(personalDataSentWords(said, clinicName, "nada"))
             return
           }
           const withHealth = (form.asksHealth || changed) && !!input.health
           try {
             await send.mutateAsync(input)
-            onSent(personalDataSentWords(form, clinicName, withHealth ? "con-salud" : "sin-salud", visitWords))
+            onSent(personalDataSentWords(said, clinicName, withHealth ? "con-salud" : "sin-salud", visitWords))
           } catch (error) {
             if (error instanceof ApiError && (error.shape.code === "DATA_ALREADY_SENT" || error.shape.code === "ALREADY_SUBMITTED")) {
-              onSent(personalDataSentWords(form, clinicName, "ya-enviado"))
+              onSent(personalDataSentWords(said, clinicName, "ya-enviado"))
               return
             }
             // Lo que es de un dato, el cuestionario lo dice en su campo.

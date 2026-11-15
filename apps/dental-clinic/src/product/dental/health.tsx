@@ -16,7 +16,15 @@ import {
 } from "@odentia/dental"
 import { shortDay } from "@odentia/clinic-app/lib/declared-health"
 import type { DeclaredInterviewKey } from "@odentia/clinic-app/lib/patients"
-import { CIGARETTE_BAND_LABELS, CIGARETTE_BANDS, EARLY_CHILDHOOD_MAX_AGE, isChildAge } from "@odentia/clinical"
+import {
+  ANESTHESIA_TROUBLE_WORDS,
+  ANESTHESIA_TROUBLES,
+  anesthesiaAnswersOf,
+  CIGARETTE_BAND_LABELS,
+  CIGARETTE_BANDS,
+  EARLY_CHILDHOOD_MAX_AGE,
+  isChildAge,
+} from "@odentia/clinical"
 import { regionToday } from "@odentia/ui-patterns"
 import {
   Checkbox,
@@ -273,6 +281,11 @@ function DentalInterviewSections({
 }
 
 const ANSWER_ITEMS: Record<string, string> = { "sin-indicar": "Sin indicar", si: "Sí", no: "No", no_sabe: "No sabe" }
+/** «¿Qué pasó?» con la anestesia, con el Sí (H9). */
+const ANESTHESIA_TROUBLE_ITEMS: Record<string, string> = {
+  "sin-indicar": "Sin indicar",
+  ...Object.fromEntries(ANESTHESIA_TROUBLES.map((value) => [value, ANESTHESIA_TROUBLE_WORDS[value].other])),
+}
 const TOBACCO_ITEMS: Record<string, string> = {
   "sin-indicar": "Sin indicar",
   nunca: "Nunca fumó",
@@ -352,6 +365,23 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
     if (value === undefined) delete next[key]
     update("antecedentesOdontologicos", "corazon", Object.keys(next).length ? next : undefined)
   }
+  // La anestesia (y qué pasó) y el sangrado, por separado (H9). Lo guardado antes con una sola
+  // respuesta para los dos: su «No» vale para los dos; un «Sí» o un «No sabe» no se parte, se dice.
+  const anesthesia = anesthesiaAnswersOf(odontologicos["problemaAnestesia"])
+  const anesthesiaNow: Record<string, string> = {
+    ...(anesthesia.joint === "no" ? { anestesia: "no", sangrado: "no" } : {}),
+    ...(anesthesia.anesthesia ? { anestesia: anesthesia.anesthesia } : {}),
+    ...(anesthesia.what ? { quePaso: anesthesia.what } : {}),
+    ...(anesthesia.bleeding ? { sangrado: anesthesia.bleeding } : {}),
+  }
+  const setAnesthesia = (key: "anestesia" | "quePaso" | "sangrado", value: string | undefined) => {
+    const next: Record<string, string> = { ...anesthesiaNow }
+    if (value === undefined) delete next[key]
+    else next[key] = value
+    // «¿Qué pasó?» va solo con el Sí a la anestesia.
+    if (key === "anestesia" && value !== "si") delete next.quePaso
+    update("antecedentesOdontologicos", "problemaAnestesia", next.anestesia || next.sangrado ? next : undefined)
+  }
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-sm font-medium">
@@ -381,13 +411,39 @@ function DentalRiskSections({ answers, update, disabled, idPrefix, sex, age, err
           />
           <Pick
             id={fid("od-anestesia")}
-            label="Problema con la anestesia o sangrado largo tras una extracción"
+            label="Problema con la anestesia"
             items={ANSWER_ITEMS}
-            value={strOf(odontologicos["problemaAnestesia"])}
-            onChange={(v) => update("antecedentesOdontologicos", "problemaAnestesia", v)}
+            value={strOf(anesthesiaNow.anestesia)}
+            onChange={(v) => setAnesthesia("anestesia", v)}
             disabled={disabled}
             error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia", fid("od-anestesia"))}
           />
+          {anesthesiaNow.anestesia === "si" ? (
+            <Pick
+              id={fid("od-anestesia-que")}
+              label="¿Qué pasó con la anestesia?"
+              items={ANESTHESIA_TROUBLE_ITEMS}
+              value={strOf(anesthesiaNow.quePaso)}
+              onChange={(v) => setAnesthesia("quePaso", v)}
+              disabled={disabled}
+              error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia.quePaso", fid("od-anestesia-que"))}
+            />
+          ) : null}
+          <Pick
+            id={fid("od-sangrado")}
+            label="Sangrado largo tras una extracción"
+            items={ANSWER_ITEMS}
+            value={strOf(anesthesiaNow.sangrado)}
+            onChange={(v) => setAnesthesia("sangrado", v)}
+            disabled={disabled}
+            error={subFieldError(errors, "antecedentesOdontologicos.problemaAnestesia.sangrado", fid("od-sangrado"))}
+          />
+          {anesthesia.joint && anesthesia.joint !== "no" ? (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Antes se preguntaba junto: «Problema con la anestesia o sangrado tras una extracción: {ANSWER_ITEMS[anesthesia.joint]}».
+              Pregúntale cuál de las dos fue.
+            </p>
+          ) : null}
           {child && strOf(habits["tabaco"]) === "" ? null : (
           <Pick
             id={fid("od-tabaco")}

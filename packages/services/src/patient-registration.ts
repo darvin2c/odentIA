@@ -27,6 +27,7 @@ import {
   type RegistrationEntryPoint,
   registrationAnswersSchema,
   registrationConfigSchema,
+  registrationFieldApplies,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -383,6 +384,12 @@ export async function patientHealthQuestions(tx: Db, orgId: string, patientId: s
   return (await patientHealthQuestionsWith(tx, orgId, patientId)).ask
 }
 
+/** Su sexo y sus años de lo que escribió en el mismo envío (la edad, de la fecha que escribió). */
+export interface WrittenPerson {
+  sex?: string | null
+  age?: number | null
+}
+
 /**
  * `patientHealthQuestions` con la salud que leyó para decidirlo, para que quien guarda lo que envió
  * no la vuelva a cargar.
@@ -391,6 +398,18 @@ export async function patientHealthQuestionsWith(
   tx: Db,
   orgId: string,
   patientId: string,
+  options: {
+    /**
+     * Lo que escribió, si su ficha no lo tiene: lo que se le pregunta sale de eso (a un niño, lo de
+     * un niño; B3 de la 7).
+     */
+    written?: WrittenPerson
+    /**
+     * Sin fecha en su ficha, también lo de un niño: la pantalla lo muestra solo si la fecha que
+     * escribe lo hace niño, y el servidor lo acepta con esa misma fecha. Sin fecha no se presume niño.
+     */
+    orChild?: boolean
+  } = {},
 ): Promise<{
   ask: RegistrationFieldKey[]
   /**
@@ -414,36 +433,41 @@ export async function patientHealthQuestionsWith(
     .limit(1)
   const health = await getPatientHealth(tx, orgId, patientId)
   const known = knownHealthQuestionsOf(health)
-  const product = await orgProduct(tx, orgId)
-  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve
-  // de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
-  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
-  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Solo
-  // si lo que dijo fue con la lista de antes (una declaración sin las dos clases) se le preguntan las
-  // nuevas; con la de hoy, o si lo dejó todo en blanco, no se le insiste.
+  // Ya respondió: envió «Tus datos» desde un enlace o se registró en línea (QA del 14 nov, B6). Quien
+  // respondió con la lista de hoy (su declaración trae las dos clases de medicina), o lo dejó todo en
+  // blanco, no ve de nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
   const responded = !!sent || health.declarations.some((row) => row.via === "registro")
-  const answeredOldList = health.declarations.length > 0 && !sawToday
+  // Quien ya respondió con la lista de hoy (su declaración trae las dos clases de medicina) no ve de
+  // nuevo lo que dejó en blanco; quien respondió antes, solo lo que la lista sumó después.
+  const sawToday = health.declarations.some((row) => "anticoagulants" in row.health || "boneMedicines" in row.health)
+  const stored = await requirePatient(tx, orgId, patientId)
+  const written = options.written ?? {}
+  const person = {
+    sex: stored.sex ?? written.sex ?? null,
+    age: ageInYears(stored.birthDate, await patientOrganizationToday(tx, orgId)) ?? written.age ?? null,
+  }
+  // A un niño no se le preguntan las dos clases (K7): que no estén no dice que vio la lista de antes.
+  const child = !registrationFieldApplies("anticoagulants", person)
+  const answeredOldList = health.declarations.length > 0 && !sawToday && !child
   // La excepción: lo que saltó del anticoagulante y los huesos, que cambian la cita. Se le preguntó y no
   // respondió, así que su enlace le pregunta solo eso (QA del 15 nov, A12 y D3 del auditor).
-  const skipped = (Object.keys(health.medicineClasses) as Array<keyof typeof health.medicineClasses>).filter(
-    (key) => health.medicineClasses[key].answer === "skipped",
-  )
+  const skipped = child
+    ? []
+    : (Object.keys(health.medicineClasses) as Array<keyof typeof health.medicineClasses>).filter(
+        (key) => health.medicineClasses[key].answer === "skipped",
+      )
+  const product = await orgProduct(tx, orgId)
   const onlyNew = responded
     ? new Set<string>([...(answeredOldList ? newRegistrationQuestions(1, product).map((question) => question.key) : []), ...skipped])
     : null
   if (onlyNew?.size === 0) return { ask: [], onlyNew: false, health, known }
   const config = await getPatientRegistrationConfig(tx, orgId)
-  const person = await requirePatient(tx, orgId, patientId)
-  const today = await patientOrganizationToday(tx, orgId)
-  const ask = healthQuestionsToAsk(
-    config,
-    {
-      countryCode: await findOrgCountry(tx, orgId),
-      product,
-      person: { sex: person.sex, age: ageInYears(person.birthDate, today) },
-    },
-    known,
-  ).filter((key) => !onlyNew || onlyNew.has(key))
+  const countryCode = await findOrgCountry(tx, orgId)
+  const askOf = (who: typeof person) =>
+    healthQuestionsToAsk(config, { countryCode, product, person: who }, known).filter((key) => !onlyNew || onlyNew.has(key))
+  // Un niño de meses: entra todo lo de un niño, también el biberón y el chupón.
+  const ask =
+    options.orChild && person.age === null ? [...new Set([...askOf(person), ...askOf({ ...person, age: 0 })])] : askOf(person)
   return { ask, onlyNew: !!onlyNew, health, known }
 }
 
