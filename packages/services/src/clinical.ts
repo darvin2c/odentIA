@@ -369,6 +369,18 @@ export const DECLARED_INTERVIEW = {
 } as const
 export type DeclaredInterviewKey = keyof typeof DECLARED_INTERVIEW
 
+/**
+ * De qué pregunta de la persona es cada dato de la entrevista guardada (`ProductInterview.record`):
+ * la copia y la atención firmada nombran con él lo que dijo y nadie revisó.
+ */
+export const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
+  "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
+  "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
+  "habitos.tabaco": ["tabaco"],
+  "habitos.alcohol": ["alcohol"],
+  "embarazoLactancia.lactancia": ["lactancia"],
+}
+
 /** Si lo que está en la entrevista es lo que dijo: la lactancia se dice Sí o No y se guarda con su día. */
 function sameInterviewValue(key: DeclaredInterviewKey, said: unknown, kept: unknown): boolean {
   if (said === undefined) return false

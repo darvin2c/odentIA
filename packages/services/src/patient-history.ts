@@ -2,6 +2,7 @@ import {
   budgetStateText,
   diagnosisCodeLabel,
   doneSessionWords,
+  type HealthAtSigning,
   isRetiredPlanStatus,
   LEFT_OUT_DECISIONS,
   planItemStateText,
@@ -760,6 +761,11 @@ export interface EncounterBorn {
    * cuándo lo envió y quién lo vio al atender; nulo si no contó nada.
    */
   told?: VisitAnswerView | null
+  /**
+   * Lo que se dijo de su salud y seguía sin revisar al firmarla (auditor, 15 nov, A2): quién,
+   * cuándo y qué, como quedó en la atención firmada; sin él, no quedaba nada sin revisar.
+   */
+  saidAtSigning?: HealthAtSigning[]
 }
 
 const FOLLOW_UP_STATE_WORDS: Record<string, string> = {
@@ -791,7 +797,7 @@ async function loadBornForEncounters(
     }
     return born
   }
-  const [items, consents, recipes, orders, forms, records, controls] = await Promise.all([
+  const [items, consents, recipes, orders, forms, records, controls, signedHealth] = await Promise.all([
     tx
       .select()
       .from(treatmentPlanItem)
@@ -869,7 +875,12 @@ async function loadBornForEncounters(
         ),
       )
       .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id)),
+    tx
+      .select({ id: encounter.id, said: encounter.healthAtSigning })
+      .from(encounter)
+      .where(and(eq(encounter.organizationId, orgId), inArray(encounter.id, encounterIds))),
   ])
+  for (const row of signedHealth) if (row.said?.length) of(row.id).saidAtSigning = row.said
   for (const item of items) {
     if (!item.sourceEncounterId) continue
     of(item.sourceEncounterId).indicated.push({

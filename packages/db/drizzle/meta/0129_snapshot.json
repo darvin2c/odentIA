@@ -1,5 +1,5 @@
 {
-  "id": "2e043b9d-8bec-44d4-80c6-cd79d6a51af9",
+  "id": "4357dedf-bd81-4eda-bf9e-d7af24eb1262",
   "prevId": "256f8ade-66cd-4d19-bf69-a12ec20f90f5",
   "version": "7",
   "dialect": "postgresql",
@@ -16993,6 +16993,12 @@
         "consent_skip_reason": {
           "name": "consent_skip_reason",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "health_at_signing": {
+          "name": "health_at_signing",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

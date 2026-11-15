@@ -2,6 +2,7 @@ import type {
   BloodGroup,
   ContactRelationship,
   FinishControl,
+  HealthAtSigning,
   PatientGuide,
   ProcedureCodingSnapshot,
   RegistrationAnswers,
@@ -956,6 +957,12 @@ export const encounter = pgTable(
      * decisión 3 de la fase 3). Historia como el resto: no cambia al cerrar.
      */
     consentSkipReason: text("consent_skip_reason"),
+    /**
+     * Lo que se dijo de su salud y seguía sin revisar al firmar, una foto por declaración
+     * (`healthAtSigningOf`): `[]` si no quedaba nada, nulo en lo firmado antes de guardarla.
+     * Historia como el resto: no cambia después de firmar.
+     */
+    healthAtSigning: jsonb("health_at_signing").$type<HealthAtSigning[]>(),
     /**
      * «Viene a su control»: el control por cumplir que quien atiende dijo, al
      * empezar, que es el de hoy. El cierre lo trae marcado y se cumple al

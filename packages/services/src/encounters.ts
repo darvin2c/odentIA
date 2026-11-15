@@ -78,6 +78,7 @@ import {
   listEncounterDocuments,
   type PatientDocumentWithContext,
 } from "./clinical.js"
+import { healthAtSigningOf } from "./health-at-signing.js"
 import {
   type ConsentNeed,
   cancelDerivationTask,
@@ -3243,6 +3244,8 @@ export async function finalizeEncounter(
       signerTitle: signature.title,
       signerRegistration: signature.registration,
       consentSkipReason,
+      // Lo que dijo de su salud y seguía sin revisar: la constancia del aviso del cierre, que no frena.
+      healthAtSigning: await healthAtSigningOf(tx, orgId, patientId),
       updatedAt: now,
     })
     .where(eq(encounter.id, encounterId))

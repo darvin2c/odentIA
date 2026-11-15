@@ -14,6 +14,7 @@ import { formatTakenAt } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
 import { FormViewButton } from "./form-record"
+import { HealthAtSigningList } from "./health-at-signing"
 import { useOpenWide } from "./wide-section"
 
 /** «mié 4 nov, 10:30»: el día y la hora, siempre absolutos. */
@@ -108,6 +109,12 @@ function BornParts({ patientId, born, retired = false }: { patientId: string; bo
         // Lo que contó antes de venir, en la atención de su cita, con quién lo vio (mesa del 13 nov, entrega 8).
         <Part label="Lo que contó antes de venir">
           <p className="text-sm">{visitHistoryLine(born.told)}</p>
+        </Part>
+      ) : null}
+      {!retired && born.saidAtSigning?.length ? (
+        // Lo que seguía sin revisar al firmarla, como quedó en la atención firmada (auditor, 15 nov, A2).
+        <Part label="Lo que dijo de su salud al firmar">
+          <HealthAtSigningList patientId={patientId} groups={born.saidAtSigning} />
         </Part>
       ) : null}
       {/* Una ficha finalizada es algo que se anotó en la atención, no que se indicó:

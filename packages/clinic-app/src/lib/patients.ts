@@ -4,6 +4,7 @@ import {
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
   isCurrentMedication,
+  type HealthAtSigning,
   type HealthDeclarant,
   type MedicationClass,
   type MedicineClassAnswer,
@@ -509,6 +510,8 @@ export interface Encounter {
   prognosis?: string | null
   /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
   consentSkipReason?: string | null
+  /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó; nulo en lo firmado antes de guardarlo. */
+  healthAtSigning?: HealthAtSigning[] | null
   evolution: string | null
   indications: string | null
   finalizedAt: string | null
@@ -928,6 +931,8 @@ export interface EncounterBorn {
   }>
   /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
   told?: VisitAnswerView | null
+  /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó en la atención firmada. */
+  saidAtSigning?: HealthAtSigning[]
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
 }
 

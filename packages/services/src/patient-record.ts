@@ -79,7 +79,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { type DeclaredHealthGroup, type DeclaredInterviewKey, getPatientHealth, type HealthDeclaration } from "./clinical.js"
+import { type DeclaredHealthGroup, ENTRY_DECLARED_KEYS, getPatientHealth, type HealthDeclaration } from "./clinical.js"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { type DataRequestItem, listDataRequests, respondDataRequest } from "./data-requests.js"
 import { loadDocumentClinic } from "./document-clinic.js"
@@ -337,15 +337,6 @@ const MEDICINE_CLASS_FHIR: Partial<Record<MedicineClassAnswer["answer"], string>
   took: "completed",
   no: "not-taken",
   unknown: "unknown",
-}
-
-/** De qué pregunta de la persona es cada dato de la entrevista (`DECLARED_INTERVIEW`). */
-const ENTRY_DECLARED_KEYS: Record<string, DeclaredInterviewKey[]> = {
-  "antecedentesOdontologicos.corazon": ["corazon", "antibiotico"],
-  "antecedentesOdontologicos.problemaAnestesia": ["anestesia"],
-  "habitos.tabaco": ["tabaco"],
-  "habitos.alcohol": ["alcohol"],
-  "embarazoLactancia.lactancia": ["lactancia"],
 }
 
 /** La entrevista vigente y, de cada dato, desde qué versión consta igual. */
