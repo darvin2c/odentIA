@@ -1,6 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { DICTATION_CHARS, type DictationFormQuestion, getDictationCatalog, getOrgLocale, ServiceError } from "@odentia/services"
-import { askDictationModel, type DictationExtraction, type DictationPending } from "./dictation.js"
+import { DICTATION_CHARS, type DictationFormQuestion, formNetMisses, getDictationCatalog, getOrgLocale, productHooksFor, ServiceError } from "@odentia/services"
+import { askDictationModel, type DictationExtraction, type DictationPending, rereadFormSentences } from "./dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
 import type { AgentRuntime } from "./run.js"
@@ -23,6 +23,8 @@ export async function extractDictation(
     pending?: DictationPending[] | undefined
     /** Las preguntas vacías de las fichas empezadas en la atención (`dictationFormQuestions`). */
     forms?: readonly DictationFormQuestion[] | undefined
+    /** Lo que ya proponen las sugerencias de ficha pendientes, por pregunta (`pendingFormValues`). */
+    formPending?: ReadonlyMap<number, unknown> | undefined
   },
 ): Promise<DictationExtraction> {
   const transcript = input.transcript.trim()
@@ -93,5 +95,11 @@ export async function extractDictation(
       "El asistente no pudo ordenar ese dictado. Vuelve a intentarlo o regístralo a mano.",
     )
   }
-  return { ...read, model: spec.modelName }
+  // La segunda lectura de las fichas: lo que la red avisaría se lee una vez más, en la misma pausa.
+  const forms = input.forms ?? []
+  const misses = forms.length ? formNetMisses(read.drafts, forms, productHooksFor(product).site, transcript, input.formPending) : []
+  if (!misses.length) return { ...read, model: spec.modelName }
+  // Si esa lectura falla, la pausa no se pierde: queda lo de la primera y el aviso de la red.
+  const reread = await rereadFormSentences(model, spec, misses, forms).catch(() => [])
+  return { ...read, drafts: [...read.drafts, ...reread], reread: { sentences: misses.length, drafts: reread.length }, model: spec.modelName }
 }

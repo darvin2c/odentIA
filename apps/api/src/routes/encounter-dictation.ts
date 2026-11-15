@@ -19,6 +19,7 @@ import {
   listConfirmedDictation,
   listDictationSuggestions,
   listVoiceRemovedDictation,
+  pendingFormValues,
   productDictation,
   requireClinicalAssistant,
   saveDictationSegment,
@@ -124,10 +125,13 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const pending = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
           const confirmed = await listConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId)
           const list = [...pending, ...confirmed]
+          // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
+          const forms = await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] })
           return {
             list,
-            // Las preguntas vacías de las fichas empezadas: Clío solo propone ahí (entrega 11).
-            forms: await dictationFormQuestions(tx, orgId, at.data.encounterId, { open: openForms ?? [] }),
+            forms,
+            // Lo que ya proponen las pendientes: la segunda lectura no repite lo ya propuesto.
+            formPending: pendingFormValues(pending, forms),
             pendingCount: pending.length,
             labels: [
               ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
@@ -135,15 +139,16 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             ],
           }
         })
-        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], droppedForms: [], formSources: [], sources: [], omitted: 0, unused: [], unusedWhy: {}, unusedFor: {}, repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
+        // La segunda lectura de las fichas va dentro: es la misma pausa, de la misma atención.
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
           extractDictation(
             deps.db,
             { secretsKey: deps.secretsKey, platform: deps.llm },
-            { orgId, transcript, context, pending: ready.labels, forms: ready.forms },
+            { orgId, transcript, context, pending: ready.labels, forms: ready.forms, formPending: ready.formPending },
           ),
           { encounterId: at.data.encounterId },
         )
@@ -181,7 +186,9 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         ]
         // Por qué no se usó, cuando se sabe: lo de una ficha lo dice el servidor.
         const unusedWhy = Object.fromEntries(saved.droppedForms.map((item) => [item.said, item.why]))
-        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, model: extracted.model }
+        // La pregunta de la ficha que nombra cada frase: «Usar en Percusión» la abre con la frase al lado.
+        const unusedFor = Object.fromEntries(saved.droppedForms.filter((item) => item.targets.length).map((item) => [item.said, item.targets]))
+        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length + saved.droppedForms.length, unused, unusedWhy, unusedFor, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")

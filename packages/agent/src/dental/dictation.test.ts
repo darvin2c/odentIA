@@ -1,7 +1,16 @@
-import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS } from "@odentia/services"
+import { AIMessage, type BaseMessage } from "@langchain/core/messages"
+import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS, type DictationFormQuestion, formQuestionsOf, productHooksFor } from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
-import { askDictationModel, type DictationAsk, dictationMessages, groundSource, readDictation as readWith } from "../dictation.js"
+import {
+  askDictationModel,
+  type DictationAsk,
+  dictationFormsText,
+  dictationMessages,
+  groundSource,
+  readDictation as readWith,
+  rereadFormSentences,
+} from "../dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "../llm.js"
 import { cacheMarked, fakeProvider, systemBlock, toolCallReply } from "../test-provider.js"
 import { DENTAL_DICTATION_PROFILE, demoExtraction, demoSegment } from "./dictation.js"
@@ -276,17 +285,95 @@ describe("lo que recibe el modelo en cada pausa", () => {
 })
 
 describe("las respuestas de una ficha", () => {
+  /** La ficha de ortodoncia de odentIA, con sus preguntas numeradas como las ve Clío. */
+  const ortho: DictationFormQuestion[] = (() => {
+    const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-de-ortodoncia")
+    if (!form) throw new Error("falta la ficha de ortodoncia")
+    return formQuestionsOf([{ id: "orto", title: form.title, snapshot: form.schema, answers: {} }])
+  })()
+  const numberOf = (fieldId: string) => ortho.find((item) => item.fieldId === fieldId)?.number ?? 0
+
   it("una respuesta a una pregunta que no se le dio no se adivina: se avisa con su frase", () => {
     const transcript = "Overjet de seis milímetros. Overbite de tres."
     const read = readWith(
-      { fichas: [{ question: 1, answer: "6", dicho: "Overjet de seis milímetros." }, { question: 3, answer: "3", dicho: "Overbite de tres." }] },
+      { fichas: [{ question: 1, answer: "6", dicho: "Overjet de seis milímetros." }, { question: 99, answer: "3", dicho: "Overbite de tres." }] },
       transcript,
       0,
       DENTAL_DICTATION_PROFILE.parts,
-      2,
+      ortho,
     )
     expect(read?.drafts).toEqual([{ kind: "ficha", payload: { question: 1, answer: "6" }, sourceText: "Overjet de seis milímetros." }])
     expect(read?.omitted).toBe(1)
     expect(read?.unused).toEqual(["Overbite de tres."])
+  })
+
+  it("la frase se encuentra aunque Clío escriba bien lo que Chrome oyó mal, tal como se dictó", () => {
+    const transcript = "al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos"
+    const question = numberOf("clase_molar_derecha")
+    const read = readWith(
+      { fichas: [{ question, answer: "Clase II división 1", dicho: "«molar derecha clase 2 división 1»" }] },
+      transcript,
+      0,
+      DENTAL_DICTATION_PROFILE.parts,
+      ortho,
+    )
+    expect(read?.drafts).toEqual([{ kind: "ficha", payload: { question, answer: "Clase II división 1" }, sourceText: "volar derecha clase 2 división 1" }])
+    // Solo en las fichas, y solo lo que suena igual o está en la lista revisada: lo que no se dijo no aparece.
+    const other = readWith({ fichas: [{ question, answer: "Clase III", dicho: "molar derecha clase 3" }] }, transcript, 0, DENTAL_DICTATION_PROFILE.parts, ortho)
+    expect(other?.drafts[0]?.sourceText).toBe("")
+  })
+
+  it("con una ficha empezada, Clío sabe que lo dictado viene de la voz y copia la frase como llegó", () => {
+    const text = dictationFormsText(ortho)
+    expect(text).toContain("Lo dictado viene del reconocimiento de voz del navegador")
+    expect(text).toContain("una sigla con espacios entre sus letras")
+    expect(text).toContain("En `dicho` copia la frase tal como llegó, con la palabra mal escrita")
+    // Sin ficha, nada nuevo: la pausa de siempre.
+    expect(dictationFormsText([])).toBe("")
+  })
+
+  it("la segunda lectura: cada oración sola con sus preguntas y un texto corto, y vuelve por revisar", async () => {
+    const seen: BaseMessage[][] = []
+    const overbite = numberOf("overbite")
+    const overjet = numberOf("overjet")
+    const model = {
+      bindTools: (tools: Array<{ name: string }>) => {
+        expect(tools.map((item) => item.name)).toEqual(["registrar_fichas"])
+        return {
+          invoke: async (messages: BaseMessage[]) => {
+            seen.push(messages)
+            return new AIMessage({
+              content: "",
+              tool_calls: [
+                {
+                  id: "relectura-1",
+                  name: "registrar_fichas",
+                  args: {
+                    fichas: [
+                      { question: overbite, answer: "4", dicho: "over byte de 4" },
+                      // Una pregunta que no era de esa oración, y una frase que no se dijo: no vuelven.
+                      { question: overjet, answer: "7", dicho: "over byte de 4" },
+                      { question: overbite, answer: "5", dicho: "overbite de cinco" },
+                    ],
+                  },
+                },
+              ],
+            })
+          },
+        }
+      },
+    }
+    const drafts = await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [{ said: "a ver over byte de 4 succión por favor", questions: [overbite] }], ortho)
+    expect(drafts).toEqual([{ kind: "ficha", payload: { question: overbite, answer: "4" }, sourceText: "over byte de 4", reread: true }])
+    const [system, human] = seen[0] ?? []
+    expect(String(system?.content)).toContain("Lees de nuevo oraciones de un dictado")
+    expect(String(system?.content).length).toBeLessThan(1500)
+    expect(String(human?.content)).toBe(`1. «a ver over byte de 4 succión por favor»\n   Ficha de ortodoncia: ${overbite}. Overbite · número en mm, de -10 a 15`)
+  })
+
+  it("sin oraciones que leer de nuevo, no llama al modelo", async () => {
+    const model = { bindTools: () => ({ invoke: async () => { throw new Error("no debía llamar") } }) }
+    expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [], ortho)).toEqual([])
+    expect(await rereadFormSentences(model, { provider: "openai", modelName: "gpt-6-luna" }, [{ said: "algo", questions: [99] }], ortho)).toEqual([])
   })
 })
