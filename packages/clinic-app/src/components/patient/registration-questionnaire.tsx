@@ -639,7 +639,13 @@ function showFound(form: RegistrationForm, found: NonNullable<Found>): void {
  * de «Enviar», que va en la última pantalla con contenido (cada pantalla lo
  * lleva; el cuestionario muestra solo el de la última).
  */
-const FinishContext = createContext<{ label: string | null; sending: boolean; checks: Map<string, () => Found> } | null>(null)
+const FinishContext = createContext<{
+  label: string | null
+  sending: boolean
+  checks: Map<string, () => Found>
+  /** La pantalla desde la que se envió: el error del envío va solo en ella, no deja inválidas a las demás. */
+  at: string | null
+} | null>(null)
 
 /**
  * «Su enlace»: quien ya es paciente completa solo lo que le falta y, si nadie
@@ -841,6 +847,8 @@ export function RegistrationQuestionnaire({
     [],
   )
   const sentRef = useRef(false)
+  // La pantalla desde la que se envió: si falla, el error se dice solo ahí.
+  const [sentFrom, setSentFrom] = useState<string | null>(null)
   const form = useRegistrationForm(
     { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
@@ -1256,7 +1264,10 @@ export function RegistrationQuestionnaire({
       (name) => name && (form.getFieldMeta(name)?.errors.length ?? 0) > 0,
     )
     if (!field) {
-      setItem("send")
+      // Lo que no es de un campo (el servidor no respondió, sin red) se dice donde se envió. «Su
+      // enlace» sin «Antes de enviar» se queda en su pantalla: ir a «send», que no tiene, lo devolvía
+      // al paso 1 (QA de la entrega 6, A1).
+      if (!finishEarly) setItem("send")
       return
     }
     setItem(ITEM_OF_FIELD.get(field) ?? "send")
@@ -1290,6 +1301,7 @@ export function RegistrationQuestionnaire({
       })
       return
     }
+    setSentFrom(item)
     const ok = await submitForm(form, { fieldMap: fieldOf, root })
     if (!ok) goToFirstInvalid(root)
   }
@@ -1340,7 +1352,7 @@ export function RegistrationQuestionnaire({
 
   return (
     <FormContext.Provider value={form}>
-      <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks } : null}>
+      <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks, at: sentFrom } : null}>
       <Questionnaire
         item={item}
         onItemChange={setItem}
@@ -3215,7 +3227,7 @@ function Question({
   const allOptional = grouped && !required
   // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de la pantalla desde la que se envía.
   const submitError = useFormSubmitError(form)
-  const loose = name === "send" || finish ? submitError : null
+  const loose = name === "send" || (finish && fillContext?.at === name) ? submitError : null
 
   function blocked(fieldset: HTMLElement): boolean {
     const found = check?.() ?? null

@@ -210,6 +210,34 @@ describe("si la interrumpen, lo escrito sigue en su celular", () => {
     expect(localStorage.length).toBe(0)
   })
 
+  // QA de la entrega 6 (A1): tras un error al enviar, el enlace volvía al paso 1 y «Siguiente» no avanzaba.
+  it("si el envío falla, sigue en el paso desde el que envió, con lo escrito, y puede ir y volver", async () => {
+    const host = await open({
+      fill: {
+        missing: new Set(),
+        health: true,
+        hasRepresentative: true,
+        firstName: "Marta",
+        visit: { purpose: null, questions: { reason: true, pain: false, more: false }, reader: "la Dra. Ana Torres" },
+      },
+      onSubmit: async () => {
+        throw new Error("No pudimos guardar lo que enviaste.")
+      },
+    })
+    const step = () => host.querySelector('[role="progressbar"]')?.textContent ?? ""
+    for (let i = 0; i < 10 && !button(host, "Enviar"); i++) await press(button(host, "Siguiente") ?? button(host, "Saltar"))
+    const last = step()
+    expect(last).toMatch(/^Paso (\d+) de \1$/)
+    await press(button(host, "Enviar"))
+    expect(step()).toBe(last)
+    expect(host.textContent).toContain("No pudimos guardar lo que enviaste.")
+    // Las demás pantallas no quedan marcadas con el error: va atrás y vuelve.
+    await press(button(host, "Anterior"))
+    expect(step()).not.toBe(last)
+    await press(button(host, "Siguiente") ?? button(host, "Saltar"))
+    expect(step()).toBe(last)
+  })
+
   it("en una ventana privada que no deja guardar, funciona igual, sin error y sin prometer", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("Bloqueado", "SecurityError")
