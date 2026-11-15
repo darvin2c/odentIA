@@ -11,6 +11,7 @@ import { Hono } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createAdminChatsRoute } from "./admin-chats.js"
+import { createAdminKairosRoute } from "./admin-kairos.js"
 
 /**
  * Responder desde el ARM contra Postgres real y un Graph de prueba: lo que Meta
@@ -308,5 +309,48 @@ describe("escribir por WhatsApp desde la ficha", () => {
     })
     const [chat] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
     expect(chat?.clientId).toBeNull()
+  })
+})
+
+describe("Kairós en la conversación", () => {
+  it("el interruptor lo ve y lo cambia solo Administración", async () => {
+    const kairos = new Hono<{ Variables: { adminActor: AdminActor } }>()
+    kairos.use("*", async (c, next) => {
+      const id = c.req.header("x-test-user") ?? ""
+      c.set("adminActor", { userId: id, role: id === ADMIN ? "admin" : "support" })
+      await next()
+    })
+    kairos.route("/k", createAdminKairosRoute({ ownerDb, mailer: { async send() {} } }))
+    const ask = (method: string, who: string, body?: unknown) =>
+      kairos.request("/k/sells", {
+        method,
+        headers: { "x-test-user": who, "content-type": "application/json" },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      })
+    const off = await ask("GET", ADMIN)
+    await expectStatus(off, 200)
+    expect((await json(off)).data).toMatchObject({ enabled: false })
+    await expectStatus(await ask("GET", SUPPORT), 403)
+    await expectStatus(await ask("PUT", SUPPORT, { enabled: true }), 403)
+    await expectStatus(await ask("PUT", ADMIN, { enabled: "sí" }), 400)
+    const on = await ask("PUT", ADMIN, { enabled: true })
+    await expectStatus(on, 200)
+    expect((await json(on)).data).toMatchObject({ enabled: true, updatedBy: { userId: ADMIN } })
+
+    // La conversación dice si Kairós la atiende; «Lo atiendo yo» la saca y «Devolver a Kairós» la vuelve.
+    const chatId = await chatWith("whatsapp", "+51911000020")
+    const before = await json(await call("GET", `/${chatId}`, ADMIN))
+    expect(before.data).toMatchObject({ handledByKairos: true, kairosPausedAt: null })
+    await expectStatus(await call("POST", `/${chatId}/kairos-pause`, SUPPORT), 404)
+    await expectStatus(await call("POST", `/${chatId}/kairos-pause`, ADMIN), 200)
+    const paused = await json(await call("GET", `/${chatId}`, ADMIN))
+    expect(paused.data.handledByKairos).toBe(false)
+    expect(paused.data.kairosPausedAt).not.toBeNull()
+    const [row] = await ownerDb.select().from(saasChat).where(eq(saasChat.id, chatId))
+    expect(row?.kairosPausedBy).toBe(ADMIN)
+    await expectStatus(await call("DELETE", `/${chatId}/kairos-pause`, ADMIN), 200)
+    expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(true)
+    await expectStatus(await ask("PUT", ADMIN, { enabled: false }), 200)
+    expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(false)
   })
 })

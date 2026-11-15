@@ -178,6 +178,9 @@ const executors: KairosExecutors = {
     calls.push({ op: "markClientFileCarga", args: [actor.userId, fileId] })
     return markClientFileCarga(tx, actor, fileId, NOW)
   },
+  async reassignPresentation(_tx, actor, taskId, toUserId) {
+    calls.push({ op: "reassignPresentation", args: [actor.userId, taskId, toUserId] })
+  },
 }
 const lastCall = (op: string) => [...calls].reverse().find((call) => call.op === op)
 const decide = (

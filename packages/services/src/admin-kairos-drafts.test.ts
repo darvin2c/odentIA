@@ -560,6 +560,7 @@ describe("la respuesta a un correo que llegó", () => {
           recordPresentation: unused,
           createProposal: unused,
           markClientFileCarga: unused,
+          reassignPresentation: unused,
         },
         NOW,
       ),

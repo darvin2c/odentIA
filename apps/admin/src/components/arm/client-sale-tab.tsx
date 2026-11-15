@@ -515,14 +515,27 @@ function PresentationsCard({
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {[
+                            task.assignee ? `Presenta ${task.assignee.name}` : null,
                             demo ? demo.name : task.demoId ? "Una demo que ya no está" : "Sin demo",
-                            task.assignee?.name,
+                            task.meetingUrl ? "con su sala" : "sin sala de videollamada",
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {task.meetingUrl ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            render={
+                              <a href={task.meetingUrl} target="_blank" rel="noopener noreferrer" />
+                            }
+                          >
+                            <ExternalLink aria-hidden />
+                            Entrar a la sala
+                          </Button>
+                        ) : null}
                         {demo && demo.status === "lista" && demo.organizationId ? (
                           <Button
                             type="button"

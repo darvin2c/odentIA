@@ -22,6 +22,11 @@ import { useState } from "react"
 import { z } from "zod"
 import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 import { StaffMailButton, StaffMailDrawer, StaffMailLine } from "../../components/staff-mail"
+import {
+  StaffScheduleDrawer,
+  StaffScheduleLine,
+  useStaffSchedule,
+} from "../../components/staff-schedule"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
 
@@ -75,17 +80,65 @@ const reasonSchema = z.object({
 })
 
 function TeamPage() {
+  // Soporte solo ve y cambia lo suyo: su horario, su sala y sus ausencias.
+  return useIsAdmin() ? <ManagerTeamPage /> : <MySchedulePage />
+}
+
+/** Equipo para Soporte: lo suyo para las presentaciones (el resto del equipo lo ve Administración). */
+function MySchedulePage() {
+  const myUserId = useAdminUserId()
+  const mine = useStaffSchedule(myUserId)
+  const [open, setOpen] = useState(false)
+  return (
+    <PageShell className="flex flex-col gap-6">
+      <PageHeader
+        title="Equipo"
+        subtitle="Tu horario para presentaciones, tu sala y tus ausencias"
+      />
+      <section aria-labelledby="mis-presentaciones" className="flex flex-col gap-3">
+        <h2 id="mis-presentaciones" className="text-lg font-semibold">
+          Tus presentaciones
+        </h2>
+        {mine.isError ? (
+          <ErrorState message={submitErrorMessage(mine.error)} onRetry={() => void mine.refetch()} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2">
+            <div className="min-w-0 flex-1 basis-48">
+              <p className="truncate font-medium">{mine.data?.name ?? "Tú"}</p>
+              <StaffScheduleLine userId={myUserId} />
+            </div>
+            <Button variant="outline" onClick={() => setOpen(true)}>
+              Horario y sala
+            </Button>
+          </div>
+        )}
+      </section>
+      {open ? (
+        <StaffScheduleDrawer
+          userId={myUserId}
+          name={mine.data?.name ?? ""}
+          self
+          isAdmin={false}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </PageShell>
+  )
+}
+
+function ManagerTeamPage() {
   const queryClient = useQueryClient()
   const team = useQuery({
     queryKey: ["admin-team"],
     queryFn: () => api<TeamData>("/api/admin/access/team"),
   })
-  const isManager = useIsAdmin()
+  const isManager = true
   const myUserId = useAdminUserId()
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [reactivate, setReactivate] = useState<StaffRow | null>(null)
   const [mailOf, setMailOf] = useState<StaffRow | null>(null)
+  const [scheduleOf, setScheduleOf] = useState<StaffRow | null>(null)
   const [confirm, setConfirm] = useState<
     | { kind: "role"; row: StaffRow; role: "admin" | "support" }
     | { kind: "deactivate"; row: StaffRow }
@@ -238,7 +291,7 @@ function TeamPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Equipo"
-        subtitle="Personal interno: invitaciones nominales, roles y reactivación"
+        subtitle="Personal interno: invitaciones, roles, y el horario y la sala de cada uno para presentar"
         primary={
           isManager ? { label: "Invitar", icon: <Plus aria-hidden />, onClick: () => setInviteOpen(true) } : undefined
         }
@@ -295,10 +348,16 @@ function TeamPage() {
                       <p className="truncate font-medium">{row.name || row.email}</p>
                       <p className="truncate text-xs text-muted-foreground">{row.email}</p>
                       <StaffMailLine row={row} />
+                      {row.active ? <StaffScheduleLine userId={row.userId} /> : null}
                     </div>
                     <Badge>{row.role === "admin" ? "Administración" : "Soporte"}</Badge>
                     {row.active ? null : <Badge>Desactivado</Badge>}
                     {isManager ? <StaffMailButton onClick={() => setMailOf(row)} /> : null}
+                    {row.active ? (
+                      <Button variant="ghost" onClick={() => setScheduleOf(row)}>
+                        Horario y sala
+                      </Button>
+                    ) : null}
                     {isManager && row.userId !== myUserId ? (
                       reactivate?.userId === row.userId ? (
                         <form
@@ -460,6 +519,15 @@ function TeamPage() {
         </FieldGroup>
       </FormDrawer>
       {mailOf ? <StaffMailDrawer row={mailOf} onClose={() => setMailOf(null)} /> : null}
+      {scheduleOf ? (
+        <StaffScheduleDrawer
+          userId={scheduleOf.userId}
+          name={scheduleOf.name || scheduleOf.email}
+          self={scheduleOf.userId === myUserId}
+          isAdmin
+          onClose={() => setScheduleOf(null)}
+        />
+      ) : null}
       <ConfirmDialog
         open={confirm !== null}
         title={

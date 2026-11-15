@@ -257,6 +257,8 @@ const TIME_CLOCK = new RegExp(
   String.raw`(?<![\d:.,/])(\d{1,2})(?::|h)([0-5]\d)(?::[0-5]\d)?(?:\s?${MERIDIEM}(?![a-z]))?(?![\d])`,
   "gi",
 )
+/** «12 m.» (o «12:00 m.»): el mediodía, como se escribe en el Perú; no es «a las 12» de dos lecturas. */
+const TIME_NOON = /(?<![\d:.,/])12(?::00)?\s?m\.(?![a-z])/gi
 const TIME_MERIDIEM = new RegExp(String.raw`(?<![\d:.,/])(1[0-2]|0?[1-9])\s?${MERIDIEM}(?![a-z])`, "gi")
 const TIME_WORDS =
   /\ba las? (\d{1,2})(?: y (media|cuarto)| en punto)?(?: de la (ma[ñn]ana|tarde|noche|madrugada))?(?![\d:.,/]|\s*(?:semanas?|d[ií]as?|mes(?:es)?|a[ñn]os?|horas?|minutos?|personas?|sesiones|citas|veces|cuotas)\b)/gi
@@ -359,7 +361,8 @@ function extractTimes(text: string): { mentions: Mention<number[]>[]; rest: stri
     mentions.push({ raw: match[0].trim(), value: hours.map((hour) => hour * 60 + minutes) })
     rest = blank(rest, match.index ?? 0, match[0].length)
   }
-  for (const match of text.matchAll(TIME_CLOCK)) take(match, to24(Number(match[1]), match[3]), Number(match[2]))
+  for (const match of text.matchAll(TIME_NOON)) take(match, [12], 0)
+  for (const match of rest.matchAll(TIME_CLOCK)) take(match, to24(Number(match[1]), match[3]), Number(match[2]))
   for (const match of rest.matchAll(TIME_MERIDIEM)) take(match, to24(Number(match[1]), match[2]), 0)
   for (const match of rest.matchAll(TIME_WORDS)) {
     const hour = Number(match[1])
@@ -511,6 +514,15 @@ const NOT_FACTS = [INTERNAL_ID, WEB_ADDRESS, APPOINTMENT_VERSION, PAGE_CURSOR, O
 
 function mask(text: string, pattern: RegExp): string {
   return text.replace(pattern, (found) => " ".repeat(found.length))
+}
+
+/**
+ * Las horas que dice un texto, cada una como sus lecturas en minutos del día
+ * («10 a. m.», «10 am», «a las 10 de la mañana» y «10:00» son 600; «a las 10»
+ * sin más, 600 o 1320), leídas como las lee la comprobación; las de un enlace no cuentan.
+ */
+export function clockMinutesIn(text: string): number[][] {
+  return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.map((mention) => mention.value)
 }
 
 /** Cuántas horas dice un texto, leídas como las lee la comprobación («9:00», «9 a. m.», «a las 9 y media»); las de un enlace no cuentan. */

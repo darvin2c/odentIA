@@ -28,7 +28,8 @@
     "eval:dictado-medico": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-dictado.ts",
     "eval:dictado-fichas": "tsx --env-file-if-exists=../../infra/dev/.env src/eval-dictado-fichas.ts",
     "eval:atencion": "tsx --env-file-if-exists=../../infra/dev/.env src/eval-atencion.ts",
-    "eval:urgencia-medica": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-urgencia.ts"
+    "eval:urgencia-medica": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-urgencia.ts",
+    "eval:kairos-vende": "tsx --env-file-if-exists=../../infra/dev/.env src/eval-kairos-vende.ts"
   },
   "dependencies": {
     "@langchain/core": "1.2.11",

@@ -14,7 +14,7 @@ import {
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, ExternalLink } from "lucide-react"
 import { z } from "zod"
 import {
   ClientName,
@@ -37,6 +37,7 @@ import {
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
 import { WAITLIST_STAGE_WORDS } from "../../components/arm/sale-words"
+import { isSlotClash } from "../../components/arm/slot-clash"
 import { type ProductChoice, ProductFilter, useOrgProducts } from "../../components/product"
 import {
   HomeCountersSkeleton,
@@ -105,6 +106,10 @@ const todaySchema = z.object({
         .optional(),
       // Lo que dice su botón cuando no es «Hecho» («Revisado»: los que no entraron en una carga).
       doneLabel: z.string().optional(),
+      // Es de alguien que ahora está ausente: «De Ana, ausente» ya va en `why`.
+      absentAssignee: z.boolean().optional(),
+      // De una presentación: la sala de videollamada de quien presenta.
+      meetingUrl: z.string().nullable().optional(),
     }),
   ),
   cooling: z.array(
@@ -810,19 +815,36 @@ function TaskItem({
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
+  // Solo el día: una presentación conserva su hora (el servidor la pone en el día nuevo). Si
+  // choca con otra de quien presenta o con su ausencia, se avisa y la persona decide.
   const move = useMutation({
-    mutationFn: async (dueOn: string) => {
+    mutationFn: async (input: { dueOn: string; force?: boolean }) => {
       leave.markLeaving()
       return api(`/api/admin/clients/tasks/${row.id}/move`, {
         method: "POST",
-        body: JSON.stringify({ dueOn }),
+        body: JSON.stringify(
+          input.force ? { dueOn: input.dueOn, force: true } : { dueOn: input.dueOn },
+        ),
       })
     },
-    onSuccess: (_data, dueOn) => {
+    onSuccess: (_data, input) => {
       invalidateArm(queryClient, row.clientId)
-      toast.success(`Pasó al ${limaDayWords(dueOn)}`)
+      toast.success(`Pasó al ${limaDayWords(input.dueOn)}`)
     },
-    onError: (error) => toast.error(submitErrorMessage(error)),
+    onError: (error, input) => {
+      if (!isSlotClash(error)) return toast.error(submitErrorMessage(error))
+      const id = toast.warning(error.shape.message ?? "Esa hora choca con otra presentación.", {
+        duration: Number.POSITIVE_INFINITY,
+        closeButton: true,
+        action: {
+          label: "Mover igual",
+          onClick: () => {
+            toast.dismiss(id)
+            move.mutate({ dueOn: input.dueOn, force: true })
+          },
+        },
+      })
+    },
   })
   const busy = done.isPending || move.isPending
   // Una presentación se cierra diciendo cómo fue, en la Venta de la ficha.
@@ -873,7 +895,7 @@ function TaskItem({
             disabled={busy}
             aria-label={`Mover «${row.title}» a otro día`}
             onChange={(day) => {
-              if (day && day !== row.dueOn) move.mutate(day)
+              if (day && day !== row.dueOn) move.mutate({ dueOn: day })
             }}
           >
             Mover
@@ -888,9 +910,32 @@ function TaskItem({
       <Line
         parts={[
           { text: row.why, urgent: row.overdue },
-          who === "todas" ? (row.assignee ? `De ${row.assignee.name}` : "Sin asignar") : null,
+          presentation && row.assignee
+            ? `Presenta ${row.assignee.name}`
+            : who === "todas" && !row.absentAssignee
+              ? row.assignee
+                ? `De ${row.assignee.name}`
+                : "Sin asignar"
+              : null,
         ]}
       />
+      {presentation ? (
+        row.meetingUrl ? (
+          <a
+            href={row.meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            <ExternalLink aria-hidden className="size-3.5" />
+            Entrar a la sala
+          </a>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Sin sala de videollamada: ponla en Equipo › Horario y sala.
+          </p>
+        )
+      ) : null}
     </HomeRow>
   )
 }
