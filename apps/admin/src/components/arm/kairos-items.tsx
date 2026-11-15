@@ -869,6 +869,9 @@ function ChatItemCard({ item, isAdmin, now }: { item: KairosItem; isAdmin: boole
           className="whitespace-pre-line"
         />
       </blockquote>
+      {text(item.payload.handover) ? (
+        <p className="text-sm [overflow-wrap:anywhere]">{text(item.payload.handover)}</p>
+      ) : null}
       {item.payload.maybeCarga === true && isAdmin ? (
         <p className="text-sm text-muted-foreground">
           Trae un Excel, CSV o Word: puede ser la carga de datos.

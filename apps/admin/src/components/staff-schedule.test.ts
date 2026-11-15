@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { kairosChatState, sentLineWords } from "./arm/chat-api"
+import { ariadnaChatsStateWords } from "./arm/ariadna-chats"
+import { handoverTitle, kairosChatState, sentLineWords } from "./arm/chat-api"
 import { absenceClashDoneWords, absenceClashOf } from "./arm/kairos-items"
 import { kairosSellsStateWords } from "./arm/kairos-sells"
 import {
@@ -166,10 +167,15 @@ describe("Kairós en los chats", () => {
     kairosPausedAt: null,
     kairosPausedBy: null,
     kairosHandover: null,
+    handledByAriadna: false,
+    ariadnaAvailable: false,
   }
 
   it("dice quién atiende la conversación", () => {
-    expect(kairosChatState({ ...base, handledByKairos: true }, "yo")).toEqual({ kind: "kairos" })
+    expect(kairosChatState({ ...base, handledByKairos: true }, "yo")).toEqual({
+      kind: "kairos",
+      agent: "Kairós",
+    })
     const paused = { ...base, kairosPausedAt: "2026-11-14T15:00:00Z" }
     expect(
       kairosChatState({ ...paused, kairosPausedBy: { userId: "yo", name: "Ada A" } }, "yo"),
@@ -179,10 +185,24 @@ describe("Kairós en los chats", () => {
     ).toMatchObject({ kind: "persona", words: expect.stringContaining("Lo atiende Ana") })
     expect(
       kairosChatState(
-        { ...paused, kairosHandover: { at: paused.kairosPausedAt, why: "Pidió un descuento" } },
+        {
+          ...paused,
+          kairosHandover: {
+            at: paused.kairosPausedAt,
+            why: "Pidió un descuento",
+            agent: "kairos",
+            to: null,
+          },
+        },
         "yo",
       ),
-    ).toEqual({ kind: "paso", why: "Pidió un descuento", canReturn: true })
+    ).toEqual({
+      kind: "paso",
+      agent: "Kairós",
+      why: "Pidió un descuento",
+      to: null,
+      canReturn: true,
+    })
     // Apagado o clínica con su app, y nadie la pausó: Kairós no tiene nada que ver.
     expect(kairosChatState({ ...base, kairosAvailable: false }, "yo")).toBeNull()
   })
@@ -200,8 +220,77 @@ describe("Kairós en los chats", () => {
         createdBy: null,
         sentAt: "2026-11-14T15:00:00Z",
         byKairos: true,
+        byAriadna: false,
       }),
     ).toBe("Kairós · 10:00 · Salió")
+  })
+
+  it("Ariadna atiende la clínica con su app y dice a quién la pasó", () => {
+    const clinic = { ...base, kairosAvailable: false, ariadnaAvailable: true }
+    expect(kairosChatState({ ...clinic, handledByAriadna: true }, "yo")).toEqual({
+      kind: "kairos",
+      agent: "Ariadna",
+    })
+    const paused = { ...clinic, kairosPausedAt: "2026-11-14T15:00:00Z" }
+    expect(
+      kairosChatState({ ...paused, kairosPausedBy: { userId: "yo", name: "Ada A" } }, "yo"),
+    ).toMatchObject({
+      kind: "persona",
+      agent: "Ariadna",
+      words: "Lo atiendes tú: Ariadna no responde sola aquí.",
+    })
+    const handed = (to: string) =>
+      kairosChatState(
+        {
+          ...paused,
+          kairosHandover: { at: paused.kairosPausedAt, why: "Dijo que sí", agent: "ariadna", to },
+        },
+        "yo",
+      )
+    const soporte = handed("soporte")
+    expect(soporte).toEqual({
+      kind: "paso",
+      agent: "Ariadna",
+      why: "Dijo que sí",
+      to: "soporte",
+      canReturn: true,
+    })
+    if (soporte?.kind !== "paso") throw new Error("paso")
+    expect(handoverTitle(soporte)).toBe("Ariadna se la pasó a Soporte")
+    const admin = handed("administracion")
+    if (admin?.kind !== "paso") throw new Error("paso")
+    expect(handoverTitle(admin)).toBe("Ariadna se la pasó a Administración")
+    const patient = handed("paciente")
+    if (patient?.kind !== "paso") throw new Error("paso")
+    expect(handoverTitle(patient)).toBe("Ariadna cree que escribe un paciente")
+    expect(
+      sentLineWords({
+        kind: "salio",
+        id: "o",
+        at: "2026-11-14T15:00:00Z",
+        body: "Hola",
+        status: "enviado",
+        template: null,
+        adminOnly: false,
+        createdBy: null,
+        sentAt: "2026-11-14T15:00:00Z",
+        byKairos: true,
+        byAriadna: true,
+      }),
+    ).toBe("Ariadna · 10:00 · Salió")
+  })
+
+  it("el interruptor de Ariadna dice quién la dejó así", () => {
+    expect(ariadnaChatsStateWords({ enabled: false, updatedAt: null, updatedBy: null })).toBe(
+      "Apagada",
+    )
+    expect(
+      ariadnaChatsStateWords({
+        enabled: true,
+        updatedAt: "2026-11-14T15:05:00Z",
+        updatedBy: { userId: "ada", name: "Ada Administradora" },
+      }),
+    ).toMatch(/^Prendida por Ada el /)
   })
 
   it("el interruptor dice quién lo dejó así", () => {

@@ -2253,6 +2253,10 @@ interface ChatPending extends Record<string, unknown> {
   maybe_carga: boolean
   /** Por qué Kairós la pasó al equipo (o falló) con este mensaje, si fue así. */
   kairos_why: string | null
+  /** Quién la pasó: `kairos` o `ariadna`. */
+  kairos_agent: string | null
+  /** Si fue Ariadna, a quién: `soporte`, `administracion` o `paciente`. */
+  kairos_to: string | null
 }
 
 /**
@@ -2278,12 +2282,13 @@ async function pendingChats(
         cross join lateral (select e ->> 'mimeType' as content_type, e ->> 'filename' as filename
           from jsonb_array_elements(mm.media) e) f
         where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga,
-      (select kt.why from kairos_chat_turn kt where kt.chat_id = c.id and kt.outcome in ('paso', 'fallo')
-        and kt.created_at >= m.created_at - interval '1 day'
-        order by kt.created_at desc limit 1) as kairos_why
+      kt.why as kairos_why, kt.agent as kairos_agent, kt.ariadna_reply as kairos_to
     from saas_chat c
     join lateral (select id, body, media, received_at, created_at, admin_only from saas_inbound_message
       where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
+    left join lateral (select t.why, t.agent, t.ariadna_reply from kairos_chat_turn t where t.chat_id = c.id
+      and t.outcome in ('paso', 'fallo') and t.created_at >= m.created_at - interval '1 day'
+      order by t.created_at desc limit 1) kt on true
     left join saas_client cl on cl.id = c.client_id
     left join saas_client_contact ct on ct.id = c.contact_id
     where ${
@@ -2296,6 +2301,24 @@ async function pendingChats(
       and m.received_at > ${since}
     order by m.received_at asc, c.id asc`,
   )
+}
+
+/**
+ * Por qué Kairós o Ariadna se la pasó al equipo, en Hoy: «Kairós se lo pasó al equipo: …»,
+ * «Ariadna se lo pasó a Soporte: …», «… a Administración: …» o, si cree que escribe un paciente,
+ * qué hacer.
+ */
+function handoverWords(
+  chat: Pick<ChatPending, "kairos_why" | "kairos_agent" | "kairos_to">,
+): string | null {
+  if (!chat.kairos_why) return null
+  if (chat.kairos_agent !== "ariadna") return `Kairós se lo pasó al equipo: ${chat.kairos_why}.`
+  if (chat.kairos_to === "soporte") return `Ariadna se lo pasó a Soporte: ${chat.kairos_why}.`
+  if (chat.kairos_to === "administracion")
+    return `Ariadna se lo pasó a Administración: ${chat.kairos_why}.`
+  if (chat.kairos_to === "paciente")
+    return `Ariadna cree que escribe un paciente de la clínica (${chat.kairos_why}): ya le explicó que escriba a su clínica. Revisa de quién es esta conversación.`
+  return `Ariadna se lo pasó al equipo: ${chat.kairos_why}.`
 }
 
 interface ChatItemPlan {
@@ -2418,7 +2441,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
           ? `Ese celular es de ${suggestion.contactName}, de ${suggestion.clientName}.`
           : null,
         chat.maybe_carga ? "Trae un Excel, CSV o Word: puede ser la carga de datos." : null,
-        chat.kairos_why ? `Kairós se lo pasó al equipo: ${chat.kairos_why}.` : null,
+        handoverWords(chat),
         "Di de quién es.",
       ]
         .filter(Boolean)
@@ -2435,6 +2458,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
         suggestion,
         maybeCarga: chat.maybe_carga,
         clientId: null,
+        handover: handoverWords(chat),
       },
     })
   }
@@ -2462,7 +2486,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
       title: `${person} · ${chat.client_name ?? "Cliente"}`,
       reason: [
         `Escribió por ${words} el ${dayText(limaDate(received))} a las ${timeText(received)} y todavía no le respondemos.`,
-        chat.kairos_why ? `Kairós se lo pasó al equipo: ${chat.kairos_why}.` : null,
+        handoverWords(chat),
       ]
         .filter(Boolean)
         .join(" "),
@@ -2477,6 +2501,8 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
         lastBody: chatPreview(chat.body, chat.files),
         receivedAt: chat.received_at,
         freeUntil: freeUntil?.toISOString() ?? null,
+        // Quién se la pasó al equipo y por qué, para la tarjeta de Hoy.
+        handover: handoverWords(chat),
       },
     })
   }

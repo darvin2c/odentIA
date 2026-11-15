@@ -255,6 +255,26 @@ export type KairosProposalStatus = (typeof KAIROS_PROPOSAL_STATUSES)[number]
  */
 export const KAIROS_TURN_OUTCOMES = ["en_curso", "respondio", "paso", "fallo", "omitido"] as const
 export type KairosTurnOutcome = (typeof KAIROS_TURN_OUTCOMES)[number]
+/**
+ * Quién atiende el turno de una conversación (`kairos_chat_turn.agent`): Kairós, a quien todavía no
+ * tiene su app; Ariadna, la Ayuda, a la clínica que ya la tiene (ADR 0191).
+ */
+export const CHAT_TURN_AGENTS = ["kairos", "ariadna"] as const
+export type ChatTurnAgent = (typeof CHAT_TURN_AGENTS)[number]
+/**
+ * Lo que respondió Ariadna en un turno (`kairos_chat_turn.ariadna_reply`): `respuesta` (de la guía),
+ * `oferta` (la Ayuda de la app o Soporte), `datos` (dónde verlo en la app) o un pase: `soporte`,
+ * `administracion` (cobros, su plan, comprar más, otra sede u otro producto) o `paciente`.
+ */
+export const ARIADNA_CHAT_REPLIES = [
+  "respuesta",
+  "oferta",
+  "datos",
+  "soporte",
+  "administracion",
+  "paciente",
+] as const
+export type AriadnaChatReplyKind = (typeof ARIADNA_CHAT_REPLIES)[number]
 export const SAAS_CLIENT_PROFESSIONALS = ["1", "2-3", "4-9", "10+"] as const
 export const SAAS_CLIENT_TOOLS = ["nada", "cuaderno_excel", "otro_software"] as const
 
@@ -692,8 +712,13 @@ export const saasOutreach = adminSchema.table(
     externalId: text("external_id"),
     /** La plantilla de WhatsApp con que salió (fuera de las 24 h); nulo si es texto libre. */
     template: text("template"),
-    /** Lo escribió y lo envió Kairós (`Kairós · odentIA`), no una persona. */
+    /**
+     * Lo escribió y lo envió un agente solo, sin persona (`Kairós · odentIA`); con `by_ariadna`, ese
+     * agente fue Ariadna (`Ariadna · odentIA`).
+     */
     byKairos: boolean("by_kairos").notNull().default(false),
+    /** Lo escribió Ariadna en el chat de una clínica con su app (siempre con `by_kairos`). */
+    byAriadna: boolean("by_ariadna").notNull().default(false),
     /** `respuesta` (lo de siempre) o `aviso` de Kairós: un aviso no cuenta como respuesta. */
     purpose: text("purpose").notNull().default("respuesta"),
     /**
@@ -716,6 +741,7 @@ export const saasOutreach = adminSchema.table(
     check("saas_outreach_channel_check", oneOf(table.channel, SAAS_OUTREACH_CHANNELS)),
     check("saas_outreach_status_check", oneOf(table.status, SAAS_OUTREACH_STATUSES)),
     check("saas_outreach_purpose_check", oneOf(table.purpose, SAAS_OUTREACH_PURPOSES)),
+    check("saas_outreach_ariadna_check", sql`NOT ${table.byAriadna} OR ${table.byKairos}`),
     check(
       "saas_outreach_text_check",
       sql`length(trim(${table.body})) BETWEEN 1 AND 5000 AND length(trim(${table.toAddress})) BETWEEN 3 AND 254
@@ -1111,6 +1137,15 @@ export const kairosSetting = adminSchema.table(
     sellsEnabled: boolean("sells_enabled").notNull().default(false),
     updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
     updatedAt: updatedAt(),
+    /**
+     * Si Ariadna responde sola en los chats de las clínicas que ya tienen su app (ADR 0191). Nace
+     * apagado, con su propio quién y cuándo.
+     */
+    ariadnaEnabled: boolean("ariadna_enabled").notNull().default(false),
+    ariadnaUpdatedBy: text("ariadna_updated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    ariadnaUpdatedAt: timestamp("ariadna_updated_at", { withTimezone: true }),
   },
   (table) => [check("kairos_setting_single_check", sql`${table.id}`)],
 )
@@ -1170,11 +1205,20 @@ export const kairosChatTurn = adminSchema.table(
     outcome: text("outcome").notNull().default("en_curso"),
     why: text("why"),
     outreachId: uuid("outreach_id").references(() => saasOutreach.id, { onDelete: "set null" }),
+    /** Quién atendió: Kairós o Ariadna (`CHAT_TURN_AGENTS`). */
+    agent: text("agent").notNull().default("kairos"),
+    /** Solo Ariadna: lo que respondió o a quién lo pasó (`ARIADNA_CHAT_REPLIES`). */
+    ariadnaReply: text("ariadna_reply"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     uniqueIndex("kairos_chat_turn_message_uidx").on(table.messageId),
+    check("kairos_chat_turn_agent_check", oneOf(table.agent, CHAT_TURN_AGENTS)),
+    check(
+      "kairos_chat_turn_ariadna_check",
+      sql`${table.ariadnaReply} IS NULL OR (${table.agent} = 'ariadna' AND ${table.ariadnaReply} IN ('respuesta','oferta','datos','soporte','administracion','paciente'))`,
+    ),
     index("kairos_chat_turn_chat_idx").on(table.chatId, table.createdAt),
     check("kairos_chat_turn_outcome_check", oneOf(table.outcome, KAIROS_TURN_OUTCOMES)),
     check("kairos_chat_turn_why_check", sql`${table.why} IS NULL OR length(${table.why}) <= 500`),

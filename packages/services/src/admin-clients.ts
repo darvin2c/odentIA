@@ -1424,6 +1424,8 @@ export interface ClientActivityRow {
   happenedAt: Date
   author: ClientPerson | null
   byKairos: boolean
+  /** Con `byKairos`: lo escribió Ariadna en el chat de la clínica. */
+  byAriadna: boolean
   contactId: string | null
   adminOnly: boolean
 }
@@ -1640,6 +1642,7 @@ export async function getClient(
       happenedAt: entry.happenedAt,
       author: entry.authorUserId ? { userId: entry.authorUserId, name: authorName ?? "" } : null,
       byKairos: entry.byKairos,
+      byAriadna: entry.byAriadna,
       contactId: entry.contactId,
       adminOnly: entry.adminOnly,
     })),
@@ -2737,7 +2740,7 @@ export async function clientTimeline(
           (inboundFrom ?? chatFrom)
             ? { kind: "clinica", name: inboundFrom ?? chatFrom ?? "" }
             : f.byKairos
-              ? { kind: "kairos", name: "Kairós" }
+              ? { kind: "kairos", name: f.byAriadna ? "Ariadna" : "Kairós" }
               : byUser(f.authorUserId, {
                   kind: "persona",
                   name: "Nota anterior, sin autor registrado",

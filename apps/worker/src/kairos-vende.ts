@@ -10,6 +10,9 @@ import { saasChat } from "@odentia/db/schema/admin-arm"
 import type { Mailer } from "@odentia/mail"
 import {
   type AdminChannels,
+  type AriadnaChatInput,
+  type AriadnaChatReply,
+  ariadnaChatContext,
   type ChatReply,
   chatSenderOf,
   claimKairosTurn,
@@ -17,6 +20,7 @@ import {
   INSTAGRAM_TEXT_BYTES,
   KAIROS_FALLBACK_TEXT,
   type KairosBookRefused,
+  type KairosChatToAnswer,
   kairosBook,
   kairosCancel,
   kairosChatBlocked,
@@ -55,6 +59,10 @@ import { eq } from "drizzle-orm"
  * (`sendChatOutreach`): enviado, no salió o incierto, nunca se reintenta. Si el
  * worker se cae a mitad, el turno queda «en curso» y a los 10 minutos Hoy lo
  * muestra: nunca se responde dos veces el mismo mensaje.
+ *
+ * El mismo ciclo atiende, con Ariadna, los chats de las clínicas que ya tienen su app (ADR 0191):
+ * con su propio interruptor, la guía de su producto y sin datos de la clínica; un turno por
+ * mensaje, los mismos topes, la misma pausa y las mismas comprobaciones al reservar.
  */
 
 /** Cada cuánto mira si hay algo que responder. */
@@ -62,9 +70,16 @@ export const KAIROS_SELLS_TICK_MS = 15_000
 /** Cuántas conversaciones responde por pasada como mucho. */
 export const KAIROS_SELLS_PER_PASS = 10
 
+/** Ariadna en los chats: responde un turno con la guía (`askHelpByChat`), midiendo su gasto con la clínica. */
+export interface AriadnaChatResponder {
+  answer: (organizationId: string, input: AriadnaChatInput) => Promise<AriadnaChatReply>
+}
+
 export interface KairosSellsDeps {
   ownerDb: Db
   seller: KairosSeller
+  /** Sin él, los chats de las clínicas con su app no se responden (quedan para Soporte). */
+  ariadna?: AriadnaChatResponder | undefined
   /** Los canales de la administración (`adminChannelsFromEnv`); sin el del chat, no responde (queda para el equipo). */
   channels?: AdminChannels | undefined
   /** Por dónde salen los avisos por correo (el canal de las conversaciones o, sin él, el de siempre). */
@@ -143,15 +158,148 @@ export function toolsFor(deps: KairosSellsDeps, chatId: string, now: Date): Kair
   }
 }
 
+type TurnOutcome = "respondio" | "paso" | "fallo" | "omitido"
+
+/** Lo que Ariadna pasa al equipo: la conversación queda pausada con el motivo y Hoy la muestra. */
+const ARIADNA_OUTCOME: Record<AriadnaChatReply["kind"], "respondio" | "paso"> = {
+  respuesta: "respondio",
+  oferta: "respondio",
+  datos: "respondio",
+  soporte: "paso",
+  administracion: "paso",
+  paciente: "paso",
+}
+
+/** Un mensaje de una clínica con su app: Ariadna responde con la guía, sin datos de la clínica. */
+async function answerAriadna(
+  deps: KairosSellsDeps,
+  target: KairosChatToAnswer,
+  turnId: string,
+  now: Date,
+): Promise<TurnOutcome> {
+  const { ownerDb } = deps
+  const finish = (outcome: "omitido", why: string) =>
+    ownerDb.transaction((tx) => finishKairosTurn(tx as Db, turnId, { outcome, why }, now))
+  if (!deps.ariadna) {
+    await finish("omitido", "Ariadna no está configurada en el worker")
+    return "omitido"
+  }
+  const context = await ownerDb.transaction((tx) => ariadnaChatContext(tx as Db, target.chatId))
+  const channel = context.chat.channel
+  if (!chatSenderOf(deps.channels, channel)) {
+    await finish("omitido", "El canal de la administración no está configurado")
+    return "omitido"
+  }
+  const cap = await ownerDb.transaction((tx) =>
+    kairosTurnCap(tx as Db, target.chatId, turnId, now, "ariadna"),
+  )
+  let result: AriadnaChatReply
+  let outcome: "respondio" | "paso" | "fallo"
+  if (cap) {
+    result = { kind: "soporte", text: KAIROS_FALLBACK_TEXT, why: cap }
+    outcome = "paso"
+  } else
+    try {
+      result = await deps.ariadna.answer(context.client.organizationId, {
+        product: context.client.product,
+        question: context.question,
+        previous: context.previous,
+        offered: context.offered,
+        firstReply: context.firstReply,
+        appOrigin: context.appOrigin,
+      })
+      outcome = ARIADNA_OUTCOME[result.kind]
+    } catch (error) {
+      result = {
+        kind: "soporte",
+        text: KAIROS_FALLBACK_TEXT,
+        why: `Falló al responder (${message(error)})`,
+      }
+      outcome = "fallo"
+    }
+  if (
+    channel === "instagram" &&
+    Buffer.byteLength(result.text, "utf8") + 40 > INSTAGRAM_TEXT_BYTES
+  ) {
+    result = {
+      kind: "soporte",
+      text: KAIROS_FALLBACK_TEXT,
+      why: "La respuesta no cabía en Instagram",
+    }
+    outcome = "fallo"
+  }
+  let reserved: ChatReply | null = null
+  try {
+    reserved = await ownerDb.transaction(async (raw) => {
+      const tx = raw as Db
+      // Mientras respondía pudieron pausarla, apagar a Ariadna, archivar al cliente o pasar las 24 h.
+      const blocked = await kairosChatBlocked(tx, target.chatId, now, "ariadna")
+      if (blocked) {
+        await finishKairosTurn(
+          tx,
+          turnId,
+          { outcome: "omitido", why: `${blocked} mientras respondía` },
+          now,
+        )
+        return null
+      }
+      const reply = await prepareKairosChatReply(
+        tx,
+        target.chatId,
+        {
+          body: result.text,
+          closeItems: outcome === "respondio",
+          agent: "ariadna",
+          // Lo que pasa a Administración no lo ve Soporte, tampoco la respuesta que lo dice.
+          adminOnly: result.kind === "administracion",
+        },
+        now,
+      )
+      await finishKairosTurn(
+        tx,
+        turnId,
+        {
+          outcome,
+          why: outcome === "respondio" ? null : "why" in result ? result.why : null,
+          outreachId: reply.outreachId,
+          ariadnaReply: result.kind,
+        },
+        now,
+      )
+      return reply
+    })
+  } catch (error) {
+    const why =
+      error instanceof ServiceError && error.code === "CHAT_WINDOW_CLOSED"
+        ? "Pasaron las 24 horas de Meta"
+        : `No se pudo reservar la respuesta (${message(error)})`
+    await finish("omitido", why)
+    return "omitido"
+  }
+  if (!reserved) return "omitido"
+  await sendChatOutreach(
+    {
+      ownerDb,
+      channels: deps.channels,
+      ...(deps.fetch ? { fetch: deps.fetch } : {}),
+      now: () => now,
+    },
+    reserved,
+    channel,
+  )
+  return outcome
+}
+
 /** Un mensaje: reclamar, responder, reservar y enviar. Devuelve en qué quedó. */
 async function answerOne(
   deps: KairosSellsDeps,
-  target: { chatId: string; messageId: string },
+  target: KairosChatToAnswer,
   now: Date,
-): Promise<"respondio" | "paso" | "fallo" | "omitido" | null> {
+): Promise<TurnOutcome | null> {
   const { ownerDb } = deps
   const turnId = await ownerDb.transaction((tx) => claimKairosTurn(tx as Db, target, now))
   if (!turnId) return null
+  if (target.agent === "ariadna") return answerAriadna(deps, target, turnId, now)
   const finish = (outcome: "omitido", why: string) =>
     ownerDb.transaction((tx) => finishKairosTurn(tx as Db, turnId, { outcome, why }, now))
   const context = await ownerDb.transaction((tx) => kairosChatContext(tx as Db, target.chatId, now))
@@ -330,7 +478,7 @@ export async function runKairosSellsTick(deps: KairosSellsDeps): Promise<KairosS
     notices: 0,
     errors: [],
   }
-  let targets: Array<{ chatId: string; messageId: string }> = []
+  let targets: KairosChatToAnswer[] = []
   try {
     targets = await deps.ownerDb.transaction((tx) =>
       kairosChatsToAnswer(tx as Db, now, KAIROS_SELLS_PER_PASS),

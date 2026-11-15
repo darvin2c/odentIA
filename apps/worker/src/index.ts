@@ -1,13 +1,19 @@
 import {
   type AgentRuntime,
+  asAdminDecider,
   consumeAgentRun,
   createAlreadyTold,
+  createDecisionModel,
+  createFakeDecisionModel,
+  createHelpWriter,
   createKairosSeller,
   createKairosWriter,
   decisionKeyStartProblem,
   embedderFromEnv,
   kairosModelNotice,
+  meterAiUse,
   platformLlmFromEnv,
+  resolveLlmSpec,
 } from "@odentia/agent"
 import { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
@@ -17,12 +23,14 @@ import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   adminChannelsFromEnv,
+  askHelpByChat,
   configureDocumentChecks,
   configureDocumentLogos,
   configurePublicLinks,
   createStorage,
   ensureSuggestedConsentsEverywhere,
   ensureSuggestedFormsEverywhere,
+  type HelpDecider,
   kairosAiUseRecorder,
   mailBrandDomains,
   metaSignupConfigured,
@@ -520,10 +528,32 @@ const conversationMailer =
         },
       })
     : mailer
+// Ariadna en los chats (ADR 0191): el mismo decisor y quien redacta que la Ayuda de la app (Jev con la cuenta de
+// odentIA; con el modelo de demostración, sus dobles), y su gasto con el origen «ayuda» de esa clínica.
+let ariadnaDecider: Promise<HelpDecider | null> | null = null
+const ariadnaDeciderOf = (): Promise<HelpDecider | null> => {
+  ariadnaDecider ??= kairosPlatform.fake
+    ? Promise.resolve(asAdminDecider(createFakeDecisionModel()))
+    : agentRuntime.decisions?.jev
+      ? createDecisionModel("jev", agentRuntime.decisions, resolveLlmSpec({ fake: true }))
+          .then((model) => (model ? asAdminDecider(model) : null))
+          .catch(() => null)
+      : Promise.resolve(null)
+  return ariadnaDecider
+}
+const ariadnaWriter = createHelpWriter(kairosPlatform)
 queues.push(
   kairosSellsQueue({
     ownerDb,
     seller: createKairosSeller({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
+    ariadna: {
+      answer: (organizationId, input) =>
+        meterAiUse(db, organizationId, "ayuda", async () => {
+          const decider = await ariadnaDeciderOf()
+          // Sin Jev no se redacta: como en la Ayuda de la app.
+          return askHelpByChat(input, decider, decider ? ariadnaWriter : null)
+        }),
+    },
     channels: adminChannelsFromEnv(env),
     // Solo pruebas (e2e): lo que iría a graph.facebook.com va al servidor local que hace de Meta.
     ...(env.ADMIN_META_GRAPH_URL

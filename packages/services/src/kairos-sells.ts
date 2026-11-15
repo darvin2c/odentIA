@@ -20,8 +20,11 @@
  *   hora, un cambio hecho por una persona) salen una sola vez por su clave en
  *   la auditoría, escrita en la misma transacción que reserva el envío.
  */
+import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  type AriadnaChatReplyKind,
+  type ChatTurnAgent,
   type KairosTurnOutcome,
   kairosChatTurn,
   kairosProposal,
@@ -61,6 +64,7 @@ import {
 import { invalidField, notFound, ServiceError } from "./errors.js"
 import { type KairosSalesFacts, kairosSalesFacts } from "./kairos-sales-facts.js"
 import { limaDate } from "./peru-business-days.js"
+import { clinicOriginOf } from "./public-links.js"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -150,6 +154,89 @@ export async function setKairosSells(
 /** El interruptor, en SQL: con la fila apagada o sin fila, falso. */
 const sellsEnabledSql = sql`coalesce((select s.sells_enabled from admin.kairos_setting s where s.id), false)`
 
+/* ---------- El interruptor de Ariadna (ADR 0191) ---------- */
+
+export async function getAriadnaChats(tx: Db): Promise<KairosSellsSetting> {
+  const [row] = await tx
+    .select({ setting: kairosSetting, name: user.name })
+    .from(kairosSetting)
+    .leftJoin(user, eq(user.id, kairosSetting.ariadnaUpdatedBy))
+    .where(eq(kairosSetting.id, true))
+    .limit(1)
+  if (!row) return { enabled: false, updatedAt: null, updatedBy: null }
+  return {
+    enabled: row.setting.ariadnaEnabled,
+    updatedAt: row.setting.ariadnaUpdatedAt,
+    updatedBy: row.setting.ariadnaUpdatedBy
+      ? { userId: row.setting.ariadnaUpdatedBy, name: row.name ?? "" }
+      : null,
+  }
+}
+
+/** Prende o apaga «Ariadna responde en los chats de las clínicas con su app». Solo Administración. */
+export async function setAriadnaChats(
+  tx: Db,
+  actor: AdminActor,
+  enabled: boolean,
+  now = new Date(),
+): Promise<KairosSellsSetting> {
+  if (actor.role !== "admin")
+    throw new ServiceError(
+      "FORBIDDEN",
+      403,
+      "Solo el rol Administración prende o apaga a Ariadna en los chats",
+    )
+  if (typeof enabled !== "boolean") throw invalidField("enabled", "Di si la prendes o la apagas")
+  await tx
+    .insert(kairosSetting)
+    .values({
+      id: true,
+      ariadnaEnabled: enabled,
+      ariadnaUpdatedBy: actor.userId,
+      ariadnaUpdatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: kairosSetting.id,
+      set: { ariadnaEnabled: enabled, ariadnaUpdatedBy: actor.userId, ariadnaUpdatedAt: now },
+    })
+  await writeAdminAudit(tx, actor, {
+    action: enabled ? "ariadna.chats_enabled" : "ariadna.chats_disabled",
+    entityId: "kairos_setting",
+  })
+  return getAriadnaChats(tx)
+}
+
+const ariadnaEnabledSql = sql`coalesce((select s.ariadna_enabled from admin.kairos_setting s where s.id), false)`
+
+/**
+ * Quién atiende la conversación `c` de cliente `cl`, en SQL: Kairós a quien no tiene su app (sin
+ * cliente o un cliente sin cuenta, no archivado), Ariadna a la clínica que ya la tiene. Lo decide la
+ * persona que ligó la conversación a su cliente, nunca el teléfono.
+ */
+const agentHandlesSql = sql`((${sellsEnabledSql} and (cl.id is null or (cl.organization_id is null and cl.archived_at is null)))
+    or (${ariadnaEnabledSql} and cl.organization_id is not null and cl.archived_at is null))`
+const agentOfSql = sql`case when cl.organization_id is not null then 'ariadna' else 'kairos' end`
+
+/** Cómo se llama quien atiende, en los textos de Hoy y de los topes. */
+export const CHAT_AGENT_NAMES: Record<ChatTurnAgent, string> = {
+  kairos: "Kairós",
+  ariadna: "Ariadna",
+}
+
+/**
+ * Ariadna atiende esta conversación: prendida, sin pausa, no «No es una clínica»
+ * y de una clínica que ya tiene su app.
+ */
+export async function ariadnaHandlesChat(
+  tx: Db,
+  chat: { kairosPausedAt: Date | null; notClinicAt: Date | null },
+  client: { organizationId: string | null; archivedAt?: Date | null } | null,
+): Promise<boolean> {
+  if (chat.kairosPausedAt || chat.notClinicAt || !client?.organizationId || client.archivedAt)
+    return false
+  return (await getAriadnaChats(tx)).enabled
+}
+
 /**
  * Kairós atiende esta conversación: prendido, sin pausa, no «No es una clínica»
  * y sin la app de una clínica. Lo muestra el cajón de la conversación.
@@ -171,8 +258,7 @@ export async function kairosHandlesChat(
  */
 export function kairosHandlesSql(now: Date) {
   const at = sql`${now.toISOString()}::timestamptz`
-  return sql`(${sellsEnabledSql} and c.kairos_paused_at is null and c.not_clinic_at is null
-    and cl.organization_id is null
+  return sql`(${agentHandlesSql} and c.kairos_paused_at is null and c.not_clinic_at is null
     and m.received_at > ${at} - interval '24 hours'
     and not exists (select 1 from admin.kairos_chat_turn t where t.message_id = m.id
       and (t.outcome = 'omitido' or (t.outcome = 'en_curso'
@@ -184,6 +270,8 @@ export function kairosHandlesSql(now: Date) {
 export interface KairosChatToAnswer {
   chatId: string
   messageId: string
+  /** Quién responde: Kairós (sin app) o Ariadna (clínica con su app). Sin él, Kairós. */
+  agent?: ChatTurnAgent
 }
 
 /**
@@ -196,9 +284,8 @@ export interface KairosChatToAnswer {
  */
 function answerableSql(now: Date) {
   const at = sql`${now.toISOString()}::timestamptz`
-  return sql`${sellsEnabledSql}
+  return sql`${agentHandlesSql}
     and c.kairos_paused_at is null and c.not_clinic_at is null
-    and (cl.id is null or (cl.organization_id is null and cl.archived_at is null))
     and m.received_at > ${at} - interval '24 hours'
     and m.received_at <= ${at} - make_interval(secs => ${KAIROS_SELL_QUIET_MS / 1000})
     and not exists (select 1 from admin.saas_outreach o where o.chat_id = c.id and o.purpose = 'respuesta'
@@ -224,12 +311,17 @@ export async function kairosChatsToAnswer(
   const rows = await tx.execute<{
     chat_id: string
     message_id: string
-  }>(sql`select c.id as chat_id, m.id as message_id
+    agent: ChatTurnAgent
+  }>(sql`select c.id as chat_id, m.id as message_id, ${agentOfSql} as agent
     from admin.saas_chat c ${lastMessageJoin}
     where ${answerableSql(now)}
     order by m.received_at asc, c.id asc
     limit ${limit}`)
-  return [...rows].map((row) => ({ chatId: row.chat_id, messageId: row.message_id }))
+  return [...rows].map((row) => ({
+    chatId: row.chat_id,
+    messageId: row.message_id,
+    agent: row.agent,
+  }))
 }
 
 /**
@@ -245,15 +337,22 @@ export async function claimKairosTurn(
 ): Promise<string | null> {
   if (!UUID.test(target.chatId) || !UUID.test(target.messageId)) return null
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`kairos-vende:${target.chatId}`}))`)
-  const [still] = await tx.execute<{ message_id: string }>(sql`select m.id as message_id
+  const [still] = await tx.execute<{
+    message_id: string
+    agent: ChatTurnAgent
+  }>(sql`select m.id as message_id,
+      ${agentOfSql} as agent
     from admin.saas_chat c ${lastMessageJoin}
     where c.id = ${target.chatId}::uuid and ${answerableSql(now)}`)
   if (!still || still.message_id !== target.messageId) return null
+  // La conversación cambió de quién la atiende (le dieron su app) desde que se eligió: no toca.
+  if (still.agent !== (target.agent ?? "kairos")) return null
   const [row] = await tx
     .insert(kairosChatTurn)
     .values({
       chatId: target.chatId,
       messageId: target.messageId,
+      agent: still.agent,
       outcome: "en_curso",
       createdAt: now,
       updatedAt: now,
@@ -271,6 +370,8 @@ export async function finishKairosTurn(
     outcome: Exclude<KairosTurnOutcome, "en_curso">
     why?: string | null
     outreachId?: string | null
+    /** Solo Ariadna: lo que respondió o a quién lo pasó. */
+    ariadnaReply?: AriadnaChatReplyKind | null
   },
   now = new Date(),
 ): Promise<void> {
@@ -280,11 +381,25 @@ export async function finishKairosTurn(
       outcome: result.outcome,
       why: result.why ? result.why.slice(0, 500) : null,
       outreachId: result.outreachId ?? null,
+      ...(result.ariadnaReply ? { ariadnaReply: result.ariadnaReply } : {}),
       updatedAt: now,
     })
     .where(eq(kairosChatTurn.id, turnId))
-    .returning({ chatId: kairosChatTurn.chatId })
+    .returning({
+      chatId: kairosChatTurn.chatId,
+      messageId: kairosChatTurn.messageId,
+      agent: kairosChatTurn.agent,
+    })
   if (!turn) throw notFound("Turno de Kairós")
+  // Lo que Ariadna pasa a Administración (cobros, su plan) es solo de Administración desde ese
+  // mensaje: Soporte no lo ve en la conversación ni en Hoy, y lo que se responda nace igual.
+  if (result.ariadnaReply === "administracion")
+    await tx
+      .update(saasInboundMessage)
+      .set({ adminOnly: true })
+      .where(
+        and(eq(saasInboundMessage.id, turn.messageId), eq(saasInboundMessage.adminOnly, false)),
+      )
   if (result.outcome === "paso" || result.outcome === "fallo") {
     const [chat] = await tx
       .update(saasChat)
@@ -294,7 +409,13 @@ export async function finishKairosTurn(
     await writeAdminAudit(tx, null, {
       action: result.outcome === "paso" ? "kairos.chat_handed_over" : "kairos.chat_failed",
       entityId: chat?.clientId ?? turn.chatId,
-      metadata: { chatId: turn.chatId, clientId: chat?.clientId ?? null, why: result.why ?? null },
+      metadata: {
+        chatId: turn.chatId,
+        clientId: chat?.clientId ?? null,
+        why: result.why ?? null,
+        agent: turn.agent,
+        ...(result.ariadnaReply ? { to: result.ariadnaReply } : {}),
+      },
     })
   }
 }
@@ -309,6 +430,8 @@ export async function kairosChatBlocked(
   tx: Db,
   chatId: string,
   now = new Date(),
+  /** Quién atiende el turno: Ariadna solo responde a la clínica con su app; Kairós, a quien no la tiene. */
+  agent: ChatTurnAgent = "kairos",
 ): Promise<string | null> {
   if (!UUID.test(chatId)) return "La conversación no existe"
   const [chat] = await tx
@@ -318,18 +441,22 @@ export async function kairosChatBlocked(
     .for("update")
     .limit(1)
   if (!chat) return "La conversación no existe"
-  if (!(await getKairosSells(tx)).enabled) return "Kairós se apagó"
+  const ariadna = agent === "ariadna"
+  if (ariadna ? !(await getAriadnaChats(tx)).enabled : !(await getKairosSells(tx)).enabled)
+    return ariadna ? "Ariadna se apagó" : "Kairós se apagó"
   if (chat.kairosPausedAt) return "La conversación se pausó"
   if (chat.notClinicAt) return "La conversación es «No es una clínica»"
-  if (chat.clientId) {
-    const [client] = await tx
-      .select({ organizationId: saasClient.organizationId, archivedAt: saasClient.archivedAt })
-      .from(saasClient)
-      .where(eq(saasClient.id, chat.clientId))
-      .limit(1)
-    if (client?.organizationId) return "La clínica ya tiene su app"
-    if (client?.archivedAt) return "El cliente está archivado"
-  }
+  const [client] = chat.clientId
+    ? await tx
+        .select({ organizationId: saasClient.organizationId, archivedAt: saasClient.archivedAt })
+        .from(saasClient)
+        .where(eq(saasClient.id, chat.clientId))
+        .limit(1)
+    : []
+  if (!ariadna && client?.organizationId) return "La clínica ya tiene su app"
+  if (client?.archivedAt) return "El cliente está archivado"
+  if (ariadna && !client?.organizationId)
+    return "La conversación ya no es de una clínica con su app"
   if (!chatFreeWindow(chat.lastInboundAt, now).canReplyFreely) return "Pasaron las 24 horas de Meta"
   return null
 }
@@ -344,7 +471,9 @@ export async function kairosTurnCap(
   chatId: string,
   turnId: string,
   now = new Date(),
+  agent: ChatTurnAgent = "kairos",
 ): Promise<string | null> {
+  const name = CHAT_AGENT_NAMES[agent]
   const [counts] = await tx.execute<{ chat: number; all: number }>(sql`select
       (select count(*)::int from admin.kairos_chat_turn t where t.chat_id = ${chatId}::uuid
         and t.id <> ${turnId}::uuid and ${limaDaySql(sql`t.created_at`, now)}) as chat,
@@ -353,9 +482,10 @@ export async function kairosTurnCap(
       + (select count(*)::int from admin.saas_outreach o where o.by_kairos and o.purpose = 'aviso'
         and ${limaDaySql(sql`o.created_at`, now)}) as all`)
   if ((counts?.chat ?? 0) >= KAIROS_TURNS_PER_CHAT_DAY)
-    return `Llegó al tope de ${KAIROS_TURNS_PER_CHAT_DAY} respuestas de Kairós de hoy en esta conversación`
+    return `Llegó al tope de ${KAIROS_TURNS_PER_CHAT_DAY} respuestas de ${name} de hoy en esta conversación`
+  // El tope de todas es uno solo, entre Kairós y Ariadna: los dos responden con la misma cuenta.
   if ((counts?.all ?? 0) >= KAIROS_TURNS_PER_DAY)
-    return `Kairós llegó a su tope de ${KAIROS_TURNS_PER_DAY} respuestas y avisos de hoy`
+    return `${name} llegó a su tope de ${KAIROS_TURNS_PER_DAY} respuestas y avisos de hoy`
   return null
 }
 
@@ -581,6 +711,100 @@ export async function kairosChatContext(
           }
         : null,
     sales: await kairosSalesFacts(tx, client?.product ?? "dental"),
+  }
+}
+
+/* ---------- Lo que lee Ariadna (ADR 0191) ---------- */
+
+export interface AriadnaChatContext {
+  chat: { id: string; channel: "whatsapp" | "instagram" | "messenger" }
+  client: { id: string; name: string; product: ClinicalProduct; organizationId: string }
+  /** Lo que escribió la persona desde nuestra última respuesta, en orden (sin firmas ni archivos). */
+  question: string
+  /** Cuántos archivos mandó en esos mensajes (no los puede ver). */
+  files: number
+  /** Lo que preguntó antes de nuestra última respuesta, para entender «¿y cómo la creo?». */
+  previous: { question: string; where: null } | null
+  /** Su última respuesta fue «¿quieres que te pase con Soporte?». */
+  offered: boolean
+  /** Ariadna todavía no escribió en esta conversación. */
+  firstReply: boolean
+  /** El origen de la app de la clínica, para el enlace a la pantalla; nulo sin dirección configurada. */
+  appOrigin: string | null
+}
+
+/**
+ * Lo que Ariadna necesita para responder: de quién es la conversación (el producto, para su guía, y
+ * el subdominio, para el enlace) y lo que escribió la persona. Nada de la clínica: ni quién escribe,
+ * ni su rol, ni sus datos.
+ */
+export async function ariadnaChatContext(tx: Db, chatId: string): Promise<AriadnaChatContext> {
+  if (!UUID.test(chatId)) throw notFound("Conversación")
+  const [chat] = await tx.select().from(saasChat).where(eq(saasChat.id, chatId)).limit(1)
+  if (!chat?.clientId) throw notFound("Conversación")
+  const [client] = await tx
+    .select()
+    .from(saasClient)
+    .where(eq(saasClient.id, chat.clientId))
+    .limit(1)
+  if (!client?.organizationId)
+    throw new ServiceError(
+      "CHAT_NOT_CLINIC_APP",
+      409,
+      "La conversación no es de una clínica con su app",
+    )
+  const replies = await tx
+    .select()
+    .from(saasOutreach)
+    .where(and(eq(saasOutreach.chatId, chat.id), eq(saasOutreach.purpose, "respuesta")))
+    .orderBy(desc(saasOutreach.createdAt), desc(saasOutreach.id))
+    .limit(KAIROS_HISTORY_MAX)
+  const lastReply = replies.find((reply) => reply.status !== "no_salio") ?? null
+  const messages = await tx
+    .select()
+    .from(saasInboundMessage)
+    .where(eq(saasInboundMessage.chatId, chat.id))
+    .orderBy(desc(saasInboundMessage.createdAt), desc(saasInboundMessage.id))
+    .limit(KAIROS_HISTORY_MAX)
+  const after = (
+    lastReply
+      ? messages.filter((m) => m.createdAt.getTime() >= lastReply.createdAt.getTime())
+      : messages
+  ).reverse()
+  const before = lastReply
+    ? messages.find((m) => m.createdAt.getTime() < lastReply.createdAt.getTime())
+    : undefined
+  const [lastTurn] = await tx
+    .select({ reply: kairosChatTurn.ariadnaReply, outreachId: kairosChatTurn.outreachId })
+    .from(kairosChatTurn)
+    .where(
+      and(
+        eq(kairosChatTurn.chatId, chat.id),
+        eq(kairosChatTurn.agent, "ariadna"),
+        eq(kairosChatTurn.outcome, "respondio"),
+      ),
+    )
+    .orderBy(desc(kairosChatTurn.updatedAt))
+    .limit(1)
+  const product: ClinicalProduct = isClinicalProduct(client.product) ? client.product : BASE_PRODUCT
+  return {
+    chat: { id: chat.id, channel: chat.channel as AriadnaChatContext["chat"]["channel"] },
+    client: { id: client.id, name: client.name, product, organizationId: client.organizationId },
+    question: after
+      .map((m) => (m.body ?? "").trim())
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, 500),
+    files: after.reduce((sum, m) => sum + m.media.length, 0),
+    previous: before?.body?.trim()
+      ? { question: before.body.trim().slice(0, 500), where: null }
+      : null,
+    // La oferta vale si fue lo último que dijo Ariadna aquí.
+    offered: Boolean(
+      lastReply && lastTurn?.reply === "oferta" && lastTurn.outreachId === lastReply.id,
+    ),
+    firstReply: !replies.some((reply) => reply.byAriadna),
+    appOrigin: await clinicOriginOf(tx, client.organizationId),
   }
 }
 

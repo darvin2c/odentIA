@@ -1044,6 +1044,8 @@ export const saasFollowUp = adminSchema.table(
     happenedAt: timestamp("happened_at", { withTimezone: true }).notNull().defaultNow(),
     /** La dejó Kairós, no una persona. */
     byKairos: boolean("by_kairos").notNull().default(false),
+    /** Con `by_kairos`: la respuesta la escribió Ariadna en el chat de una clínica con su app. */
+    byAriadna: boolean("by_ariadna").notNull().default(false),
     /**
      * La conversación (WhatsApp, Instagram o Messenger) de la que salió (lo que entró o lo que
      * respondimos): con ella pasa a otro cliente si la conversación se mueve. No cambia a otra.
