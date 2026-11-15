@@ -659,7 +659,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         // Mesa del 13 nov, entrega 7. Lo de «de pequeño» es de odentIA: latidIA y vistIA lo quitan (`BY_ID`).
         id: "que-le-preguntan-a-la-mama-de-un-nino",
         q: "¿Qué le preguntan a la mamá de un niño?",
-        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago es alérgico a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
+        a: `A un niño menor de 12 años lo registra quien lo cuida, y su salud se le pregunta a ella con el nombre del niño (¿Thiago tiene alergia a algún medicamento?), con «Lo respondes tú» y su nombre. Los ejemplos son de niño (asma, convulsiones), no se le pregunta embarazo, lactancia, tabaco ni alcohol, y la casilla del final nombra los datos del niño y los suyos. Lo mismo pasa en el enlace del niño.${CHILDHOOD_DENTAL_SENTENCE} En la atención lo lees sin abrir nada, en el aviso «Revisa con…», con quién lo dijo y qué día. De 12 a 17 años se le pregunta como a un adulto.`,
         forms: ["que se le pregunta a un niño", "biberón y chupón", "preguntas de salud de un niño"],
       },
       {
@@ -742,7 +742,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quedaron-atenciones-recetas-u-ordenes",
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
-        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (presupuestos, recetas, órdenes, consentimientos, formularios, imágenes, otros archivos y, en clínicas de Perú, odontogramas); «Nuevo» abre directo el formulario.",
+        a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma (con el Periodontograma debajo), Historia y Documentos. Historia es lo que pasó y cuándo, día por día: cada atención es una tarjeta con quién atendió, el diagnóstico con su nombre y su código, lo que se hizo, lo que se indicó (tratamientos, presupuesto, controles, recetas y pedidos) y lo que se firmó; la atención que sigue en curso también es su tarjeta, marcada «En curso · sin firmar», porque lo de dentro aún puede cambiar; lo anulado va plegado al final de su día, con su motivo, quién y cuándo. En el celular, la lista de hallazgos va justo debajo del odontograma. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (presupuestos, recetas, órdenes, consentimientos, fichas, imágenes, otros archivos y, en clínicas de Perú, odontogramas); «Nuevo» abre directo la receta, la orden, la ficha o lo que elijas.",
         area: "clinica",
       },
       {
@@ -795,7 +795,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "receta-consentimiento-orden-atencion",
         q: "¿Dónde hago la receta, el consentimiento o la orden de la atención?",
-        a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, formulario o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
+        a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, ficha o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
         area: "clinica",
       },
       {
@@ -906,8 +906,17 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "ofrecer-dos-opciones",
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno es el recomendado. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
-        forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno va recomendado: nace el primero y se cambia con «Marcar como recomendada», en el Plan o en «Revisar y enviar». Es el que la persona ve marcado, aunque «Lo que le proponemos» diga otra cosa: en «Revisar y enviar», un aviso encima de las opciones te dice cuál es. Si ya se lo entregaste, se cambia con «Crear revisión», no con «Anular presupuesto»: la revisión conserva el número y en ella la marcas. Lo cambia quien lo preparó. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        forms: [
+          "dos caminos",
+          "conservar o extraer",
+          "otro camino para la pieza",
+          "alternativas de tratamiento",
+          "opcion recomendada",
+          "cambiar la recomendada",
+          "le sale marcada otra opcion",
+          "ya lo envie y la recomendada esta mal",
+        ],
         area: "plan",
       },
       {
@@ -1115,6 +1124,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
           "puedo ver lo que contesto el paciente",
           "recepcion ve las respuestas",
           "sabe si respondio antes de venir",
+        ],
+      },
+      {
+        // Mesa de formularios del 13 nov, entrega 9.
+        id: "paciente-se-le-borro-lo-que-escribio",
+        q: "La paciente dice que se le borró lo que escribió, ¿qué pasó?",
+        a: "Lo que escribe desde su enlace (sus datos, su salud, «Antes de tu cita») se guarda en su propio celular, no en la clínica, hasta que lo envía o por un día, lo que pase primero. Si vuelve en ese mismo celular y en ese mismo navegador dentro del día, ve «Vas en el paso 3 de 6» y «Seguir donde ibas». Empieza en blanco si lo abre desde otro celular, desde otro navegador o en una ventana privada, si pasó más de un día, si su enlace venció, si borró los datos del navegador o si tocó «Empezar de nuevo». El registro por el código QR o desde la web, sin enlace, se borra al cerrar la página: puede llenarse en un equipo de la clínica, y así nadie ve lo de la persona anterior. Hasta que lo envía, la clínica no recibe nada y nadie del equipo puede recuperarlo: que lo vuelva a responder, o que lo cuente en la cita. Lo que ya envió no se pierde: llegó a la clínica.",
+        forms: [
+          "la paciente dice que se le borro lo que escribio",
+          "se le borro lo que estaba llenando",
+          "el paciente perdio lo que respondio",
+          "se perdieron sus respuestas antes de enviar",
+          "puedo recuperar lo que escribio el paciente",
         ],
       },
       {
@@ -2203,18 +2225,8 @@ const BASE_TOPICS: readonly HelpTopic[] = [
     title: "Consentimientos",
     parent: SETTINGS,
     purpose:
-      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno. También se crean formularios propios, para preguntas que solo tu clínica hace.",
-    terms: [
-      "consentimiento informado",
-      "anamnesis",
-      "cuestionario",
-      "plantillas",
-      "firma del paciente",
-      "documentos para firmar",
-      "ficha propia",
-      "mis preguntas",
-      "formulario propio",
-    ],
+      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno.",
+    terms: ["consentimiento informado", "firma del paciente", "documentos para firmar", "hoja para firmar", "documento que firman", "texto que firman"],
     writePermission: "settings.write",
     faqs: [
       {
@@ -2236,6 +2248,75 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         id: "alergias-paciente-escribe-cuestionario-llegan-ficha",
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",
         a: "Sus alergias se le preguntan en su registro y en su enlace («Antes de tu cita»), y llegan a Antecedentes como «lo dijo él», sin revisar; la receta avisa al escribir un medicamento que choca. Si respondió un cuestionario de los de antes que las preguntaba, entran al «Marcar como revisado». No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó.",
+      },
+    ],
+  },
+  {
+    // Las fichas del equipo, con su lugar en el menú (ADR 0117). Las preguntas que venían de
+    // «Formularios propios» conservan su id con el prefijo `formularios-`.
+    id: "fichas",
+    path: "/settings/consultation-forms",
+    title: "Fichas de consulta",
+    parent: SETTINGS,
+    purpose:
+      "Tus hojas para anotar en consulta, además del examen. Cada ficha aparece sola en la atención cuando la cita es de su especialidad; si la cita no tiene servicio, por la especialidad de quien atiende, y «Otra ficha…» ofrece las demás. Las que vienen con el producto ya se usan y dicen «Sin mirar» hasta que alguien las abre; todas se pueden cambiar, y lo ya anotado conserva sus preguntas.",
+    terms: [
+      "fichas",
+      "formularios",
+      "formulario propio",
+      "ficha propia",
+      "mis preguntas",
+      "hoja de consulta",
+      "hoja",
+      "hojas",
+      "plantillas",
+      "cuestionario",
+      "anamnesis",
+    ],
+    writePermission: "settings.write",
+    faqs: [
+      {
+        id: "fichas-por-que-aparece",
+        q: "¿Por qué me aparece esta ficha?",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        forms: [
+          "por que me sale esta ficha en la atencion",
+          "de donde sale la ficha que aparece sola",
+          "no quiero que aparezca esta ficha",
+          "por que no aparece mi ficha en la atencion",
+          "por que me aparece esta hoja en la atencion",
+          "por su edad me sale una ficha",
+        ],
+      },
+      {
+        id: "fichas-cual-ficha",
+        q: "¿Dónde veo la ficha de esta paciente?",
+        a: "Depende de cuál. Si es su página (sus datos, su historia, sus citas), está en Pacientes: búscala y ábrela. Si es una ficha de consulta que se llenó en la atención, está en su página › Clínica › Documentos, con el filtro «Fichas», y en la Historia, en la atención de ese día. En la atención en curso, la de hoy está en «Fichas para esta atención» y la anterior se ve debajo de cada pregunta. Si no es ninguna de las dos, dime cuál buscas.",
+        forms: [
+          "donde veo la ficha de esta paciente",
+          "abrir la ficha del paciente",
+          "donde quedo la ficha que llene en la consulta",
+          "ver la hoja que llene en la consulta",
+        ],
+      },
+      {
+        id: "fichas-trabada-obligatoria",
+        q: "Una pregunta obligatoria no me deja finalizar la ficha, ¿qué hago?",
+        a: "Respóndela: si el paciente no tiene nada, elige «No tiene» o «Ninguno». Las fichas que vienen con el producto ya traen esa opción en sus casillas. Si es una ficha de tu clínica y la pregunta no la tiene, quien administra se la agrega, o le quita lo obligatorio, en Configuración › Fichas de consulta («Ver y cambiar»); la ficha ya empezada sigue con sus preguntas. Mientras tanto puede quedar a medias: firmar y cobrar la atención no la necesita, y se termina después. Para salir de ella, «Descartar borrador…» con su motivo y empieza otra.",
+        forms: [
+          "no puedo finalizar la ficha porque pide una pregunta",
+          "la ficha me obliga a marcar algo que no tiene",
+          "como salgo de una ficha trabada",
+          "responde esta pregunta para finalizar y no tiene nada",
+        ],
+      },
+      {
+        id: "fichas-sin-mirar",
+        q: "¿Qué quiere decir «Viene con» y «Sin mirar»?",
+        a: "Que la ficha vino con odentIA y nadie de tu clínica la abrió todavía. Ya se puede usar tal como está. Arriba dice cuántas miraste de las que vinieron. «Ver y ajustar» la abre: desde ese momento dice «La miraste», y si cambias algo y lo publicas, lo ya anotado conserva sus preguntas.",
+        forms: ["que significa sin mirar", "fichas que vienen con el sistema", "tengo que revisar las fichas", "que hojas trae el sistema"],
+        // latidIA y vistIA no traen fichas: no la heredan.
+        own: true,
       },
     ],
   },
@@ -2276,7 +2357,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "preguntar-anticoagulantes",
         q: "¿Cómo le pregunto a mis pacientes si toman anticoagulantes?",
-        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicinas para los huesos». Si lo escribe solo en «otro medicamento», no sale la marca: pregúntaselo en la consulta.",
+        a: "En Configuración › Preguntas al paciente, en «Su salud», deja «Anticoagulantes o aspirina diaria» en «Opcional» u «Obligatorio» y guarda. Se le pregunta en «Tus medicinas», al registrarse y en su enlace, con Sí, No o No sé y cuál, si lo sabe; a quien ya respondió lo demás solo se le pregunta esto. Si dice que sí, arriba de su ficha y de la atención sale «Anticoagulante» con lo que dijo, quién lo dijo y cuándo, sin revisar hasta que lo revises con él. En la atención, si nadie se lo preguntó, dice «no se le preguntó», que no es lo mismo que «dijo que no». Lo mismo vale para «Medicina para los huesos». La aspirina y el clopidogrel salen como «Antiagregante». A quien ya tiene una medicina anotada por el equipo, su enlace no le pregunta «¿algún otro medicamento?». Si lo escribe solo en «otro medicamento» (por ejemplo, «Sintrom»), no sale la marca: en su página › Antecedentes, cámbialo por el nombre de la lista (acenocumarol) y la marca sale arriba. Recepción no lo pregunta desde Configuración: le manda su enlace o le muestra su código, y el enlace le pregunta lo que falta.",
+        forms: [
+          "un paciente toma sintrom como hago para que el sistema me avise",
+          "como hago que salga la marca del anticoagulante",
+          "como le pregunto si toma anticoagulantes",
+        ],
+      },
+      {
+        // QA del 14 nov (auditor H8): a recepción se le daban pasos de Configuración que no puede abrir.
+        id: "recepcion-preguntar-su-salud",
+        q: "Soy recepción: ¿cómo hago que el paciente me diga si toma anticoagulantes o lo de su salud?",
+        a: "Mándale su enlace desde su página (o muéstrale su código en «Mostrar su código»): le pregunta de su salud solo lo que falta, también si toma anticoagulantes, y lo que diga lo revisa quien lo atiende. Qué se pregunta lo decide quien administra la clínica en Configuración › Preguntas al paciente.",
+        forms: ["soy recepcion como le pregunto su salud", "recepcion quiere saber si toma anticoagulantes", "como le pido sus datos de salud al paciente"],
       },
       {
         id: "preguntas-nuevas",

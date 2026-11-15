@@ -92,6 +92,37 @@ export const FHIR_OBSERVATION_INTERPRETATION_SYSTEM =
 /** Parentesco de una persona vinculada: v3-RoleCode, con «otro» como texto. */
 export const FHIR_ROLE_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
 
+/**
+ * `Provenance` (R4): quién hizo qué con un recurso y por qué. El papel de quien
+ * participa (`author`, quien escribió una adenda o corrección; `verifier`, quien
+ * revisó los antecedentes) y la operación (`APPEND`: se agregó sin cambiar lo
+ * anterior) son de los códigos de HL7; el motivo va en `Provenance.reason`.
+ */
+export const FHIR_PROVENANCE_PARTICIPANT_SYSTEM = "http://terminology.hl7.org/CodeSystem/provenance-participant-type"
+export const FHIR_DATA_OPERATION_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-DataOperation"
+
+/**
+ * `Questionnaire.item.type` (R4) desde el tipo de pregunta de un formulario. Las
+ * opciones de la clínica no tienen código: la pregunta es de texto, con sus
+ * opciones en `answerOption.valueString` (un `Coding` solo con `display` no dice
+ * nada a quien lo recibe). La firma viaja como texto (quién firmó; R4 no tiene
+ * respuesta de firma) y la pieza, como la dice el producto para un sitio
+ * (`ProductSite.bodySite`: en odentIA, con su sistema).
+ */
+export const FORM_FIELD_TYPE_FHIR = {
+  texto: "string",
+  texto_largo: "text",
+  numero: "decimal",
+  booleano: "boolean",
+  opcion_unica: "string",
+  opcion_multiple: "string",
+  fecha: "date",
+  firma: "string",
+  pieza: "string",
+  escala: "integer",
+  adjunto: "reference",
+} as const
+
 /** El código FHIR de un valor propio, o null si no tiene equivalencia segura. */
 export function fhirCode<T extends Record<string, string>>(table: T, value: string | null | undefined): T[keyof T] | null {
   if (!value || !Object.hasOwn(table, value)) return null

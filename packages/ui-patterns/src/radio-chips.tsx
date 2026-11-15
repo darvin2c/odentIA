@@ -22,8 +22,49 @@ export interface RadioChipsProps<T extends string> {
   invalid?: boolean
   /** Al salir del grupo. */
   onBlur?: () => void
+  /**
+   * Las opciones son una escala (0 a 10): las flechas se detienen en los extremos, e Inicio y Fin
+   * van al primero y al último, como en un control deslizante (patrón «slider» de WAI-ARIA). Sin
+   * ella el grupo da la vuelta, como pide el patrón de radio: en Sí/No no hay un orden que perder.
+   */
+  ordered?: boolean
   disabled?: boolean
   className?: string
+}
+
+/** El anillo de foco de `Button` (`ring-3`), algo más fuerte porque rodea una pastilla clara. */
+const FOCUS_RING =
+  "has-[[role=radio]:focus-visible]:border-ring has-[[role=radio]:focus-visible]:ring-3 has-[[role=radio]:focus-visible]:ring-ring/50"
+
+const BACK = new Set(["ArrowLeft", "ArrowUp"])
+const FORWARD = new Set(["ArrowRight", "ArrowDown"])
+
+/**
+ * En una escala, desde 0 la flecha ← marcaba 10, el peor dolor: el grupo daba la vuelta. Aquí se
+ * detiene en los extremos, e Inicio y Fin eligen el primero y el último. Va antes de que el grupo
+ * mueva el foco (en captura), y solo cuando hay algo que cambiar de su comportamiento.
+ */
+function keepInScale<T extends string>(
+  event: React.KeyboardEvent<HTMLDivElement>,
+  options: ReadonlyArray<{ value: T }>,
+  onChange: (value: T) => void,
+): void {
+  if (event.altKey || event.ctrlKey || event.metaKey) return
+  const radios = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')]
+  const at = radios.findIndex((radio) => radio === event.target || radio.contains(event.target as Node))
+  if (at < 0) return
+  const last = radios.length - 1
+  const to =
+    event.key === "Home" ? 0 : event.key === "End" ? last : null
+  const stuck = (BACK.has(event.key) && at === 0) || (FORWARD.has(event.key) && at === last)
+  if (to === null && !stuck) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (to === null || to === at) return
+  const option = options[to]
+  if (!option) return
+  onChange(option.value)
+  radios[to]?.focus()
 }
 
 /**
@@ -42,6 +83,7 @@ export function RadioChips<T extends string>({
   onClear,
   invalid = false,
   onBlur,
+  ordered = false,
   disabled,
   className,
   ...aria
@@ -64,16 +106,25 @@ export function RadioChips<T extends string>({
       disabled={disabled}
       value={value ?? ""}
       onValueChange={(next) => onChange(next as T)}
+      onKeyDownCapture={ordered && !disabled ? (event) => keepInScale(event, options, onChange) : undefined}
     >
       {options.map((option) => (
         <FieldLabel
           key={option.value}
           className={cn(
-            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal transition-shadow",
             value === option.value && "border-primary bg-primary-soft",
+            // El foco del teclado se ve en toda la pastilla, como el anillo de un botón, y se
+            // distingue de «elegida» (borde y fondo): con foco, el anillo; sin foco, nada más.
+            FOCUS_RING,
           )}
         >
-          <RadioGroupItem value={option.value} aria-invalid={invalid || undefined} />
+          {/* El anillo lo lleva la pastilla: el del círculo de 16 px casi no se veía. */}
+          <RadioGroupItem
+            value={option.value}
+            aria-invalid={invalid || undefined}
+            className="focus-visible:ring-0 aria-invalid:ring-0"
+          />
           {option.label}
         </FieldLabel>
       ))}

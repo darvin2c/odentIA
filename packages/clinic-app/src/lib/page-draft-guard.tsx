@@ -1,14 +1,4 @@
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
-} from "@odentia/ui"
-import { type KeptInPage, useDraftBlocker } from "@odentia/ui-patterns"
+import { type KeptInPage, UnsavedDialog, useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef, useState } from "react"
 
 /** Compara valores de formulario, no metadatos de interacción ni orden de claves. */
@@ -26,7 +16,16 @@ export function sameDraft(left: unknown, right: unknown): boolean {
  * El formulario conserva sus valores; el guard solo retiene el destino pendiente.
  * Con `keptInPage` solo pregunta al ir a otra ruta (`useDraftBlocker`).
  */
-export function usePageDraftGuard(dirty: boolean, options: { keptInPage?: KeptInPage | null } = {}) {
+export function usePageDraftGuard(
+  dirty: boolean,
+  options: {
+    keptInPage?: KeptInPage | null
+    /** Qué se pierde de verdad, si quien avisa lo sabe (el panel lateral con lo que se guarda solo). */
+    lost?: string | null
+    /** Antes de salir con «Descartar y salir»: lo descartado ya no se guarda al cerrarse. */
+    onDiscard?: () => void
+  } = {},
+) {
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
   const [leave, setLeave] = useState<(() => void) | null>(null)
@@ -72,32 +71,39 @@ export function usePageDraftGuard(dirty: boolean, options: { keptInPage?: KeptIn
       else action()
     },
     dialog: (
-      <AlertDialog open={blocker.status === "blocked" || leave !== null} onOpenChange={(open) => { if (!open) cancel() }}>
-        <AlertDialogContent size="sm" finalFocus={() => {
+      // La misma pregunta que al cerrar el panel con × o Escape (`UnsavedDialog`): dice lo que se pierde.
+      <UnsavedDialog
+        open={blocker.status === "blocked" || leave !== null}
+        lost={options.lost}
+        onStay={cancel}
+        finalFocus={() => {
           const target = restoreFocus.current && editedField.current?.isConnected ? editedField.current : false
           restoreFocus.current = false
           return target
-        }}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Salir sin guardar los cambios</AlertDialogTitle>
-            <AlertDialogDescription>Los cambios de esta página no se han guardado. Si sales, se perderán.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
-            <Button type="button" onClick={() => {
-              restoreFocus.current = false
-              const action = leave
-              setLeave(null)
-              if (blocker.status === "blocked") blocker.proceed()
-              else action?.()
-            }}>Descartar y salir</Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        }}
+        onDiscard={() => {
+          restoreFocus.current = false
+          const action = leave
+          setLeave(null)
+          options.onDiscard?.()
+          if (blocker.status === "blocked") blocker.proceed()
+          else action?.()
+        }}
+      />
     ),
   }
 }
 
-export function PageDraftGuard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage | null }) {
-  return usePageDraftGuard(dirty, { keptInPage }).dialog
+export function PageDraftGuard({
+  dirty,
+  keptInPage,
+  lost,
+  onDiscard,
+}: {
+  dirty: boolean
+  keptInPage?: KeptInPage | null
+  lost?: string | null
+  onDiscard?: () => void
+}) {
+  return usePageDraftGuard(dirty, { keptInPage, lost, onDiscard }).dialog
 }

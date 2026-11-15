@@ -20,6 +20,7 @@ import {
   watchSubmitErrors,
 } from "./server-errors.js"
 import { submitErrorOf } from "./submit-error.js"
+import { announceSubmitRejected } from "./submit-outcome.js"
 
 const appForm = createFormHook({
   fieldContext,
@@ -207,6 +208,7 @@ export async function submitForm(
   if (!ok) {
     if (!rejected) keepValidationErrors(form)
     focusFirstInvalid(options.root ?? null)
+    announceSubmitRejected(options.root)
   }
   return ok
 }

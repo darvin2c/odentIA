@@ -1578,6 +1578,12 @@ export interface BudgetPresentation {
     name: string | null
     pros: string | null
     cons: string | null
+    /**
+     * La que verá marcada el paciente (enlace, portal y PDF). Va aquí porque «Lo que
+     * le proponemos» es texto libre y nada lo une a esta marca: quien lo escribe
+     * tiene que ver cuál es.
+     */
+    isRecommended: boolean
   }>
   lines: Array<{
     id: string
@@ -1657,6 +1663,7 @@ export async function getBudgetPresentation(
       name: option.name,
       pros: option.pros,
       cons: option.cons,
+      isRecommended: option.isRecommended,
     })),
     lines: lines.map((line) => ({
       id: line.id,

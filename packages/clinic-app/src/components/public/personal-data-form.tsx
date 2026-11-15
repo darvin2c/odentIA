@@ -2,10 +2,11 @@ import { declaredHealthAnswered, isChildAge, type RegistrationAnswers, type Visi
 import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
 import { fetchPersonalDataForm, type PersonalDataForm as PersonalDataFormView, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
+import { clearDeviceDraft } from "../../lib/device-draft"
 import { RegistrationQuestionnaire } from "../patient/registration-questionnaire"
 
 /** Lo que «Tus datos» puede completar (las mismas claves que acepta el servidor). */
@@ -185,11 +186,17 @@ export function PersonalDataForm({
   clinicName,
   reader,
   mode,
+  draftKey,
+  resume = false,
   onSent,
 }: {
   slug: string
   token: string
   clinicName: string
+  /** Dónde queda lo escrito en este celular hasta enviarlo, por un día (entrega 9). */
+  draftKey?: string
+  /** Llegó por «Seguir donde ibas»: sigue con lo escrito y su paso. */
+  resume?: boolean
   /** Quien lo lee antes de atenderla: «el Dr. Luis Prado»; nulo si la cita no lo dice. */
   reader?: string | null
   /** `corregir`: «Corregir mi salud o mis medicinas» (entrega 10): solo su salud, entera. */
@@ -210,9 +217,14 @@ export function PersonalDataForm({
   })
   // Su respuesta a «¿Cambió algo?»: hasta elegir, la tarjeta solo pregunta eso.
   const [check, setCheck] = useState<"sin_cambios" | "cambio" | null>(null)
+  const alreadyThere = formQuery.error instanceof ApiError && formQuery.error.shape.code === "BOOKING_LINK_EXPIRED"
+  // Ya no está pendiente: lo escrito a medias en este celular ya no sirve y se borra.
+  useEffect(() => {
+    if (alreadyThere && draftKey) clearDeviceDraft(draftKey)
+  }, [alreadyThere, draftKey])
   if (formQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando…" />
   if (formQuery.isError) {
-    if (formQuery.error instanceof ApiError && formQuery.error.shape.code === "BOOKING_LINK_EXPIRED") {
+    if (alreadyThere) {
       return <ErrorState title="Ya está en la clínica" message="Esto ya no está pendiente." />
     }
     return <ErrorState title="No pudimos abrirlo" message="Vuelve a intentarlo en un momento." onRetry={() => void formQuery.refetch()} />
@@ -280,6 +292,8 @@ export function PersonalDataForm({
         submitLabel="Enviar"
         shortcuts={false}
         addressSource={addressSource}
+        draftKey={draftKey}
+        resume={resume}
         onSubmit={async (answers, extra) => {
           const input: PersonalDataInput = {
             ...toInput(answers, form.pending, extra.visit),

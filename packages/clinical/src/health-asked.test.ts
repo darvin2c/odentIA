@@ -7,7 +7,7 @@ import {
   medicineClassAnswers,
   onlyAskedHealth,
 } from "./health-asked.js"
-import { DEFAULT_REGISTRATION_CONFIG } from "./patient-registration.js"
+import { DEFAULT_REGISTRATION_CONFIG, registrationFieldApplies } from "./patient-registration.js"
 
 const nothing: KnownHealthInput = {
   bloodGroup: null,
@@ -145,7 +145,7 @@ describe("«No se le preguntó» no es «dijo que no»", () => {
       group: "anticoagulants",
     })
     expect(medicationAlertWords({ name: "alendronato", atcCode: "M05B" })).toEqual({
-      label: "Huesos: alendronato",
+      label: "Medicina para los huesos: alendronato",
       group: "boneMedicines",
     })
     expect(medicationAlertWords({ name: "Anticoagulante (no dijo cuál)", atcCode: "B01A" }).label).toBe(
@@ -173,4 +173,77 @@ describe("de lo que envió desde su enlace, solo lo que se le preguntó", () => 
       medical: { tabaco: "fuma", cigarrillos: "menos_10" },
     })
   })
+})
+
+// Revisión de la entrega 6 (14 nov): dos formas de terminar en «Anticoagulante: no toma» sin que fuera cierto.
+describe("«no toma» solo cuando es cierto", () => {
+  it("dijo que sí y ninguna medicina anotada lleva la clase: «dijo que toma», nunca «no toma»", () => {
+    const declarations = [{ health: { anticoagulants: { state: "recorded" as const, detail: "Sintrom" } } }]
+    // El equipo ya tenía «Sintrom» escrito a mano, sin código: lo de ella no sumó otra fila.
+    expect(medicineClassAnswers({ ...nothing, declarations, current: [{ atcCode: null }] }).anticoagulants).toEqual({
+      answer: "saidYes",
+      said: true,
+    })
+    // Dijo que sí y el equipo la terminó: hoy no la toma.
+    expect(
+      medicineClassAnswers({ ...nothing, declarations, current: [], ended: [{ atcCode: "B01AA07" }] }).anticoagulants,
+    ).toEqual({ answer: "no", said: false })
+  })
+
+  it("el «No» a «algún otro medicamento» no responde por el anticoagulante ni por los huesos", () => {
+    const declarations = [
+      { health: { anticoagulants: { state: "unknown" as const }, boneMedicines: { state: "unanswered" as const }, medications: { state: "none" as const, items: [] } } },
+    ]
+    const withNone = { ...nothing, reviewStatus: { ...nothing.reviewStatus, medications: "none" }, declarations }
+    const classes = medicineClassAnswers({ ...withNone, current: [] })
+    expect(classes.anticoagulants).toEqual({ answer: "unknown", said: true })
+    expect(classes.boneMedicines).toEqual({ answer: "unasked", said: false })
+    const known = knownHealthQuestions(withNone)
+    expect(known.has("boneMedicines")).toBe(false)
+    expect(known.has("medications")).toBe(true)
+    // Un «no toma medicamentos» de antes, cuando era una sola pregunta, sí responde por las dos.
+    const before = { ...nothing, reviewStatus: { ...nothing.reviewStatus, medications: "none" } }
+    expect(medicineClassAnswers({ ...before, current: [] }).boneMedicines).toEqual({ answer: "no", said: false })
+    expect(knownHealthQuestions(before).has("anticoagulants")).toBe(true)
+  })
+
+  it("un «tiene» que solo trae el anticoagulante no responde «¿algún otro medicamento?»", () => {
+    const onlyClass = { ...nothing, reviewStatus: { ...nothing.reviewStatus, medications: "recorded" }, medications: [{ atcCode: "B01A" }] }
+    expect(knownHealthQuestions(onlyClass).has("medications")).toBe(false)
+    expect(knownHealthQuestions({ ...onlyClass, medications: [{ atcCode: "B01A" }, { atcCode: null }] }).has("medications")).toBe(true)
+  })
+})
+
+// QA del 14 nov (B4, B11): a un niño de 7 años se le preguntaba si fuma; la regla de a quién le
+// corresponde cada pregunta es una sola, la del servidor.
+describe("a quién le corresponde cada pregunta", () => {
+  it("el tabaco y el alcohol desde los 12 años; el embarazo y la lactancia, mujeres de 12 a 55", () => {
+    expect(registrationFieldApplies("medical.tabaco", { age: 7 })).toBe(false)
+    expect(registrationFieldApplies("medical.alcohol", { age: 7 })).toBe(false)
+    expect(registrationFieldApplies("medical.tabaco", { age: 15 })).toBe(true)
+    expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 61 })).toBe(false)
+    expect(registrationFieldApplies("medical.lactancia", { sex: "M", age: 30 })).toBe(false)
+    expect(registrationFieldApplies("personal.embarazo", { sex: "F", age: 30 })).toBe(true)
+  })
+})
+
+// QA del 14 nov (C1): la aspirina y el clopidogrel son antiagregantes; la marca lo dice.
+it("«Antiagregante» para el grupo B01AC y «Anticoagulante» para el resto", () => {
+  expect(medicationAlertWords({ name: "clopidogrel", dose: "75 mg", atcCode: "B01AC04" }).label).toBe("Antiagregante: clopidogrel 75 mg")
+  expect(medicationAlertWords({ name: "apixabán", dose: null, atcCode: "B01AF02" }).label).toBe("Anticoagulante: apixabán")
+})
+
+// QA del 14 nov (B3): la medicina para los huesos que tomó y ya no toma sigue contando.
+it("de los huesos, la que tomó y ya no toma es «la tomó antes»; del anticoagulante, «no toma»", () => {
+  const declarations = [
+    { health: { boneMedicines: { state: "recorded" as const }, anticoagulants: { state: "recorded" as const } } },
+  ]
+  const answers = medicineClassAnswers({
+    ...nothing,
+    declarations,
+    current: [],
+    ended: [{ atcCode: "M05BA08" }, { atcCode: "B01AA03" }],
+  })
+  expect(answers.boneMedicines).toEqual({ answer: "took", said: true })
+  expect(answers.anticoagulants).toEqual({ answer: "no", said: false })
 })

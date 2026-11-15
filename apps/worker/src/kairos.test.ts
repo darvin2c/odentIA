@@ -7,6 +7,7 @@ import {
   saasClientContact,
   saasClientFile,
   saasInboundEmail,
+  saasTask,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
 import { aiUsage } from "@odentia/db/schema/agent"
@@ -93,6 +94,18 @@ beforeAll(async () => {
     adminOnly: true,
     happenedAt: new Date("2026-11-13T16:00:00Z"),
   })
+  // Una tarea de Soporte, una solo de Administración y una de cobro.
+  await ownerDb.insert(saasTask).values([
+    { clientId, kind: "llamar", title: "Llamar a Rosa por la demo", dueOn: "2026-11-20" },
+    {
+      clientId,
+      kind: "otro",
+      title: "Revisar el precio especial",
+      dueOn: "2026-11-20",
+      adminOnly: true,
+    },
+    { clientId, kind: "cobro", title: "Hablar del comprobante", dueOn: "2026-11-20" },
+  ])
   const [item] = await ownerDb
     .insert(kairosItem)
     .values({
@@ -167,6 +180,10 @@ describe("runKairosTick", () => {
     expect(client?.summary).toContain("Le interesa la agenda por WhatsApp")
     // Lo solo de administración no entra en lo que también ve Soporte.
     expect(client?.summary).not.toContain("descuento")
+    // Tampoco las tareas solo de Administración ni las de cobro; las de Soporte, sí.
+    expect(client?.summary).toContain("Llamar a Rosa por la demo")
+    expect(client?.summary).not.toContain("precio especial")
+    expect(client?.summary).not.toContain("comprobante")
     // Las fechas van en palabras: el resumen con plantilla las copia a la ficha.
     expect(client?.summary).not.toMatch(/\d{4}-\d{2}-\d{2}/)
     expect(client?.summary).toContain("13 de noviembre de 2026")

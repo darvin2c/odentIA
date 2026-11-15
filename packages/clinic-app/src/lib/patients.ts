@@ -3,6 +3,7 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
   healthReviewPending,
+  isCurrentMedication,
   type HealthDeclarant,
   type MedicationClass,
   type MedicineClassAnswer,
@@ -228,14 +229,19 @@ export interface DeclaredHealthGroup {
   conditions: string[]
   medications: string[]
   pregnancy: boolean
+  /** Lo demás de la entrevista que dijo en esta declaración y sigue sin revisar (el corazón, la anestesia…). */
+  interview?: DeclaredInterviewKey[]
   /**
    * Lo del producto que dijo, ya en palabras (odentIA: «de pequeño» de un niño). Opcional: un
    * servidor anterior no lo manda.
    */
-  interview?: Array<{ label: string; value: string }>
+  productLines?: Array<{ label: string; value: string }>
   /** Su «No» a un grupo lo dijo quien declaró, no lo anotó un profesional. */
   saidNo: { allergies: boolean; conditions: boolean; medications: boolean }
 }
+
+/** Lo de la entrevista que puede decir la persona y lleva su marca (`DECLARED_INTERVIEW` del servidor). */
+export type DeclaredInterviewKey = "corazon" | "antibiotico" | "anestesia" | "tabaco" | "alcohol" | "lactancia"
 
 /** Una declaración de salud tal como llegó. */
 export interface HealthDeclarationView {
@@ -357,10 +363,8 @@ export function unaskedHealthGroups(health: PatientHealth, today: string): Array
   return groups
 }
 
-/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta. */
-export function isCurrentMedication(row: Pick<Medication, "endDate">, today: string): boolean {
-  return !row.endDate || row.endDate >= today
-}
+/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta (la regla común). */
+export { isCurrentMedication }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
   unknown: "No se le preguntó",
@@ -700,6 +704,30 @@ export function splitPlans<T extends TreatmentPlanWithStatus>(plans: readonly T[
   }
 }
 
+/**
+ * Un formulario finalizado, para leerlo: cada pregunta que se hizo con su respuesta
+ * en palabras, y sus adendas. Lo dice el servidor, igual que en la copia de la historia.
+ */
+export interface FormRecord {
+  id: string
+  title: string
+  version: number
+  /** Quién lo llenó y cuándo se finalizó, en una frase. */
+  byWords: string
+  /** «Correcciones» en lo que envió el paciente, «Adendas» en lo del equipo. */
+  addendaTitle: string
+  /** Lo llenó el equipo o lo respondió la persona. */
+  source?: "staff" | "portal"
+  sections: Array<{
+    id: string
+    title: string
+    /** `words` nulo: la pregunta se hizo y quedó sin respuesta. */
+    items: Array<{ id: string; label: string; words: string | null }>
+  }>
+  /** `reason`: por qué se corrigió, si quien corrigió lo dijo. */
+  addenda: Array<{ id: string; text: string; reason?: string | null; authorName: string | null; createdAt: string }>
+}
+
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
 export interface EncounterDetail {
   encounter: Encounter
@@ -723,6 +751,8 @@ export interface EncounterDetail {
    */
   odontogramEntries?: SiteFinding[]
   documents: PatientDocument[]
+  /** Los formularios finalizados en la atención, con sus respuestas: algo que se anotó en ella. */
+  forms?: FormRecord[]
   /** Correcciones posteriores al cierre (kind='adenda'), orden ascendente. */
   addenda: ClinicalNote[]
   /** «Hoy viene a…» del borrador, como lo calcula el servidor; nulo si está firmada o anulada. */
@@ -859,6 +889,8 @@ export interface TimelineItem {
   /** Quién firmó la atención y cuándo. */
   signerName?: string | null
   signedAt?: string | null
+  /** Un formulario: quién lo llenó, dicho por el servidor («Lo llenó Ana Torres»). */
+  byText?: string | null
   /** Hecho de una atención que sigue en curso, sin firmar. */
   openEncounter?: boolean
   voidedByName?: string | null
@@ -876,7 +908,24 @@ export interface EncounterBorn {
   consents: Array<{ id: string; title: string; status: string; signerName: string | null; relation: string | null }>
   prescriptions: Array<{ id: string; number: number; detail: string; voided: boolean; reason: string | null }>
   orders: Array<{ id: string; title: string; state: string }>
-  forms: Array<{ id: string; title: string }>
+  /**
+   * Sus formularios: a medias o finalizado (y cuándo, y si fue después de firmar); `retired`, de una
+   * atención anulada, que trae también los descartados con su motivo (`discardedWithAttention`: lo
+   * descartó la propia anulación). `summary`: lo respondido en una línea, si lo hay.
+   */
+  forms: Array<{
+    id: string
+    title: string
+    state: "a_medias" | "finalizado" | "descartado"
+    finalizedAt: string | null
+    afterSigning: boolean
+    retired: boolean
+    discardReason: string | null
+    discardedWithAttention: boolean
+    summary: string
+    /** Lo respondió la persona: el equipo lo revisó, no lo finalizó. */
+    fromPerson?: boolean
+  }>
   /** Lo que contó antes de venir para la cita de esta atención, con quién lo vio al atender. */
   told?: VisitAnswerView | null
   followUps: Array<{ id: string; title: string; dueAt: string; stateText: string; retired: boolean }>
@@ -1093,6 +1142,11 @@ export interface PatientFull {
   allergyReview?: HealthReviewState | null
   /** El «No» a las alergias lo dijo la persona (o quien habla por ella) y nadie lo revisó: quién y cuándo. */
   allergySaidNo?: { by: HealthDeclarant; at: string | null } | null
+  /**
+   * Las alergias activas que dijo la persona y nadie revisó (y su «No»), por declaración: quién y
+   * cuándo. Llega también a quien solo ve las alergias (recepción): nada más de su salud.
+   */
+  declaredAllergies?: Array<{ by: HealthDeclarant; at: string | null; allergies: string[]; saidNo: boolean }>
   /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
   isMinor: boolean
 }
@@ -1195,7 +1249,7 @@ export function timelineTypeLabel(type: string): string {
     case "order":
       return "Orden"
     case "form":
-      return "Formulario"
+      return "Ficha"
     case "odontogram_signed":
       return "Odontograma firmado"
     default:

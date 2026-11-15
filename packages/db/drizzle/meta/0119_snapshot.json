@@ -1,6 +1,6 @@
 {
-  "id": "415d14a2-77fd-49f7-8cb8-44f2e8860fee",
-  "prevId": "6df0c660-7e5b-44eb-be9c-5eb9e6ad4681",
+  "id": "35469834-ea7f-401c-8b11-c7e5d421df1f",
+  "prevId": "0acf2afb-0a4a-4443-aa78-cbafc6e4a0cc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1678,6 +1678,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "file_ids": {
+          "name": "file_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1884,6 +1891,10 @@
         "saas_outreach_mail_check": {
           "name": "saas_outreach_mail_check",
           "value": "(\"admin\".\"saas_outreach\".\"from_address\" IS NULL OR (\"admin\".\"saas_outreach\".\"from_address\" = lower(\"admin\".\"saas_outreach\".\"from_address\") AND length(\"admin\".\"saas_outreach\".\"from_address\") BETWEEN 3 AND 254))\n        AND (\"admin\".\"saas_outreach\".\"message_id\" IS NULL OR length(\"admin\".\"saas_outreach\".\"message_id\") BETWEEN 3 AND 998)\n        AND (\"admin\".\"saas_outreach\".\"references\" IS NULL OR length(\"admin\".\"saas_outreach\".\"references\") <= 8000)\n        AND (\"admin\".\"saas_outreach\".\"in_reply_to_email_id\" IS NULL OR \"admin\".\"saas_outreach\".\"channel\" = 'correo')"
+        },
+        "saas_outreach_files_check": {
+          "name": "saas_outreach_files_check",
+          "value": "cardinality(\"admin\".\"saas_outreach\".\"file_ids\") <= 5 AND (cardinality(\"admin\".\"saas_outreach\".\"file_ids\") = 0 OR \"admin\".\"saas_outreach\".\"channel\" = 'correo')"
         }
       },
       "isRLSEnabled": false
@@ -11554,233 +11565,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.appointment_visit_answer": {
-      "name": "appointment_visit_answer",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "appointment_id": {
-          "name": "appointment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pain": {
-          "name": "pain",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pain_level": {
-          "name": "pain_level",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "more": {
-          "name": "more",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "told_purpose": {
-          "name": "told_purpose",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "respondent_contact_id": {
-          "name": "respondent_contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "submitted_via": {
-          "name": "submitted_via",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "seen_by": {
-          "name": "seen_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "seen_at": {
-          "name": "seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "seen_encounter_id": {
-          "name": "seen_encounter_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "appointment_visit_answer_appointment_uidx": {
-          "name": "appointment_visit_answer_appointment_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "appointment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "appointment_visit_answer_org_patient_idx": {
-          "name": "appointment_visit_answer_org_patient_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "appointment_visit_answer_organization_id_organization_id_fk": {
-          "name": "appointment_visit_answer_organization_id_organization_id_fk",
-          "tableFrom": "appointment_visit_answer",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "appointment_visit_answer_seen_by_user_id_fk": {
-          "name": "appointment_visit_answer_seen_by_user_id_fk",
-          "tableFrom": "appointment_visit_answer",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "seen_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "appointment_visit_answer_appointment_fk": {
-          "name": "appointment_visit_answer_appointment_fk",
-          "tableFrom": "appointment_visit_answer",
-          "tableTo": "appointment",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "appointment_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "appointment_visit_answer_seen_encounter_fk": {
-          "name": "appointment_visit_answer_seen_encounter_fk",
-          "tableFrom": "appointment_visit_answer",
-          "tableTo": "encounter",
-          "columnsFrom": [
-            "organization_id",
-            "patient_id",
-            "seen_encounter_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "patient_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "appointment_visit_answer_pain_check": {
-          "name": "appointment_visit_answer_pain_check",
-          "value": "\"appointment_visit_answer\".\"pain\" is null or \"appointment_visit_answer\".\"pain\" in ('si','no')"
-        },
-        "appointment_visit_answer_pain_level_check": {
-          "name": "appointment_visit_answer_pain_level_check",
-          "value": "\"appointment_visit_answer\".\"pain_level\" is null or (\"appointment_visit_answer\".\"pain_level\" between 0 and 10 and \"appointment_visit_answer\".\"pain\" = 'si')"
-        },
-        "appointment_visit_answer_via_check": {
-          "name": "appointment_visit_answer_via_check",
-          "value": "\"appointment_visit_answer\".\"submitted_via\" in ('enlace','portal')"
-        },
-        "appointment_visit_answer_seen_check": {
-          "name": "appointment_visit_answer_seen_check",
-          "value": "(\"appointment_visit_answer\".\"seen_at\" is null) = (\"appointment_visit_answer\".\"seen_by\" is null) and (\"appointment_visit_answer\".\"seen_encounter_id\" is null or \"appointment_visit_answer\".\"seen_at\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.clinical_form_addendum": {
       "name": "clinical_form_addendum",
       "schema": "",
@@ -11809,6 +11593,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -11886,7 +11676,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "clinical_form_addendum_reason_check": {
+          "name": "clinical_form_addendum_reason_check",
+          "value": "\"clinical_form_addendum\".\"reason\" IS NULL OR char_length(\"clinical_form_addendum\".\"reason\") BETWEEN 1 AND 2000"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.clinical_form_response": {
@@ -12299,6 +12094,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'staff'"
+        },
+        "in_use": {
+          "name": "in_use",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_by": {
           "name": "created_by",
@@ -21277,12 +21079,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "said_at": {
           "name": "said_at",
           "type": "timestamp with time zone",
@@ -21368,10 +21164,6 @@
         "patient_health_declaration_respondent_check": {
           "name": "patient_health_declaration_respondent_check",
           "value": "\"patient_health_declaration\".\"respondent\" IN ('patient','representative','staff')"
-        },
-        "patient_health_declaration_reason_check": {
-          "name": "patient_health_declaration_reason_check",
-          "value": "\"patient_health_declaration\".\"reason\" IS NULL OR \"patient_health_declaration\".\"reason\" IN ('cambio','correccion') OR (\"patient_health_declaration\".\"reason\" = 'sin_cambios' AND \"patient_health_declaration\".\"health\" = '{}'::jsonb)"
         }
       },
       "isRLSEnabled": false

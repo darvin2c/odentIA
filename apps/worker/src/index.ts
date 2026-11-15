@@ -20,8 +20,10 @@ import {
   configurePublicLinks,
   createStorage,
   ensureSuggestedConsentsEverywhere,
+  ensureSuggestedFormsEverywhere,
   kairosAiUseRecorder,
   mailBrandDomains,
+  metaSignupConfigured,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -311,7 +313,9 @@ queues.push(
       if (Date.now() < nextSuggestedConsentsPoll) return false
       nextSuggestedConsentsPoll = Date.now() + 6 * 3_600_000
       const result = await ensureSuggestedConsentsEverywhere(ownerDb, db)
-      return result.created > 0
+      // Y las fichas de consulta del producto, con la misma regla: las que falten, por clave.
+      const forms = await ensureSuggestedFormsEverywhere(ownerDb, db)
+      return result.created > 0 || forms.created > 0
     },
   },
   {
@@ -488,6 +492,7 @@ queues.push(
     ownerDb,
     writer: createKairosWriter({ platform: kairosPlatform, onUse: kairosAiUseRecorder(ownerDb) }),
     storage,
+    metaSignupAvailable: metaSignupConfigured(env),
   }),
 )
 

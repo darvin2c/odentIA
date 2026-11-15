@@ -447,6 +447,9 @@ function BudgetCard({
   const own = budget.canChange !== false
   const mayWrite = canWrite && own
   const maySend = canSend && own
+  // Lo entregado se cambia con una revisión (también la recomendada).
+  const revisable =
+    mayWrite && ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status)
   const editable = isDraft && mayWrite
   const revision = useMemo(
     () => (previous ? revisionOf(budget, previous) : null),
@@ -848,8 +851,7 @@ function BudgetCard({
                   <Button type="button" variant="outline" onClick={() => setReviewOpen(true)}>
                     {isDraft ? "Lo que se le explicará" : "Lo que se le explicó"}
                   </Button>
-                  {mayWrite &&
-                  ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status) ? (
+                  {revisable ? (
                     <Button type="button" variant="outline" onClick={() => setReviseOpen(true)}>
                       Crear revisión
                     </Button>
@@ -891,6 +893,14 @@ function BudgetCard({
           patientId={patientId}
           budgetId={budget.id}
           onClose={() => setReviewOpen(false)}
+          onRevise={
+            revisable
+              ? () => {
+                  setReviewOpen(false)
+                  setReviseOpen(true)
+                }
+              : undefined
+          }
         />
       ) : null}
       {editOpen ? (

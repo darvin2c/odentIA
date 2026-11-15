@@ -31,6 +31,14 @@ export const MEDICATION_FREQUENCIES = ["cada_8_h", "cada_12_h", "cada_24_h", "se
 export type MedicationFrequency = (typeof MEDICATION_FREQUENCIES)[number]
 
 /**
+ * La medicina que toma: sin fecha de fin o con fin desde `today` (YYYY-MM-DD, el día
+ * de la clínica). Una sola regla para la franja, la receta y la copia de la historia.
+ */
+export function isCurrentMedication(row: { endDate?: string | null }, today: string): boolean {
+  return !row.endDate || row.endDate >= today
+}
+
+/**
  * Unidad de la dosis en código UCUM: masa, volumen y unidades internacionales,
  * y las formas que se cuentan como anotaciones (`{tbl}` un comprimido).
  */

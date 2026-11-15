@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -572,7 +572,7 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
     "answers.pieza": expect.stringContaining("Pieza"),
   })
   // No había nada guardado en esas preguntas, y el aviso lo dice así.
-  expect(partial.rejected["answers.intensidad"]).toContain("No se guardó: la pregunta sigue sin respuesta.")
+  expect(partial.rejected["answers.intensidad"]).toContain("El 15 no se guardó; la pregunta sigue sin respuesta.")
   const stored = await run((tx) => listFormResponses(tx, "org_a", { patientId: patient.id }))
   expect(stored.find((row) => row.id === response.id)?.answers).toMatchObject({ intensidad: null, hallazgos: "Percusión positiva" })
   // Revisión de la entrega 3: había 7, se escribe 15 y la base quedaba vacía. Lo que no vale no
@@ -580,13 +580,13 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   await save({ dolor: true, intensidad: 7, pieza: 36, hallazgos: "Percusión positiva" })
   const kept = await save({ dolor: true, intensidad: 15, pieza: 19, hallazgos: "Percusión negativa" })
   expect(kept.answers).toMatchObject({ dolor: true, intensidad: 7, pieza: 36, hallazgos: "Percusión negativa" })
-  expect(kept.rejected["answers.intensidad"]).toMatch(/0 a 10\. No se guardó: sigue guardado «7»\.$/)
-  expect(kept.rejected["answers.pieza"]).toContain("sigue guardado «36».")
+  expect(kept.rejected["answers.intensidad"]).toMatch(/^Va de 0 a 10\. El 15 no se guardó; sigue «7»\.$/)
+  expect(kept.rejected["answers.pieza"]).toContain("El 19 no se guardó; sigue «36».")
   // Lo que depende de una respuesta rechazada sigue a la que quedó guardada: con «¿Hay dolor?» mal
   // escrito sigue valiendo el «Sí» de antes, y su intensidad no se borra por oculta.
   const dependent = await save({ dolor: "quizá", intensidad: 9 })
   expect(dependent.answers).toMatchObject({ dolor: true, intensidad: 9 })
-  expect(dependent.rejected["answers.dolor"]).toContain("sigue guardado «Sí».")
+  expect(dependent.rejected["answers.dolor"]).toContain("«quizá» no se guardó; sigue «Sí».")
   // La firma sin el nombre de quien firma tampoco frena lo demás.
   const unsigned = await save({ dolor: false, firma: { strokes: [[[1, 1], [2, 2]]] } })
   expect(unsigned.answers).toMatchObject({ dolor: false, firma: null })
@@ -683,13 +683,34 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
       .returning(),
   )
   if (!template) throw new Error("Sin plantilla")
-  const response = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" },
-    }),
-  )
+  // El equipo no crea una respuesta con esta plantilla: la enviaba el paciente.
+  await expect(
+    run((tx) => createFormResponse(tx, "org_a", ACTOR, { templateId: template.id, patientId: patient.id })),
+  ).rejects.toMatchObject({ status: 400 })
+  // Lo que el paciente envió con ella antes de la entrega 8, tal como quedó: declarado y por revisar.
+  const own = (await run((tx) => getPatient(tx, "org_a", patient.id))).contacts.find((link) => link.relationship === "self")
+  if (!own) throw new Error("Sin persona propia")
+  const declared = async (answers: Record<string, unknown>) => {
+    const [row] = await ownerDb
+      .insert(clinicalFormResponse)
+      .values({
+        organizationId: "org_a",
+        templateId: template.id,
+        templateVersion: template.version,
+        templateSnapshot: template.schema,
+        templateTitle: template.title,
+        patientId: patient.id,
+        answers,
+        source: "portal",
+        respondentContactId: own.contactId,
+        submittedAt: new Date(),
+        submittedVia: "enlace",
+      })
+      .returning()
+    if (!row) throw new Error("Sin respuesta declarada")
+    return row
+  }
+  const response = await declared({ alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" })
   // Mientras no se finaliza, nada pasa a los antecedentes.
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id))
@@ -715,13 +736,7 @@ it("la alergia declarada en el cuestionario pasa a antecedentes a nombre del pac
   expect(health.revision).toBe(2)
   expect(health.reviewStatus.allergies).toBe("recorded")
   // «Ninguna» no es una alergia, y repetir la penicilina no la duplica.
-  const again = await run((tx) =>
-    createFormResponse(tx, "org_a", ACTOR, {
-      templateId: template.id,
-      patientId: patient.id,
-      answers: { alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" },
-    }),
-  )
+  const again = await declared({ alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" })
   await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, again.id))
   expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(2)
   // Al escribir amoxicilina, la receta avisa la penicilina por su grupo, como cualquier

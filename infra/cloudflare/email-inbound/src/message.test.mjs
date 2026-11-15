@@ -1,7 +1,7 @@
 // Pruebas de lo que el Worker manda a la API (`node --test`, Node 24 lee el TS sin compilar).
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { inboundBody, omittedNote, pickAttachments } from "./index.ts"
+import { inboundBody, omittedNote, pickAttachments } from "./message.ts"
 
 const encoder = new TextEncoder()
 const raw = (headers, body = "Hola, les escribo.") =>
@@ -86,4 +86,10 @@ test("el nombre y el tipo de un adjunto raro se recortan: la API no lo rechaza",
   assert.ok(kept[0].filename.endsWith(".pdf"))
   assert.ok(kept[0].contentType.length <= 200)
   assert.ok(notAllowed[0].length <= 1000)
+})
+
+test("el punto de entrada exporta solo el manejador: el runtime no arranca con otra exportación", async () => {
+  const entry = await import("./index.ts")
+  assert.deepEqual(Object.keys(entry), ["default"])
+  assert.equal(typeof entry.default.email, "function")
 })

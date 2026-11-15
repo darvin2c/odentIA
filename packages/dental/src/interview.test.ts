@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { childhoodLines, dentalHabitsErrors, dentalInterviewErrors, dentalInterviewLines } from "./interview.js"
+import { childhoodLines, dentalHabitsErrors, dentalInterviewEntries, dentalInterviewErrors, dentalInterviewItems, dentalInterviewLines } from "./interview.js"
 
 describe("lo que odentIA suma a la entrevista: corazón, anestesia, tabaco y lactancia", () => {
   it("se dice en palabras, y lo que no se respondió no sale", () => {
@@ -53,5 +53,76 @@ describe("«de pequeño»: lo que cuenta quien cuida a un niño", () => {
     expect(dentalInterviewErrors({ antecedentesOdontologicos: { quienCepilla: "papá" } })).toHaveProperty(
       "antecedentesOdontologicos.quienCepilla",
     )
+  })
+})
+
+// QA del 14 nov (causa raíz): arriba de la ficha y de la atención va solo lo que cambia la cita.
+describe("lo de la entrevista que va arriba", () => {
+  it("el corazón, el antibiótico y la anestesia solo con «Sí» o «No sabe»; la lactancia con su día; el tabaco nunca", () => {
+    const items = dentalInterviewItems({
+      antecedentesOdontologicos: { corazon: { riesgoEndocarditis: "si", antibioticoPrevio: "no_sabe" }, problemaAnestesia: "no" },
+      habitos: { tabaco: "fuma", cigarrillos: "10_o_mas" },
+      embarazoLactancia: { lactancia: { estado: "si", fecha: "2026-11-14" } },
+    })
+    expect(items.map((item) => [item.key, item.alert])).toEqual([
+      ["corazon", "Corazón: válvula, de nacimiento o endocarditis · no sabe si debe tomar antibiótico antes"],
+      ["anestesia", null],
+      ["tabaco", null],
+      ["lactancia", "Lactancia"],
+    ])
+    expect(items.find((item) => item.key === "lactancia")?.saidOn).toBe("2026-11-14")
+    // Lo que nadie dijo no sale: nunca un «No» inventado.
+    expect(dentalInterviewItems({})).toEqual([])
+  })
+})
+
+
+describe("«Odontológicos y hábitos» en palabras (copia de la historia)", () => {
+  it("cada dato con el nombre de la pantalla y su opción dicha", () => {
+    expect(
+      dentalInterviewEntries({
+        antecedentesOdontologicos: {
+          habitos: ["onicofagia", "morder lápices"],
+          bruxismo: true,
+          hiloDental: false,
+          ansiedadDental: "moderada",
+          experienciaPrevia: "traumatica",
+          cepilladosAlDia: 2,
+          ultimaVisita: "Hace dos años",
+        },
+      }).map((entry) => `${entry.key} · ${entry.label}: ${entry.value}`),
+    ).toEqual([
+      "antecedentesOdontologicos.ultimaVisita · Última visita: Hace dos años",
+      "antecedentesOdontologicos.cepilladosAlDia · Cepillados al día: 2",
+      "antecedentesOdontologicos.experienciaPrevia · Experiencia previa: Traumática",
+      "antecedentesOdontologicos.ansiedadDental · Ansiedad dental: Moderada",
+      "antecedentesOdontologicos.hiloDental · Hilo dental: No",
+      "antecedentesOdontologicos.bruxismo · Bruxismo: Sí",
+      "antecedentesOdontologicos.habitos · Hábitos: onicofagia, morder lápices",
+    ])
+  })
+
+  it("sin respuestas de la boca no dice nada", () => {
+    expect(dentalInterviewEntries({ antecedentesPersonales: { embarazo: true } })).toEqual([])
+    expect(dentalInterviewEntries({ antecedentesOdontologicos: { cepilladosAlDia: 0, habitos: [] } })).toEqual([
+      { key: "antecedentesOdontologicos.cepilladosAlDia", label: "Cepillados al día", value: "0" },
+    ])
+    expect(dentalInterviewEntries(undefined)).toEqual([])
+  })
+
+  it("lo de pequeño que contó quien cuida a un niño también va en la copia, con las palabras de la pantalla", () => {
+    expect(
+      dentalInterviewEntries({
+        antecedentesOdontologicos: { biberon: "ya_no", chupon: "dedo", dulcesEntreComidas: "4_o_mas", pastaConFluor: "si", quienCepilla: "solo" },
+      }).map((entry) => `${entry.key} · ${entry.label}: ${entry.value}`),
+    ).toEqual([
+      "antecedentesOdontologicos.biberon · Biberón o pecho para dormir: Ya no toma biberón",
+      "antecedentesOdontologicos.chupon · Chupón o dedo: Se chupa el dedo",
+      "antecedentesOdontologicos.dulcesEntreComidas · Dulces o jugos entre comidas: 4 o más veces al día",
+      "antecedentesOdontologicos.pastaConFluor · Pasta de dientes con flúor: Pasta con flúor",
+      "antecedentesOdontologicos.quienCepilla · Quién le cepilla los dientes: Se cepilla sin ayuda",
+    ])
+    // Una respuesta que no es de la lista no sale.
+    expect(dentalInterviewEntries({ antecedentesOdontologicos: { biberon: "mucho" } })).toEqual([])
   })
 })

@@ -12,6 +12,7 @@ import type { Db } from "@odentia/db"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { ensureClinicConsents } from "./clinical-forms.js"
+import { ensureClinicForms } from "./consultation-forms.js"
 import { invalidField } from "./errors.js"
 import { refreshSuggestedNotice, setUpNewClinic } from "./new-clinic.js"
 import { initialOrgRegion, type UpdateOrgRegionInput, updateOrgRegion } from "./organization-profile.js"
@@ -108,6 +109,8 @@ export async function saveOrgProfile(
   if (!current) await ensureClinicSpecialties(tx, orgId)
   // Y con sus consentimientos activos, para firmar por la web desde el primer día.
   if (!current) await ensureClinicConsents(tx, orgId, actorUserId)
+  // Y con las fichas de consulta de su producto, ya en uso (ADR 0117).
+  if (!current) await ensureClinicForms(tx, orgId)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

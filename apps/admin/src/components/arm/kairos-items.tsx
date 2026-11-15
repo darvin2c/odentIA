@@ -20,6 +20,7 @@ import { api } from "../../lib/api"
 import { useFocusOnLeave } from "../../lib/focus"
 import { supportDayTime } from "../../lib/support-words"
 import { ProductMark } from "../product"
+import { cargaMarkedWords } from "./client-files-tab"
 import { EmailDrawer } from "./email-drawer"
 import { ClientName, type ClientTab, invalidateArm, OpenClientButton } from "./hoy-links"
 import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
@@ -34,6 +35,9 @@ import { NewClientDrawer, type NewClientValues } from "./new-client-drawer"
  * Los correos: «responder_correo» trae el borrador de la respuesta y se envía
  * (o se cambia en el mismo cajón de «Responder»); «correo_sin_cliente» se
  * liga a un cliente, se responde sin ligarlo o crea el cliente con el correo.
+ * «posible_carga» (solo Administración): «Sí, es la carga» la marca con la
+ * operación de Documentos y «No» no la vuelve a preguntar; si ya pasaron 30
+ * días desde que llegó, el botón dice antes que se borra al marcarlo.
  */
 
 /** El tipo y el estado se leen como texto: uno nuevo del servidor no rompe la pantalla. */
@@ -85,8 +89,8 @@ const decisionSchema = z.object({
 })
 type Decision = z.infer<typeof decisionSchema>
 
-/** Lo que solo aprueba Administración (precios, ligar personas, fusionar): el servidor también lo exige. */
-const ADMIN_KINDS = new Set(["propuesta", "vinculo", "duplicado"])
+/** Lo que solo aprueba Administración (precios, ligar personas, fusionar, la carga de datos): el servidor también lo exige. */
+const ADMIN_KINDS = new Set(["propuesta", "vinculo", "duplicado", "posible_carga"])
 
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value : null
@@ -107,19 +111,25 @@ export function kairosItemTab(kind: string): ClientTab {
     case "mensaje":
     case "responder_correo":
       return "historial"
+    case "posible_carga":
+      return "documentos"
     default:
       return "resumen"
   }
 }
 
-const channelOf = (item: KairosItem): "correo" | "whatsapp" | null => {
+const channelOf = (item: Pick<KairosItem, "payload">): "correo" | "whatsapp" | null => {
   const channel = text(item.payload.channel)
   return channel === "correo" || channel === "whatsapp" ? channel : null
 }
 
-/** El botón del sí, en palabras de lo que hace. */
-function approveLabel(item: KairosItem): string {
+/** El botón del sí, en palabras de lo que hace (una carga que ya pasó los 30 días lo dice antes). */
+export function approveLabel(item: Pick<KairosItem, "kind" | "payload">): string {
   switch (item.kind) {
+    case "posible_carga":
+      return item.payload.dueNow === true
+        ? "Sí, es la carga: se borra al marcarlo"
+        : "Sí, es la carga"
     case "mensaje":
       return channelOf(item) === "whatsapp" ? "Abrir WhatsApp" : "Enviar"
     case "guion":
@@ -143,6 +153,24 @@ function approveLabel(item: KairosItem): string {
 
 /** Lo que se puede cambiar aquí antes del sí; lo demás se cambia en la ficha. */
 const CHANGEABLE = new Set(["mensaje", "presentacion_hecha", "dato", "correo_sin_cliente"])
+
+/** «No» de una posible carga: no se vuelve a preguntar; «Ahora no» de lo demás. */
+export const discardLabel = (kind: string): string => (kind === "posible_carga" ? "No" : "Ahora no")
+
+/** Lo que dice el aviso después de decidir una posible carga (la fecha la da el servidor). */
+export function possibleCargaDoneWords(
+  item: Pick<KairosItem, "payload">,
+  action: "aprobar" | "descartar",
+  result: Record<string, unknown> | null,
+): string {
+  const filename = text(item.payload.filename) ?? "El archivo"
+  if (action === "descartar") return `Listo: ${filename} no es la carga y se guarda`
+  return cargaMarkedWords(filename, {
+    file: { id: text(result?.fileId) ?? "", deleteAfter: text(result?.deleteAfter) },
+    dueNow: result?.dueNow === true,
+    deletedNow: false,
+  })
+}
 
 /** «Vence el jue 13 nov, 10:05»; en rojo si le quedan menos de 6 horas (y lo dice la palabra «Vence»). */
 function dueWords(expiresAt: string, now: Date): { text: string; urgent: boolean } {
@@ -239,6 +267,10 @@ export function useKairosDecide() {
         toast.error(decision.error ?? "No se pudo hacer: ya no vale")
         return
       }
+      if (item.kind === "posible_carga") {
+        toast.success(possibleCargaDoneWords(item, action, decision.result))
+        return
+      }
       if (action === "descartar") {
         toast.success("Listo: no se hace")
         return
@@ -305,6 +337,8 @@ export function KairosItemCard({
     await decide.mutateAsync({ item, action: "aprobar", edited })
   }
   const due = dueWords(item.expiresAt, now)
+  // Una posible carga a los 25 días ya es urgente (a los 30 se borraría al marcarla).
+  const urgent = due.urgent || (item.kind === "posible_carga" && item.payload.urgent === true)
   const facts = textList(item.payload.facts)
   const subject = text(item.payload.subject)
   const body = text(item.payload.body)
@@ -336,7 +370,7 @@ export function KairosItemCard({
             {item.product ? <ProductMark product={item.product} /> : null}
           </p>
         </div>
-        <Badge variant={due.urgent ? "destructive" : "outline"}>{due.text}</Badge>
+        <Badge variant={urgent ? "destructive" : "outline"}>{due.text}</Badge>
       </div>
       <p className="text-sm [overflow-wrap:anywhere]">
         <span className="font-medium">Por qué: </span>
@@ -445,7 +479,13 @@ export function KairosItemCard({
           <OpenClientButton
             clientId={item.clientId}
             tab={kairosItemTab(item.kind)}
-            label={item.kind === "propuesta" ? "Cambiar en la ficha" : "Abrir ficha"}
+            label={
+              item.kind === "propuesta"
+                ? "Cambiar en la ficha"
+                : item.kind === "posible_carga"
+                  ? "Ver en Documentos"
+                  : "Abrir ficha"
+            }
           />
         ) : null}
         <Button
@@ -455,7 +495,7 @@ export function KairosItemCard({
           disabled={pending}
           onClick={() => run("descartar")}
         >
-          Ahora no
+          {discardLabel(item.kind)}
         </Button>
       </div>
       {CHANGEABLE.has(item.kind) ? (

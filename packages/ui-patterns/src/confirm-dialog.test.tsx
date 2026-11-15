@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ConfirmDialog } from "./confirm-dialog.js"
+import { common } from "./common.js"
+import { ConfirmDialog, UnsavedDialog } from "./confirm-dialog.js"
 
 afterEach(() => {
   cleanup()
@@ -64,5 +65,40 @@ describe("ConfirmDialog", () => {
     fireEvent.click(confirm)
     expect(onConfirm).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+// QA de la entrega 3 (14 nov): salir por el menú preguntaba con otro diálogo («Salir sin guardar los
+// cambios»), decía que se perdían los cambios de la página aunque ya estaban guardados y pintaba
+// «Descartar y salir» como la acción principal.
+describe("UnsavedDialog", () => {
+  it("dice lo que se pierde, y quedarse es lo principal: va al final y recibe el foco", async () => {
+    const onStay = vi.fn()
+    const onDiscard = vi.fn()
+    render(
+      <UnsavedDialog
+        open
+        lost="No se guardó «15» en «Intensidad del dolor (0–10)». Lo demás ya está guardado."
+        onStay={onStay}
+        onDiscard={onDiscard}
+      />,
+    )
+    const dialog = await screen.findByRole("alertdialog", { name: common.confirm.unsaved.title })
+    expect(dialog.textContent).toContain("Lo demás ya está guardado.")
+    const stay = screen.getByRole("button", { name: "Seguir aquí" })
+    const buttons = [...dialog.querySelectorAll("button")]
+    expect(buttons.at(-1)).toBe(stay)
+    await waitFor(() => expect(document.activeElement).toBe(stay))
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar y salir" }))
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+    fireEvent.click(stay)
+    expect(onStay).toHaveBeenCalled()
+  })
+
+  it("sin saber qué se pierde, dice el texto común", async () => {
+    render(<UnsavedDialog open onStay={() => {}} onDiscard={() => {}} />)
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog.textContent).toContain(common.confirm.unsaved.description)
   })
 })

@@ -467,7 +467,12 @@ describe("por dónde le llega a cada persona", () => {
   })
 
   it("si solo le queda contar a qué viene, sale el recordatorio de siempre con una línea suave; como plantilla, sin ella", async () => {
+    // Las próximas 10:00 de Lima de lunes a viernes: la cita sigue por venir (lo de su visita se pregunta
+    // solo entonces) y el recordatorio sale en el horario de escribir. Con la hora real, de noche o en fin
+    // de semana, no salía.
     const now = new Date()
+    now.setUTCHours(15, 0, 0, 0)
+    while (now.getTime() <= Date.now() || now.getUTCDay() === 0 || now.getUTCDay() === 6) now.setTime(now.getTime() + 24 * HOUR)
     const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
     await ruleOn(c, "recordatorio_cita", new Date(now.getTime() - HOUR), { hoursBefore: [24] })
     const complete = async (name: string, openWindow: boolean) => {
@@ -480,6 +485,8 @@ describe("por dónde le llega a cada persona", () => {
     }
     // Escribió hoy: el recordatorio sale como texto y lleva la línea con su enlace.
     const marta = await complete("Marta Ríos", true)
+    // Escribió una hora antes de ese «ahora».
+    await ownerDb.update(conversation).set({ lastInboundAt: new Date(now.getTime() - HOUR) }).where(eq(conversation.id, marta.conversationId!))
     await appointmentFor(c, marta.patientId, new Date(now.getTime() + 24 * HOUR))
     // No escribió en 24 horas: sale la plantilla aprobada del recordatorio, sin línea.
     const rosa = await complete("Rosa Lima", false)

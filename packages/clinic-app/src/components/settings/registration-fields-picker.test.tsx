@@ -31,7 +31,8 @@ describe("«Preguntas al paciente»: el único lugar donde la clínica decide qu
       "Fuma y cuántos cigarrillos al día",
     ])
       expect(page).toContain(label)
-    expect(page).not.toContain("Si toma alcohol")
+    // El alcohol, también en odentIA (QA del 14 nov, C4).
+    expect(page).toContain("Si toma alcohol")
   })
 
   it("latidIA no pregunta lo del dentista y no repite la lactancia ni el tabaco", () => {

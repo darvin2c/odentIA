@@ -2,7 +2,7 @@ import { DEFAULT_REGISTRATION_CONFIG, healthQuestionsToAsk } from "@odentia/clin
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { bareProduct, declareProduct } from "../../product/product-ui"
-import { RegistrationQuestionnaire } from "./registration-questionnaire"
+import { DraftResumeNotice, draftKeptOnDevice, RegistrationQuestionnaire } from "./registration-questionnaire"
 
 const config = { ...DEFAULT_REGISTRATION_CONFIG, enabled: true, privacyNotice: "Aviso de demostración" }
 const page = (props: Partial<Parameters<typeof RegistrationQuestionnaire>[0]> = {}) =>
@@ -39,7 +39,7 @@ describe("las preguntas de salud nuevas en el registro y en su enlace", () => {
       },
     })
     expect(html).toContain("para que la sangre no forme coágulos")
-    expect(html).not.toContain("¿Eres alérgico a algún medicamento o material?")
+    expect(html).not.toContain("¿Tienes alergia a algún medicamento o material?")
     expect(html).not.toContain("¿Tienes alguna de estas enfermedades?")
   })
 })
@@ -66,11 +66,11 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     const html = childLink(6)
     expect(html).toContain("La salud de Thiago")
     expect(html).toContain("Lo respondes tú, Carla.")
-    expect(html).toContain("¿Thiago es alérgico a algún medicamento o material?")
+    expect(html).toContain("¿Thiago tiene alergia a algún medicamento o material?")
     expect(html).toContain("¿Thiago tiene alguna de estas enfermedades?")
     expect(html).toContain("Por ejemplo, asma, convulsiones o problemas de sangrado.")
     expect(html).not.toMatch(/diabetes, presión alta/i)
-    expect(html).not.toContain("¿Eres alérgico")
+    expect(html).not.toContain("¿Tienes alergia")
     // Al niño no se le pregunta embarazo ni tabaco.
     expect(html).not.toContain("embarazada")
     expect(html).not.toContain("fuma?")
@@ -101,6 +101,16 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
     expect(teen).toContain("Eres menor de edad: déjanos los datos de quien responde por ti.")
   })
 
+  it("en el enlace de Thiago, la casilla del aviso nombra los datos de Thiago y los de Carla, como el registro", () => {
+    declareProduct(bareProduct("dental"))
+    const fill = { missing: new Set<string>(), health: true, hasRepresentative: true, firstName: "Thiago", age: 6, clinicName: "Dental Smile", privacy: true }
+    const child = page({ fill: { ...fill, respondentFirstName: "Carla" } }).replace(/<[^>]+>/g, "|")
+    expect(child).toContain("Acepto el aviso de privacidad de Dental Smile para los datos de Thiago y los míos.")
+    // Quien abre su propio enlace acepta por sí.
+    const own = page({ fill: { ...fill, firstName: "Marta", age: 40, respondentFirstName: null } }).replace(/<[^>]+>/g, "|")
+    expect(own).toContain("Acepto el aviso de privacidad de Dental Smile.")
+  })
+
   it("a un niño de 8 años no se le pregunta biberón ni chupón", () => {
     declareProduct(bareProduct("dental"))
     const html = childLink(8)
@@ -125,9 +135,57 @@ describe("lo de un niño, para quien lo cuida (C3)", () => {
         respondentFirstName: "Carla",
       },
     })
-    expect(html).toContain("¿Thiago es alérgico")
+    expect(html).toContain("¿Thiago tiene alergia")
     expect(html).not.toContain("¿Quién le cepilla los dientes?")
     expect(html).not.toContain("biberón")
     expect(html).not.toContain("fuma?")
+  })
+})
+
+// Mesa de formularios del 13 nov, entrega 9: lo escrito queda en el celular un día o hasta enviarlo.
+describe("lo escrito en este celular", () => {
+  it("guarda solo lo escrito del formulario: nunca el aviso de privacidad ni las novedades, ni lo que no es un campo", () => {
+    const kept = draftKeptOnDevice({
+      givenNames: "Marta",
+      medicationsText: "warfarina 5 mg",
+      conditionsPicked: ["diabetes"],
+      phoneDigits: 9,
+      docType: "DNI",
+      privacy: true,
+      messages: "si",
+      // Lo que no es del formulario (un archivo, otra cosa) no va al celular.
+      photo: { name: "dni.jpg" },
+      habits: [{ no: "texto" }],
+      surnames: 42,
+    })
+    expect(kept).toEqual({
+      givenNames: "Marta",
+      medicationsText: "warfarina 5 mg",
+      conditionsPicked: ["diabetes"],
+      phoneDigits: 9,
+      docType: "DNI",
+    })
+  })
+
+  it("al volver: «Vas en el paso 3 de 6», hasta cuándo sigue y un toque para seguir", () => {
+    const html = renderToStaticMarkup(
+      <DraftResumeNotice
+        step={{ item: "medicines", current: 3, total: 6 }}
+        until="hasta mañana, 2:15 p. m."
+        onResume={() => {}}
+        onRestart={() => {}}
+      />,
+    )
+    expect(html).toContain("Vas en el paso 3 de 6")
+    expect(html).toContain("Lo que escribiste sigue guardado en este celular hasta mañana, 2:15 p. m. Todavía no lo enviaste.")
+    expect(html).toContain("Seguir donde ibas")
+    expect(html).toContain("Empezar de nuevo")
+    // Nunca lo que escribió.
+    expect(html).not.toContain("warfarina")
+  })
+
+  it("antes de saber si el navegador guarda (en el servidor), la pantalla no promete guardar", () => {
+    declareProduct(bareProduct("dental"))
+    expect(page({ draftKey: "odentia.borrador.x" })).not.toContain("se guarda en este celular")
   })
 })

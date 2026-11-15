@@ -36,6 +36,7 @@ import {
 } from "../../components/arm/hoy-search"
 import { ProductMark } from "../../components/product"
 import {
+  ALTA_KPIS,
   FUNNEL_KPIS,
   REPORTS_SUBTITLE,
   REPORTS_TITLE,
@@ -56,8 +57,8 @@ export const Route = createFileRoute("/_app/reports")({
 })
 
 /**
- * Reportes del ARM (`/api/admin/reports`): el embudo de la venta, los
- * ingresos y la previsión, y el resumen de la semana que escribió Kairós.
+ * Reportes del ARM (`/api/admin/reports`): el embudo de la venta, el alta
+ * (de que entra a su primer pago), los ingresos y la previsión, y el resumen de la semana que escribió Kairós.
  * Cada cifra y sus palabras vienen del servidor, con «Así se calcula»; con
  * pocos casos dice «3 de 7» en lugar de un porcentaje. Las cifras las pone el
  * cálculo: Kairós solo las cuenta en palabras.
@@ -123,6 +124,27 @@ const funnelSchema = z.object({
   lost: figure,
 })
 type Funnel = z.infer<typeof funnelSchema>
+
+const altaSchema = z.object({
+  months: z.number(),
+  spanWords: z.string(),
+  entered: figure,
+  paid: ratio,
+  daysToPay: maybeFigure.extend({ cases: z.number() }),
+  stalls: z.array(z.object({ step: z.string(), label: z.string(), count: z.number() })),
+  stalledMost: z.object({ step: z.string(), label: z.string(), words: z.string() }).nullable(),
+  stallsHowCalculated: z.string(),
+  cohorts: z.array(
+    z.object({
+      month: z.string(),
+      label: z.string(),
+      entered: z.number(),
+      paid: z.number(),
+      conversion: ratio,
+    }),
+  ),
+  cohortsHowCalculated: z.string(),
+})
 
 const revenueSchema = z.object({
   month: z.string(),
@@ -200,6 +222,7 @@ function ReportsPage() {
           value={tab}
           options={[
             { value: "embudo", label: "Embudo" },
+            { value: "alta", label: "Alta" },
             { value: "ingresos", label: "Ingresos" },
             { value: "prevision", label: "Previsión" },
           ]}
@@ -208,7 +231,7 @@ function ReportsPage() {
         {tab !== "prevision" ? (
           <div className="flex flex-col gap-1.5">
             <FieldLabel htmlFor="reportes-meses">
-              {tab === "embudo" ? "Primer contacto en" : "Meses"}
+              {tab === "embudo" ? "Primer contacto en" : tab === "alta" ? "Entraron en" : "Meses"}
             </FieldLabel>
             <Select
               value={String(months)}
@@ -240,6 +263,8 @@ function ReportsPage() {
       </div>
       {tab === "embudo" ? (
         <FunnelTab months={months} />
+      ) : tab === "alta" ? (
+        <AltaTab months={months} />
       ) : tab === "ingresos" ? (
         <RevenueTab months={months} />
       ) : (
@@ -489,6 +514,118 @@ function FunnelTab({ months }: { months: number }) {
         </ReportCard>
       </div>
       <GroupsCard data={data} />
+    </div>
+  )
+}
+
+/* ---------- Alta ---------- */
+
+function AltaTab({ months }: { months: number }) {
+  const alta = useReport(`/api/admin/reports/alta?months=${months}`, ["alta", months], altaSchema)
+  if (alta.isPending)
+    return (
+      <SkeletonRegion message="Calculando el alta…">
+        <ReportsBodySkeleton kpis={ALTA_KPIS} />
+      </SkeletonRegion>
+    )
+  if (alta.isError) return <ErrorState error={alta.error} onRetry={() => void alta.refetch()} />
+  const data = alta.data
+  if (data.entered.value === 0)
+    return (
+      <EmptyState
+        title="Ninguna clínica entró en esos meses"
+        description={`Ninguna clínica entró en ${monthsWords(data.months)}. Prueba con más meses.`}
+      />
+    )
+  const unpaid = data.paid.m - data.paid.n
+  return (
+    <div className="flex flex-col gap-6" aria-busy={alta.isFetching || undefined}>
+      <p className="text-sm text-muted-foreground">
+        Clínicas que entraron de {data.spanWords}. Sin demos ni archivadas.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi
+          title="Entraron"
+          value={count(data.entered.value)}
+          description={data.entered.words}
+          how={data.entered.howCalculated}
+        />
+        <Kpi
+          title="Pagaron"
+          value={data.paid.words}
+          description={`${count(data.paid.n)} de ${count(data.paid.m)}`}
+          how={data.paid.howCalculated}
+        />
+        <Kpi
+          title="Días hasta el primer pago"
+          value={data.daysToPay.words}
+          description="De Entró al primer pago confirmado"
+          how={data.daysToPay.howCalculated}
+        />
+        <Kpi
+          title="Donde más se quedan"
+          value={data.stalledMost?.label ?? "—"}
+          description={data.stalledMost?.words ?? "Todas las que entraron ya pagaron"}
+          how={data.stallsHowCalculated}
+        />
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ReportCard
+          id="alta-pasos"
+          title="Dónde se quedan las que no pagaron"
+          lead={`${count(unpaid)} ${unpaid === 1 ? "clínica" : "clínicas"} todavía sin su primer pago`}
+          how={data.stallsHowCalculated}
+        >
+          {data.stalls.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Todas las que entraron en esos meses ya pagaron.
+            </p>
+          ) : (
+            <BarList
+              title="El primer paso que les falta"
+              size="sm"
+              rows={data.stalls.map((stall) => ({
+                key: stall.step,
+                label: stall.label,
+                value: stall.count,
+                valueText: count(stall.count),
+              }))}
+              table={{ label: "Paso", value: "Clínicas" }}
+            />
+          )}
+        </ReportCard>
+        <ReportCard id="alta-meses" title="Por mes en que entraron" how={data.cohortsHowCalculated}>
+          <ColumnChart
+            title="Clínicas por mes en que entraron y si ya pagaron"
+            tableHeading="Mes"
+            stacked
+            categories={data.cohorts.map(
+              (cohort, index): ChartCategory => ({
+                key: cohort.month,
+                label: cohort.label,
+                short: cohort.label.slice(0, 3),
+                partial: index === data.cohorts.length - 1,
+              }),
+            )}
+            bars={[
+              {
+                key: "pagaron",
+                label: "Pagaron",
+                tone: "series-1",
+                values: data.cohorts.map((c) => c.paid),
+              },
+              {
+                key: "todavia",
+                label: "Todavía no",
+                tone: "series-2",
+                values: data.cohorts.map((c) => c.entered - c.paid),
+              },
+            ]}
+            format={(value) => count(value)}
+            height={200}
+          />
+        </ReportCard>
+      </div>
     </div>
   )
 }
