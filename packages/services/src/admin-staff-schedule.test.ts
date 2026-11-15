@@ -1,5 +1,11 @@
-import { kairosItem, saasChat, saasClient, saasTask } from "@odentia/db/schema/admin-arm"
-import { adminStaff } from "@odentia/db/schema/admin-core"
+import {
+  kairosItem,
+  kairosProposal,
+  saasChat,
+  saasClient,
+  saasTask,
+} from "@odentia/db/schema/admin-arm"
+import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -10,7 +16,7 @@ import {
   kairosRulesPass,
   todayForStaff,
 } from "./admin-kairos.js"
-import { recordPresentation, schedulePresentation } from "./admin-sales.js"
+import { moveClientTask, recordPresentation, schedulePresentation } from "./admin-sales.js"
 import {
   absenceConflicts,
   addStaffAbsence,
@@ -18,6 +24,7 @@ import {
   cancelPresentation,
   confirmProposal,
   getStaffSchedule,
+  listStaffAbsences,
   movePresentation,
   proposeSlot,
   reassignPresentation,
@@ -25,6 +32,7 @@ import {
   setStaffMeetingUrl,
   staffSlots,
 } from "./admin-staff-schedule.js"
+import { kairosBook, kairosSlots } from "./kairos-sells.js"
 import { limaDate } from "./peru-business-days.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -806,5 +814,177 @@ describe("«No se conectó»", () => {
       assigneeUserId: luis.userId,
       byKairos: true,
     })
+  })
+})
+
+describe("nadie cruza presentaciones sin saberlo", () => {
+  it("agendar a mano encima de otra presentación o de una ausencia avisa; «Agendar igual» la agenda y queda constancia", async () => {
+    const now = monday(16)
+    const first = await client("Clínica Rumi (ficticia)", ana.userId)
+    const second = await client("Clínica Sauce (ficticia)", ana.userId)
+    await tx((db) =>
+      bookPresentation(
+        db,
+        null,
+        { clientId: first, startsAt: lima(16, 1, "10:00"), assigneeUserId: ana.userId },
+        now,
+      ),
+    )
+    const at = lima(16, 1, "10:30")
+    const input = { dueOn: limaDate(at), dueAt: at, assigneeUserId: ana.userId }
+    await expect(
+      tx((db) => schedulePresentation(db, maria, second, input, now)),
+    ).rejects.toMatchObject({
+      code: "SLOT_TAKEN",
+      message: expect.stringContaining(
+        "Ana Pérez ya tiene a esa hora la presentación de Clínica Rumi",
+      ),
+    })
+    await tx((db) =>
+      addStaffAbsence(
+        db,
+        maria,
+        luis.userId,
+        { startsAt: lima(16, 2, "00:00"), endsAt: lima(16, 3, "00:00"), reason: "Médico" },
+        now,
+      ),
+    )
+    const away = lima(16, 2, "10:00")
+    await expect(
+      tx((db) =>
+        schedulePresentation(
+          db,
+          maria,
+          second,
+          { dueOn: limaDate(away), dueAt: away, assigneeUserId: luis.userId },
+          now,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "SLOT_TAKEN", message: "Luis Rojas está ausente a esa hora." })
+    const forced = await tx((db) =>
+      schedulePresentation(db, maria, second, { ...input, force: true }, now),
+    )
+    expect(forced.dueAt?.toISOString()).toBe(at.toISOString())
+    const [audit] = await ownerDb
+      .select()
+      .from(adminAudit)
+      .where(
+        and(
+          eq(adminAudit.action, "arm.task_created"),
+          sql`${adminAudit.metadata} ->> 'taskId' = ${forced.id}`,
+        ),
+      )
+    expect(audit?.metadata).toMatchObject({ overrode: expect.stringContaining("Clínica Rumi") })
+  })
+
+  it("«Mover» de Hoy conserva la hora y su fin, avisa si choca y atiende «Pedir otra hora»", async () => {
+    const now = monday(17)
+    const clientId = await client("Clínica Tara (ficticia)", ana.userId)
+    const other = await client("Clínica Ulluco (ficticia)", ana.userId)
+    const task = await tx((db) =>
+      bookPresentation(
+        db,
+        null,
+        { clientId, startsAt: lima(17, 1, "10:00"), assigneeUserId: ana.userId },
+        now,
+      ),
+    )
+    await tx((db) =>
+      bookPresentation(
+        db,
+        null,
+        { clientId: other, startsAt: lima(17, 2, "10:00"), assigneeUserId: ana.userId },
+        now,
+      ),
+    )
+    await ownerDb.update(saasTask).set({ needsNewTimeAt: now }).where(eq(saasTask.id, task.id))
+    // Solo el día (lo que manda «Mover»): el martes a las 10:00 ya es de Ulluco.
+    await expect(
+      tx((db) =>
+        moveClientTask(db, maria, task.id, { dueOn: limaDate(lima(17, 2, "10:00")) }, now),
+      ),
+    ).rejects.toMatchObject({ code: "SLOT_TAKEN" })
+    const moved = await tx((db) =>
+      moveClientTask(db, maria, task.id, { dueOn: limaDate(lima(17, 3, "10:00")) }, now),
+    )
+    expect(moved.dueAt?.toISOString()).toBe(lima(17, 3, "10:00").toISOString())
+    const [row] = await ownerDb.select().from(saasTask).where(eq(saasTask.id, task.id))
+    expect(row?.endsAt?.toISOString()).toBe(lima(17, 3, "10:45").toISOString())
+    expect(row?.needsNewTimeAt).toBeNull()
+    // Tras el aviso, la persona decide: «Mover igual».
+    const forced = await tx((db) =>
+      moveClientTask(
+        db,
+        maria,
+        task.id,
+        { dueOn: limaDate(lima(17, 2, "10:00")), force: true },
+        now,
+      ),
+    )
+    expect(forced.dueAt?.toISOString()).toBe(lima(17, 2, "10:00").toISOString())
+  })
+
+  it("para mover, Kairós ofrece solo las horas de quien presenta", async () => {
+    const now = monday(18)
+    // Responsable Ana; la presentación es con Luis.
+    const clientId = await client("Clínica Vilca (ficticia)", ana.userId)
+    const chatId = await chat(clientId)
+    await tx((db) =>
+      bookPresentation(
+        db,
+        null,
+        { clientId, startsAt: lima(18, 1, "09:00"), assigneeUserId: luis.userId, chatId },
+        now,
+      ),
+    )
+    const slots = await tx((db) => kairosSlots(db, chatId, {}, now))
+    expect(slots.length).toBeGreaterThan(0)
+    expect(new Set(slots.map((slot) => slot.userId))).toEqual(new Set([luis.userId]))
+  })
+
+  it("si la hora ya no está, la propuesta queda vencida aunque no se pueda agendar", async () => {
+    const now = monday(19)
+    const clientId = await client("Clínica Wari (ficticia)", ana.userId)
+    const other = await client("Clínica Yacón (ficticia)", ana.userId)
+    const chatId = await chat(clientId)
+    const proposal = await tx((db) =>
+      proposeSlot(db, { chatId, assigneeUserId: ana.userId, startsAt: lima(19, 1, "10:00") }, now),
+    )
+    await tx((db) =>
+      bookPresentation(
+        db,
+        null,
+        { clientId: other, startsAt: lima(19, 1, "10:00"), assigneeUserId: ana.userId },
+        now,
+      ),
+    )
+    const out = await tx((db) => kairosBook(db, chatId, proposal.id, now))
+    expect(out).toMatchObject({ refused: { code: "SLOT_TAKEN" } })
+    const [row] = await ownerDb
+      .select({ status: kairosProposal.status })
+      .from(kairosProposal)
+      .where(eq(kairosProposal.id, proposal.id))
+    expect(row?.status).toBe("vencida")
+  })
+
+  it("el motivo de una ausencia lo ven solo quien se ausenta y Administración", async () => {
+    const now = monday(20)
+    await tx((db) =>
+      addStaffAbsence(
+        db,
+        ana,
+        ana.userId,
+        { startsAt: lima(20, 1, "00:00"), endsAt: lima(20, 2, "00:00"), reason: "Cita médica" },
+        now,
+      ),
+    )
+    const reasons = async (actor: AdminActor) =>
+      (await tx((db) => listStaffAbsences(db, actor, ana.userId, now))).map((row) => row.reason)
+    expect(await reasons(ana)).toContain("Cita médica")
+    expect(await reasons(maria)).toContain("Cita médica")
+    expect(await reasons(luis)).not.toContain("Cita médica")
+    const schedule = await tx((db) => getStaffSchedule(db, luis, ana.userId, now))
+    expect(schedule.absences.length).toBeGreaterThan(0)
+    expect(schedule.absences.every((row) => row.reason === null)).toBe(true)
   })
 })

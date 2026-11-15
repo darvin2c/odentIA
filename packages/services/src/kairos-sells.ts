@@ -35,7 +35,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, type SQL, sql } from "drizzle-orm"
 import { findClientDuplicates } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import {
@@ -80,6 +80,23 @@ export const KAIROS_SLOTS_OFFERED = 3
 
 /** El aviso fijo cuando Kairós no puede responder (falla, comprobación, no sabe): nunca deja sin respuesta. */
 export const KAIROS_FALLBACK_TEXT = "Gracias por escribir. Alguien del equipo te responde pronto."
+
+/**
+ * Topes por día de Lima, contra el gasto y el abuso: lo que pasa de ahí lo ve el equipo («tope»
+ * en Hoy). Turnos de una conversación; turnos y avisos de todas (un aviso por correo a una
+ * dirección que dieron en un chat cuenta aquí, porque nadie la verificó); presentaciones que agenda
+ * Kairós en todas (cada conversación o cliente tiene como mucho una abierta).
+ */
+export const KAIROS_TURNS_PER_CHAT_DAY = 30
+export const KAIROS_TURNS_PER_DAY = 500
+export const KAIROS_BOOKINGS_PER_DAY = 10
+/** El código de un tope: el agente lo pasa al equipo en vez de insistir. */
+export const KAIROS_CAP_CODE = "KAIROS_TOPE"
+
+/** El comienzo del día de Lima de `now` (Perú: UTC−5 todo el año). */
+function limaDayStart(now: Date): Date {
+  return new Date(`${limaDate(now)}T00:00:00-05:00`)
+}
 
 /* ---------- El interruptor ---------- */
 
@@ -174,7 +191,8 @@ export interface KairosChatToAnswer {
  * Ya respondida es con una respuesta nuestra creada después de guardar el mensaje
  * (`m.created_at`), no después de la hora que dice Meta (`received_at`: segundos
  * enteros y su reloj): un «Sí» escrito en el mismo segundo en que salió la
- * respuesta anterior quedaba como ya respondido y sin turno.
+ * respuesta anterior quedaba como ya respondido y sin turno. Un aviso de Kairós
+ * (`purpose = 'aviso'`: recordatorio, otra hora, cambio) no responde nada.
  */
 function answerableSql(now: Date) {
   const at = sql`${now.toISOString()}::timestamptz`
@@ -183,7 +201,7 @@ function answerableSql(now: Date) {
     and (cl.id is null or (cl.organization_id is null and cl.archived_at is null))
     and m.received_at > ${at} - interval '24 hours'
     and m.received_at <= ${at} - make_interval(secs => ${KAIROS_SELL_QUIET_MS / 1000})
-    and not exists (select 1 from admin.saas_outreach o where o.chat_id = c.id
+    and not exists (select 1 from admin.saas_outreach o where o.chat_id = c.id and o.purpose = 'respuesta'
       and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.created_at)
     and not exists (select 1 from admin.kairos_chat_turn t where t.message_id = m.id)
     and not exists (select 1 from admin.kairos_chat_turn t where t.chat_id = c.id
@@ -279,6 +297,82 @@ export async function finishKairosTurn(
       metadata: { chatId: turn.chatId, clientId: chat?.clientId ?? null, why: result.why ?? null },
     })
   }
+}
+
+/**
+ * Por qué Kairós ya no puede actuar en esta conversación, o null: se apagó, se pausó (o la pasó
+ * al equipo), es «No es una clínica», su cliente ya tiene su app o está archivado, o pasaron las
+ * 24 h de Meta. Se mira con la conversación bloqueada antes de cada herramienta que escribe y al
+ * reservar la respuesta: lo que cambió mientras el modelo pensaba gana.
+ */
+export async function kairosChatBlocked(
+  tx: Db,
+  chatId: string,
+  now = new Date(),
+): Promise<string | null> {
+  if (!UUID.test(chatId)) return "La conversación no existe"
+  const [chat] = await tx
+    .select()
+    .from(saasChat)
+    .where(eq(saasChat.id, chatId))
+    .for("update")
+    .limit(1)
+  if (!chat) return "La conversación no existe"
+  if (!(await getKairosSells(tx)).enabled) return "Kairós se apagó"
+  if (chat.kairosPausedAt) return "La conversación se pausó"
+  if (chat.notClinicAt) return "La conversación es «No es una clínica»"
+  if (chat.clientId) {
+    const [client] = await tx
+      .select({ organizationId: saasClient.organizationId, archivedAt: saasClient.archivedAt })
+      .from(saasClient)
+      .where(eq(saasClient.id, chat.clientId))
+      .limit(1)
+    if (client?.organizationId) return "La clínica ya tiene su app"
+    if (client?.archivedAt) return "El cliente está archivado"
+  }
+  if (!chatFreeWindow(chat.lastInboundAt, now).canReplyFreely) return "Pasaron las 24 horas de Meta"
+  return null
+}
+
+/**
+ * Si este turno pasa un tope del día de Lima: 30 de esta conversación, o 500 de todas contando los
+ * avisos de las presentaciones. Devuelve el motivo (con «tope», para Hoy) o null. No cuenta el
+ * turno que se está mirando.
+ */
+export async function kairosTurnCap(
+  tx: Db,
+  chatId: string,
+  turnId: string,
+  now = new Date(),
+): Promise<string | null> {
+  const [counts] = await tx.execute<{ chat: number; all: number }>(sql`select
+      (select count(*)::int from admin.kairos_chat_turn t where t.chat_id = ${chatId}::uuid
+        and t.id <> ${turnId}::uuid and ${limaDaySql(sql`t.created_at`, now)}) as chat,
+      (select count(*)::int from admin.kairos_chat_turn t where t.id <> ${turnId}::uuid
+        and ${limaDaySql(sql`t.created_at`, now)})
+      + (select count(*)::int from admin.saas_outreach o where o.by_kairos and o.purpose = 'aviso'
+        and ${limaDaySql(sql`o.created_at`, now)}) as all`)
+  if ((counts?.chat ?? 0) >= KAIROS_TURNS_PER_CHAT_DAY)
+    return `Llegó al tope de ${KAIROS_TURNS_PER_CHAT_DAY} respuestas de Kairós de hoy en esta conversación`
+  if ((counts?.all ?? 0) >= KAIROS_TURNS_PER_DAY)
+    return `Kairós llegó a su tope de ${KAIROS_TURNS_PER_DAY} respuestas y avisos de hoy`
+  return null
+}
+
+/** `column` cae en el día de Lima de `now` (las filas guardan `now` de quien las escribió). */
+function limaDaySql(column: SQL, now: Date) {
+  const start = limaDayStart(now)
+  return sql`${column} >= ${start.toISOString()}::timestamptz
+    and ${column} < ${new Date(start.getTime() + DAY).toISOString()}::timestamptz`
+}
+
+/** Cuántos turnos y avisos lleva Kairós hoy: los avisos paran en el mismo tope de todas. */
+async function kairosDayCount(tx: Db, now: Date): Promise<number> {
+  const [row] = await tx.execute<{ n: number }>(sql`select
+      (select count(*)::int from admin.kairos_chat_turn t where ${limaDaySql(sql`t.created_at`, now)})
+      + (select count(*)::int from admin.saas_outreach o where o.by_kairos and o.purpose = 'aviso'
+        and ${limaDaySql(sql`o.created_at`, now)}) as n`)
+  return row?.n ?? 0
 }
 
 /* ---------- Lo que ve el modelo ---------- */
@@ -501,7 +595,8 @@ export interface KairosOfferedSlot {
 
 /**
  * Hasta tres horas para ofrecer (`ver_horarios`): las del responsable si tiene
- * (si no, de quien esté libre), repartidas: la primera, y después las que caen
+ * (si no, de quien esté libre; con una presentación abierta, solo de quien la
+ * presenta), repartidas: la primera, y después las que caen
  * al menos 2 h después o en otro día. `from`/`to` acotan a lo que pidió.
  */
 export async function kairosSlots(
@@ -517,7 +612,11 @@ export async function kairosSlots(
     .where(eq(saasChat.id, chatId))
     .limit(1)
   if (!chat) throw notFound("Conversación")
+  // Con una presentación abierta, lo que se ofrece es para moverla: solo con quien la presenta
+  // (`kairosMove` no la pasa a otra persona).
+  const open = await openPresentation(tx, chatId, chat.clientId)
   const all: StaffSlot[] = await staffSlots(tx, {
+    onlyUserId: open?.assigneeUserId ?? null,
     preferUserId: chat.owner ?? null,
     from: range.from ?? null,
     to: range.to ?? null,
@@ -593,17 +692,27 @@ export async function kairosBookingMissing(
 }
 
 /**
+ * La hora ya no se puede dar (otro se la ganó, venció o ya no tiene las 2 h de
+ * aviso): la propuesta quedó vencida. Se devuelve en vez de lanzar para que
+ * quien llama confirme la transacción y lo vencido quede guardado.
+ */
+export interface KairosBookRefused {
+  refused: { code: string; message: string }
+}
+
+/**
  * `agendar`: confirma la hora pendiente que la persona eligió (`confirmProposal`,
  * con el candado de quien presenta). Antes, la clínica y (Instagram o
  * Messenger) un WhatsApp o un correo para avisarle. Si ya tiene una abierta, no
- * agenda otra: eso es `mover`.
+ * agenda otra (`PRESENTATION_EXISTS`: el agente lo pasa al equipo; mover es
+ * `mover`). Como mucho `KAIROS_BOOKINGS_PER_DAY` al día entre todas.
  */
 export async function kairosBook(
   tx: Db,
   chatId: string,
   proposalId: string,
   now = new Date(),
-): Promise<KairosBooked> {
+): Promise<KairosBooked | KairosBookRefused> {
   const missing = await kairosBookingMissing(tx, chatId)
   if (missing === "clinica")
     throw new ServiceError("CLIENT_REQUIRED", 409, "Falta el nombre de la clínica")
@@ -621,11 +730,21 @@ export async function kairosBook(
     throw new ServiceError(
       "PRESENTATION_EXISTS",
       409,
-      "Ya tiene una presentación agendada: muévela",
+      "Ya tiene una presentación agendada: Kairós agenda una sola por clínica",
+    )
+  // Contra las presentaciones falsas: un tope al día entre todas (con el candado, nadie se lo salta).
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('kairos-vende:agendar'))`)
+  const [booked] = await tx.execute<{ n: number }>(sql`select count(*)::int as n
+    from admin.saas_task t where t.kind = 'presentacion' and t.by_kairos
+      and ${limaDaySql(sql`t.created_at`, now)}`)
+  if ((booked?.n ?? 0) >= KAIROS_BOOKINGS_PER_DAY)
+    throw new ServiceError(
+      KAIROS_CAP_CODE,
+      409,
+      `Kairós llegó al tope de ${KAIROS_BOOKINGS_PER_DAY} presentaciones agendadas hoy`,
     )
   const result = await confirmProposal(tx, proposalId, now)
-  if (result.status !== "confirmada")
-    throw new ServiceError(result.error.code, 409, result.error.message)
+  if (result.status !== "confirmada") return { refused: result.error }
   const presenter = await staffName(tx, result.proposal.assigneeUserId)
   await writeAdminAudit(tx, null, {
     action: "kairos.presentation_booked",
@@ -653,14 +772,16 @@ export async function kairosBook(
 
 /**
  * `mover`: la presentación abierta pasa a la hora pendiente que eligió, con la
- * misma persona (si la hora es con otra, 409: se ofrece otra o se pasa al equipo).
+ * misma persona (si la hora es con otra, 409: se ofrece otra o se pasa al equipo;
+ * `kairosSlots` ya ofrece solo las de quien presenta). Si la hora ya no se puede
+ * dar, la propuesta queda vencida y se devuelve (`KairosBookRefused`).
  */
 export async function kairosMove(
   tx: Db,
   chatId: string,
   proposalId: string,
   now = new Date(),
-): Promise<KairosBooked> {
+): Promise<KairosBooked | KairosBookRefused> {
   const pending = await pendingKairosProposal(tx, chatId, now)
   if (!pending || pending.id !== proposalId)
     throw new ServiceError("PROPOSAL_CLOSED", 409, "Esa hora ya no está propuesta")
@@ -677,7 +798,20 @@ export async function kairosMove(
       409,
       "Esa hora es con otra persona del equipo: ofrece una de quien presenta o pásalo al equipo",
     )
-  await movePresentation(tx, null, task.id, pending.startsAt, now)
+  try {
+    await tx.transaction((inner) =>
+      movePresentation(inner as Db, null, task.id, pending.startsAt, now),
+    )
+  } catch (error) {
+    if (error instanceof ServiceError && (error.code === "SLOT_TAKEN" || error.fields?.startsAt)) {
+      await tx
+        .update(kairosProposal)
+        .set({ status: "vencida", updatedAt: now })
+        .where(eq(kairosProposal.id, pending.id))
+      return { refused: { code: "SLOT_TAKEN", message: error.message } }
+    }
+    throw error
+  }
   await tx
     .update(kairosProposal)
     .set({ status: "confirmada", taskId: task.id, updatedAt: now })
@@ -973,10 +1107,13 @@ async function noticeSent(tx: Db, key: string): Promise<boolean> {
 /**
  * Lo que hay que avisarle a las clínicas que agendaron por un chat:
  * - `recordatorio`: desde las 09:00 de Lima del día anterior y hasta 2 h antes,
- *   una vez por presentación (no si se agendó después de esa hora: la
- *   confirmación es de hace poco).
+ *   una vez por presentación, con «hoy» o «mañana» según cuándo sale. No si se
+ *   agendó después de esa hora ni si la confirmación de Kairós o el aviso de un
+ *   cambio de esa misma hora salieron a menos de 24 h de empezar (`toldRecently`).
  * - `otra_hora`: «Pedir otra hora» (`needs_new_time_at`), una vez por pedido.
- * - `cambio`: una persona la movió o la pasó a otra persona, una vez por cambio.
+ * - `cambio`: una persona la movió (también con «Mover» de Hoy) o la pasó a otra
+ *   persona, una vez por cambio.
+ * Todos van con `purpose = 'aviso'`: no cuentan como respuesta.
  */
 export async function kairosPresentationNotices(tx: Db, now = new Date()): Promise<KairosNotice[]> {
   const at = sql`${now.toISOString()}::timestamptz`
@@ -1019,6 +1156,8 @@ export async function kairosPresentationNotices(tx: Db, now = new Date()): Promi
       const route = await noticeRoute(tx, task, now, template, templateParams, subject)
       if (route) out.push({ kind, key, taskId: task.id, clientId: task.client_id, route, text })
     }
+    // Mientras espera otra hora (cualquier cambio de una persona la atiende y la limpia: mover,
+    // «Mover» de Hoy, pasar a otra), la hora que tiene no vale: ni cambio ni recordatorio.
     if (task.needs_new_time_at) {
       await add(
         "otra_hora",
@@ -1034,7 +1173,7 @@ export async function kairosPresentationNotices(tx: Db, now = new Date()): Promi
       id: string
       action: string
     }>(sql`select a.id, a.action from admin.admin_audit a
-      where a.action in ('arm.presentation_moved', 'arm.presentation_reassigned')
+      where a.action in ('arm.presentation_moved', 'arm.presentation_reassigned', 'arm.task_moved')
         and a.actor_user_id is not null and a.metadata ->> 'taskId' = ${task.id}
         and a.created_at > ${task.created_at}::timestamptz
       order by a.created_at desc limit 1`)
@@ -1052,18 +1191,46 @@ export async function kairosPresentationNotices(tx: Db, now = new Date()): Promi
     if (
       now >= remindFrom &&
       dueAt.getTime() - now.getTime() > 2 * HOUR &&
-      new Date(task.created_at) < remindFrom
-    )
+      new Date(task.created_at) < remindFrom &&
+      !(await toldRecently(tx, task.id, dueAt))
+    ) {
+      // «hoy» o «mañana» según cuándo sale, en Lima (el worker pudo pasar tarde).
+      const day = limaDate(dueAt)
+      const relative =
+        day === limaDate(now)
+          ? "hoy"
+          : day === limaDate(new Date(now.getTime() + DAY))
+            ? "mañana"
+            : null
       await add(
         "recordatorio",
         `recordatorio:${task.id}:${task.due_at}`,
-        `${hello} Te recuerdo tu presentación de mañana: el ${when} (hora de Lima) con ${presenter.name}. ${presenter.meetingUrl ? `Entra a la hora aquí ${presenter.meetingUrl}` : `${presenter.name} te comparte el enlace antes de empezar.`}`,
+        `${hello} Te recuerdo tu presentación${relative ? ` de ${relative}` : ""}: el ${when} (hora de Lima) con ${presenter.name}. ${presenter.meetingUrl ? `Entra a la hora aquí ${presenter.meetingUrl}` : `${presenter.name} te comparte el enlace antes de empezar.`}`,
         "recordatorio_presentacion",
-        "Tu presentación es mañana",
+        relative ? `Tu presentación es ${relative}` : "Se acerca tu presentación",
         params,
       )
+    }
   }
   return out
+}
+
+/**
+ * Ya se le dijo esta misma hora hace poco: la confirmación de Kairós al agendarla o moverla, o el
+ * aviso de un cambio, a menos de 24 h de empezar. Entonces el recordatorio sobra.
+ */
+async function toldRecently(tx: Db, taskId: string, dueAt: Date): Promise<boolean> {
+  const due = dueAt.toISOString()
+  const since = new Date(dueAt.getTime() - DAY).toISOString()
+  const [row] = await tx.execute<{ told: boolean }>(sql`select
+      exists (select 1 from admin.kairos_proposal p where p.task_id = ${taskId}::uuid
+        and p.status = 'confirmada' and p.starts_at = ${due}::timestamptz
+        and p.updated_at > ${since}::timestamptz)
+      or exists (select 1 from admin.admin_audit a where a.action = 'kairos.presentation_notice'
+        and a.metadata ->> 'taskId' = ${taskId} and a.metadata ->> 'kind' = 'cambio'
+        and a.metadata ->> 'dueAt' = ${due} and (a.metadata ->> 'at')::timestamptz > ${since}::timestamptz)
+      as told`)
+  return Boolean(row?.told)
 }
 
 /** Lo reservado de un aviso: por un chat (`sendChatOutreach`) o por correo (`outreachEmail`). */
@@ -1083,6 +1250,14 @@ export async function reserveKairosNotice(
 ): Promise<KairosNoticeReserved | null> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`kairos-aviso:${notice.taskId}`}))`)
   if (await noticeSent(tx, notice.key)) return null
+  // Los avisos (también los correos a una dirección que dieron en un chat, sin verificar) paran en
+  // el tope del día de Kairós.
+  if ((await kairosDayCount(tx, now)) >= KAIROS_TURNS_PER_DAY) return null
+  const [task] = await tx
+    .select({ dueAt: saasTask.dueAt })
+    .from(saasTask)
+    .where(eq(saasTask.id, notice.taskId))
+    .limit(1)
   await writeAdminAudit(tx, null, {
     action: "kairos.presentation_notice",
     entityId: notice.key,
@@ -1091,6 +1266,8 @@ export async function reserveKairosNotice(
       clientId: notice.clientId,
       kind: notice.kind,
       by: notice.route.by,
+      dueAt: task?.dueAt?.toISOString() ?? null,
+      at: now.toISOString(),
     },
   })
   if (notice.route.by === "correo") {
@@ -1116,8 +1293,9 @@ export async function reserveKairosNotice(
           template: notice.route.template,
           templateParams: notice.route.params,
           closeItems: false,
+          purpose: "aviso",
         }
-      : { body: notice.text, closeItems: false },
+      : { body: notice.text, closeItems: false, purpose: "aviso" },
     now,
   )
   const [chat] = await tx

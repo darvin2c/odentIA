@@ -1,4 +1,4 @@
-import { createKairosSeller, type KairosChatModel } from "@odentia/agent"
+import { createKairosSeller, type KairosChatModel, type KairosSeller } from "@odentia/agent"
 import type { Db } from "@odentia/db"
 import {
   kairosChatTurn,
@@ -7,6 +7,7 @@ import {
   saasChat,
   saasClient,
   saasClientContact,
+  saasInboundMessage,
   saasOutreach,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
@@ -17,7 +18,11 @@ import {
   type AdminChannels,
   assignChat,
   ingestInboundChat,
+  KAIROS_BOOKINGS_PER_DAY,
+  KAIROS_TURNS_PER_CHAT_DAY,
+  kairosPresentationNotices,
   kairosRulesPass,
+  moveClientTask,
   pauseChatKairos,
   setKairosSells,
   setStaffHours,
@@ -25,7 +30,7 @@ import {
 } from "@odentia/services"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { runKairosSellsTick } from "./kairos-vende.js"
+import { runKairosSellsTick, toolsFor } from "./kairos-vende.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -446,5 +451,383 @@ describe("Kairós vende en los chats", () => {
     expect((await tick(new Date(remind.getTime() + 3 * MIN))).notices).toBe(0)
     const out = await replies(chatId)
     expect(out.filter((row) => row.byKairos && row.template)).toHaveLength(2)
+  })
+})
+
+describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como respuesta", () => {
+  /** El cliente de la clínica con su app (`org_a`): Kairós no la atiende, Hoy sí. */
+  async function appClient() {
+    await tx((db) => kairosRulesPass(db, monday))
+    const [row] = await ownerDb
+      .select()
+      .from(saasClient)
+      .where(eq(saasClient.organizationId, "org_a"))
+    return row?.id ?? ""
+  }
+
+  async function addOutreach(
+    chatId: string,
+    to: string,
+    at: Date,
+    purpose: "respuesta" | "aviso",
+    byKairos = purpose === "aviso",
+  ) {
+    await ownerDb.insert(saasOutreach).values({
+      chatId,
+      channel: "whatsapp",
+      toAddress: to,
+      body: purpose === "aviso" ? "Te recuerdo tu presentación." : "Hola, te ayudo.",
+      status: "enviado",
+      byKairos,
+      purpose,
+      adminOnly: true,
+      createdAt: at,
+      updatedAt: at,
+    })
+  }
+
+  it("si Meta rechaza la respuesta de Kairós, pasa al equipo y Hoy la muestra", async () => {
+    const at = new Date(monday.getTime() + 60 * MIN)
+    const chatId = await write("whatsapp", "+51900000011", "¿Qué es odentIA?", at)
+    const rejecting = (async () =>
+      Response.json(
+        { error: { message: "Message undeliverable", code: 131026 } },
+        { status: 400 },
+      )) as typeof fetch
+    const now = new Date(at.getTime() + MIN)
+    await runKairosSellsTick({
+      ownerDb,
+      seller: fakeSeller,
+      channels,
+      fetch: rejecting,
+      now: () => now,
+    })
+    expect((await replies(chatId)).at(-1)?.status).toBe("no_salio")
+    expect((await chatOf(chatId))?.kairosPausedAt).not.toBeNull()
+    const [turn] = await ownerDb
+      .select()
+      .from(kairosChatTurn)
+      .where(eq(kairosChatTurn.chatId, chatId))
+    expect(turn?.outcome).toBe("fallo")
+    await tx((db) => kairosRulesPass(db, new Date(now.getTime() + MIN)))
+    const [item] = await itemsOf(chatId, "chat_sin_cliente")
+    expect(item?.reason).toContain("Su respuesta no salió")
+  })
+
+  it("un aviso de Kairós no responde el mensaje: Kairós lo responde y Hoy lo pide", async () => {
+    const at = new Date(monday.getTime() + 70 * MIN)
+    const chatId = await write("whatsapp", "+51900000012", "Hola, ¿cuánto cuesta?", at)
+    await addOutreach(chatId, "+51900000012", new Date(at.getTime() + 5_000), "aviso")
+    const result = await tick(new Date(at.getTime() + MIN))
+    expect(result.errors).toEqual([])
+    expect((await replies(chatId)).filter((row) => row.purpose === "respuesta")).toHaveLength(1)
+
+    const withApp = await appClient()
+    const appChat = await write("whatsapp", "+51900000013", "No me carga la agenda", at)
+    await tx((db) => assignChat(db, ana, appChat, { clientId: withApp }, at))
+    await addOutreach(appChat, "+51900000013", new Date(at.getTime() + 5_000), "aviso")
+    await tx((db) => kairosRulesPass(db, new Date(at.getTime() + MIN)))
+    expect(await itemsOf(appChat, "responder_chat")).toHaveLength(1)
+  })
+
+  it("respondido es con nuestro reloj: lo que guardamos después de la respuesta sigue pendiente", async () => {
+    const at = new Date(monday.getTime() + 72 * MIN)
+    const withApp = await appClient()
+    const chatId = await write("whatsapp", "+51900000018", "Hola", at)
+    await tx((db) => assignChat(db, ana, chatId, { clientId: withApp }, at))
+    const replied = new Date(at.getTime() + MIN)
+    await addOutreach(chatId, "+51900000018", replied, "respuesta", false)
+    // Meta dice medio segundo antes de nuestra respuesta; lo guardamos después.
+    await write(
+      "whatsapp",
+      "+51900000018",
+      "¿Y para el lunes?",
+      new Date(replied.getTime() - 500),
+      new Date(replied.getTime() + 300),
+    )
+    await tx((db) => kairosRulesPass(db, new Date(replied.getTime() + MIN)))
+    const [item] = await itemsOf(chatId, "responder_chat")
+    expect(item?.payload).toMatchObject({ lastBody: "¿Y para el lunes?" })
+  })
+
+  it("«Mover» de Hoy le avisa el cambio, también después de «Pedir otra hora»", async () => {
+    const at = new Date(monday.getTime() + 80 * MIN)
+    const chatId = await write("whatsapp", "+51900000014", "Hola", at)
+    const [client] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica Mueve (ficticia)", product: "dental" })
+      .returning()
+    const [contact] = await ownerDb
+      .insert(saasClientContact)
+      .values({ clientId: client?.id ?? "", name: "Inés Salas", phone: "+51900000014" })
+      .returning()
+    await tx((db) =>
+      assignChat(
+        db,
+        ana,
+        chatId,
+        { clientId: client?.id ?? "", contactId: contact?.id ?? null },
+        at,
+      ),
+    )
+    const old = new Date("2026-11-05T15:00:00Z")
+    const [task] = await ownerDb
+      .insert(saasTask)
+      .values({
+        clientId: client?.id ?? "",
+        kind: "presentacion",
+        title: "Presentación",
+        dueOn: "2026-11-11",
+        dueAt: new Date("2026-11-11T15:00:00Z"),
+        endsAt: new Date("2026-11-11T15:45:00Z"),
+        assigneeUserId: ana.userId,
+        contactId: contact?.id ?? null,
+        channelChatId: chatId,
+        byKairos: true,
+        needsNewTimeAt: at,
+        createdAt: old,
+        updatedAt: old,
+      })
+      .returning()
+    const now = new Date(at.getTime() + MIN)
+    expect((await tick(now)).notices).toBe(1)
+    // Ana la pasa al jueves con «Mover»: solo el día; conserva las 10:00.
+    const moved = await tx((db) =>
+      moveClientTask(db, ana, task?.id ?? "", { dueOn: "2026-11-12" }, now),
+    )
+    expect(moved.dueAt?.toISOString()).toBe("2026-11-12T15:00:00.000Z")
+    const after = await tick(new Date(now.getTime() + MIN))
+    expect(after.notices).toBe(1)
+    const last = (await replies(chatId)).at(-1)
+    expect(last?.purpose).toBe("aviso")
+    expect(last?.body).toContain(
+      "Cambió tu presentación: ahora es el jueves, 12 de noviembre a las 10:00",
+    )
+  })
+
+  it("lo que cambió mientras pensaba gana: archivado, no escribe ni sale nada", async () => {
+    const at = new Date(monday.getTime() + 90 * MIN)
+    const chatId = await write("whatsapp", "+51900000015", "Hola, quiero una demo", at)
+    const live = { signal: new AbortController().signal }
+    let refused: unknown = null
+    const archiving: KairosSeller = {
+      seller: "plantilla",
+      async answer(_input, tools) {
+        await tools.clinicData(
+          { clinicName: "Clínica Archivo (ficticia)", personName: null, product: null, city: null },
+          live,
+        )
+        // Mientras el modelo piensa, alguien archiva al cliente.
+        const chat = await chatOf(chatId)
+        await ownerDb
+          .update(saasClient)
+          .set({ archivedAt: new Date() })
+          .where(eq(saasClient.id, chat?.clientId ?? ""))
+        try {
+          await tools.saveContact({ phone: null, email: "ines@clinica.test" }, live)
+        } catch (error) {
+          refused = error
+        }
+        return { kind: "respondio", text: "Gracias, ya tengo tu correo.", booked: null }
+      },
+    }
+    await tick(new Date(at.getTime() + MIN), archiving)
+    expect(refused).toMatchObject({ code: "KAIROS_STOPPED", message: "El cliente está archivado" })
+    const chat = await chatOf(chatId)
+    const [contact] = await ownerDb
+      .select()
+      .from(saasClientContact)
+      .where(eq(saasClientContact.id, chat?.contactId ?? ""))
+    expect(contact?.email ?? null).toBeNull()
+    expect(await replies(chatId)).toHaveLength(0)
+    const [turn] = await ownerDb
+      .select()
+      .from(kairosChatTurn)
+      .where(eq(kairosChatTurn.chatId, chatId))
+    expect(turn).toMatchObject({ outcome: "omitido" })
+  })
+
+  it("lo que una herramienta escribía cuando se acabó el tiempo se deshace", async () => {
+    const at = new Date(monday.getTime() + 95 * MIN)
+    const chatId = await write("whatsapp", "+51900000019", "Hola", at)
+    const now = new Date(at.getTime() + MIN)
+    const tools = toolsFor({ ownerDb, seller: fakeSeller, channels }, chatId, now)
+    const controller = new AbortController()
+    const pending = tools.propose(
+      { startsAt: new Date("2026-11-10T16:00:00Z"), userId: ana.userId, name: "Ana Pérez" },
+      { signal: controller.signal },
+    )
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: "KAIROS_STOPPED" })
+    expect(
+      await ownerDb.select().from(kairosProposal).where(eq(kairosProposal.chatId, chatId)),
+    ).toHaveLength(0)
+    // Ya cortado, ni empieza.
+    await expect(
+      tools.propose(
+        { startsAt: new Date("2026-11-10T16:00:00Z"), userId: ana.userId, name: "Ana Pérez" },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: "KAIROS_STOPPED" })
+    // Su «Hola» no lo responde nadie aquí: queda con el equipo para las pruebas que siguen.
+    await tx((db) => pauseChatKairos(db, ana, chatId, now))
+  })
+
+  it("el recordatorio dice «hoy» o «mañana» según cuándo sale, y no repite una confirmación reciente", async () => {
+    const old = new Date("2026-11-05T15:00:00Z")
+    const chatId = await write("whatsapp", "+51900000017", "Hola", old)
+    const [client] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica Hoy (ficticia)", product: "dental" })
+      .returning()
+    const [contact] = await ownerDb
+      .insert(saasClientContact)
+      .values({ clientId: client?.id ?? "", name: "Olga Paz", phone: "+51900000017" })
+      .returning()
+    await tx((db) =>
+      assignChat(
+        db,
+        ana,
+        chatId,
+        { clientId: client?.id ?? "", contactId: contact?.id ?? null },
+        old,
+      ),
+    )
+    // Viernes 13 a las 10:00 de Lima.
+    const due = new Date("2026-11-13T15:00:00Z")
+    const [task] = await ownerDb
+      .insert(saasTask)
+      .values({
+        clientId: client?.id ?? "",
+        kind: "presentacion",
+        title: "Presentación",
+        dueOn: "2026-11-13",
+        dueAt: due,
+        endsAt: new Date(due.getTime() + 45 * MIN),
+        assigneeUserId: ana.userId,
+        contactId: contact?.id ?? null,
+        channelChatId: chatId,
+        byKairos: true,
+        createdAt: old,
+        updatedAt: old,
+      })
+      .returning()
+    const reminderAt = async (now: Date) =>
+      (await tx((db) => kairosPresentationNotices(db, now))).find(
+        (notice) => notice.taskId === task?.id && notice.kind === "recordatorio",
+      )
+    // El jueves a las 10:00 de Lima: «de mañana».
+    expect((await reminderAt(new Date("2026-11-12T15:00:00Z")))?.text).toContain(
+      "tu presentación de mañana",
+    )
+    // El worker pasó recién el viernes a las 07:00: «de hoy».
+    const sameDay = await reminderAt(new Date("2026-11-13T12:00:00Z"))
+    expect(sameDay?.text).toContain("tu presentación de hoy")
+    expect(sameDay?.route).toMatchObject({ by: "chat" })
+    // Kairós le confirmó esa misma hora 20 h antes: el recordatorio sobra.
+    await ownerDb.insert(kairosProposal).values({
+      chatId,
+      clientId: client?.id ?? null,
+      assigneeUserId: ana.userId,
+      startsAt: due,
+      status: "confirmada",
+      taskId: task?.id ?? null,
+      expiresAt: due,
+      createdAt: new Date(due.getTime() - 21 * 60 * MIN),
+      updatedAt: new Date(due.getTime() - 20 * 60 * MIN),
+    })
+    expect(await reminderAt(new Date("2026-11-12T15:00:00Z"))).toBeUndefined()
+  })
+
+  it("pasado el tope de respuestas del día en una conversación, pasa al equipo sin modelo", async () => {
+    const at = new Date(monday.getTime() + 100 * MIN)
+    let chatId = ""
+    for (let i = 0; i < KAIROS_TURNS_PER_CHAT_DAY; i += 1)
+      chatId = await write(
+        "whatsapp",
+        "+51900000016",
+        `Hola ${i}`,
+        new Date(at.getTime() - (40 - i) * MIN),
+      )
+    const earlier = await ownerDb
+      .select({ id: saasInboundMessage.id })
+      .from(saasInboundMessage)
+      .where(eq(saasInboundMessage.chatId, chatId))
+    await ownerDb.insert(kairosChatTurn).values(
+      earlier.map((row) => ({
+        chatId,
+        messageId: row.id,
+        outcome: "respondio" as const,
+        createdAt: new Date(at.getTime() - 30 * MIN),
+        updatedAt: new Date(at.getTime() - 30 * MIN),
+      })),
+    )
+    await write("whatsapp", "+51900000016", "¿Sigues ahí?", at)
+    let called = false
+    const counting: KairosSeller = {
+      seller: "plantilla",
+      answer: async () => {
+        called = true
+        return { kind: "respondio", text: "Aquí estoy.", booked: null }
+      },
+    }
+    const now = new Date(at.getTime() + MIN)
+    const result = await tick(now, counting)
+    expect(called).toBe(false)
+    expect(result.handedOver).toBe(1)
+    expect((await chatOf(chatId))?.kairosPausedAt).not.toBeNull()
+    await tx((db) => kairosRulesPass(db, new Date(now.getTime() + MIN)))
+    const [item] = await itemsOf(chatId, "chat_sin_cliente")
+    expect(item?.reason).toContain("tope")
+  })
+
+  it("pasado el tope de presentaciones del día, no agenda: pasa al equipo", async () => {
+    const at = new Date(monday.getTime() + 110 * MIN)
+    const chatId = await write(
+      "whatsapp",
+      "+51900000020",
+      "Hola, quiero una presentación. Mi clínica se llama Clínica Tope",
+      at,
+    )
+    const first = new Date(at.getTime() + MIN)
+    await tick(first)
+    expect(
+      await ownerDb.select().from(kairosProposal).where(eq(kairosProposal.chatId, chatId)),
+    ).toHaveLength(1)
+    // Otras diez agendadas por Kairós hoy (sin hora, para no ocupar a Ana).
+    const [other] = await ownerDb
+      .insert(saasClient)
+      .values({ name: "Clínica Muchas (ficticia)", product: "dental" })
+      .returning()
+    await ownerDb.insert(saasTask).values(
+      Array.from({ length: KAIROS_BOOKINGS_PER_DAY }, () => ({
+        clientId: other?.id ?? "",
+        kind: "presentacion",
+        title: "Presentación",
+        dueOn: "2026-11-20",
+        status: "cancelada",
+        byKairos: true,
+        createdAt: first,
+        updatedAt: first,
+      })),
+    )
+    const yes = new Date(first.getTime() + MIN)
+    await write("whatsapp", "+51900000020", "sí", yes)
+    const result = await tick(new Date(yes.getTime() + MIN))
+    expect(result.handedOver).toBe(1)
+    const chat = await chatOf(chatId)
+    expect(
+      await ownerDb
+        .select()
+        .from(saasTask)
+        .where(and(eq(saasTask.clientId, chat?.clientId ?? ""), eq(saasTask.kind, "presentacion"))),
+    ).toHaveLength(0)
+    const turns = await ownerDb
+      .select()
+      .from(kairosChatTurn)
+      .where(eq(kairosChatTurn.chatId, chatId))
+      .orderBy(asc(kairosChatTurn.createdAt))
+    expect(turns.at(-1)).toMatchObject({ outcome: "paso" })
+    expect(turns.at(-1)?.why).toContain("tope")
   })
 })

@@ -58,7 +58,7 @@ import {
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
-import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
+import { adminAudit, adminStaff, adminStaffAbsence } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -109,6 +109,7 @@ import {
   senderOfAddress,
   staffShortName,
 } from "./admin-staff-mail.js"
+import { zonedTimeToUtc } from "./availability.js"
 import { productMailDomain } from "./clinic-progress-report.js"
 import { CONSUMER_COMPLAINT_PROVIDER } from "./consumer-complaints.js"
 import { type DocumentClinic, DocumentKit, dayWords, SIZE, sheetFormat } from "./document-kit.js"
@@ -486,6 +487,11 @@ export interface TaskInput {
   assigneeUserId?: string | null
   contactId?: string | null
   demoId?: string | null
+  /**
+   * Una persona agenda igual una presentación que choca con otra de quien presenta o
+   * con su ausencia («Agendar igual», tras el aviso `SLOT_TAKEN`). Kairós nunca.
+   */
+  force?: boolean
 }
 
 export interface TaskRow {
@@ -521,6 +527,92 @@ export function presentationEndsAt(kind: string, dueAt: Date | null | undefined)
 }
 
 /**
+ * El candado de quien presenta: agendar, mover o pasar una presentación de esa persona va de uno
+ * en uno (lo toman también los de `admin-staff-schedule.ts`), así dos no se ganan la misma hora.
+ */
+export async function lockPresenter(tx: Db, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`admin_presentation:${userId}`}))`)
+}
+
+const LIMA_CLOCK = new Intl.DateTimeFormat("es-PE", {
+  timeZone: "America/Lima",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+
+/**
+ * Por qué quien presenta no está libre en `[startsAt, endsAt)`: otra presentación abierta suya que
+ * se cruza, o una ausencia. Null si está libre. No mira su horario: una persona puede presentar
+ * fuera de él (esa excepción la decide el equipo; Kairós solo ofrece sus horas).
+ */
+export async function presenterClash(
+  tx: Db,
+  userId: string,
+  startsAt: Date,
+  endsAt: Date,
+  exceptTaskId?: string,
+): Promise<string | null> {
+  const [person] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId))
+  const name = person?.name ?? "Quien presenta"
+  const [busy] = await tx
+    .select({ dueAt: saasTask.dueAt, clientName: saasClient.name })
+    .from(saasTask)
+    .innerJoin(saasClient, eq(saasClient.id, saasTask.clientId))
+    .where(
+      and(
+        eq(saasTask.kind, "presentacion"),
+        eq(saasTask.status, "abierta"),
+        eq(saasTask.assigneeUserId, userId),
+        isNotNull(saasTask.dueAt),
+        sql`${saasTask.dueAt} < ${endsAt.toISOString()}::timestamptz`,
+        sql`coalesce(${saasTask.endsAt}, ${saasTask.dueAt} + interval '45 minutes') > ${startsAt.toISOString()}::timestamptz`,
+        exceptTaskId ? sql`${saasTask.id} <> ${exceptTaskId}::uuid` : undefined,
+      ),
+    )
+    .orderBy(asc(saasTask.dueAt))
+    .limit(1)
+  if (busy?.dueAt)
+    return `${name} ya tiene a esa hora la presentación de ${busy.clientName} (${LIMA_CLOCK.format(busy.dueAt)})`
+  const [absent] = await tx
+    .select({ id: adminStaffAbsence.id })
+    .from(adminStaffAbsence)
+    .where(
+      and(
+        eq(adminStaffAbsence.userId, userId),
+        sql`${adminStaffAbsence.startsAt} < ${endsAt.toISOString()}::timestamptz`,
+        sql`${adminStaffAbsence.endsAt} > ${startsAt.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1)
+  return absent ? `${name} está ausente a esa hora` : null
+}
+
+/**
+ * Antes de agendar o mover una presentación con hora: el candado de quien presenta y su choque.
+ * Si choca, 409 `SLOT_TAKEN` con el porqué; con `force` (una persona que ya vio el aviso) sigue y
+ * devuelve el choque, que queda como constancia en la auditoría.
+ */
+async function presenterCheck(
+  tx: Db,
+  userId: string,
+  startsAt: Date,
+  force: boolean,
+  exceptTaskId?: string,
+): Promise<string | null> {
+  await lockPresenter(tx, userId)
+  const clash = await presenterClash(
+    tx,
+    userId,
+    startsAt,
+    new Date(startsAt.getTime() + PRESENTATION_MS),
+    exceptTaskId,
+  )
+  if (clash && !force) throw new ServiceError("SLOT_TAKEN", 409, `${clash}.`)
+  return clash
+}
+
+/**
  * Guarda una tarea. `actor` nulo es Kairós (agendar desde una conversación): la
  * tarea queda a su nombre (`by_kairos`), sin autor, y va a quien se eligió o al
  * responsable del cliente.
@@ -552,6 +644,12 @@ async function insertTask(
       : client.ownerUserId
   const contact = await contactOfClient(tx, client.id, input.contactId)
   const demoId = await requireDemo(tx, input.demoId)
+  // Una presentación con hora no se cruza con otra de quien presenta ni con su ausencia sin que
+  // se vea: una persona puede agendarla igual tras el aviso; Kairós (`actor` nulo), nunca.
+  const overrode =
+    input.kind === "presentacion" && input.dueAt && assignee
+      ? await presenterCheck(tx, assignee, input.dueAt, Boolean(actor && input.force))
+      : null
   const [row] = await tx
     .insert(saasTask)
     .values({
@@ -576,7 +674,7 @@ async function insertTask(
     action: actor ? "arm.task_created" : "kairos.task_created",
     organizationId: client.organizationId,
     entityId: client.id,
-    metadata: { taskId: row.id, kind: input.kind },
+    metadata: { taskId: row.id, kind: input.kind, ...(overrode ? { overrode } : {}) },
   })
   return row.id
 }
@@ -740,12 +838,23 @@ export async function cancelClientTask(
   return getClientTask(tx, id, now)
 }
 
-/** Cambia el día (y la hora) de una tarea abierta. */
+/** La misma hora de Lima de `at`, en otro día de Lima. */
+function sameLimaTime(day: string, at: Date): Date {
+  const [hh, mm] = LIMA_CLOCK.format(at).split(":").map(Number)
+  return zonedTimeToUtc(day, (hh ?? 0) * 60 + (mm ?? 0), "America/Lima")
+}
+
+/**
+ * Cambia el día (y la hora) de una tarea abierta. Una presentación con hora la conserva si solo
+ * cambia el día («Mover» de Hoy): nunca queda sin hora ni sin su fin. Con hora, toma el candado
+ * de quien presenta y mira el choque (`SLOT_TAKEN`, salvo `force` tras el aviso). Moverla
+ * atiende «Pedir otra hora» (`needs_new_time_at`) y Kairós le avisa el cambio a la clínica.
+ */
 export async function moveClientTask(
   tx: Db,
   actor: AdminActor,
   id: string,
-  input: { dueOn: string; dueAt?: Date | null },
+  input: { dueOn: string; dueAt?: Date | null; force?: boolean },
   now = new Date(),
 ): Promise<TaskRow> {
   const task = await lockTask(tx, actor, id)
@@ -753,19 +862,31 @@ export async function moveClientTask(
   const dueOn = requireDay("dueOn", input.dueOn, "el día")
   if (input.dueAt && (Number.isNaN(input.dueAt.getTime()) || limaDate(input.dueAt) !== dueOn))
     throw invalidField("dueAt", "La hora tiene que ser del mismo día")
+  const presentation = task.kind === "presentacion"
+  const dueAt = input.dueAt ?? (presentation && task.dueAt ? sameLimaTime(dueOn, task.dueAt) : null)
+  const overrode =
+    presentation && dueAt && task.assigneeUserId
+      ? await presenterCheck(tx, task.assigneeUserId, dueAt, Boolean(input.force), task.id)
+      : null
   await tx
     .update(saasTask)
     .set({
       dueOn,
-      dueAt: input.dueAt ?? null,
-      endsAt: presentationEndsAt(task.kind, input.dueAt),
+      dueAt,
+      endsAt: presentationEndsAt(task.kind, dueAt),
+      ...(presentation ? { needsNewTimeAt: null } : {}),
       updatedAt: now,
     })
     .where(eq(saasTask.id, id))
   await writeAdminAudit(tx, actor, {
     action: "arm.task_moved",
     entityId: task.clientId,
-    metadata: { taskId: id, dueOn },
+    metadata: {
+      taskId: id,
+      dueOn,
+      ...(presentation ? { to: dueAt?.toISOString() ?? null } : {}),
+      ...(overrode ? { overrode } : {}),
+    },
   })
   return getClientTask(tx, id, now)
 }
@@ -1409,7 +1530,10 @@ export async function applyInvitedProposal(
 /**
  * Agenda una presentación: es una tarea `presentacion` con su día, hora (dura
  * 45 min, `ends_at`), contacto y demo. `actor` nulo es Kairós
- * (`bookPresentation`, con el candado y el choque ya revisados).
+ * (`bookPresentation`, con el candado y el choque ya revisados). Con hora, quien
+ * presenta no puede tener otra presentación ni una ausencia a esa hora: 409
+ * `SLOT_TAKEN` con el porqué, salvo `force` de una persona que ya vio el aviso
+ * (queda en la auditoría como `overrode`). Kairós nunca lo fuerza.
  */
 export async function schedulePresentation(
   tx: Db,
@@ -1421,6 +1545,8 @@ export async function schedulePresentation(
     contactId?: string | null
     demoId?: string | null
     assigneeUserId?: string | null
+    /** «Agendar igual» tras el aviso de choque (`SLOT_TAKEN`); solo una persona. */
+    force?: boolean
   },
   now = new Date(),
 ): Promise<TaskRow> {
@@ -2807,6 +2933,8 @@ export async function prepareKairosMail(
       messageId: newMessageId(productOf(client.product)),
       adminOnly: !client.organizationId,
       byKairos: true,
+      // Los correos de Kairós son sus avisos de la presentación: no responden nada.
+      purpose: "aviso",
       createdBy: null,
       createdAt: now,
       updatedAt: now,

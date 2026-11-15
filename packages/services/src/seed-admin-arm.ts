@@ -286,6 +286,8 @@ async function pastPresentation(
       dueAt: clock.at(-daysAgo, 11),
       contactId: client.contactId,
       assigneeUserId: actor.userId,
+      // La semilla arma su propia agenda: no frena en un choque que ella misma deja.
+      force: true,
     },
     clock.ago(daysAgo + 2),
   )
@@ -629,6 +631,7 @@ export async function seedAdminArm(
         dueAt: presentedAt,
         contactId: vida.contactId,
         demoId: medicalDemo,
+        force: true,
       },
       clock.ago(4),
     )
@@ -691,6 +694,7 @@ export async function seedAdminArm(
         dueAt: upcoming,
         contactId: mirada.contactId,
         demoId: opticalDemo,
+        force: true,
       },
       clock.ago(1),
     )
@@ -1261,7 +1265,12 @@ async function seedStaffSchedules(tx: Db, clock: Clock, sonrisa: Seeded): Promis
       tx,
       SOFIA,
       sonrisa.id,
-      { dueOn: limaDate(presentedAt), dueAt: presentedAt, contactId: sonrisa.contactId },
+      {
+        dueOn: limaDate(presentedAt),
+        dueAt: presentedAt,
+        contactId: sonrisa.contactId,
+        force: true,
+      },
       clock.now,
     )
 

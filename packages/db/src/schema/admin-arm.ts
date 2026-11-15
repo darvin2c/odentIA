@@ -120,6 +120,13 @@ export const SAAS_WRITE_CHANNELS = [
 ] as const satisfies readonly SaasOutreachChannel[]
 export const SAAS_OUTREACH_STATUSES = ["pendiente", "enviado", "incierto", "no_salio"] as const
 export type SaasOutreachStatus = (typeof SAAS_OUTREACH_STATUSES)[number]
+/**
+ * Para qué es un envío: `respuesta` a lo que escribió la persona, o `aviso` de Kairós
+ * (recordatorio, pedir otra hora, un cambio de la presentación). Un aviso no responde
+ * nada: no cuenta como respuesta del último mensaje.
+ */
+export const SAAS_OUTREACH_PURPOSES = ["respuesta", "aviso"] as const
+export type SaasOutreachPurpose = (typeof SAAS_OUTREACH_PURPOSES)[number]
 export const KAIROS_ITEM_KINDS = [
   "mensaje",
   "propuesta",
@@ -687,6 +694,8 @@ export const saasOutreach = adminSchema.table(
     template: text("template"),
     /** Lo escribió y lo envió Kairós (`Kairós · odentIA`), no una persona. */
     byKairos: boolean("by_kairos").notNull().default(false),
+    /** `respuesta` (lo de siempre) o `aviso` de Kairós: un aviso no cuenta como respuesta. */
+    purpose: text("purpose").notNull().default("respuesta"),
     /**
      * Solo de Administración, fijado al reservar el envío: lo marcó así quien respondió, o salió en
      * una conversación que no era de una clínica con su app (venta). Solo sube, de no a sí (la
@@ -706,6 +715,7 @@ export const saasOutreach = adminSchema.table(
     uniqueIndex("saas_outreach_external_uidx").on(table.externalId),
     check("saas_outreach_channel_check", oneOf(table.channel, SAAS_OUTREACH_CHANNELS)),
     check("saas_outreach_status_check", oneOf(table.status, SAAS_OUTREACH_STATUSES)),
+    check("saas_outreach_purpose_check", oneOf(table.purpose, SAAS_OUTREACH_PURPOSES)),
     check(
       "saas_outreach_text_check",
       sql`length(trim(${table.body})) BETWEEN 1 AND 5000 AND length(trim(${table.toAddress})) BETWEEN 3 AND 254

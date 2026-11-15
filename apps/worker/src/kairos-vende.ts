@@ -1,4 +1,10 @@
-import type { KairosSeller, KairosSellResult, KairosSellTools } from "@odentia/agent"
+import type {
+  KairosSellBooked,
+  KairosSeller,
+  KairosSellResult,
+  KairosSellTools,
+  KairosToolContext,
+} from "@odentia/agent"
 import type { Db } from "@odentia/db"
 import { saasChat } from "@odentia/db/schema/admin-arm"
 import type { Mailer } from "@odentia/mail"
@@ -8,11 +14,12 @@ import {
   chatSenderOf,
   claimKairosTurn,
   finishKairosTurn,
-  getKairosSells,
   INSTAGRAM_TEXT_BYTES,
   KAIROS_FALLBACK_TEXT,
+  type KairosBookRefused,
   kairosBook,
   kairosCancel,
+  kairosChatBlocked,
   kairosChatContext,
   kairosChatsToAnswer,
   kairosClinicData,
@@ -21,6 +28,7 @@ import {
   kairosPropose,
   kairosSaveContact,
   kairosSlots,
+  kairosTurnCap,
   markKairosMailSent,
   outreachEmail,
   outreachMailMessage,
@@ -85,20 +93,53 @@ const OUTCOME: Record<KairosSellResult["kind"], "respondio" | "paso" | "fallo"> 
   fallo: "fallo",
 }
 
-/** Las herramientas del modelo sobre los servicios: cada una en su transacción, a nombre de Kairós. */
-function toolsFor(deps: KairosSellsDeps, chatId: string, now: Date): KairosSellTools {
-  const run = <T>(fn: (tx: Db) => Promise<T>) => deps.ownerDb.transaction((tx) => fn(tx as Db))
+/** Se acabó el tiempo del turno: lo que iba a escribir no se escribe. */
+function stopped(): ServiceError {
+  return new ServiceError("KAIROS_STOPPED", 409, "Se acabó el tiempo de este turno")
+}
+
+/** Lo que la hora ya no puede dar sale como error para el modelo, con lo vencido ya guardado. */
+function bookedOrThrow(result: KairosSellBooked | KairosBookRefused): KairosSellBooked {
+  if ("refused" in result) throw new ServiceError(result.refused.code, 409, result.refused.message)
+  return result
+}
+
+/**
+ * Las herramientas del modelo sobre los servicios: cada una en su transacción, a nombre de
+ * Kairós. Las que escriben vuelven a mirar, con la conversación bloqueada, que Kairós todavía
+ * pueda actuar (`kairosChatBlocked`: prendido, sin pausa, no «No es una clínica», sin la app ni
+ * archivado, dentro de las 24 h) y que el turno no se cortó: si el tiempo se acabó mientras
+ * escribía, la transacción se deshace antes de confirmarse.
+ */
+export function toolsFor(deps: KairosSellsDeps, chatId: string, now: Date): KairosSellTools {
+  const read = <T>(fn: (tx: Db) => Promise<T>, ctx: KairosToolContext) => {
+    if (ctx.signal.aborted) throw stopped()
+    return deps.ownerDb.transaction((tx) => fn(tx as Db))
+  }
+  const write = <T>(fn: (tx: Db) => Promise<T>, ctx: KairosToolContext) => {
+    if (ctx.signal.aborted) throw stopped()
+    return deps.ownerDb.transaction(async (raw) => {
+      const tx = raw as Db
+      const blocked = await kairosChatBlocked(tx, chatId, now)
+      if (blocked) throw new ServiceError("KAIROS_STOPPED", 409, blocked)
+      const result = await fn(tx)
+      if (ctx.signal.aborted) throw stopped()
+      return result
+    })
+  }
   return {
-    slots: (range) => run((tx) => kairosSlots(tx, chatId, range, now)),
-    propose: async (slot) => {
-      const row = await run((tx) => kairosPropose(tx, chatId, slot, now))
+    slots: (range, ctx) => read((tx) => kairosSlots(tx, chatId, range, now), ctx),
+    propose: async (slot, ctx) => {
+      const row = await write((tx) => kairosPropose(tx, chatId, slot, now), ctx)
       return { id: row.id, startsAt: row.startsAt }
     },
-    book: (proposalId) => run((tx) => kairosBook(tx, chatId, proposalId, now)),
-    move: (proposalId) => run((tx) => kairosMove(tx, chatId, proposalId, now)),
-    cancel: (reason) => run((tx) => kairosCancel(tx, chatId, reason, now)),
-    saveContact: (input) => run((tx) => kairosSaveContact(tx, chatId, input, now)),
-    clinicData: (input) => run((tx) => kairosClinicData(tx, chatId, input, now)),
+    book: async (proposalId, ctx) =>
+      bookedOrThrow(await write((tx) => kairosBook(tx, chatId, proposalId, now), ctx)),
+    move: async (proposalId, ctx) =>
+      bookedOrThrow(await write((tx) => kairosMove(tx, chatId, proposalId, now), ctx)),
+    cancel: (reason, ctx) => write((tx) => kairosCancel(tx, chatId, reason, now), ctx),
+    saveContact: (input, ctx) => write((tx) => kairosSaveContact(tx, chatId, input, now), ctx),
+    clinicData: (input, ctx) => write((tx) => kairosClinicData(tx, chatId, input, now), ctx),
   }
 }
 
@@ -119,44 +160,48 @@ async function answerOne(
     await finish("omitido", "El canal de la administración no está configurado")
     return "omitido"
   }
+  // Pasó un tope del día (de esta conversación o de todas): no se llama al modelo, pasa al equipo.
+  const cap = await ownerDb.transaction((tx) => kairosTurnCap(tx as Db, target.chatId, turnId, now))
   let result: KairosSellResult
-  try {
-    result = await deps.seller.answer(
-      {
-        channel,
-        now,
-        firstReply: context.firstReply,
-        product: context.sales,
-        client: context.client ? { name: context.client.name } : null,
-        contact: context.contact
-          ? {
-              name: context.contact.name,
-              hasPhone: Boolean(context.contact.phone),
-              hasEmail: Boolean(context.contact.email),
-            }
-          : null,
-        displayName: context.chat.displayName,
-        history: context.history,
-        omitted: context.omitted,
-        leftContact: context.leftContact,
-        proposal: context.proposal
-          ? {
-              id: context.proposal.id,
-              startsAt: context.proposal.startsAt,
-              assigneeName: context.proposal.assigneeName,
-            }
-          : null,
-        presentation: context.presentation,
-      },
-      toolsFor(deps, target.chatId, now),
-    )
-  } catch (error) {
-    result = {
-      kind: "fallo",
-      text: KAIROS_FALLBACK_TEXT,
-      why: `Falló al responder (${message(error)})`,
+  if (cap) result = { kind: "paso", text: KAIROS_FALLBACK_TEXT, why: cap }
+  else
+    try {
+      result = await deps.seller.answer(
+        {
+          channel,
+          now,
+          firstReply: context.firstReply,
+          product: context.sales,
+          client: context.client ? { name: context.client.name } : null,
+          contact: context.contact
+            ? {
+                name: context.contact.name,
+                hasPhone: Boolean(context.contact.phone),
+                hasEmail: Boolean(context.contact.email),
+              }
+            : null,
+          displayName: context.chat.displayName,
+          history: context.history,
+          omitted: context.omitted,
+          leftContact: context.leftContact,
+          proposal: context.proposal
+            ? {
+                id: context.proposal.id,
+                startsAt: context.proposal.startsAt,
+                assigneeName: context.proposal.assigneeName,
+              }
+            : null,
+          presentation: context.presentation,
+        },
+        toolsFor(deps, target.chatId, now),
+      )
+    } catch (error) {
+      result = {
+        kind: "fallo",
+        text: KAIROS_FALLBACK_TEXT,
+        why: `Falló al responder (${message(error)})`,
+      }
     }
-  }
   // Instagram corta a 1000 bytes: lo que no cabe no sale cortado, sale el aviso fijo.
   if (channel === "instagram" && Buffer.byteLength(result.text, "utf8") + 40 > INSTAGRAM_TEXT_BYTES)
     result = {
@@ -168,18 +213,14 @@ async function answerOne(
   try {
     reserved = await ownerDb.transaction(async (raw) => {
       const tx = raw as Db
-      // Mientras redactaba pudieron pausarla o apagar a Kairós: entonces no sale nada.
-      const [chat] = await tx
-        .select({ pausedAt: saasChat.kairosPausedAt })
-        .from(saasChat)
-        .where(eq(saasChat.id, target.chatId))
-        .for("update")
-        .limit(1)
-      if (chat?.pausedAt || !(await getKairosSells(tx)).enabled) {
+      // Mientras redactaba pudieron pausarla, apagar a Kairós, marcarla «No es una clínica», darle
+      // su app o archivar al cliente, o pasar las 24 h: entonces no sale nada (Hoy lo muestra).
+      const blocked = await kairosChatBlocked(tx, target.chatId, now)
+      if (blocked) {
         await finishKairosTurn(
           tx,
           turnId,
-          { outcome: "omitido", why: "Se pausó o se apagó mientras respondía" },
+          { outcome: "omitido", why: `${blocked} mientras respondía` },
           now,
         )
         return null

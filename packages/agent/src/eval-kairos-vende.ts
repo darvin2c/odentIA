@@ -308,7 +308,10 @@ const isFree = (w: World, persona: string, start: number, exceptOwn = false) =>
     start + PRESENTATION_MS,
   )
 
-/** Como `staffSlots`: el responsable primero (si está y tiene horas), si no la persona libre más temprana. */
+/**
+ * Como `kairosSlots` con `staffSlots`: con presentación, solo quien la presenta; si no, el
+ * responsable primero (si está y tiene horas), si no la persona libre más temprana.
+ */
 function staffSlots(w: World, range: { from: Date | null; to: Date | null }) {
   const now = w.now.getTime()
   const from = Math.max(
@@ -323,6 +326,12 @@ function staffSlots(w: World, range: { from: Date | null; to: Date | null }) {
   const staff = w.staff
     .filter((s) => s.horas.length > 0)
     .sort((a, b) => a.nombre.localeCompare(b.nombre, "es") || a.id.localeCompare(b.id))
+  // Con una presentación, lo que se ofrece es para moverla: solo con quien la presenta.
+  const presenter = w.presentation?.persona
+  if (presenter)
+    return slotStarts(freeSpans(w, presenter, from, to))
+      .slice(0, 200)
+      .map((start) => ({ start, persona: presenter }))
   const preferred = w.client?.owner ? staff.find((s) => s.id === w.client?.owner) : undefined
   if (preferred && !absentAt(w, preferred.id, from)) {
     const own = slotStarts(freeSpans(w, preferred.id, from, to))

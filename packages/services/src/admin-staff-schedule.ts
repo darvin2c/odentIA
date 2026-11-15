@@ -32,6 +32,7 @@ import { and, asc, eq, gt, inArray, isNotNull, lt, ne, sql } from "drizzle-orm"
 import { type AdminActor, isAdminRole, writeAdminAudit } from "./admin-core.js"
 import {
   getClientTask,
+  lockPresenter,
   PRESENTATION_MS,
   presentationEndsAt,
   schedulePresentation,
@@ -111,9 +112,9 @@ function requireDate(field: string, value: Date | null | undefined, what: string
   return value
 }
 
-/** El candado de quien presenta: dos agendas a la vez no le dan la misma hora. */
-async function lockPresenter(tx: Db, userId: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`admin_presentation:${userId}`}))`)
+/** El motivo de una ausencia lo ven quien se ausenta y Administración; el resto, solo el tramo. */
+function absenceFor(actor: AdminActor, row: StaffAbsenceRow): StaffAbsenceRow {
+  return actor.role === "admin" || actor.userId === row.userId ? row : { ...row, reason: null }
 }
 
 /* ---------- Horario y sala ---------- */
@@ -284,11 +285,12 @@ export async function listStaffAbsences(
   now = new Date(),
 ): Promise<StaffAbsenceRow[]> {
   requireStaffActor(actor)
-  return tx
+  const rows = await tx
     .select()
     .from(adminStaffAbsence)
     .where(and(eq(adminStaffAbsence.userId, userId), gt(adminStaffAbsence.endsAt, now)))
     .orderBy(asc(adminStaffAbsence.startsAt))
+  return rows.map((row) => absenceFor(actor, row))
 }
 
 /** Una presentación abierta que cae en un tramo de una persona. */
@@ -526,6 +528,11 @@ export interface StaffSlot {
 export interface StaffSlotsQuery {
   /** El responsable del cliente: sus horas primero. */
   preferUserId?: string | null
+  /**
+   * Solo las horas de esta persona (mover una presentación: sigue con quien la presenta). Sin
+   * horas suyas, nada: no se ofrece la de otra persona que después no se puede dar.
+   */
+  onlyUserId?: string | null
   from?: Date | null
   to?: Date | null
   now: Date
@@ -595,6 +602,13 @@ export async function staffSlots(tx: Db, query: StaffSlotsQuery): Promise<StaffS
     name: person.name,
     preferred,
   })
+  if (query.onlyUserId) {
+    const only = staff.find((person) => person.userId === query.onlyUserId)
+    if (!only) return []
+    return slotStarts(spans.get(only.userId) ?? [])
+      .slice(0, limit)
+      .map((start) => slotOf(only, start, true))
+  }
   const preferred = query.preferUserId
     ? staff.find((person) => person.userId === query.preferUserId)
     : undefined

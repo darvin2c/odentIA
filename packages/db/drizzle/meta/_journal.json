@@ -925,6 +925,13 @@
       "when": 1794712991116,
       "tag": "0131_kairos_responde",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1794722245985,
+      "tag": "0132_kairos_avisos",
+      "breakpoints": true
     }
   ]
 }

@@ -37,6 +37,7 @@ import {
   kairosItemsSchema,
 } from "../../components/arm/kairos-items"
 import { WAITLIST_STAGE_WORDS } from "../../components/arm/sale-words"
+import { isSlotClash } from "../../components/arm/slot-clash"
 import { type ProductChoice, ProductFilter, useOrgProducts } from "../../components/product"
 import {
   HomeCountersSkeleton,
@@ -814,19 +815,36 @@ function TaskItem({
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
+  // Solo el día: una presentación conserva su hora (el servidor la pone en el día nuevo). Si
+  // choca con otra de quien presenta o con su ausencia, se avisa y la persona decide.
   const move = useMutation({
-    mutationFn: async (dueOn: string) => {
+    mutationFn: async (input: { dueOn: string; force?: boolean }) => {
       leave.markLeaving()
       return api(`/api/admin/clients/tasks/${row.id}/move`, {
         method: "POST",
-        body: JSON.stringify({ dueOn }),
+        body: JSON.stringify(
+          input.force ? { dueOn: input.dueOn, force: true } : { dueOn: input.dueOn },
+        ),
       })
     },
-    onSuccess: (_data, dueOn) => {
+    onSuccess: (_data, input) => {
       invalidateArm(queryClient, row.clientId)
-      toast.success(`Pasó al ${limaDayWords(dueOn)}`)
+      toast.success(`Pasó al ${limaDayWords(input.dueOn)}`)
     },
-    onError: (error) => toast.error(submitErrorMessage(error)),
+    onError: (error, input) => {
+      if (!isSlotClash(error)) return toast.error(submitErrorMessage(error))
+      const id = toast.warning(error.shape.message ?? "Esa hora choca con otra presentación.", {
+        duration: Number.POSITIVE_INFINITY,
+        closeButton: true,
+        action: {
+          label: "Mover igual",
+          onClick: () => {
+            toast.dismiss(id)
+            move.mutate({ dueOn: input.dueOn, force: true })
+          },
+        },
+      })
+    },
   })
   const busy = done.isPending || move.isPending
   // Una presentación se cierra diciendo cómo fue, en la Venta de la ficha.
@@ -877,7 +895,7 @@ function TaskItem({
             disabled={busy}
             aria-label={`Mover «${row.title}» a otro día`}
             onChange={(day) => {
-              if (day && day !== row.dueOn) move.mutate(day)
+              if (day && day !== row.dueOn) move.mutate({ dueOn: day })
             }}
           >
             Mover

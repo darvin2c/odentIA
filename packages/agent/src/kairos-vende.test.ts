@@ -535,3 +535,108 @@ describe("Kairós vende: el doble por reglas", () => {
     expect(patient.kind).toBe("paciente")
   })
 })
+
+describe("Kairós vende: después de su tiempo no hace nada", () => {
+  const waiting = {
+    proposal: { id: "p-1", startsAt: monday10, assigneeName: "Ana Pérez" },
+    history: [{ who: "persona" as const, at: now, text: "sí, confirmado" }],
+  }
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it("lo que el modelo pide después del tiempo no llega a las herramientas", async () => {
+    // El modelo tarda y recién entonces pide agendar: el aviso fijo ya salió.
+    const invoke = async () => {
+      await wait(80)
+      return new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "agendar", args: {} }] })
+    }
+    const late: KairosChatModel = { invoke, bindTools: () => ({ invoke }) }
+    const t = tools()
+    const result = await seller(late, 20).seller.answer(input(waiting), t.tools)
+    expect(result).toMatchObject({ kind: "fallo", why: "El modelo tardó demasiado" })
+    await wait(150)
+    expect(t.calls).toEqual([])
+  })
+
+  it("la herramienta que estaba escribiendo ve el turno cortado", async () => {
+    const { model } = scripted([{ tool: "agendar" }, { text: "Listo." }])
+    let aborted: boolean | null = null
+    const t = tools({
+      book: async (_id, ctx) => {
+        await wait(80)
+        aborted = ctx.signal.aborted
+        throw new Error("Se acabó el tiempo de este turno")
+      },
+    })
+    const result = await seller(model, 20).seller.answer(input(waiting), t.tools)
+    expect(result.kind).toBe("fallo")
+    await wait(150)
+    expect(aborted).toBe(true)
+  })
+
+  it("lo agendado antes del tiempo sale con su confirmación, no con el aviso fijo", async () => {
+    const invoke = async (messages: BaseMessage[]) => {
+      if (messages.some((message) => message.getType() === "tool")) {
+        await wait(200)
+        return new AIMessage({ content: "Listo." })
+      }
+      return new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "agendar", args: {} }] })
+    }
+    const model: KairosChatModel = { invoke, bindTools: () => ({ invoke }) }
+    const result = await seller(model, 50).seller.answer(input(waiting), tools().tools)
+    expect(result.kind).toBe("respondio")
+    expect(result.text).toContain("Quedó agendada tu presentación")
+  })
+})
+
+describe("Kairós vende: no da por hecho lo que no hizo", () => {
+  const offered = { tool: "ver_horarios", args: { desde: null, hasta: null } }
+
+  it("decir que agendó, reservó, movió o canceló sin hacerlo no sale", async () => {
+    for (const text of [
+      "Listo, quedó agendada tu presentación.",
+      `Te reservé el ${sellWhenWords(monday10)} con Ana Pérez.`,
+      `Listo, el ${sellWhenWords(monday10)} con Ana Pérez.`,
+      "Ya la moví al lunes con Ana Pérez.",
+      "Cancelé tu presentación.",
+    ]) {
+      const { model } = scripted([offered, { text }])
+      const result = await seller(model).seller.answer(input(), tools().tools)
+      expect(result, text).toMatchObject({ kind: "fallo" })
+      if (result.kind === "fallo") expect(result.why).toContain("daba por hecho")
+    }
+  })
+
+  it("preguntar o proponer sí sale", async () => {
+    for (const text of [
+      `¿Te la agendo para el ${sellWhenWords(monday10)} con Ana Pérez?`,
+      `Tengo libre el ${sellWhenWords(monday10)} con Ana Pérez. ¿Te sirve?`,
+      "Si me confirmas, queda agendada.",
+    ]) {
+      const { model } = scripted([offered, { text }])
+      const result = await seller(model).seller.answer(input(), tools().tools)
+      expect(result, text).toMatchObject({ kind: "respondio" })
+    }
+  })
+})
+
+describe("Kairós vende: los topes pasan al equipo", () => {
+  it("un tope del día o una segunda presentación no se insiste: pasa al equipo", async () => {
+    for (const code of ["KAIROS_TOPE", "PRESENTATION_EXISTS"]) {
+      const { model } = scripted([{ tool: "agendar" }, { text: "Gracias." }])
+      const t = tools({
+        book: async () => {
+          throw Object.assign(new Error(`Kairós llegó al tope (${code})`), { code })
+        },
+      })
+      const result = await seller(model).seller.answer(
+        input({
+          proposal: { id: "p-1", startsAt: monday10, assigneeName: "Ana Pérez" },
+          history: [{ who: "persona", at: now, text: "sí" }],
+        }),
+        t.tools,
+      )
+      expect(result).toMatchObject({ kind: "paso", text: KAIROS_SELL_HANDOFF })
+      if (result.kind === "paso") expect(result.why).toContain("tope")
+    }
+  })
+})

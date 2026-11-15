@@ -40,6 +40,7 @@ import {
   SAAS_CHAT_CHANNELS,
   type SaasChatChannel,
   type SaasInboundMedia,
+  type SaasOutreachPurpose,
   type SaasOutreachStatus,
   saasChat,
   saasClient,
@@ -1416,6 +1417,8 @@ export interface KairosChatReplyInput {
    * pasa al equipo: ahí la respuesta es el aviso fijo y Hoy lo tiene que mostrar.
    */
   closeItems?: boolean
+  /** `aviso` (recordatorio, otra hora, cambio): no responde el último mensaje. Por omisión, `respuesta`. */
+  purpose?: SaasOutreachPurpose
 }
 
 /**
@@ -1463,6 +1466,7 @@ export async function prepareKairosChatReply(
       template,
       adminOnly: true,
       byKairos: true,
+      purpose: input.purpose ?? "respuesta",
       createdBy: null,
       createdAt: now,
       updatedAt: now,
@@ -1648,7 +1652,45 @@ async function settleChatOutreach(
       ...(extra.metaStatus ? { metaStatus: extra.metaStatus } : {}),
     },
   })
+  if (status !== "enviado" && updated.byKairos && updated.purpose === "respuesta")
+    await handOverKairosReply(tx, updated, status, now, extra.why ?? null)
   return updated
+}
+
+/**
+ * La respuesta de Kairós no salió (Meta la rechazó) o no se sabe si salió: la conversación no
+ * está atendida. Su turno pasa a `fallo` con el porqué y la conversación queda pausada sin
+ * persona («Kairós se la pasó al equipo»): `responder_chat` sale en Hoy y el equipo la ve.
+ */
+async function handOverKairosReply(
+  tx: Db,
+  row: OutreachRecord,
+  status: "incierto" | "no_salio",
+  now: Date,
+  why: string | null,
+): Promise<void> {
+  const words =
+    status === "no_salio"
+      ? `Su respuesta no salió${why ? ` (${why.slice(0, 200)})` : ""}`
+      : "No se sabe si salió su respuesta"
+  const turns = await tx
+    .update(kairosChatTurn)
+    .set({ outcome: "fallo", why: words.slice(0, 500), updatedAt: now })
+    .where(and(eq(kairosChatTurn.outreachId, row.id), eq(kairosChatTurn.outcome, "respondio")))
+    .returning({ chatId: kairosChatTurn.chatId })
+  const chatId = turns[0]?.chatId ?? row.chatId
+  if (!chatId) return
+  const paused = await tx
+    .update(saasChat)
+    .set({ kairosPausedAt: now, kairosPausedBy: null, updatedAt: now })
+    .where(and(eq(saasChat.id, chatId), isNull(saasChat.kairosPausedAt)))
+    .returning({ id: saasChat.id })
+  if (turns.length > 0 || paused.length > 0)
+    await writeAdminAudit(tx, null, {
+      action: "kairos.chat_failed",
+      entityId: row.clientId ?? chatId,
+      metadata: { chatId, clientId: row.clientId, outreachId: row.id, why: words },
+    })
 }
 
 export interface ChatOutreachResult {

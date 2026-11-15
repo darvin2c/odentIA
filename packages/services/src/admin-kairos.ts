@@ -2223,10 +2223,14 @@ function chatPreview(body: string | null, files: number): string | null {
 /**
  * La conversación `c` tiene una respuesta nuestra desde su mensaje `m`: pendiente,
  * enviada o incierta (lo que no salió no cuenta como respuesta). El aviso fijo de
- * Kairós cuando lo pasó al equipo o falló tampoco: Hoy tiene que mostrarlo.
+ * Kairós cuando lo pasó al equipo o falló tampoco: Hoy tiene que mostrarlo. Ni un
+ * aviso de Kairós (`purpose = 'aviso'`: recordatorio, otra hora, cambio), que no
+ * responde nada. «Desde» es desde que guardamos el mensaje (`m.created_at`, nuestro
+ * reloj, el mismo de la respuesta), no la hora que dice Meta (`received_at`).
  */
 const chatRepliedSql = sql`exists (select 1 from saas_outreach o where o.chat_id = c.id
-  and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.received_at
+  and o.purpose = 'respuesta'
+  and o.status in ('pendiente', 'enviado', 'incierto') and o.created_at >= m.created_at
   and not exists (select 1 from kairos_chat_turn kt where kt.outreach_id = o.id
     and kt.outcome in ('paso', 'fallo')))`
 
@@ -2275,10 +2279,10 @@ async function pendingChats(
           from jsonb_array_elements(mm.media) e) f
         where mm.chat_id = c.id and ${likelyCargaSql("f")}) as maybe_carga,
       (select kt.why from kairos_chat_turn kt where kt.chat_id = c.id and kt.outcome in ('paso', 'fallo')
-        and kt.created_at >= m.received_at - interval '1 day'
+        and kt.created_at >= m.created_at - interval '1 day'
         order by kt.created_at desc limit 1) as kairos_why
     from saas_chat c
-    join lateral (select id, body, media, received_at, admin_only from saas_inbound_message
+    join lateral (select id, body, media, received_at, created_at, admin_only from saas_inbound_message
       where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
     left join saas_client cl on cl.id = c.client_id
     left join saas_client_contact ct on ct.id = c.contact_id
@@ -2377,7 +2381,7 @@ async function ruleInboundChats(pass: Pass): Promise<void> {
     from kairos_item k
     left join saas_chat c on c.id::text = k.payload ->> 'chatId'
     left join saas_client cl on cl.id = c.client_id
-    left join lateral (select received_at from saas_inbound_message
+    left join lateral (select received_at, created_at from saas_inbound_message
       where chat_id = c.id order by received_at desc, created_at desc, id desc limit 1) m on true
     where k.kind in ('chat_sin_cliente', 'responder_chat') and k.status = 'espera'
       and (c.id is null

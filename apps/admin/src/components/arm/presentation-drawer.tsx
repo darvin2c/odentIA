@@ -23,6 +23,7 @@ import {
   useInvalidateClient,
 } from "./sale-api"
 import { addDays, dueWords, limaDay, limaInstant, limaTime } from "./sale-words"
+import { withClashChoice } from "./slot-clash"
 import { DayField } from "./task-drawer"
 
 /**
@@ -139,15 +140,25 @@ function ScheduleForm({
     validators: { onSubmit: scheduleSchema },
     onSubmit: async ({ value }) => {
       const dueAt = value.dueTime ? limaInstant(value.dueOn, value.dueTime) : null
-      await postJson(`/api/admin/clients/${encodeURIComponent(clientId)}/presentations`, {
-        dueOn: value.dueOn,
-        dueAt,
-        contactId: value.contactId === NONE ? null : value.contactId,
-        demoId: value.demoId === NONE ? null : value.demoId,
-      })
-      invalidate()
-      toast.success(`Presentación agendada para ${dueWords(value.dueOn, dueAt)}`)
-      onClose()
+      const send = async (force: boolean) => {
+        await postJson(`/api/admin/clients/${encodeURIComponent(clientId)}/presentations`, {
+          dueOn: value.dueOn,
+          dueAt,
+          contactId: value.contactId === NONE ? null : value.contactId,
+          demoId: value.demoId === NONE ? null : value.demoId,
+          ...(force ? { force: true } : {}),
+        })
+        invalidate()
+        toast.success(`Presentación agendada para ${dueWords(value.dueOn, dueAt)}`)
+        onClose()
+      }
+      // Choca con otra presentación de quien presenta o con su ausencia: se avisa y la persona
+      // decide («Agendar igual»), sin pasos de más.
+      await withClashChoice(
+        () => send(false),
+        "Agendar igual",
+        () => send(true),
+      )
     },
   })
   const surface = useFormSurface(form, { fieldMap: { dueAt: "dueTime" } })

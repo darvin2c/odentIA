@@ -1,0 +1,2 @@
+ALTER TABLE "admin"."saas_outreach" ADD COLUMN "purpose" text DEFAULT 'respuesta' NOT NULL;--> statement-breakpoint
+ALTER TABLE "admin"."saas_outreach" ADD CONSTRAINT "saas_outreach_purpose_check" CHECK ("admin"."saas_outreach"."purpose" IN ('respuesta','aviso'));

@@ -105,24 +105,49 @@ export interface KairosSellBooked {
   confirmation: string
 }
 
+/**
+ * Lo de cada llamada a una herramienta: `signal` se corta cuando se acaba el tiempo del turno.
+ * Desde ahí ninguna herramienta escribe (el worker lo vuelve a mirar antes de confirmar su
+ * transacción): lo que el turno no alcanzó a hacer no ocurre después de que salió el aviso fijo.
+ */
+export interface KairosToolContext {
+  signal: AbortSignal
+}
+
 /** Lo que hacen las herramientas en la base (el worker las arma con los servicios). Un error vuelve al modelo como texto. */
 export interface KairosSellTools {
-  slots(range: { from: Date | null; to: Date | null }): Promise<KairosSellSlot[]>
-  propose(slot: KairosSellSlot): Promise<{ id: string; startsAt: Date }>
-  book(proposalId: string): Promise<KairosSellBooked>
-  move(proposalId: string): Promise<KairosSellBooked>
-  cancel(reason: string | null): Promise<{ startsAt: Date }>
-  saveContact(input: {
-    phone: string | null
-    email: string | null
-  }): Promise<{ phone: string | null; email: string | null }>
-  clinicData(input: {
-    clinicName: string
-    personName: string | null
-    product: "dental" | "medical" | "optical" | null
-    city: string | null
-  }): Promise<{ created: boolean; similar: string[] }>
+  slots(
+    range: { from: Date | null; to: Date | null },
+    ctx: KairosToolContext,
+  ): Promise<KairosSellSlot[]>
+  propose(slot: KairosSellSlot, ctx: KairosToolContext): Promise<{ id: string; startsAt: Date }>
+  book(proposalId: string, ctx: KairosToolContext): Promise<KairosSellBooked>
+  move(proposalId: string, ctx: KairosToolContext): Promise<KairosSellBooked>
+  cancel(reason: string | null, ctx: KairosToolContext): Promise<{ startsAt: Date }>
+  saveContact(
+    input: {
+      phone: string | null
+      email: string | null
+    },
+    ctx: KairosToolContext,
+  ): Promise<{ phone: string | null; email: string | null }>
+  clinicData(
+    input: {
+      clinicName: string
+      personName: string | null
+      product: "dental" | "medical" | "optical" | null
+      city: string | null
+    },
+    ctx: KairosToolContext,
+  ): Promise<{ created: boolean; similar: string[] }>
 }
+
+/**
+ * Los errores de las herramientas que no se arreglan insistiendo: un tope del día
+ * (`KAIROS_TOPE`, contra el gasto y las presentaciones falsas) o una segunda
+ * presentación para la misma clínica. El turno pasa al equipo.
+ */
+const HANDOVER_CODES = new Set(["KAIROS_TOPE", "PRESENTATION_EXISTS"])
 
 export type KairosSellResult =
   | { kind: "respondio"; text: string; booked: KairosSellBooked | null }
@@ -313,6 +338,8 @@ interface TurnState {
   /** La presentación que canceló en este turno. */
   cancelled: { startsAt: Date } | null
   ended: Exclude<KairosSellResult, { kind: "respondio" }> | null
+  /** Se corta al acabarse el tiempo: desde ahí no corre ninguna herramienta. */
+  signal: AbortSignal
 }
 
 function errorText(error: unknown): string {
@@ -333,13 +360,16 @@ async function runTool(
   if (!parsed.success)
     return `Revisa los datos de ${name}: ${parsed.error.issues[0]?.message ?? ""}`
   const value = parsed.data as Record<string, unknown>
+  // Se acabó el tiempo del turno: ya salió (o sale) el aviso fijo; nada más se hace.
+  if (state.signal.aborted) return "Se acabó el tiempo de este turno: no hagas nada más."
+  const ctx: KairosToolContext = { signal: state.signal }
   try {
     switch (name as ToolName) {
       case "ver_horarios": {
         const from = typeof value.desde === "string" ? limaDayStart(value.desde) : null
         const untilDay = typeof value.hasta === "string" ? limaDayStart(value.hasta) : null
         const to = untilDay ? new Date(untilDay.getTime() + 86_400_000) : null
-        const slots = await tools.slots({ from, to })
+        const slots = await tools.slots({ from, to }, ctx)
         if (slots.length === 0)
           return "No hay horas libres en esos días. Ofrece buscar otros días o pásalo al equipo."
         const lines = slots.map((slot) => {
@@ -352,7 +382,7 @@ async function runTool(
       case "proponer_hora": {
         const slot = state.offered.get(String(value.referencia))
         if (!slot) return "Esa referencia no salió de ver_horarios en este turno: usa una que sí."
-        const proposal = await tools.propose(slot)
+        const proposal = await tools.propose(slot, ctx)
         state.proposed = { id: proposal.id, startsAt: proposal.startsAt, assigneeName: slot.name }
         return `Propuesta: ${sellWhenWords(proposal.startsAt)} con ${slot.name}. Pregúntale si la confirma; todavía no está agendada.`
       }
@@ -365,13 +395,16 @@ async function runTool(
             : "No hay una hora esperando su sí: usa ver_horarios y proponer_hora."
         const booked =
           name === "agendar"
-            ? await tools.book(input.proposal.id)
-            : await tools.move(input.proposal.id)
+            ? await tools.book(input.proposal.id, ctx)
+            : await tools.move(input.proposal.id, ctx)
         state.booked = booked
         return `Listo: ${sellWhenWords(booked.startsAt)} con ${booked.assigneeName}. La confirmación la agrega el sistema: no la repitas.`
       }
       case "cancelar": {
-        const cancelled = await tools.cancel(typeof value.motivo === "string" ? value.motivo : null)
+        const cancelled = await tools.cancel(
+          typeof value.motivo === "string" ? value.motivo : null,
+          ctx,
+        )
         state.cancelled = { startsAt: cancelled.startsAt }
         return `Cancelada la presentación del ${sellWhenWords(cancelled.startsAt)}.`
       }
@@ -381,16 +414,19 @@ async function runTool(
         const email = typeof value.correo === "string" && value.correo.trim() ? value.correo : null
         if (!phone && !email)
           return "Pídele su WhatsApp (con el código de su país) o su correo para avisarle."
-        const saved = await tools.saveContact({ phone, email })
+        const saved = await tools.saveContact({ phone, email }, ctx)
         return `Guardado: ${[saved.phone ? "WhatsApp" : null, saved.email ? "correo" : null].filter(Boolean).join(" y ") || "nada nuevo"}.`
       }
       case "datos_de_la_clinica": {
-        const result = await tools.clinicData({
-          clinicName: String(value.clinica),
-          personName: typeof value.persona === "string" ? value.persona : null,
-          product: (value.producto as "dental" | "medical" | "optical" | null) ?? null,
-          city: typeof value.ciudad === "string" ? value.ciudad : null,
-        })
+        const result = await tools.clinicData(
+          {
+            clinicName: String(value.clinica),
+            personName: typeof value.persona === "string" ? value.persona : null,
+            product: (value.producto as "dental" | "medical" | "optical" | null) ?? null,
+            city: typeof value.ciudad === "string" ? value.ciudad : null,
+          },
+          ctx,
+        )
         return result.created ? "Clínica registrada." : "Esta conversación ya era de una clínica."
       }
       case "pasar_al_equipo":
@@ -409,6 +445,15 @@ async function runTool(
         return "Listo."
     }
   } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code
+    if (typeof code === "string" && HANDOVER_CODES.has(code)) {
+      state.ended = {
+        kind: "paso",
+        text: KAIROS_SELL_HANDOFF,
+        why: (error instanceof Error ? error.message : code).slice(0, 300),
+      }
+      return "Pasado al equipo."
+    }
     return errorText(error)
   }
   return "Listo."
@@ -533,6 +578,57 @@ export function checkSellReply(
   return { ok: unsupported.length === 0, unsupported }
 }
 
+/** Una pregunta o una condición no da nada por hecho: «¿Te la agendo?», «si me confirmas, queda agendada». */
+const NOT_A_CLAIM = /[?¿]|(?<![\p{L}])(?:si|cuando|apenas|en cuanto|para que)(?![\p{L}])/u
+const DAY_WORD =
+  /(?<![\p{L}])(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|hoy|manana)(?![\p{L}])/u
+const OFFER_WORD =
+  /(?<![\p{L}])(?:propong\p{L}*|libres?|disponibles?|tengo|hay|ofrezc\p{L}*|puedo|opciones?)(?![\p{L}])/u
+const CLAIMS: Array<{ act: "agendar" | "cancelar"; re: RegExp }> = [
+  {
+    act: "agendar",
+    re: /(?<![\p{L}])(?:quedo|queda|quedaron|esta)\s+(?:ya\s+)?(?:agendad|reservad|confirmad|programad|movid|cambiad|reprogramad)[oa]s?(?![\p{L}])/u,
+  },
+  {
+    act: "agendar",
+    re: /(?<!que\s(?:te\s)?(?:la\s|lo\s)?)(?<![\p{L}])(?:agende|reserve|programe|reprograme)(?![\p{L}])/u,
+  },
+  {
+    act: "agendar",
+    re: /(?<![\p{L}])(?:la|lo|te la|te lo)\s+(?:movi|cambie|pase|reprograme)(?![\p{L}])/u,
+  },
+  {
+    act: "cancelar",
+    re: /(?<![\p{L}])(?:quedo|queda|esta)\s+(?:ya\s+)?(?:cancelad|anulad)[oa]s?(?![\p{L}])/u,
+  },
+  {
+    act: "cancelar",
+    re: /(?<!que\s(?:te\s)?(?:la\s|lo\s)?)(?<![\p{L}])(?:cancele|anule)(?![\p{L}])/u,
+  },
+]
+
+/**
+ * Lo que la respuesta da por hecho: agendó o movió («quedó agendada», «te reservé», «la moví»,
+ * «listo, el lunes a las 10») o canceló («cancelé»). Solo puede decirlo si la herramienta lo hizo
+ * en este turno; si no, es una promesa falsa y va el aviso fijo.
+ */
+export function claimedActions(text: string): Set<"agendar" | "cancelar"> {
+  const out = new Set<"agendar" | "cancelar">()
+  const plainText = withoutMeridiemDots(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase())
+  for (const sentence of plainText.split(/(?<=[.!?])\s+|\n+/)) {
+    if (NOT_A_CLAIM.test(sentence)) continue
+    for (const claim of CLAIMS) if (claim.re.test(sentence)) out.add(claim.act)
+    if (
+      /^\s*(?:listo|perfecto|hecho|genial)(?![\p{L}])/u.test(sentence) &&
+      DAY_WORD.test(sentence) &&
+      clockMinutesIn(sentence).length > 0 &&
+      !OFFER_WORD.test(sentence)
+    )
+      out.add("agendar")
+  }
+  return out
+}
+
 /** Lo que se le dio en el turno, como fuentes de la comprobación. */
 function evidenceOf(input: KairosSellInput, state: TurnState): Evidence[] {
   const out: Evidence[] = [
@@ -653,7 +749,9 @@ async function runTurn(
     new HumanMessage({ content: sellContext(input) }),
   ]
   for (let step = 0; step < KAIROS_SELL_MAX_STEPS; step += 1) {
-    const reply = await bound.invoke(messages)
+    // Se acabó el tiempo: ya salió el aviso fijo (o la confirmación de lo hecho); no se sigue.
+    if (state.signal.aborted) return failedTurn(input, state, "El modelo tardó demasiado")
+    const reply = await bound.invoke(messages, { signal: state.signal })
     reportReplyUse(provider, modelName, reply)
     messages.push(reply)
     const calls = reply.tool_calls ?? []
@@ -676,9 +774,20 @@ async function runTurn(
           state,
           `La respuesta traía lo que no se le dio (${check.unsupported.join("; ")})`.slice(0, 300),
         )
+      const claimed = claimedActions(text)
+      if (
+        (claimed.has("agendar") && !state.booked) ||
+        (claimed.has("cancelar") && !state.cancelled)
+      )
+        return failedTurn(
+          input,
+          state,
+          `La respuesta daba por hecho lo que no hizo (${[...claimed].join(", ")})`,
+        )
       return { kind: "respondio", text: out, booked: state.booked }
     }
     for (const call of calls) {
+      if (state.signal.aborted) return failedTurn(input, state, "El modelo tardó demasiado")
       const content = await runTool(call.name, call.args, input, tools, state)
       messages.push(
         new ToolMessage({ content, tool_call_id: call.id ?? call.name, name: call.name }),
@@ -719,12 +828,15 @@ export function createKairosSeller(deps: KairosSellerDeps): KairosSeller {
   return {
     seller: fake ? "plantilla" : "modelo",
     async answer(input, tools) {
+      // Al acabarse el tiempo se corta: el modelo deja de llamarse y ninguna herramienta escribe.
+      const controller = new AbortController()
       const state: TurnState = {
         offered: new Map(),
         proposed: null,
         booked: null,
         cancelled: null,
         ended: null,
+        signal: controller.signal,
       }
       // Lo que ya hizo en la base se le confirma aunque el modelo falle o tarde después.
       const failed = (why: string): KairosSellResult => failedTurn(input, state, why)
@@ -742,7 +854,12 @@ export function createKairosSeller(deps: KairosSellerDeps): KairosSeller {
             return withTimeout(
               runTurn(model, resolved.provider, resolved.modelName, input, tools, state),
               timeoutMs,
-              () => failed("El modelo tardó demasiado"),
+              () => {
+                // Lo que ya agendó, movió o canceló antes de este instante sale con su confirmación.
+                const result = failed("El modelo tardó demasiado")
+                controller.abort()
+                return result
+              },
             )
           },
           async (entries) => {
