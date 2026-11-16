@@ -396,34 +396,57 @@ const QUOTES = /[«»“”"]/gu
  * que el profesional no dijo.
  */
 export function groundSource(said: string | undefined, transcript: string): string {
-  // La puntuación del final no es lo dicho: el modelo cierra con punto lo que en el dictado seguía con coma.
   const fragment = (said ?? "").trim()
   if (!fragment) return ""
-  const bare = (text: string) => text.trim().replace(/[\s.,;:!?…]+$/u, "")
-  const heard = loose(transcript)
-  const ground = (text: string) => {
-    if (!text) return ""
-    if (heard.includes(loose(text))) return text
-    if (bare(text).length >= 3 && heard.includes(loose(bare(text)))) return bare(text)
-    return text
-      .split(/(?<=[.;!?])\s+/)
-      .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
-      .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
-      .join(" ")
-  }
   // Con «...» entre palabras el modelo saltó lo de en medio: los pedazos no se juntan, porque juntos no
   // se dijeron; queda el más largo que está tal cual (medición del 16 nov: «cinco ... con extracción
   // indicada» dejaba lista una «e» de 5, y el cinco era de «cariados»).
-  const pieces = fragment.replace(QUOTES, "").split(/\s*(?:\.{3}|…)\s*/u).filter((piece) => piece.trim())
-  if (pieces.length > 1) return pieces.map(ground).reduce((longest, piece) => (piece.length > longest.length ? piece : longest), "")
+  const pieces = piecesOf(fragment)
+  if (pieces.length > 1) return pieces.map((piece) => groundText(piece, transcript)).reduce((longest, piece) => (piece.length > longest.length ? piece : longest), "")
   // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
   // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
   // respuestas de ficha perdidas eran las comillas.
-  return ground(fragment) || ground(fragment.replace(QUOTES, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim())
+  return groundText(fragment, transcript) || groundText(fragment.replace(QUOTES, "").replace(/^\s*(?:\.{3}|…)\s*/u, "").trim(), transcript)
+}
+
+/**
+ * Los pedazos que el modelo citó separados con «...», cada uno tal cual en lo dictado; vacío si citó
+ * uno solo. En una respuesta de varias opciones cada opción puede estar en su pedazo: en «hábitos
+ * respiración bucal ... y se come las uñas» queda «hábitos respiración bucal» (`groundSource`) y la
+ * onicofagia está en el otro (prueba con voz c7, v03). El servidor comprueba cada opción en el suyo.
+ */
+export function groundPieces(said: string | undefined, transcript: string): string[] {
+  const pieces = piecesOf((said ?? "").trim())
+  return pieces.length > 1 ? pieces.map((piece) => groundText(piece, transcript)).filter(Boolean) : []
+}
+
+const piecesOf = (fragment: string) =>
+  fragment
+    .replace(QUOTES, "")
+    .split(/\s*(?:\.{3}|…)\s*/u)
+    .filter((piece) => piece.trim())
+
+/** El texto, o lo que de él está tal cual en lo dictado, frase por frase. */
+function groundText(text: string, transcript: string): string {
+  if (!text) return ""
+  // La puntuación del final no es lo dicho: el modelo cierra con punto lo que en el dictado seguía con coma.
+  const bare = (part: string) => part.trim().replace(/[\s.,;:!?…]+$/u, "")
+  const heard = loose(transcript)
+  if (heard.includes(loose(text))) return text
+  if (bare(text).length >= 3 && heard.includes(loose(bare(text)))) return bare(text)
+  return text
+    .split(/(?<=[.;!?])\s+/)
+    .map((sentence) => (heard.includes(loose(sentence.trim())) ? sentence.trim() : bare(sentence)))
+    .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
+    .join(" ")
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** Lo que cambia es solo la respuesta de una ficha (`answer`, `answers`, `question`), no un campo de otra sugerencia. */
+const formAnswerOnly = (item: unknown) =>
+  isRecord(item) && isRecord(item["cambios"]) && Object.keys(item["cambios"]).length > 0 && Object.keys(item["cambios"]).every((key) => ["answer", "answers", "question"].includes(key))
 const blank = (value: unknown) =>
   value === undefined || value === null || (typeof value === "string" && !value.trim())
 
@@ -524,15 +547,24 @@ export function readDictation(
       const unknownQuestion =
         part.kind === "ficha" && !(typeof question === "number" && Number.isInteger(question) && question >= 1 && question <= forms.length)
       if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion) skip(item)
-      else drafts.push({ kind: part.kind, payload, sourceText: quote(item, part.kind) })
+      else {
+        // Varias opciones citadas en pedazos: cada pedazo va aparte, para comprobar cada opción en el suyo.
+        const multiple = part.kind === "ficha" && forms.find((one) => one.number === question)?.type === "opcion_multiple"
+        const pieces = multiple && typeof item["dicho"] === "string" ? groundPieces(item["dicho"], transcript) : []
+        drafts.push({ kind: part.kind, payload, sourceText: quote(item, part.kind), ...(pieces.length > 1 ? { pieces } : {}) })
+      }
     }
   }
 
   const corrections: DictationExtraction["corrections"] = []
   for (const item of items(args["correcciones"])) {
     const index = isRecord(item) ? pendingIndex(item["sugerencia"]) : null
-    if (!isRecord(item) || index === null || !isRecord(item["cambios"])) skip(item)
-    else corrections.push({ index, changes: item["cambios"], sourceText: quote(item) })
+    if (isRecord(item) && index !== null && isRecord(item["cambios"])) corrections.push({ index, changes: item["cambios"], sourceText: quote(item) })
+    // Con una ficha abierta, Clío a veces repite aquí sus respuestas («cambios» con solo la respuesta, a
+    // una pendiente que no existe): no se pidió corregir nada, y lo dictado ya lo comprueba la ficha, que
+    // avisa con su motivo lo que no quedó. Mostrarla daba un «4» suelto, sin motivo ni dónde usarlo
+    // (prueba con voz c7, v11).
+    else if (!(forms.length && formAnswerOnly(item))) skip(item)
   }
   const removals: DictationExtraction["removals"] = []
   for (const item of items(args["quitar"])) {
