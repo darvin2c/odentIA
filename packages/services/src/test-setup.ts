@@ -73,7 +73,7 @@ export async function retireWhatsApp(orgId: string): Promise<void> {
 }
 
 /**
- * Una clínica tiene una sola cuenta activa por canal de mensajería: las pruebas
+ * Una clínica suele tener un solo bot o una sola página por canal: las pruebas
  * que abren una conversación por caso sobre la misma organización reusan la del
  * canal, como el bot único de la clínica. Nula si todavía no hay ninguna.
  */

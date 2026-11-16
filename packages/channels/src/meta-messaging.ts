@@ -9,6 +9,9 @@
 // - IG webhooks: https://developers.facebook.com/docs/instagram-platform/webhooks/
 // Messenger: host graph.facebook.com, token de página, permiso pages_messaging,
 // envío POST /{PAGE-ID}/messages con messaging_type RESPONSE.
+// Instagram por Facebook («Conectar con Facebook»): host graph.facebook.com, el
+// token de la página a la que está unida la cuenta, permisos instagram_basic +
+// instagram_manage_messages, envío POST /{PAGE-ID}/messages.
 // Instagram Login: host graph.instagram.com, token de usuario de Instagram,
 // permisos instagram_business_basic + instagram_business_manage_messages,
 // envío POST /{IG-ID}/messages (sin messaging_type), texto máx. 1000 bytes,
@@ -35,14 +38,23 @@ const IG_HOST = "https://graph.instagram.com"
 export interface MessengerConfig {
   pageId: string
   pageAccessToken: string
+  /** Vacía si se conectó con el botón: sus avisos llegan firmados con la clave de la app de odentIA. */
   appSecret: string
 }
 
 export interface InstagramConfig {
   /** ID de la cuenta profesional de Instagram (IG-ID). */
   instagramId: string
-  /** Token de usuario de Instagram con instagram_business_manage_messages. */
+  /**
+   * «instagram»: Instagram Login, token de usuario de Instagram (la app propia).
+   * «facebook»: «Conectar con Facebook», token de la página a la que está unida.
+   */
+  via: "instagram" | "facebook"
+  /** El token con que se envía: el de Instagram o el de la página. */
   accessToken: string
+  /** La página unida, si se conectó por Facebook. */
+  pageId: string | null
+  /** Vacía si se conectó con el botón (como Messenger). */
   appSecret: string
 }
 
@@ -54,20 +66,42 @@ function pick(config: Record<string, unknown>, key: string, label: string): stri
   return v
 }
 
+const optional = (config: Record<string, unknown>, key: string): string =>
+  typeof config[key] === "string" ? (config[key] as string) : ""
+
 function messengerConfig(config: Record<string, unknown>): MessengerConfig {
   return {
     pageId: pick(config, "pageId", "Messenger"),
     pageAccessToken: pick(config, "pageAccessToken", "Messenger"),
-    appSecret: pick(config, "appSecret", "Messenger"),
+    appSecret: optional(config, "appSecret"),
   }
 }
 
 function instagramConfig(config: Record<string, unknown>): InstagramConfig {
-  return {
-    instagramId: pick(config, "instagramId", "Instagram"),
-    accessToken: pick(config, "accessToken", "Instagram"),
-    appSecret: pick(config, "appSecret", "Instagram"),
+  const instagramId = pick(config, "instagramId", "Instagram")
+  // Con el botón llegan la página y su clave: se habla con la API de Facebook.
+  // Sin `pageId` (la cuenta de Instagram de la administración) sigue Instagram Login.
+  if (typeof config["pageAccessToken"] === "string" && config["pageAccessToken"] && typeof config["pageId"] === "string" && config["pageId"]) {
+    return {
+      instagramId,
+      via: "facebook",
+      accessToken: config["pageAccessToken"] as string,
+      pageId: pick(config, "pageId", "Instagram"),
+      appSecret: optional(config, "appSecret"),
+    }
   }
+  return {
+    instagramId,
+    via: "instagram",
+    accessToken: pick(config, "accessToken", "Instagram"),
+    pageId: null,
+    appSecret: optional(config, "appSecret"),
+  }
+}
+
+/** La app de odentIA, guardada al conectar con el botón: distingue sus ecos de los de Meta Business Suite. */
+function ownAppIdOf(config: Record<string, unknown>): string | null {
+  return typeof config["appId"] === "string" && config["appId"] ? config["appId"] : null
 }
 
 function header(headers: Record<string, string>, name: string): string | undefined {
@@ -121,6 +155,8 @@ interface MetaMessage {
   text?: string
   attachments?: MetaAttachment[]
   is_echo?: boolean
+  /** En un eco: la app que lo envió. La de odentIA, si salió de aquí. */
+  app_id?: number | string
   quick_reply?: { payload?: string }
 }
 
@@ -170,12 +206,16 @@ function toNormalized(
   ev: MetaMessaging,
   messages: NormalizedInbound[],
   statuses: NormalizedStatus[],
+  ownAppId: string | null = null,
 ): void {
   if (actualObject !== expectedObject) return
-  const senderId = ev.sender?.id
+  const echo = ev.message?.is_echo === true
+  // En un eco la página es quien envía y la persona quien recibe.
+  const senderId = echo ? ev.recipient?.id : ev.sender?.id
   if (!senderId) return
   // El webhook es por conexión: ignora eventos de otra página/cuenta.
-  if (ev.recipient?.id && ev.recipient.id !== expectedRecipient) return
+  const page = echo ? ev.sender?.id : ev.recipient?.id
+  if (page && page !== expectedRecipient) return
   const sentAt =
     typeof ev.timestamp === "number" ? new Date(ev.timestamp).toISOString() : new Date().toISOString()
   if (ev.delivery?.mids) {
@@ -187,8 +227,12 @@ function toNormalized(
   // `read` solo trae watermark (sin mid): no se puede atribuir a un mensaje.
   const msg = ev.message
   if (msg) {
-    // Ecos propios (mensajes enviados por la página): nunca se ingieren.
-    if (msg.is_echo) return
+    // Ecos: lo enviado por la página. Lo que salió de odentIA ya está en la
+    // Bandeja; lo respondido desde Meta Business Suite o la app del celular
+    // entra como respuesta del equipo, para no contestar dos veces. Solo con
+    // el botón se sabe cuál es la app de odentIA: sin eso, ningún eco entra.
+    // Si el eco no dice de qué app salió, tampoco entra: podría ser uno nuestro.
+    if (msg.is_echo && (!ownAppId || msg.app_id === undefined || String(msg.app_id) === ownAppId)) return
     if (typeof msg.mid !== "string" || !msg.mid) return
     const base = {
       externalEventId: msg.mid,
@@ -196,6 +240,7 @@ function toNormalized(
       externalThreadId: `${prefix}:${senderId}`,
       senderExternalId: `${prefix}:${senderId}`,
       sentAt,
+      ...(echo ? { fromBusinessApp: true } : {}),
     }
     const text = typeof msg.text === "string" ? msg.text : ""
     const quick = msg.quick_reply?.payload
@@ -410,7 +455,7 @@ export const messengerAdapter: ChannelAdapter = {
     }
     for (const entry of entries) {
       for (const ev of entry.messaging ?? []) {
-        toNormalized("page", object, "msgr", recipient, ev, empty.messages, empty.statuses)
+        toNormalized("page", object, "msgr", recipient, ev, empty.messages, empty.statuses, ownAppIdOf(config))
       }
     }
     return empty
@@ -474,7 +519,7 @@ export const instagramAdapter: ChannelAdapter = {
     }
     for (const entry of entries) {
       for (const ev of entry.messaging ?? []) {
-        toNormalized("instagram", object, "ig", recipient, ev, empty.messages, empty.statuses)
+        toNormalized("instagram", object, "ig", recipient, ev, empty.messages, empty.statuses, ownAppIdOf(config))
       }
     }
     return empty
@@ -482,10 +527,11 @@ export const instagramAdapter: ChannelAdapter = {
 
   async sendMessage(config, msg, deps) {
     const cfg = instagramConfig(config)
+    const byFacebook = cfg.via === "facebook"
     return sendViaGraph(
       "Instagram",
-      `${IG_HOST}/${metaGraphVersion()}`,
-      `${cfg.instagramId}/messages`,
+      `${byFacebook ? GRAPH_HOST : IG_HOST}/${metaGraphVersion()}`,
+      `${byFacebook ? cfg.pageId : cfg.instagramId}/messages`,
       cfg.accessToken,
       stripPrefix(msg.to, "ig"),
       msg.kind,
@@ -505,7 +551,7 @@ export const instagramAdapter: ChannelAdapter = {
       cfg.accessToken,
       {},
       deps,
-      `${IG_HOST}/${metaGraphVersion()}`,
+      `${cfg.via === "facebook" ? GRAPH_HOST : IG_HOST}/${metaGraphVersion()}`,
     )
     if (status >= 500) throw new Error(`Instagram no respondió al comprobar la cuenta: ${graphError(status, json)}`)
     if (status >= 400 || !json || typeof json !== "object" || !("id" in json)) {
@@ -516,4 +562,26 @@ export const instagramAdapter: ChannelAdapter = {
       "username" in json && typeof json.username === "string" ? `@${json.username}` : id
     return { externalId: id, displayName: username }
   },
+}
+
+/**
+ * Instagram conectado a mano (Instagram Login): su clave dura 60 días y se
+ * renueva con ella misma, siempre que tenga al menos 24 horas y no haya
+ * vencido. Devuelve la nueva; si Instagram ya no la acepta, ConnectionRejectedError.
+ * https://developers.facebook.com/docs/instagram-platform/reference/refresh_access_token
+ */
+export async function refreshInstagramLoginToken(
+  accessToken: string,
+  deps: ChannelAdapterDeps,
+): Promise<{ accessToken: string; expiresInSeconds: number | null }> {
+  const query = new URLSearchParams({ grant_type: "ig_refresh_token", access_token: accessToken })
+  const res = await deps.fetch(`${IG_HOST}/refresh_access_token?${query.toString()}`, { method: "GET" })
+  const json: unknown = await res.json().catch(() => null)
+  if (res.status >= 500) throw new Error(`Instagram no respondió al renovar la clave: ${graphError(res.status, json)}`)
+  const token = json && typeof json === "object" && "access_token" in json && typeof json.access_token === "string" ? json.access_token : ""
+  if (res.status >= 400 || !token) {
+    throw new ConnectionRejectedError("Instagram no renovó la clave", graphRejectedPart(json))
+  }
+  const expires = json && typeof json === "object" && "expires_in" in json && typeof json.expires_in === "number" ? json.expires_in : null
+  return { accessToken: token, expiresInSeconds: expires }
 }

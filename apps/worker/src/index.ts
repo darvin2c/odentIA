@@ -57,6 +57,7 @@ import { runReportDigestTick } from "./report-digests.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
 import { createTranscriber } from "./transcribe.js"
+import { runInstagramTokenTick, runPageTokenTick } from "./meta-pages.js"
 import { runOwnAppNumberTick, runOwnAppTokenTick, runSignupTokenTick } from "./whatsapp-tokens.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
@@ -476,6 +477,22 @@ queues.push({
     nextOwnAppNumberPoll = Date.now() + 24 * 3_600_000
     const result = await runOwnAppNumberTick(ownerDb, db, { secretsKey, fetch })
     for (const error of result.errors) console.error(`worker: whatsapp_own_app_numbers ${error}`)
+    return false
+  },
+})
+
+// Messenger e Instagram conectados con Facebook: una vez al día, si la clave de cada página sigue sirviendo.
+let nextPageTokenPoll = 0
+queues.push({
+  name: "meta_page_tokens",
+  poll: async () => {
+    if (Date.now() < nextPageTokenPoll) return false
+    nextPageTokenPoll = Date.now() + 24 * 3_600_000
+    const result = await runPageTokenTick(ownerDb, db, { secretsKey, fetch })
+    for (const error of result.errors) console.error(`worker: meta_page_tokens ${error}`)
+    // Y la clave de Instagram conectado a mano, que vence a los 60 días.
+    const instagram = await runInstagramTokenTick(ownerDb, db, { secretsKey, fetch })
+    for (const error of instagram.errors) console.error(`worker: meta_page_tokens ${error}`)
     return false
   },
 })

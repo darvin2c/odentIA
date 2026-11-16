@@ -321,3 +321,19 @@ describe("al volver de autorizar el correo", () => {
     expect(mailNotice({})).toBeNull()
   })
 })
+
+describe("la vuelta de Facebook con las páginas", () => {
+  it("dice qué se conectó, qué página no tiene Instagram y qué ya estaba en otra clínica", () => {
+    const search = validateIntegrationsSearch({ facebook: "ok", messenger: "2", instagram: "1", sinig: "1", otra: "0" })
+    expect(mailNotice(search)).toEqual({
+      tone: "success",
+      text: "Quedó conectado Messenger (2 páginas) e Instagram (1 cuenta): lo que escriban ya entra a la Bandeja. Una página no tiene un Instagram de empresa unido: únelo en Meta Business Suite y vuelve a conectar.",
+    })
+    expect(mailNotice(validateIntegrationsSearch({ facebook: "ok", messenger: "0", instagram: "0", otra: "1" }))).toEqual({
+      tone: "danger",
+      text: "No se conectó ninguna cuenta nueva. Una cuenta ya está conectada en otra clínica y no se tocó.",
+    })
+    expect(mailNotice({ facebook: "cancelado" })?.text).toContain("cerraste la ventana de Facebook")
+    expect(mailNotice({ facebook: "sin-paginas" })?.text).toContain("marca la página de la clínica")
+  })
+})

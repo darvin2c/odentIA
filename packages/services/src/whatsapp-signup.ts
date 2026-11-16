@@ -70,7 +70,7 @@ import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./wor
  * cuál falta y por qué (`signup.pending`) y se reintenta con el permiso guardado
  * (`pendingSignupWork` → pasos 3 y 4), sin abrir otra vez la ventana de Meta.
  *
- * NADA DE ESTO SE HA PROBADO CONTRA META: la app de odentIA todavía no existe.
+ * Probado contra Meta real el 16 nov con la app SALLCA (coexistencia incluida).
  * Las pruebas usan un `fetch` que responde con la forma que publica Meta.
  */
 

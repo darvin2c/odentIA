@@ -9,10 +9,12 @@ import { configureMailLinks, createMailer } from "@odentia/mail"
 import { adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
+import { metaPagesFromEnv } from "./routes/meta-pages.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 
 // Una sola versión del Graph de Meta: el botón de Facebook, WhatsApp, Messenger e Instagram.
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
+const metaSignup = metaSignupFromEnv(env)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
 configureMailLinks(env.WEB_URL, mailBrandDomains(env.productDomains))
@@ -147,7 +149,8 @@ const app = createApp({
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
-  metaSignup: metaSignupFromEnv(env),
+  metaSignup,
+  metaPages: metaPagesFromEnv(metaSignup, env),
   adminChannels,
   adminChannelsFetch,
   vapidPublicKey: env.VAPID_PUBLIC_KEY,

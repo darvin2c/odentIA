@@ -454,8 +454,9 @@ export function FacebookSignup({
         )}
       </form.AppField>
       {/* Meta lo pide al crear la cuenta de la clínica y no deja seguir sin él. */}
-      <p className="text-sm text-muted-foreground">
-        Ten a mano la dirección de la web de la clínica o de su página de Facebook o Instagram: Meta la pide para crear la cuenta.
+      <p className="rounded-xl bg-muted px-3.5 py-3 text-sm">
+        <strong className="font-semibold">Ten a mano:</strong> el teléfono de ese número y la dirección de la web de la
+        clínica o de su página de Facebook o Instagram (Meta la pide para crear la cuenta).
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <SubmitButton type="submit" pending={busy} className="min-h-11 sm:min-h-9">

@@ -6,7 +6,7 @@
 // Documentación leída el 2026-10-13 (la URL exacta va junto a cada llamada):
 // https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider
 //
-// NADA DE ESTO SE HA PROBADO CONTRA META: la app de odentIA todavía no existe.
+// Probado contra Meta real el 16 nov con la app SALLCA (coexistencia incluida).
 // Las formas de las respuestas son las que publica la documentación; donde esta
 // no las muestra completas se aceptan las variantes razonables y se dice.
 import { randomInt } from "node:crypto"
@@ -35,6 +35,7 @@ export type MetaSignupStep =
   | "comprobar"
   | "leer"
   | "desuscribir"
+  | "paginas"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -112,7 +113,7 @@ export function failure(step: MetaSignupStep, answer: GraphAnswer): MetaSignupEr
 }
 
 /** `{ "success": true }`; la referencia del registro admite también el texto `"true"`. */
-function succeeded(json: unknown): boolean {
+export function succeeded(json: unknown): boolean {
   if (!json || typeof json !== "object" || !("success" in json)) return false
   return json.success === true || json.success === "true"
 }

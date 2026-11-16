@@ -953,6 +953,20 @@
       "when": 1794849551102,
       "tag": "0135_una_activa_por_canal",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794858845229,
+      "tag": "0136_varias_cuentas_salvo_whatsapp",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794859198364,
+      "tag": "0137_estado_oauth_paginas_meta",
+      "breakpoints": true
     }
   ]
 }

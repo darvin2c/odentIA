@@ -902,12 +902,9 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(tested.status).toBe(200)
   expect(((await tested.json()) as { data: Record<string, unknown> }).data).toMatchObject({ ok: false, account: null, checkedAt: expect.any(String) })
 
-  // Una cuenta activa por canal: con el bot de antes conectado, otro se rechaza diciendo cuál está.
+  // Telegram admite varios bots a la vez, como varios buzones de correo: solo WhatsApp tiene uno.
   const second = await post(app, "/channels/connections", { channel: "telegram", provider: "telegram_bot_api", config: { botToken: "segundo" } })
-  expect(second.status).toBe(409)
-  expect(((await second.json()) as { error: { message: string } }).error.message).toContain("La clínica ya tiene un bot de Telegram conectado")
-  // Como hace la clínica al cambiar de bot: desconecta el anterior.
-  await ownerDb.execute(sql`update channel_connection set status = 'disabled' where organization_id = 'org_a' and channel = 'telegram'`)
+  expect(second.status).toBe(201)
 
   // El nombre es opcional: sin él queda el del canal (o el que dé el proveedor).
   const unnamed = await post(app, "/channels/connections", { channel: "telegram", provider: "telegram_bot_api", config: { botToken: "sin-nombre" } })

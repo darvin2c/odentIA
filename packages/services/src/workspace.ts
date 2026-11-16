@@ -162,6 +162,8 @@ export interface WorkspaceNoticeInput {
  *   pegó otra clave, o la conexión ya no está activa.
  * - `numero-sin-registro:<conexión>`: el número de la app propia volvió a quedar
  *   registrado («Volver a comprobar») o la conexión ya no está activa.
+ * - `renovar-instagram:<conexión>`: Instagram conectado a mano se renovó o se
+ *   pegó otra clave después del aviso (la conexión cambió), o ya no está activa.
  */
 export const NOTICE_SUBJECTS = [
   "producto",
@@ -174,6 +176,7 @@ export const NOTICE_SUBJECTS = [
   "meta-desconecto",
   "clave-propia",
   "numero-sin-registro",
+  "renovar-instagram",
   "preguntas-nuevas",
 ] as const
 
@@ -292,6 +295,9 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'numero-sin-registro:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("numero-sin-registro")}
             and c.status = 'active' and c.own_app is not null and c.own_app->>'registeredAt' is null))
+        or (n.subject like 'renovar-instagram:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("renovar-instagram")}
+            and c.status = 'active' and c.updated_at <= n.created_at))
         or (n.subject = 'preguntas-nuevas' and exists (select 1 from patient_registration_config c
           where c.organization_id = n.organization_id and c.questions_version >= ${REGISTRATION_QUESTIONS_VERSION}))
       )`)
