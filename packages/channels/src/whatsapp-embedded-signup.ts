@@ -34,6 +34,7 @@ export type MetaSignupStep =
   | "revisar"
   | "comprobar"
   | "leer"
+  | "desuscribir"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -66,7 +67,7 @@ export interface GraphAnswer {
 export async function graph(
   step: MetaSignupStep,
   url: string,
-  init: { method: "GET" | "POST"; token?: string; body?: unknown },
+  init: { method: "GET" | "POST" | "DELETE"; token?: string; body?: unknown },
   deps: ChannelAdapterDeps,
 ): Promise<GraphAnswer> {
   let res: Response
@@ -287,6 +288,30 @@ export async function subscribeAppToAccount(
     deps,
   )
   if (answer.status >= 400 || !succeeded(answer.json)) throw failure("suscribir", answer)
+}
+
+/**
+ * Al desconectar: quita la suscripción de la app de odentIA a la cuenta de la
+ * clínica. Meta deja de entregarnos sus avisos y la clínica ve en su cuenta que
+ * odentIA ya no la usa. No da de baja el número: sigue funcionando donde esté.
+ * Repetirla no cambia nada.
+ *
+ * `DELETE /<WABA_ID>/subscribed_apps` → `{ "success": true }`
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
+ */
+export async function unsubscribeAppFromAccount(
+  app: Pick<MetaPlatformApp, "graphVersion">,
+  wabaId: string,
+  token: string,
+  deps: ChannelAdapterDeps,
+): Promise<void> {
+  const answer = await graph(
+    "desuscribir",
+    `${base(app)}/${encodeURIComponent(wabaId)}/subscribed_apps`,
+    { method: "DELETE", token },
+    deps,
+  )
+  if (answer.status >= 400 || !succeeded(answer.json)) throw failure("desuscribir", answer)
 }
 
 /**

@@ -830,3 +830,174 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect((await queued()).at(-1)).toBe("org_e wamid.manual-propia")
   })
 })
+
+describe("un número desconectado no queda tomado", () => {
+  /** Las rutas de conexiones con la app de odentIA configurada y un Meta de prueba. */
+  const connections = (orgId: string, meta: ReturnType<typeof fakeMeta>) => {
+    const app = new Hono()
+    app.use("*", stubOrg(orgId, "owner"))
+    app.route(
+      "/channels/connections",
+      createConnectionsRoute({
+        db: appDb,
+        secretsKey: KEY,
+        storage: storageStub,
+        validateExternal: true,
+        webhookBaseUrl: "https://api.example.com",
+        metaGraphVersion: META.graphVersion,
+        fetch: meta.fetch,
+      }),
+    )
+    return app
+  }
+  const sign = (raw: string) =>
+    `sha256=${createHmac("sha256", META.appSecret).update(raw, "utf8").digest("hex")}`
+  const deliver = (raw: string) =>
+    createWebhooksRoute({
+      ownerDb,
+      db: appDb,
+      secretsKey: KEY,
+      metaApp: { appSecret: META.appSecret, verifyToken: META.webhookVerifyToken },
+    }).request("/meta/whatsapp", {
+      method: "POST",
+      headers: { "x-hub-signature-256": sign(raw), "content-type": "application/json" },
+      body: raw,
+    })
+  const lastQueued = async () => {
+    const rows = (await ownerDb.execute(
+      sql`select message from pgmq.q_inbound_messages order by msg_id desc limit 1`,
+    )) as unknown as {
+      message: { orgId: string; connectionId: string; event: { externalEventId: string } }
+    }[]
+    return rows[0]?.message
+  }
+
+  it("vuelve con el botón a su misma conexión, otra clínica lo toma cuando se desconecta, y la vieja no se lo quita", async () => {
+    await newOrg("org_k")
+    await newOrg("org_m")
+    const meta = fakeMeta()
+    // Dental Smile lo conectó a mano, con su propia app, y lo desconectó.
+    const old = await withOrgContext(appDb, "org_k", (tx) =>
+      createConnection(
+        tx,
+        "org_k",
+        KEY,
+        {
+          channel: "whatsapp",
+          provider: "whatsapp_cloud_api",
+          displayName: "A mano",
+          config: {
+            phoneNumberId: "9020",
+            wabaId: "7020",
+            accessToken: "clave-propia",
+            appSecret: "secreto-propio",
+          },
+        },
+        { fetch: meta.fetch },
+      ),
+    )
+    expect(
+      (await post(connections("org_k", meta), `/channels/connections/${old.id}/disable`)).status,
+    ).toBe(200)
+    // Hecha a mano, la app es de la clínica: desconectar no le pide nada a Meta.
+    expect(meta.of("DELETE", "/subscribed_apps")).toHaveLength(0)
+
+    // Con el botón, el mismo número sigue en la misma conexión, con sus conversaciones.
+    const again = await connect("org_k", meta, {
+      code: "codigo-k",
+      wabaId: "7020",
+      phoneNumberId: "9020",
+    })
+    expect(again.error).toBeUndefined()
+    expect(again.data).toMatchObject({ id: old.id, status: "active", externalId: "9020" })
+    expect(again.data?.signup?.subscribedAt).toBeTruthy()
+    expect((await rowOf(old.id)).ownApp).toBeNull()
+    expect(await rowsOf("org_k")).toHaveLength(1)
+
+    // Mientras está activo, otra clínica no puede tomarlo.
+    const taken = await connect("org_m", meta, {
+      code: "codigo-m1",
+      wabaId: "7020",
+      phoneNumberId: "9020",
+    })
+    expect(taken.error).toMatchObject({
+      code: "CONNECTION_EXISTS",
+      message: "Esa cuenta ya está conectada en otra clínica de odentIA.",
+    })
+
+    // Desconectar quita en Meta la suscripción de la app; el número no se da de baja.
+    expect(
+      (await post(connections("org_k", meta), `/channels/connections/${old.id}/disable`)).status,
+    ).toBe(200)
+    expect(meta.of("DELETE", "/7020/subscribed_apps")).toHaveLength(1)
+    expect(meta.of("POST", "/9020/deregister")).toHaveLength(0)
+    expect((await rowOf(old.id)).signup?.subscribedAt).toBeNull()
+
+    // Desconectado, otra clínica sí lo conecta.
+    const moved = await connect("org_m", meta, {
+      code: "codigo-m2",
+      wabaId: "7020",
+      phoneNumberId: "9020",
+    })
+    expect(moved.status).toBe(201)
+    expect(moved.data?.id).not.toBe(old.id)
+
+    // La clínica vieja no se lo quita: lo dice en vez de reactivar.
+    const back = await post(connections("org_k", meta), `/channels/connections/${old.id}/enable`)
+    expect(back.status).toBe(409)
+    expect(((await back.json()) as { error: { message: string } }).error.message).toBe(
+      "Ese número ahora está conectado en otra clínica de odentIA. Para usarlo aquí, primero tienen que desconectarlo allá.",
+    )
+    expect((await rowOf(old.id)).status).toBe("disabled")
+
+    // Lo que escribe un paciente a ese número llega a la clínica donde está activo.
+    const raw = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "7020",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: { display_phone_number: "x", phone_number_id: "9020" },
+                messages: [
+                  {
+                    from: "51977777777",
+                    id: "wamid.movido",
+                    timestamp: "1735689600",
+                    type: "text",
+                    text: { body: "Hola" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect((await deliver(raw)).status).toBe(200)
+    expect(await lastQueued()).toMatchObject({
+      orgId: "org_m",
+      connectionId: moved.data!.id,
+      event: { externalEventId: "wamid.movido" },
+    })
+
+    // Cuando la otra lo suelta, la vieja vuelve y la app se suscribe de nuevo.
+    expect(
+      (await post(connections("org_m", meta), `/channels/connections/${moved.data!.id}/disable`))
+        .status,
+    ).toBe(200)
+    const subscribedBefore = meta.of("POST", "/7020/subscribed_apps").length
+    const returned = await post(
+      connections("org_k", meta),
+      `/channels/connections/${old.id}/enable`,
+    )
+    expect(returned.status).toBe(200)
+    expect(meta.of("POST", "/7020/subscribed_apps")).toHaveLength(subscribedBefore + 1)
+    const row = await rowOf(old.id)
+    expect(row.status).toBe("active")
+    expect(row.signup?.subscribedAt).toBeTruthy()
+  })
+})

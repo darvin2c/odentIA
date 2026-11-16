@@ -29,6 +29,7 @@ export {
   type SignupToken,
   type SignupTokenState,
   subscribeAppToAccount,
+  unsubscribeAppFromAccount,
 } from "./whatsapp-embedded-signup.js"
 export {
   inspectOwnAppToken,

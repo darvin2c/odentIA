@@ -299,10 +299,20 @@ export async function completeMailboxOAuth(
       )
       .limit(1)
     if (existing) {
-      await tx
-        .update(channelConnection)
-        .set({ configEncrypted: sealed(tokens.accessToken), status: "active", updatedAt: new Date() })
-        .where(eq(channelConnection.id, existing.id))
+      try {
+        // Punto de retorno: mientras estuvo desconectado, otra organización pudo conectar ese buzón.
+        await tx.transaction((inner) =>
+          inner
+            .update(channelConnection)
+            .set({ configEncrypted: sealed(tokens.accessToken), status: "active", updatedAt: new Date() })
+            .where(eq(channelConnection.id, existing.id)),
+        )
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ServiceError("MAILBOX_TAKEN", 409, "Este buzón ya está conectado en otra organización")
+        }
+        throw error
+      }
       await auditMailbox(tx, pending.organizationId, input.userId, "mailbox.reconnected", existing.id, {
         provider,
         emailAddress,
@@ -326,7 +336,7 @@ export async function completeMailboxOAuth(
         .returning({ id: channelConnection.id })
       created = rows[0]
     } catch (error) {
-      // unique (provider, external_id) global: el buzón vive en otra org.
+      // unique (provider, external_id) entre los activos: el buzón vive en otra org.
       if (isUniqueViolation(error)) {
         throw new ServiceError(
           "MAILBOX_TAKEN",

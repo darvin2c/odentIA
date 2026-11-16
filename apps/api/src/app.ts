@@ -1242,7 +1242,7 @@ export function createApp(deps: AppDeps) {
     storage: deps.storage,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
-    ...(deps.metaSignup ? { metaAppId: deps.metaSignup.appId } : {}),
+    ...(deps.metaSignup ? { metaAppId: deps.metaSignup.appId, metaGraphVersion: deps.metaSignup.graphVersion } : {}),
   }
   guarded.route(
     "/",

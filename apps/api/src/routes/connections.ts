@@ -1,8 +1,9 @@
-import { type ChannelProvider, channelAdapters } from "@odentia/channels"
+import { type ChannelProvider, channelAdapters, unsubscribeAppFromAccount } from "@odentia/channels"
 import { withOrgContext } from "@odentia/db"
 import {
   changeConnectionCredentials,
   checkMessageText,
+  closeWhatsAppSignup,
   connectionWebhookUrl,
   createClinicMessage,
   createConnection,
@@ -11,10 +12,13 @@ import {
   listClinicMessages,
   listConnections,
   listConnectionsOverview,
+  resubscribeWork,
   retryOwnApp,
   revertMessageText,
   saveMessageText,
+  runSignupSteps,
   setConnectionStatus,
+  signupAccess,
   syncConnectionAccount,
   testConnection,
 } from "@odentia/services"
@@ -238,29 +242,57 @@ export function createConnectionsRoute(deps: CrmDeps) {
     )
   })
 
+  /**
+   * Desconectar. Si se hizo con el botón, además quita en Meta la suscripción de
+   * la app de odentIA a la cuenta de la clínica, fuera de la transacción: si Meta
+   * no contesta, la conexión queda igual desconectada (odentIA descarta lo que
+   * llegue) y al volver a conectar se pide de nuevo. No da de baja el número.
+   */
   app.post("/:id/disable", async (c) => {
     const denied = forbidden(c, "settings.write")
     if (denied) return denied
     const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setConnectionStatus(tx, orgId, c.req.param("id"), "disabled"),
-      ),
-    )
+    const id = c.req.param("id")
+    return runService(c, 200, async () => {
+      const { updated, access } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        updated: await setConnectionStatus(tx, orgId, id, "disabled"),
+        access: await signupAccess(tx, orgId, deps.secretsKey, id),
+      }))
+      if (access && deps.metaGraphVersion && deps.validateExternal !== false) {
+        await unsubscribeAppFromAccount({ graphVersion: deps.metaGraphVersion }, access.wabaId, access.token, { fetch: deps.fetch ?? fetch }).catch(
+          (error: unknown) => {
+            console.warn(`[connections] no se pudo quitar la suscripción de la app en Meta: ${error instanceof Error ? error.message : "sin detalle"}`)
+          },
+        )
+      }
+      return updated
+    })
   })
 
+  /**
+   * Volver a conectar. Si se hizo con el botón, pide otra vez en Meta la
+   * suscripción que se quitó al desconectar; si no sale, queda como paso
+   * pendiente con su «Reintentar», igual que al conectar.
+   */
   app.post("/:id/enable", async (c) => {
     const denied = forbidden(c, "settings.write")
     if (denied) return denied
     const { orgId } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setConnectionStatus(tx, orgId, c.req.param("id"), "active", {
+    const id = c.req.param("id")
+    return runService(c, 200, async () => {
+      const { updated, work } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        updated: await setConnectionStatus(tx, orgId, id, "active", {
           secretsKey: deps.secretsKey,
           deps: providerDeps,
         }),
-      ),
-    )
+        work: await resubscribeWork(tx, orgId, deps.secretsKey, id),
+      }))
+      if (!work || work.steps.length === 0 || !deps.metaGraphVersion || deps.validateExternal === false) return updated
+      const results = await runSignupSteps({ graphVersion: deps.metaGraphVersion }, work, { fetch: deps.fetch ?? fetch })
+      return withOrgContext(deps.db, orgId, (tx) =>
+        closeWhatsAppSignup(tx, orgId, deps.secretsKey, work, results, providerDeps),
+      )
+    })
   })
 
   // ---- los mensajes de WhatsApp de la clínica ---------------------------------

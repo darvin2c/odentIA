@@ -291,7 +291,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "whatsapp-conectar",
         q: "¿Cómo conecto el WhatsApp de la clínica?",
-        a: "En Configuración › Integraciones › WhatsApp hay dos formas. «Con tu Facebook» («Conectar con Facebook»): entras con el Facebook de quien administra la clínica, eliges el número y vuelves conectado; ten a mano el teléfono de ese número para recibir un código. «Con tu propia app de Meta» («Usar mi propia app»): para cuando el botón no está disponible o prefieres tener tu app; te guía paso a paso y pegas cuatro datos. Tu número y tu cuenta siguen siendo tuyos.",
+        a: "En Configuración › Integraciones › WhatsApp hay dos formas. «Con tu Facebook» («Conectar con Facebook»): entras con el Facebook de quien administra la clínica, eliges el número y vuelves conectado; ten a mano el teléfono de ese número para recibir un código y la dirección de la web de la clínica o de su página de Facebook o Instagram, que Meta pide al crear la cuenta. Si ese número ya estuvo conectado en la clínica, aunque haya sido con tu propia app, se sigue en la misma conexión con sus conversaciones. «Con tu propia app de Meta» («Usar mi propia app»): para cuando el botón no está disponible o prefieres tener tu app; te guía paso a paso y pegas cuatro datos. Tu número y tu cuenta siguen siendo tuyos.",
         forms: ["que necesito para conectar whatsapp", "no me sale el boton de facebook para conectar whatsapp"],
       },
       {
@@ -303,8 +303,13 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "whatsapp-desconectar",
         q: "¿Cómo desconecto el WhatsApp?",
-        a: "En Configuración › Integraciones › WhatsApp, «Desconectar» (en el teléfono, en el menú de la conexión). Los mensajes dejan de llegar a la Bandeja y el agente deja de atender y de enviar recordatorios y avisos por WhatsApp; lo que pueda salir por correo sigue saliendo y las conversaciones se conservan. «Probar conexión» dice si la cuenta responde.",
-        forms: ["como quito el numero de whatsapp de la clinica", "como pruebo la conexion de whatsapp"],
+        a: "En Configuración › Integraciones › WhatsApp, «Desconectar» (en el teléfono, en el menú de la conexión). Los mensajes dejan de llegar a la Bandeja y el agente deja de atender y de enviar recordatorios y avisos por WhatsApp; lo que pueda salir por correo sigue saliendo y las conversaciones se conservan. Si se conectó con Facebook, odentIA también deja de recibir los mensajes de tu cuenta en Meta; el número no se da de baja y sigue funcionando donde lo uses, también en la app del celular. Desconectado, el número queda libre: puedes conectarlo en otra clínica de odentIA o en otro programa. «Volver a conectar» lo retoma, salvo que ya esté conectado en otra clínica. «Probar conexión» dice si la cuenta responde.",
+        forms: [
+          "como quito el numero de whatsapp de la clinica",
+          "como pruebo la conexion de whatsapp",
+          "puedo usar el numero de whatsapp en otra clinica",
+          "si desconecto whatsapp se borra mi numero",
+        ],
       },
       {
         id: "whatsapp-celular",

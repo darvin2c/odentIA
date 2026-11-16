@@ -227,6 +227,8 @@ export function createWebhooksRoute(deps: WebhookDeps) {
             and(
               eq(channelConnection.provider, provider),
               eq(channelConnection.externalId, delivery.phoneNumberId),
+              // El mismo número puede seguir guardado, desconectado, en otra clínica.
+              eq(channelConnection.status, "active"),
             ),
           )
           .limit(1)

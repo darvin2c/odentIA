@@ -17,6 +17,14 @@ export interface CrmDeps {
    * configurado: sube el PDF de muestra del mensaje con documento (ADR 0156).
    */
   metaAppId?: string
+  /**
+   * La versión del Graph API de la app de odentIA, si «Conectar con Facebook»
+   * está configurado: desconectar y volver a conectar una conexión hecha con el
+   * botón quita y vuelve a pedir la suscripción de la app en Meta.
+   */
+  metaGraphVersion?: string
+  /** Para las pruebas: las llamadas a Meta de desconectar y volver a conectar. */
+  fetch?: typeof fetch
 }
 
 /**

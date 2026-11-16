@@ -453,6 +453,10 @@ export function FacebookSignup({
           </field.Group>
         )}
       </form.AppField>
+      {/* Meta lo pide al crear la cuenta de la clínica y no deja seguir sin él. */}
+      <p className="text-sm text-muted-foreground">
+        Ten a mano la dirección de la web de la clínica o de su página de Facebook o Instagram: Meta la pide para crear la cuenta.
+      </p>
       <div className="flex flex-wrap items-center gap-3">
         <SubmitButton type="submit" pending={busy} className="min-h-11 sm:min-h-9">
           {problem ? "Volver a intentar" : "Abrir la ventana de Meta"}

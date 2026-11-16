@@ -25,8 +25,10 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import {
+  adoptConnectionForSignup,
   changeConnectionCredentials,
   completeConnectionAccount,
+  findWhatsAppByNumber,
   type ConnectionChecked,
   type ConnectionDeps,
   createConnection,
@@ -313,6 +315,31 @@ export async function openWhatsAppSignup(
     const steps = SIGNUP_STEPS.filter((step) => step === "suscribir" || work.steps.includes(step))
     return { ...work, steps, account }
   }
+  // El número ya estuvo en esta clínica (a mano o con el botón, desconectado):
+  // se sigue en esa conexión, con sus conversaciones, en vez de crear otra.
+  const previousId = await findWhatsAppByNumber(tx, orgId, grant.checked.externalId)
+  if (previousId) {
+    const fresh = newRegistrationPin()
+    const adopted = await adoptConnectionForSignup(
+      tx,
+      orgId,
+      previousId,
+      secretsKey,
+      { phoneNumberId: grant.phoneNumberId, wabaId: grant.wabaId, accessToken: grant.token, registrationPin: fresh },
+      origin,
+    )
+    return {
+      connectionId: adopted.id,
+      token: grant.token,
+      wabaId: grant.wabaId,
+      phoneNumberId: grant.phoneNumberId,
+      pin: adopted.registrationPin ?? fresh,
+      steps: SIGNUP_STEPS.filter((step) => (grant.businessApp ? step !== "registrar" : step !== "sincronizar")),
+      account,
+      grantedAt: origin.at.toISOString(),
+      sync: {},
+    }
+  }
   const pin = newRegistrationPin()
   const created = await createConnection(
     tx,
@@ -378,6 +405,41 @@ export async function pendingSignupWork(
     grantedAt: row.signup.grantedAt,
     sync: row.signup.sync ?? {},
   }
+}
+
+/**
+ * Lo que hace falta para quitar en Meta la suscripción de la app al desconectar
+ * una conexión hecha con el botón. Nula si se hizo a mano (la app es de la
+ * clínica, no de odentIA) o le falta un dato. Con base y sin red.
+ */
+export async function signupAccess(
+  tx: Db,
+  orgId: string,
+  secretsKey: Buffer,
+  connectionId: string,
+): Promise<{ wabaId: string; token: string } | null> {
+  const { row, config } = await getConnectionSecrets(tx, orgId, connectionId, secretsKey)
+  if (!row.signup || row.channel !== "whatsapp") return null
+  const wabaId = config["wabaId"]
+  const token = config["accessToken"]
+  return typeof wabaId === "string" && wabaId && typeof token === "string" && token ? { wabaId, token } : null
+}
+
+/**
+ * Al volver a conectar una conexión hecha con el botón: lo único que se pide
+ * otra vez a Meta es la suscripción, que se quitó al desconectar. Nula si se
+ * hizo a mano. Con base y sin red.
+ */
+export async function resubscribeWork(
+  tx: Db,
+  orgId: string,
+  secretsKey: Buffer,
+  connectionId: string,
+): Promise<SignupWork | null> {
+  const { row } = await getConnectionSecrets(tx, orgId, connectionId, secretsKey)
+  if (!row.signup || row.channel !== "whatsapp") return null
+  const work = await pendingSignupWork(tx, orgId, secretsKey, connectionId)
+  return { ...work, steps: work.steps.filter((step) => step === "suscribir") }
 }
 
 /** Qué se le dice a quien conecta cuando no se pudo pedir lo del celular. */
