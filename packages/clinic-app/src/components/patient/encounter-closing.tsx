@@ -14,7 +14,6 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   ScrollArea,
 } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
@@ -1543,68 +1542,5 @@ export function EncounterClosingDialog({
   )
 }
 
-/**
- * Sin colegiatura no se firma (ADR 0003: nombre y colegiatura en cada
- * atención): se pide en el mismo cierre, sin salir de la atención, y se
- * guarda en el perfil profesional para las siguientes. El título solo se pide
- * si el perfil no lo tiene; el colegio viene propuesto por el país del
- * producto (COP en odentIA, CMP en latidIA) y se puede cambiar. Cada falta se
- * dice en su campo.
- */
-export function SignatureRegistrationFields({
-  form,
-  signAs,
-  askTitle,
-  disabled,
-  numberRef,
-}: {
-  form: ClosingForm
-  /** El nombre con que firma, de su cuenta o su perfil. */
-  signAs: string | null
-  askTitle: boolean
-  disabled: boolean
-  /** El número es lo que falta escribir: ahí empieza el foco. */
-  numberRef?: React.Ref<HTMLInputElement>
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex flex-col">
-        <p className="font-medium">Falta tu colegiatura para firmar</p>
-        <p className="text-xs text-muted-foreground">
-          {signAs ? `Firmarás como ${signAs}. ` : ""}La historia clínica pide nombre y colegiatura.
-        </p>
-      </div>
-      {askTitle ? (
-        <form.AppField name="professionalTitle">
-          {(field) => <field.TextField label="Título profesional" maxLength={120} disabled={disabled} />}
-        </form.AppField>
-      ) : null}
-      <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3">
-        <form.AppField name="registrationBody">
-          {(field) => <field.TextField label="Colegio" maxLength={40} disabled={disabled} />}
-        </form.AppField>
-        <form.AppField name="registrationNumber">
-          {(field) => (
-            <field.Control
-              label="Número de colegiatura"
-              description="Se guarda en tu perfil profesional: no la volverá a pedir."
-            >
-              {(control) => (
-                <Input
-                  {...control.props}
-                  ref={numberRef}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  maxLength={20}
-                  disabled={disabled}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              )}
-            </field.Control>
-          )}
-        </form.AppField>
-      </div>
-    </div>
-  )
-}
+/** El bloque de la colegiatura vive aparte: también lo usa el consentimiento en la tablet. */
+export { SignatureRegistrationFields } from "./signature-registration-fields"

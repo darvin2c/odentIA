@@ -150,6 +150,7 @@ import {
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterContextBody, EncounterHealthReview } from "./encounter-context"
 import { LinkSignedNotice } from "./link-signed-notice"
+import { REGISTRATION_FIELDS } from "./signature-registration-fields"
 import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
@@ -2284,6 +2285,7 @@ export function EncounterEditor({
   const registrationFields = needsRegistration ? (
     <SignatureRegistrationFields
       form={closingForm}
+      fields={REGISTRATION_FIELDS}
       signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
       askTitle={!profileQuery.data?.data.professionalTitle}
       disabled={finalizing}

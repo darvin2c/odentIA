@@ -90,6 +90,14 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        id: "pacientes-consentimiento-colegiatura-al-confirmar",
+        q: "Soy nuevo y la paciente ya firmó, ¿dónde pongo mi colegiatura?",
+        a: "En el mismo paso «Confirma que informaste», después de que firma en la tablet: si a tu perfil le falta la colegiatura, ahí mismo sale «Falta tu colegiatura para firmar» con «Título profesional», «Colegio» y «Número de colegiatura», y el botón pasa a «Guardar y confirmar». Se guarda en tu perfil profesional y no la vuelve a pedir. Su firma no se pierde: si te equivocas o tocas «Volver», su hoja sigue firmada y no tiene que firmar otra vez. «Firmado en papel» la pide igual. Con la colegiatura ya puesta, el paso dice «Firmas como…» con tu nombre, tu título y tu colegiatura.",
+        forms: ["me pide la colegiatura al confirmar el consentimiento", "la paciente firmo y me falta la colegiatura", "por que me pide la colegiatura en el consentimiento", "se perdio la firma de la paciente"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
         id: "pacientes-dictado-corregir-pausar",
         q: "¿Cómo corrijo lo que Clío entendió mal en el dictado?",
         a: "Toca la sugerencia para editarla y «Guardar y confirmar», o quítala con «Descartar sugerencia»; lo confirmado tiene «Deshacer». El micrófono se pausa y se reanuda con su botón, y «Terminar dictado» lo cierra. «Ver lo dictado» muestra tu respaldo: lo resaltado dio una sugerencia y lo marcado «No lo usé» hay que decirlo de nuevo o registrarlo a mano. Una receta dictada se emite con «Emitir receta» y un presupuesto dictado se deja en borrador con «Armar».",
