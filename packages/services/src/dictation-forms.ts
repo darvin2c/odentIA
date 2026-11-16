@@ -3,7 +3,7 @@ import type { Db } from "@odentia/db"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { and, desc, eq } from "drizzle-orm"
 import { assertFormSchema, conditionMet, type FormFieldDef, isEmptyAnswer as isEmpty, updateFormResponseDraft } from "./clinical-forms.js"
-import { asHeard, formVocabulary, type HeardVocabulary, plain } from "./dictation-heard.js"
+import { asHeard, formVocabulary, type HeardVocabulary, NEGATION_WORDS, plain } from "./dictation-heard.js"
 import { ServiceError } from "./errors.js"
 import type { ProductSite } from "./product-hooks.js"
 
@@ -215,8 +215,23 @@ const TEENS: Record<string, number> = {
 const TENS: Record<string, number> = {
   veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
 }
+/** Cómo se dice cada unidad, sin tildes, por magnitud: la de una ficha y las otras de su magnitud, que no se convierten. */
+const UNITS_SAID: Record<string, Record<string, readonly string[]>> = {
+  longitud: { mm: ["mm", "milimetro", "milimetros"], cm: ["cm", "centimetro", "centimetros"], m: ["metro", "metros"] },
+  masa: { kg: ["kg", "kilo", "kilos", "kilogramo", "kilogramos"], g: ["g", "gramo", "gramos"], lb: ["libra", "libras"] },
+}
 /** Las unidades que pueden ir entre el número y su «y medio» («quince kilos y medio»), o tras «medio» («medio milímetro»). */
-const UNIT_WORDS = new Set(["mm", "milimetro", "milimetros", "cm", "centimetro", "centimetros", "kg", "kilo", "kilos", "kilogramos", "g", "gramos"])
+const UNIT_WORDS = new Set(Object.values(UNITS_SAID).flatMap((units) => Object.values(units).flat()))
+const wordsPattern = (words: readonly string[]) => new RegExp(`\\b(${words.join("|")})\\b`)
+/** Por unidad de una ficha: cómo se dice («18 kg» nombra el peso) y cómo se dicen las otras de su magnitud (no se proponen). */
+const UNIT_SAID: Record<string, RegExp> = {}
+const OTHER_UNITS: Record<string, RegExp> = {}
+for (const units of Object.values(UNITS_SAID)) {
+  for (const [unit, words] of Object.entries(units)) {
+    UNIT_SAID[unit] = wordsPattern(words)
+    OTHER_UNITS[unit] = wordsPattern(Object.entries(units).flatMap(([other, said]) => (other === unit ? [] : said)))
+  }
+}
 /** Las muletillas de quien dicta («digamos», «este», «a ver», «o sea»): no dicen nada de la pregunta (prueba con voz del 15 nov). */
 const MULETILLAS = new Set(["digamos", "este", "eh", "ehh", "mmm", "emm", "osea", "sea", "ver", "bueno", "pues"])
 const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 }
@@ -339,10 +354,15 @@ function containsAll(said: number[], wanted: number[]): boolean {
 /** Los números de una opción, también los romanos y los dichos en palabras («Clase II división 1»: 2 y 1). */
 const optionNumbers = (option: string) => saidNumbers(option, { roman: "todos" })
 
-/** «No», «sin», «niega»…: un «No» solo se propone si se negó en voz alta. El silencio no es «No». */
-const NEGATION = /\b(no|ni|sin|niega|niegan|negativ[oa]s?|ausente|ausencia|ningun[oa]?|nunca|tampoco|descarta)\b/
-/** ¿Se negó algo en la frase? «sin embargo» no niega nada. */
-const denies = (said: string) => NEGATION.test(plain(said).replace(/\bsin embargo\b/g, ""))
+/**
+ * ¿Se negó algo en la frase (`NEGATION_WORDS`)? Un «No» solo se propone si se negó en voz alta: el
+ * silencio no es «No». «sin embargo» no niega nada.
+ */
+const denies = (said: string) =>
+  plain(said)
+    .replace(/\bsin embargo\b/g, "")
+    .split(/[^a-z]+/)
+    .some((word) => NEGATION_WORDS.has(word))
 /** Una opción que dice que no hay nada: «No», «No tiene», «Negativa», «Ninguno», «Ausente». */
 const isNegativeOption = (option: string) => /^(no|sin|ningun[oa]?|nada|negativ[oa]|ausente)\b/.test(plain(option))
 /** Cómo se dice en la consulta lo que la opción nombra con su término: «se come las uñas» es onicofagia (prueba con voz del 15 nov). */
@@ -437,14 +457,6 @@ function namesAnother(question: DictationFormQuestion, text: string): boolean {
     const stem = stemsOf(next)[0]
     return !!stem && !known.has(stem)
   })
-}
-
-/** Otra unidad de la misma magnitud dicha en la frase: no se convierte, no se propone. */
-const OTHER_UNITS: Record<string, RegExp> = {
-  mm: /\b(centimetros?|cm|metros?)\b/,
-  cm: /\b(milimetros?|mm|metros?)\b/,
-  kg: /\b(gramos?|libras?)\b/,
-  g: /\b(kilos?|kilogramos?|kg)\b/,
 }
 
 /** Un número dicho como aproximado: no se propone como exacto. */
@@ -1052,24 +1064,23 @@ function formPhrasesCleaner<T extends FormDraftLike>(
   const answers = drafts
     .filter((draft) => draft.kind === "ficha" && draft.sourceText?.trim())
     .map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, site, transcript) }))
-  // Lo examinado que tomó la ficha: sus frases y las opciones elegidas. El dolor que cuenta el paciente
-  // es del relato aunque la ficha también lo tenga (verificación del 14 nov).
-  const examined = answers.filter(({ ready }) => ready?.payload["value"] != null && !PAIN_SAID.test(plain(String(ready.payload["label"] ?? ""))))
+  // Lo examinado que tomó la ficha: sus frases y las opciones elegidas, sin lo que cuenta el paciente.
+  const examined = answers.flatMap(({ draft, ready }) =>
+    ready && ready.payload["value"] != null && !patientTells(String(ready.payload["label"] ?? "")) ? [{ said: draft.sourceText ?? "", value: ready.payload["value"] }] : [],
+  )
   const ficha = {
-    phrases: examined.map(({ draft }) => draft.sourceText ?? ""),
-    options: examined.flatMap(({ ready }) => [ready?.payload["value"]].flat().filter((value): value is string => typeof value === "string")),
+    phrases: examined.map((item) => item.said),
+    options: examined.flatMap((item) => [item.value].flat().filter((value): value is string => typeof value === "string")),
   }
-  const phrases = answers
-    .filter(({ draft, ready }) => ready !== null || formAnswerDropReason(draft, questions) !== null)
-    .map(({ draft }) => draft)
-    .flatMap((draft) => {
-      const said = draft.sourceText ?? ""
-      const parts = sentencesOf(said).filter((part) => part.trim())
-      const question = questions.find((item) => item.number === draft.payload["question"])
-      if (parts.length <= 1 || !question) return [said]
-      const label = labelStems(question.label)
-      return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
-    })
+  const phrases = answers.flatMap(({ draft, ready }) => {
+    if (!ready && formAnswerDropReason(draft, questions) === null) return []
+    const said = draft.sourceText ?? ""
+    const parts = sentencesOf(said).filter((part) => part.trim())
+    const question = questions.find((item) => item.number === draft.payload["question"])
+    if (parts.length <= 1 || !question) return [said]
+    const label = labelStems(question.label)
+    return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
+  })
   return (text) => withoutFormPhrases(text, phrases, ficha)
 }
 
@@ -1328,16 +1339,11 @@ function spansOf(question: DictationFormQuestion, others: readonly DictationForm
   return spans.length ? spans : [heard]
 }
 
-/** Cómo se dice cada unidad de una ficha: «18 kg» es el peso si ninguna otra pregunta de la ficha va en kg. */
-const UNIT_SAID: Record<string, RegExp> = {
-  mm: /\b(mm|milimetros?)\b/,
-  cm: /\b(cm|centimetros?)\b/,
-  kg: /\b(kg|kilos?|kilogramos?)\b/,
-  g: /\b(g|gramos?)\b/,
-}
+/** Cómo se dice también una palabra de un rótulo, por su raíz: «le duele como un nueve» nombra el dolor. */
+const LABEL_SAID: Record<string, RegExp> = { dolor: /\b(duele|duelen|dolia|dolio|doler)\b/ }
 
-/** «Le duele como un nueve»: el dolor también se dice con el verbo. */
-const PAIN_SAID = /\b(dolor|duele|duelen|dolia|dolio|doler)\b/
+/** Lo que cuenta el paciente (el dolor) es del relato aunque la ficha también lo tenga (verificación del 14 nov). */
+const patientTells = (label: string) => labelStems(label).includes("dolor")
 
 /**
  * Las preguntas de la ficha que pueden recibir un número: las de número, escala y pieza, y las
@@ -1358,28 +1364,22 @@ const takesNumber = (item: { type: string; options: readonly string[] | null }) 
  */
 function numberNamed(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], site: ProductSite, said: string, sentence: string): boolean {
   if (namesQuestion(question, said, site)) return true
-  const kin = questions.filter((other) => other !== question && other.responseId === question.responseId && takesNumber(other))
-  const theirs = new Set(kin.flatMap((other) => meaningful(other.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
-  const own = meaningful(question.label.replace(/\([^)]*\)/g, " ")).filter((word) => !theirs.has(word.slice(0, 5)))
-  const spoken = (text: string) => {
-    const words = meaningful(text)
-    return own.some((word) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3) || (word === "dolor" && PAIN_SAID.test(plain(text))))
-  }
-  if (spoken(said)) return true
+  // Las raíces de su rótulo que ninguna otra que lleva un número tiene, dichas o con su verbo («duele»).
+  const theirs = new Set((question.siblings ?? []).filter(takesNumber).flatMap((other) => labelStems(other.label)))
+  const own = labelStems(question.label).filter((stem) => !theirs.has(stem))
+  const saysOwn = (text: string) => own.some((stem) => stemsOf(text).includes(stem) || LABEL_SAID[stem]?.test(plain(text)))
+  if (saysOwn(said)) return true
+  // Su unidad, si ninguna otra de la ficha va en ella.
   const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
-  if (unit?.test(plain(said)) && !kin.some((other) => other.unit === question.unit)) return true
-  if (question.type === "escala" && question.max !== null) {
-    const outOf = new RegExp(`\\b(de|sobre) (${question.max}|${plain(String(saidWordOf(question.max)))})\\b`)
-    if (outOf.test(plain(said)) && spoken(sentence || said)) return true
-  }
+  if (unit?.test(plain(said)) && !questions.some((other) => other !== question && other.responseId === question.responseId && other.unit === question.unit)) return true
+  // En una escala, «ocho de diez» (su máximo), con lo suyo en la oración.
+  const outOfMax = [...plain(said).matchAll(/\b(?:de|sobre) ([a-z0-9]+)/g)].some((match) => saidNumbers(match[1] ?? "")[0] === question.max)
+  if (question.type === "escala" && outOfMax && saysOwn(sentence || said)) return true
   if (!sentence || !namesQuestion(question, sentence, site)) return false
   const others = questions.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, heardBy(other, sentence), site))
   const phrase = plain(said)
   return spansOf(question, others, sentence).some((span) => plain(span).includes(phrase))
 }
-
-/** El número en palabras, para leer «de diez» como «de 10». */
-const saidWordOf = (value: number) => Object.entries({ ...UNITS, ...TEENS, ...TENS }).find(([word, number]) => number === value && word !== "un" && word !== "una")?.[0] ?? String(value)
 
 function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
@@ -1512,9 +1512,10 @@ function checkFormAnswer(
       // La pieza también se dice dígito a dígito («la cuatro seis»), como en el odontograma.
       // Un tiempo («hace 2 años», también con la unidad después de la frase citada) no responde una
       // pregunta que no se mide en tiempo.
-      const timed = question.type !== "pieza" && !TIME_WORDS.has(plain(question.unit ?? ""))
-      const numbers = timed ? saidNumbers(`${said} ${wordsAfter(said, sentence, 1)}`, { roman: "largos", times: false }) : heard
-      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : numbers, [proposed])) return null
+      const measuresTime = TIME_WORDS.has(plain(question.unit ?? ""))
+      const numbers =
+        question.type === "pieza" ? toothNumbersIn(said) : measuresTime ? heard : saidNumbers(`${said} ${wordsAfter(said, sentence, 1)}`, { roman: "largos", times: false })
+      if (!containsAll(numbers, [proposed])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.

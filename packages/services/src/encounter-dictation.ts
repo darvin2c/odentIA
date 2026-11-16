@@ -45,7 +45,7 @@ import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { closestDiagnosisCode, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
-import { diagnosisClash, diagnosisSearchWords, diagnosisSibling } from "./dictation-diagnosis.js"
+import { reviewDiagnosis } from "./dictation-diagnosis.js"
 import { recordEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
 import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
@@ -713,10 +713,11 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
     // Un nombre que contradice lo dictado («sin fístula» con la fístula dicha) queda por revisar, con
     // el hermano de la lista que calza si lo hay (prueba con voz del 15 nov, c4b, v07).
-    const clash = diagnosisClash(known.description, draft.sourceText ?? "", scope.said ?? (scope.transcript ? [scope.transcript] : []))
-    if (clash) {
-      const candidates = await diagnosisCodesWith(tx, diagnosisSystem, diagnosisSearchWords(known.description, clash))
-      const sibling = diagnosisSibling({ code: known.code, title: known.description }, clash, candidates.map((item) => ({ ...item, title: item.description })))
+    const review = await reviewDiagnosis({ code: known.code, title: known.description }, draft.sourceText ?? "", scope.said ?? (scope.transcript ? [scope.transcript] : []), async (words) =>
+      (await diagnosisCodesWith(tx, diagnosisSystem, words)).map((item) => ({ ...item, title: item.description })),
+    )
+    if (review) {
+      const { clash, sibling } = review
       const chosen = sibling ?? known
       return {
         payload: { ...payload, diagnosisCode: chosen.code, diagnosisSystem, description: chosen.description },

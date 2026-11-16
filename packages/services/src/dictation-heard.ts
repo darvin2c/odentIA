@@ -28,6 +28,15 @@ const HEARD_AS: Readonly<Record<string, readonly string[]>> = {
   cpod: ["p o d"],
 }
 
+/**
+ * Las palabras que niegan algo dicho («no», «sin», «niega», «tampoco»…), sin tildes: las mismas para
+ * las fichas (un «No» solo si se negó) y para el diagnóstico (lo negado no contradice «sin fístula»).
+ */
+export const NEGATION_WORDS: ReadonlySet<string> = new Set([
+  "no", "ni", "sin", "niega", "niegan", "negativo", "negativa", "negativos", "negativas", "ausente", "ausencia",
+  "ningun", "ninguno", "ninguna", "nunca", "tampoco", "descarta",
+])
+
 /** Sin tildes ni mayúsculas, con los espacios de un texto como uno solo: como se comparan lo dicho y la ficha. */
 export const plain = (text: string) =>
   text

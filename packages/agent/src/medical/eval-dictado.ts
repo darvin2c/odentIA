@@ -222,7 +222,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
     )
   scoreConsulta(dictation.espera.consulta, read.drafts, other)
   // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
-  const codes = serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""]).map((item) => item.code)
+  const { codes } = await serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""])
   for (const code of dictation.espera.diagnosticos ?? [])
     other(
       `diagnóstico ${code}`,

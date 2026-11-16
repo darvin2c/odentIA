@@ -374,8 +374,7 @@ for (const dictation of cases) {
     else notes.push(`la nota perdió «${want}» (nota: «${noteText.slice(0, 160)}»; sin limpiar: «${read.drafts.filter((draft) => draft.kind === "nota").flatMap((draft) => Object.values(draft.payload)).join(" ").slice(0, 160)}»)`)
   }
   // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
-  const diagnoses = serverDiagnoses(read.drafts, [heard, dictation.contexto ?? ""])
-  const codes = diagnoses.map((item) => item.code)
+  const { codes, ready: readyCodes } = await serverDiagnoses(read.drafts, [heard, dictation.contexto ?? ""])
   for (const code of dictation.espera.diagnosticos ?? []) {
     totals.diagnosticosEsperados += 1
     if (diagnosisProposed(code, codes)) totals.diagnosticosBien += 1
@@ -383,7 +382,7 @@ for (const dictation of cases) {
   }
   for (const code of dictation.espera.diagnosticosNo ?? []) {
     totals.diagnosticosNoEsperados += 1
-    if (!diagnosisProposed(code, diagnoses.filter((item) => item.ready).map((item) => item.code))) continue
+    if (!diagnosisProposed(code, readyCodes)) continue
     totals.diagnosticosNoListos += 1
     notes.push(`DIAGNÓSTICO QUE CONTRADICE LO DICTADO ${code}, listo`)
   }

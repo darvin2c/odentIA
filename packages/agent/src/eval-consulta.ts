@@ -1,5 +1,5 @@
 import { BUNDLED_DIAGNOSIS_LISTS, readDiagnosisList } from "@odentia/db"
-import { diagnosisClash, diagnosisSearchWords, diagnosisSibling } from "@odentia/services"
+import { reviewDiagnosis } from "@odentia/services"
 
 /**
  * Lo que se espera de la consulta en un dictado de práctica, campo por campo, para
@@ -49,13 +49,14 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 export const diagnosisProposed = (expected: string, codes: readonly string[]) =>
   expected.split("|").some((one) => codes.some((code) => code.toUpperCase().startsWith(one.toUpperCase())))
 
+type CatalogRow = { code: string; title: string; isCategory: boolean; searchText: string }
 /** La CIE-10 del MINSA que trae el repositorio, por código: la lista con que se miden los diagnósticos. */
-let icd10: Array<{ code: string; title: string; isCategory: boolean }> | null = null
-function diagnosisList() {
+let icd10: Map<string, CatalogRow> | null = null
+function diagnosisList(): Map<string, CatalogRow> {
   if (!icd10) {
     const load = BUNDLED_DIAGNOSIS_LISTS.find((item) => item.system === "ICD-10-PE")
     if (!load) throw new Error("Falta la CIE-10 del MINSA en el repositorio")
-    icd10 = readDiagnosisList(load).rows.map((row) => ({ code: row.code, title: row.title, isCategory: row.isCategory }))
+    icd10 = new Map(readDiagnosisList(load).rows.map((row) => [row.code, { code: row.code, title: row.title, isCategory: row.isCategory, searchText: row.searchText }]))
   }
   return icd10
 }
@@ -63,22 +64,28 @@ function diagnosisList() {
 /**
  * Los diagnósticos que propuso Clío como los deja el servidor (`prepare` de los servicios, con la
  * lista de la clínica; aquí, la CIE-10 del MINSA): el que contradice lo dictado pasa al hermano que
- * calza y queda por revisar (`diagnosisClash`, `diagnosisSibling`, con los mismos candidatos que busca
- * `diagnosisCodesWith`). `said`: lo demás dictado, de lo más cerca a lo más lejos.
+ * calza y queda por revisar (`reviewDiagnosis`, con los candidatos que buscaría `diagnosisCodesWith`
+ * en su `searchText`). `said`: lo demás dictado, de lo más cerca a lo más lejos. `ready`: los que
+ * quedan listos.
  */
-export function serverDiagnoses(drafts: ReadonlyArray<{ kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>, said: readonly string[]): Array<{ code: string; ready: boolean }> {
+export async function serverDiagnoses(
+  drafts: ReadonlyArray<{ kind: string; payload: Record<string, unknown>; sourceText?: string | undefined }>,
+  said: readonly string[],
+): Promise<{ codes: string[]; ready: string[] }> {
   const list = diagnosisList()
-  return drafts
-    .filter((draft) => draft.kind === "diagnostico")
-    .map((draft) => {
-      const code = String(draft.payload["diagnosisCode"] ?? "").trim().toUpperCase()
-      const known = list.find((row) => row.code === code)
-      const clash = known && !known.isCategory ? diagnosisClash(known.title, draft.sourceText ?? "", said) : null
-      if (!known || !clash) return { code, ready: true }
-      const words = diagnosisSearchWords(known.title, clash)
-      const candidates = list.filter((row) => words.every((word) => plain(`${row.code} ${row.title}`).includes(word))).slice(0, 40)
-      return { code: diagnosisSibling(known, clash, candidates)?.code ?? code, ready: false }
-    })
+  const rows = [...list.values()]
+  const find = (words: string[]) => rows.filter((row) => words.every((word) => row.searchText.includes(word))).slice(0, 40)
+  const codes: string[] = []
+  const ready: string[] = []
+  for (const draft of drafts) {
+    if (draft.kind !== "diagnostico") continue
+    const code = String(draft.payload["diagnosisCode"] ?? "").trim().toUpperCase()
+    const known = list.get(code)
+    const review = known && !known.isCategory ? await reviewDiagnosis(known, draft.sourceText ?? "", said, find) : null
+    codes.push(review?.sibling?.code ?? code)
+    if (!review) ready.push(code)
+  }
+  return { codes, ready }
 }
 
 /** Si el texto tiene alguna de las variantes, empezando donde empieza una palabra. */

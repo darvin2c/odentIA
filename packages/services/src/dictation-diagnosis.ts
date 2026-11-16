@@ -1,4 +1,4 @@
-import { plain } from "./dictation-heard.js"
+import { NEGATION_WORDS, plain } from "./dictation-heard.js"
 
 /*
  * ---------- El diagnóstico que contradice lo dictado ----------
@@ -22,6 +22,8 @@ export interface DiagnosisClash {
   /** La palabra del nombre que cambia y la que lleva el hermano que calza («sin» → «con», «aguda» → «crónica»). */
   from: string
   to: string
+  /** Lo que debe nombrar el hermano, sin tildes: el hallazgo («fistula») o el curso («cronic»). */
+  about: string
   /** Lo dictado también dice lo del nombre («no hay fístula… presenta fístula»): se revisa sin proponer otro. */
   unsure: boolean
 }
@@ -33,23 +35,31 @@ const otherCourse = (word: string) => (courseOf(word) === "agud" ? word.replace(
 
 /** Lo que sigue a «con» o «sin» en un nombre y no es un hallazgo que se dicte: «sin especificación», «sin mención de…». */
 const NOT_A_FINDING = new Set(["especificacion", "especificada", "especificado", "especificar", "mencion", "diagnostico", "quejas", "otra", "otras", "otro", "otros"])
-
-/** Lo que niega lo que viene después: «no hay fístula», «sin fístula», «ni fístula», «ausencia de fístula». */
-const NEGATES = new Set(["no", "sin", "ni", "niega", "niegan", "ausencia", "tampoco", "descarta", "descartan", "ningun", "ninguna", "ninguno"])
 /** Lo que puede ir entre la negación y lo negado: «no se observa fístula», «no presenta signos de fístula». */
 const BETWEEN = new Set(["hay", "habia", "hubo", "existe", "existen", "se", "le", "observa", "observan", "ve", "ven", "aprecia", "aprecian", "evidencia", "evidencian", "encuentra", "encuentran", "presenta", "presentan", "tiene", "tienen", "de", "la", "el", "los", "las", "una", "un", "signo", "signos", "dato", "datos"])
 /** Lo que niega lo que va antes: «fístula tampoco», «fístula negativa». */
 const NEGATES_BEFORE = new Set(["tampoco", "negativa", "negativo", "ausente", "descartada", "descartado"])
 
-/** Las palabras de un texto, sin tildes, con dónde están, oración por oración: una negación no cruza un punto. */
-function sentencesWords(text: string): Array<Array<{ word: string; start: number; end: number }>> {
-  return text.split(/(?<=[.;!?\n])/).reduce<{ at: number; out: Array<Array<{ word: string; start: number; end: number }>> }>(
-    ({ at, out }, sentence) => ({
-      at: at + sentence.length,
-      out: [...out, [...sentence.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({ word: plain(match[0]), start: at + match.index, end: at + match.index + match[0].length }))],
-    }),
-    { at: 0, out: [] },
-  ).out
+interface Word {
+  /** Sin tildes ni mayúsculas. */
+  word: string
+  start: number
+  end: number
+}
+
+/** Las palabras de un texto, sin tildes, con dónde están (desde `from`). */
+const wordsIn = (text: string, from = 0): Word[] =>
+  [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({ word: plain(match[0]), start: from + match.index, end: from + match.index + match[0].length }))
+
+/** Las palabras de un texto oración por oración: una negación no cruza un punto. */
+function sentencesWords(text: string): Word[][] {
+  const sentences: Word[][] = []
+  let at = 0
+  for (const sentence of text.split(/(?<=[.;!?\n])/)) {
+    sentences.push(wordsIn(sentence, at))
+    at += sentence.length
+  }
+  return sentences
 }
 
 /** ¿Es esa palabra el término? Por sus cinco primeras letras: «fístula», «fistulizado». */
@@ -63,20 +73,20 @@ function mentions(text: string, term: string): { affirmed: string | null; denied
   let affirmed: string | null = null
   let denied: string | null = null
   for (const words of sentencesWords(text)) {
-    words.forEach((item, index) => {
-      if (!sameTerm(item.word, term)) return
+    for (const [index, item] of words.entries()) {
+      if (!sameTerm(item.word, term)) continue
       let back = index - 1
       while (back >= 0 && BETWEEN.has(words[back]?.word ?? "")) back -= 1
       const before = words[back]
       const after = words[index + 1]
+      const deniedBefore = before !== undefined && NEGATION_WORDS.has(before.word)
       // «fístula no» al final de su oración también la niega; seguida de otra cosa («fístula no hay tumefacción») no se sabe de qué es.
-      const negated = (before && NEGATES.has(before.word)) || (after && (NEGATES_BEFORE.has(after.word) || (after.word === "no" && index + 2 === words.length)))
-      const first = negated && before && NEGATES.has(before.word) ? before : (words[Math.max(0, index - 1)] ?? item)
-      const last = negated && after && !(before && NEGATES.has(before.word)) ? after : item
-      const phrase = text.slice(first.start, last.end)
-      if (negated) denied ??= phrase
+      const deniedAfter = !deniedBefore && after !== undefined && (NEGATES_BEFORE.has(after.word) || (after.word === "no" && index + 2 === words.length))
+      const first = deniedBefore ? before : (words[index - 1] ?? item)
+      const phrase = text.slice(first.start, (deniedAfter ? after : item).end)
+      if (deniedBefore || deniedAfter) denied ??= phrase
       else affirmed ??= phrase
-    })
+    }
   }
   return { affirmed, denied }
 }
@@ -89,44 +99,40 @@ function mentions(text: string, term: string): { affirmed: string | null; denied
  * dicho de otra cosa no cambia la periodontitis aguda.
  */
 export function diagnosisClash(title: string, phrase: string, dictated: readonly string[] = []): DiagnosisClash | null {
-  const words = plain(title).split(/[^a-z0-9]+/).filter(Boolean)
-  const said = sentencesWords(phrase).flat()
-  for (const [index, word] of words.entries()) {
-    const course = courseOf(word)
+  const words = wordsIn(title)
+  const written = (item: Word | undefined) => (item ? title.slice(item.start, item.end) : "")
+  const said = wordsIn(phrase)
+  for (const item of words) {
+    const course = courseOf(item.word)
     if (!course) continue
-    const theOther = said.find((item) => courseOf(item.word) !== null && courseOf(item.word) !== course)
-    if (theOther && !said.some((item) => courseOf(item.word) === course)) {
-      return { named: titleWord(title, index), said: phrase.slice(theOther.start, theOther.end), from: word, to: otherCourse(word), unsure: false }
+    const theOther = said.find((spoken) => courseOf(spoken.word) !== null && courseOf(spoken.word) !== course)
+    if (theOther && !said.some((spoken) => courseOf(spoken.word) === course)) {
+      const to = otherCourse(item.word)
+      return { named: written(item), said: phrase.slice(theOther.start, theOther.end), from: item.word, to, about: courseOf(to) ?? to, unsure: false }
     }
   }
-  for (const [index, word] of words.entries()) {
-    if (word !== "con" && word !== "sin") continue
-    const term = words[index + 1]
+  for (const [index, item] of words.entries()) {
+    if (item.word !== "con" && item.word !== "sin") continue
+    const term = words[index + 1]?.word
     if (!term || term.length < 4 || NOT_A_FINDING.has(term)) continue
     // Lo primero que lo nombra decide: la frase del diagnóstico, después la pausa, después lo anterior.
-    const found = [phrase, ...dictated].map((text) => mentions(text, term)).find((item) => item.affirmed || item.denied)
-    if (!found) continue
-    const contradicts = word === "sin" ? found.affirmed : found.denied
-    if (!contradicts) continue
-    return { named: `${titleWord(title, index)} ${titleWord(title, index + 1)}`, said: contradicts, from: word, to: word === "sin" ? "con" : "sin", unsure: Boolean(word === "sin" ? found.denied : found.affirmed) }
+    for (const text of [phrase, ...dictated]) {
+      const found = mentions(text, term)
+      if (!found.affirmed && !found.denied) continue
+      const [contradicts, also] = item.word === "sin" ? [found.affirmed, found.denied] : [found.denied, found.affirmed]
+      if (!contradicts) break
+      return { named: `${written(item)} ${written(words[index + 1])}`, said: contradicts, from: item.word, to: item.word === "sin" ? "con" : "sin", about: term, unsure: also !== null }
+    }
   }
   return null
 }
 
-/** La palabra `index` del nombre, como está escrita («fístula», no «fistula»). */
-function titleWord(title: string, index: number): string {
-  return [...title.matchAll(/[\p{L}\p{N}]+/gu)][index]?.[0] ?? ""
-}
-
-/** Las palabras que dicen qué es un diagnóstico, sin sus calificativos ni las de enlace. */
+/** Las palabras de un nombre, sin tildes. */
+const titleWords = (title: string) => wordsIn(title).map((item) => item.word)
+/** Las de enlace, que no dicen qué es un diagnóstico. */
 const LINKS = new Set(["con", "sin", "de", "del", "la", "las", "el", "los", "en", "por", "y", "o", "a", "e", "no"])
-const coreOf = (title: string) =>
-  new Set(
-    plain(title)
-      .split(/[^a-z0-9]+/)
-      .filter((word) => word.length >= 3 && !LINKS.has(word) && courseOf(word) === null)
-      .map((word) => word.slice(0, 5)),
-  )
+/** Lo que dice qué es un diagnóstico, por raíces: sin sus calificativos ni las de enlace. */
+const coreOf = (title: string) => new Set(titleWords(title).filter((word) => word.length >= 3 && !LINKS.has(word) && courseOf(word) === null).map((word) => word.slice(0, 5)))
 
 /**
  * El hermano que calza con lo dictado, entre `candidates` (códigos de la misma lista): el que tiene la
@@ -142,13 +148,13 @@ export function diagnosisSibling<T extends { code: string; title: string; isCate
   candidates: readonly T[],
 ): T | null {
   if (clash.unsure) return null
-  const own = plain(proposed.title).split(/[^a-z0-9]+/).filter(Boolean)
+  const own = titleWords(proposed.title)
   const at = own.indexOf(clash.from)
   const wanted = [...own.slice(0, at), clash.to, ...own.slice(at + 1)].join(" ")
   const course = courseOf(clash.to)
   const says = (word: string) => (course ? courseOf(word) === course : word === clash.to)
-  const pool = candidates.filter((item) => item.code !== proposed.code && !item.isCategory && plain(item.title).split(/[^a-z0-9]+/).some(says))
-  const exact = pool.filter((item) => plain(item.title).split(/[^a-z0-9]+/).filter(Boolean).join(" ") === wanted)
+  const pool = candidates.filter((item) => item.code !== proposed.code && !item.isCategory && titleWords(item.title).some(says))
+  const exact = pool.filter((item) => titleWords(item.title).join(" ") === wanted)
   if (exact.length === 1) return exact[0] ?? null
   const mine = coreOf(proposed.title)
   const inside = (a: Set<string>, b: Set<string>) => a.size > 0 && [...a].every((word) => b.has(word))
@@ -162,14 +168,22 @@ export function diagnosisSibling<T extends { code: string; title: string; isCate
   return fits.length === 1 ? (fits[0] ?? null) : null
 }
 
-/** La palabra con la que se buscan los hermanos en la lista: la primera que dice qué es («absceso», «periodontitis»). */
-export function diagnosisHead(title: string): string {
-  return (
-    plain(title)
-      .split(/[^a-z0-9]+/)
-      .find((word) => word.length >= 4 && !LINKS.has(word) && courseOf(word) === null) ?? ""
-  )
+/**
+ * El diagnóstico propuesto comparado con lo dictado, como lo hacen el servidor y la medición: `null` si
+ * su nombre no lo contradice (`diagnosisClash`); si lo contradice, por qué y el hermano que calza
+ * (`diagnosisSibling`). `find`: los códigos de la lista cuyo nombre tiene unas palabras, sin tildes
+ * (en el servidor, `diagnosisCodesWith`): lo que es el diagnóstico («absceso») y lo que debe nombrar
+ * el hermano («fistula», «cronic»).
+ */
+export async function reviewDiagnosis<T extends { code: string; title: string; isCategory?: boolean }>(
+  proposed: { code: string; title: string },
+  phrase: string,
+  dictated: readonly string[],
+  find: (words: string[]) => readonly T[] | Promise<readonly T[]>,
+): Promise<{ clash: DiagnosisClash; sibling: T | null } | null> {
+  const clash = diagnosisClash(proposed.title, phrase, dictated)
+  if (!clash) return null
+  const head = titleWords(proposed.title).find((word) => word.length >= 4 && !LINKS.has(word) && courseOf(word) === null)
+  const sibling = clash.unsure ? null : diagnosisSibling(proposed, clash, await find([head ?? "", clash.about].filter(Boolean)))
+  return { clash, sibling }
 }
-
-/** Con qué palabras se buscan en la lista los hermanos del propuesto: lo que es y el calificativo contrario («crónic», en cualquier género). */
-export const diagnosisSearchWords = (title: string, clash: DiagnosisClash): string[] => [diagnosisHead(title), courseOf(clash.to) ?? clash.to].filter(Boolean)

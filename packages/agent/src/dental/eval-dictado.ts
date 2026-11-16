@@ -186,11 +186,10 @@ for (const dictation of bank.dictados) {
   }
   const plans = read.drafts.filter((draft) => draft.kind === "plan").map((draft) => draft.payload["toothNumber"])
   // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
-  const diagnoses = serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""])
-  const codes = diagnoses.map((item) => item.code)
+  const { codes, ready: readyCodes } = await serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""])
   for (const code of dictation.espera.diagnosticos ?? []) other(`diagnóstico ${code}`, diagnosisProposed(code, codes))
   for (const code of dictation.espera.diagnosticosNo ?? []) {
-    const ready = diagnosisProposed(code, diagnoses.filter((item) => item.ready).map((item) => item.code))
+    const ready = diagnosisProposed(code, readyCodes)
     totals.diagnosticosContrarios += Number(ready)
     other(`sin ${code} listo`, !ready)
   }
