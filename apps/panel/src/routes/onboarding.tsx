@@ -70,7 +70,7 @@ const STEP_FIELDS = [
 ] as const
 
 // Subdominios reservados (misma lista que el servidor).
-const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
+const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, media: true, storage: true }
 
 const personaSchema = z.object({
   firstName: z.string().min(1, "Ingresa tu nombre"),

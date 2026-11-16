@@ -117,8 +117,9 @@ describe("la comprobación del servidor lee lo mal oído", () => {
     const heard = "beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá"
     expect(ask(kid, "ceod_c", "1", "descarriados uno", heard)).toBeNull()
     expect(ask(kid, "ceod_e", "1", "uno con extracción indicada", heard)).toMatchObject({ status: "lista", payload: { value: 1 } })
-    // Sin otro término al lado, el número dicho sigue valiendo («déjame medir 7 mm» del overjet).
-    expect(ask(ortho, "overjet", "7", "7 mm", "a ver déjame medir 7 mm over byte de 4 succión por favor")).toMatchObject({ status: "lista", payload: { value: 7 } })
+    // Sin otro término al lado, el número dicho se propone, pero sin nombrar el overjet no queda listo:
+    // Clío lo propone y se revisa («déjame medir 7 mm», prueba con voz del 15 nov, c4).
+    expect(ask(ortho, "overjet", "7", "7 mm", "a ver déjame medir 7 mm over byte de 4 succión por favor")).toMatchObject({ status: "por_revisar", payload: { value: 7 } })
     expect(ask(kid, "ceod_c", "4", "cariados 4", "cariados 4 obturados uno")).toMatchObject({ status: "lista", payload: { value: 4 } })
   })
   it("lo que se muestra como «dijiste» sigue siendo lo dictado", () => {

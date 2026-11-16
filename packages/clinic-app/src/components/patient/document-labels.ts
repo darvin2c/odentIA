@@ -47,7 +47,7 @@ export const ACCEPT_ATTR = [...ACCEPTED_TYPES, ".dcm"].join(",")
 export const MAX_BYTES = DOCUMENT_MAX_BYTES
 export const DICOM_MAX_BYTES = DICOM_DOCUMENT_MAX_BYTES
 
-function isDicomFile(file: File): boolean {
+export function isDicomFile(file: File): boolean {
   return file.type === "application/dicom" || /\.dcm$/i.test(file.name)
 }
 
@@ -143,9 +143,12 @@ export function capturedDay(iso: string | null | undefined): string {
   return iso ? zonedDateOf(iso, activeOrgTimeZone()) : ""
 }
 
-/** Cómo se llama la fecha propia de un archivo: la de toma en una imagen, la del documento en lo demás. */
-export function documentDateLabel(category: string): string {
-  return isImageDocumentCategory(category) ? "Fecha de toma" : "Fecha del documento"
+/**
+ * Cómo se llama la fecha propia de un archivo: la de toma en una imagen, la del documento en lo
+ * demás. Una foto o un DICOM que todavía no tiene categoría ya es una imagen (`image`).
+ */
+export function documentDateLabel(category: string, image = isImageDocumentCategory(category)): string {
+  return image ? "Fecha de toma" : "Fecha del documento"
 }
 
 /**

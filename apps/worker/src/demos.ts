@@ -4,6 +4,7 @@ import { saasDemo } from "@odentia/db/schema/admin-demos"
 import {
   advanceDemo,
   buildDemo,
+  type ClinicHosts,
   claimPendingDemo,
   DEMO_BUILD_STEPS,
   type DemoRecipeRef,
@@ -12,6 +13,7 @@ import {
   expiredDemos,
   failStaleDemos,
   purgeDemoOrganization,
+  syncClinicHosts,
 } from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 
@@ -29,6 +31,8 @@ export interface DemosDeps {
   fetch: typeof fetch
   /** Quita del almacenamiento lo que tenía la clínica borrada. */
   deleteObject?: (key: string) => Promise<void>
+  /** La regla de hosts permitidos de Cloudflare (ADR 0193): se pone al día al armar o borrar una demo. */
+  clinicHosts?: ClinicHosts | null
 }
 
 let building: Promise<void> | null = null
@@ -99,6 +103,8 @@ async function build(deps: DemosDeps, row: typeof saasDemo.$inferSelect): Promis
     })
     for (const key of storageKeys) await deps.deleteObject?.(key).catch(() => undefined)
     console.log(`worker: demo ${row.slug} lista (${built.organizationId})`)
+    // Si su subdominio se tomó mientras esperaba, la clínica salió con otro.
+    await syncClinicHosts(deps.ownerDb, deps.clinicHosts)
   } catch (error) {
     console.error(`worker: la demo ${row.slug} no se pudo armar`, error)
     await deps.ownerDb
@@ -174,6 +180,7 @@ export async function runDemosTick(
         console.error(`worker: la demo ${view.slug} no se pudo borrar`, error)
       }
     }
+    if (expired > 0) await syncClinicHosts(deps.ownerDb, deps.clinicHosts)
   }
   return { started, advanced, expired }
 }

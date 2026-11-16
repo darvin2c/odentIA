@@ -106,6 +106,23 @@ export async function closestDiagnosisCode(tx: Db, system: DiagnosisSystemKey, r
   return found && row ? { system, code: found, description: row.title, isCategory: row.isCategory } : null
 }
 
+/**
+ * Los códigos de la lista cuyo nombre tiene todas esas palabras, sin tildes ni mayúsculas: de ahí
+ * sale el hermano que calza con lo dictado (`diagnosisSibling`, prueba con voz del 15 nov, c4b).
+ * Pocos: los que nombran lo mismo con el otro calificativo.
+ */
+export async function diagnosisCodesWith(tx: Db, system: DiagnosisSystemKey, words: readonly string[]): Promise<DiagnosisCodeOption[]> {
+  const wanted = words.map((word) => normalizeSearchText(word)).filter((word) => /^[a-z0-9]+$/.test(word))
+  if (!wanted.length) return []
+  const rows = await tx
+    .select({ code: diagnosisCatalog.code, title: diagnosisCatalog.title, isCategory: diagnosisCatalog.isCategory })
+    .from(diagnosisCatalog)
+    .where(and(eq(diagnosisCatalog.systemKey, system), ...wanted.map((word) => sql`${diagnosisCatalog.searchText} like ${`%${word}%`}`)))
+    .orderBy(asc(diagnosisCatalog.code))
+    .limit(40)
+  return rows.map((row) => ({ system, code: row.code, description: row.title, isCategory: row.isCategory }))
+}
+
 export interface DiagnosisCodeInput {
   code: string
   /** Lista del código; sin ella, la de la clínica. */

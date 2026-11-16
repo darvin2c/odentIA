@@ -315,6 +315,7 @@ Las stories consumen los componentes reales; únicamente sus demoras, almacén s
 ## Problemas operativos conocidos
 
 - `CHANNEL_VALIDATE_EXTERNAL=false` en dev/e2e evita contactar Meta/Telegram al crear conexiones.
+- `CLOUDFLARE_WAF_TOKEN`, `CLOUDFLARE_ZONE_ID`, `MEDICAL_CLOUDFLARE_ZONE_ID` y `OPTICAL_CLOUDFLARE_ZONE_ID` (la lista de hosts permitidos de cada zona, ADR 0193) son solo de producción: en dev y e2e quedan vacías, nada llama a Cloudflare y el arranque de la API y del worker dice `clinic-hosts: sin CLOUDFLARE_WAF_TOKEN`. Las pruebas usan un doble del puerto (`HostsFirewall`) o un `fetch` falso, nunca la API real. Qué permiso lleva el token y cómo se activa: `docs/deployment.md`.
 - `PASSWORD_BREACH_CHECK=false` (solo e2e) deja de consultar Have I Been Pwned al crear o cambiar una contraseña; en dev y producción queda en `true` y, si el servicio no responde, la contraseña se acepta.
 - Portless `already registered by PID 0`: comprobar entradas muertas de `~/.portless/routes.json` antes de retirarlas. Colisiones de puertos API/panel: reiniciar el stack para reasignar.
 - Portless 0.15.6 está fijado y parcheado en `patches/portless@0.15.6.patch`: `PORTLESS_HTTP_REDIRECT=0` evita puerto 80 en E2E; configuración OpenSSL mínima evita `basicConstraints` duplicado en la CA; sus procesos OpenSSL se crean ocultos para que la generación dinámica de certificados no abra ventanas de Terminal en Windows.

@@ -19,6 +19,7 @@ import { z } from "zod"
 import { clientReadyForAccount, linkClientToOrganization } from "./admin-clients.js"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
+import { SYSTEM_SUBDOMAINS } from "./clinic-hosts.js"
 import { invalidField, isUniqueViolation, issueFields, ServiceError } from "./errors.js"
 
 /**
@@ -200,16 +201,13 @@ export interface OrganizationDetail {
 }
 /**
  * Subdominios reservados: nunca son slugs de tenant (colisionarían con las
- * apps/infra). La API la reutiliza; el alta del panel la repite porque el panel
- * no depende de ningún paquete del dominio (y el servidor vuelve a validarla).
+ * apps/infra): los del sistema (ADR 0193) y `storage`. La API la reutiliza; el
+ * alta del panel la repite porque el panel no depende de ningún paquete del
+ * dominio (y el servidor vuelve a validarla).
  */
-export const RESERVED_ORG_SLUGS: Record<string, true> = {
-  api: true,
-  app: true,
-  admin: true,
-  www: true,
-  storage: true,
-}
+export const RESERVED_ORG_SLUGS: Record<string, true> = Object.fromEntries(
+  [...SYSTEM_SUBDOMAINS, "storage"].map((slug) => [slug, true as const]),
+)
 export interface AssistedOrganizationInput {
   orgName: string
   slug: string

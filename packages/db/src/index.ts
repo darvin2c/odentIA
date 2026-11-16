@@ -4,6 +4,7 @@ export {
   BUNDLED_DIAGNOSIS_LISTS,
   type DiagnosisListLoad,
   loadDiagnosisList,
+  readDiagnosisList,
 } from "./diagnosis-catalog.js"
 export { seedProcedureCodes } from "./procedure-codes.js"
 export {

@@ -64,7 +64,10 @@ export interface DemoDicomInput {
   frames?: number
   /** Espaciado del detector en mm (fila, columna); null: el archivo no trae escala. */
   pixelSpacingMm?: [number, number] | null
-  studyDate?: string
+  /** AAAAMMDD; null: el archivo no trae fecha del estudio. */
+  studyDate?: string | null
+  /** La modalidad (0008,0060); por omisión, IO (intraoral). */
+  modality?: string
   uid?: string
 }
 
@@ -88,8 +91,8 @@ export function encodeDemoDicom(input: DemoDicomInput): Uint8Array {
   const dataset = concat([
     element(0x0008, 0x0016, text("UI", INTRAORAL_SOP_CLASS)),
     element(0x0008, 0x0018, text("UI", uid)),
-    element(0x0008, 0x0020, text("DA", input.studyDate ?? "20261008")),
-    element(0x0008, 0x0060, text("CS", "IO")),
+    ...(input.studyDate === null ? [] : [element(0x0008, 0x0020, text("DA", input.studyDate ?? "20261008"))]),
+    element(0x0008, 0x0060, text("CS", input.modality ?? "IO")),
     element(0x0008, 0x0070, text("LO", "DEMO Odentia32")),
     element(0x0010, 0x0010, text("PN", "DEMO^PACIENTE")),
     ...(spacing ? [element(0x0018, 0x1164, text("DS", `${spacing[0]}\\${spacing[1]}`))] : []),
