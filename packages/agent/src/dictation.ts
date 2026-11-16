@@ -401,8 +401,8 @@ export function groundSource(said: string | undefined, transcript: string): stri
   // Con «...» entre palabras el modelo saltó lo de en medio: los pedazos no se juntan, porque juntos no
   // se dijeron; queda el más largo que está tal cual (medición del 16 nov: «cinco ... con extracción
   // indicada» dejaba lista una «e» de 5, y el cinco era de «cariados»).
-  const pieces = piecesOf(fragment)
-  if (pieces.length > 1) return pieces.map((piece) => groundText(piece, transcript)).reduce((longest, piece) => (piece.length > longest.length ? piece : longest), "")
+  const pieces = groundPieces(fragment, transcript)
+  if (pieces) return pieces.reduce((longest, piece) => (piece.length > longest.length ? piece : longest), "")
   // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
   // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
   // respuestas de ficha perdidas eran las comillas.
@@ -410,21 +410,19 @@ export function groundSource(said: string | undefined, transcript: string): stri
 }
 
 /**
- * Los pedazos que el modelo citó separados con «...», cada uno tal cual en lo dictado; vacío si citó
- * uno solo. En una respuesta de varias opciones cada opción puede estar en su pedazo: en «hábitos
+ * Los pedazos que el modelo citó separados con «...», los que están tal cual en lo dictado; `null` si
+ * citó uno solo. En una respuesta de varias opciones cada opción puede estar en su pedazo: en «hábitos
  * respiración bucal ... y se come las uñas» queda «hábitos respiración bucal» (`groundSource`) y la
  * onicofagia está en el otro (prueba con voz c7, v03). El servidor comprueba cada opción en el suyo.
  */
-export function groundPieces(said: string | undefined, transcript: string): string[] {
-  const pieces = piecesOf((said ?? "").trim())
-  return pieces.length > 1 ? pieces.map((piece) => groundText(piece, transcript)).filter(Boolean) : []
-}
-
-const piecesOf = (fragment: string) =>
-  fragment
+export function groundPieces(said: string | undefined, transcript: string): string[] | null {
+  const pieces = (said ?? "")
+    .trim()
     .replace(QUOTES, "")
     .split(/\s*(?:\.{3}|…)\s*/u)
     .filter((piece) => piece.trim())
+  return pieces.length > 1 ? pieces.map((piece) => groundText(piece, transcript)).filter(Boolean) : null
+}
 
 /** El texto, o lo que de él está tal cual en lo dictado, frase por frase. */
 function groundText(text: string, transcript: string): string {
@@ -444,9 +442,13 @@ function groundText(text: string, transcript: string): string {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-/** Lo que cambia es solo la respuesta de una ficha (`answer`, `answers`, `question`), no un campo de otra sugerencia. */
-const formAnswerOnly = (item: unknown) =>
-  isRecord(item) && isRecord(item["cambios"]) && Object.keys(item["cambios"]).length > 0 && Object.keys(item["cambios"]).every((key) => ["answer", "answers", "question"].includes(key))
+/** Lo que cambia son solo campos de una respuesta de ficha (operación `ficha.respuesta`), no los de otra sugerencia. */
+function formAnswerOnly(item: unknown): boolean {
+  if (!isRecord(item) || !isRecord(item["cambios"])) return false
+  const keys = Object.keys(item["cambios"])
+  const shape = operationAgentSchema(DICTATION_OPERATION.ficha).shape
+  return keys.length > 0 && keys.every((key) => key in shape)
+}
 const blank = (value: unknown) =>
   value === undefined || value === null || (typeof value === "string" && !value.trim())
 
@@ -548,10 +550,9 @@ export function readDictation(
         part.kind === "ficha" && !(typeof question === "number" && Number.isInteger(question) && question >= 1 && question <= forms.length)
       if (!isRecord(item) || Object.keys(payload).length === 0 || unknownQuestion) skip(item)
       else {
-        // Varias opciones citadas en pedazos: cada pedazo va aparte, para comprobar cada opción en el suyo.
-        const multiple = part.kind === "ficha" && forms.find((one) => one.number === question)?.type === "opcion_multiple"
-        const pieces = multiple && typeof item["dicho"] === "string" ? groundPieces(item["dicho"], transcript) : []
-        drafts.push({ kind: part.kind, payload, sourceText: quote(item, part.kind), ...(pieces.length > 1 ? { pieces } : {}) })
+        // Una respuesta citada en pedazos los lleva aparte: el servidor decide con cuáles se comprueba.
+        const pieces = part.kind === "ficha" && typeof item["dicho"] === "string" ? groundPieces(item["dicho"], transcript) : null
+        drafts.push({ kind: part.kind, payload, sourceText: quote(item, part.kind), ...(pieces && pieces.length > 1 ? { pieces } : {}) })
       }
     }
   }

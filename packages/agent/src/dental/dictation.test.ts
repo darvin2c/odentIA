@@ -144,6 +144,7 @@ describe("dictado en modo de demostración", () => {
         fichas: [
           { question: habitos, answers: ["Respiración bucal", "Onicofagia"], dicho: "hábitos respiración bucal ... y se come las uñas" },
           { question: molar, answer: "Clase II división 1", dicho: "claro que sí ... derecha clase 2 división 1" },
+          { question: molar, answer: "Clase II división 1", dicho: "derecha clase 2 división 1" },
         ],
       },
       heard,
@@ -151,10 +152,11 @@ describe("dictado en modo de demostración", () => {
       DENTAL_DICTATION_PROFILE.parts,
       ortho,
     )
-    // Lo que se muestra sigue siendo un pedazo dicho tal cual; los dos van aparte.
+    // Lo que se muestra sigue siendo un pedazo dicho tal cual; los pedazos van aparte y el servidor decide si los usa.
     expect(read?.drafts[0]).toMatchObject({ sourceText: "hábitos respiración bucal", pieces: ["hábitos respiración bucal", "y se come las uñas"] })
-    // Una opción sola no se comprueba por pedazos: queda como siempre.
-    expect(read?.drafts[1]?.pieces).toBeUndefined()
+    expect(read?.drafts[1]).toMatchObject({ sourceText: "derecha clase 2 división 1", pieces: ["claro que sí", "derecha clase 2 división 1"] })
+    // Citada de una vez, sin pedazos.
+    expect(read?.drafts[2]?.pieces).toBeUndefined()
   })
 
   it("las respuestas de ficha que Clío repite como correcciones de lo que no está pendiente no dan un «4» suelto (prueba con voz c7, v11)", () => {
