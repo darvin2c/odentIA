@@ -87,6 +87,7 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import {
+  diagnosisFinding,
   odontogramAssessment,
   odontogramEntry,
   periodontalChart,
@@ -396,6 +397,20 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     .where(inArray(message.organizationId, orgs))
   // Un concepto vendido apunta a su producto (ADR 0067): se suelta antes de borrar
   // los productos; el concepto se borra después con los cobros.
+  // Las ventas de mostrador (sin paciente) no pueden soltar su producto (`patient_charge_counter_check`):
+  // se borran aquí con sus aplicaciones, antes que los productos (revisión R7: sin esto la segunda corrida
+  // de la semilla fallaba).
+  await db.execute(
+    sql`delete from patient_payment_application where organization_id in (${orgList})
+      and charge_id in (select id from patient_charge where organization_id in (${orgList}) and patient_id is null)`,
+  )
+  await db.execute(
+    sql`delete from stock_movement where organization_id in (${orgList})
+      and charge_id in (select id from patient_charge where organization_id in (${orgList}) and patient_id is null)`,
+  )
+  await db.execute(
+    sql`delete from patient_charge where organization_id in (${orgList}) and patient_id is null`,
+  )
   await db.execute(
     sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
       where organization_id in (${orgList}) and product_id is not null`,
@@ -548,6 +563,9 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, orgs))
   await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, orgs))
   await db.delete(encounterSite).where(inArray(encounterSite.organizationId, orgs))
+  // Los vínculos diagnóstico-hallazgo referencian a ambos (FK sin cascada): van antes de los dos
+  // (revisión R7: sin esto la segunda corrida de la semilla fallaba).
+  await db.delete(diagnosisFinding).where(inArray(diagnosisFinding.organizationId, orgs))
   // Los diagnósticos migrados desde notas antiguas las referencian (`legacy_note_id`): van antes.
   await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, orgs))
   await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, orgs))
