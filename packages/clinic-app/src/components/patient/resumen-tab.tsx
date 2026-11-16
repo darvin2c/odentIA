@@ -265,7 +265,7 @@ export function PatientPendingCard({
             ? `Saldo por cobrar de ${money(balance.saldo, balance.currency)}`
             : "Lo que tiene a favor cubre lo que debe",
         // «Sin pago aplicado» solo si no pagó nada (C19): con S/ 300 pagados lo decía igual.
-        detail: balanceDetailWords(balance, money),
+        detail: balanceDetailWords(balance, money, accountQuery.data?.data.pendiente ?? []),
         // El mismo cobro de Cobros, ahí mismo; «Aplicar…» siempre pide confirmar.
         action: collect.button({ size: "sm", variant: "outline", currency: balance.currency }),
       })

@@ -679,17 +679,25 @@ export interface AccountCurrency {
 
 /**
  * El detalle del saldo en el Resumen (QA del 16 nov, C19): con algo a favor, las tres cifras; con
- * algo ya pagado, lo que debe y lo que pagó; solo sin ningún pago, «sin pago aplicado». Antes lo
- * decía aunque hubiera pagado una parte.
+ * algo ya pagado de lo que debe, lo que debe y lo que pagó; solo sin ningún pago de eso, «sin pago
+ * aplicado». Antes lo decía aunque hubiera pagado una parte.
+ *
+ * «Ya pagó» es lo pagado de los cargos que siguen abiertos (`pending`, con su adelanto), no todo
+ * lo pagado alguna vez (`pagado`): quien pagó S/ 1,200 el año pasado y hoy debe un cargo nuevo de
+ * S/ 300 no pagó nada de eso (revisión del 16 nov, R5).
  */
 export function balanceDetailWords(
   balance: AccountCurrency,
   money: (cents: number, currency: string) => string,
+  pending: ReadonlyArray<Pick<AccountPendingItem, "currency" | "paidCents" | "advancePaidCents">>,
 ): string {
   if (balance.aFavor > 0)
     return `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
-  if (balance.pagado > 0)
-    return `Debe: ${money(balance.porCobrar, balance.currency)} · Ya pagó: ${money(balance.pagado, balance.currency)}`
+  const paidOfOpen = pending
+    .filter((item) => item.currency === balance.currency)
+    .reduce((total, item) => total + item.paidCents + (item.advancePaidCents ?? 0), 0)
+  if (paidOfOpen > 0)
+    return `Debe: ${money(balance.porCobrar, balance.currency)} · Ya pagó: ${money(paidOfOpen, balance.currency)}`
   return "Cargos emitidos sin pago aplicado."
 }
 
