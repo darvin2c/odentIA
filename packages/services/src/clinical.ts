@@ -2509,10 +2509,26 @@ export async function setPatientAsa(
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // La atención que manda la pantalla se anota solo si es un borrador de este paciente: la firma lee
+  // esta marca para «la de antes» y no puede tomar la de otra atención (revisión del 16 nov, R13).
+  const [own] = input.encounterId
+    ? await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(
+          and(
+            eq(encounter.organizationId, orgId),
+            eq(encounter.patientId, patientId),
+            eq(encounter.id, input.encounterId),
+            eq(encounter.status, "borrador"),
+          ),
+        )
+        .limit(1)
+    : []
   await audit(tx, orgId, actorUserId, "patient.asa_classified", "patient", patientId, {
     before: locked.asaClass ?? null,
     after: input.asaClass,
-    encounterId: input.encounterId ?? null,
+    encounterId: own?.id ?? null,
     revision: { before: locked.revision, after: locked.revision + 1 },
   })
   return getPatientHealth(tx, orgId, patientId)

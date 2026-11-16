@@ -175,3 +175,24 @@ it("sin nada de hoy con anestesia, la atención firmada no guarda anestesia", as
   const [signed] = await ownerDb.select().from(encounter).where(eq(encounter.id, f.encounter.id))
   expect(signed?.anesthesiaAtSigning).toBeNull()
 })
+
+// Revisión del 16 nov (R13): la ASA no se anota contra una atención que no es un borrador de este paciente.
+it("R13: setPatientAsa ignora una atención que no es borrador de ese paciente", async () => {
+  const f = await clinicalFixture()
+  const other = await clinicalFixture()
+  await f.run((tx) =>
+    setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "II", encounterId: other.encounter.id }),
+  )
+  await f.run((tx) =>
+    setPatientAsa(tx, "org_a", f.actor, f.patient.id, { asaClass: "III", encounterId: f.encounter.id }),
+  )
+  const trail = await ownerDb
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.action, "patient.asa_classified"), eq(auditEvent.entityId, f.patient.id)))
+    .orderBy(auditEvent.createdAt)
+  expect(trail.map((row) => (row.metadata as { encounterId: string | null }).encounterId)).toEqual([
+    null,
+    f.encounter.id,
+  ])
+})
