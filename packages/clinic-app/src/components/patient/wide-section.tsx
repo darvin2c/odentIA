@@ -30,6 +30,8 @@ export interface WideTarget {
   budgetId?: string
   /** El filtro de Documentos. */
   documentFilter?: DocumentFilter
+  /** El archivo que se abre de una vez en el visor de Documentos. */
+  documentId?: string
   /** «Registrar responsable»: Responsables con su formulario ya abierto. */
   grant?: boolean
 }
@@ -57,6 +59,7 @@ function DocumentosOver({ patientId, target }: { patientId: string; target: Wide
   const search = useScopedListSearch({
     tipo: target.documentFilter,
     tooth: target.place ? String(target.place) : undefined,
+    documentId: target.documentId,
   })
   const tooth = Number(search.get("tooth"))
   return (
@@ -113,7 +116,7 @@ export function WideSectionProvider({
     if (!target || !patientId) return null
     if (target.id === "antecedentes") return <AntecedentesTab patientId={patientId} startEditing={target.review} />
     if (target.id === "historia") return <HistoriaTab patientId={patientId} initialTooth={target.place} />
-    if (target.id === "documentos") return <DocumentosOver key={`${target.documentFilter}-${target.place}`} patientId={patientId} target={target} />
+    if (target.id === "documentos") return <DocumentosOver key={`${target.documentFilter}-${target.place}-${target.documentId}`} patientId={patientId} target={target} />
     if (target.id === "plan")
       return <PlanTab patientId={patientId} patientName={name} initialBudgetId={target.budgetId} initialItemId={target.itemId} />
     if (target.id === "responsables") return <ResponsablesTab patientId={patientId} startGranting={target.grant} />

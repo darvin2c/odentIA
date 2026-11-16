@@ -6,7 +6,8 @@ import type { EncounterDetail } from "./patients"
 /**
  * Lo que un archivo ya trae al subirlo, leído en el navegador y sin ningún modelo: la
  * fecha de toma de un DICOM o de una foto, el tipo de imagen de un DICOM o el que dice
- * su nombre, y si el nombre es el que deja la cámara (entonces el título se arma solo).
+ * su nombre (o qué papel es), y si el nombre es el que deja la cámara (entonces el título
+ * dice qué es).
  * Nunca adivina lo que no está escrito: las piezas no salen de la imagen, sino de la
  * atención desde la que se sube (`attentionTeeth`).
  */
@@ -21,7 +22,10 @@ export interface FileHints {
   imageType: string | null
   /** De dónde salieron la categoría y el tipo; null si no se sugiere ninguno. */
   from: HintSource | null
-  /** Una radiografía intraoral sin decir cuál (DICOM IO): el título dice «Radiografía intraoral». */
+  /**
+   * Una radiografía intraoral (DICOM IO, o «rx intraoral» en el nombre): su tipo es periapical,
+   * interproximal u oclusal, y sin elegirlo el título dice «Radiografía intraoral».
+   */
   intraoral: boolean
 }
 
@@ -40,7 +44,7 @@ function words(text: string): string {
 
 /** Una radiografía sin decir cuál: en un producto sin «radiografía simple», solo la categoría. */
 const RADIOGRAPH_WORDS = ["rx", "radiografia", "radiograph", "xray", "x ray"]
-const INTRAORAL_TYPES = ["periapical", "bitewing", "oclusal"]
+export const INTRAORAL_TYPES: readonly string[] = ["periapical", "bitewing", "oclusal"]
 
 /**
  * Las palabras del nombre (o de la descripción de un DICOM) que dicen claramente qué
@@ -87,15 +91,18 @@ export function nameHint(
     const listed = TYPE_WORDS.find(([value]) => value === type.value)?.[1]
     return listed ? has(said, listed) : false
   })
+  const intraoral = (value: string) => INTRAORAL_TYPES.includes(value)
   // «rx intraoral»: una radiografía, no una foto; sin decir cuál de las intraorales.
   if (radiograph && found.some((type) => type.value === "foto_intraoral")) {
     const rest = found.filter((type) => type.category === "radiografia")
-    if (rest.length === 1 && rest[0]) return { category: "radiografia", imageType: rest[0].value, intraoral: false }
-    return types.some((type) => INTRAORAL_TYPES.includes(type.value))
+    if (rest.length === 1 && rest[0])
+      return { category: "radiografia", imageType: rest[0].value, intraoral: intraoral(rest[0].value) }
+    return types.some((type) => intraoral(type.value))
       ? { category: "radiografia", imageType: null, intraoral: true }
       : null
   }
-  if (found.length === 1 && found[0]) return { category: found[0].category, imageType: found[0].value, intraoral: false }
+  if (found.length === 1 && found[0])
+    return { category: found[0].category, imageType: found[0].value, intraoral: intraoral(found[0].value) }
   if (found.length > 1) {
     const categories = new Set(found.map((type) => type.category))
     const [only1] = categories
@@ -168,13 +175,7 @@ export function dicomHints(ds: DicomTags, name: string, types: readonly ImagingT
     .join(" ")
   if (modality === "IO" && types.some((type) => INTRAORAL_TYPES.includes(type.value))) {
     const which = nameHint(described, types, INTRAORAL_TYPES)
-    return {
-      takenOn,
-      category: "radiografia",
-      imageType: which?.imageType ?? null,
-      from: "archivo",
-      intraoral: !which?.imageType,
-    }
+    return { takenOn, category: "radiografia", imageType: which?.imageType ?? null, from: "archivo", intraoral: true }
   }
   const type = (MODALITY_TYPES[modality] ?? [])
     .map((value) => types.find((item) => item.value === value))
@@ -229,20 +230,39 @@ function tiffDateTimeOriginal(tiff: Uint8Array, today: string): string | null {
   return realDay(/^(\d{4}):(\d{2}):(\d{2})$/.exec(said), today)
 }
 
+/** Las palabras del nombre que dicen qué papel es («Consentimiento firmado.pdf»): ganan al formato. */
+const PAPER_WORDS: ReadonlyArray<readonly [category: string, words: readonly string[]]> = [
+  ["consentimiento", ["consentimiento", "consentimientos", "consent"]],
+  ["informe", ["informe", "informes", "hemograma", "laboratorio", "analisis", "resultado", "resultados"]],
+]
+
+/** La categoría de papel que dice el nombre, si dice una sola. */
+export function paperHint(text: string): string | null {
+  const said = words(text)
+  const found = PAPER_WORDS.filter(([, listed]) => has(said, listed))
+  return found.length === 1 && found[0] ? found[0][0] : null
+}
+
 /** Lo que trae un archivo ya leído (`readChosenFile`): no lo cambia ni lo sube. */
 export async function readFileHints(file: File, types: readonly ImagingType[], today: string): Promise<FileHints> {
+  const stem = file.name.replace(/\.[^.]+$/, "")
   try {
     if (file.type === "application/pdf") {
-      // Un PDF que llega casi siempre es un informe (de laboratorio, del centro de imágenes);
-      // si es otra cosa, se elige a mano.
-      return { ...NO_HINTS, category: "informe", from: "formato" }
+      // Lo que dice el nombre gana. Si no dice nada, un PDF que llega casi siempre es un
+      // informe (de laboratorio, del centro de imágenes); si es otra cosa, se elige a mano.
+      const named = paperHint(stem)
+      return named
+        ? { ...NO_HINTS, category: named, from: "nombre" }
+        : { ...NO_HINTS, category: "informe", from: "formato" }
     }
     if (!file.type.startsWith("image/")) {
       // DICOM suele llegar sin tipo declarado: se reconoce por su contenido (el «DICM» de PS3.10).
       const ds = await dicomHeader(file)
       return ds ? dicomHints(ds, file.name, types, today) : NO_HINTS
     }
-    const hinted = nameHint(file.name.replace(/\.[^.]+$/, ""), types)
+    // La foto de un papel («Consentimiento firmado.jpg») también dice qué es.
+    const paper = paperHint(stem)
+    const hinted = nameHint(stem, types) ?? (paper ? { category: paper, imageType: null, intraoral: false } : null)
     const takenOn =
       file.type === "image/jpeg"
         ? exifTakenOn(new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer()), today)
@@ -282,27 +302,6 @@ export function isGenericFileName(name: string): boolean {
   const base = name.split(/[\\/]/).pop() ?? name
   const stem = base.replace(/\.[^.]+$/, "").trim()
   return GENERIC_NAMES.some((pattern) => pattern.test(stem))
-}
-
-/**
- * «pieza 46», «piezas 36 y 46», «piezas 16, 26 y 36»; con más de tres, «5 piezas».
- * Sin «dónde» en el producto (latidIA, vistIA), nada.
- */
-export function placesWords(
-  teeth: readonly number[],
-  site: { placeLabel: string; placesLabel: string } | null,
-): string | null {
-  if (!site || teeth.length === 0) return null
-  const one = site.placeLabel.toLowerCase()
-  const many = site.placesLabel.toLowerCase()
-  if (teeth.length === 1) return `${one} ${teeth[0]}`
-  if (teeth.length > 3) return `${teeth.length} ${many}`
-  return `${many} ${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
-}
-
-/** «Radiografía periapical · pieza 46 · 15 nov»: lo que es, dónde y cuándo, lo que se sepa. */
-export function composeTitle(what: string, places: string | null, day: string): string {
-  return [what, places, day].filter(Boolean).join(" · ")
 }
 
 /**

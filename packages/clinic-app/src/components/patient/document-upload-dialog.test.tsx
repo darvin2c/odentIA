@@ -86,7 +86,7 @@ function apiWith(changedOnDisk: ReadonlySet<File>, answer: () => Response | Prom
 
 const created = () => new Response(JSON.stringify({ data: { id: "doc-1" } }), { status: 201 })
 
-function show(onSuccess = vi.fn(async () => {})) {
+function show(onSuccess = vi.fn(async () => {}), onOpenChange: (open: boolean) => void = () => {}) {
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
@@ -97,7 +97,7 @@ function show(onSuccess = vi.fn(async () => {})) {
         planItems={[]}
         suggestions={[]}
         open
-        onOpenChange={() => {}}
+        onOpenChange={onOpenChange}
         onSuccess={onSuccess}
       />
     </QueryClientProvider>,
@@ -158,9 +158,10 @@ describe("subir una captura que cambió en el disco después de elegirla", () =>
 })
 
 describe("cuando no queda nada por subir", () => {
-  it("guardado todo, no queda «Subir 0» ni «Cancelar»: se cierra con «Cerrar»", async () => {
+  it("guardado todo, no queda «Subir 0» ni «Cancelar»: «Listo» cierra", async () => {
     apiWith(new Set(), created)
-    show()
+    const onOpenChange = vi.fn()
+    show(undefined, onOpenChange)
     await choose(screenshot())
     await asReport()
     fireEvent.click(screen.getByRole("button", { name: "Subir 1" }))
@@ -168,7 +169,8 @@ describe("cuando no queda nada por subir", () => {
 
     expect(screen.queryByRole("button", { name: /^Subir/ })).toBeNull()
     expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull()
-    expect(screen.getByRole("button", { name: "Cerrar" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Listo" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it("sin respuesta del servidor, lo dice una sola vez, en su fila, con su «Verifiqué: reenviar»", async () => {
@@ -186,7 +188,7 @@ describe("cuando no queda nada por subir", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(1)
     expect(screen.queryByText(/archivo\(s\)/)).toBeNull()
     expect(screen.queryByRole("button", { name: /^Subir/ })).toBeNull()
-    expect(screen.getByRole("button", { name: "Cerrar" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Listo" })).toBeTruthy()
 
     // Reenviar es la decisión de esa fila, y la copia en memoria se vuelve a enviar.
     vi.stubGlobal(
@@ -201,8 +203,10 @@ describe("cuando no queda nada por subir", () => {
 
 /**
  * Lo que el archivo ya trae se llena solo (16 nov): la fecha de un DICOM o de la foto, el
- * tipo de un DICOM, «Informe» en un PDF, el título si el nombre es el de la cámara y, desde
- * una atención en curso, las piezas que trata. Cada dato dice de dónde salió.
+ * tipo de un DICOM, la categoría de un PDF, el título si el nombre es el de la cámara y, en
+ * una imagen subida desde una atención, sus piezas. La revisión de diseño del 15 nov dejó el
+ * título sin fecha ni piezas, las piezas a la vista y solo en imágenes, y la marca solo en la
+ * fecha y las piezas.
  */
 describe("se llena con lo que trae el archivo", () => {
   const SITE = {
@@ -231,13 +235,13 @@ describe("se llena con lo que trae el archivo", () => {
     finalizedBy: null,
   } as unknown as Encounter
 
-  /** La atención trata la 46 (su procedimiento) y la 11 está anulada: solo cuenta la 46. */
-  function apiWithAttention() {
+  /** La atención trata `teeth` (sus procedimientos); la 11 está anulada y no cuenta. */
+  function apiWithAttention(teeth: number[] = [46]) {
     api.attention = {
       teeth: [],
       procedures: [
-        { id: "pr1", description: "Endodoncia", toothNumber: 46, voidedAt: null },
-        { id: "pr2", description: "Resina", toothNumber: 11, voidedAt: "2026-11-15T10:00:00Z" },
+        ...teeth.map((tooth) => ({ id: `pr${tooth}`, description: "Endodoncia", toothNumber: tooth, voidedAt: null })),
+        { id: "pr11", description: "Resina", toothNumber: 11, voidedAt: "2026-11-15T10:00:00Z" },
       ],
       diagnoses: [],
       plannedItems: [],
@@ -291,69 +295,150 @@ describe("se llena con lo que trae el archivo", () => {
     return new File([new Uint8Array([0xff, 0xd8, ...exif, 0xff, 0xd9])], "IMG_4821.jpg", { type: "image/jpeg" })
   }
 
-  const titleOf = () => (screen.getByRole("textbox", { name: /^Título/ }) as HTMLInputElement).value
+  /** Un DICOM intraoral del 12 nov, con el nombre que le pone el CD. */
+  function sensorDicom(): File {
+    const bytes = encodeDemoDicom({ width: 4, height: 2, pixels: new Uint16Array(8), studyDate: "20261112" })
+    return new File([bytes as BlobPart], "IM000001.dcm", { type: "application/dicom" })
+  }
 
-  it("desde una atención en curso, propone las piezas que trata y las pone en el título", async () => {
+  const pdf = (name: string) => new File(["%PDF-1.7"], name, { type: "application/pdf" })
+  const titleOf = (index = 0) =>
+    (screen.getAllByRole("textbox", { name: /^Título/ })[index] as HTMLInputElement).value
+
+  async function pick(combo: HTMLElement, option: string) {
+    fireEvent.click(combo)
+    const item = await screen.findByRole("option", { name: option })
+    fireEvent.pointerDown(item, { pointerType: "mouse" })
+    fireEvent.click(item)
+    await waitFor(() => expect(combo.textContent).toContain(option))
+  }
+
+  it("un DICOM intraoral: el título dice qué es, la fecha dice de dónde salió y el tipo ofrece solo los intraorales", async () => {
     apiWithAttention()
     showWith({ defaultEncounterId: "e1" })
-    await choose(cameraPhoto())
+    await choose(sensorDicom())
 
-    await waitFor(() => expect(titleOf()).toMatch(/^Imagen · pieza 46 · 14 nov/))
-    expect(screen.getByText("Sugerido con lo que trae el archivo")).toBeTruthy()
-    expect(screen.getByText("Tomada del archivo")).toBeTruthy()
-    fireEvent.click(screen.getByText(/^Extras/))
-    expect(screen.getByLabelText("Piezas elegidas").textContent).toBe("46")
+    await waitFor(() => expect(titleOf()).toBe("Radiografía intraoral"))
+    expect(screen.getByRole("combobox", { name: /^Categoría/ }).textContent).toContain("Radiografía")
+    // La marca solo donde no se ve de dónde salió: la fecha (y las piezas).
+    expect(screen.getByText("Del archivo")).toBeTruthy()
+    expect(screen.queryByText(/Tomad[oa] del/)).toBeNull()
+    const type = screen.getByRole("combobox", { name: /^Tipo de imagen/ })
+    fireEvent.click(type)
+    const options = await screen.findAllByRole("option")
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Radiografía periapical",
+      "Radiografía interproximal (bitewing)",
+      "Radiografía oclusal",
+    ])
+    fireEvent.pointerDown(options[1] as HTMLElement, { pointerType: "mouse" })
+    fireEvent.click(options[1] as HTMLElement)
+    // El título sigue al tipo, sin «(bitewing)».
+    await waitFor(() => expect(titleOf()).toBe("Radiografía interproximal"))
+  })
+
+  it("en una imagen, la única pieza de la atención viene puesta y a la vista", async () => {
+    apiWithAttention([46])
+    showWith({ defaultEncounterId: "e1" })
+    await choose(sensorDicom())
+
+    const tooth = await screen.findByRole("button", { name: "46" })
+    expect(tooth.getAttribute("aria-pressed")).toBe("true")
     expect(screen.getByText("De la atención")).toBeTruthy()
+    expect(titleOf()).toBe("Radiografía intraoral")
+  })
+
+  it("con varias piezas en la atención, ninguna viene marcada: se eligen de un toque en la fila", async () => {
+    apiWithAttention([16, 26, 36])
+    showWith({ defaultEncounterId: "e1" })
+    await choose(sensorDicom())
+
+    const sixteen = await screen.findByRole("button", { name: "16" })
+    for (const name of ["16", "26", "36"])
+      expect(screen.getByRole("button", { name }).getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(sixteen)
+    await waitFor(() => expect(screen.getByRole("button", { name: "16" }).getAttribute("aria-pressed")).toBe("true"))
+    fireEvent.click(screen.getByText(/^Extras/))
+    expect(screen.getByLabelText("Piezas elegidas").textContent).toBe("16")
+  })
+
+  it("un papel no lleva las piezas de la atención", async () => {
+    apiWithAttention([46])
+    showWith({ defaultEncounterId: "e1" })
+    await choose(pdf("Hemograma Rosa Quispe.pdf"))
+
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /^Categoría/ }).textContent).toContain("Informe"))
+    expect(screen.queryByRole("button", { name: "46" })).toBeNull()
+    fireEvent.click(screen.getByText(/^Extras/))
+    expect(screen.getByLabelText("Piezas elegidas").textContent).toBe("")
   })
 
   it("sin atención, no propone ninguna pieza", async () => {
-    apiWithAttention()
+    apiWithAttention([46])
     showWith()
-    await choose(cameraPhoto())
+    await choose(sensorDicom())
 
-    await waitFor(() => expect(titleOf()).toMatch(/^Imagen · 14 nov/))
-    fireEvent.click(screen.getByText(/^Extras/))
-    expect(screen.getByLabelText("Piezas elegidas").textContent).toBe("")
+    await waitFor(() => expect(titleOf()).toBe("Radiografía intraoral"))
+    expect(screen.queryByRole("button", { name: "46" })).toBeNull()
     expect(screen.queryByText("De la atención")).toBeNull()
   })
 
-  it("el título armado sigue a lo que se elige, hasta que la persona lo escribe", async () => {
+  it("una foto con EXIF: su fecha, y el título sigue a lo que se elige hasta que la persona lo escribe", async () => {
     apiWithAttention()
     showWith()
     await choose(cameraPhoto())
+    await waitFor(() => expect(titleOf()).toBe("Imagen"))
+    expect(screen.getByText("Del archivo")).toBeTruthy()
     await asReport()
-    await waitFor(() => expect(titleOf()).toMatch(/^Informe · 14 nov/))
+    await waitFor(() => expect(titleOf()).toBe("Informe"))
 
-    fireEvent.change(screen.getByRole("textbox", { name: /^Título/ }), { target: { value: "Receta de otra clínica" } })
-    expect(screen.queryByText("Sugerido con lo que trae el archivo")).toBeNull()
-    fireEvent.click(screen.getByRole("combobox", { name: /^Categoría/ }))
-    const other = await screen.findByRole("option", { name: "Otro" })
-    fireEvent.pointerDown(other, { pointerType: "mouse" })
-    fireEvent.click(other)
-    await waitFor(() => expect(screen.getByRole("combobox", { name: /^Categoría/ }).textContent).toContain("Otro"))
-    expect(titleOf()).toBe("Receta de otra clínica")
+    const title = screen.getByRole("textbox", { name: /^Título/ })
+    fireEvent.change(title, { target: { value: "Informe de otra clínica" } })
+    // Vuelve a dejarlo igual que lo sugerido: ya es suyo y no se mueve.
+    fireEvent.change(title, { target: { value: "Informe" } })
+    await pick(screen.getByRole("combobox", { name: /^Categoría/ }), "Otro")
+    expect(titleOf()).toBe("Informe")
   })
 
-  it("un PDF con el nombre que le puso la persona: lo conserva y se sugiere como informe", async () => {
+  it("un PDF con el nombre que le puso la persona: lo conserva, y el nombre dice qué papel es", async () => {
     apiWithAttention()
     showWith()
-    await choose(new File(["%PDF-1.7"], "Hemograma Rosa Quispe.pdf", { type: "application/pdf" }))
+    fireEvent.change(screen.getByLabelText("Archivos"), {
+      target: { files: [pdf("Hemograma Rosa Quispe.pdf"), pdf("Consentimiento firmado.pdf")] },
+    })
+    await screen.findByText("Consentimiento firmado.pdf")
 
-    expect(titleOf()).toBe("Hemograma Rosa Quispe")
-    expect(screen.queryByText("Sugerido con lo que trae el archivo")).toBeNull()
-    expect(screen.getByRole("combobox", { name: /^Categoría/ }).textContent).toContain("Informe")
-    expect(screen.getByText("Sugerida para un PDF")).toBeTruthy()
+    expect(titleOf(0)).toBe("Hemograma Rosa Quispe")
+    expect(titleOf(1)).toBe("Consentimiento firmado")
+    const categories = screen.getAllByRole("combobox", { name: /^Categoría ?de (Hemograma|Consentimiento)/ })
+    expect(categories[0]?.textContent).toContain("Informe")
+    expect(categories[1]?.textContent).toContain("Consentimiento")
   })
 
-  it("un DICOM intraoral: radiografía con su fecha, y el tipo queda por elegir", async () => {
+  it("«Categoría de todos» cambia lo que solo se sugirió por ser PDF", async () => {
     apiWithAttention()
-    showWith({ defaultEncounterId: "e1" })
-    const bytes = encodeDemoDicom({ width: 4, height: 2, pixels: new Uint16Array(8), studyDate: "20261112" })
-    await choose(new File([bytes as BlobPart], "IM000001.dcm", { type: "application/dicom" }))
+    showWith()
+    fireEvent.change(screen.getByLabelText("Archivos"), {
+      target: { files: [pdf("scan0001.pdf"), pdf("scan0002.pdf")] },
+    })
+    await screen.findByText("scan0002.pdf")
 
-    await waitFor(() => expect(titleOf()).toMatch(/^Radiografía intraoral · pieza 46 · 12 nov/))
-    expect(screen.getByRole("combobox", { name: /^Categoría/ }).textContent).toContain("Radiografía")
-    expect(screen.getAllByText("Tomada del archivo")).toHaveLength(2)
-    expect(screen.getByRole("combobox", { name: /^Tipo de imagen/ }).textContent).toContain("Elige el tipo")
+    await pick(screen.getByRole("combobox", { name: "Categoría de todos" }), "Otro")
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("combobox", { name: /^Categoría ?de scan/ }).map((combo) => combo.textContent),
+      ).toEqual(["Otro", "Otro"]),
+    )
+    await waitFor(() => expect(titleOf(0)).toBe("Documento"))
+  })
+
+  it("«Para todos» no sale si no queda nada que copiar", async () => {
+    apiWithAttention()
+    showWith()
+    fireEvent.change(screen.getByLabelText("Archivos"), { target: { files: [sensorDicom(), cameraPhoto()] } })
+    await screen.findByText("IMG_4821.jpg")
+    await waitFor(() => expect(titleOf(1)).toBe("Imagen"))
+
+    expect(screen.queryByText("Para todos")).toBeNull()
   })
 })

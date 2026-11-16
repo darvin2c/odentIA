@@ -2,11 +2,10 @@ import { DENTAL_IMAGING_TYPES, encodeDemoDicom, type ImagingType } from "@odenti
 import { describe, expect, it } from "vitest"
 import {
   attentionTeeth,
-  composeTitle,
   exifTakenOn,
   isGenericFileName,
   nameHint,
-  placesWords,
+  paperHint,
   readFileHints,
 } from "./upload-hints"
 
@@ -98,11 +97,11 @@ describe("la fecha de toma que trae el archivo", () => {
 })
 
 describe("la categoría y el tipo", () => {
-  it("un DICOM intraoral es una radiografía; periapical o interproximal solo si lo dice", async () => {
+  it("un DICOM intraoral es una radiografía intraoral; periapical o interproximal solo si lo dice", async () => {
     const plain = await readFileHints(dicom("IM000001.dcm"), DENTAL_IMAGING_TYPES, TODAY)
     expect(plain).toMatchObject({ category: "radiografia", imageType: null, intraoral: true, from: "archivo" })
     const bitewing = await readFileHints(dicom("Bitewing derecha.dcm"), DENTAL_IMAGING_TYPES, TODAY)
-    expect(bitewing).toMatchObject({ category: "radiografia", imageType: "bitewing", intraoral: false })
+    expect(bitewing).toMatchObject({ category: "radiografia", imageType: "bitewing", intraoral: true })
   })
 
   it("panorámica (PX) y tomografía (CT, o CBCT si el equipo lo escribe); otra modalidad, sin elegir", async () => {
@@ -119,13 +118,17 @@ describe("la categoría y el tipo", () => {
     expect(hints).toMatchObject({ category: "radiografia", imageType: "tomografia_computarizada", intraoral: false })
   })
 
-  it("un PDF es un informe, sugerido por su formato", async () => {
-    const pdf = new File(["%PDF-1.7"], "Hemograma Rosa Quispe.pdf", { type: "application/pdf" })
-    expect(await readFileHints(pdf, DENTAL_IMAGING_TYPES, TODAY)).toMatchObject({
-      category: "informe",
-      imageType: null,
-      from: "formato",
-    })
+  it("un PDF es un informe por su formato, salvo que su nombre diga qué papel es", async () => {
+    const pdf = (name: string) =>
+      readFileHints(new File(["%PDF-1.7"], name, { type: "application/pdf" }), DENTAL_IMAGING_TYPES, TODAY)
+    expect(await pdf("scan0001.pdf")).toMatchObject({ category: "informe", imageType: null, from: "formato" })
+    expect(await pdf("Hemograma Rosa Quispe.pdf")).toMatchObject({ category: "informe", from: "nombre" })
+    expect(await pdf("Consentimiento firmado.pdf")).toMatchObject({ category: "consentimiento", from: "nombre" })
+    // La foto de un papel también.
+    const photo = await readFileHints(jpeg("Consentimiento firmado.jpg", jpegWithExif(null)), DENTAL_IMAGING_TYPES, TODAY)
+    expect(photo).toMatchObject({ category: "consentimiento", imageType: null, from: "nombre" })
+    // Si dice dos papeles, ninguno.
+    expect(paperHint("informe del consentimiento")).toBeNull()
   })
 
   it("una imagen común queda sin elegir, salvo una pista clara en su nombre", async () => {
@@ -133,7 +136,7 @@ describe("la categoría y el tipo", () => {
     expect(plain).toMatchObject({ category: null, imageType: null, from: null })
     const pano = await readFileHints(jpeg("Panorámica Rosa.jpg", jpegWithExif(null)), DENTAL_IMAGING_TYPES, TODAY)
     expect(pano).toMatchObject({ category: "radiografia", imageType: "panoramica", from: "nombre" })
-    expect(nameHint("periapical_46", DENTAL_IMAGING_TYPES)).toMatchObject({ imageType: "periapical" })
+    expect(nameHint("periapical_46", DENTAL_IMAGING_TYPES)).toMatchObject({ imageType: "periapical", intraoral: true })
     expect(nameHint("PeriapicalPieza46", DENTAL_IMAGING_TYPES)).toMatchObject({ imageType: "periapical" })
     expect(nameHint("foto intraoral frente", DENTAL_IMAGING_TYPES)).toMatchObject({ imageType: "foto_intraoral" })
     // «rx» dice radiografía, sin decir cuál; con «intraoral», tampoco es una foto.
@@ -185,18 +188,6 @@ describe("el título", () => {
       "Informe tomografía.pdf",
     ])
       expect(isGenericFileName(name), name).toBe(false)
-  })
-
-  it("dice qué es, dónde y cuándo", () => {
-    const site = { placeLabel: "Pieza", placesLabel: "Piezas" }
-    expect(composeTitle("Radiografía periapical", placesWords([46], site), "15 nov")).toBe(
-      "Radiografía periapical · pieza 46 · 15 nov",
-    )
-    expect(composeTitle("Foto intraoral", placesWords([], site), "15 nov")).toBe("Foto intraoral · 15 nov")
-    expect(placesWords([36, 46], site)).toBe("piezas 36 y 46")
-    expect(placesWords([16, 26, 36], site)).toBe("piezas 16, 26 y 36")
-    expect(placesWords([16, 26, 36, 46], site)).toBe("4 piezas")
-    expect(placesWords([46], null)).toBeNull()
   })
 })
 

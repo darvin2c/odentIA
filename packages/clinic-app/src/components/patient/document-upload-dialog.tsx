@@ -1,5 +1,6 @@
 import { productUi } from "../../product/product-ui"
 import { appWords } from "../../lib/product-words"
+import { isImageDocumentCategory } from "@odentia/clinical"
 import {
   Attachment,
   AttachmentAction,
@@ -42,17 +43,15 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { readChosenFile } from "../../lib/chosen-file"
-import { shortDay } from "../../lib/declared-health"
 import { orgSlugFromHostname } from "../../lib/host"
 import { mayHoldStudy, type SelectedFile } from "../../lib/imaging-scan"
 import type { Encounter, EncounterDetail, PlanItem } from "../../lib/patients"
 import {
   attentionTeeth,
-  composeTitle,
   type FileHints,
   type HintSource,
+  INTRAORAL_TYPES,
   isGenericFileName,
-  placesWords,
   readFileHints,
 } from "../../lib/upload-hints"
 import {
@@ -99,17 +98,13 @@ interface Filled {
   from: FilledFrom
 }
 
-/** La marca de lo que se llenó solo, mientras el campo siga con eso: después es de la persona. */
-const FILLED_WORDS: Record<FilledField, Partial<Record<FilledFrom, string>>> = {
-  title: { titulo: "Sugerido con lo que trae el archivo" },
-  category: {
-    archivo: "Tomada del archivo",
-    nombre: "Tomada del nombre del archivo",
-    formato: "Sugerida para un PDF",
-    hoja: "La de la hoja que vas a subir",
-  },
-  imageType: { archivo: "Tomado del archivo", nombre: "Tomado del nombre del archivo" },
-  capturedAt: { archivo: "Tomada del archivo" },
+/**
+ * La marca de lo que se llenó solo, mientras el campo siga con eso: después es de la persona.
+ * Solo donde no se ve de dónde salió (la fecha y las piezas): el título, la categoría y el
+ * tipo se comprueban mirando el archivo (revisión de diseño del 15 nov).
+ */
+const FILLED_WORDS: Partial<Record<FilledField, Partial<Record<FilledFrom, string>>>> = {
+  capturedAt: { archivo: "Del archivo" },
   teeth: { atencion: "De la atención", pieza: "La del filtro «Pieza»" },
 }
 
@@ -282,24 +277,18 @@ function fileProblem(file: File): string | null {
 }
 
 /**
- * Cómo se llama en el título lo que es el archivo, con lo elegido en su fila: su tipo, su
- * categoría o, sin ninguna, su formato.
+ * El título de un archivo con nombre de cámara: lo que es, con lo elegido en su fila (su tipo,
+ * su categoría o, sin ninguna, su formato). La fecha y las piezas no van en el texto: son sus
+ * datos, y la lista y el visor ya los dicen al lado («Tomada … · Pieza …»); escritos aquí,
+ * quedaban viejos al corregirlos (revisión de diseño del 15 nov).
  */
-function titleWhat(row: RowValues, meta: Pick<RowFile, "file" | "intraoral">): string {
+function rowTitle(row: RowValues, meta: Pick<RowFile, "file" | "intraoral">): string {
   if (row.imageType && imageTypesFor(row.category).includes(row.imageType))
-    return imageTypeLabel(row.imageType) ?? row.imageType
+    // «Radiografía interproximal», sin «(bitewing)».
+    return (imageTypeLabel(row.imageType) ?? row.imageType).replace(/\s*\([^)]*\)$/, "")
   if (row.category === "radiografia" && meta.intraoral) return "Radiografía intraoral"
   if (row.category === "otro" || (!row.category && meta.file.type === "application/pdf")) return "Documento"
   return row.category ? categoryLabel(row.category) : "Imagen"
-}
-
-/** «Radiografía periapical · pieza 46 · 15 nov»: sin fecha propia, la de subida (hoy). */
-function rowTitle(row: RowValues, meta: Pick<RowFile, "file" | "intraoral">): string {
-  return composeTitle(
-    titleWhat(row, meta),
-    placesWords(row.teeth, productUi().site),
-    shortDay(row.capturedAt || regionToday()),
-  )
 }
 
 /** Lo que se llenó solo, sin la entrada del campo si ya no hay nada. */
@@ -312,10 +301,28 @@ function withFilled(
   return value ? { ...rest, [field]: value } : rest
 }
 
+/** De dónde salen las piezas: la del filtro «Pieza» y las que la atención elegida trata o examina. */
+interface TeethSource {
+  focus: readonly number[]
+  attention: readonly number[]
+}
+
+/**
+ * Las piezas que se ponen solas en una fila: la del filtro «Pieza» o, en una imagen
+ * (radiografía o foto), la de la atención si es una sola. Con dos o más no se marca
+ * ninguna (una periapical no abarca tres cuadrantes): se eligen de un toque en la fila.
+ * Un papel (informe, consentimiento, otro) no recibe las de la atención.
+ */
+function autoTeeth(category: string, source: TeethSource): { values: readonly number[]; from: FilledFrom } {
+  if (source.focus.length > 0) return { values: source.focus, from: "pieza" }
+  if (isImageDocumentCategory(category) && source.attention.length === 1)
+    return { values: source.attention, from: "atencion" }
+  return { values: [], from: "atencion" }
+}
+
 interface RowContext {
   hints: FileHints
-  /** Las piezas que se proponen (las del filtro o las de la atención) y de dónde salen. */
-  teeth: { values: readonly number[]; from: FilledFrom }
+  teeth: TeethSource
   defaultPlanItemId?: string
   defaultCategory?: string
   forAll: { category: string; capturedAt: string }
@@ -329,7 +336,7 @@ interface RowContext {
  */
 function toRow(file: File, context: RowContext): { values: RowValues; meta: RowFile } {
   rowSeq += 1
-  const { hints, teeth, forAll } = context
+  const { hints, forAll } = context
   const filled: RowValues["filled"] = {}
   let category = forAll.category
   if (context.defaultCategory) filled.category = { value: context.defaultCategory, from: "hoja" }
@@ -340,6 +347,7 @@ function toRow(file: File, context: RowContext): { values: RowValues; meta: RowF
   if (imageType && hints.from) filled.imageType = { value: imageType, from: hints.from }
   const capturedAt = hints.takenOn ?? forAll.capturedAt
   if (hints.takenOn) filled.capturedAt = { value: hints.takenOn, from: "archivo" }
+  const teeth = autoTeeth(category, context.teeth)
   if (teeth.values.length > 0) filled.teeth = { value: teeth.values.join(","), from: teeth.from }
   const meta: RowFile = {
     file,
@@ -575,15 +583,13 @@ export function DocumentUploadDialog({
   })
   const attention = encounterChoice ? procedureQuery.data?.data : undefined
   const procedures = attention?.procedures ?? []
-  // Las piezas que se proponen: la del filtro «Pieza», o las que la atención elegida trata o
-  // examina. Nunca salen de la imagen.
-  const focusTeeth = initialTeeth ?? []
-  const suggestedTeeth: RowContext["teeth"] = !productUi().site
-    ? { values: [], from: "atencion" }
-    : focusTeeth.length > 0
-      ? { values: focusTeeth, from: "pieza" }
-      : { values: attention ? attentionTeeth(attention) : [], from: "atencion" }
-  const teethKey = suggestedTeeth.values.join(",")
+  // Las piezas: la del filtro «Pieza» y las que la atención elegida trata o examina. Nunca salen
+  // de la imagen; en cada fila se ponen solas o se eligen de un toque (`autoTeeth`).
+  const teethSource: TeethSource = {
+    focus: productUi().site ? (initialTeeth ?? []) : [],
+    attention: productUi().site && attention ? attentionTeeth(attention) : [],
+  }
+  const teethKey = `${teethSource.focus.join(",")}|${teethSource.attention.join(",")}`
   const statusOf = (key: string) => files[key]?.status
   const pendingKeys = rows
     .filter((row) => isOpenRow(statusOf(row.key)))
@@ -592,53 +598,71 @@ export function DocumentUploadDialog({
   const nothingLeft = !uploading && rows.length > 0 && pendingKeys.length === 0
 
   // Lo propuesto sigue a lo que cambia, en cada fila por subir, hasta que la persona lo toca. Se lee
-  // la fila al día (no la de este render): las piezas cambian antes de armar el título.
+  // la fila al día (no la de este render).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `teethKey` resume las piezas propuestas.
   useEffect(() => {
-    // Las piezas llegan con la atención (o cambian al elegir otra): las toma la fila que sigue con
-    // las que se le propusieron, o sin ninguna.
     form.getFieldValue("rows").forEach((row, index) => {
       if (!isOpenRow(files[row.key]?.status)) return
+      // Las piezas llegan con la atención, o cambian al elegir otra atención u otra categoría: las
+      // toma la fila que sigue con las que se le pusieron, o sin ninguna.
       const current = row.teeth.join(",")
       const before = row.filled.teeth
-      if (before ? current !== before.value : current !== "") return
-      if (current === teethKey && (before?.from ?? suggestedTeeth.from) === suggestedTeeth.from) return
-      form.setFieldValue(`rows[${index}].teeth`, [...suggestedTeeth.values])
-      form.setFieldValue(
-        `rows[${index}].filled`,
-        withFilled(row.filled, "teeth", teethKey ? { value: teethKey, from: suggestedTeeth.from } : null),
-      )
+      const wanted = autoTeeth(row.category, teethSource)
+      const wantedKey = wanted.values.join(",")
+      if ((before ? current === before.value : current === "") && current !== wantedKey) {
+        form.setFieldValue(`rows[${index}].teeth`, [...wanted.values])
+        form.setFieldValue(
+          `rows[${index}].filled`,
+          withFilled(row.filled, "teeth", wantedKey ? { value: wantedKey, from: wanted.from } : null),
+        )
+      }
     })
-    // El título armado sigue a lo elegido en la fila (tipo, fecha, piezas) hasta que la persona lo escribe.
     form.getFieldValue("rows").forEach((row, index) => {
       const meta = files[row.key]
-      if (!meta?.autoTitle || !isOpenRow(meta.status) || row.filled.title?.value !== row.title) return
+      const title = row.filled.title
+      if (!meta?.autoTitle || !isOpenRow(meta.status) || !title) return
+      // La persona lo escribió: desde ahí es suyo, aunque después vuelva a dejarlo igual.
+      if (row.title !== title.value) {
+        form.setFieldValue(`rows[${index}].filled`, withFilled(row.filled, "title", null))
+        return
+      }
+      // El título armado sigue al tipo y a la categoría que se eligen en la fila.
       const next = rowTitle(row, meta)
       if (next === row.title) return
       form.setFieldValue(`rows[${index}].title`, next)
       form.setFieldValue(`rows[${index}].filled`, withFilled(row.filled, "title", { value: next, from: "titulo" }))
     })
-  })
+  }, [rows, files, teethKey])
 
   /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
   const lastCommon = useRef({ category: "", capturedAt: "" })
   /**
+   * ¿«Para todos» puede cambiar esto en la fila? Sí si está vacío, si es lo que se copió antes o si
+   * es la categoría que se sugirió solo por el formato (un PDF): eso no es «una propia».
+   */
+  const replaceable = (row: RowValues, name: "category" | "capturedAt") =>
+    row[name] === "" ||
+    row[name] === lastCommon.current[name] ||
+    (name === "category" && row.filled.category?.from === "formato" && row.filled.category.value === row.category)
+  /**
    * «Para todos»: copia la categoría o la fecha a cada fila por subir que no tenga una
-   * propia (vacía o la que se copió antes); la que se cambió a mano se respeta.
+   * propia; la que se cambió a mano o trajo el archivo se respeta.
    */
   const applyToAll = (name: "category" | "capturedAt", value: string) => {
-    const previous = lastCommon.current[name]
-    lastCommon.current = { ...lastCommon.current, [name]: value }
     form.getFieldValue("rows").forEach((row, index) => {
-      const status = statusOf(row.key)
-      if (status !== "pending" && status !== "error") return
-      if (row[name] !== "" && row[name] !== previous) return
+      if (!isOpenRow(statusOf(row.key)) || !replaceable(row, name)) return
       form.setFieldValue(`rows[${index}].${name}`, value)
       // Otro tipo de archivo: el tipo de imagen elegido deja de valer si no es de esa categoría.
       if (name === "category" && row.imageType && !imageTypesFor(value).includes(row.imageType))
         form.setFieldValue(`rows[${index}].imageType`, "")
       if (name === "category") askImageTypeNow(form as unknown as AnyFormApi, index, value)
     })
+    lastCommon.current = { ...lastCommon.current, [name]: value }
   }
+  // «Para todos» solo con algo que copiar: dos o más filas por subir sin categoría o sin fecha propias.
+  const forAllUseful =
+    rows.filter((row) => isOpenRow(statusOf(row.key)) && (replaceable(row, "category") || replaceable(row, "capturedAt")))
+      .length > 1
 
   const addFiles = async (list: File[]) => {
     if (disabled || !list.length) return
@@ -662,7 +686,7 @@ export function DocumentUploadDialog({
         bad.push(`${chosen.name}: ${problem ?? UNREADABLE_FILE}`)
         continue
       }
-      const row = toRow(file, { hints, teeth: suggestedTeeth, defaultPlanItemId, defaultCategory, forAll })
+      const row = toRow(file, { hints, teeth: teethSource, defaultPlanItemId, defaultCategory, forAll })
       added[row.values.key] = row.meta
       form.pushFieldValue("rows", row.values)
     }
@@ -804,8 +828,10 @@ export function DocumentUploadDialog({
       title="Subir imágenes o documentos"
       description={`JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo y 30 MB la radiografía DICOM${storesTomography() ? "; la tomografía, hasta 1,5 GB" : ""}. El formato se verifica por contenido. Sin atención queda como General.`}
       onSubmit={(event) => {
+        // Todo subido: «Listo» cierra.
         if (nothingLeft) {
           event.preventDefault()
+          close()
           return
         }
         targets.current = new Set(pendingKeys)
@@ -815,10 +841,11 @@ export function DocumentUploadDialog({
       error={surface.error}
       // Solo por permiso: lo que falta en una fila se dice en su campo al subir.
       submitDisabled={disabled}
-      submitLabel={uploading ? "Subiendo…" : pendingKeys.length > 0 ? `Subir ${pendingKeys.length}` : "Subir"}
-      // Sin nada por subir, lo único que queda es cerrar: «Cerrar» es la «×» de arriba
-      // (el pie no repite un botón que solo cierra) y no hay «Subir 0» ni «Cancelar».
-      hideSubmit={nothingLeft}
+      submitLabel={
+        uploading ? "Subiendo…" : nothingLeft ? "Listo" : pendingKeys.length > 0 ? `Subir ${pendingKeys.length}` : "Subir"
+      }
+      // Sin nada por subir queda «Listo», que cierra: ni «Subir 0» ni «Cancelar» (la «×» de
+      // arriba sigue; el pie no repite un «Cerrar»).
       cancelLabel={nothingLeft ? common.actions.close : undefined}
     >
       {/* min-w-0: un fieldset mide lo que su contenido más ancho (la atención con su motivo largo) y a 390 px se salía de la ventana. */}
@@ -920,7 +947,7 @@ export function DocumentUploadDialog({
                 )}
               </rowsField.Group>
 
-              {pendingKeys.length > 1 && (
+              {forAllUseful && (
                 <fieldset className="flex min-w-0 flex-col gap-3 rounded-xl bg-muted/50 p-4">
                   <legend className="float-left text-sm font-medium">Para todos</legend>
                   <p className="clear-left text-sm text-muted-foreground">
@@ -988,8 +1015,9 @@ export function DocumentUploadDialog({
                         onToggle={(expanded) => patchFile(row.key, { expanded })}
                         onRemove={() => removeRow(index)}
                         onRetry={() => retryRow(row.key)}
-                        several={pendingKeys.length > 1}
+                        several={forAllUseful}
                         sharedError={sharedError}
+                        attentionTeeth={teethSource.attention}
                       />
                     ) : null
                   })}
@@ -1087,6 +1115,8 @@ interface QueuedRowProps {
   several: boolean
   /** El motivo que comparten varias filas: va una vez, arriba, y la fila no lo repite. */
   sharedError: string | null
+  /** Las piezas de la atención elegida: en una imagen se eligen de un toque, sin abrir «Extras». */
+  attentionTeeth: readonly number[]
 }
 
 const QueuedRow = withForm({
@@ -1106,6 +1136,7 @@ const QueuedRow = withForm({
     onRetry,
     several,
     sharedError,
+    attentionTeeth,
   }) {
     const id = useId()
     const row = useStore(form.store, (state) => state.values.rows[index])
@@ -1123,8 +1154,14 @@ const QueuedRow = withForm({
     const note = (field: FilledField): string | undefined => {
       const filled = row.filled[field]
       const value = field === "teeth" ? row.teeth.join(",") : row[field]
-      return filled && value === filled.value ? FILLED_WORDS[field][filled.from] : undefined
+      return filled && value === filled.value ? FILLED_WORDS[field]?.[filled.from] : undefined
     }
+    // Una radiografía intraoral solo puede ser periapical, interproximal u oclusal.
+    const intraoral = meta.intraoral && row.category === "radiografia"
+    const typeChoices = intraoral ? types.filter((type) => INTRAORAL_TYPES.includes(type)) : types
+    const site = productUi().site
+    // Las piezas de la atención, a la vista en una imagen (radiografía o foto): un papel no las lleva.
+    const pickTeeth = site !== null && attentionTeeth.length > 0 && isImageDocumentCategory(row.category)
     const withExtras =
       row.teeth.length > 0 ||
       row.planItemId ||
@@ -1175,7 +1212,6 @@ const QueuedRow = withForm({
                   <field.TextField
                     id={`${id}-title`}
                     label={<>Título{forFile}</>}
-                    description={note("title")}
                     disabled={busy}
                     placeholder={`p. ej. ${appWords().examples.imagingTitle}`}
                     maxLength={200}
@@ -1198,7 +1234,6 @@ const QueuedRow = withForm({
                   <field.SelectField
                     id={`${id}-category`}
                     label={<>Categoría{forFile}</>}
-                    description={note("category")}
                     placeholder="Elige la categoría"
                     options={UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
                   />
@@ -1212,9 +1247,11 @@ const QueuedRow = withForm({
                     <field.SelectField
                       id={`${id}-type`}
                       label={<>Tipo de imagen{forFile}</>}
-                      description={note("imageType")}
                       placeholder="Elige el tipo"
-                      options={types.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t }))}
+                      options={(typeChoices.length > 0 ? typeChoices : types).map((t) => ({
+                        value: t,
+                        label: imageTypeLabel(t) ?? t,
+                      }))}
                     />
                   )}
                 </form.AppField>
@@ -1253,6 +1290,53 @@ const QueuedRow = withForm({
                 )}
               </form.AppField>
             </div>
+
+            {pickTeeth ? (
+              // Las de la atención se eligen de un toque, sin abrir «Extras»: con una sola ya viene
+              // marcada; con varias, ninguna. Otra pieza, en el odontograma de «Extras».
+              <form.AppField name={`${at}.teeth`}>
+                {(field) => (
+                  <field.Group
+                    id={`${id}-attention-teeth`}
+                    legend={
+                      <>
+                        {site.placesLabel} de esta atención{forFile}
+                      </>
+                    }
+                    description={note("teeth")}
+                  >
+                    {(control) => (
+                      <div className="flex flex-wrap gap-2">
+                        {attentionTeeth.map((tooth) => {
+                          const on = field.state.value.includes(tooth)
+                          return (
+                            <Button
+                              key={tooth}
+                              type="button"
+                              size="sm"
+                              variant={on ? "default" : "outline"}
+                              className="min-h-11 min-w-11 sm:min-h-8"
+                              aria-pressed={on}
+                              aria-describedby={control.describedBy}
+                              disabled={busy}
+                              onClick={() =>
+                                field.handleChange(
+                                  on
+                                    ? field.state.value.filter((value) => value !== tooth)
+                                    : [...field.state.value, tooth].sort((a, b) => a - b),
+                                )
+                              }
+                            >
+                              {tooth}
+                            </Button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </field.Group>
+                )}
+              </form.AppField>
+            ) : null}
 
             <details open={meta.expanded} onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}>
               <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
@@ -1317,7 +1401,7 @@ const QueuedRow = withForm({
                       <field.Group
                         id={`${id}-teeth`}
                         legend={`${productUi().site?.placesLabel} (opcional)`}
-                        description={note("teeth")}
+                        description={pickTeeth ? undefined : note("teeth")}
                       >
                         {(control) => (
                           <PlacesField

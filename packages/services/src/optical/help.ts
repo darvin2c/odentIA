@@ -271,10 +271,10 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
           "imagen o archivo, con su tipo (retinografía, topografía corneal, OCT, campo visual o foto del ojo) y la fecha de toma",
         ],
         // Sin piezas en una óptica: la atención no propone dónde. Sus pruebas no se nombran como DICOM.
-        ["; desde una atención, también sus piezas", ""],
+        ["; en una imagen subida desde una atención, también su pieza (si son varias, la eliges de un toque en la fila)", ""],
         [
-          "la fecha de un DICOM o de la foto del celular, el tipo de un DICOM o el que dice su nombre",
-          "la fecha de la foto del celular, el tipo que dice su nombre",
+          "la fecha de un DICOM o de la foto del celular (dice «Del archivo»), el tipo de un DICOM o el que dice su nombre",
+          "la fecha de la foto del celular (dice «Del archivo»), el tipo que dice su nombre",
         ],
       ),
       forms: ["donde subo una retinografia", "donde subo una prueba del ojo", "subir imagen", "subir examen", "subir campo visual", "subir topografia"],
