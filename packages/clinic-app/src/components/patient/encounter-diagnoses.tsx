@@ -324,7 +324,8 @@ export function EncounterDiagnoses({
         <h2 id={`${typeGroupId}-title`} className="font-heading text-base font-medium">
           Diagnóstico ({active.length})
         </h2>
-        {editable ? (
+        {/* La regla, solo con el bloque vacío (estándar E2); la Ayuda la sigue contestando. */}
+        {editable && active.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             Al menos uno para cerrar la atención; «Presuntivo» basta.
           </p>

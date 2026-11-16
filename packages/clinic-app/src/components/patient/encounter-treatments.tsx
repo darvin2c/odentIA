@@ -92,10 +92,8 @@ export function EncounterTreatments({
   if (items.length === 0) return <>{null}</>
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-sm text-muted-foreground">
-        Lo que con la sesión de hoy llega a sus sesiones previstas queda realizado al firmar;
-        «Completar» lo termina antes.
-      </p>
+      {/* Qué hace «Completar» y cuándo queda realizado lo dice la Ayuda: con contenido, el bloque
+          no repite su regla (estándar E2). */}
       {
         <ul className="flex flex-col divide-y" aria-label="Tratamientos de esta atención">
           {items.map((item) => {

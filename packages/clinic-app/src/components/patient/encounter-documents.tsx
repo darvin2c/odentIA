@@ -395,9 +395,10 @@ export function EncounterDocumentsBlock({
               </Link>
               .
             </>
-          ) : (
+          ) : docs.total === 0 && docs.needs.length === 0 ? (
+            // La regla, solo con el bloque vacío (estándar E2): con algo dentro, el título basta.
             "Receta, consentimiento, orden, ficha o imagen, llenos con lo de esta atención."
-          )}
+          ) : null}
         </p>
         {canWrite && !signed ? (
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

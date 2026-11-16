@@ -767,6 +767,11 @@ export interface EncounterDetail {
   /** Lo que la atención deja por ejecutar, sin lo que la persona dejó fuera: lo cuenta el servidor. */
   pendingTreatments: number
   procedures: ProcedureItem[]
+  /**
+   * Lo que se hizo, una línea por procedimiento vigente con su sitio y su sesión («Endodoncia
+   * posterior vital · Pieza 36 · sesión 1 de 2»): la atención firmada se titula con esto.
+   */
+  doneLines?: string[]
   /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
   diagnoses: EncounterDiagnosis[]
   /** Notas de evolución sin código (kind='evolucion'), orden ascendente. */

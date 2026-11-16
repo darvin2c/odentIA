@@ -263,6 +263,9 @@ export function EncounterProcedures({
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
   /** Lo que vino puesto al abrir: el cajón lo dice mientras siga elegido. */
   const [presetId, setPresetId] = useState<string | null>(null)
+  // «Otro servicio del catálogo» elegido a propósito: sin elegir nada, con varios tratamientos,
+  // la lista dice «Elige qué hiciste» y no da por hecho el catálogo (P10, C25).
+  const [otherPicked, setOtherPicked] = useState(false)
 
   const encounter = detail.encounter
   // Solo el borrador admite registrar o anular actos.
@@ -453,6 +456,7 @@ export function EncounterProcedures({
 
   const onPlanChange = (value: string | null) => {
     const next = value ?? NO_PLAN
+    setOtherPicked(next === NO_PLAN)
     if (next === NO_PLAN) {
       form.setFieldValue("planItemId", "")
       return
@@ -483,6 +487,7 @@ export function EncounterProcedures({
     if (surface.isSubmitting) return
     form.reset()
     setPresetId(null)
+    setOtherPicked(false)
     setOpen(false)
   }
 
@@ -536,7 +541,10 @@ export function EncounterProcedures({
                           )
                         ) : null}
                         <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
-                        {proc.priceCents != null && proc.currency ? (
+                        {/* Lo de un tratamiento del plan se cobra con su presupuesto (una vez, o por
+                            sesión): la fila no dice un precio que quizá ya se cobró en una sesión
+                            anterior (P10, C18). Lo que se cargará lo dicen el cierre y la caja. */}
+                        {proc.planItemId ? null : proc.priceCents != null && proc.currency ? (
                           <span className="font-medium text-foreground">
                             {orgLocale ? formatMoney(proc.priceCents, proc.currency, orgLocale) : "…"}
                           </span>
@@ -638,7 +646,13 @@ export function EncounterProcedures({
                             </div>
                           ) : (
                             <Select
-                              value={field.state.value === "" ? NO_PLAN : field.state.value}
+                              value={
+                                field.state.value !== ""
+                                  ? field.state.value
+                                  : otherPicked || options.length === 0
+                                    ? NO_PLAN
+                                    : null
+                              }
                               items={planItems}
                               onValueChange={onPlanChange}
                               disabled={busy}
@@ -651,7 +665,7 @@ export function EncounterProcedures({
                                     : "Tratamiento indicado"
                                 }
                               >
-                                <SelectValue />
+                                <SelectValue placeholder="Elige qué hiciste" />
                               </SelectTrigger>
                               <SelectContent>
                                 {options.map((item) => (

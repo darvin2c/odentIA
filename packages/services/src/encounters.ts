@@ -1,6 +1,7 @@
 import { canAttend } from "@odentia/auth/permissions"
 import {
   budgetStateText,
+  doneSessionWords,
   isLeftOut,
   isLocalAnestheticName,
   parseVitals,
@@ -165,6 +166,8 @@ import {
   controlWindowOpenSql,
   controlWindowStart,
   dayKeyIn,
+  encounterSessionKey,
+  encounterSessionsOf,
   goesBeforeSql,
   LIVE_APPOINTMENT_STATUSES,
   pairsWithAccepted,
@@ -292,6 +295,12 @@ export interface EncounterDetailBase {
   teeth: number[]
   /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
   procedures: EncounterProcedureRow[]
+  /**
+   * Lo que se hizo, una línea por procedimiento vigente con su sitio y su sesión
+   * («Endodoncia posterior vital · Pieza 36 · sesión 1 de 2»), con la misma regla que la
+   * Historia (`encounterSessionsOf`): la atención firmada se titula con esto (P10).
+   */
+  doneLines: string[]
   /**
    * Diagnósticos de la atención (lista y código), anulados incluidos, con su
    * nombre en el catálogo: quien atiende lee «Caries dental», no solo DA08.0.
@@ -1304,10 +1313,21 @@ export async function getEncounterDetail(
   const pendingTreatments = [...attention.values()].filter(
     (item) => TO_EXECUTE_STATUSES.includes(item.status) && !isLeftOut(item.decisionStatus),
   ).length
+  const liveProcedures = procedures.filter((procedure) => procedure.voidedAt === null)
+  const sessions = liveProcedures.some((procedure) => procedure.planItemId)
+    ? await encounterSessionsOf(tx, orgId, [encounterId])
+    : new Map()
+  const doneLines = liveProcedures.map((procedure) => {
+    const session = procedure.planItemId ? sessions.get(encounterSessionKey(encounterId, procedure.planItemId)) : undefined
+    return [procedure.description, site.words(procedure, "full"), session ? doneSessionWords(session.n, session.m, session.finished) : null]
+      .filter(Boolean)
+      .join(" · ")
+  })
   return {
     encounter: row,
     teeth: teethRows.map((r) => site.value(r.siteCode)).filter((tooth): tooth is number => tooth != null),
     procedures: procedures.map((row) => withSite(site, row)),
+    doneLines,
     diagnoses: diagnoses.map((row) => withSite(site, row)),
     notes: notes.map((row) => withSite(site, row)),
     // Lo del producto (odentIA: los hallazgos del odontograma de la atención).

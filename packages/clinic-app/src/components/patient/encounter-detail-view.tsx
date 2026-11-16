@@ -137,9 +137,9 @@ function listWords(items: string[]): string {
 
 /**
  * Lo que la atención no registró, para decirlo en una sola línea: así nadie cree
- * que está escondido. Una receta emitida en ella es una indicación y un documento
- * registrados (E9); un formulario finalizado también es un documento suyo (QA de
- * formularios del 13 nov: decía «Sin registrar: … documentos» teniendo uno).
+ * que está escondido. Un formulario finalizado es un documento suyo (QA de
+ * formularios del 13 nov: decía «Sin registrar: … documentos» teniendo uno), y una
+ * receta emitida, también. Las indicaciones son opcionales: no se dicen como falta (P10).
  */
 export function unrecordedParts(input: {
   diagnoses: number
@@ -156,7 +156,6 @@ export function unrecordedParts(input: {
     input.diagnoses === 0 ? "diagnóstico" : "",
     input.procedures === 0 ? "procedimientos" : "",
     input.evolution ? "" : "evolución",
-    input.indications || input.issuedPrescription ? "" : "indicaciones",
     input.showDocuments && input.documents === 0 && !input.issuedPrescription && input.forms === 0 ? "documentos" : "",
   ].filter(Boolean)
 }

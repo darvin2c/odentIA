@@ -26,6 +26,11 @@ describe("«Sin registrar» de la atención firmada", () => {
     expect(unrecordedParts({ ...signed, indications: false, issuedPrescription: true })).toEqual(["procedimientos"])
   })
 
+  // Estudio de la atención (16 nov, P10): lo opcional no se dice como falta.
+  it("las indicaciones son opcionales: sin ellas no se dice «Sin registrar: indicaciones»", () => {
+    expect(unrecordedParts({ ...signed, indications: false })).toEqual(["procedimientos", "documentos"])
+  })
+
   it("en la página de la atención, que lista sus documentos aparte, no se dice que faltan", () => {
     expect(unrecordedParts({ ...signed, showDocuments: false })).toEqual(["procedimientos"])
   })
@@ -33,6 +38,6 @@ describe("«Sin registrar» de la atención firmada", () => {
   it("sin nada registrado lo dice todo", () => {
     expect(
       unrecordedParts({ ...signed, diagnoses: 0, evolution: false, indications: false }),
-    ).toEqual(["diagnóstico", "procedimientos", "evolución", "indicaciones", "documentos"])
+    ).toEqual(["diagnóstico", "procedimientos", "evolución", "documentos"])
   })
 })

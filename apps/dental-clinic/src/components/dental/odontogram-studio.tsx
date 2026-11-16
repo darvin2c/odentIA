@@ -501,14 +501,22 @@ function StudioBody({
               ))}
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {dentition === suggested
-              ? birthDate
-                ? "Dentición sugerida por la edad del paciente."
-                : "Dentición por defecto: no hay fecha de nacimiento registrada."
-              : "Vista cambiada a mano."}
-            {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
-          </p>
+          {/* En la atención, tres frases decían cómo usar el arco: queda una, la del bloque vacío
+              («Toca una pieza…»). Lo que hace falta para leer la mixta se dice siempre (estándar E2). */}
+          {compact ? (
+            dentition === "mixed" ? (
+              <p className="text-xs text-muted-foreground">Arco exterior: permanentes. Arco interior: temporales.</p>
+            ) : null
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {dentition === suggested
+                ? birthDate
+                  ? "Dentición sugerida por la edad del paciente."
+                  : "Dentición por defecto: no hay fecha de nacimiento registrada."
+                : "Vista cambiada a mano."}
+              {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               <Button
@@ -650,11 +658,13 @@ function StudioBody({
               onToggle={toggle}
             />
           </div>
-          <p className="text-xs text-muted-foreground">
-            {multiple
-              ? "Marca las piezas y abre la selección para editarlas juntas."
-              : "Haz clic en una pieza para abrir su registro clínico."}
-          </p>
+          {multiple || !compact ? (
+            <p className="text-xs text-muted-foreground">
+              {multiple
+                ? "Marca las piezas y abre la selección para editarlas juntas."
+                : "Haz clic en una pieza para abrir su registro clínico."}
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-red-600" />

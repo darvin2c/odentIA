@@ -1011,7 +1011,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "atiendo-paciente",
         q: "¿Cómo atiendo a un paciente?",
-        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice «Cierre de la atención», cada cosa con «Registrar»; cuando no falta nada, dice «Lista para firmar». Solo lo ve quien escribe en la historia clínica.",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic, con el cursor en el motivo, y si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice el pie fijo de abajo, todo junto, y cada cosa lleva a su lugar («Faltan 2: tu colegiatura y la firma de Carmen»); cuando no falta nada, dice «Listo para firmar». Si es una urgencia, «Es una urgencia» está junto al título de Consulta. Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
         area: "clinica",
       },
@@ -2337,7 +2337,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-por-que-aparece",
         q: "¿Por qué me aparece esta ficha?",
-        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
         forms: [
           "por que me sale esta ficha en la atencion",
           "de donde sale la ficha que aparece sola",

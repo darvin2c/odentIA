@@ -224,14 +224,12 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // La atención ya tiene motivo: se dice antes de confirmar que lo dictado se agrega.
   await expect(suggested("Consulta")).toContainText("Se agrega a lo que ya hay en Motivo de consulta.")
-  // El cierre dice que el diagnóstico está sugerido, no registrado.
-  const closing = page.getByRole("region", { name: "Cierre de la atención" })
   // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
   const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
-  await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
+  // El pie, el único lugar de lo que falta (P10), dice que el diagnóstico está sugerido, no registrado.
   // Lo que falta no apaga «Finalizar y firmar» (ADR 0113, como en patients.spec): sin abrir el cierre,
   // lleva a lo primero que falta (la evolución, sugerida pero sin confirmar) y lo marca en su campo.
-  await expect(page.getByText("Faltan 2 para cerrar: diagnóstico y evolución")).toBeVisible()
+  await expect(page.getByText("Faltan 2: diagnóstico sugerido sin confirmar y evolución")).toBeVisible()
   await expect(signButton).toBeEnabled()
   await signButton.click()
   // En la misma página: sin cajón que cerrar.
