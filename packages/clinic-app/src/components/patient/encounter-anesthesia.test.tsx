@@ -63,7 +63,7 @@ function line(props: {
   )
 }
 
-it("Mateo, 22 kg, pulpectomía: pide la ASA con un toque y dice 96,8 mg, unos 2,7 cartuchos", async () => {
+it("Mateo, 22 kg, pulpectomía: pide la ASA con un toque y dice 96,8 mg, unos 2,6 cartuchos", async () => {
   setAsa.mockResolvedValue({ data: { ...mateo, asaClass: "II" } })
   line({ atSign: true })
   expect(screen.getByText("Anestesia local · Pulpectomía posterior, deciduo")).toBeTruthy()
@@ -74,7 +74,7 @@ it("Mateo, 22 kg, pulpectomía: pide la ASA con un toque y dice 96,8 mg, unos 2,
   ).toBeTruthy()
   expect(
     screen.getByText(
-      "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos.",
+      "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos.",
     ),
   ).toBeTruthy()
   // Sin cartuchos ni técnica: solo la ASA y el anestésico.

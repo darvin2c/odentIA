@@ -143,7 +143,7 @@ it("B5: lo de hoy con anestesia pide la línea sin materiales; la ASA de un toqu
     asaBefore: null,
     weightKg: 22,
     anesthetic: "Lidocaína 2 % con epinefrina 1:100 000",
-    dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos",
+    dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos",
   })
   // Es historia: no cambia después de firmar.
   await expect(

@@ -9,7 +9,7 @@ import {
 import { bloodPressureAlert } from "./vitals.js"
 
 describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
-  it("Mateo, 22 kg, con lidocaína: 96,8 mg, unos 2,7 cartuchos", () => {
+  it("Mateo, 22 kg, con lidocaína: 96,8 mg, unos 2,6 cartuchos", () => {
     expect(
       localAnesthesiaWords({
         weightKg: 22,
@@ -18,15 +18,15 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
         cardiac: false,
       }),
     ).toEqual({
-      dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos",
+      dose: "Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos",
       warnings: [],
     })
   })
 
-  it("con mepivacaína al 3 %, el mismo niño son 1,8 cartuchos, no 2,7", () => {
+  it("con mepivacaína al 3 %, el mismo niño son 1,7 cartuchos, no 2,6", () => {
     expect(maxLocalAnestheticDose(22, localAnestheticOf("mepivacaina-3")!)).toEqual({
       mg: 96.8,
-      cartridges: 1.8,
+      cartridges: 1.7,
       capped: false,
     })
   })
@@ -40,6 +40,10 @@ describe("la dosis máxima por peso (QA del 16 nov, B5)", () => {
       mg: 132,
       cartridges: 1.8,
     })
+  })
+
+  it("el máximo se redondea hacia abajo y no pasa el tope: 15 kg con articaína son 1,4 cartuchos, no 1,5 (R11)", () => {
+    expect(maxLocalAnestheticDose(15, localAnestheticOf("articaina-4-epinefrina")!)).toMatchObject({ mg: 105, cartridges: 1.4 })
   })
 
   it("en un adulto llega al tope y lo dice", () => {

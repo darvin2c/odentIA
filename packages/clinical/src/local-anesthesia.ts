@@ -88,9 +88,12 @@ export function localAnestheticOf(key: string | null | undefined): LocalAnesthet
   return LOCAL_ANESTHETICS.find((anesthetic) => anesthetic.key === key) ?? null
 }
 
-/** Un decimal, como se dice: 2,69 → 2,7. */
+/**
+ * Un decimal hacia abajo: es un máximo, y redondear al más cercano puede pasarlo (2,69 → 2,6, no
+ * 2,7; 1,46 → 1,4; revisión del 16 nov, R11). El 1e-9 evita que 96,8 × 10 quede en 967,99…
+ */
 function oneDecimal(value: number): number {
-  return Math.round(value * 10) / 10
+  return Math.floor(value * 10 + 1e-9) / 10
 }
 
 /** El máximo para ese peso con ese anestésico: mg, cartuchos de 1,8 mL y si llegó al tope. */
