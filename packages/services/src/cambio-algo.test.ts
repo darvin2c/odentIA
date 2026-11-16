@@ -33,7 +33,7 @@ import { createPatient, patientPersonId } from "./patients.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { getPersonalLinkDataForm, getPersonalLinkView, submitPersonalLinkData } from "./su-enlace.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -431,6 +431,8 @@ it("C10: recepción ve si respondió y cuándo salió su enlace, sin nada de lo 
   expect(pending).toMatchObject({ appointmentId: marta.visit, state: "por_responder", answeredAt: null, linkSent: null })
 
   // Su enlace salió por WhatsApp (aceptado por el canal); uno solo encolado no cuenta.
+  // Un solo WhatsApp activo por clínica: el de otro caso se desconecta antes.
+  await retireWhatsApp(ORG)
   const [connection] = await ownerDb
     .insert(channelConnection)
     .values({

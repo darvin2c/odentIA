@@ -140,6 +140,7 @@ export function WhatsAppConnection({
   freshByButton,
   showAccount,
   otherActive = false,
+  onlyOne = false,
   canWrite,
   fixedCreate,
   initialMessageId = null,
@@ -156,6 +157,8 @@ export function WhatsAppConnection({
   showAccount: boolean
   /** Esta conexión está desconectada y la clínica ya usa otro número: queda de historial. */
   otherActive?: boolean
+  /** Es el número conectado: la tarjeta dice que hay uno a la vez y cómo cambiarlo. */
+  onlyOne?: boolean
   canWrite: boolean
   /** En teléfono «Nuevo mensaje» queda fijo al pie de la página. */
   fixedCreate: boolean
@@ -359,6 +362,11 @@ export function WhatsAppConnection({
                 Número anterior. Para volver a usarlo, desconecta primero el número que está conectado.
               </p>
             ) : null}
+            {onlyOne && active && canWrite ? (
+              <p className="text-sm text-muted-foreground">
+                Solo un WhatsApp a la vez: para conectar otro número, primero desconecta este. Sus conversaciones se guardan.
+              </p>
+            ) : null}
             {words.facts.length > 0 ? (
               <ul className="mt-0.5 flex flex-wrap gap-1.5">
                 {words.facts.map((fact) => (
@@ -383,16 +391,15 @@ export function WhatsAppConnection({
                     {setStatus.isPending ? "Conectando…" : "Volver a conectar"}
                   </Button>
                 )}
-                {byButton || otherActive ? null : (
-                  <Button type="button" variant="outline" onClick={openKey}>
-                    Cambiar la clave
-                  </Button>
-                )}
                 {active ? (
                   <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirming(true)}>
                     Desconectar
                   </Button>
                 ) : null}
+                {/* Lo que no es de todos los días va al menú: un solo botón principal por tarjeta. */}
+                {byButton || otherActive ? null : (
+                  <RowActions label="Más acciones de la conexión" items={[{ key: "clave", label: "Cambiar la clave", onSelect: openKey }]} />
+                )}
               </div>
               {/* En teléfono: la acción de todos los días y, en el menú, las demás. */}
               <div className="flex w-full items-center gap-2 lg:hidden">

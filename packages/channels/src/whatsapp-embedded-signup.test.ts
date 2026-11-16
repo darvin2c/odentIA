@@ -321,6 +321,25 @@ describe("repartir un aviso que llega a la dirección de la app", () => {
     })
   })
 
+  it("con la app propia, el aviso de la cuenta que llega a la dirección de la conexión también se lee", () => {
+    const parsed = whatsappCloudApiAdapter.parseWebhook({
+      rawBody: JSON.stringify({
+        object: "whatsapp_business_account",
+        entry: [
+          {
+            id: "WABA-P",
+            time: 1739321024,
+            changes: [{ field: "account_update", value: { event: "PARTNER_REMOVED", disconnection_info: { reason: "ACCOUNT_DISCONNECTED", initiated_by: "USER" } } }],
+          },
+        ],
+      }),
+      headers: {},
+      config: {},
+    })
+    expect(parsed.accountEvents).toEqual([{ kind: "removed", reason: "disconnected_in_app", initiatedBy: "user", at: "2025-02-12T00:43:44.000Z" }])
+    expect(parsed.messages).toEqual([])
+  })
+
   it("cuando Meta corta o rehace la conexión de una cuenta, el aviso va a la cuenta con el motivo en palabras de odentIA", () => {
     const removal = (value: Record<string, unknown>) => ({ field: "account_update", value })
     const deliveries = splitWhatsAppWebhook(

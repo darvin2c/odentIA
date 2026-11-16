@@ -59,7 +59,7 @@ import { runReportDigestTick } from "./report-digests.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
 import { createTranscriber } from "./transcribe.js"
-import { runOwnAppTokenTick, runSignupTokenTick } from "./whatsapp-tokens.js"
+import { runOwnAppNumberTick, runOwnAppTokenTick, runSignupTokenTick } from "./whatsapp-tokens.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -465,6 +465,19 @@ queues.push({
     nextOwnAppTokenPoll = Date.now() + 12 * 3_600_000
     const result = await runOwnAppTokenTick(ownerDb, db)
     for (const error of result.errors) console.error(`worker: whatsapp_own_app_tokens ${error}`)
+    return false
+  },
+})
+
+// Con la app propia, Meta no avisa si el número se desconecta: se le pregunta una vez al día.
+let nextOwnAppNumberPoll = 0
+queues.push({
+  name: "whatsapp_own_app_numbers",
+  poll: async () => {
+    if (Date.now() < nextOwnAppNumberPoll) return false
+    nextOwnAppNumberPoll = Date.now() + 24 * 3_600_000
+    const result = await runOwnAppNumberTick(ownerDb, db, { secretsKey, fetch })
+    for (const error of result.errors) console.error(`worker: whatsapp_own_app_numbers ${error}`)
     return false
   },
 })

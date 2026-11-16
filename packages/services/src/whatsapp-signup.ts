@@ -46,7 +46,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { reportAutomaticCase } from "./model-outage.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
-import { notifyAdmins, notifyTeamChannelDown } from "./whatsapp-own-app.js"
+import { noteOwnAppUnregistered, notifyAdmins, notifyTeamChannelDown } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -680,11 +680,18 @@ export async function applyAccountEvents(
   now = new Date(),
 ): Promise<void> {
   const [row] = await tx
-    .select({ signup: channelConnection.signup })
+    .select({ signup: channelConnection.signup, ownApp: channelConnection.ownApp })
     .from(channelConnection)
     .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
     .for("update")
     .limit(1)
+  // Con la app propia de la clínica, si activó ese aviso: el número queda por registrar
+  // otra vez, con su motivo, y la campana avisa.
+  if (row && !row.signup && row.ownApp) {
+    const removed = events.filter((event) => event.kind === "removed").at(-1)
+    if (removed) await noteOwnAppUnregistered(tx, orgId, connectionId, metaRemovalWhy({ reason: removed.reason }))
+    return
+  }
   if (!row?.signup) return
   const grantedAt = Date.parse(row.signup.grantedAt)
   const before = row.signup.metaRemoved ?? null

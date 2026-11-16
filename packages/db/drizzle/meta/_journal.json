@@ -946,6 +946,13 @@
       "when": 1794807254214,
       "tag": "0134_numero_ocupado_si_activo",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1794849551102,
+      "tag": "0135_una_activa_por_canal",
+      "breakpoints": true
     }
   ]
 }
