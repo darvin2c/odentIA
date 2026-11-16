@@ -40,6 +40,7 @@ import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
 import { type PlanNextAction, type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { inviteStatusOf, inviteStepText } from "./return-invites.js"
+import { lastVisitAtSql } from "./report-visits.js"
 import {
   countPeopleShortcuts,
   missingDataAmong,
@@ -421,7 +422,7 @@ export interface PersonListItem {
   vinculoCount: number
   /** Próxima cita por venir; solo para quien ve la agenda. */
   nextAppointmentAt: string | null
-  /** Última visita atendida; solo para quien ve la agenda. */
+  /** Última visita (una cita atendida o una atención firmada sin cita); solo para quien ve la agenda. */
   lastVisitAt: string | null
   /** Último mensaje con la persona; solo para quien lee conversaciones. */
   lastInteractionAt: string | null
@@ -735,9 +736,9 @@ export async function listPeople(
           : sql`null`
       } as next_appointment_at,
       ${
+        // La cita atendida o la atención firmada sin cita (`lastVisitAtSql`, la regla de Reportes e «Invitar a volver»).
         agenda
-          ? sql`(select to_char(max(a.starts_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') from appointment a
-              where a.organization_id = c.organization_id and a.patient_id = p.id and a.status = 'atendida')`
+          ? sql`to_char(${lastVisitAtSql(orgId, sql`p.id`)} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
           : sql`null`
       } as last_visit_at
     from contact c
