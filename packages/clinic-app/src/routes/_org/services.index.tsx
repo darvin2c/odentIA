@@ -135,6 +135,7 @@ import {
 import { currencyLabel, displayLanguage } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
 import { hasPlaces, servicesAccess, servicesHeader } from "../../lib/screen-rules"
+import { USES_LOCAL_ANESTHESIA } from "../../lib/anesthesia"
 
 export const Route = createFileRoute("/_org/services/")({
   /** Los filtros los lee `useListSearch`; aquí solo se tipa la especialidad para los enlaces (Especialidades abre la lista filtrada). */
@@ -899,6 +900,8 @@ function offerSchemaFor(rules: {
       ),
       /** «Volver a lo sugerido»: espera y controles vuelven a los de la guía. */
       followUpReset: z.boolean(),
+      /** «Usa anestesia local»: marcado desde la biblioteca, la clínica lo cambia. */
+      localAnesthesia: z.boolean(),
       specialtyId: z.string().min(1, "Elige la especialidad"),
       scope: rules.scopeShown ? z.string().min(1, "Elige dónde se hace") : z.string(),
       billingMode: z.enum(["treatment", "session"]),
@@ -943,6 +946,7 @@ const emptyOfferValues: OfferFormValues = {
   sessionGapDays: "",
   finishControls: [],
   followUpReset: false,
+  localAnesthesia: false,
   specialtyId: "",
   scope: "",
   billingMode: "treatment",
@@ -977,6 +981,7 @@ function offerValues(
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
     usualSessions: String(offer.usualSessions ?? 1),
     ...followUpValues(offer),
+    localAnesthesia: offer.localAnesthesia ?? false,
     specialtyId: offer.specialtyId ?? "",
     scope,
     billingMode: offer.billingMode ?? "treatment",
@@ -1259,6 +1264,10 @@ function OfferEditor({
         : {}),
       // La espera y los controles (decisión B5): sin tocarlos siguen siendo los de la guía.
       ...followUpBody(value, offer),
+      // Sin tocarla sigue siendo la de la biblioteca (nula); solo viaja si cambia.
+      ...(value.localAnesthesia !== (offer?.localAnesthesia ?? false)
+        ? { localAnesthesia: value.localAnesthesia }
+        : {}),
       priceDisclosure: value.priceDisclosure,
       evaluationServiceId: value.evaluationServiceId === "" ? null : value.evaluationServiceId,
       // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
@@ -1730,6 +1739,9 @@ function OfferReadOnly({
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
         <DetailField label="Sesiones habituales">{sessionsLabel(offer.usualSessions)}</DetailField>
+        {USES_LOCAL_ANESTHESIA[productUi().product] ? (
+          <DetailField label="Anestesia local">{offer.localAnesthesia ? "La usa" : "No la usa"}</DetailField>
+        ) : null}
         <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
         {hasPlaces() ? (
           <DetailField label="Ámbito">
@@ -1903,6 +1915,16 @@ function OfferFields({
             />
           )}
         </form.AppField>
+        {USES_LOCAL_ANESTHESIA[productUi().product] ? (
+          <form.AppField name="localAnesthesia">
+            {(field) => (
+              <field.CheckboxField
+                label="Usa anestesia local"
+                description="La atención muestra antes de anestesiar sus alergias, su medicación, la ASA y, con su peso, la dosis máxima."
+              />
+            )}
+          </form.AppField>
+        ) : null}
       </div>
       <ServiceFollowUpFields form={form} idPrefix={idPrefix} offer={offer} />
       <form.AppField name="billingMode">

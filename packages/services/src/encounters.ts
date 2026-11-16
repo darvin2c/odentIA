@@ -5,6 +5,7 @@ import {
   isLocalAnestheticName,
   parseVitals,
   sumByCurrency,
+  type Vitals,
   vitalsErrors,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -80,6 +81,7 @@ import {
   listEncounterDocuments,
   type PatientDocumentWithContext,
 } from "./clinical.js"
+import { anesthesiaAtSigningOf, anesthesiaUsesOf } from "./anesthesia-at-signing.js"
 import { healthAtSigningOf } from "./health-at-signing.js"
 import {
   type ConsentNeed,
@@ -2270,8 +2272,13 @@ export interface ClosingCheckBase {
    * anestesia y algo por saber, el cierre lo avisa junto a los materiales. No
    * bloquea; la firma deja constancia de que se firmó así.
    */
-  /** `risks`: lo que dijo del corazón y la anestesia que cambia una anestesia (`anesthesiaRisksOf`). */
-  health: { gaps: HealthGap[]; anesthetics: string[]; risks: string[] }
+  /**
+   * `risks`: lo que dijo del corazón y la anestesia que cambia una anestesia (`anesthesiaRisksOf`).
+   * `uses`: lo de hoy cuyo servicio usa anestesia local (`anesthesiaUsesOf`, QA del 16 nov); con
+   * eso o con un anestésico en sus materiales, la atención muestra la línea de anestesia antes de
+   * anestesiar y la repite al firmar. `asksAsa`: si el producto pide la ASA (odentIA).
+   */
+  health: { gaps: HealthGap[]; anesthetics: string[]; risks: string[]; uses: string[]; asksAsa: boolean }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
   controls: ClosingControls
   /**
@@ -2734,6 +2741,8 @@ export async function checkEncounterClosing(
     gaps: await healthGapsOf(tx, orgId, row.patientId),
     anesthetics: (materials?.items ?? []).filter((item) => isLocalAnestheticName(item.name)).map((item) => item.name),
     risks: await anesthesiaRisksOf(tx, orgId, row.patientId),
+    uses: await anesthesiaUsesOf(tx, orgId, row.id),
+    asksAsa: (await productHooks(tx, orgId)).asksAsa,
   }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const resolvable = await resolvableDiagnosesOf(tx, orgId, row.patientId, row.id)
@@ -3115,6 +3124,11 @@ export interface FinalizeEncounterInput {
    * (`closing.controls.finishing`, por su `key`): otro día o quitarlo, solo para esta persona.
    */
   finishControlChanges?: FinishingControlChange[]
+  /**
+   * El anestésico elegido en la línea de anestesia (`LOCAL_ANESTHETICS`), solo para el máximo que
+   * guarda la atención firmada; sin él, el máximo no se guarda.
+   */
+  anesthetic?: string | null
 }
 
 /**
@@ -3317,6 +3331,17 @@ export async function finalizeEncounter(
         sex: person.sex,
         today: dayKeyIn(now, timezone),
         interview: hooks.interview,
+      }),
+      // La anestesia de ese día: la ASA con quién la puso, el peso y el máximo (QA del 16 nov).
+      anesthesiaAtSigning: await anesthesiaAtSigningOf(tx, orgId, {
+        patientId,
+        encounterId,
+        uses: [...new Set([...closing.health.uses, ...closing.health.anesthetics])],
+        vitals: (locked.vitals as Vitals | null) ?? null,
+        birthDate: person.birthDate ?? null,
+        today: dayKeyIn(locked.startedAt, timezone),
+        anesthetic: input.anesthetic ?? null,
+        asksAsa: hooks.asksAsa,
       }),
       updatedAt: now,
     })

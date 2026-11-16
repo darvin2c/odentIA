@@ -250,10 +250,13 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
             "la diabetes, la presión alta, un medicamento o un embarazo cambian lo que se revisa en el ojo y lo que se indica",
           )
           .replace(
-            " Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales.",
+            " Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar.",
             "",
           )
-          .replace(" La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».", ""),
+          .replace(
+            " La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)», o con un toque en «Anestesia local».",
+            "",
+          ),
       },
       "asa antes de la anestesia",
       "donde pongo la clasificacion asa",

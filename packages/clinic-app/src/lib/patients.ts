@@ -1,5 +1,6 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
+  type AnesthesiaAtSigning,
   ageInYears,
   DIAGNOSIS_VERIFICATION_LABELS,
   hasHealthInfo as sharedHasHealthInfo,
@@ -287,6 +288,9 @@ export interface PatientHealth {
   medications: Medication[]
   bloodGroup: BloodGroup | null
   asaClass?: string | null
+  /** Quién clasificó la ASA y cuándo (QA del 16 nov). */
+  asaClassSetAt?: string | null
+  asaClassSetBy?: string | null
   familyHistory?: Array<FamilyHistoryItem & { id: string }>
   reviewedAt: string | null
   reviewedBy: string | null
@@ -522,6 +526,8 @@ export interface Encounter {
   consentSkipReason?: string | null
   /** Lo que dijo de su salud y seguía sin revisar al firmarla, como quedó; nulo en lo firmado antes de guardarlo. */
   healthAtSigning?: HealthAtSigning[] | null
+  /** La anestesia de ese día al firmar: ASA, peso y máximo; nula si no se anestesió o se firmó antes. */
+  anesthesiaAtSigning?: AnesthesiaAtSigning | null
   evolution: string | null
   indications: string | null
   finalizedAt: string | null
@@ -1411,6 +1417,18 @@ export function markHealthDeniedApi(
   return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/denied`, {
     method: "POST",
     body: JSON.stringify({ groups }),
+  })
+}
+
+/** La ASA de un toque desde la línea de anestesia: queda con quién y cuándo, y en qué atención. */
+export function setPatientAsaApi(
+  patientId: string,
+  asaClass: string | null,
+  encounterId?: string | null,
+): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/asa`, {
+    method: "POST",
+    body: JSON.stringify({ asaClass, ...(encounterId ? { encounterId } : {}) }),
   })
 }
 

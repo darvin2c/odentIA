@@ -199,7 +199,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             a: faq.a
               .replace(" o su riesgo anestésico (ASA)", "")
               .replace(
-                "La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+                "La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)», o con un toque en «Anestesia local».",
                 "Si alguien clasificó su riesgo anestésico (ASA), se ve en «Antecedentes y última atención»; se elige en Antecedentes.",
               ),
           },
@@ -533,7 +533,34 @@ function fromBase(topicId: string, id: string): Faq {
 
 /** Lo que solo tiene un consultorio, por tema: preguntas que la guía de odentIA no trae. */
 const OWN_FAQS: Record<string, Faq[]> = {
+  // Los avisos de seguridad del consultorio (QA del 16 nov): los mismos umbrales y la misma dosis
+  // que odentIA, desde `@odentia/clinical`; latidIA no pide la ASA.
+  servicios: [
+    {
+      id: "servicios-anestesia-local",
+      q: "¿Cómo marco que un servicio usa anestesia?",
+      a: "En Servicios y precios, en el menú de su fila, «Ver y editar»: «Usa anestesia local», junto a «Sesiones habituales». Lo de la biblioteca ya viene marcado si casi siempre se anestesia (la sutura, el drenaje de un absceso, la extracción de una uña y poner o retirar un implante anticonceptivo); un servicio propio, no: márcalo si se anestesia. Con la marca, la atención muestra sus alergias, su medicación y, con su peso, la dosis máxima del anestésico. Cambiarla no toca las atenciones ya firmadas.",
+      forms: ["usa anestesia local", "marcar que un servicio lleva anestesia", "la sutura lleva anestesia"],
+      needs: "settings.write",
+    },
+  ],
   pacientes: [
+    {
+      id: "pacientes-presion-alta",
+      q: "¿Qué hago si la presión sale muy alta?",
+      a: "La app te avisa y la decisión es tuya. Si en «Examen físico» anotas una presión de 180/110 o más (sistólica de 180 o más, o diastólica de 110 o más), debajo de los signos vitales sale «Aviso: … Repite la toma. Con 180/110 o más, lo electivo se suele diferir. Con dolor de pecho, dolor de cabeza fuerte o falta de aire, es una urgencia». Repite la toma después de unos minutos sentado: si baja, el aviso se va. Sale también al firmar y queda junto a la presión en la atención firmada. No frena nada. Vale desde los 13 años; en un niño menor la presión se juzga por percentiles y no se avisa.",
+      forms: ["la presion salio muy alta", "presion 185 con 115", "que hago con la presion alta", "por que me avisa la presion"],
+      area: "clinica",
+      needs: "clinical.write",
+    },
+    {
+      id: "pacientes-anestesia-dosis-maxima",
+      q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
+      a: "En la atención, en «Realizado hoy», en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos». Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo"],
+      area: "clinica",
+      needs: "clinical.write",
+    },
     {
       id: "registro-signos-vitales-examen-fisico",
       q: "¿Dónde registro los signos vitales y el examen físico?",

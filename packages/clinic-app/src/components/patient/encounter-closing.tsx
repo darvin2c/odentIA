@@ -1064,49 +1064,6 @@ export function healthGapWords(gaps: readonly HealthGap[]): string {
 }
 
 /**
- * Con anestesia y algo por saber de su salud, el cierre lo dice junto a los
- * materiales (QA del 8 nov, A2): avisa y deja firmar; la firma guarda lo que
- * faltaba. Sin anestesia, lo que falta va en «Sin registrar».
- */
-export function AnesthesiaHealthLine({
-  anesthetics,
-  gaps,
-  risks = [],
-  onComplete,
-  disabled = false,
-}: {
-  anesthetics: readonly string[]
-  gaps: readonly HealthGap[]
-  /** Lo que dijo del corazón y de la anestesia que cambia una anestesia (QA del 14 nov, causa raíz). */
-  risks?: readonly string[]
-  /** «Completar en Antecedentes»: los abre encima de la atención. */
-  onComplete?: () => void
-  disabled?: boolean
-}): React.JSX.Element | null {
-  if (anesthetics.length === 0 || (gaps.length === 0 && risks.length === 0)) return null
-  const asked = healthGapWords(gaps)
-  const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
-    .filter(Boolean)
-    .join("; ")
-  return (
-    <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">{missing ? "Anestesia con su salud por completar" : "Anestesia: revisa lo que dijo"}</span>
-        <span className="text-xs text-muted-foreground">
-          Se usa {listWords(anesthetics)}.{risks.length > 0 ? ` Dijo que ${listWords([...risks])}.` : ""}
-          {missing ? ` Falta ${missing}.` : ""} Puedes firmar igual{missing ? ": queda anotado lo que faltaba" : ""}.
-        </span>
-      </div>
-      {onComplete ? (
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
-          Completar en Antecedentes
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
-/**
  * Una ficha a medias de la atención, como la ve quien firma (revisión final del
  * 15 nov, propuesta 4): la ficha se cierra con la firma, sin un «Finalizar»
  * propio mientras la atención está en curso.
@@ -1271,8 +1228,7 @@ export function EncounterClosingDialog({
   children,
   nextVisit = null,
   mayCharge = true,
-  healthGaps = [],
-  onCompleteHealth,
+  safety = null,
   onCompleteForm,
   signForms = [],
   finishingForms,
@@ -1334,10 +1290,11 @@ export function EncounterClosingDialog({
    * plan). Sin eso, el cierre no promete «lo que se cargó hoy» (entrega 11).
    */
   mayCharge?: boolean
-  /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
-  healthGaps?: HealthGap[]
-  /** «Completar en Antecedentes» desde la línea de anestesia. */
-  onCompleteHealth?: () => void
+  /**
+   * Lo que avisa la seguridad del paciente antes de firmar, sin frenar (QA del 16 nov): la presión
+   * alta y la línea de anestesia (ASA y máximo por peso), las mismas de la atención.
+   */
+  safety?: React.ReactNode
   /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
   onCompleteForm?: (formId: string) => void
   /** Las fichas a medias de la atención, un bloque por ficha (`signFormsOf`). */
@@ -1433,13 +1390,7 @@ export function EncounterClosingDialog({
                   {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
                 </p>
               ) : null}
-              <AnesthesiaHealthLine
-                anesthetics={closing?.health?.anesthetics ?? []}
-                gaps={healthGaps}
-                risks={closing?.health?.risks ?? []}
-                onComplete={onCompleteHealth}
-                disabled={busy}
-              />
+              {safety}
               {dictated}
               <FormsAtSign
                 id={`${ids}-forms`}

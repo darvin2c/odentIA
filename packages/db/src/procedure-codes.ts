@@ -178,6 +178,36 @@ export async function seedFollowUpRules(
     )
 }
 
+/**
+ * Lo que suele hacerse con anestesia local (QA del 16 nov): `<archivo>` con `template_key`, uno
+ * por línea; lo que no está, sin ella. Solo lo que casi siempre se anestesia: la cirugía (las
+ * exodoncias, el colgajo, el implante, la biopsia), la terapia pulpar (endodoncia, pulpectomía,
+ * pulpotomía, retratamiento), la periodoncia quirúrgica y el raspado radicular, y la anestesia
+ * misma. Lo que depende del caso (una resina, una incrustación) queda sin marcar: lo marca la
+ * clínica en su servicio. Fuente: Malamed SF, *Handbook of Local Anesthesia*, 7.ª ed., 2020
+ * (técnicas por procedimiento). Fail closed como las sesiones.
+ */
+export function libraryAnesthesia(file: string, keys: ReadonlySet<string>): Set<string> {
+  const marked = new Set<string>()
+  for (const key of strictLines(file, "template_key")) {
+    if (!keys.has(key)) throw new Error(`Anestesia de un tratamiento que no está en ${file}: ${key}`)
+    if (marked.has(key)) throw new Error(`Anestesia repetida en ${file}: ${key}`)
+    marked.add(key)
+  }
+  return marked
+}
+
+/** Escribe en la biblioteca de un producto qué usa anestesia local; lo demás, sin ella. No sube la versión. */
+export async function seedLocalAnesthesia(tx: Db, product: string, marked: ReadonlySet<string>): Promise<void> {
+  await tx.execute(
+    sql`update "treatment_template" set "local_anesthesia" = false where "product" = ${product} and "local_anesthesia"`,
+  )
+  for (const key of marked)
+    await tx.execute(
+      sql`update "treatment_template" set "local_anesthesia" = true where "key" = ${key} and "product" = ${product}`,
+    )
+}
+
 /** Las listas oficiales leídas de sus CSV, para sembrarlas y para que una biblioteca valide sus códigos. */
 export type ProcedureLists = ReturnType<typeof loadProcedureLists>
 

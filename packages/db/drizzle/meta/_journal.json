@@ -953,6 +953,13 @@
       "when": 1794849551102,
       "tag": "0135_una_activa_por_canal",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1794859142641,
+      "tag": "0136_anestesia_del_servicio",
+      "breakpoints": true
     }
   ]
 }

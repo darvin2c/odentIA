@@ -11,7 +11,7 @@ import {
 } from "@odentia/dental"
 import { expect, it } from "vitest"
 import { libraryAnatomy } from "./dental/library.js"
-import { librarySessions, loadPatientGuides } from "./procedure-codes.js"
+import { libraryAnesthesia, librarySessions, loadPatientGuides } from "./procedure-codes.js"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
@@ -386,6 +386,27 @@ it("las sesiones habituales: de tratamientos de su biblioteca, de 2 a 60, y nunc
     const most = visits ? Math.max(...(visits.match(/\d+/g) ?? []).map(Number)) : null
     if (most !== null) expect(sessions, key).toBeLessThanOrEqual(most)
   }
+})
+
+it("la anestesia local de la biblioteca: de tratamientos suyos, la endodoncia y la pulpectomía sí, la limpieza y la resina no", () => {
+  const keysOf = (file: string) =>
+    new Set(
+      strictRead(file)
+        .split("\n")
+        .slice(1)
+        .filter(Boolean)
+        .map((line) => line.split(",")[0]!),
+    )
+  const dental = libraryAnesthesia("biblioteca_anestesia.csv", keysOf("biblioteca.csv"))
+  const medical = libraryAnesthesia("biblioteca_medica_anestesia.csv", keysOf("biblioteca_medica.csv"))
+  expect(() => libraryAnesthesia("biblioteca_medica_anestesia.csv", keysOf("biblioteca.csv"))).toThrow(/no está/)
+  for (const key of ["endodoncia-posterior-vital", "pulpectomia-posterior-deciduo", "exodoncia-simple", "raspado-y-alisado-radicular-1-a-3-dientes"])
+    expect(dental.has(key), key).toBe(true)
+  // Lo que depende del caso lo marca la clínica: la biblioteca no lo afirma.
+  for (const key of ["profilaxis", "resina-fotocurable-1-superficie-posterior", "raspado-dental-destartraje", "corona-de-porcelana"])
+    expect(dental.has(key), key).toBe(false)
+  expect(medical.has("sutura-simple")).toBe(true)
+  expect(medical.has("consulta-medicina-general")).toBe(false)
 })
 
 it("la anatomía de la biblioteca: explícita, de tratamientos por pieza, y la endodoncia anterior no es para la 46", () => {

@@ -1,4 +1,5 @@
 import type {
+  AnesthesiaAtSigning,
   BloodGroup,
   ContactRelationship,
   FinishControl,
@@ -159,6 +160,12 @@ export const patient = pgTable(
     affiliationNumber: text("affiliation_number"),
     /** Clasificación del estado físico de la ASA (I–VI). */
     asaClass: text("asa_class"),
+    /**
+     * Quién la clasificó y cuándo (QA del 16 nov): la ASA se pone de un toque antes de anestesiar
+     * y queda con su rastro; el valor anterior va en la auditoría (`patient.asa_classified`).
+     */
+    asaClassSetAt: timestamp("asa_class_set_at", { withTimezone: true }),
+    asaClassSetBy: text("asa_class_set_by").references(() => user.id),
     maritalStatus: text("marital_status"),
     educationLevel: text("education_level"),
     occupation: text("occupation"),
@@ -964,6 +971,12 @@ export const encounter = pgTable(
      */
     healthAtSigning: jsonb("health_at_signing").$type<HealthAtSigning[]>(),
     /**
+     * La anestesia de ese día al firmar (QA del 16 nov): la ASA con quién la puso, el peso y el
+     * máximo con el anestésico elegido (`AnesthesiaAtSigning`). Nula si nada de hoy usaba
+     * anestesia local o se firmó antes de guardarla. Historia: no cambia después de firmar.
+     */
+    anesthesiaAtSigning: jsonb("anesthesia_at_signing").$type<AnesthesiaAtSigning>(),
+    /**
      * «Viene a su control»: el control por cumplir que quien atiende dijo, al
      * empezar, que es el de hoy. El cierre lo trae marcado y se cumple al
      * firmar; antes no cambia nada. Sin llave foránea: el control nace después
@@ -1221,6 +1234,12 @@ export const treatmentTemplate = catalogSchema.table(
      */
     usualSessions: smallint("usual_sessions").notNull().default(1),
     /**
+     * Si suele hacerse con anestesia local (QA del 16 nov): la biblioteca lo dice desde
+     * `seeds/biblioteca_anestesia.csv` (y su par médico), con su fuente clínica. Como las sesiones
+     * habituales, es una ayuda y no sube la versión.
+     */
+    localAnesthesia: boolean("local_anesthesia").notNull().default(false),
+    /**
      * Días que la guía clínica deja entre una sesión y la siguiente (la endodoncia con
      * medicación, 7); nula, ninguna. Como las sesiones habituales: no sube la versión.
      */
@@ -1349,6 +1368,12 @@ export const serviceCatalog = pgTable(
      * sugerido sin reescribir lo de la clínica. Se lee con `usualSessionsSql`.
      */
     ownUsualSessions: smallint("usual_sessions"),
+    /**
+     * «Usa anestesia local», de la clínica (QA del 16 nov): nula es «lo de la biblioteca». Con
+     * ella, la atención muestra la línea de anestesia (ASA y máximo por peso) antes de anestesiar.
+     * Se lee con `localAnesthesiaSql`.
+     */
+    ownLocalAnesthesia: boolean("local_anesthesia"),
     /**
      * Días de espera entre sesiones que puso la clínica (decisión B5 del 10 nov): nula es
      * «la de la biblioteca», 0 es «sin espera». Se lee con `sessionGapSql`.

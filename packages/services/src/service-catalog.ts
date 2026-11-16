@@ -79,6 +79,9 @@ export type ServiceRow = typeof serviceCatalog.$inferSelect & {
 export type ServiceListItem = ServiceRow & {
   specialtyName: string | null
   toothAnatomy: ServiceToothAnatomy | null
+  /** Si usa anestesia local: lo de la clínica o, si no lo cambió, lo de la biblioteca (`localAnesthesiaSql`). */
+  localAnesthesia: boolean
+  libraryLocalAnesthesia: boolean | null
 }
 /** El tratamiento de la biblioteca con su parte dental (caras y lo que deja en la pieza). */
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateProduct
@@ -104,6 +107,14 @@ export const sessionGapSql = sql<number>`coalesce("service_catalog"."session_gap
 export const finishControlsSql = sql<FinishControl[]>`coalesce("service_catalog"."finish_controls",
   (select tpl."finish_controls" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), '[]'::jsonb)`
 
+/**
+ * Si un servicio usa anestesia local (QA del 16 nov): lo que puso la clínica o, si no puso nada,
+ * lo que dice la biblioteca de su tratamiento; uno propio, no. Con ella, la atención muestra la
+ * línea de anestesia antes de anestesiar (ASA, alergias, medicación y máximo por peso).
+ */
+export const localAnesthesiaSql = sql<boolean>`coalesce("service_catalog"."local_anesthesia",
+  (select tpl."local_anesthesia" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), false)`
+
 /** Lo que sugiere la biblioteca, para decir «Sugerido» y volver a él. */
 const librarySessionGapSql = sql<
   number | null
@@ -111,6 +122,16 @@ const librarySessionGapSql = sql<
 const libraryFinishControlsSql = sql<
   FinishControl[] | null
 >`(select tpl."finish_controls" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id")`
+const libraryLocalAnesthesiaSql = sql<
+  boolean | null
+>`(select tpl."local_anesthesia" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id")`
+
+/** «Usa anestesia local» que se escribe: sí o no, o nulo para volver a lo de la biblioteca. */
+function assertLocalAnesthesia(value: boolean | null | undefined): boolean | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== "boolean") throw invalidField("localAnesthesia", "Marca si usa anestesia local, o déjalo como la biblioteca")
+  return value
+}
 
 function assertSessionGap(value: number | null | undefined): number | null {
   try {
@@ -747,6 +768,9 @@ const serviceListColumns = () => ({
   librarySessionGapDays: librarySessionGapSql,
   ownFinishControls: serviceCatalog.ownFinishControls,
   libraryFinishControls: libraryFinishControlsSql,
+  ownLocalAnesthesia: serviceCatalog.ownLocalAnesthesia,
+  libraryLocalAnesthesia: libraryLocalAnesthesiaSql,
+  localAnesthesia: localAnesthesiaSql,
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
   patientGuide: serviceCatalog.patientGuide,
@@ -904,6 +928,8 @@ export interface CreateServiceInput {
   /** Días de espera entre sesiones y controles al terminar; sin ellos, los de la guía (ADR 0176). */
   sessionGapDays?: number | null
   finishControls?: FinishControl[] | null
+  /** «Usa anestesia local»; sin indicarlo, lo de la biblioteca (un propio, no). */
+  localAnesthesia?: boolean | null
   /** Cómo dice el precio el agente; por defecto «evaluacion». */
   priceDisclosure?: string | null
   evaluationServiceId?: string | null
@@ -969,6 +995,7 @@ export async function createService(
       ownUsualSessions: assertUsualSessions(input.usualSessions),
       ownSessionGapDays: assertSessionGap(input.sessionGapDays),
       ownFinishControls: assertFinishControls(input.finishControls),
+      ownLocalAnesthesia: assertLocalAnesthesia(input.localAnesthesia),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,
@@ -999,6 +1026,7 @@ export async function createService(
       ownUsualSessions: assertUsualSessions(input.usualSessions),
       ownSessionGapDays: assertSessionGap(input.sessionGapDays),
       ownFinishControls: assertFinishControls(input.finishControls),
+      ownLocalAnesthesia: assertLocalAnesthesia(input.localAnesthesia),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,
@@ -1051,6 +1079,8 @@ export interface UpdateServicePatch {
   sessionGapDays?: number | null
   /** Controles al terminar; `null` vuelve a los de la biblioteca, `[]` es ninguno. */
   finishControls?: FinishControl[] | null
+  /** «Usa anestesia local»; `null` vuelve a lo de la biblioteca. */
+  localAnesthesia?: boolean | null
   priceDisclosure?: string
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
@@ -1223,6 +1253,10 @@ export async function updateService(
   if (patch.finishControls !== undefined) {
     set.ownFinishControls = assertFinishControls(patch.finishControls)
     fields.push("finishControls")
+  }
+  if (patch.localAnesthesia !== undefined) {
+    set.ownLocalAnesthesia = assertLocalAnesthesia(patch.localAnesthesia)
+    fields.push("localAnesthesia")
   }
   if (patch.priceDisclosure !== undefined) {
     set.priceDisclosure = assertPriceDisclosure(patch.priceDisclosure)

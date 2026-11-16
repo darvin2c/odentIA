@@ -41,7 +41,11 @@ export interface ClosingCheck {
    * anestesia y algo por saber, el cierre lo avisa. No bloquea.
    */
   /** `risks`: lo que dijo del corazón y de la anestesia que cambia una anestesia. */
-  health?: { gaps: HealthGap[]; anesthetics: string[]; risks?: string[] }
+  /**
+   * Lo que falta saber de su salud y la anestesia de hoy: `anesthetics`, los de sus materiales;
+   * `uses`, lo de hoy cuyo servicio usa anestesia local; `asksAsa`, si el producto pide la ASA.
+   */
+  health?: { gaps: HealthGap[]; anesthetics: string[]; risks?: string[]; uses?: string[]; asksAsa?: boolean }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**
