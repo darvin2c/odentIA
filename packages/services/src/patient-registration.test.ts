@@ -43,7 +43,7 @@ import { createTask, updateTask } from "./tasks.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { listDecisionRecipients, listResponsibilities } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
-import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { activeConnectionId, appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 import { and, eq, sql } from "drizzle-orm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -106,7 +106,8 @@ async function publishedVersion(orgId: string): Promise<number> {
   return config.version
 }
 async function makeThread(orgId: string, contactId: string) {
-  const connectionId = await withOrgContext(appDb, orgId, (tx) =>
+  const existing = await activeConnectionId(orgId, "telegram")
+  const connectionId: string = existing ?? (await withOrgContext(appDb, orgId, (tx) =>
     createConnection(
       tx,
       orgId,
@@ -114,7 +115,7 @@ async function makeThread(orgId: string, contactId: string) {
       { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },
       { fetch, validateExternal: false },
     ).then((c) => c.id),
-  )
+  ))
   return withOrgContext(appDb, orgId, async (tx) => {
     const externalId = `tg:${Date.now()}${Math.floor(Math.random() * 100000)}`
     const [identity] = await tx.insert(contactIdentity).values({ organizationId: orgId, contactId, channel: "telegram", externalUserId: externalId }).returning()

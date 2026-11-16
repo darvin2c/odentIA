@@ -121,6 +121,7 @@ export function ChannelPanel({
   row,
   loading = false,
   canWrite,
+  otherActive = false,
   onClose,
   onConnected,
 }: {
@@ -130,6 +131,8 @@ export function ChannelPanel({
   /** La conexión existe pero la lista aún no la trae: se espera en vez de ofrecer conectarla otra vez. */
   loading?: boolean
   canWrite: boolean
+  /** Esta cuenta está desconectada y el canal ya tiene otra activa: una a la vez. */
+  otherActive?: boolean
   onClose: () => void
   /** Se creó la conexión: la pantalla sigue con ella sin cerrar el panel. */
   onConnected: (connectionId: string) => void
@@ -389,12 +392,17 @@ export function ChannelPanel({
 
             {canWrite ? (
               <div className="flex flex-col gap-2">
+                {otherActive ? (
+                  <p className="text-sm text-muted-foreground">
+                    Cuenta anterior. Para volver a usarla, desconecta primero la que está conectada.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {active ? (
                     <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>
                       {test.isPending ? "Probando…" : "Probar"}
                     </Button>
-                  ) : (
+                  ) : otherActive ? null : (
                     <Button type="button" disabled={setStatus.isPending} onClick={() => setStatus.mutate("enable")}>
                       {setStatus.isPending ? "Conectando…" : "Volver a conectar"}
                     </Button>

@@ -71,3 +71,15 @@ export async function retireWhatsApp(orgId: string): Promise<void> {
     sql`update channel_connection set status = 'disabled' where organization_id = ${orgId} and channel = 'whatsapp' and status = 'active'`,
   )
 }
+
+/**
+ * Una clínica tiene una sola cuenta activa por canal de mensajería: las pruebas
+ * que abren una conversación por caso sobre la misma organización reusan la del
+ * canal, como el bot único de la clínica. Nula si todavía no hay ninguna.
+ */
+export async function activeConnectionId(orgId: string, channel: string): Promise<string | null> {
+  const rows = (await ownerDb.execute(
+    sql`select id from channel_connection where organization_id = ${orgId} and channel = ${channel} and status = 'active' limit 1`,
+  )) as unknown as { id: string }[]
+  return rows[0]?.id ?? null
+}

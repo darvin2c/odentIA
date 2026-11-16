@@ -745,6 +745,35 @@ export async function assertSingleWhatsApp(
   exceptId: string | null = null,
   exceptExternalId: string | null = null,
 ): Promise<void> {
+  await assertSingleActive(tx, orgId, "whatsapp", exceptId, exceptExternalId)
+}
+
+/**
+ * Los canales de mensajería que tienen una sola cuenta activa por clínica. El
+ * correo no está: una clínica puede tener varios buzones (recepción, citas).
+ */
+const SINGLE_ACTIVE_CHANNELS: Record<string, string> = {
+  whatsapp: "La clínica ya tiene un WhatsApp conectado («{name}»). Para usar otro número, desconecta primero ese.",
+  instagram: "La clínica ya tiene un Instagram conectado («{name}»). Para usar otra cuenta, desconecta primero esa.",
+  messenger: "La clínica ya tiene una página de Messenger conectada («{name}»). Para usar otra, desconecta primero esa.",
+  telegram: "La clínica ya tiene un bot de Telegram conectado («{name}»). Para usar otro, desconecta primero ese.",
+}
+
+/**
+ * Una cuenta activa por canal de mensajería: la pantalla muestra «tu WhatsApp»,
+ * «tu Instagram»; para usar otra se desconecta antes la actual (sus
+ * conversaciones se conservan). `exceptId` es la conexión que se está
+ * reactivando; `exceptExternalId`, la cuenta que se intenta conectar.
+ */
+export async function assertSingleActive(
+  tx: Db,
+  orgId: string,
+  channel: string,
+  exceptId: string | null = null,
+  exceptExternalId: string | null = null,
+): Promise<void> {
+  const message = SINGLE_ACTIVE_CHANNELS[channel]
+  if (!message) return
   const active = await tx
     .select({
       id: channelConnection.id,
@@ -755,7 +784,7 @@ export async function assertSingleWhatsApp(
     .where(
       and(
         eq(channelConnection.organizationId, orgId),
-        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.channel, channel),
         eq(channelConnection.status, "active"),
       ),
     )
@@ -764,9 +793,9 @@ export async function assertSingleWhatsApp(
   )
   if (other) {
     throw new ServiceError(
-      "WHATSAPP_ALREADY_CONNECTED",
+      channel === "whatsapp" ? "WHATSAPP_ALREADY_CONNECTED" : "CHANNEL_ALREADY_CONNECTED",
       409,
-      `La clínica ya tiene un WhatsApp conectado («${other.displayName}»). Para usar otro número, desconecta primero ese.`,
+      message.replace("{name}", other.displayName),
     )
   }
 }
@@ -835,7 +864,7 @@ export async function createConnection(
       throw new ServiceError("CONNECTION_EXISTS", 409, message, accountField(input.provider, message))
     }
   }
-  if (input.channel === "whatsapp") await assertSingleWhatsApp(tx, orgId)
+  await assertSingleActive(tx, orgId, input.channel)
   let created: ConnectionRow | undefined
   try {
     // Punto de retorno: la cuenta puede estar conectada en otra clínica.
@@ -988,7 +1017,7 @@ export async function setConnectionStatus(
       .from(channelConnection)
       .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
       .limit(1)
-    if (current?.channel === "whatsapp") await assertSingleWhatsApp(tx, orgId, id)
+    if (current) await assertSingleActive(tx, orgId, current.channel, id)
   }
   let updated: ConnectionRow | undefined
   try {
