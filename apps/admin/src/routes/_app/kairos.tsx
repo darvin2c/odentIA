@@ -15,7 +15,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
-import { AriadnaChatsSwitch } from "../../components/arm/ariadna-chats"
 import { ClientName, invalidateArm } from "../../components/arm/hoy-links"
 import { kairosSearchOf } from "../../components/arm/hoy-search"
 import {
@@ -143,12 +142,7 @@ function KairosPage() {
             : undefined
         }
       />
-      {isAdmin ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <KairosSellsSwitch />
-          <AriadnaChatsSwitch />
-        </div>
-      ) : null}
+      {isAdmin ? <KairosSellsSwitch /> : null}
       <div className="flex flex-wrap items-center gap-3">
         <ViewTabs
           label="Qué ver de Kairós"

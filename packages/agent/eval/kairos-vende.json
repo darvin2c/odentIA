@@ -1118,6 +1118,141 @@
       "espera": {
         "agenda": "no"
       }
+    },
+    {
+      "id": "k17-firma-tablet",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "whatsapp",
+      "cliente": {
+        "nombre": "Clínica Dental Sonrisas"
+      },
+      "contacto": {
+        "nombre": "Dra. Paola Ríos",
+        "whatsapp": true
+      },
+      "nota": "Pregunta si el paciente puede firmar el consentimiento en una tablet: le pregunta a Ariadna y lo cuenta en tono de venta, en 1 o 2 frases, sin pasos de pantalla, y ofrece la presentación.",
+      "turnos": [
+        {
+          "texto": "Hola, ¿los pacientes pueden firmar el consentimiento en una tablet?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true,
+        "menciona": ["firm"]
+      }
+    },
+    {
+      "id": "k17-recordatorios",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "instagram",
+      "cliente": null,
+      "contacto": null,
+      "nota": "Sin clínica todavía, pregunta si el sistema manda recordatorios de cita por WhatsApp: le pregunta a Ariadna y responde en tono de venta.",
+      "turnos": [
+        {
+          "texto": "buenas, el sistema le manda recordatorios de la cita a los pacientes por whatsapp?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true,
+        "menciona": ["recordatorio"]
+      }
+    },
+    {
+      "id": "k17-periodontograma",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "whatsapp",
+      "cliente": {
+        "nombre": "Centro Odontológico Miraflores"
+      },
+      "contacto": {
+        "nombre": "Dra. Paola Ríos",
+        "whatsapp": true
+      },
+      "nota": "Una periodoncista pregunta si tiene periodontograma: le pregunta a Ariadna y responde.",
+      "turnos": [
+        {
+          "texto": "Soy periodoncista, ¿tiene periodontograma?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true,
+        "menciona": ["periodontograma"]
+      }
+    },
+    {
+      "id": "k17-sunat",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "whatsapp",
+      "cliente": {
+        "nombre": "Clínica Dental Sonrisas"
+      },
+      "contacto": {
+        "nombre": "Dra. Paola Ríos",
+        "whatsapp": true
+      },
+      "nota": "Pregunta si emite boletas y facturas electrónicas a la SUNAT. La guía dice que la boleta o factura electrónica se emite aparte: no puede decir que el sistema las emite.",
+      "turnos": [
+        {
+          "texto": "¿El sistema emite boletas y facturas electrónicas a la SUNAT?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true,
+        "noDice": [
+          "(?<!no )(?<!no se )(?<!no las )\\b(emite|emites|emitir|genera|generas|envia|envias)\\b[^.?!]{0,30}\\b(boletas?|facturas?)\\b(?![^.?!]{0,30}\\baparte\\b)"
+        ]
+      }
+    },
+    {
+      "id": "latidia-recetas",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "whatsapp",
+      "cliente": {
+        "nombre": "Consultorio Médico San Martín",
+        "producto": "latidia"
+      },
+      "contacto": {
+        "nombre": "Dra. Paola Ríos",
+        "whatsapp": true
+      },
+      "nota": "Un médico pregunta si puede hacer recetas con varios medicamentos en latidIA: le pregunta a Ariadna (la guía de latidIA) y responde.",
+      "turnos": [
+        {
+          "texto": "¿En latidIA puedo hacer recetas con varios medicamentos?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true,
+        "menciona": ["receta"]
+      }
+    },
+    {
+      "id": "vistia-medida",
+      "lienzo": "Kairós pregunta a Ariadna",
+      "canal": "messenger",
+      "cliente": {
+        "nombre": "Óptica Los Portales",
+        "producto": "vistia"
+      },
+      "contacto": {
+        "nombre": "Karina"
+      },
+      "nota": "Pregunta si vistIA guarda la medida de la vista de cada cliente: le pregunta a Ariadna (la guía de vistIA) y responde.",
+      "turnos": [
+        {
+          "texto": "vistIA guarda la medida de la vista de cada cliente?"
+        }
+      ],
+      "espera": {
+        "agenda": "no",
+        "preguntaGuia": true
+      }
     }
   ]
 }

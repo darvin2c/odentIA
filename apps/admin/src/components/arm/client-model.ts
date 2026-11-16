@@ -242,7 +242,6 @@ export const activityRowSchema = z.object({
   happenedAt: z.string(),
   author: person.nullable(),
   byKairos: z.boolean(),
-  byAriadna: z.boolean().default(false),
   contactId: z.string().nullable(),
   adminOnly: z.boolean(),
 })

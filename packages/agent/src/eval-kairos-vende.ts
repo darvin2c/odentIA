@@ -48,7 +48,9 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { ChatOpenAI } from "@langchain/openai"
 import {
+  askGuideForSale,
   contactIn,
+  type HelpDecider,
   KAIROS_PROPOSAL_HOURS,
   KAIROS_SLOTS_OFFERED,
   kairosAllowedEmailText,
@@ -65,7 +67,9 @@ import {
   subtractSpans,
   zonedTimeToUtc,
 } from "@odentia/services"
+import { asAdminDecider } from "./admin.js"
 import { costMicrosOf } from "./ai-usage.js"
+import { createDecisionModel } from "./decision/index.js"
 import {
   createKairosSeller,
   KAIROS_SELL_FALLBACK,
@@ -79,7 +83,7 @@ import {
   sellContext,
   sellTimesNotIn,
 } from "./kairos-vende.js"
-import { platformLlmFromEnv } from "./llm.js"
+import { platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
 import { clockMinutesIn } from "./verify.js"
 
 /* ---------- El banco ---------- */
@@ -128,6 +132,10 @@ interface Expect {
   presentaCon?: string
   /** El responsable del cliente al terminar (no cambia). */
   responsable?: string
+  /** Le pregunta a Ariadna (la guía de la Ayuda) por la función antes de responder. */
+  preguntaGuia?: boolean
+  /** Expresiones (sin mayúsculas ni tildes) que ninguna respuesta puede traer: afirmar lo que la guía no dice es GRAVE. */
+  noDice?: string[]
   /** Expresiones (sin mayúsculas ni tildes) que alguna respuesta debe traer. */
   menciona?: string[]
   /** El aviso fijo no cuenta como no cumplido (sí en la tasa de avisos). */
@@ -188,6 +196,31 @@ const only = arg("casos", "")
   .filter(Boolean)
 const repetitions = Math.max(1, Number(arg("repeticiones", "1")) || 1)
 const withJudge = !fake && !flag("sin-juez")
+// La guía de la Ayuda a la que Kairós le pregunta (`preguntar_a_ariadna`): con Jev, como el worker; sin su
+// clave, solo lo escrito igual que en la guía (la medición lo dice en el resumen).
+const guideDecider: HelpDecider | null = fake
+  ? await createDecisionModel(
+      "baseline",
+      { timeoutMs: 8_000 },
+      resolveLlmSpec({ fake: true }),
+    ).then((model) => (model ? asAdminDecider(model) : null))
+  : process.env.JEV_API_KEY?.trim()
+    ? await createDecisionModel(
+        "jev",
+        {
+          jev: {
+            apiKey: process.env.JEV_API_KEY ?? "",
+            baseUrl: process.env.JEV_BASE_URL,
+            model: process.env.JEV_MODEL,
+          },
+          // El plazo del worker (`DECISIONS_TIMEOUT_MS`, 2 s por defecto): con más, la medición vería menos fallas de Jev.
+          timeoutMs: 2_000,
+        },
+        resolveLlmSpec({ fake: true }),
+      ).then((model) => (model ? asAdminDecider(model) : null))
+    : null
+/** Cuántas veces Kairós le preguntó a Ariadna en toda la medición y cuántas la guía lo tenía. */
+const guideStats = { asked: 0, found: 0 }
 const cases = bank.casos.filter((item) => only.length === 0 || only.includes(item.id))
 if (only.length && cases.length !== only.length)
   throw new Error(
@@ -236,6 +269,8 @@ interface World {
   createdClient: string | null
   similarReported: string[]
   contactAsked: boolean
+  /** Lo que le preguntó a Ariadna (la guía de la Ayuda) y si la guía lo tenía. */
+  guideAsked: Array<{ question: string; found: boolean }>
   turnsAtFirstBooking: number | null
   seq: number
 }
@@ -405,6 +440,15 @@ function bookingProblems(w: World, persona: string, start: number, exceptOwn: bo
 function toolsOf(w: World, calls: string[]): KairosSellTools {
   const nowMs = () => w.now.getTime()
   return {
+    async askGuide(question) {
+      calls.push("preguntar_a_ariadna")
+      // La guía real del producto (`askGuideForSale`), con el mismo Jev que el worker.
+      const answer = await askGuideForSale(w.client?.product ?? "dental", question, guideDecider)
+      w.guideAsked.push({ question, found: answer.found })
+      guideStats.asked += 1
+      if (answer.found) guideStats.found += 1
+      return answer.found ? { found: true, texts: answer.texts } : { found: false }
+    },
     async slots(range) {
       calls.push("ver_horarios")
       const slots = kairosSlots(w, range)
@@ -650,6 +694,13 @@ function graveRules(
   const personTimes = clockMinutesIn(personText).flat()
   if (gateClosed && sent.length > 0)
     graves.push({ rule: "respondió a una conversación que no le toca", text: sent[0]?.text ?? "" })
+  for (const want of c.espera.noDice ?? [])
+    for (const s of sent)
+      if (new RegExp(want).test(plain(s.text)))
+        graves.push({
+          rule: "afirmó una función que la guía no dice",
+          text: `/${want}/ — «${s.text}»`,
+        })
   for (const s of sent) {
     if (s.text === KAIROS_SELL_FALLBACK || s.text.endsWith(KAIROS_SELL_FALLBACK)) continue
     const bare = s.text.replace(/https?:\/\/\S+/g, " ")
@@ -742,6 +793,7 @@ function misses(c: CaseDef, w: World, sent: Sent[], gateClosed: boolean): string
   if (e.parecido && w.similarReported.length === 0) push(excused("no avisó del cliente parecido"))
   if (e.presentaCon && w.presentation?.persona !== e.presentaCon)
     push(excused(`no presenta ${e.presentaCon}`))
+  if (e.preguntaGuia && w.guideAsked.length === 0) push(excused("no le preguntó a Ariadna"))
   if (e.responsable && w.client?.owner !== e.responsable)
     push(`el responsable pasó a ${w.client?.owner ?? "nadie"}`)
   for (const want of e.menciona ?? [])
@@ -903,6 +955,7 @@ function worldOf(c: CaseDef): World {
     createdClient: null,
     similarReported: [],
     contactAsked: false,
+    guideAsked: [],
     turnsAtFirstBooking: null,
     seq: 0,
   }
@@ -1154,6 +1207,9 @@ console.log(
 )
 console.log(
   `| Juez (tono / claridad / responde) | ${withJudge ? `${fmt(avg((v) => v.tono))} / ${fmt(avg((v) => v.claridad))} / ${fmt(avg((v) => v.responde))} en ${judged.length} conversaciones` : "sin juez"} |`,
+)
+console.log(
+  `| Kairós le preguntó a Ariadna | ${guideStats.asked} veces, la guía lo tenía en ${guideStats.found} (guía ${guideDecider ? (fake ? "con el doble" : "con Jev") : "sin Jev: solo lo escrito igual"}) |`,
 )
 console.log(
   `| Gasto del vendedor | ${fake ? "—" : `${usd(sellerTotals.micros)} (${sellerTotals.calls} turnos medidos, ${sellerTotals.input} entrada, ${sellerTotals.cached} de caché, ${sellerTotals.output} salida${sellerTotals.noCost ? `, ${sellerTotals.noCost} sin costo informado` : ""})`} |`,

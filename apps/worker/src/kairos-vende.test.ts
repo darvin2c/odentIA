@@ -831,3 +831,49 @@ describe("Kairós vende: no actúa después de su tiempo ni cuenta un aviso como
     expect(turns.at(-1)?.why).toContain("tope")
   })
 })
+
+describe("Kairós le pregunta a Ariadna (la guía de la Ayuda)", () => {
+  const signal = new AbortController().signal
+
+  it("pregunta en la guía del producto de la conversación y pasa solo los textos", async () => {
+    const asked: Array<{ product: string; question: string }> = []
+    const tools = toolsFor(
+      {
+        ownerDb: {} as Db,
+        seller: {} as KairosSeller,
+        guide: {
+          ask: async (product, question) => {
+            asked.push({ product, question })
+            return {
+              found: true,
+              texts: ["La receta lleva varios medicamentos."],
+              topicIds: ["recetas"],
+            }
+          },
+        },
+      },
+      "00000000-0000-4000-8000-000000000001",
+      new Date(),
+      "medical",
+    )
+    expect(await tools.askGuide("¿puedo hacer recetas?", { signal })).toEqual({
+      found: true,
+      texts: ["La receta lleva varios medicamentos."],
+    })
+    expect(asked).toEqual([{ product: "medical", question: "¿puedo hacer recetas?" }])
+  })
+
+  it("sin la guía en el worker no encuentra nada, y con el turno cortado no pregunta", async () => {
+    const without = toolsFor(
+      { ownerDb: {} as Db, seller: {} as KairosSeller },
+      "00000000-0000-4000-8000-000000000001",
+      new Date(),
+    )
+    expect(await without.askGuide("¿tiene odontograma?", { signal })).toEqual({ found: false })
+    const stopped = new AbortController()
+    stopped.abort()
+    await expect(
+      without.askGuide("¿tiene odontograma?", { signal: stopped.signal }),
+    ).rejects.toThrow()
+  })
+})

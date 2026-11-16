@@ -63,8 +63,6 @@ const entrySchema = z.discriminatedUnion("kind", [
     sentAt: z.string().nullable(),
     /** Lo escribió Kairós solo: va con su nombre. */
     byKairos: z.boolean().default(false),
-    /** Lo escribió Ariadna (con `byKairos`): va con su nombre. */
-    byAriadna: z.boolean().default(false),
   }),
 ])
 export type ChatEntry = z.infer<typeof entrySchema>
@@ -100,20 +98,7 @@ export const chatDetailSchema = z.object({
   /** Kairós podría atenderla si no estuviera pausada (está prendido y no es de una clínica con su app). */
   kairosAvailable: z.boolean().default(false),
   kairosPausedBy: z.object({ userId: z.string(), name: z.string() }).nullable().default(null),
-  kairosHandover: z
-    .object({
-      at: z.string(),
-      why: z.string().nullable(),
-      agent: z.enum(["kairos", "ariadna"]).default("kairos"),
-      /** Si la pasó Ariadna: a Soporte, a Administración o porque escribe un paciente. */
-      to: z.string().nullable().default(null),
-    })
-    .nullable()
-    .default(null),
-  /** Ariadna responde sola aquí ahora (clínica con su app). */
-  handledByAriadna: z.boolean().default(false),
-  /** Ariadna podría atenderla si no estuviera pausada. */
-  ariadnaAvailable: z.boolean().default(false),
+  kairosHandover: z.object({ at: z.string(), why: z.string().nullable() }).nullable().default(null),
   lastInboundAt: z.string().nullable(),
   canReplyFreely: z.boolean(),
   freeUntil: z.string().nullable(),
@@ -211,93 +196,34 @@ export const resumeKairos = (chatId: string) =>
   api(`/api/admin/chats/${enc(chatId)}/kairos-pause`, { method: "DELETE" })
 
 /**
- * Quién atiende la conversación, en palabras: Kairós (a quien no tiene su app) o
- * Ariadna (a la clínica que ya la tiene), una persona («Lo atiendes tú», «Lo
- * atiende Ana») o el equipo porque uno de ellos se la pasó (con su motivo y, si
- * fue Ariadna, a quién). Nulo si ninguno tiene nada que ver (apagados) y nadie la pausó.
+ * Quién atiende la conversación, en palabras: Kairós, una persona («Lo atiendes
+ * tú», «Lo atiende Ana») o el equipo porque Kairós se la pasó (con su motivo).
+ * Nulo si Kairós no tiene nada que ver (apagado o clínica con su app) y nadie la pausó.
  */
 export type KairosChatState =
-  | { kind: "kairos"; agent: ChatAgentName }
-  | { kind: "persona"; agent: ChatAgentName; words: string; canReturn: boolean }
-  | {
-      kind: "paso"
-      agent: ChatAgentName
-      why: string | null
-      /** Solo Ariadna: `soporte`, `administracion` o `paciente`. */
-      to: string | null
-      canReturn: boolean
-    }
-export type ChatAgentName = "Kairós" | "Ariadna"
+  | { kind: "kairos" }
+  | { kind: "persona"; words: string; canReturn: boolean }
+  | { kind: "paso"; why: string | null; canReturn: boolean }
 
 export function kairosChatState(
   chat: Pick<
     ChatDetail,
-    | "handledByKairos"
-    | "kairosAvailable"
-    | "kairosPausedAt"
-    | "kairosPausedBy"
-    | "kairosHandover"
-    | "handledByAriadna"
-    | "ariadnaAvailable"
+    "handledByKairos" | "kairosAvailable" | "kairosPausedAt" | "kairosPausedBy" | "kairosHandover"
   >,
   myUserId: string,
 ): KairosChatState | null {
-  if (chat.handledByKairos) return { kind: "kairos", agent: "Kairós" }
-  if (chat.handledByAriadna) return { kind: "kairos", agent: "Ariadna" }
+  if (chat.handledByKairos) return { kind: "kairos" }
   if (!chat.kairosPausedAt) return null
-  if (chat.kairosHandover) {
-    const ariadna = chat.kairosHandover.agent === "ariadna"
-    return {
-      kind: "paso",
-      agent: ariadna ? "Ariadna" : "Kairós",
-      why: chat.kairosHandover.why,
-      to: ariadna ? chat.kairosHandover.to : null,
-      canReturn: ariadna ? chat.ariadnaAvailable : chat.kairosAvailable,
-    }
-  }
-  // Pausada por una persona: solo se dice si alguno la atendería (si no, no hay nada que devolver).
-  if (!chat.kairosAvailable && !chat.ariadnaAvailable) return null
-  const agent: ChatAgentName = chat.ariadnaAvailable ? "Ariadna" : "Kairós"
+  if (chat.kairosHandover)
+    return { kind: "paso", why: chat.kairosHandover.why, canReturn: chat.kairosAvailable }
+  // Pausada por una persona: solo se dice si Kairós la atendería (si no, no hay nada que devolver).
+  if (!chat.kairosAvailable) return null
   const by = chat.kairosPausedBy
-  const quiet = `${agent} no responde ${agent === "Ariadna" ? "sola" : "solo"} aquí.`
   const words =
     by?.userId === myUserId
-      ? `Lo atiendes tú: ${quiet}`
-      : `Lo atiende ${by?.name.trim().split(/\s+/)[0] || "alguien del equipo"}: ${quiet}`
-  return { kind: "persona", agent, words, canReturn: true }
-}
-
-/**
- * Cómo sale «Solo administración» en una respuesta a mano. Mientras Ariadna la tenga pasada a
- * Administración (`toAdministration`), la casilla nace marcada en cada respuesta y quitarla se dice
- * aparte (`adminOnlyOverride`): sin eso, el servidor la guarda solo para Administración igual.
- * `canHide`: es Administración y Soporte ve la conversación (clínica con su app).
- */
-export function replyAdminOnly(
-  canHide: boolean,
-  toAdministration: boolean,
-): {
-  initial: boolean
-  fields: (adminOnly: boolean) => { adminOnly?: boolean; adminOnlyOverride?: boolean }
-} {
-  return {
-    initial: canHide && toAdministration,
-    fields: (adminOnly) =>
-      !canHide
-        ? {}
-        : toAdministration && !adminOnly
-          ? { adminOnly: false, adminOnlyOverride: true }
-          : { adminOnly },
-  }
-}
-
-/** El título del aviso cuando Kairós o Ariadna se la pasaron al equipo. */
-export function handoverTitle(state: Extract<KairosChatState, { kind: "paso" }>): string {
-  if (state.agent === "Kairós") return "Kairós se la pasó al equipo"
-  if (state.to === "soporte") return "Ariadna se la pasó a Soporte"
-  if (state.to === "administracion") return "Ariadna se la pasó a Administración"
-  if (state.to === "paciente") return "Ariadna cree que escribe un paciente"
-  return "Ariadna se la pasó al equipo"
+      ? "Lo atiendes tú: Kairós no responde solo aquí."
+      : `Lo atiende ${by?.name.trim().split(/\s+/)[0] || "alguien del equipo"}: Kairós no responde solo aquí.`
+  return { kind: "persona", words, canReturn: true }
 }
 
 export const markNotClinic = (chatId: string) =>
@@ -341,7 +267,7 @@ const sentSchema = z.object({ outreachId: z.string(), status: z.string() })
 /** Responder con texto libre (dentro de las 24 h). */
 export async function sendChatReply(
   chatId: string,
-  body: { body: string; adminOnly?: boolean; adminOnlyOverride?: boolean; proposalId?: string },
+  body: { body: string; adminOnly?: boolean; proposalId?: string },
 ): Promise<z.infer<typeof sentSchema>> {
   try {
     return sentSchema.parse(
@@ -501,11 +427,7 @@ export const isUnsettled = (entry: ChatEntry, now: Date) =>
 
 /** «Ana Ruiz · 17:42 · Salió» de un mensaje nuestro. */
 export function sentLineWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {
-  const who = entry.byAriadna
-    ? "Ariadna"
-    : entry.byKairos
-      ? "Kairós"
-      : entry.createdBy?.name?.trim() || "El equipo"
+  const who = entry.byKairos ? "Kairós" : entry.createdBy?.name?.trim() || "El equipo"
   return `${who} · ${supportTime(entry.sentAt ?? entry.at)} · ${CHAT_SEND_STATUS_WORDS[entry.status] ?? entry.status}`
 }
 

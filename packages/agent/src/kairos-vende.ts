@@ -20,7 +20,8 @@ import {
 import { clockMinutesIn, type Evidence, verifyReply } from "./verify.js"
 
 /**
- * Kairós vende (ADR 0189 y el lienzo «Kairós vende»): responde solo en los
+ * Kairós vende (ADR 0189 y el lienzo «Kairós vende»; ADR 0194: le pregunta a
+ * Ariadna, la guía de la Ayuda, por las funciones): responde solo en los
  * chats de Sallca (WhatsApp, Instagram, Messenger) a quien todavía no tiene su
  * app. Dice lo de las webs, los precios vigentes y agenda la presentación de
  * 45 minutos. Es un recorrido con herramientas sobre `AGENT_MODEL`, a
@@ -140,7 +141,15 @@ export interface KairosSellTools {
     },
     ctx: KairosToolContext,
   ): Promise<{ created: boolean; similar: string[] }>
+  /**
+   * Le pregunta a Ariadna, la guía de la Ayuda del producto (`askGuideForSale`), si el sistema
+   * hace algo y cómo. Solo lee, sin datos de ninguna clínica.
+   */
+  askGuide(question: string, ctx: KairosToolContext): Promise<KairosGuideReply>
 }
+
+/** Lo que la guía de la Ayuda dice de una función, o que no lo dice. */
+export type KairosGuideReply = { found: true; texts: string[] } | { found: false }
 
 /**
  * Los errores de las herramientas que no se arreglan insistiendo: un tope del día
@@ -178,7 +187,8 @@ export const SELLER_SYSTEM = `Eres Kairós, el asistente de Sallca. Sallca hace 
 Siempre:
 - Español de Perú, trato de tú, cálido, claro y profesional. De 1 a 4 frases cortas. Sin emojis, sin listas ni formato.
 - La primera vez que respondes en una conversación, preséntate: «Hola, soy Kairós, el asistente de Sallca.»
-- Usa solo los hechos del producto y los precios que se te dan. No inventes funciones, plazos, resultados ni promesas.
+- Usa solo los hechos del producto, los precios que se te dan y lo que te responda preguntar_a_ariadna. No inventes funciones, plazos, resultados ni promesas.
+- Si pregunta si el sistema hace algo o cómo funciona algo que no está en «Lo que sabes del producto», usa preguntar_a_ariadna antes de responder. Con lo que te diga, responde en tono de venta: qué gana su clínica con eso, en 1 o 2 frases, sin los pasos de la pantalla ni nombres de botones. Si Ariadna no lo encuentra, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo.
 - Termina con el paso siguiente claro: qué puede hacer o qué pasa ahora.
 - Si solo saluda o escribe algo corto como «info», cuenta en una frase qué es y pregúntale qué necesita o de qué clínica es.
 - Si manda un audio, una imagen o un archivo que no puedes ver, díselo y pídele que te lo escriba.
@@ -308,6 +318,15 @@ const TOOL_SCHEMAS = {
     ciudad: z.string().max(120).nullable(),
   }),
   pasar_al_equipo: z.object({ motivo: z.string().min(1).max(300) }),
+  preguntar_a_ariadna: z.object({
+    pregunta: z
+      .string()
+      .min(2)
+      .max(300)
+      .describe(
+        "La función por la que pregunta, en sus palabras, como «¿se puede firmar en la tablet?»",
+      ),
+  }),
   es_paciente: z.object({}),
 }
 
@@ -327,6 +346,8 @@ const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   datos_de_la_clinica: "Registra la clínica con el nombre que dijo y la liga a esta conversación.",
   pasar_al_equipo:
     "Pasa la conversación al equipo con un mensaje fijo: descuentos, precios especiales o lo que no sabes.",
+  preguntar_a_ariadna:
+    "Le preguntas a Ariadna, la Ayuda del sistema, si el producto hace algo y cómo. Responde con su guía o dice que no lo encuentra. Solo lee.",
   es_paciente:
     "Quien escribe es un paciente: le explica que Sallca hace el software y no atiende, y lo deja al equipo.",
 }
@@ -499,6 +520,12 @@ async function runTool(
           why: String(value.motivo).slice(0, 300),
         }
         return "Pasado al equipo."
+      case "preguntar_a_ariadna": {
+        const reply = await tools.askGuide(String(value.pregunta), ctx)
+        if (!reply.found)
+          return "Ariadna no lo encuentra en la guía: no digas que el sistema lo hace ni que no lo hace. Ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo."
+        return `Ariadna (la guía de la Ayuda):\n${reply.texts.map((text) => `- ${text}`).join("\n")}\nCuéntaselo en tono de venta, en 1 o 2 frases, sin pasos de pantalla ni nombres de botones, y sin agregar nada que no diga.`
+      }
       case "es_paciente":
         state.ended = {
           kind: "paciente",
@@ -1009,6 +1036,8 @@ const PRESENTATION =
   /\b(presentacion|demo|demostracion|reunion|videollamada|agendar|horario|horarios|conocer)\b/
 const PRICES = /\b(precio|precios|cuesta|cuanto|planes|plan|tarifa|cobran)\b/
 const CANCEL = /\b(cancelar|cancela|ya no puedo|anular)\b/
+const FEATURE =
+  /\b(se puede|puedo|pueden|tiene|tienen|hace|permite|sirve para|funciona|manda|guarda|emite)\b/
 const YES = /^(si|sí|ok|dale|perfecto|confirmo|confirmado|de acuerdo|esa|la primera|me sirve|va)\b/
 const CLINIC =
   /(?:^|\s)(?:mi|la|nuestra)\s+(?:cl[ií]nica|consultorio|[oó]ptica)\s+(?:es|se llama)\s+([^.,;!?\n]+)/i
@@ -1068,6 +1097,8 @@ export function fakeSellerModel(): KairosChatModel {
       if (PATIENT.test(last)) return call("es_paciente", {})
       if (CANCEL.test(last) && booked) return call("cancelar", { motivo: null })
       if (YES.test(last.trim()) && waiting) return call(booked ? "mover" : "agendar", {})
+      if (FEATURE.test(last) && !PRICES.test(last) && !PRESENTATION.test(last))
+        return call("preguntar_a_ariadna", { pregunta: persons.at(-1) ?? last })
       const clinic = CLINIC.exec(persons.at(-1) ?? "")?.[1]?.trim()
       if (clinic && !hasClient)
         return call("datos_de_la_clinica", {
@@ -1083,6 +1114,12 @@ export function fakeSellerModel(): KairosChatModel {
       }
     }
     const lastResult = results.at(-1)
+    if (lastResult?.name === "preguntar_a_ariadna") {
+      const first = /^- (.+)$/m.exec(String(lastResult.content))?.[1]
+      return first
+        ? say(`Sí: ${first} ¿Quieres verlo en una presentación de 45 minutos?`)
+        : say("Eso te lo muestro mejor en una presentación de 45 minutos. ¿Te agendo una?")
+    }
     if (lastResult?.name === "agendar" || lastResult?.name === "mover") return say("Listo.")
     if (lastResult?.name === "cancelar")
       return say("Listo, cancelé tu presentación. Si quieres otra fecha, dime.")
