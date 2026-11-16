@@ -171,6 +171,16 @@ const envSchema = z.object({
   GEOAPIFY_API_KEY: z.string().optional().default(""),
   /** El plan de Geoapify: búsquedas al día para todo odentIA (el gratis da 3 000). */
   GEOAPIFY_DAILY_LIMIT: z.coerce.number().int().min(1).default(3000),
+  /**
+   * Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193): un token de
+   * Cloudflare con «Zone WAF: Edit» solo en las zonas de los productos, y el id de la zona
+   * del dominio de cada uno. La API y el worker ponen al día la regla de hosts permitidos de
+   * cada zona. Vacías: no se toca Cloudflare. vistIA no tiene su dominio ahí todavía.
+   */
+  CLOUDFLARE_WAF_TOKEN: z.string().trim().default(""),
+  CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
+  MEDICAL_CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
+  OPTICAL_CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
   PORT: z.coerce.number().int().default(3001),
 }).superRefine((data, ctx) => {
   // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).

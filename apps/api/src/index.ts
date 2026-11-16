@@ -6,7 +6,7 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { adminChannelsFromEnv, adminChannelsWarning, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -158,6 +158,8 @@ const app = createApp({
     paciente: env.GEOAPIFY_API_KEY === "fake" ? fakeAddressProvider("geoapify") : env.GEOAPIFY_API_KEY ? geoapifyProvider(env.GEOAPIFY_API_KEY) : null,
   },
   geoapifyDailyLimit: env.GEOAPIFY_DAILY_LIMIT,
+  // Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193). Sin token ni zonas, no hace nada.
+  clinicHosts: clinicHostsFromEnv(env, { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN, productDomains: env.productDomains }),
   expectBackups: env.NODE_ENV === "production",
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },

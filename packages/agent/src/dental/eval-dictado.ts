@@ -13,12 +13,12 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { dictatedService } from "@odentia/services"
+import { dictatedService, withPauseBridge } from "@odentia/services"
 import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/dental"
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { askDictationModel } from "../dictation.js"
-import { consultaSummary, diagnosisProposed, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
+import { consultaSummary, diagnosisProposed, type ExpectedConsulta, scoreConsulta, serverDiagnoses } from "../eval-consulta.js"
 import { DENTAL_DICTATION_PROFILE } from "./dictation.js"
 
 interface ExpectedFinding {
@@ -39,6 +39,8 @@ interface PracticeDictation {
   espera: {
     hallazgos?: ExpectedFinding[]
     diagnosticos?: string[]
+    /** Diagnósticos que contradicen lo dictado («K04.7», sin fístula, con la fístula dicha): no deben quedar listos. */
+    diagnosticosNo?: string[]
     planes?: number[]
     controles?: number
     nota?: boolean
@@ -114,7 +116,7 @@ function variantOf(condition: string, spoken: unknown): string | undefined {
   return finding.variants.filter((item) => plain(item.label).includes(plain(spoken))).sort((a, b) => a.label.length - b.label.length)[0]?.value
 }
 
-const totals = { esperados: 0, bien: 0, detalleBien: 0, detalleEsperado: 0, perdidos: 0, inventados: 0, otrosBien: 0, otrosEsperados: 0, costo: 0, sinCosto: 0, serviciosOtros: 0 }
+const totals = { esperados: 0, bien: 0, detalleBien: 0, detalleEsperado: 0, perdidos: 0, inventados: 0, otrosBien: 0, otrosEsperados: 0, costo: 0, sinCosto: 0, serviciosOtros: 0, diagnosticosContrarios: 0 }
 const now = new Date()
 
 for (const dictation of bank.dictados) {
@@ -183,8 +185,14 @@ for (const dictation of bank.dictados) {
     else notes.push(`falló: ${label}`)
   }
   const plans = read.drafts.filter((draft) => draft.kind === "plan").map((draft) => draft.payload["toothNumber"])
-  const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? ""))
+  // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
+  const { codes, ready: readyCodes } = await serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""])
   for (const code of dictation.espera.diagnosticos ?? []) other(`diagnóstico ${code}`, diagnosisProposed(code, codes))
+  for (const code of dictation.espera.diagnosticosNo ?? []) {
+    const ready = diagnosisProposed(code, readyCodes)
+    totals.diagnosticosContrarios += Number(ready)
+    other(`sin ${code} listo`, !ready)
+  }
   for (const tooth of dictation.espera.planes ?? []) other(`indicación en la ${tooth}`, plans.includes(tooth))
   if (dictation.espera.controles) other("control", read.drafts.filter((draft) => draft.kind === "control").length === dictation.espera.controles)
   if (dictation.espera.nota) other("nota", read.drafts.some((draft) => draft.kind === "nota"))
@@ -284,6 +292,7 @@ console.log(`Hallazgos: ${totals.bien} de ${totals.esperados} bien (${pct(totals
 console.log(`Variante y estado dichos: ${totals.detalleBien} de ${totals.detalleEsperado} bien (${pct(totals.detalleBien, totals.detalleEsperado)})`)
 console.log(`Lo demás (diagnósticos, indicaciones, controles, nota, correcciones, quitar): ${totals.otrosBien} de ${totals.otrosEsperados} (${pct(totals.otrosBien, totals.otrosEsperados)})`)
 console.log(`Servicios de otro procedimiento propuestos en lo hecho o el plan: ${totals.serviciosOtros}`)
+console.log(`Diagnósticos que contradicen lo dictado y quedan listos: ${totals.diagnosticosContrarios}`)
 if (consultaSummary()) console.log(consultaSummary())
 console.log(
   `Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, bank.dictados.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`,

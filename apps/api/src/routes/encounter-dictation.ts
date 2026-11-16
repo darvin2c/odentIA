@@ -170,6 +170,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             segmentId,
             // Lo que comprobó Clío: el tramo, con el final del anterior delante si sigue su frase.
             transcript: extracted.heard,
+            // Y lo anterior que leyó: un diagnóstico no contradice lo dicho ahí («presenta fístula»).
+            context,
             formQuestions: ready.forms,
           }),
         )

@@ -1066,3 +1066,49 @@ describe("lo que encontró la tercera prueba con voz (15 nov, c3)", () => {
     await enable(false)
   })
 })
+
+describe("lo que encontró la cuarta prueba con voz (15 nov, c4b)", () => {
+  it("un diagnóstico «sin fístula» con la fístula dicha queda por revisar con el que la tiene (v07)", async () => {
+    await seedDiagnosisCodes([
+      { code: "K04", title: "Enfermedades de la pulpa y de los tejidos periapicales", isCategory: true },
+      { code: "K04.1", title: "Necrosis de la pulpa" },
+      { code: "K04.4", title: "Periodontitis apical aguda originada en la pulpa" },
+      { code: "K04.5", title: "Periodontitis apical crónica" },
+      { code: "K04.6", title: "Absceso periapical con fístula" },
+      { code: "K04.7", title: "Absceso periapical sin fístula" },
+    ])
+    await enable(true)
+    const fx = await openSession("Endodoncia de diagnóstico")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    // Lo que oyó Chrome: la fístula en la pausa anterior y el diagnóstico en esta.
+    const context = "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor"
+    const transcript = "sin respuesta también percusión negativa palpación positiva sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico"
+    const said = "necrosis pulpar con absceso apical crónico"
+    const { suggestions } = await segment({
+      drafts: [
+        { kind: "diagnostico", payload: { diagnosisCode: "K04.1", diagnosisType: "confirmed", toothNumber: 21 }, sourceText: said },
+        { kind: "diagnostico", payload: { diagnosisCode: "K04.7", diagnosisType: "confirmed", toothNumber: 21 }, sourceText: said },
+      ],
+      transcript,
+      context,
+    })
+    expect(suggestions.map((item) => [item.payload["diagnosisCode"], item.status])).toEqual([
+      ["K04.1", "lista"],
+      ["K04.6", "por_revisar"],
+    ])
+    expect(suggestions[1]?.note).toBe("Dijiste «presenta fístula» y K04.7 dice «sin fístula»: te propongo K04.6, «Absceso periapical con fístula». Revísalo.")
+    // Con la fístula negada, «sin fístula» calza y queda lista; lo agudo dicho crónico pasa al crónico.
+    const denied = await segment({
+      drafts: [
+        { kind: "diagnostico", payload: { diagnosisCode: "K04.7", diagnosisType: "confirmed", toothNumber: 11 }, sourceText: "absceso apical crónico" },
+        { kind: "diagnostico", payload: { diagnosisCode: "K04.4", diagnosisType: "confirmed", toothNumber: 46 }, sourceText: "periodontitis apical crónica en la 46" },
+      ],
+      transcript: "en la once no hay fístula absceso apical crónico y en la 46 periodontitis apical crónica",
+    })
+    expect(denied.suggestions.map((item) => [item.payload["diagnosisCode"], item.status])).toEqual([
+      ["K04.7", "lista"],
+      ["K04.5", "por_revisar"],
+    ])
+    await enable(false)
+  })
+})

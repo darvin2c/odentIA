@@ -24,6 +24,7 @@ import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   adminChannelsFromEnv,
   askHelpByChat,
+  clinicHostsFromEnv,
   configureDocumentChecks,
   configureDocumentLogos,
   configurePublicLinks,
@@ -41,6 +42,7 @@ import { sql } from "drizzle-orm"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
+import { clinicHostsQueue } from "./clinic-hosts.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runDemosTick } from "./demos.js"
 import { env } from "./env.js"
@@ -102,6 +104,9 @@ const storage: Storage = createStorage({
 })
 // El logo de cada clínica en sus papeles: se lee del almacenamiento, nunca por HTTP.
 configureDocumentLogos(storage)
+
+// Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193). Sin token ni zonas, no hace nada.
+const clinicHosts = clinicHostsFromEnv(env, publicLinks)
 
 const transcribe = createTranscriber(env)
 
@@ -391,6 +396,7 @@ queues.push(
         secretsKey,
         fetch,
         deleteObject: (key) => storage.deleteAttachment(key),
+        clinicHosts,
       })
       return result.started || result.advanced > 0 || result.expired > 0
     },
@@ -419,6 +425,9 @@ queues.push(
     },
   },
 )
+
+// La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y cada hora.
+if (clinicHosts) queues.push(clinicHostsQueue(ownerDb, clinicHosts))
 
 // La clave de «Conectar con Facebook» vence a los 60 días: se renueva sola (#121).
 const metaApp =

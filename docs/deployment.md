@@ -249,8 +249,44 @@ cada dirección que no es una clínica tiene que tener su propia ruta, que gana 
 específica: `app.`, `admin.` y `www.` ya van a sus Workers, y `api.<dominio>/*` (y
 `media.odentia32.com/*`, los archivos de R2) se agregan en la zona, en Workers Routes, con
 Worker «None», para que sigan yendo al VPS y a R2. Un subdominio nuevo con proxy en esas zonas
-necesita lo mismo. `platform` y `latidia` ya no están en el compose: volver al VPS es
-devolverlos y quitar la ruta comodín.
+necesita lo mismo, y entrar en `SYSTEM_SUBDOMAINS` (abajo). `platform` y `latidia` ya no están en
+el compose: volver al VPS es devolverlos y quitar la ruta comodín.
+
+#### Solo los subdominios de clínicas reales llegan al Worker
+
+Con la ruta comodín, un subdominio inventado (`graylog.latidia72.com/login`) también llega al
+Worker y gasta una petición del tope diario de la cuenta: el 15 nov un robot lo agotó y se
+cayeron todas las pantallas (ADR 0193). En cada zona, una regla personalizada de WAF con Block,
+`Solo los hosts del sistema y de sus clínicas…`, bloquea antes del Worker todo
+`*.<dominio>` que no esté en su lista: los del sistema (`www`, `app`, `admin`, `api`, `media`;
+`SYSTEM_SUBDOMAINS` de `packages/services/src/clinic-hosts.ts`) y uno por cada clínica y demo
+de la base, en el dominio de su producto. Es aparte de «Bloquear robot de escaneo y rutas de
+archivos secretos», que el sistema no toca. La API la pone al día al abrir, renombrar o borrar
+una clínica, con el alta asistida y al pedir o borrar una demo; el worker, al armar o vencer
+una demo, al arrancar y cada hora (un GET por zona, que solo escribe si la lista cambió). Un
+fallo queda en el registro (`clinic-hosts:`) y la clínica se crea igual: su subdominio queda
+bloqueado como mucho hasta la próxima hora. Si la lectura de las clínicas falla o la
+expresión pasaría de 4000 caracteres, la regla queda como estaba; desde 3200 el registro avisa
+que hay que pasar a Workers Paid o a otra estrategia.
+
+Variables, en el entorno production del proyecto (las leen la API y el worker). Sin el token o
+sin ninguna zona no se llama a Cloudflare y el arranque lo dice:
+
+- `CLOUDFLARE_WAF_TOKEN`: token de Cloudflare (My Profile › API Tokens › Create Custom Token)
+  con el permiso «Zone › Zone WAF › Edit» (si no aparece, «Zone › Firewall Services › Edit») y,
+  en Zone Resources, «Include › Specific zone» solo `odentia32.com` y `latidia72.com`. Es otro
+  que el `CLOUDFLARE_API_TOKEN` del CI, que solo publica Workers.
+- `CLOUDFLARE_ZONE_ID`: el id de la zona de `odentia32.com` (Overview de la zona, «Zone ID»).
+- `MEDICAL_CLOUDFLARE_ZONE_ID`: el de `latidia72.com`.
+- `OPTICAL_CLOUDFLARE_ZONE_ID`: el de `vistia20.com`, cuando su dominio esté en Cloudflare; con
+  `OPTICAL_DOMAIN` vacío, sus ópticas van en `odentia32.com` y entran en esa lista.
+
+Activarla: crear el token, poner las tres variables, desplegar y mirar en el registro de la API
+`clinic-hosts: regla de odentia32.com creada` (y la de latidIA). En Security › WAF › Custom rules
+de cada zona aparece la regla nueva al final. Comprobar que la web, `app.`, `admin.`, `api.`,
+`media.` y una clínica responden, y que `https://<inventado>.odentia32.com/login` da 403 de
+Cloudflare. Volver atrás: apagar la regla en el panel (el sistema la deja apagada y solo cambia
+su lista) o quitar el token y borrarla.
 
 ## Variables: una sola fuente
 

@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato; «adulto», que el paciente es adulto (a un adulto no se le propone lo de diente de leche). Los servicios de leche, anterior o posterior son para ver que el servidor siga la pieza (prueba con voz c3).",
+  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato; «adulto», que el paciente es adulto (a un adulto no se le propone lo de diente de leche). Los servicios de leche, anterior o posterior son para ver que el servidor siga la pieza (prueba con voz c3). «diagnosticosNo» son los diagnósticos que contradicen lo dictado (sin fístula con la fístula dicha, agudo con crónico dicho) y no deben quedar listos (prueba con voz c4).",
   "servicios": [
     "Obturación con resina",
     "Endodoncia multirradicular",
@@ -315,9 +315,13 @@
       "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
       "espera": {
         "diagnosticos": [
-          "K04"
+          "K04.1",
+          "K04.6"
         ],
-        "soloConsulta": true
+        "soloConsulta": true,
+        "diagnosticosNo": [
+          "K04.7"
+        ]
       }
     },
     {
@@ -390,6 +394,48 @@
           {
             "enDias": 7
           }
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-v07-fistula-en-la-pausa",
+      "texto": "presenta fístula a nivel apical por vestibular tumefacción intraoral leve radio lucidez periapical necrosis pulpar con absceso apical crónico",
+      "espera": {
+        "diagnosticos": [
+          "K04.1",
+          "K04.6"
+        ],
+        "diagnosticosNo": [
+          "K04.7"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "absceso-sin-fistula",
+      "texto": "Pieza veintiuno. No hay fístula ni tumefacción. Radiolucidez periapical. Diagnóstico: necrosis pulpar con absceso apical crónico.",
+      "espera": {
+        "diagnosticos": [
+          "K04.1",
+          "K04.7"
+        ],
+        "diagnosticosNo": [
+          "K04.6"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "periodontitis-apical-cronica",
+      "texto": "Diagnóstico de la cuarenta y seis: necrosis pulpar con periodontitis apical crónica.",
+      "espera": {
+        "diagnosticos": [
+          "K04.1",
+          "K04.5"
+        ],
+        "diagnosticosNo": [
+          "K04.4"
         ],
         "soloConsulta": true
       }
