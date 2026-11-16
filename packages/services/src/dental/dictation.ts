@@ -1,4 +1,4 @@
-import { type DiagnosisSystemKey, findingDiagnosisCode } from "@odentia/clinical"
+import { type DiagnosisSystemKey, findingDiagnosisCode, isPulpNecrosis } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   anatomyFits,
@@ -19,7 +19,7 @@ import {
 } from "@odentia/dental"
 import { findDiagnosisCode } from "../diagnosis-codes.js"
 import { normalizeForSearch } from "../knowledge.js"
-import type { DictationPatient, DictationPrepared, DictationService, DictationServiceFit, ProductDictation } from "../product-hooks.js"
+import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationService, DictationServiceFit, ProductDictation } from "../product-hooks.js"
 import { orgStrictVariants } from "./odontogram.js"
 import { activeServiceAnatomies } from "./service-finding.js"
 import { registerToothFinding } from "./tooth-panel.js"
@@ -338,25 +338,108 @@ export function anatomyFromName(service: Pick<DictationService, "name" | "code">
  * dentición nunca y el de otro grupo solo si ninguno del suyo calza (`anatomyFits`: la 36 es un
  * molar permanente, ni la pulpectomía de leche ni la endodoncia anterior); sin pieza, a un adulto
  * nunca uno de leche. La anatomía es la que se leyó de la clínica (`context`) o, sin ella, la que
- * dicen su nombre y su código.
+ * dicen su nombre y su código. La variante vital o no vital sigue a la pulpa diagnosticada en esa
+ * pieza (`pulpFit`).
  */
 function serviceFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): DictationServiceFit {
-  const read = (context as DentalDictationContext | undefined)?.anatomy
+  const fit = anatomyFit(service, where, patient, context as DentalDictationContext | undefined)
+  return fit === "fits" ? pulpFit(service, where, patient, context as DentalDictationContext | undefined) : fit
+}
+
+function anatomyFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: DentalDictationContext): DictationServiceFit {
+  const read = context?.anatomy
   const anatomy = service.id && read?.has(service.id) ? read.get(service.id) : anatomyFromName(service)
   if (!anatomy) return "fits"
   const tooth = where["toothNumber"]
   if (typeof tooth !== "number" || !isValidTooth(tooth)) return patient.adult && anatomy.dentition === "deciduous" ? "never" : "fits"
   if (anatomy.dentition && anatomy.dentition !== dentitionOf(tooth)) return "never"
-  return anatomyFits({ groups: anatomy.groups.length ? anatomy.groups : TOOTH_GROUPS, dentition: null }, tooth) ? "fits" : "otherGroup"
+  return anatomyFits({ groups: anatomy.groups.length ? anatomy.groups : TOOTH_GROUPS, dentition: null }, tooth) ? "fits" : "fallback"
+}
+
+/* ---------- La variante que depende de la pulpa (prueba con voz del 15 nov, c5, v06) ---------- */
+
+/** La pulpa viva o necrótica: decide la endodoncia vital o no vital. */
+type PulpState = "vital" | "necrotic"
+
+/** La familia de la biblioteca que dice la variante (la misma de la decisión B2 del 10 nov). */
+const PULP_FAMILY: Readonly<Record<string, PulpState>> = { "endodoncia-vital": "vital", "endodoncia-no-vital": "necrotic" }
+/** Un tratamiento de la pulpa, por su nombre: «Endodoncia…», «Tratamiento de conductos…», «Biopulpectomía». */
+const PULP_TREATMENT = /\b(?:endodon[a-z]*|conductos?|[a-z]*pulp[a-z]*)\b/
+/** Lo que dice que la pulpa no está viva: «no vital» (también «no es vital»), la necrosis, el absceso apical. */
+const NECROTIC = /\bno (?:[a-z]+ )?vital\b|\bnecro(?:sis|tic[oa]s?|sad[oa]s?|pulp[a-z]*)\b|\babscesos? (?:peri)?apical(?:es)?\b|\babsceso dentoalveolar\b/
+/** Lo que dice que está viva: la pulpitis, «vital», la biopulpectomía. */
+const VITAL = /\bpulpitis\b|\bvital\b|\bbiopulp[a-z]*/
+/** La pulpitis en la CIE-10 y en la CIE-11 (los atajos de `PULP_DIAGNOSES` de `@odentia/clinical`). */
+const PULPITIS = /^(?:K04\.0|DA09\.0)/
+
+/** Lo que dice de la pulpa un texto ya normalizado (`normalizeForSearch`); null si no dice nada, o dice las dos cosas. */
+function pulpSaid(said: string): PulpState | null {
+  const necrotic = NECROTIC.test(said)
+  // «no vital» también dice «vital»: cuenta solo el «vital» que no niega nada.
+  const vital = VITAL.test(said.replace(NECROTIC, " "))
+  return necrotic === vital ? null : necrotic ? "necrotic" : "vital"
+}
+
+/**
+ * La variante de un tratamiento de la pulpa: la de su familia de la biblioteca o, sin ella, la que
+ * nombra el servicio («Endodoncia unirradicular no vital»); null si no tiene.
+ */
+export function pulpVariantOf(service: Pick<DictationService, "name">, family?: string | null): PulpState | null {
+  if (family) return PULP_FAMILY[family] ?? null
+  const name = normalizeForSearch(service.name)
+  return PULP_TREATMENT.test(name) ? pulpSaid(name) : null
+}
+
+/**
+ * La pulpa de un diagnóstico: la pulpitis está viva; la necrosis y lo que la presupone no
+ * (`isPulpNecrosis`, la misma regla del aviso de la pieza). Con otro código, lo que dice su nombre o
+ * lo dicho.
+ */
+function pulpOfDiagnosis(item: DictationDiagnosis): PulpState | null {
+  const code = String(item.code ?? "").trim().toUpperCase()
+  if (isPulpNecrosis(code)) return "necrotic"
+  if (PULPITIS.test(code)) return "vital"
+  return pulpSaid(normalizeForSearch(item.text))
+}
+
+/**
+ * La pulpa diagnosticada donde va el servicio: lo de esa pieza y lo de toda la atención. null si no
+ * se dijo nada o se dijeron las dos (la pulpitis en la ficha y la necrosis en Diagnóstico).
+ */
+function pulpAt(where: Record<string, unknown>, patient: DictationPatient): PulpState | null {
+  const tooth = where["toothNumber"]
+  const states = new Set(
+    (patient.diagnoses ?? []).flatMap((item) => {
+      const at = item.where?.["toothNumber"]
+      if (typeof tooth === "number" && typeof at === "number" && at !== tooth) return []
+      return pulpOfDiagnosis(item) ?? []
+    }),
+  )
+  return states.size === 1 ? ([...states][0] ?? null) : null
+}
+
+/**
+ * La variante que depende de la pulpa sigue al diagnóstico: con la pulpitis, la vital; con la
+ * necrosis o el absceso, la no vital. La otra solo se ofrece para elegir, si no hay la que calza, y,
+ * si no se sabe, ninguna se da por buena: se elige entre las dos (`unsure`).
+ */
+function pulpFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: DentalDictationContext): DictationServiceFit {
+  const variant = service.id && context?.pulp.has(service.id) ? context.pulp.get(service.id) : pulpVariantOf(service)
+  if (!variant) return "fits"
+  const known = pulpAt(where, patient)
+  if (!known) return "unsure"
+  return known === variant ? "fits" : "fallback"
 }
 
 /**
  * Lo que odentIA lee una vez para revisar un tramo: si la norma de su país exige la variante del
- * hallazgo y para qué piezas es cada servicio activo (de la biblioteca o, sin ella, de su nombre).
+ * hallazgo, para qué piezas es cada servicio activo y si es una endodoncia vital o no vital (de la
+ * biblioteca o, sin ella, de su nombre).
  */
 interface DentalDictationContext {
   strictVariants: boolean
   anatomy: ReadonlyMap<string, ServiceAnatomy | null>
+  pulp: ReadonlyMap<string, PulpState | null>
 }
 
 export const DENTAL_DICTATION: ProductDictation = {
@@ -371,7 +454,11 @@ export const DENTAL_DICTATION: ProductDictation = {
   async context(tx, orgId): Promise<DentalDictationContext> {
     const strictVariants = await orgStrictVariants(tx, orgId)
     const services = await activeServiceAnatomies(tx, orgId)
-    return { strictVariants, anatomy: new Map(services.map((service) => [service.id, service.anatomy ?? anatomyFromName(service)])) }
+    return {
+      strictVariants,
+      anatomy: new Map(services.map((service) => [service.id, service.anatomy ?? anatomyFromName(service)])),
+      pulp: new Map(services.map((service) => [service.id, pulpVariantOf(service, service.family)])),
+    }
   },
   serviceFit,
   normalizeSite,

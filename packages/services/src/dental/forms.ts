@@ -15,24 +15,36 @@ import type { ProductForms, SuggestedFormTemplate } from "../product-hooks.js"
 /** Las respuestas de una prueba de sensibilidad pulpar (frío o calor). */
 const PULP_TEST = ["Sin respuesta", "Normal", "Aumentada, cede al retirar el estímulo", "Aumentada, persiste"]
 
-/** Los términos de diagnóstico de la Asociación Americana de Endodoncistas (AAE, 2009), pulpar y apical por separado. */
-const PULPAL_DIAGNOSES = [
-  "Pulpa normal",
-  "Pulpitis reversible",
-  "Pulpitis irreversible sintomática",
-  "Pulpitis irreversible asintomática",
-  "Necrosis pulpar",
-  "Previamente tratado",
-  "Tratamiento previamente iniciado",
+/**
+ * Los términos de diagnóstico de la Asociación Americana de Endodoncistas (AAE, 2009), pulpar y apical
+ * por separado, con el diagnóstico de la CIE-10 (OMS) que son, en la categoría K04: la pulpitis
+ * (reversible o irreversible) es K04.0; la necrosis, K04.1; la periodontitis apical sintomática es la
+ * aguda (K04.4) y la asintomática, la crónica (K04.5); el absceso apical agudo no drena (K04.7, sin
+ * fístula) y el crónico drena por una fístula (K04.6), como lo define la AAE. Si lo dictado dice lo
+ * contrario de la fístula, `reviewDiagnosis` propone el otro. Lo normal, lo ya tratado y la osteítis
+ * condensante (fuera de K04) no tienen código: no van a Diagnóstico.
+ */
+const PULPAL: ReadonlyArray<readonly [string, string | null]> = [
+  ["Pulpa normal", null],
+  ["Pulpitis reversible", "K04.0"],
+  ["Pulpitis irreversible sintomática", "K04.0"],
+  ["Pulpitis irreversible asintomática", "K04.0"],
+  ["Necrosis pulpar", "K04.1"],
+  ["Previamente tratado", null],
+  ["Tratamiento previamente iniciado", null],
 ]
-const APICAL_DIAGNOSES = [
-  "Tejidos apicales normales",
-  "Periodontitis apical sintomática",
-  "Periodontitis apical asintomática",
-  "Absceso apical agudo",
-  "Absceso apical crónico",
-  "Osteítis condensante",
+const APICAL: ReadonlyArray<readonly [string, string | null]> = [
+  ["Tejidos apicales normales", null],
+  ["Periodontitis apical sintomática", "K04.4"],
+  ["Periodontitis apical asintomática", "K04.5"],
+  ["Absceso apical agudo", "K04.7"],
+  ["Absceso apical crónico", "K04.6"],
+  ["Osteítis condensante", null],
 ]
+const PULPAL_DIAGNOSES = PULPAL.map(([option]) => option)
+const APICAL_DIAGNOSES = APICAL.map(([option]) => option)
+/** Las opciones que son un diagnóstico, con su código (`ProductForms.diagnoses`). */
+const AAE_ICD10: Readonly<Record<string, string>> = Object.fromEntries([...PULPAL, ...APICAL].flatMap(([option, code]) => (code ? [[option, code]] : [])))
 
 const ENDODONTICS: SuggestedFormTemplate = {
   key: "evaluacion-de-endodoncia",
@@ -291,4 +303,5 @@ export const DENTAL_FORMS: ProductForms = {
   suggestions: [ENDODONTICS, ORTHODONTICS, PEDIATRIC, STOMATOLOGIC],
   // A un niño se le ofrecen las de odontopediatría aunque su cita no diga de qué es.
   byAge: { underYears: 12, kind: "odontopediatria" },
+  diagnoses: AAE_ICD10,
 }
