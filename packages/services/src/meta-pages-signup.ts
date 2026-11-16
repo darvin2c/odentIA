@@ -19,7 +19,7 @@ import { encryptJson } from "./secrets.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 
 /**
- * «Conectar con Facebook» de Messenger e Instagram (ADR 0201): por redirección,
+ * «Conectar con Facebook» de Messenger e Instagram (ADR 0195): por redirección,
  * como Gmail, sin la página del panel que necesita WhatsApp. La clínica marca
  * en la ventana de Facebook sus páginas; cada página es una conexión de
  * Messenger y, si tiene un Instagram de empresa unido, otra de Instagram. Varias

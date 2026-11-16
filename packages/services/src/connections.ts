@@ -857,7 +857,7 @@ export async function createConnection(
   if (externalId) {
     // La misma cuenta no se conecta dos veces: se le cambia la clave a la que ya está.
     const [same] = await tx
-      .select({ displayName: channelConnection.displayName, signup: channelConnection.signup })
+      .select({ id: channelConnection.id, displayName: channelConnection.displayName, signup: channelConnection.signup, status: channelConnection.status })
       .from(channelConnection)
       .where(
         and(
@@ -867,6 +867,42 @@ export async function createConnection(
         ),
       )
       .limit(1)
+    // La misma cuenta, desconectada y hecha a mano: vuelve con sus conversaciones y los datos nuevos.
+    if (same && same.status !== "active" && !same.signup && !origin) {
+      await assertSingleActive(tx, orgId, input.channel)
+      let revived: ConnectionRow | undefined
+      try {
+        ;[revived] = await tx.transaction((inner) =>
+          inner
+            .update(channelConnection)
+            .set({
+              displayName,
+              configEncrypted: encryptJson(secretsKey, input.config),
+              status: "active",
+              ...(ownAppKeys ? { ownApp: freshOwnApp(ownAppKeys) } : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(channelConnection.id, same.id))
+            .returning(),
+        )
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+        await rethrowOneActive(tx, orgId, input.channel, same.id, error)
+        throw new ServiceError("CONNECTION_EXISTS", 409, ACTIVE_ELSEWHERE, accountField(input.provider, ACTIVE_ELSEWHERE))
+      }
+      if (!revived) throw new Error("No se pudo volver a conectar")
+      await registerTelegramWebhook(revived, input.config, deps)
+      revived = await settleOwnApp(tx, revived, input.config, secretsKey, deps)
+      const settled = await settleAccount(tx, orgId, revived, adapter, input.config, account, secretsKey, deps)
+      const { templates } = settled
+      return {
+        ...toPublic(settled.row),
+        account,
+        templates,
+        webhookSecret: settled.row.webhookSecret,
+        ...(templates?.error ? { templatesError: templates.error } : {}),
+      }
+    }
     if (same) {
       const message = same.signup
         ? `Esa cuenta ya está conectada como «${same.displayName}». Ábrela y vuelve a conectarla con Facebook en vez de crear otra conexión.`

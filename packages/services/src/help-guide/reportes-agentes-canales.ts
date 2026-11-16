@@ -262,8 +262,8 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "canales-instagram-messenger",
         q: "¿Cómo conecto Instagram?",
-        a: "En Configuración › Integraciones, «Conectar» en Instagram o Messenger te lleva a su página; ahí «Conectar» pide los datos de tu app de Meta: el identificador de la cuenta o de la página, la «Clave de acceso» y la «Clave secreta de la app». Después te muestra la «Dirección de avisos» y la «Clave de verificación»: pégalas en tu app de Meta, en Webhooks. Hasta entonces no llega ningún mensaje y su fila dice «Necesita atención», con «Revisar».",
-        forms: ["como conecto messenger", "instagram dice que falta pegar la direccion de avisos"],
+        a: "En Configuración › Integraciones, entra a Instagram o a Messenger y pulsa «Conectar con Facebook»: entras con el Facebook de quien administra la página de la clínica, marcas sus páginas y vuelves con Messenger de cada página y el Instagram unido a cada una, sin pegar nada. Si una página no tiene un Instagram de empresa unido, se conecta su Messenger y te dice que unas el Instagram en Meta Business Suite y vuelvas a conectar. Lo que respondas desde Meta Business Suite también aparece en la Bandeja. Si Facebook deja de permitir una cuenta (se quitó el permiso o cambió quien administra la página), su fila dice «Necesita atención» y la campana avisa: «Conectar otra con Facebook» la deja como estaba, con sus conversaciones. «Con tu propia app de Meta» sigue para quien tiene su app: pide el identificador, la «Clave de acceso» y la «Clave secreta de la app», y luego pegar la «Dirección de avisos» y la «Clave de verificación» en Webhooks; la clave de Instagram hecha así se renueva sola.",
+        forms: ["como conecto messenger", "instagram dice que falta pegar la direccion de avisos", "conectar instagram con facebook", "mi pagina no tiene instagram", "contesto desde business suite se ve en odentia"],
       },
       {
         id: "canales-telegram",
@@ -274,7 +274,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "canales-administrar",
         q: "¿Cómo desconecto Instagram, Messenger o Telegram?",
-        a: "En Configuración › Integraciones, entra al canal y, en «Conexión», «Administrar» en su cuenta: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan. La cuenta pasa a la pestaña «Desconectados», donde «Volver a conectar» la retoma. Instagram, Messenger y Telegram admiten varias cuentas a la vez («Conectar otra cuenta»); WhatsApp, uno solo. Ahí también «Probar» dice si la cuenta responde y «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
+        a: "En Configuración › Integraciones, entra al canal y, en «Conexión», «Administrar» en su cuenta: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan. La cuenta pasa a la pestaña «Desconectados», donde «Volver a conectar» la retoma. Instagram, Messenger y Telegram admiten varias cuentas a la vez («Conectar otra con Facebook» o «Conectar otra cuenta»); WhatsApp, uno solo. Ahí también «Probar» dice si la cuenta responde y, en las conectadas a mano, «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
         forms: ["como desconecto instagram", "como se si telegram funciona", "cambie la clave en meta donde la pongo", "puedo tener dos cuentas de instagram", "cuantos whatsapp puedo conectar"],
       },
       {

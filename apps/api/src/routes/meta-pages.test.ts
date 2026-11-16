@@ -297,3 +297,21 @@ describe("la revisión diaria", () => {
     expect((await listInstagramTokensDue(ownerDb, KEY, new Date(Date.now() + 8 * 24 * 3_600_000))).map((due) => due.connectionId)).toContain(created.id)
   })
 })
+
+describe("volver a conectar a mano una cuenta desconectada", () => {
+  it("la misma cuenta vuelve con su fila y sus conversaciones, con los datos nuevos; activa, se dice que ya está", async () => {
+    const instagram = (async () => new Response(JSON.stringify({ id: "IG-VUELVE", username: "vuelve" }), { status: 200 })) as unknown as typeof fetch
+    const deps = { fetch: instagram, validateExternal: true }
+    const input = { channel: "instagram" as const, provider: "instagram" as const, config: { instagramId: "IG-VUELVE", accessToken: "UNO", appSecret: "s" } }
+    const first = await withOrgContext(appDb, "org_c", (tx) => createConnection(tx, "org_c", KEY, input, deps))
+    await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, first.id))
+    const again = await withOrgContext(appDb, "org_c", (tx) =>
+      createConnection(tx, "org_c", KEY, { ...input, config: { ...input.config, accessToken: "DOS" } }, deps),
+    )
+    expect(again.id).toBe(first.id)
+    const [row] = await ownerDb.select().from(channelConnection).where(eq(channelConnection.id, first.id))
+    expect(row?.status).toBe("active")
+    expect(decryptConfig(KEY, row!.configEncrypted)).toMatchObject({ accessToken: "DOS" })
+    await expect(withOrgContext(appDb, "org_c", (tx) => createConnection(tx, "org_c", KEY, input, deps))).rejects.toMatchObject({ code: "CONNECTION_EXISTS" })
+  })
+})
