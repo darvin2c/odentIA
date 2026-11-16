@@ -493,15 +493,12 @@ export function ClosingNextVisit({
   // Lo que no tiene cita va en una sola frase: «Vuelve para Resina · 15 y Limpieza».
   const unbooked = continuing.filter((visit) => !visit.booked)
   const unbookedWhat = listSaid(unbooked.map((visit) => sessionLine(visit.label, visit.n, visit.m)))
+  // Las mismas palabras en los tres productos: en latidIA y vistIA lo indicado ya queda aceptado.
   const unbookedLine = !unbookedWhat
     ? null
-    : unbooked.every((visit) => visit.accepted)
-      ? canBook
-        ? `Vuelve para lo aceptado sin empezar: ${unbookedWhat}. Al firmar puedes reservar su cita aquí mismo.`
-        : `Vuelve para lo aceptado sin empezar: ${unbookedWhat}. Recepción lo verá en «Qué sigue» para reservarlo.`
-      : canBook
-        ? `Vuelve para ${unbookedWhat}: al firmar puedes reservar su cita aquí mismo.`
-        : `Vuelve para ${unbookedWhat}: recepción la verá en «Qué sigue» para reservarla.`
+    : canBook
+      ? `Vuelve para ${unbookedWhat}: al firmar puedes reservar su cita aquí mismo.`
+      : `Vuelve para ${unbookedWhat}: recepción la verá en «Qué sigue» para reservarla.`
   const sessionsLines = [...booked, ...(unbookedLine ? [unbookedLine] : [])]
   // El control corto que se propone, sin marcarlo: quien firma decide.
   const proposal =
