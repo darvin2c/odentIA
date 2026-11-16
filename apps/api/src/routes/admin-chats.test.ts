@@ -139,21 +139,6 @@ afterAll(async () => {
 })
 
 describe("responder", () => {
-  it("acepta decir que se quitó «Solo administración» a propósito (`adminOnlyOverride`, ADR 0191)", async () => {
-    mode = "ok"
-    const chatId = await chatWith("whatsapp", "+51911000091")
-    const response = await call("POST", `/${chatId}/reply`, ADMIN, {
-      body: "Hola",
-      adminOnly: false,
-      adminOnlyOverride: true,
-    })
-    await expectStatus(response, 201)
-    await expectStatus(
-      await call("POST", `/${chatId}/reply`, ADMIN, { body: "Hola", adminOnlyOverride: "sí" }),
-      400,
-    )
-  })
-
   it("Meta lo acepta: enviado con su wamid, el id del envío como callback y el número sin «+»", async () => {
     mode = "ok"
     const chatId = await chatWith("whatsapp", "+51911000001")
@@ -367,32 +352,5 @@ describe("Kairós en la conversación", () => {
     expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(true)
     await expectStatus(await ask("PUT", ADMIN, { enabled: false }), 200)
     expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(false)
-  })
-
-  it("el interruptor de Ariadna (ADR 0191) es aparte, solo de Administración, y no toca lo de Kairós", async () => {
-    const kairos = new Hono<{ Variables: { adminActor: AdminActor } }>()
-    kairos.use("*", async (c, next) => {
-      const id = c.req.header("x-test-user") ?? ""
-      c.set("adminActor", { userId: id, role: id === ADMIN ? "admin" : "support" })
-      await next()
-    })
-    kairos.route("/k", createAdminKairosRoute({ ownerDb, mailer: { async send() {} } }))
-    const ask = (path: string, method: string, who: string, body?: unknown) =>
-      kairos.request(`/k/${path}`, {
-        method,
-        headers: { "x-test-user": who, "content-type": "application/json" },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      })
-    const off = await ask("ariadna", "GET", ADMIN)
-    await expectStatus(off, 200)
-    expect((await json(off)).data).toMatchObject({ enabled: false })
-    await expectStatus(await ask("ariadna", "GET", SUPPORT), 403)
-    await expectStatus(await ask("ariadna", "PUT", SUPPORT, { enabled: true }), 403)
-    await expectStatus(await ask("ariadna", "PUT", ADMIN, { enabled: 1 }), 400)
-    const on = await ask("ariadna", "PUT", ADMIN, { enabled: true })
-    await expectStatus(on, 200)
-    expect((await json(on)).data).toMatchObject({ enabled: true, updatedBy: { userId: ADMIN } })
-    expect((await json(await ask("sells", "GET", ADMIN))).data).toMatchObject({ enabled: false })
-    await expectStatus(await ask("ariadna", "PUT", ADMIN, { enabled: false }), 200)
   })
 })

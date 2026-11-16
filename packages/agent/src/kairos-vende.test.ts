@@ -95,6 +95,10 @@ function tools(overrides: Partial<KairosSellTools> = {}) {
       calls.push("clinicData")
       return { created: true, similar: [] }
     },
+    askGuide: async (question) => {
+      calls.push(`askGuide:${question}`)
+      return { found: false }
+    },
   }
   return { tools: { ...base, ...overrides }, calls }
 }
@@ -107,7 +111,8 @@ function scripted(steps: Step[]) {
   let n = 0
   const invoke = async (messages: BaseMessage[]) => {
     seen.push([...messages])
-    const step = steps[n] ?? { text: "Gracias." }
+    // Sin más guion, el modelo insiste con lo último que escribió (así se ve la segunda vez de la comprobación).
+    const step = steps[n] ?? [...steps].reverse().find((s) => "text" in s) ?? { text: "Gracias." }
     n += 1
     const usage = { input_tokens: 1000, output_tokens: 100, total_tokens: 1100 }
     if ("throws" in step) throw new Error(step.throws)
@@ -147,6 +152,21 @@ describe("Kairós vende: la comprobación antes de enviar", () => {
     expect(result.kind).toBe("fallo")
     expect(result.text).toBe(KAIROS_SELL_FALLBACK)
     if (result.kind === "fallo") expect(result.why).toMatch(/hora|fecha/)
+  })
+
+  it("lo que no pasa la comprobación se reescribe una vez con lo que faltó", async () => {
+    const { model, seen } = scripted([
+      { text: "Te espero el lunes a las 9:00." },
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { tool: "proponer_hora", args: { referencia: "h1" } },
+      { text: "Te propongo el lunes 16 de noviembre a las 10:00 con Ana. ¿Te la confirmo?" },
+    ])
+    const t = tools()
+    const result = await seller(model).seller.answer(input(), t.tools)
+    expect(result.kind).toBe("respondio")
+    const asked = seen[1]?.map((m) => String(m.content)).join("\n") ?? ""
+    expect(asked).toContain("Eso no puede salir")
+    expect(asked).toContain("ver_horarios")
   })
 
   it("las horas que devolvió ver_horarios sí salen", async () => {
@@ -497,6 +517,99 @@ describe("Kairós vende: las instrucciones", () => {
     expect(SELLER_SYSTEM).toContain(
       "por Fundadores o por cuánto se ahorra con Fundadores no es pedir un descuento",
     )
+  })
+})
+
+describe("Kairós vende: le pregunta a Ariadna por una función", () => {
+  const guide =
+    "Para firmar el consentimiento en la tablet, abre la atención y toca «Firmar en la tablet»."
+
+  it("lo que dice la guía sustenta lo que sale y lo cuenta en tono de venta", async () => {
+    const { model, seen } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿se puede firmar en la tablet?" } },
+      {
+        text: "Sí: tu paciente firma el consentimiento en la tablet, sin papeles. ¿Quieres verlo en una presentación?",
+      },
+    ])
+    const t = tools({
+      askGuide: async (question) => {
+        t.calls.push(`askGuide:${question}`)
+        return { found: true, texts: [guide] }
+      },
+    })
+    const result = await seller(model).seller.answer(
+      input({ history: [{ who: "persona", at: now, text: "¿se puede firmar en la tablet?" }] }),
+      t.tools,
+    )
+    expect(result.kind).toBe("respondio")
+    expect(t.calls).toEqual(["askGuide:¿se puede firmar en la tablet?"])
+    const lastSeen =
+      seen
+        .at(-1)
+        ?.map((m) => String(m.content))
+        .join("\n") ?? ""
+    expect(lastSeen).toContain(guide)
+    expect(lastSeen).toContain("tono de venta")
+  })
+
+  it("lo que la guía no tiene no se afirma: el modelo lo lee así", async () => {
+    const { model, seen } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿emite facturas a la SUNAT?" } },
+      { text: "Eso te lo muestro en la presentación. ¿Te agendo una?" },
+    ])
+    const t = tools()
+    const result = await seller(model).seller.answer(input(), t.tools)
+    expect(result.kind).toBe("respondio")
+    const lastSeen =
+      seen
+        .at(-1)
+        ?.map((m) => String(m.content))
+        .join("\n") ?? ""
+    expect(lastSeen).toContain("no lo encuentra")
+  })
+
+  it("una hora que dice la guía no sustenta una hora de presentación", async () => {
+    const { model } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿manda un resumen semanal?" } },
+      { text: "Sí, cada lunes te llega el resumen. ¿Te va la presentación el lunes a las 8:00?" },
+    ])
+    const t = tools({
+      askGuide: async () => ({ found: true, texts: ["El resumen llega cada lunes a las 8:00."] }),
+    })
+    const result = await seller(model).seller.answer(input(), t.tools)
+    expect(result.kind).toBe("fallo")
+  })
+
+  it("si la guía duda, le pasa las preguntas parecidas para volver a preguntar con una", async () => {
+    const { model, seen } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿manda recordatorios?" } },
+      { text: "Eso te lo muestro en la presentación. ¿Te agendo una?" },
+    ])
+    const t = tools({
+      askGuide: async () => ({ found: false, close: ["¿Dónde enciendo los recordatorios de cita?"] }),
+    })
+    await seller(model).seller.answer(input(), t.tools)
+    const lastSeen = seen.at(-1)?.map((m) => String(m.content)).join("\n") ?? ""
+    expect(lastSeen).toContain("- ¿Dónde enciendo los recordatorios de cita?")
+    expect(lastSeen).toContain("tal cual")
+  })
+
+  it("las instrucciones mandan preguntarle antes de afirmar una función", () => {
+    expect(SELLER_SYSTEM).toContain("preguntar_a_ariadna")
+    expect(SELLER_SYSTEM).toMatch(/no digas que el sistema lo hace ni que no lo hace/)
+  })
+
+  it("el doble le pregunta y responde con la guía", async () => {
+    const fake = createKairosSeller({ platform: { fake: true, maxRetries: 0 }, onUse: () => {} })
+    const t = tools({
+      askGuide: async () => ({ found: true, texts: [guide] }),
+    })
+    const result = await fake.answer(
+      input({ history: [{ who: "persona", at: now, text: "¿Se puede firmar en la tablet?" }] }),
+      t.tools,
+    )
+    expect(result.kind).toBe("respondio")
+    expect(result.text).toContain("tablet")
   })
 })
 

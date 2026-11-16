@@ -1,6 +1,6 @@
 # 0191 · Ariadna responde por chat a las clínicas con app
 
-Fecha: 2026-11-15 · Estado: aceptada · Extiende la [0190](0190-kairos-vende.md) («a una clínica con app no le responde Kairós») y la [0146](0146-la-ayuda-elige-con-jev-y-muestra-la-guia.md) (la Ayuda con la guía); respeta la [0013](0013-ayuda-responde-con-la-guia-del-sistema.md)
+Fecha: 2026-11-15 · Estado: reemplazada por la [0194](0194-kairos-le-pregunta-a-ariadna.md) · Extiende la [0190](0190-kairos-vende.md) («a una clínica con app no le responde Kairós») y la [0146](0146-la-ayuda-elige-con-jev-y-muestra-la-guia.md) (la Ayuda con la guía); respeta la [0013](0013-ayuda-responde-con-la-guia-del-sistema.md)
 
 ## Problema
 

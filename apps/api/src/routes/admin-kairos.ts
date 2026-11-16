@@ -11,7 +11,6 @@ import {
   createSaasProposal,
   decideKairosItem,
   draftPendingKairosItems,
-  getAriadnaChats,
   getKairosSells,
   KAIROS_DRAFTS_PER_PASS,
   type KairosDraftWriter,
@@ -33,7 +32,6 @@ import {
   reassignPresentation,
   recordPresentation,
   ServiceError,
-  setAriadnaChats,
   setKairosSells,
   settleKairosOutreach,
   todayForStaff,
@@ -413,26 +411,6 @@ export function createAdminKairosRoute(deps: AdminKairosDeps) {
           enabled: "Di si lo prendes o lo apagas",
         })
       return deps.ownerDb.transaction((tx) => setKairosSells(tx, actor, parsed.data.enabled))
-    })
-  })
-
-  // «Ariadna responde en los chats de las clínicas con su app» (ADR 0191): su propio interruptor, solo Administración.
-  app.get("/ariadna", (c) =>
-    runService(c, 200, () => {
-      adminOf(c)
-      return deps.ownerDb.transaction((tx) => getAriadnaChats(tx))
-    }),
-  )
-  app.put("/ariadna", async (c) => {
-    const raw = await c.req.json().catch(() => null)
-    const parsed = sellsBody.safeParse(raw)
-    return runService(c, 200, () => {
-      const actor = adminOf(c)
-      if (!parsed.success)
-        throw new ServiceError("VALIDATION", 400, "Di si la prendes o la apagas", {
-          enabled: "Di si la prendes o la apagas",
-        })
-      return deps.ownerDb.transaction((tx) => setAriadnaChats(tx, actor, parsed.data.enabled))
     })
   })
 

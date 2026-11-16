@@ -25,7 +25,6 @@ import { useState } from "react"
 import { api } from "../../lib/api"
 import { CLIENT_HISTORY_FILTERS, type ClientHistoryFilter } from "../../lib/list-search"
 import type { ClientTabProps } from "./account-tabs"
-import { ChatDrawer } from "./chat-drawer"
 import {
   HISTORY_CATEGORY_WORDS,
   type TimelineEntry,
@@ -34,6 +33,7 @@ import {
   wordOf,
 } from "./client-model"
 import { clientQueryKeys } from "./client-queries"
+import { ChatDrawer } from "./chat-drawer"
 import { EmailDrawer } from "./email-drawer"
 
 const FILTER_WORDS: Record<ClientHistoryFilter, string> = {
@@ -182,9 +182,7 @@ function HistoryEntry({
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-          <span className="font-medium">
-            {kairos ? entry.who.name || "Kairós" : entry.who.name}
-          </span>
+          <span className="font-medium">{kairos ? "Kairós" : entry.who.name}</span>
           <span className="text-muted-foreground">{whenWords(entry.at)}</span>
           <Badge variant="outline">{wordOf(HISTORY_CATEGORY_WORDS, entry.category, "Otro")}</Badge>
           {entry.adminOnly ? (
