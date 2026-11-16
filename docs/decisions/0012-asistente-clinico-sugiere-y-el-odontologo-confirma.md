@@ -103,6 +103,9 @@ Una prueba con ChatGPT 6 en la pantalla real dejó una receta dictada dentro de 
   - Se descartó dejar las reglas al principio del mensaje de la pausa, en su propio bloque con corte. Fue peor: el peso se perdió 4 de 30 veces.
   - La red avisa el número con la unidad que solo tiene una pregunta. También avisa, en las dos hermanas, lo dicho entre ellas sin decir cuál.
   - «No pude usar esto» deja de avisar la frase que cortó la pausa cuando la pausa siguiente la propone.
+  - La medición encontró dos inventadas que el servidor dejaba listas, en cualquier orden de los mensajes:
+    - «seis de diez» con 10: el máximo de una escala dicho tras otro número no es la respuesta;
+    - «cinco ... con extracción indicada»: los pedazos que el modelo une con «...» ya no se juntan en una frase que no se dijo.
 - **Un costo que queda.** Con las reglas en el mensaje de sistema, la parte fija con ficha y sin ficha son dos entradas distintas de la caché. La primera pausa con ficha de una atención que ya dictó sin ficha vuelve a escribir las instrucciones, si ninguna otra atención con ficha de la clínica las dejó en la caché. Cuesta unos USD 0,0009, una vez.
 - **Para medir.** `eval:dictado-fichas -- --servicios=eval/servicios-demo.json` lee el tarifario de la demo. Se usa cuando cambia dónde o cómo lee Clío las fichas.
 
