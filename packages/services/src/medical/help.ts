@@ -567,7 +567,7 @@ const OWN_FAQS: Record<string, Faq[]> = {
     {
       id: "pacientes-anestesia-dosis-maxima",
       q: "¿Dónde veo la dosis máxima de anestesia según su peso?",
-      a: "En la atención, en «Realizado hoy», en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos». Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
+      a: "En la atención, en «Realizado hoy», en cuanto algo de hoy usa anestesia local sale «Anestesia local» con sus alergias y su medicación. Eliges el anestésico y, con el peso anotado en los signos vitales, dice el máximo: por ejemplo, «Máximo para 22 kg con lidocaína 2 % con epinefrina (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos» (se redondea hacia abajo). Sin peso no calcula nada: pide anotarlo. Se repite al firmar, y la atención firmada guarda el peso y el máximo. Avisa y no frena.",
       forms: ["dosis maxima de anestesia", "maximo de lidocaina por kilo"],
       area: "clinica",
       needs: "clinical.write",

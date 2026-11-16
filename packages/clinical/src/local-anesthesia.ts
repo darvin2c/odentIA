@@ -115,7 +115,7 @@ const number = (value: number) =>
 
 /**
  * La línea del máximo y sus avisos: «Máximo para 22 kg con lidocaína 2 % con epinefrina
- * (cartucho de 1,8 mL): 96,8 mg, unos 2,7 cartuchos». Sin peso no inventa un máximo (`dose`
+ * (cartucho de 1,8 mL): 96,8 mg, unos 2,6 cartuchos». Sin peso no inventa un máximo (`dose`
  * nulo): la pantalla pide anotarlo en los signos vitales.
  */
 export function localAnesthesiaWords(input: {
