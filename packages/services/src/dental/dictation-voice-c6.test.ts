@@ -67,7 +67,8 @@ describe("la red avisa lo dicho entre dos hermanas sin decir cuál (v11)", () =>
     expect(notice?.questions).toEqual(expect.arrayContaining([cpodO, ceodO]))
     // El mismo aviso que si Clío lo hubiera propuesto sin decir cuál.
     expect(notice?.why).toBe("No quedó claro si era «CPOD · O, obturados» o «ceod · o, obturados»: nómbrala o escríbela en la ficha.")
-    expect(formNetMisses(drafts, estomato, FDI, V11).some((miss) => miss.questions.includes(cpodO) && miss.questions.includes(ceodO))).toBe(true)
+    // Leerla otra vez no diría de cuál es: no se paga otra lectura y el aviso queda.
+    expect(formNetMisses(drafts, estomato, FDI, V11).some((miss) => miss.questions.includes(cpodO) || miss.questions.includes(ceodO))).toBe(false)
   })
 
   it("si Clío ya respondió una de las dos, la otra no se avisa", () => {

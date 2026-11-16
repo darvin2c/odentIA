@@ -851,7 +851,7 @@ export function formSentencesWithoutAnswer(
   site: ProductSite,
   /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta. */
   pending: ReadonlyMap<number, unknown> = new Map(),
-): Array<{ said: string; why: string; questions: number[] }> {
+): Array<{ said: string; why: string; questions: number[]; between?: true }> {
   const open = questions.filter((question) => !handled.has(question.number))
   if (!transcript?.trim() || !open.length) return []
   return sentencesOf(transcript).flatMap((sentence) => {
@@ -878,8 +878,10 @@ export function formSentencesWithoutAnswer(
     if (!named.length) return []
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
     const labels = [...new Set(named.map((question) => question.label))]
-    // Entre hermanas, el mismo aviso que el motivo de lo parado.
-    return [{ said, why: named.every((question) => between.has(question)) ? notClearWhich(labels) : looksLike(labels), questions: named.map((question) => question.number) }]
+    const numbers = named.map((question) => question.number)
+    // Entre hermanas, el mismo aviso que el motivo de lo parado; `between`: leerla otra vez no diría cuál.
+    if (named.every((question) => between.has(question))) return [{ said, why: notClearWhich(labels), questions: numbers, between: true as const }]
+    return [{ said, why: looksLike(labels), questions: numbers }]
   })
 }
 
@@ -898,8 +900,8 @@ export function formDropNotices<T extends FormDraftLike>(
   where: { site: ProductSite; transcript?: string | undefined },
   /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta (`null`: por elegir). */
   pending: ReadonlyMap<number, unknown> = new Map(),
-): Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red" }> {
-  const notices: Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red" }> = []
+): Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red"; between?: true }> {
+  const notices: Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red"; between?: true }> = []
   // Una pendiente por elegir ya dice «revísala»: no se avisa otra vez.
   const handled = new Set([...pending].flatMap(([number, value]) => (value == null ? [number] : [])))
   for (const { draft, ready } of outcomes) {
@@ -923,7 +925,8 @@ export function formDropNotices<T extends FormDraftLike>(
  * de «X»»), con sus preguntas: las que Clío lee una vez más, solas, antes de
  * guardar la pausa. La misma cuenta que al guardar (las gemelas, el diagnóstico
  * que también es de la ficha y lo que ya proponen las pendientes); la usan la
- * atención y la medición.
+ * atención y la medición. Lo dicho entre dos hermanas sin decir cuál no se lee
+ * otra vez: la frase no alcanza para que su respuesta quede, y el aviso queda.
  */
 export function formNetMisses<T extends FormDraftLike>(
   drafts: readonly T[],
@@ -940,7 +943,7 @@ export function formNetMisses<T extends FormDraftLike>(
   const outcomes = expanded
     .filter((draft) => draft.kind === "ficha")
     .map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, site, transcript) !== null }))
-  return formDropNotices(outcomes, twins, questions, { site, transcript }, pending).flatMap((notice) => (notice.by === "red" ? [{ said: notice.said, questions: notice.questions }] : []))
+  return formDropNotices(outcomes, twins, questions, { site, transcript }, pending).flatMap((notice) => (notice.by === "red" && !notice.between ? [{ said: notice.said, questions: notice.questions }] : []))
 }
 
 /**
