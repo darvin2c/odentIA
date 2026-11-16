@@ -170,6 +170,45 @@ En toda tarea se prueban cuatro cosas, además de las suyas: **interrupción** (
 
 ---
 
+## Odontólogo
+
+Las tareas de un día de consulta. Hasta el estudio de la atención (16 nov 2026) el catálogo solo tenía recepción, caja y el paciente.
+
+### T-ODO-01 Atender a quien llegó sin cita con dolor
+**Dónde:** la ficha («Atender», `C/patient/new-encounter-button.tsx`) y la atención (`C/patient/encounter-editor.tsx`).
+- [ ] Desde la ficha la atención se abre en un clic.
+- [ ] Registro el motivo, la caries de la 36 y la resina, firmo y caja lo ve para cobrar.
+- [ ] El cierre muestra el cargo y el control.
+- [ ] Si no sé registrar a un paciente nuevo, la Ayuda me dice que lo hace recepción y cómo pedírselo; no me explica un botón que no tengo.
+
+**Ya falló:** la Ayuda le explicó «Nuevo paciente» a la odontóloga, que no tiene ese botón (16 nov).
+
+### T-ODO-02 La sesión siguiente de un tratamiento
+**Dónde:** «Hoy viene a…» y «Realizado hoy» de la atención (`C/patient/encounter-visit.tsx`, `C/patient/encounter-treatments.tsx`).
+- [ ] La atención me dice qué sesión toca y la retomo en un toque.
+- [ ] Al terminar, me ofrece reservar la sesión que sigue o lo aceptado.
+
+### T-ODO-03 El borrador de ayer
+**Dónde:** Inicio (`C/home/today.tsx`).
+- [ ] Mañana encuentro el borrador de ayer sin firmar, sin buscar al paciente.
+- [ ] Interrupción: salgo a atender el teléfono a mitad de la consulta y, al volver, Inicio muestra la atención abierta; el motivo y lo registrado siguen ahí.
+
+**Ya falló:** la atención abierta hoy no aparecía en Inicio ni en Tareas (16 nov).
+
+### T-ODO-04 Marqué la pieza equivocada
+**Dónde:** el panel de la pieza (`apps/dental-clinic/src/components/dental/tooth-drawer.tsx`) y Diagnóstico (`C/patient/encounter-diagnoses.tsx`).
+- [ ] Anular el hallazgo deja también sin diagnóstico ni procedimiento esa pieza, con un solo motivo.
+- [ ] «Última atención» de la ficha no lista la pieza anulada.
+
+**Ya falló:** la caries anulada en la 47 dejó su diagnóstico activo, que se firmaba (16 nov).
+
+### T-ODO-05 La tablet en el sillón
+**Dónde:** la atención a 820 px.
+- [ ] Registro un hallazgo en una pieza sin perder de vista el odontograma.
+- [ ] Sin colegiatura en mi perfil, la paciente firma su consentimiento en la tablet y su firma no se pierde.
+
+**Palabras que no entiende quien llega** (la Ayuda debe contestarlas en una línea): la sigla de la NTS 188, MB, CE, CD y CDP, CIE-10, ASA, Clío, adenda, «inmutable», «Liberarla», «Lo piensa», «Indicado hoy», «Por decidir», «Trazar forma observada», «Registro gráfico», «Acto libre» y «Otro servicio del catálogo».
+
 ## Caja
 
 ### T-CAJ-01 Cobrar lo que debe y entregar el ticket

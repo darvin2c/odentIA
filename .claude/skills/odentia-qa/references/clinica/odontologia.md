@@ -118,7 +118,7 @@ El tiempo no se puede adelantar en la demo. El recorrido se arma así:
 - [ ] A quien nunca se le preguntó por anticoagulantes o medicinas para los huesos, la atención lo dice («no se le preguntó»).
 
 **Ya falló:** se anestesiaba sin antecedentes ni ASA (8 nov, PR 528); un aviso falso de antecedentes «declarados por el paciente» (PR 550).
-**Huecos conocidos:** nada cruza un anticoagulante o un bifosfonato con exodoncia, cirugía o implante; no hay aviso de profilaxis antibiótica; la ASA no se sugiere; el látex no avisa en los materiales.
+**Huecos conocidos:** no hay aviso de profilaxis antibiótica; la ASA no se sugiere; el látex no avisa en los materiales.
 **Fuentes:** clasificación ASA (American Society of Anesthesiologists); profilaxis de endocarditis de la AHA (declaración de 2021); osteonecrosis por medicamentos de la AAOMS (posición de 2022); ADR 0035, 0072 y 0163.
 
 **Sumado por la QA de la entrega 6 (14 nov 2026):**
@@ -136,6 +136,14 @@ Fuentes que se suman: AHA 2021, prevención de la endocarditis (Wilson y otros, 
 Huecos conocidos: los antiangiogénicos (bevacizumab, sunitinib) también dan osteonecrosis y no se preguntan (AAOMS 2022).
 
 Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxia a penicilina; va a una exodoncia); **Ernesto** (warfarina por fibrilación y sangrado previo tras una extracción; exodoncia de la 46); **Gloria** (ácido zoledrónico endovenoso por metástasis óseas; va a una extracción); **Lucía** (gestante de 24 semanas, lactante y fumadora de menos de 10 al día; se le receta un analgésico).
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Los antecedentes familiares (`patient_family_history`) tienen dónde anotarse y se ven en Antecedentes (NTS 139).
+- [ ] La ASA se pide en algún momento antes de la primera anestesia, aunque el servicio no tenga materiales cargados.
+- [ ] Sin alergias vigentes, cada estado se dice con una sola frase, la misma en la franja, la ficha, la atención y lo que ve recepción: «Niega alergias» (se le preguntó), «Alergias: no se le preguntó», su «No sé» y su «No» sin revisar. Ninguno se funde con otro.
+- [ ] En la línea fija y a 390 px, las alertas van por riesgo: alergia grave, anticoagulante o bifosfonato, embarazo, enfermedad, y «Niega» al final.
+
+**Podado:** «nada cruza un anticoagulante o un bifosfonato con exodoncia»: ya existe en el renglón del Plan («Toma Eliquis: riesgo de sangrado. Toma Fosamax: riesgo de osteonecrosis…»).
 
 ## P-ODO-03 Abrir la atención: «Hoy viene a…», motivo y relato
 
@@ -169,6 +177,12 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Huecos conocidos:** sin oclusión, apertura, vitalidad ni percusión estructuradas; sin tamizaje de cáncer oral; sin índices ni riesgo de caries; sin aviso de presión alta.
 **Fuentes:** LOINC y UCUM; ICDAS; CPOD y ceod (OMS, *Oral Health Surveys: Basic Methods*); NTS 139-MINSA/2018/DGAIN, numeral 5.2.2 12) Fichas odonto-estomatológicas, y su «Ficha de evaluación odontológica»; Greene y Vermillion, JADA 1964;68:7-13.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Con PA de 180/110 o más, el campo avisa «lo electivo se suele diferir», propone repetir la toma y el aviso se repite en el cierre, sin frenar. Vale desde los 13 años (AAP 2017). Con síntomas (cefalea intensa, dolor de pecho, disnea, alteración visual o neurológica) dice que es una urgencia médica (ACC/AHA 2017). Caso: K3, 185/115 antes de la exodoncia de la 48.
+- [ ] La fiebre de 38 °C o más con un absceso, y la saturación baja, se notan en el examen (signos de diseminación). **Verificar** los umbrales antes de pedirlo.
+
+Fuentes que se suman: Little y Falace, *Dental Management of the Medically Compromised Patient* (verificar la edición); AAP 2017 (presión en niños y adolescentes); ACC/AHA 2017 (crisis hipertensiva).
+
 ## P-ODO-05 Odontograma
 
 **Dónde:** en la atención, `OdontogramStudio` y `ToothDrawer` (`DA/components/dental/`); en la ficha, Clínica › Odontograma (`odontograma-tab.tsx`), con «Evolución», «Ver estado al» y el historial por pieza (`S/dental/tooth-history.ts`). El registro es `registerToothFinding` (`S/dental/tooth-panel.ts`) y las reglas, `findingIssues` (`D/findings.ts`).
@@ -192,6 +206,9 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Huecos conocidos:** no hay cara cervical (la clase V va como vestibular, palatina o lingual).
 **Fuentes:** ISO 3950 (notación FDI); NTS N.° 188-MINSA/DGIESP-2022 (odontograma), aprobada por la RM N.° 559-2022/MINSA (deroga la RM 272-2019/MINSA y la NTS 150), numerales 5.2 a 5.13; ADR 0036 y 0079.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Una sesión que solo trata (sin hallazgos nuevos) no firma el odontograma como «Nuevos hallazgos».
+
 ## P-ODO-06 Diagnóstico
 
 **Dónde:** el bloque «Diagnóstico» (`CA/encounter-diagnoses.tsx`) y sus propuestas; las listas en `C/diagnoses.ts` y `S/diagnosis-codes.ts`.
@@ -207,6 +224,13 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 **Ya falló:** el diagnóstico pasaba a la pieza anterior al indicar en otra (9 nov); solo con el código en el Plan.
 **Fuentes:** CIE-10 (MINSA) y CIE-11 (OMS); terminología diagnóstica de la AAE; ADR 0041, 0053 y 0103.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] El diagnóstico pulpar y apical de la ficha de endodoncia (AAE) y el de la atención (CIE-10) son el mismo dato o uno propone al otro. Llenada a mano, la ficha propone «K04.0 Pulpitis · irreversible sintomática · 36» y «K04.4 … · sintomática · 36» con «Usar»; la periodontitis apical de la ficha no queda fuera de Diagnóstico. Proponer no es registrar.
+- [ ] La Historia dice cada diagnóstico con su pieza y su tipo («Caries de la dentina · pieza 15 · definitivo»), sin fundir dos de piezas distintas, y el término de la ficha junto al código.
+
+**Mejora posible:** con «Pulpitis reversible» en la ficha y una endodoncia indicada, avisar: la pulpitis reversible no es indicación de endodoncia (AAE; verificar).
+Fuentes que se suman: AAE Consensus Conference on Diagnostic Terminology (J Endod 2009;35:1634); CIE-10 de la OMS, capítulo K04. **Verificar** si la lista del MINSA usa la ICD-DA.
 
 ## P-ODO-07 Plan de tratamiento, caminos y sesiones
 
@@ -228,6 +252,10 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** «Endodoncia anterior vital» se ofrecía para un molar (demo) y el consentimiento firmado decía «anterior · pieza 46» (9 nov); la endodoncia indicada desde el odontograma no preguntaba sesiones y venía «Sí, terminar» marcado (9 nov); la corona antes de terminar la endodoncia del mismo diente (9 nov); «sesión 2» que contaba una cita pasada (PR 550).
 **Fuentes:** ADR 0034, 0099, 0153, 0161 y 0164.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Lo que se indica por dolor o infección se propone en la fase de urgencia, aunque el servicio sea de la fase básica.
+- [ ] «Indicar un tratamiento» toma la pieza y el hallazgo que se están mirando, no la última pieza tocada.
+
 ## P-ODO-08 Presupuesto del plan
 
 **Dónde:** `CA/plan/plan-budgets.tsx`, `budget-review.tsx`, `budget-response.tsx` y `budget-signing.tsx`; el servicio `S/budgets.ts`.
@@ -243,6 +271,11 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 **Ya falló:** «Aceptó todo» cuando eligió la opción A; la franja con un conteo y un monto que no cuadraban (8 nov); la opción no elegida dentro de lo pendiente (9 nov).
 **Fuentes:** ADR 0144, 0145, 0153 y 0159.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Un tratamiento indicado después de armar el presupuesto con opciones entra a ese presupuesto o se dice «entra al firmar». El total de cada opción suma todo lo que muestra el Plan. Caso: la resina de la 24 indicada después de «Es otro camino».
+- [ ] En una pieza que ya tiene opciones, lo indicado después pregunta a qué opción va; en otra pieza, entra común a todas. Caso: perno-muñón en la 36 con A (endodoncia y corona) y B (exodoncia).
+- [ ] La línea de la atención dice lo aceptado (con su monto) cuando aceptó por partes, y la respuesta se dice con una sola palabra («Lo piensa») en el diálogo, el Plan y la ficha.
 
 ## P-ODO-09 Consentimiento informado
 
@@ -264,6 +297,10 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** se pedía el consentimiento del camino no elegido (PR 539); «Firmar ahora» de la endodoncia abría la prótesis (8 nov); la declaración no se veía en el enlace (PR 479).
 **Fuentes:** Ley 29414 y su reglamento; Ley 26842 (Ley General de Salud); ADR 0033, 0117, 0131 y 0148.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Indicar y registrar en la misma atención («Registrar lo de hoy» o «Hacerla hoy» en el Plan) pide el consentimiento **antes** de registrar el procedimiento, sin frenar. Caso: K1, la endodoncia de la 36 indicada y registrada en la primera consulta.
+- [ ] Anular un hallazgo de la pieza equivocada dice que hay un consentimiento firmado con esa pieza, para revocarlo y firmar el correcto.
+
 ## P-ODO-10 Anestesia local
 
 **Dónde:** «Riesgo anestésico (ASA)» en Antecedentes y la línea del cierre `AnesthesiaHealthLine` (`CA/encounter-closing.tsx`). El anestésico se detecta por el nombre del material (`isLocalAnestheticName`, `C/medications.ts`).
@@ -276,6 +313,12 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** se anestesiaba sin antecedentes ni ASA (PR 528).
 **Huecos conocidos:** no hay registro propio de la anestesia (técnica, cartuchos, vasoconstrictor) ni dosis máxima por peso.
 **Fuentes:** Malamed, *Handbook of Local Anesthesia*, para dosis máximas por peso y por cartucho; ADR 0106 y 0163.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La línea de anestesia no depende de que el servicio tenga un anestésico entre sus materiales: sale del servicio («usa anestesia local»).
+- [ ] La línea (ASA, alergias, medicación y máximo) aparece en la atención apenas hoy hay algo con anestesia, no solo en el diálogo de firmar.
+- [ ] El máximo se calcula con el anestésico elegido y el peso de los signos vitales: lidocaína al 2 % con epinefrina, 4,4 mg/kg (hasta 300 mg); mepivacaína al 3 %, 4,4 mg/kg (300 mg); articaína al 4 %, 7 mg/kg (500 mg; no en menores de 4 años), y prilocaína al 4 %, 6 mg/kg (400 mg); cartucho de 1,8 mL. Los cartuchos nunca se dicen sin nombrar el anestésico. Caso: Mateo, 22 kg, con mepivacaína al 3 %: 1,8 cartuchos, no 2,7. Fuente: tabla de la AAPD, verificar.
+- [ ] En un cardiópata (o ASA III o IV), la epinefrina hasta 0,04 mg, unos 2 cartuchos con 1:100 000. Fuente: Malamed, *Handbook of Local Anesthesia*, verificar.
 
 ## P-ODO-11 Procedimientos de hoy
 
@@ -320,7 +363,7 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 - [ ] Cada ítem tiene DCI, concentración, forma, vía, dosis, frecuencia, duración y cantidad, y la cantidad cuadra.
 - [ ] La alergia y la reactividad cruzada (penicilina y cefalosporinas; AINE) se avisan, y lo que se vio queda en la receta.
-- [ ] **El embarazo y la lactancia avisan** (AINE en el tercer trimestre, tetraciclinas). Hoy odentIA no tiene ningún aviso de embarazo: `S/product-hooks.ts` deja la revisión vacía.
+- [ ] **El embarazo y la lactancia avisan** (AINE en el tercer trimestre, tetraciclinas).
 - [ ] Las interacciones que cambian la conducta dental se avisan: anticoagulante con AINE, y metronidazol con alcohol o warfarina.
 - [ ] En un niño, la dosis por peso.
 - [ ] La profilaxis antibiótica, cuando corresponde, se puede recetar con su dosis y momento (antes del procedimiento).
@@ -330,8 +373,12 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 **Ya falló:** la receta imprimía los ítems en un orden al azar (QA del 11 nov).
 
-**Huecos conocidos:** sin aviso de embarazo ni interacciones en odentIA (latidIA sí avisa del embarazo).
+**Podado (16 nov 2026):** «no hay aviso de embarazo ni de interacciones»: odentIA ya avisa del embarazo y del anticoagulante con un AINE.
 **Fuentes:** Manual de Buenas Prácticas de Prescripción (DIGEMID-MINSA); profilaxis de endocarditis de la AHA (2021); ADR 0132 y 0143.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Cambiar medicamento» limpia la concentración, la forma y la dosis del anterior. Caso: de amoxicilina 500 mg a ibuprofeno, la concentración queda vacía para escribirla.
+- [ ] La cantidad total se propone desde dosis × frecuencia × duración, también en la receta escrita.
 
 ## P-ODO-14 Imágenes, radiografías y tomografía
 
@@ -372,6 +419,12 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** tras un pago parcial, el cierre decía a la vez «Quedó por cobrar S/ 450» y «Debe S/ 200», y en la sesión 2 «ya estaba incluido en lo cobrado» debiendo 200 (9 nov); «Sí, terminar» venía marcado aunque faltaba una sesión; la sesión 2 se proponía el mismo día; el control de otro odontólogo venía desmarcado (8 y 9 nov; PR 524, 533, 535 y 537).
 **Fuentes:** NTS 139-MINSA; ADR 0003, 0152 y 0161.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Al terminar antes la sesión de una cita, el cierre ofrece usar esa cita para lo aceptado que sigue, además de liberarla.
+- [ ] «¿Cuándo vuelve?» ofrece lo aceptado sin empezar del mismo plan, respetando «va después»; no trae lo aceptado hace un año en otro plan.
+- [ ] Al terminar la endodoncia, lo que va después (la corona) se ofrece en el mismo cierre, contando lo que la firma termina.
+- [ ] Si la restauración que va después queda en «Lo piensa», el cierre lo dice («queda con obturación provisional») y deja un control a 30 días.
+
 ## P-ODO-16 Anular y corregir
 
 **Dónde:** `CA/encounter-void-dialog.tsx`, `S/encounters.ts` (anular), `S/encounter-void-budgets.ts` y la adenda (`CA/encounter-addendum-drawer.tsx`).
@@ -402,6 +455,11 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 
 **Ya falló:** la Historia ilegible por evento suelto (PR 551); «¿Vino?» abría «Por confirmar»; la copia daba por vigentes la ficha de una atención anulada y una medicina suspendida (QA de la entrega 2, 14 nov).
 **Fuentes:** NTS 139-MINSA; HL7 FHIR R4; ADR 0080, 0115 y 0133.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La hoja de atención no lista la opción no elegida ni lo rechazado como «Tratamiento sugerido».
+- [ ] La Historia dice la pieza y el tipo de cada diagnóstico, sin fundir dos de piezas distintas.
+- [ ] La ficha odontoestomatológica se ofrece mientras no haya una del plan (la primera consulta que no es urgencia), otra vez para «Riesgo y alta» al culminar el plan y al reingresar; nunca en las sesiones intermedias.
 
 ## P-ODO-18 Controles y seguimiento
 
@@ -436,6 +494,9 @@ Casos: **Víctor** (válvula aórtica protésica, profilaxis indicada, anafilaxi
 **Ya falló:** la nota dictada borraba lo escrito (PR 418); la cantidad de la receta dictada (PR 416); Clío sin pulpitis (8 nov); lo dictado para la ficha abierta no iba a ningún lado y «Lo dictado» lo resaltaba como usado (mesa del 14 nov, entrega 11).
 **Fuentes:** ADR 0012, 0099, 0100, 0102 y 0188.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Resina» dictada para un molar temporal ofrece las resinas de posterior, no carillas.
+
 ## P-ODO-20 Quién ve lo clínico
 
 **Dónde:** `packages/auth/src/permissions.ts` y `S/clinical-access.ts`.
@@ -462,6 +523,17 @@ No tienen pantalla propia: viven en el plan, las sesiones, los controles y los p
 **Fuentes:** las guías de cada especialidad; para odontopediatría, las guías de la AAPD.
 
 ---
+
+## P-ODO-29 Nota clínica fuera de una atención
+
+**Dónde:** `CA/quick-note-drawer.tsx`, `POST /api/patients/:id/notes`, la tabla `clinical_note`; la Historia la filtra como «Notas clínicas». Ya existe en la app y ninguna ronda la revisaba (estudio de la atención, 16 nov 2026).
+
+- [ ] La nota lleva autor, fecha y hora, y no se edita ni se borra: se corrige con otra nota.
+- [ ] Se ve en la Historia junto a las atenciones y entra en la copia de la historia y en el FHIR.
+- [ ] Una indicación clínica dada por teléfono se puede anotar ahí sin abrir una atención.
+
+**Caso:** el paciente llama dos días después de la endodoncia con dolor leve y se le indica paracetamol.
+**Fuentes:** NTS 139-MINSA (cada anotación con firma; nada se borra).
 
 ## Lo que hace una consulta y la app todavía no tiene
 

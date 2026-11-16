@@ -18,6 +18,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** un adelanto a quien ya debía dejó tres cifras distintas de «debe» en la misma ficha.
 **Caso:** el lunes 2 de marzo debe S/ 300. El martes 3 deja S/ 100 de adelanto: debe 300, a favor 100, falta pagar 200. El jueves 5 se le devuelven S/ 40: a favor 60, falta pagar 240, y la devolución se lee en su ficha.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] El detalle del saldo en el Resumen no dice «sin pago aplicado» cuando hubo un pago parcial.
+
 ## V-DIN-02 El ticket
 **Aparece en:** el ticket en pantalla (`CA/finance/ticket-view.tsx`), su PDF (`S/financial-document-pdf.ts`), «Cobro registrado» (`CA/finance/collect-drawer.tsx`), Finanzas › Cobros (`CA/finance/tickets-tab.tsx`) y ficha › Cobros.
 **A mano:** suma de líneas − saldo a favor usado − pagado hoy = le falta pagar. El total del ticket es lo que entró hoy. Vuelto = lo entregado − lo cobrado; el vuelto no entra a la caja.
@@ -51,6 +54,10 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** el total al firmar sumó alternativas que compiten para la misma pieza.
 **Caso:** pieza 46. Opción A: endodoncia S/ 450 + corona S/ 900 = 1,350. Opción B: exodoncia S/ 150. Aparte, un implante de USD 1,000. Se lee «A S/ 1,350 · B S/ 150» y «+ USD 1,000»; nunca S/ 1,500. El 12 de marzo elige A: B queda «No elegida» en todos los lugares.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Con algo común a las opciones, cada tarjeta muestra de dónde sale su total (lo de la opción + lo común), y todas las filas comunes se marcan igual.
+- [ ] La línea de lo elegido sigue igual al recargar la atención.
+
 ## V-DIN-05 Lo que carga la atención
 **Aparece en:** el diálogo «Finalizar y firmar» y «Atención finalizada» (`CA/patient/encounter-editor.tsx`, `encounter-closing.tsx`), ficha › Cobros, lo que caja ve por cobrar y el ticket.
 **A mano:** el cargo nace al firmar, no antes. Un tratamiento de varias sesiones se carga una sola vez. Aceptar no genera deuda.
@@ -61,6 +68,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** el cierre decía «no dejó nada que cobrar» con S/ 250 de esa atención sin pagar.
 **Caso:** endodoncia de S/ 650 en 2 sesiones. Lunes 9 de marzo, sesión 1: se cargan 650 y paga 300; debe en total 350. Lunes 16, sesión 2: hoy no se carga nada y debe en total 350.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] En una sesión que no carga, la fila del procedimiento no muestra el precio del tratamiento como si se cobrara hoy (o dice «ya cargado»).
 
 ## V-DIN-06 Lo cobrado del día, la caja y las deudas
 **Aparece en:** Inicio › «Caja de hoy» (`CA/home/today.tsx`), Finanzas › Caja, Cobros y Deudas (`R/_org/finance.tsx`), Reportes › Resumen y Finanzas (`CA/reports/summary-tab.tsx`, `finance-tab.tsx`) y Argos (`S/agent-admin.ts`).
@@ -129,6 +139,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** imprimirlo lo dejó «Enviado · espera respuesta» a quien no tiene WhatsApp ni correo.
 **Caso:** el 4 de marzo se imprime y entrega el presupuesto de S/ 340 (resina 220 + profilaxis 120). El 6 acepta la resina y deja la profilaxis: «Lo está pensando · S/ 120» en Plan, «Qué sigue» y Pacientes; la Oportunidad sigue abierta por 120.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Lo piensa» no se usa para «la hará después»: lo aceptado que va después de otro tratamiento queda aceptado y no cuenta como «espera respuesta».
+
 ## V-EST-04 La cita: por confirmar, sin cerrar, atendida, no vino
 **Aparece en:** cabecera, rejilla y lista de la Agenda (`R/_org/agenda.tsx`, «Ya pasaron · sin cerrar») y su cajón (`CA/agenda/appointment-drawer.tsx`), ficha › Citas (`CA/patient/citas-panel.tsx`), cabecera («Próxima cita»), Inicio («Mis pacientes de hoy», «Agenda de hoy», «¿Vino?») (`S/workspace.ts`), Reportes › Agenda y «Sin marcar» (`S/reports.ts`, `S/report-agenda.ts`), el portal y lo que confirma Sofi.
 **A mano:** nadie marca sola la inasistencia: una cita pasada sin atención pregunta «¿Vino?». Sin cerrar = su hora pasó, sin llegada ni atención unida, y no está atendida, ni «No vino», ni cancelada; quien llegó o está en atención no es «sin cerrar». «Por confirmar» es solo lo que aún no empieza. «Próxima cita» es la primera que aún no termina. Lo cancelado y lo no asistido no cuentan en el total del día.
@@ -186,6 +199,11 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** el Resumen ponía primero el control vencido y el Plan, lo aceptado.
 **Caso:** al 11 de marzo: endodoncia con la sesión 1 firmada el 9, corona aceptada que va después y control vencido el 1 de marzo. En los cuatro lugares: primero la sesión 2, luego el control; la corona, después de terminar la endodoncia.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La vista firmada («Lo que sigue»), el diálogo «Atención finalizada» y «Qué sigue» de la ficha dan los mismos pasos (sesión que falta, lo aceptado, el control, la deuda) con el mismo verbo.
+
+**Ya falló:** tras la sesión 1 de una endodoncia, el diálogo ofrecía «Reservar la sesión 2» y la vista firmada solo «Cobrar»; tras la sesión 2, la vista firmada no nombraba la corona aceptada (16 nov).
+
 ## V-DAT-02 Las cuentas de seguimiento
 **Aparece en:** los atajos de Pacientes («Por agendar», «Presupuesto sin respuesta», «Control vencido», «Por invitar a volver», «Deben») (`S/people-shortcuts.ts`), Inicio («Te espera», «Sin apuro») (`CA/home/waiting-list.tsx`), el número del menú, Reportes y sus listas (`CA/reports/report-list-drawer.tsx`), Argos y la Ayuda (`S/help-guide.ts`).
 **A mano:** hay que saber qué cuenta cada una: personas, tratamientos, conversaciones o filas. Argos espera unos días antes de contar. Las listas en pantalla tienen tope y el resto va en la descarga.
@@ -210,6 +228,12 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** «Última visita» con día y mes de una visita del año anterior.
 **Caso:** paciente con última visita el 21 de noviembre de 2025 y cita el 20 de marzo de 2026 a las 16:00 con la Dra. A. El 20 la atiende el Dr. B. Pacientes muestra la visita con año; la Agenda conserva a la Dra. A y la Historia dice que atendió el Dr. B.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Última visita» de Pacientes, los pacientes activos y «Por invitar a volver» cuentan la atención firmada aunque no tuviera cita.
+- [ ] Antes de cambiar qué cuenta como visita, se miden por clínica las invitaciones a volver que empiezan y las que dejan de salir.
+
+**Caso:** paciente nueva atendida sin cita el 9 de marzo. Pacientes dice «lun, 9 mar.» y no «—»; Reportes la cuenta como activa.
+
 ## V-DAT-04 Pieza, hallazgo y diagnóstico
 **Aparece en:** la atención y su vista firmada (`CA/patient/encounter-detail-view.tsx`), Historia (`CA/patient/encounter-history-card.tsx`, `timeline.tsx`), el odontograma firmado, ficha › Resumen («Última atención»), el consentimiento, la hoja de atención (`S/attention-sheet.ts`) y la historia impresa o exportada (`S/patient-record.ts`).
 **A mano:** lo firmado es una foto y no cambia. «Tratada» es la pieza donde se hizo algo, no toda pieza con hallazgo. Un hallazgo de dos caras es una sola lesión.
@@ -220,6 +244,12 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** «Piezas tratadas: 36, 46» con solo la 36 hecha.
 **Caso:** el 9 de marzo: caries oclusal y distal en la 46, pulpitis, y resina en la 36. Firmado: tratada la 36; la 46, un solo hallazgo vigente. El 23 se cementa la corona de la 46: su diagnóstico no es la pulpitis ya resuelta.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] La hoja de atención y la historia impresa listan como «Tratamiento sugerido» solo lo que sigue en pie: nada «No elegida» ni «No aceptó», y las opciones como alternativas.
+- [ ] La Historia dice cada diagnóstico con su pieza y su tipo, y sin los chips de pieza que lo repiten.
+
+**Ya falló:** «Tratamiento sugerido: endodoncia, corona y exodoncia» de la misma pieza, con la exodoncia no elegida (16 nov).
 
 ## V-DAT-05 La clínica en sus papeles: razón social, RUC, dirección y teléfono
 **Aparece en:** la línea chica de la hoja membretada (`S/document-kit.ts` `sheetLetterhead`), el membrete sin hoja, la hoja que se firma (`S/document-clinic.ts` `loadDocumentLetterhead`), el odontograma impreso (`S/dental/odontogram.ts` `establishmentOf`), el comprobante y el ticket (`loadFrozenDocumentClinic`), la casilla y el texto del cajón de la hoja (`CA/settings/clinic-letterhead.tsx`) y la Ayuda.
@@ -257,6 +287,24 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** el FHIR fechaba el cuestionario a la hora de su revisión; tras «Revisar antecedentes», el «no» de la paciente a enfermedades desaparecía de la copia (QA de la entrega 2, 14 nov).
 **Caso:** se registra el 13 con «enfermedades: no» y un cuestionario a las 09:32; el 14 a las 09:35 se revisa. Las dos copias dicen respondió 13/09:32, revisó 14/09:35, y «Enfermedades: no se le preguntó en la clínica; dijo que no el 13…».
 
+## V-DAT-08 Las alergias y su revisión: el mismo estado con la misma palabra
+**Aparece en:** la franja de la ficha y de la atención (`CA/patient/patient-header.tsx`), la caja «Pregúntale…» (`CA/patient/health-review-notice.tsx`), el panel «Antecedentes y última atención» (`CA/patient/encounter-context.tsx`), la tarjeta del Resumen sin permiso clínico (`CA/person/person-summary.tsx`), el Resumen clínico y Antecedentes. La frase sale de una sola función (`noAllergiesWords`, `lib/declared-health.ts`).
+**A mano:** son estados distintos: no se le preguntó, niega, su «No sé», su «No» sin revisar y tiene. Cada uno se dice igual en todos los lugares y para todos los roles.
+- [ ] Quien niega alergias no figura como «Sin alergias registradas» en ninguna pantalla.
+- [ ] Sin preguntar, los lugares de la atención usan la misma frase.
+
+**Ya falló:** recepción veía «Niega alergias» arriba y «Alergias: Sin alergias registradas» en la tarjeta (16 nov).
+
+## V-VAL-01 Cuántas veces dice lo mismo la atención
+**Aparece en:** la atención en borrador (`CA/patient/encounter-editor.tsx` y sus bloques), en tres estados: nueva vacía, primera consulta cargada y sesión siguiente.
+**A mano:** se cuenta cuántas veces aparece en la página el nombre de un mismo tratamiento, su consentimiento pendiente y cada requisito para firmar, y cuántas frases grises explican una regla.
+- [ ] Un tratamiento aparece una vez por bloque como máximo, y nunca en «Hoy viene a…» si se indicó en esta misma atención.
+- [ ] Cada requisito para firmar se dice en un solo lugar con su salida (el pie fijo).
+- [ ] El consentimiento pendiente de algo que no se hace hoy no aparece en «Hoy viene a…».
+- [ ] Las frases que explican una regla aparecen solo en el estado vacío o la primera vez.
+
+**Línea base (16 nov 2026):** sesión 2 de endodoncia, «Endodoncia posterior vital» 7 veces; el requisito del diagnóstico, 3 veces; 11 frases de regla en la consulta vacía; 3615 px a 1440 y 4289 px a 390.
+
 ## V-PRO-01 Enlaces y botones que llevan a lo que dicen
 **Aparece en:** «Ver cobros» de Inicio, «Ver el reporte» de Gastos y «Ver los gastos» de Reportes (`R/_org/finance.tsx`, `CA/reports/finance-tab.tsx`), «Lo que debes», los enlaces de la Ayuda, «Imprimir», «Cancelar» de los cajones y «Dejar de repetir».
 **A mano:** se pulsa cada uno y se compara el destino con el origen: mismo mes, misma sede, mismo filtro y la misma cifra.
@@ -269,6 +317,13 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** la barra de un mes abría los gastos de otro mes, sin filtro.
 **Caso:** en Reportes de febrero, sede Centro, la barra «Personal S/ 5,700». «Ver los gastos» abre Gastos de febrero, Centro, tipo Personal, y sus filas suman 5,700.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Un botón abre lo que dice aunque otro panel esté abierto al lado: con la pieza del odontograma abierta, «Anotar su respuesta» abre la respuesta, no la pieza encima.
+- [ ] «Deshacer» deja todo como estaba: el renglón vuelve a su opción, con su precio, y nada cambia de orden («va después»). Si no puede, el aviso no ofrece «Deshacer».
+- [ ] «Descartar esta atención» solo se ve cuando el servidor la descartaría. Si algo se indicó después de abrirla, el botón pasa a «Anular».
+
+**Ya falló:** quitar la resina de la opción A y «Deshacer» dejó la exodoncia sola en el presupuesto y la resina fuera, con «va después de Obturación con resina» (16 nov).
 
 ## V-PRO-02 Avisos que dicen la verdad
 **Aparece en:** el aviso al reservar («El agente le avisa…») (`CA/agenda/booking-drawer.tsx`), los textos del cierre («recepción lo verá») (`CA/patient/encounter-closing.tsx`), «Sin conexión» de la atención, el envío de documentos, la página de reserva (`R/public/reserva.tsx`), «Tus mensajes» del enlace (`CA/public/personal-link-page.tsx`) y los avisos de la caja.
@@ -297,6 +352,11 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 **Ya falló:** contestó sobre otra pantalla.
 **Caso:** recepción, en la Agenda, pregunta «¿cómo le mando a la señora el enlace de su cita?». La respuesta nombra dónde está el botón, y siguiéndola el enlace queda copiado o enviado. La misma pregunta con caja dice que eso lo hace recepción.
 
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Recepción: «¿Cómo le reservo lo que aceptó?» responde «Qué sigue › Reservar lo aceptado».
+- [ ] Una pregunta que nombra un botón visible de la pantalla («Completar», «Hacerla hoy») no recibe «¿Qué es Inicio?».
+- [ ] Una respuesta de «cómo se hace» se lee en menos de 120 palabras; lo demás va en otras preguntas.
+
 ## V-RAS-01 Rastro del dinero
 **Aparece en:** Caja › «Movimientos de hoy», ficha › Cobros, el detalle de un gasto, Comisiones y la actividad del equipo (`R/_org/settings.audit.tsx`, `S/audit-words.ts`).
 **A mano:** por cada movimiento se busca quién, cuándo, a quién y por cuánto. Corregir es anular y crear de nuevo, enlazados. Nada se borra.
@@ -307,6 +367,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** la caja mostraba «Devolución a favor · −50» sin la persona.
 **Caso:** el 10 de marzo a las 11:00 se registra un gasto de S/ 30 en efectivo y a las 11:20 se corrige a S/ 45. Movimientos muestra −30, +30 y −45, con quién y a qué hora; la caja baja 45 en total.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] «Quitó un tratamiento indicado en la misma atención» y «Añadió un tratamiento al plan» dicen la persona y el tratamiento en «Sobre qué».
 
 ## V-RAS-02 Rastro de firmas, datos clínicos y anulaciones
 **Aparece en:** la atención firmada («Correcciones después del cierre») (`CA/patient/encounter-detail-view.tsx`), Historia, Antecedentes, ficha › Plan (controles y respuesta del presupuesto), ficha › Documentos y la comprobación del papel (`R/public/comprobar.$token.tsx`).
@@ -320,6 +383,9 @@ Rutas: `S` = `packages/services/src/`, `CA` = `packages/clinic-app/src/component
 
 **Ya falló:** se anuló una atención y la orden emitida en ella siguió vigente al comprobarla.
 **Caso:** el 9 de marzo se firma una atención con receta y orden de radiografía. El 10 se anula con motivo. Historia la muestra anulada, con quién y cuándo; la receta y la orden se ven anuladas en Documentos y al comprobar su código.
+
+**Sumado por el estudio de la atención (16 nov 2026):**
+- [ ] Lo que se decide en el cierre (la ASA, el máximo de anestésico) queda en la atención firmada, y su cambio en la auditoría, con el valor de antes y el de después.
 
 ## V-RAS-03 Rastro de la cita
 **Aparece en:** el cajón de la cita (`CA/agenda/appointment-drawer.tsx`), ficha › Citas (`CA/patient/citas-panel.tsx`), Configuración › Actividad del equipo (`R/_org/settings.audit.tsx`, `S/workspace.ts`) y Reportes › «Cancelaron» (`CA/reports/report-list-drawer.tsx`).
