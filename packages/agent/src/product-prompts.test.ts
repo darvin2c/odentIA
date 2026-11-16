@@ -129,7 +129,7 @@ describe("prompts de odentIA, iguales a los de antes", () => {
       false,
     )
     // Cada bloque tal como llega al proveedor; tras uno con corte, la marca: lo de antes se lee de la caché.
-    const blocks = typeof pause?.content === "string" ? [{ text: pause.content }] : ((pause?.content ?? []) as Array<{ text: string; prompt_cache_breakpoint?: unknown }>)
+    const blocks = pause?.content as Array<{ text: string; prompt_cache_breakpoint?: unknown }>
     await expect(blocks.map((block) => `${block.text}${block.prompt_cache_breakpoint ? "\n⟦corte de caché⟧" : ""}`).join("")).toMatchFileSnapshot(golden("clio-pausa-con-ficha.txt"))
   })
 })

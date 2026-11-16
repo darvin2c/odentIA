@@ -281,7 +281,7 @@ describe("lo que recibe el modelo en cada pausa", () => {
     const [fixedWithout, humanWithout] = dictationMessages(base, DENTAL_DICTATION_PROFILE, false)
     expect(fixedWith?.content).toEqual(fixedWithout?.content)
     // Las reglas y las preguntas abren el mensaje de la pausa, con su corte; la pausa va después, sin él.
-    const [questions, pause] = humanWith?.content as Array<{ text: string; prompt_cache_breakpoint?: unknown }>
+    const [questions, pause] = (humanWith?.content ?? []) as Array<{ text: string; prompt_cache_breakpoint?: unknown }>
     expect(questions).toMatchObject({ type: "text", prompt_cache_breakpoint: { mode: "explicit" } })
     expect(questions?.text).toContain(
       ["Ficha de ortodoncia:", "1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1", "2. Overjet · número en mm, de -10 a 20"].join("\n"),
@@ -307,8 +307,8 @@ describe("lo que recibe el modelo en cada pausa", () => {
       false,
     )
     expect(next[0]?.content).toEqual(first[0]?.content)
-    const [fixedFirst] = first[1]?.content as Array<{ text: string }>
-    const [fixedNext, pauseNext] = next[1]?.content as Array<{ text: string }>
+    const [fixedFirst] = (first[1]?.content ?? []) as Array<{ text: string }>
+    const [fixedNext, pauseNext] = (next[1]?.content ?? []) as Array<{ text: string }>
     expect(fixedNext).toEqual(fixedFirst)
     expect(fixedNext?.text).not.toContain("· ya dice")
     const overjet = questionsOf({}).find((item) => item.fieldId === "overjet")

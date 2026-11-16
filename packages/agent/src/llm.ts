@@ -225,10 +225,11 @@ export function viaResponses(model: unknown): boolean {
  *
  * `rest`: lo que sigue en el mismo mensaje y cambia en cada llamada, en otro
  * bloque sin corte (el dictado con una ficha empezada: sus preguntas son fijas
- * y la pausa no). Probado con la API el 2026-11-16: en un mensaje del usuario
- * el corte queda al final de su bloque, por Chat Completions y por
- * /v1/responses; en el de sistema, por Chat Completions, OpenAI lo corre al
- * final del mensaje. Sin caché, el texto seguido.
+ * y la pausa no). Solo en un mensaje del usuario: probado con la API el
+ * 2026-11-16, ahí el corte queda al final de su bloque, por Chat Completions y
+ * por /v1/responses; en uno de sistema, por Chat Completions, OpenAI lo corre
+ * al final del mensaje y `rest` se escribiría en la caché. Sin caché, el texto
+ * seguido.
  */
 export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean, rest = ""): string | ContentBlock[] {
   if (provider !== "openai") return `${text}${rest}`

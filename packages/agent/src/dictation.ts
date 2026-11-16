@@ -263,10 +263,10 @@ const answeredWords = (question: DictationFormQuestion) =>
   question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
 
 /**
- * Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo.
- * `answered`: con lo que ya dice; sin eso, la pregunta es igual en toda la atención.
+ * Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo. Sin lo
+ * que ya dice (`answeredWords`): así la pregunta es igual en toda la atención.
  */
-function formQuestionWords(question: DictationFormQuestion, answered = true): string {
+function formQuestionWords(question: DictationFormQuestion): string {
   const range =
     question.min !== null && question.max !== null
       ? `, de ${question.min} a ${question.max}`
@@ -291,7 +291,7 @@ function formQuestionWords(question: DictationFormQuestion, answered = true): st
   const depends = question.dependsOn
     ? ` (solo si «${question.dependsOn.label}» es «${equals === true ? "Sí" : equals === false ? "No" : String(equals)}»)`
     : ""
-  return `${question.number}. ${question.label} · ${how}${depends}${answered ? answeredWords(question) : ""}`
+  return `${question.number}. ${question.label} · ${how}${depends}`
 }
 
 /**
@@ -326,7 +326,7 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
     "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
     `- ${HEARD_HINT} En \`dicho\` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.`,
     "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.",
-    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map((question) => formQuestionWords(question, false))].join("\n")),
+    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
   ].join("\n")
 }
 
@@ -784,7 +784,7 @@ export async function rereadFormSentences(
     .filter((target) => target.questions.length > 0)
   if (!targets.length) return []
   const human = targets
-    .map((target, index) => [`${index + 1}. «${target.said}»`, ...target.questions.map((question) => `   ${question.formTitle}: ${formQuestionWords(question)}`)].join("\n"))
+    .map((target, index) => [`${index + 1}. «${target.said}»`, ...target.questions.map((question) => `   ${question.formTitle}: ${formQuestionWords(question)}${answeredWords(question)}`)].join("\n"))
     .join("\n\n")
   const recorder = tool(async () => "registrado", {
     name: DICTATION_REREAD_TOOL,
