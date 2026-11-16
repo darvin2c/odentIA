@@ -3,19 +3,28 @@ import { renderEmail } from "./layout.js"
 import { markdownText, parseInline, parseMarkdown, safeHref } from "./markdown.js"
 
 describe("formato básico de lo que escribe el equipo", () => {
-  it("negrita, cursiva con * y con _, y enlaces", () => {
+  it("negrita con * (como WhatsApp) y con **, cursiva con _, tachado con ~ y enlaces", () => {
     expect(
-      parseInline("Hola **Rosa**, *gracias* y _saludos_ [la web](https://odentia32.com)"),
+      parseInline("Hola *Rosa*, **gracias** y _saludos_ ~antes~ [la web](https://odentia32.com)"),
     ).toEqual([
       { kind: "text", text: "Hola " },
       { kind: "strong", children: [{ kind: "text", text: "Rosa" }] },
       { kind: "text", text: ", " },
-      { kind: "em", children: [{ kind: "text", text: "gracias" }] },
+      { kind: "strong", children: [{ kind: "text", text: "gracias" }] },
       { kind: "text", text: " y " },
       { kind: "em", children: [{ kind: "text", text: "saludos" }] },
       { kind: "text", text: " " },
+      { kind: "strike", children: [{ kind: "text", text: "antes" }] },
+      { kind: "text", text: " " },
       { kind: "link", href: "https://odentia32.com", text: "la web" },
     ])
+  })
+
+  it("el tachado no toma una virgulilla suelta ni corta palabras", () => {
+    expect(markdownText(parseMarkdown("unos ~5 minutos y ver~sión"))).toBe(
+      "unos ~5 minutos y ver~sión",
+    )
+    expect(markdownText(parseMarkdown("precio ~USD 20~ hoy"))).toBe("precio USD 20 hoy")
   })
 
   it("no corta palabras con guion bajo ni toma un asterisco suelto", () => {

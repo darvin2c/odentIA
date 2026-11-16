@@ -27,6 +27,12 @@ function Inline({ nodes }: { nodes: readonly MarkdownInline[] }): ReactNode {
           <Inline nodes={node.children} />
         </em>
       )
+    if (node.kind === "strike")
+      return (
+        <s key={key}>
+          <Inline nodes={node.children} />
+        </s>
+      )
     return (
       <a
         key={key}

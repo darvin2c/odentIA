@@ -1,9 +1,10 @@
 /**
  * El formato básico de lo que escribe una persona del equipo en un correo
  * (responder o escribir desde la administración): un subconjunto de Markdown
- * (CommonMark) y nada más. `**negrita**`, `*cursiva*` o `_cursiva_`,
- * `[texto](https://…)`, las direcciones sueltas como enlace y las listas con
- * «- » o «1. ». Lo demás (títulos, tablas, imágenes, código, HTML) sale como
+ * (CommonMark) con las marcas de WhatsApp, las mismas del editor de la
+ * administración (ADR 0196): `*negrita*` (y `**negrita**`, que se escribía
+ * antes), `_cursiva_`, `~tachado~`, `[texto](https://…)`, las direcciones
+ * sueltas como enlace y las listas con «- » o «1. ». Lo demás (títulos, tablas, imágenes, código, HTML) sale como
  * texto: no rompe el molde del correo y nada que escriba alguien se vuelve
  * HTML. Solo enlaces `https:` y `mailto:` (una dirección `javascript:` o
  * `http:` queda como texto).
@@ -16,6 +17,7 @@ export type MarkdownInline =
   | { kind: "text"; text: string }
   | { kind: "strong"; children: MarkdownInline[] }
   | { kind: "em"; children: MarkdownInline[] }
+  | { kind: "strike"; children: MarkdownInline[] }
   | { kind: "link"; href: string; text: string }
 
 export type MarkdownBlock =
@@ -44,12 +46,12 @@ export function safeHref(raw: string): string | null {
 }
 
 /*
- * Un solo recorrido por la línea: enlace con texto, negrita, cursiva (con * o
- * con _, que no corta palabras como «mi_archivo») y dirección suelta. Lo que no
- * cierra queda como texto, con sus marcas.
+ * Un solo recorrido por la línea: enlace con texto, negrita (con ** o con *),
+ * cursiva (con _, que no corta palabras como «mi_archivo»), tachado (con ~) y
+ * dirección suelta. Lo que no cierra queda como texto, con sus marcas.
  */
 const INLINE =
-  /\[([^\]\n]{1,500})\]\(((?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)(.+?)(?<=\S)\*\*|(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\p{L}\p{N}_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\p{L}\p{N}_])|((?:https:\/\/|mailto:)[^\s<>"]+)/gu
+  /\[([^\]\n]{1,500})\]\(((?:[^()\s]|\([^()\s]{0,500}\)){1,2000})\)|\*\*(?=\S)(.+?)(?<=\S)\*\*|(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])|(?<![\p{L}\p{N}_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}~])~(?=[^\s~])(.+?)(?<=[^\s~])~(?![\p{L}\p{N}~])|((?:https:\/\/|mailto:)[^\s<>"]+)/gu
 
 /**
  * Lo que cierra una oración no es parte de la dirección suelta: «https://a.pe.»
@@ -83,15 +85,17 @@ export function parseInline(line: string): MarkdownInline[] {
     const start = match.index ?? 0
     pushText(out, line.slice(at, start))
     at = start + match[0].length
-    const [whole, linkText, linkHref, strong, star, under, bare] = match
+    const [whole, linkText, linkHref, double, star, under, tilde, bare] = match
     if (linkText !== undefined && linkHref !== undefined) {
       const href = safeHref(linkHref)
       if (href) out.push({ kind: "link", href, text: linkText })
       else pushText(out, whole)
-    } else if (strong !== undefined) {
-      out.push({ kind: "strong", children: parseInline(strong) })
-    } else if (star !== undefined || under !== undefined) {
-      out.push({ kind: "em", children: parseInline(star ?? under ?? "") })
+    } else if (double !== undefined || star !== undefined) {
+      out.push({ kind: "strong", children: parseInline(double ?? star ?? "") })
+    } else if (under !== undefined) {
+      out.push({ kind: "em", children: parseInline(under) })
+    } else if (tilde !== undefined) {
+      out.push({ kind: "strike", children: parseInline(tilde) })
     } else if (bare !== undefined) {
       const { url, rest } = trimUrl(bare)
       const href = safeHref(url)

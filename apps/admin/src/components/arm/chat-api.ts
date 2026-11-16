@@ -63,9 +63,36 @@ const entrySchema = z.discriminatedUnion("kind", [
     sentAt: z.string().nullable(),
     /** Lo escribió Kairós solo: va con su nombre. */
     byKairos: z.boolean().default(false),
+    /** Solo WhatsApp: cuándo llegó al teléfono y cuándo lo leyó (lo informa Meta). */
+    deliveredAt: z.string().nullable().default(null),
+    readAt: z.string().nullable().default(null),
+    /** En qué se basó Kairós para responder («los precios de la web», «la guía de la Ayuda: …»). */
+    basis: z.array(z.string()).default([]),
+    /** El archivo que salió en este mensaje (en un chat, cada archivo es su propio mensaje). */
+    files: z
+      .array(
+        z.object({
+          id: z.string(),
+          filename: z.string(),
+          contentType: z.string().default(""),
+          size: z.number().default(0),
+        }),
+      )
+      .default([]),
   }),
 ])
 export type ChatEntry = z.infer<typeof entrySchema>
+
+/** Lo que el canal acepta, como lo dice el servidor (el editor lo cuenta antes de enviar). */
+export const channelRulesSchema = z.object({
+  channel: z.string(),
+  maxChars: z.number().nullable(),
+  maxBytes: z.number().nullable(),
+  maxFiles: z.number().int().nonnegative(),
+  maxTotalBytes: z.number().nullable(),
+  files: z.array(z.object({ kind: z.string(), types: z.array(z.string()), maxBytes: z.number() })),
+  formatting: z.enum(["markdown", "whatsapp", "texto"]),
+})
 
 const fileSchema = z.object({
   fileId: z.string(),
@@ -87,7 +114,13 @@ export const chatDetailSchema = z.object({
   address: z.string(),
   displayName: z.string().nullable(),
   client: z
-    .object({ id: z.string(), name: z.string(), product: z.string(), hasAccount: z.boolean() })
+    .object({
+      id: z.string(),
+      name: z.string(),
+      product: z.string(),
+      hasAccount: z.boolean(),
+      phase: z.string().nullable().default(null),
+    })
     .nullable(),
   contact: z.object({ id: z.string(), name: z.string(), phone: z.string().nullable() }).nullable(),
   notClinicAt: z.string().nullable(),
@@ -106,6 +139,13 @@ export const chatDetailSchema = z.object({
   suggestion: suggestionSchema.nullable().default(null),
   entries: z.array(entrySchema),
   files: z.array(fileSchema).default([]),
+  /** Lo que acepta el canal: largo del texto y archivos. */
+  rules: channelRulesSchema.nullable().default(null),
+  /** En la Bandeja: su estado, quién la atiende y si se marcó «No necesita respuesta». */
+  state: z.string().nullable().default(null),
+  stateWhy: z.string().nullable().default(null),
+  attendedBy: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
+  settledAt: z.string().nullable().default(null),
 })
 export type ChatDetail = z.infer<typeof chatDetailSchema>
 
@@ -262,12 +302,26 @@ function sendErrorOf(error: unknown): unknown {
   return error
 }
 
-const sentSchema = z.object({ outreachId: z.string(), status: z.string() })
+const sentSchema = z.object({
+  outreachId: z.string(),
+  status: z.string(),
+  /** El texto y cada archivo salen como mensajes aparte, cada uno con su estado. */
+  parts: z
+    .array(
+      z.object({
+        outreachId: z.string(),
+        kind: z.enum(["texto", "archivo"]),
+        filename: z.string().nullable(),
+        status: z.string(),
+      }),
+    )
+    .default([]),
+})
 
-/** Responder con texto libre (dentro de las 24 h). */
+/** Responder con texto libre (dentro de las 24 h), con archivos de Documentos si hay cliente. */
 export async function sendChatReply(
   chatId: string,
-  body: { body: string; adminOnly?: boolean; proposalId?: string },
+  body: { body?: string; adminOnly?: boolean; proposalId?: string; fileIds?: string[] },
 ): Promise<z.infer<typeof sentSchema>> {
   try {
     return sentSchema.parse(
@@ -425,10 +479,20 @@ export const isUnsettled = (entry: ChatEntry, now: Date) =>
   (entry.status === "incierto" ||
     (entry.status === "pendiente" && now.getTime() - Date.parse(entry.at) >= CHAT_SEND_SETTLE_MS))
 
-/** «Ana Ruiz · 17:42 · Salió» de un mensaje nuestro. */
+/**
+ * Cómo le fue a un mensaje nuestro: «Leído» o «Entregado» si WhatsApp lo dijo, y si no su estado
+ * («Salió», «No salió», «No se sabe si salió»).
+ */
+export function sentStatusWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {
+  if (entry.status === "enviado" && entry.readAt) return "Leído"
+  if (entry.status === "enviado" && entry.deliveredAt) return "Entregado"
+  return CHAT_SEND_STATUS_WORDS[entry.status] ?? entry.status
+}
+
+/** «Ana Ruiz · 17:42 · Leído» de un mensaje nuestro. */
 export function sentLineWords(entry: Extract<ChatEntry, { kind: "salio" }>): string {
   const who = entry.byKairos ? "Kairós" : entry.createdBy?.name?.trim() || "El equipo"
-  return `${who} · ${supportTime(entry.sentAt ?? entry.at)} · ${CHAT_SEND_STATUS_WORDS[entry.status] ?? entry.status}`
+  return `${who} · ${supportTime(entry.sentAt ?? entry.at)} · ${sentStatusWords(entry)}`
 }
 
 /** El tipo de un archivo en palabras cortas («XLSX», «PDF», «Audio»…). */

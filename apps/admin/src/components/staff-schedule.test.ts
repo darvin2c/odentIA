@@ -200,8 +200,34 @@ describe("Kairós en los chats", () => {
         createdBy: null,
         sentAt: "2026-11-14T15:00:00Z",
         byKairos: true,
+        deliveredAt: null,
+        readAt: null,
+        basis: [],
+        files: [],
       }),
     ).toBe("Kairós · 10:00 · Salió")
+  })
+
+  it("WhatsApp dice si llegó y si lo leyó", () => {
+    const sent = {
+      kind: "salio" as const,
+      id: "o",
+      at: "2026-11-14T15:00:00Z",
+      body: "Hola",
+      status: "enviado",
+      template: null,
+      adminOnly: true,
+      createdBy: { userId: "u", name: "Ana Ruiz" },
+      sentAt: "2026-11-14T15:00:00Z",
+      byKairos: false,
+      deliveredAt: "2026-11-14T15:00:05Z",
+      readAt: null,
+      basis: [],
+      files: [],
+    }
+    expect(sentLineWords(sent)).toBe("Ana Ruiz · 10:00 · Entregado")
+    expect(sentLineWords({ ...sent, readAt: "2026-11-14T15:02:00Z" })).toBe("Ana Ruiz · 10:00 · Leído")
+    expect(sentLineWords({ ...sent, status: "incierto" })).toBe("Ana Ruiz · 10:00 · No se sabe si salió")
   })
 
   it("el interruptor dice quién lo dejó así", () => {

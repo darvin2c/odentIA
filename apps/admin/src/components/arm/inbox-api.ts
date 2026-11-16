@@ -136,7 +136,160 @@ export function useInboxCount(options: { enabled?: boolean } = {}) {
   })
 }
 
+/** La conversación abierta en la dirección (`?c=chat:<id>` o `?c=correo:<id>`). */
 export const inboxItemPath = (item: Pick<InboxItem, "kind" | "id">) =>
   item.kind === "chat" ? `chat:${item.id}` : `correo:${item.id}`
 
-export { enc as encodeInboxPart }
+export function inboxTargetOf(
+  value: string | undefined,
+): { kind: "chat"; chatId: string } | { kind: "correo"; emailId: string } | null {
+  const match = /^(chat|correo):([0-9a-f-]{36})$/i.exec(value ?? "")
+  if (!match?.[1] || !match[2]) return null
+  return match[1] === "chat" ? { kind: "chat", chatId: match[2] } : { kind: "correo", emailId: match[2] }
+}
+
+/* ---------- Lo que se marca ---------- */
+
+/** «No necesita respuesta»: lo que llegó hasta ahora ya no espera. */
+export const settleConversation = (kind: "chat" | "correo", id: string) =>
+  api("/api/admin/inbox/settle", { method: "POST", body: JSON.stringify({ kind, id }) })
+
+/** Deshace «No necesita respuesta». */
+export const unsettleConversation = (kind: "chat" | "correo", id: string) =>
+  api("/api/admin/inbox/unsettle", { method: "POST", body: JSON.stringify({ kind, id }) })
+
+/** «Lo atiendo yo» en el hilo de un correo (en un chat es la pausa de Kairós). */
+export const attendEmailThread = (emailId: string, on: boolean) =>
+  api(`/api/admin/inbox/correo/${enc(emailId)}/attend`, {
+    method: "POST",
+    body: JSON.stringify({ on }),
+  })
+
+/* ---------- El hilo de un correo ---------- */
+
+const fileOfThreadSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  contentType: z.string().default(""),
+  size: z.number().default(0),
+})
+
+const threadEntrySchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("entro"),
+    id: z.string(),
+    at: z.string(),
+    fromName: z.string().nullable(),
+    fromAddress: z.string(),
+    to: z.string(),
+    subject: z.string().nullable(),
+    /** Nulo si se borró (lo de la carga de datos se borra a los 30 días). */
+    text: z.string().nullable(),
+    textDeleted: z.boolean().default(false),
+    notice: z.string().nullable().default(null),
+    senderVerified: z.boolean(),
+    attachments: z.array(
+      z.object({
+        fileId: z.string().nullable(),
+        filename: z.string(),
+        contentType: z.string().default(""),
+        size: z.number().default(0),
+      }),
+    ),
+  }),
+  z.object({
+    kind: z.literal("salio"),
+    id: z.string(),
+    at: z.string(),
+    by: z.object({ id: z.string(), name: z.string() }).nullable(),
+    byKairos: z.boolean(),
+    from: z.string().nullable(),
+    to: z.string(),
+    subject: z.string().nullable(),
+    body: z.string(),
+    status: z.string(),
+    sentAt: z.string().nullable(),
+    files: z.array(fileOfThreadSchema).default([]),
+    canResolve: z.boolean().default(false),
+  }),
+])
+export type ThreadEntry = z.infer<typeof threadEntrySchema>
+
+export const emailThreadSchema = z.object({
+  emailId: z.string(),
+  threadKey: z.string(),
+  subject: z.string().nullable(),
+  mailbox: z.string(),
+  product: z.string().nullable(),
+  client: inboxItemSchema.shape.client,
+  suggestion: z
+    .object({ clientId: z.string(), clientName: z.string(), why: z.string() })
+    .nullable()
+    .default(null),
+  state: oneOf(INBOX_STATES),
+  stateWhy: z.string().nullable(),
+  attendedBy: z.object({ id: z.string(), name: z.string() }).nullable(),
+  settledAt: z.string().nullable(),
+  entries: z.array(threadEntrySchema),
+  reply: z.object({
+    emailId: z.string(),
+    to: z.string(),
+    from: z.string().nullable(),
+    subject: z.string(),
+    canReply: z.boolean(),
+    why: z.string().nullable(),
+  }),
+  rules: z
+    .object({
+      channel: z.string(),
+      maxChars: z.number().nullable(),
+      maxBytes: z.number().nullable(),
+      maxFiles: z.number().int().nonnegative(),
+      maxTotalBytes: z.number().nullable(),
+      files: z.array(z.object({ kind: z.string(), types: z.array(z.string()), maxBytes: z.number() })),
+      formatting: z.enum(["markdown", "whatsapp", "texto"]),
+    })
+    .nullable()
+    .default(null),
+  /** La respuesta que dejó lista Kairós, con su porqué: se cambia y se envía aquí mismo. */
+  draft: z
+    .object({
+      itemId: z.string(),
+      subject: z.string().nullable(),
+      body: z.string(),
+      reason: z.string().nullable(),
+      facts: z.array(z.string()).default([]),
+      drafter: z.string(),
+      note: z.string().nullable(),
+    })
+    .nullable()
+    .default(null),
+})
+export type EmailThread = z.infer<typeof emailThreadSchema>
+
+export const emailThreadKey = (emailId: string) => ["admin", "inbox", "correo", emailId] as const
+
+export function useEmailThread(emailId: string, enabled = true) {
+  return useQuery({
+    queryKey: emailThreadKey(emailId),
+    enabled,
+    queryFn: async () =>
+      emailThreadSchema.parse(await api<unknown>(`/api/admin/inbox/correo/${enc(emailId)}`)),
+  })
+}
+
+/**
+ * Aprueba la respuesta que dejó Kairós con lo que la persona cambió (solo el texto: con archivos
+ * sale como respuesta a mano, y el servidor cierra el borrador).
+ */
+export async function approveKairosReply(itemId: string, body: string) {
+  return z
+    .object({ status: z.string(), error: z.string().nullable().optional() })
+    .passthrough()
+    .parse(
+      await api<unknown>(`/api/admin/kairos/items/${enc(itemId)}/decide`, {
+        method: "POST",
+        body: JSON.stringify({ action: "aprobar", edited: { body } }),
+      }),
+    )
+}

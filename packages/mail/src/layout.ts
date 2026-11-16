@@ -377,13 +377,14 @@ function sectionsHtml(sections: readonly EmailSection[]): string {
     .join("")
 }
 
-/** Una línea con formato: todo texto escapado; solo <strong>, <em> y enlaces https/mailto ya revisados. */
+/** Una línea con formato: todo texto escapado; solo <strong>, <em>, <s> y enlaces https/mailto ya revisados. */
 function inlineHtml(nodes: readonly MarkdownInline[], color: string): string {
   return nodes
     .map((node) => {
       if (node.kind === "text") return escapeHtml(node.text)
       if (node.kind === "strong") return `<strong>${inlineHtml(node.children, color)}</strong>`
       if (node.kind === "em") return `<em>${inlineHtml(node.children, color)}</em>`
+      if (node.kind === "strike") return `<s>${inlineHtml(node.children, color)}</s>`
       return `<a class="enlace" href="${escapeHtml(node.href)}" target="_blank" style="color:${color};text-decoration:underline;word-break:break-word;">${escapeHtml(node.text)}</a>`
     })
     .join("")
