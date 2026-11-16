@@ -960,6 +960,13 @@
       "when": 1794859142641,
       "tag": "0136_anestesia_del_servicio",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794859143641,
+      "tag": "0137_hallazgo_y_su_diagnostico",
+      "breakpoints": true
     }
   ]
 }

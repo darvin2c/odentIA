@@ -624,3 +624,42 @@ export function activeFindingsAsOf<T extends FindingRecord>(
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
     })
 }
+
+/** Una cara con caries y restauración a la vez: la pieza y la cara. */
+export interface SameFaceFinding {
+  toothNumber: number
+  surface: string
+}
+
+/**
+ * Las caras con caries y restauración definitiva vigentes a la vez, si alguna de las dos es de
+ * esta atención (QA del 16 nov, C41). Clínicamente suele ser caries bajo la restauración, que se
+ * registra como restauración en mal estado: la que ya lo está no avisa. Solo informa.
+ */
+export function cariesOnRestoredFaces(
+  rows: ReadonlyArray<{
+    toothNumber: number
+    surface: string | null
+    condition: string
+    details: unknown
+    encounterId: string | null
+  }>,
+  encounterId: string,
+): SameFaceFinding[] {
+  const poor = (details: unknown) => (details as { quality?: string } | null)?.quality === "poor"
+  const faces = new Map<string, { caries: boolean; restored: boolean; today: boolean; toothNumber: number; surface: string }>()
+  for (const row of rows) {
+    if (!row.surface) continue
+    if (row.condition === "definitive_restoration" && poor(row.details)) continue
+    const key = `${row.toothNumber}|${row.surface}`
+    const face = faces.get(key) ?? { caries: false, restored: false, today: false, toothNumber: row.toothNumber, surface: row.surface }
+    if (row.condition === "caries") face.caries = true
+    if (row.condition === "definitive_restoration") face.restored = true
+    if (row.encounterId === encounterId) face.today = true
+    faces.set(key, face)
+  }
+  return [...faces.values()]
+    .filter((face) => face.caries && face.restored && face.today)
+    .map(({ toothNumber, surface }) => ({ toothNumber, surface }))
+    .sort((a, b) => a.toothNumber - b.toothNumber || a.surface.localeCompare(b.surface))
+}

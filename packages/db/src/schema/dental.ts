@@ -9,6 +9,7 @@ import {
   integer,
   jsonb,
   numeric,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -19,6 +20,7 @@ import { user } from "./auth.js"
 import {
   diagnosisCodeRef,
   encounter,
+  encounterDiagnosis,
   patient,
   serviceCatalog,
   treatmentPlanItem,
@@ -353,6 +355,46 @@ export const planItemFinding = dentalSchema.table(
       name: "plan_item_finding_entry_fk",
     }),
     index("plan_item_finding_entry_idx").on(table.odontogramEntryId),
+  ],
+)
+
+/**
+ * El diagnóstico de la atención que nació con un hallazgo (el panel de la pieza y Clío los
+ * registran juntos, `registerToothFinding`). Anular el hallazgo ofrece anular su diagnóstico,
+ * y solo el suyo: buscarlo por la pieza anularía el de otro. Dos caries de la misma pieza con
+ * el mismo código comparten un diagnóstico, que sigue vigente mientras una de ellas lo use.
+ * Solo se agrega: lo anulado se ve en cada fila, no en el vínculo.
+ */
+export const diagnosisFinding = dentalSchema.table(
+  "diagnosis_finding",
+  {
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    diagnosisId: uuid("diagnosis_id").notNull(),
+    odontogramEntryId: uuid("odontogram_entry_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.odontogramEntryId, table.diagnosisId] }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.diagnosisId],
+      foreignColumns: [
+        encounterDiagnosis.organizationId,
+        encounterDiagnosis.patientId,
+        encounterDiagnosis.id,
+      ],
+      name: "diagnosis_finding_diagnosis_fk",
+    }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.odontogramEntryId],
+      foreignColumns: [
+        odontogramEntry.organizationId,
+        odontogramEntry.patientId,
+        odontogramEntry.id,
+      ],
+      name: "diagnosis_finding_entry_fk",
+    }),
+    index("diagnosis_finding_diagnosis_idx").on(table.organizationId, table.diagnosisId),
   ],
 )
 

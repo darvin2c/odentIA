@@ -13,7 +13,7 @@
  *    lo empezado va antes que lo aceptado sin empezar (QA del 8 nov, X5): con
  *    una endodoncia a medias sin cita, «Falta la cita de la próxima sesión»
  *    gana a la corona que va después.
- * 3. Lo que espera respuesta: «Entregado · espera respuesta» o «Lo está pensando».
+ * 3. Lo que espera respuesta: «Entregado · espera respuesta» o «Lo piensa».
  * 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya
  *    tiene su primera cita y le faltan sesiones por reservar (`canBookAnother`):
  *    «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2».
@@ -30,7 +30,7 @@
  * Recibe `can`: el botón solo se ofrece a quien puede hacerlo. La frase nunca
  * lleva diagnósticos, piezas ni notas: también la lee recepción.
  */
-import { formatMoney, moneyTotalsText, sessionWords, showsSession } from "@odentia/clinical"
+import { budgetAnswerLine, formatMoney, moneyTotalsText, sessionWords, showsSession } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
@@ -224,9 +224,10 @@ async function openEncountersOf(tx: Db, orgId: string, patientIds: string[], vie
 /**
  * El presupuesto en una línea honesta. Con una opción: «3 tratamientos · S/ 540».
  * Con varias, cada una con su total, que nunca se suman: «Opción A S/ 1,350 ·
- * Opción B S/ 150 · falta que elija»; con una elegida, «Eligió la opción A · S/
- * 1,350» (QA de la atención del 8 nov: decía «2 tratamientos · S/ 1,350 · 2
- * opciones» con tres indicados y dos montos).
+ * Opción B S/ 150 · falta que elija»; con una elegida, lo que aceptó y lo que piensa
+ * (`budgetAnswerLine`, la misma frase de la atención y el Plan: «Eligió la opción A ·
+ * aceptó S/ 950 · lo piensa: Corona cerámica · S/ 900», QA del 16 nov, E3). Antes
+ * decía el total de la opción, aunque hubiera aceptado una parte.
  */
 export function budgetLine(budget: BudgetWithTotals, locale: string, names?: string): string {
   const say = (totals: BudgetWithTotals["totals"]) =>
@@ -239,7 +240,10 @@ export function budgetLine(budget: BudgetWithTotals, locale: string, names?: str
     const ordered = [...budget.options].sort((a, b) => a.position - b.position)
     const chosen = ordered.find((option) => option.decision === "elegida")
     if (chosen)
-      return `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${say(chosen.totals)}`
+      return (
+        budgetAnswerLine(budget, (cents, currency) => formatMoney(cents, currency, locale)) ??
+        `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${say(chosen.totals)}`
+      )
     return `${ordered.map((option) => `${option.label} ${say(option.totals)}`).join(" · ")} · falta que elija`
   }
   // Con sus nombres, si quien llama los tiene: «Resina y Corona · S/ 1,080» (QA de la ficha del 9 nov).
@@ -1260,7 +1264,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       : null
     return {
       kind: "respuesta",
-      text: callbackText ?? (budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo está pensando"),
+      text: callbackText ?? (budget.status === "presentado" ? "Entregado · espera respuesta" : "Lo piensa"),
       detail: [
         open
           ? awaitingLinesText(open, locale, names)

@@ -987,7 +987,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "anoto-acepto-parte-otro-esta-pensando",
         q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
-        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca «Acepta», «Lo piensa» o «No»; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que la clínica hará después de otro tratamiento (la corona tras la endodoncia) se marca «Acepta»: el orden ya lo dice «va después de…», y así no queda esperando respuesta. Lo que ya respondió no se vuelve a preguntar.",
         forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
         area: "plan",
       },
@@ -996,6 +996,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?",
         a: "En la atención, el presupuesto por enviar tiene «Anotar su respuesta», también al mostrárselo en pantalla y en su Plan. Abre un solo cajón: con caminos, eliges el camino, «Lo piensa» o «No acepta»; sin caminos, «Acepta todo», «Lo piensa» o «No acepta», y si acepta solo una parte cambias cada tratamiento. Al guardar queda entregado y con su respuesta, sin enviarle nada. Si acepta algo, «Que lo firme en la tablet» es opcional: quien decide (la persona o, si es menor, su representante legal) lee su decisión en pantalla completa y firma con el dedo, y después tú guardas. Con firma, su presupuesto dice que aceptó y firmó en la clínica, con su firma; sin firma, quién decide y quién lo anotó. Lo aceptado no se cambia ahí: se corrige con una revisión, que se entrega primero y después se anota su respuesta.",
         forms: ["dijo que si en la consulta", "acepto en el sillon", "firmar el presupuesto", "firma del presupuesto en la tablet", "anotar la respuesta sin imprimir"],
+        area: "plan",
+      },
+      {
+        id: "indique-despues-presupuesto-incluida",
+        q: "Indiqué otra cosa después de darle el presupuesto, ¿ya está incluida?",
+        a: "Si el presupuesto sigue por enviar, sí: lo que indicas en la atención entra en él al momento, con los totales y el PDF al día. Si es de otra pieza, entra en todas las opciones; si es de la pieza que ya tiene opciones (un perno en la 36), la atención te pregunta «¿En qué opción va…?» y entra cuando eliges. Si ya se lo entregaste o ya respondió, lo que tiene no cambia: la línea del presupuesto dice que «entra al firmar» y va «en un presupuesto aparte», que nace al firmar. Lo que no tiene precio no entra. Si quitas algo con «Quitar», «Deshacer» lo devuelve a su opción, con su precio.",
+        forms: ["indique algo despues del presupuesto", "el presupuesto no tiene lo nuevo", "agregue un tratamiento y no esta en el presupuesto", "la resina nueva no sale en el total", "deshacer quitar en el presupuesto"],
         area: "plan",
       },
       {
@@ -1022,7 +1029,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "quiere-decir-cada-estado-presupuesto",
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo piensa»: si ya aceptó una parte, «Qué sigue» nombra solo lo que falta responder y lo que suma eso. «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa). «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
         area: "plan",
       },
       {
@@ -1031,6 +1038,15 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         a: "Sí. Al tocar «Anular esta atención…» te dice antes de confirmar qué pasa con su presupuesto. Si no se le entregó, se anula con ella; si además lleva tratamientos de otras atenciones, solo se le quita lo de esta. Si ya se le entregó, aunque lo haya aceptado, el botón dice «Anular atención y presupuesto» y lo hace en el mismo paso; si tenía una cita para eso, sigue en la agenda y le avisas a recepción. Si en ella cambiaste un tratamiento por otro («Cambiar» o «Revisar indicación»), se deshace el cambio: el anterior vuelve como estaba, con su respuesta y su consentimiento, y el diálogo lo dice. No se puede si caja ya cobró algo de ese presupuesto (primero se anula el cobro), si algo ya se hizo en otra atención, si quien decide firmó que lo acepta o si ya respondió y lleva otros tratamientos: te dice por qué y, cuando hay dónde, te lleva a resolverlo.",
         forms: ["anular atencion con presupuesto", "no me deja anular la atencion", "anular borrador con presupuesto enviado"],
         area: "clinica",
+      },
+      {
+        id: "descartar-atencion-vacia",
+        q: "¿Por qué ya no me sale «Descartar esta atención»?",
+        a: "Porque ya no está vacía. «Descartar esta atención» solo aparece mientras no tiene nada: nada escrito, aunque aún no se haya guardado (también el motivo), y nada indicado, registrado ni firmado. La borra de un toque, sin motivo ni rastro en la Historia. En cuanto escribes o indicas algo, abajo queda «Anular esta atención…», que pide el motivo y deja constancia.",
+        forms: ["no aparece descartar atencion", "como borro una atencion que abri por error", "descartar atencion con motivo escrito", "me dio error al descartar la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
       },
       {
         id: "guarda-escribo-atencion",

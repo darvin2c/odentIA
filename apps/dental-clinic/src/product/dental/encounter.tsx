@@ -170,9 +170,19 @@ function DentalClosing({
   pending: boolean
   openBlock: (key: string) => void
 }) {
-  const { odontogram, periodontal } = closing
+  const { odontogram, periodontal, sameFace = [] } = closing
   return (
     <>
+      {sameFace.length > 0 ? (
+        // Caries y restauración en la misma cara: suele ser caries bajo la restauración. Avisa y no
+        // frena: la restauración en mal estado la dibuja la norma en rojo (QA del 16 nov, C41).
+        <p role="status" className="rounded-lg border border-warning/50 bg-warning-soft p-3 text-sm">
+          {sameFace
+            .map((face) => `La ${face.toothNumber} tiene caries y restauración en la cara ${surfaceLabel(face.surface).toLowerCase()}`)
+            .join(". ")}
+          . Si es caries bajo la restauración, regístrala como restauración en mal estado.
+        </p>
+      ) : null}
       {odontogram ? (
         <div className="flex items-start gap-3 rounded-lg border p-3">
           <Badge variant="outline">{odontogram.shortName}</Badge>

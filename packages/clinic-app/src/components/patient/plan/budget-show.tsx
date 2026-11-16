@@ -34,6 +34,7 @@ export function BudgetShowActions({
   patientName,
   beforeWrite,
   menu = false,
+  note = null,
 }: {
   patientId: string
   budgetId: string
@@ -45,6 +46,11 @@ export function BudgetShowActions({
    * con «Enviar» y a quién le llega, para ver antes qué recibe.
    */
   menu?: boolean
+  /**
+   * Lo indicado hoy que no está en este presupuesto, dicho también al mostrarlo (QA del 16 nov,
+   * E3): «No está en este presupuesto: Perno · 36 · S/ 300.00 · entra al firmar».
+   */
+  note?: string | null
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -173,6 +179,11 @@ export function BudgetShowActions({
               consulta.
             </DialogDescription>
             <RecommendedLine patientId={patientId} budgetId={budgetId} className="text-sm" />
+            {note ? (
+              <p role="status" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+                {note}
+              </p>
+            ) : null}
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-muted/30">
             {pdf ? (

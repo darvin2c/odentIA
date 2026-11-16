@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { paidCommissionWarnings, refundLines } from "./finance-collect"
+import { balanceDetailWords, paidCommissionWarnings, refundLines } from "./finance-collect"
 
 // QA del 6 nov (M14): el ticket dice «queda a favor», «A favor» está en cero y la
 // cuenta no decía adónde fueron los S/ 20.
@@ -38,5 +38,21 @@ describe("anular un ticket con la comisión ya pagada", () => {
   it("sin comisión pagada, nada", () => {
     expect(paidCommissionWarnings({ commissionPaid: false }, money)).toEqual([])
     expect(paidCommissionWarnings({}, money)).toEqual([])
+  })
+})
+
+describe("el detalle del saldo en el Resumen (C19)", () => {
+  const money = (cents: number) => `S/ ${(cents / 100).toFixed(2)}`
+  const row = (porCobrar: number, pagado: number, aFavor = 0) => ({
+    currency: "PEN",
+    porCobrar,
+    pagado,
+    aFavor,
+    saldo: Math.max(porCobrar - aFavor, 0),
+  })
+  it("con S/ 300 pagados no dice «sin pago aplicado»", () => {
+    expect(balanceDetailWords(row(35000, 30000), money)).toBe("Debe: S/ 350.00 · Ya pagó: S/ 300.00")
+    expect(balanceDetailWords(row(65000, 0), money)).toBe("Cargos emitidos sin pago aplicado.")
+    expect(balanceDetailWords(row(65000, 10000, 10000), money)).toBe("Debe: S/ 650.00 · A favor: S/ 100.00 · Saldo: S/ 550.00")
   })
 })

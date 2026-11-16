@@ -211,7 +211,7 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
     withoutForms(
       {
         ...faq,
-        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca «Acepta», «Lo piensa» o «No»; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
       },
       "lo piensa con la muela",
     ),
@@ -583,6 +583,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
  * fase (`optical/hooks.ts`); Clío no dicta (`dictation: null`).
  */
 const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
+  // Lo indicado nace aceptado y el presupuesto es opcional: no entra solo al indicar (QA del 16 nov, E3).
+  "indique-despues-presupuesto-incluida": () => [],
   // «De pequeño» es de odentIA (pediatría dental); en una óptica, solo lo común de quien cuida a un niño.
   "que-le-preguntan-a-la-mama-de-un-nino": (faq) => [
     {
@@ -625,7 +627,7 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
       ...faq,
       a: swap(
         faq.a,
-        "«Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después que eligió la opción A, con lo que cuesta esa opción.",
+        "«Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. En la atención, con dos opciones, dice cada una con su total y «falta que elija», y después lo que eligió, lo que aceptó y lo que aún piensa, con lo que suma cada parte (por ejemplo, la opción A, S/ 950 aceptados y la corona, S/ 900, que lo piensa).",
         "«Aceptó todo» o «Aceptó 2 de 3»; con dos opciones, dice cuál eligió.",
       ),
     },

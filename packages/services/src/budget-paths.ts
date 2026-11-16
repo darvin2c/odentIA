@@ -154,15 +154,32 @@ export async function placeBudgetPath(
     await add(target.id)
     for (const option of options) if (option.id !== target.id && has(option.id, item.id)) await remove(option.id, [item.id])
   }
-  // Un camino que se quedó sin nada propio deja de ser camino (lo común se mira de nuevo cada vez).
+  budget = await dropPathsWithoutOwn(tx, orgId, actorUserId, patientId, budget, opts)
+  return getBudgetDetail(tx, orgId, patientId, budget.id)
+}
+
+/**
+ * Un camino que se quedó sin nada propio deja de ser camino (lo común se mira de nuevo cada
+ * vez): al ponerlo en otro camino y al quitarlo de la atención («Quitar»), la misma regla.
+ */
+export async function dropPathsWithoutOwn(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  start: BudgetWithTotals,
+  opts: BudgetActorOpts = {},
+): Promise<BudgetWithTotals> {
+  let budget = start
   for (;;) {
     if (budget.options.length < 2) break
     const common = commonPlanItems(budget.items, budget.options.length)
     const empty = budget.options.find(
-      (option) => !linesOf(option.id).some((line) => !common.has(line.planItemId)),
+      (option) =>
+        !budget.items.some((line) => line.optionId === option.id && !common.has(line.planItemId)),
     )
     if (!empty) break
     budget = await removeBudgetOption(tx, orgId, actorUserId, patientId, budget.id, empty.id, opts)
   }
-  return getBudgetDetail(tx, orgId, patientId, budget.id)
+  return budget
 }

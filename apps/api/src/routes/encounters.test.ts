@@ -1145,3 +1145,30 @@ it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulació
   // Anulada, ya no bloquea abrir otra atención.
   expect((await postEncounter(app, patientId, { reason: "Atención correcta" })).status).toBe(201)
 })
+
+// QA del 16 nov (E2 y «Deshacer»): corregir junto y deshacer «Quitar» son de quien escribe en la
+// historia; recepción no ve ni hace nada, y un id que no es de esta atención no se anula.
+it("corregir junto y «Deshacer»: recepción 403; un diagnóstico ajeno o algo no quitado, 409 sin efectos", async () => {
+  const admin = buildApp("admin")
+  const reception = buildApp("reception")
+  const patientId = await createFreshPatient(admin, "Corregir junto")
+  const ctx = await setupPlan(admin, patientId)
+  const item = await addPlanItem(admin, patientId, ctx, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    toothNumber: 36,
+  })
+  const base = `/patients/${patientId}/encounters/${ctx.encounterId}`
+  const other = crypto.randomUUID()
+  expect((await reception.request(`${base}/correction?diagnosisId=${other}`)).status).toBe(403)
+  const post = (app: Hono, path: string, body: unknown) =>
+    app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const correction = { start: { diagnosisId: other }, reason: "Pieza equivocada" }
+  expect((await post(reception, `${base}/correction`, correction)).status).toBe(403)
+  expect((await post(reception, `${base}/indicated/${item.id}/restore`, {})).status).toBe(403)
+  const foreign = await admin.request(`${base}/correction?diagnosisId=${other}`)
+  expect(foreign.status).toBe(409)
+  expect(((await foreign.json()) as ErrorBody).error.code).toBe("ALREADY_VOIDED")
+  const notRemoved = await post(admin, `${base}/indicated/${item.id}/restore`, {})
+  expect(notRemoved.status).toBe(409)
+  expect(((await notRemoved.json()) as ErrorBody).error.code).toBe("NOT_RESTORABLE")
+})

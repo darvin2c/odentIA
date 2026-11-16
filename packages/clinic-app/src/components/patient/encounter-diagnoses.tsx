@@ -15,10 +15,12 @@ import { useStore } from "@tanstack/react-form"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { z } from "zod"
+import { PLAN_QUERY_KEYS } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
-import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
+import { addDiagnosisApi, correctApi, type EncounterDiagnosis } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
+import { CorrectionChoices, useCorrection } from "./correction-choices"
 import {
   areaWords,
   DiagnosisPicker,
@@ -282,12 +284,25 @@ export function EncounterDiagnoses({
   const description = useStore(form.store, (state) => state.values.description)
   const area = useStore(form.store, (state) => (state.values.site.toothNumber == null ? areaWords(state.values.area ?? {}) : null))
 
+  // Anular el diagnóstico trae, marcado, el hallazgo con que nació y lo indicado hoy desde él
+  // (QA del 16 nov, E2): un motivo y una sola operación en el servidor.
+  const correction = useCorrection(patientId, encounter.id, voiding ? { diagnosisId: voiding.id } : null)
   const voidForm = useAppForm({
     defaultValues: { reason: "" },
     validators: { onSubmit: reasonSchema },
     onSubmit: async ({ value }) => {
       if (!voiding) return
-      await write(() => voidDiagnosisApi(patientId, encounter.id, voiding.id, value.reason.trim()))
+      await write(() =>
+        correctApi(patientId, encounter.id, {
+          start: { diagnosisId: voiding.id },
+          reason: value.reason.trim(),
+          ...correction.marks,
+        }),
+      )
+      // Lo que cayó con él: el odontograma, el plan y su presupuesto.
+      await Promise.all(
+        ["odontogram", ...PLAN_QUERY_KEYS].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
       setVoiding(null)
     },
   })
@@ -544,6 +559,13 @@ export function EncounterDiagnoses({
           if (!voidSubmitting) setVoiding(null)
         }}
       >
+        <CorrectionChoices
+          preview={correction.preview}
+          marks={correction.marks}
+          onMarksChange={correction.setMarks}
+          disabled={voidSubmitting}
+          idPrefix={`${typeGroupId}-anular`}
+        />
         <voidForm.AppField name="reason">
           {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_TEXT} aria-required />}
         </voidForm.AppField>

@@ -389,7 +389,7 @@ export function budgetStatusLabel(status: string): string {
     case "presentado":
       return "Entregado · espera respuesta"
     case "pospuesto":
-      return "Lo está pensando"
+      return "Lo piensa"
     case "aceptado":
       return "Aceptó todo"
     case "parcial":
