@@ -38,6 +38,8 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const params = z.object({ id: z.uuid(), encounterId: z.uuid() })
 const suggestionParams = params.extend({ suggestionId: z.uuid() })
+/** Descartar: en una respuesta de ficha en la que Clío dudaba, la opción que eligió la persona. */
+const discardInput = z.object({ chosen: z.string().min(1).max(200).optional() })
 // Un tramo del dictado: lo nuevo, lo último ya ordenado (solo para entenderlo) y su identidad,
 // para que reenviar el mismo tramo no duplique sugerencias.
 const dictateInput = z
@@ -276,9 +278,12 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const { orgId, userId } = orgContextOf(c)
     const at = suggestionParams.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
+    // La opción que eligió la persona entre las que Clío dudaba: queda la constancia.
+    const body = discardInput.safeParse((await c.req.json().catch(() => null)) ?? {})
+    if (!body.success) return validationError(c, body.error.issues)
     return runService(c, 200, async () => {
       await withOrgContext(deps.db, orgId, (tx) =>
-        discardDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
+        discardDictationSuggestion(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId, body.data.chosen),
       )
       return { ok: true }
     })

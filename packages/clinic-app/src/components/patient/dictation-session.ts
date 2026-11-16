@@ -488,8 +488,12 @@ export function useDictationSession({
     retry: false,
     // «undo-voice» deshace lo hecho en voz alta: una corrección o un «quita».
     // «undo-confirmed» quita lo ya confirmado que se pidió quitar; «keep» lo deja como está.
-    mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" | "undo-confirmed" | "keep" | "restore" }) => {
-      const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${input.item.id}/${input.action}`, { method: "POST" })
+    // `chosen`: al descartar la duda de una respuesta de ficha, la opción que eligió la persona (queda la constancia).
+    mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" | "undo-confirmed" | "keep" | "restore"; chosen?: string }) => {
+      const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${input.item.id}/${input.action}`, {
+        method: "POST",
+        ...(input.chosen !== undefined ? { body: JSON.stringify({ chosen: input.chosen }) } : {}),
+      })
       return { ...input, result: response?.data ?? null }
     },
     onSuccess: (input) => {

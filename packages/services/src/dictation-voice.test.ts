@@ -249,3 +249,15 @@ describe("el relato no recoge lo que no es del paciente", () => {
     expect(withoutFormNotes([told], [], FDI)).toEqual([told])
   })
 })
+
+describe("cuando Clío duda entre dos opciones, las deja para elegir", () => {
+  it("«prueba de frío aumentada» queda por revisar, sin valor, con las dos opciones posibles", () => {
+    expect(ask(endo, "frio", "Aumentada, persiste", "prueba de frío aumentada")).toMatchObject({
+      status: "por_revisar",
+      payload: { value: null, choices: ["Aumentada, cede al retirar el estímulo", "Aumentada, persiste"] },
+      note: expect.stringContaining("no alcanza para elegir entre"),
+    })
+    // Sin duda, no lleva opciones.
+    expect(ask(endo, "frio", "Aumentada, persiste", "prueba de frío aumentada que persiste")?.payload).not.toHaveProperty("choices")
+  })
+})

@@ -42,7 +42,8 @@ import { appWords } from "../../lib/product-words"
 import { DeclaredResponse } from "./declared-response"
 import { X } from "lucide-react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { answersWords, changesWritten, proposalsOf, proposedWords, proposesValue, useClioFormProposals } from "./clio-form-proposals"
+import { ChoiceButtons } from "../choice-buttons"
+import { answersWords, changesWritten, choicesOf, proposalsOf, proposedWords, proposesValue, useClioFormProposals } from "./clio-form-proposals"
 import type { DictationSuggestion } from "./dictation-session"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
@@ -601,6 +602,32 @@ function StaffResponseDetail({
       setConfirming(false)
     }
   }
+  /**
+   * «¿Cuál?»: la persona elige una de las opciones entre las que Clío dudaba. La respuesta queda
+   * escrita por ella, como si la hubiera tocado en la pregunta, y la duda se descarta con lo que
+   * eligió: así queda la constancia de que Clío había dudado. Clío no decide nada.
+   */
+  const choose = async (item: DictationSuggestion, fieldId: string, label: string, value: string) => {
+    if (!clio || confirmingRef.current) return
+    confirmingRef.current = true
+    setConfirming(true)
+    typedHere.current.add(fieldId)
+    discardSent.current.add(item.id)
+    try {
+      form.setFieldValue(`answers.${fieldId}`, value)
+      await persist()
+      clio.discard(item, value)
+      setAnnouncement(`Guardaste «${value}» en «${label}».`)
+      focusAfter(fieldId)
+    } catch (error) {
+      discardSent.current.delete(item.id)
+      if (isStale(error)) setStale(true)
+      toast.error(submitErrorMessage(error))
+    } finally {
+      confirmingRef.current = false
+      setConfirming(false)
+    }
+  }
   const discardProposal = (item: DictationSuggestion) => {
     if (!clio) return
     discardSent.current.add(item.id)
@@ -1039,6 +1066,8 @@ function StaffResponseDetail({
                     const proposal = proposalFor(field.id)
                     const changes = proposal ? changesWritten(proposal) : false
                     const valued = proposal ? proposesValue(proposal) : false
+                    // Entre cuáles opciones dudó Clío: se eligen aquí con un toque.
+                    const choices = proposal && !valued ? choicesOf(proposal) : []
                     const late = response.afterSigning?.[field.id]
                     // Lo aceptado de Clío, mientras siga siendo eso: si se cambia a mano, ya es de la persona.
                     const mark = response.clioAccepted?.[field.id]
@@ -1099,6 +1128,23 @@ function StaffResponseDetail({
                                 </>
                               )}
                             </span>
+                            {choices.length >= 2 ? (
+                              <span className="order-last flex basis-full flex-wrap items-center gap-2 pb-1">
+                                <span aria-hidden className="font-medium">
+                                  ¿Cuál?
+                                </span>
+                                <ChoiceButtons
+                                  aria-label={`¿Cuál? ${field.label}`}
+                                  value={null}
+                                  options={choices.map((choice) => ({ value: choice, label: choice }))}
+                                  // En celdas iguales: las opciones largas se parten en dos líneas y caben a 390 px.
+                                  columns={choices.length <= 4 ? (Math.max(2, choices.length) as 2 | 3 | 4) : undefined}
+                                  className="min-w-0 flex-1"
+                                  onChange={(value) => void choose(proposal, field.id, field.label, value)}
+                                  disabled={busy}
+                                />
+                              </span>
+                            ) : null}
                             <span className="flex items-center gap-1">
                               {valued ? (
                                 <Button

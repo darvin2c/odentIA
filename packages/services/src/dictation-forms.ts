@@ -1428,6 +1428,12 @@ function checkFormAnswer(
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
+  // Entre cuáles opciones dudó: la pregunta las ofrece en botones y la persona elige con un toque.
+  const between = (options: readonly string[], note: string): PreparedFormAnswer => ({
+    payload: { ...base, value: null, ...(options.length >= 2 ? { choices: [...options] } : {}) },
+    status: "por_revisar",
+    note,
+  })
   const option = (text: string) => {
     const exact = (question.options ?? []).find((item) => plain(item) === plain(text))
     if (exact || !/^\d+$/.test(text.trim())) return exact ?? null
@@ -1452,7 +1458,7 @@ function checkFormAnswer(
    * la lista. Las demás, por sus palabras: en una sola, la que más calza, sin
    * empate; en varias, la que tiene dicha una palabra que es solo suya.
    */
-  const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string } | null => {
+  const chosen = (value: string, single: boolean): { ok: true } | { ok: false; note: string; between: string[] } | null => {
     if (isNegativeOption(value)) return denies(said) && labelSaid ? { ok: true } : null
     if (isPositiveOption(value) && painOnTest(question, said)) return { ok: true }
     if (SAID_AS[plain(value)]?.test(plain(said))) return { ok: true }
@@ -1463,7 +1469,8 @@ function checkFormAnswer(
       if (fullySaid(value) && !better && !heardForOptions.some((number) => listNumbers.includes(number))) return { ok: true }
       const known = numbers.filter((number) => containsAll(heardForOptions, [number]))
       if (!known.length && !score(value)) return null
-      return { ok: false, note: elige(options.filter((item) => containsAll(optionNumbers(item), known))) }
+      const among = options.filter((item) => containsAll(optionNumbers(item), known))
+      return { ok: false, note: elige(among), between: among }
     }
     if (single) {
       const mine = score(value)
@@ -1473,7 +1480,7 @@ function checkFormAnswer(
       const best = Math.max(...rivals.map(score))
       const tied = rivals.filter((item) => score(item) === best)
       if (mine < best) return null
-      return tied.length === 1 ? { ok: true } : { ok: false, note: elige(tied) }
+      return tied.length === 1 ? { ok: true } : { ok: false, note: elige(tied), between: tied }
     }
     const unique = ownStems(value).filter((stem) => !options.some((item) => item !== value && ownStems(item).includes(stem)))
     return (unique.length ? unique.some((stem) => spoken.has(stem)) : fullySaid(value)) ? { ok: true } : null
@@ -1493,7 +1500,7 @@ function checkFormAnswer(
       if (!value) return null
       const check = chosen(value, true)
       if (!check) return null
-      return check.ok ? ready(value) : review(null, check.note)
+      return check.ok ? ready(value) : between(check.between, check.note)
     }
     case "opcion_multiple": {
       const values = [...new Set((list.length ? list : raw ? [raw] : []).map(option).filter((item): item is string => item !== null))]
