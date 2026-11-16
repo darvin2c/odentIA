@@ -189,7 +189,7 @@ export function ChannelPage({ channel, search = {} }: { channel: PanelChannel; s
               ))}
             </IntegrationBlock>
           ) : null}
-          {tab === "conexion" && hasActive && canWrite ? (
+          {tab === "conexion" && hasActive && canWrite && !pick ? (
             // Como varios buzones de correo: otra cuenta se suma a las que ya están.
             <div className="flex flex-wrap items-start gap-2">
               {way ? <MetaConnectButton way={way} label={`Conectar otra con ${viaWords}`} variant="outline" /> : null}
@@ -203,7 +203,7 @@ export function ChannelPage({ channel, search = {} }: { channel: PanelChannel; s
               </Button>
             </div>
           ) : null}
-          {tab === "conexion" && !hasActive ? (
+          {tab === "conexion" && !hasActive && !pick ? (
             canWrite ? (
               <section
                 aria-label={`Conecta ${name}`}
