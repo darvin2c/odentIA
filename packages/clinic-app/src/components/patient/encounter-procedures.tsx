@@ -270,9 +270,10 @@ export function EncounterProcedures({
   detail: EncounterDetail
   /**
    * «Preparar y firmar» el consentimiento de lo que se va a registrar, antes de hacerlo: la
-   * atención lo trae a hoy, lo prepara y abre la firma. Avisa y no frena (P11).
+   * atención lo trae a hoy, lo prepara y abre la firma. Avisa y no frena (P11). `awaiting`: lo
+   * indicado que aún espera su respuesta, que se acepta al registrarlo y no se trae antes.
    */
-  onConsentFirst?: (planItemId: string) => void
+  onConsentFirst?: (planItemId: string, awaiting: boolean) => void
   disabled?: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -723,7 +724,7 @@ export function EncounterProcedures({
                                   variant="link"
                                   className="h-auto p-0 align-baseline text-sm"
                                   disabled={busy}
-                                  onClick={() => onConsentFirst(selectedPlan.id)}
+                                  onClick={() => onConsentFirst(selectedPlan.id, selectedPlan.decision === "pendiente")}
                                 >
                                   {consentAhead(selectedPlan)?.action}
                                 </Button>

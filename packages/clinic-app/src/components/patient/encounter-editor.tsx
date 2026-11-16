@@ -1871,11 +1871,24 @@ export function EncounterEditor({
    * «Preparar y firmar» desde «Registrar procedimiento» (P11): el consentimiento es previo al acto.
    * Trae el tratamiento a hoy (la misma operación que «Hacerla hoy»), y su consentimiento sale de
    * la regla de siempre (`consent-needs`): se prepara y se firma ahí mismo. No frena el registro.
+   * Lo indicado que aún espera su respuesta no se trae (solo se trae lo aceptado): su
+   * consentimiento se prepara por el tratamiento y se firma antes del acto, que lo acepta al
+   * registrarlo (revisión del 16 nov, R2).
    */
-  const consentFirst = async (planItemId: string) => {
+  const consentFirst = async (planItemId: string, awaiting: boolean) => {
     try {
       await flush()
-      if (!detail.plannedItems.some((item) => item.id === planItemId)) await bringTreatmentApi(patientId, encounterId, planItemId)
+      const brought = detail.plannedItems.some((item) => item.id === planItemId)
+      if (!brought && awaiting) {
+        const prepared = await prepareConsents(patientId, encounterId, undefined, planItemId)
+        await handleChildChanged()
+        const need = prepared.data.needs.find(
+          (item) => item.planItemId === planItemId && item.status !== "firmado" && item.status !== "sin_publicar",
+        )
+        if (need) await signConsentsNow(need)
+        return
+      }
+      if (!brought) await bringTreatmentApi(patientId, encounterId, planItemId)
       const needs = await queryClient.fetchQuery({
         queryKey: ["consent-needs", patientId, encounterId],
         queryFn: () => fetchConsentNeeds(patientId, encounterId),
@@ -2739,7 +2752,7 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
                 prefillPlanItemId={sessionPrefill}
                 onPrefillUsed={() => setSessionPrefill(null)}
-                onConsentFirst={(planItemId) => void consentFirst(planItemId)}
+                onConsentFirst={(planItemId, awaiting) => void consentFirst(planItemId, awaiting)}
               />
               {suggestionsOf("procedimientos")}
             </>,

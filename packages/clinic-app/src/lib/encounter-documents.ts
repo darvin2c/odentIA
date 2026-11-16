@@ -41,12 +41,22 @@ export function fetchConsentNeeds(patientId: string, encounterId: string) {
   return apiFetch<{ data: ConsentNeed[] }>(`${FORMS}/consent-needs?${search.toString()}`)
 }
 
-/** «Preparar»: genera los que faltan (o solo esas claves), llenos con lo de la atención. */
-export function prepareConsents(patientId: string, encounterId: string, templateKeys?: string[]) {
+/**
+ * «Preparar»: genera los que faltan (o solo esas claves), llenos con lo de la atención. Con
+ * `planItemId`, solo los de ese tratamiento, aunque aún espere su respuesta y no esté en la
+ * atención: el consentimiento va antes del acto.
+ */
+export function prepareConsents(
+  patientId: string,
+  encounterId: string,
+  templateKeys?: string[],
+  planItemId?: string,
+) {
   return post<{ created: Array<{ id: string }>; needs: ConsentNeed[] }>(`${FORMS}/consent-needs/prepare`, {
     patientId,
     encounterId,
     ...(templateKeys ? { templateKeys } : {}),
+    ...(planItemId ? { planItemId } : {}),
   })
 }
 
