@@ -32,6 +32,14 @@ export {
   unsubscribeAppFromAccount,
 } from "./whatsapp-embedded-signup.js"
 export {
+  buildPagesLoginUrl,
+  exchangePagesCode,
+  listSharedPages,
+  PAGE_FIELDS,
+  type SharedPage,
+  subscribeAppToPage,
+} from "./meta-pages-login.js"
+export {
   inspectOwnAppToken,
   type OwnAppNumber,
   type OwnAppToken,
@@ -58,6 +66,7 @@ export {
   type WebchatVisitorPayload,
 } from "./web-chat.js"
 export {
+  refreshInstagramLoginToken,
   instagramAdapter,
   messengerAdapter,
   verifyMetaChallenge,

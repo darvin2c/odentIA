@@ -67,7 +67,7 @@ const SUBTITLE = "Lo que se conecta una vez. Cada fila dice para qué sirve y c�
 const SUBTITLE_SHORT = "Lo que se conecta una vez: para qué sirve y cómo está."
 
 const MESSAGING_NOTE =
-  "Una cuenta activa por canal. Lo automático sale por WhatsApp y, si no se puede, por correo. Instagram, Messenger y Telegram solo responden a quien escribió primero."
+  "Un solo WhatsApp por clínica: por ahí sale lo automático y, si no se puede, por correo. Instagram, Messenger y Telegram admiten varias cuentas y solo responden a quien escribió primero."
 
 /**
  * Integraciones: una página con lo que la clínica conecta una vez —mensajería,

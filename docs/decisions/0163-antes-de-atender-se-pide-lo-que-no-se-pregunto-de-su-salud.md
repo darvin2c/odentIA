@@ -1,6 +1,6 @@
 # 0163 · Antes de atender se pide lo que no se preguntó de su salud
 
-Fecha: 2026-11-08 · Estado: aceptada · Amplía el aviso de alergias de la atención (ADR 0072) · Actualizada el 2026-11-13: el embarazo declarado sale arriba de la ficha y de la atención, con su fecha · Revisada por el [ADR 0195](0195-los-avisos-clinicos-salen-de-datos-clinicos.md) el 2026-11-16: la ASA se elige con un toque en la línea de anestesia, que sale antes de anestesiar por el servicio («Usa anestesia local») y no solo por el inventario
+Fecha: 2026-11-08 · Estado: aceptada · Amplía el aviso de alergias de la atención (ADR 0072) · Actualizada el 2026-11-13: el embarazo declarado sale arriba de la ficha y de la atención, con su fecha · Revisada por el [ADR 0197](0197-los-avisos-clinicos-salen-de-datos-clinicos.md) el 2026-11-16: la ASA se elige con un toque en la línea de anestesia, que sale antes de anestesiar por el servicio («Usa anestesia local») y no solo por el inventario
 
 ## Problema
 

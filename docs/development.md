@@ -211,6 +211,33 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    celular: que no se registra, que llegan la agenda y el historial, y que lo
    escrito desde el celular aparece en la Bandeja como «Desde el celular».
 
+**Messenger e Instagram con el mismo botón (ADR 0195).** Misma app, otra
+configuración y dos variables más, solo en la API:
+
+| Variable | Qué es | Dónde se obtiene |
+| --- | --- | --- |
+| `META_PAGES_CONFIG_ID` | Configuración de «Facebook Login for Business» para páginas e Instagram | Facebook Login for Business › Configuraciones |
+| `META_PAGES_REDIRECT_URI` | La vuelta fija de la ventana: `https://<API>/api/meta-pages/callback` | Se elige y se pega igual en Meta |
+
+Sin las dos (o sin las cuatro de WhatsApp) el botón de páginas no aparece y
+Messenger e Instagram siguen con «Con tu propia app de Meta».
+
+1. En App Review, pedir `pages_show_list`, `pages_manage_metadata`,
+   `pages_messaging`, `pages_read_engagement`, `instagram_basic` e
+   `instagram_manage_messages`, con un video de cada uso. Hasta que apruebe,
+   solo sirve a quien tiene un rol en la app.
+2. Crear otra configuración de «Facebook Login for Business» (tipo token de
+   acceso de usuario) con esos permisos; su identificador es `META_PAGES_CONFIG_ID`.
+3. Agregar `META_PAGES_REDIRECT_URI` a «URI de redirección de OAuth válidos».
+4. En Webhooks, objetos «Page» e «Instagram»: dirección
+   `https://<API>/api/webhooks/meta/pages`, la misma clave de verificación
+   (`META_WEBHOOK_VERIFY_TOKEN`) y los campos `messages`, `messaging_postbacks`,
+   `message_echoes`, `message_deliveries` y `message_reads`. La suscripción de
+   cada página la pide odentIA al conectar.
+5. Conectar una página de prueba con su Instagram unido y comprobar: que vuelve
+   con los dos, un mensaje que entra y otro que sale por cada uno, y que lo
+   respondido desde Meta Business Suite aparece en la Bandeja.
+
 Límites que pone Meta: al principio se pueden conectar hasta 10 clínicas nuevas
 cada 7 días (200 al completar la verificación de la empresa, App Review y la
 verificación de acceso). El código que devuelve la ventana vive 30 segundos. Un

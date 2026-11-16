@@ -316,3 +316,37 @@ it("fetchMedia con tope: corta lo que dice o resulta pesar más, y pasa el tiemp
   )
   expect(whole?.bytes.byteLength).toBe(80)
 })
+
+it("messenger con el botón: lo respondido desde Meta Business Suite entra como respuesta del equipo; lo que salió de odentIA, no", () => {
+  const button = { pageId: "PAGE1", pageAccessToken: "TOKEN", appId: "APP1" }
+  const echoes = JSON.stringify({
+    object: "page",
+    entry: [
+      {
+        id: "PAGE1",
+        messaging: [
+          // Desde Meta Business Suite: otra app.
+          { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440000000, message: { mid: "mid.suite", text: "Sí, mañana a las 4", is_echo: true, app_id: 263902037430900 } },
+          // Desde odentIA: ya está en la Bandeja.
+          { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440001000, message: { mid: "mid.nuestro", text: "Te esperamos", is_echo: true, app_id: "APP1" } },
+          // Sin decir de qué app salió: podría ser uno nuestro, no entra.
+          { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440002000, message: { mid: "mid.sinapp", text: "Hola", is_echo: true } },
+        ],
+      },
+    ],
+  })
+  const parsed = messengerAdapter.parseWebhook({ headers: {}, rawBody: echoes, config: button })
+  expect(parsed.messages).toEqual([
+    {
+      externalEventId: "mid.suite",
+      externalMessageId: "mid.suite",
+      externalThreadId: "msgr:PSID1",
+      senderExternalId: "msgr:PSID1",
+      sentAt: new Date(1727440000000).toISOString(),
+      fromBusinessApp: true,
+      content: { type: "text", text: "Sí, mañana a las 4" },
+    },
+  ])
+  // Sin el botón no se sabe cuál es la app de odentIA: ningún eco entra.
+  expect(messengerAdapter.parseWebhook({ headers: {}, rawBody: echoes, config }).messages).toEqual([])
+})

@@ -157,15 +157,15 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   // Una fila por integración: su estado en palabras, para qué sirve y qué hace falta.
   for (const [name, needs] of [
     ["WhatsApp", "Para conectar:"],
-    ["Instagram", "Para conectar: la cuenta profesional de Instagram de la clínica."],
+    ["Instagram", "Para conectar: la página de Facebook unida al Instagram profesional de la clínica."],
     ["Messenger", "Para conectar: la página de Facebook de la clínica."],
     ["Telegram", "Para conectar: la clave del bot, que da @BotFather."],
   ] as const) {
     await expect(rowOf(messaging, name)).toContainText("Sin conectar")
     await expect(rowOf(messaging, name)).toContainText(needs)
   }
-  await expect(messaging).toContainText("Una cuenta activa por canal.")
-  await expect(messaging).toContainText("Instagram, Messenger y Telegram solo responden a quien escribió primero.")
+  await expect(messaging).toContainText("Un solo WhatsApp por clínica")
+  await expect(messaging).toContainText("Instagram, Messenger y Telegram admiten varias cuentas y solo responden a quien escribió primero.")
   await expect(page.getByRole("region", { name: "Tu sitio web" }).getByRole("listitem")).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Inteligencia artificial" })).toContainText("ChatGPT 6")
   // La misma comprobación que el encendido: el modelo de demostración responde.
@@ -196,10 +196,10 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   await expect(panel).toContainText("Conectado")
   await expect(panel).toContainText("No hay nada que copiar ni pegar")
   // En «Conexión», la cuenta conectada; una sola por canal.
-  const telegram = rowOf(page.getByRole("region", { name: "Conectada" }), "Telegram")
+  const telegram = rowOf(page.getByRole("region", { name: "Conectadas" }), "Telegram")
   await expect(telegram).toContainText("Conectado")
   await expect(telegram.getByRole("button", { name: "Administrar Telegram", exact: true })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Conectada" })).toContainText("Solo una cuenta de Telegram a la vez")
+  await expect(page.getByRole("button", { name: "Conectar otra cuenta", exact: true })).toBeVisible()
   const [created] = (await connections()).filter((item) => item.channel === "telegram")
   expect(created).toMatchObject({ status: "active" })
   await info.attach("telegram-conectado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -279,7 +279,7 @@ test("integraciones: Messenger muestra siempre la dirección de avisos y su clav
   const row = rowOf(messaging, "Messenger")
   await expect(row).not.toContainText("Página E2E")
   await row.getByRole("link", { name: /^(Abrir|Revisar) Messenger$/ }).click()
-  const account = rowOf(page.getByRole("region", { name: "Conectada" }), "Messenger")
+  const account = rowOf(page.getByRole("region", { name: "Conectadas" }), "Messenger")
   await expect(account).toContainText("Página E2E")
   const openMessenger = account.getByRole("button", { name: /^(Administrar|Revisar) Messenger$/ })
   await openMessenger.click()

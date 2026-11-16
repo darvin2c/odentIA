@@ -4,7 +4,7 @@ ALTER TABLE "patient" ADD COLUMN "asa_class_set_by" text;--> statement-breakpoin
 ALTER TABLE "service_catalog" ADD COLUMN "local_anesthesia" boolean;--> statement-breakpoint
 ALTER TABLE "catalog"."treatment_template" ADD COLUMN "local_anesthesia" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "patient" ADD CONSTRAINT "patient_asa_class_set_by_user_id_fk" FOREIGN KEY ("asa_class_set_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
--- Lo que TS no declara (la regla a mano va en la misma migración: la parte 1 tiene solo 0136).
+-- Lo que TS no declara va a mano en esta misma migración.
 -- La anestesia de ese día al firmar (ASA, peso y máximo) es historia como el resto de la atención
 -- firmada: la guarda que ya protege su contenido también la protege (NTS 139-MINSA/2018/DGAIN,
 -- 5.3.3: lo registrado no se modifica; se corrige con una adenda). Las columnas nuevas de `patient`

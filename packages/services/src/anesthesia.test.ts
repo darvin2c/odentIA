@@ -1,5 +1,5 @@
 /**
- * La anestesia sale de datos clínicos (QA del 16 nov, E5b y E5c; ADR 0195): el servicio dice si usa
+ * La anestesia sale de datos clínicos (QA del 16 nov, E5b y E5c; ADR 0197): el servicio dice si usa
  * anestesia local (la biblioteca, y la clínica lo cambia), la atención la muestra en cuanto algo de
  * hoy la usa aunque el inventario no tenga anestésicos, la ASA se pone de un toque con su rastro y
  * la atención firmada guarda la ASA, el peso y el máximo.

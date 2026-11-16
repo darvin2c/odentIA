@@ -1422,7 +1422,7 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
-              {/* La presión y la anestesia avisan antes del consentimiento: son de lo que se decide (ADR 0195). */}
+              {/* La presión y la anestesia avisan antes del consentimiento: son de lo que se decide (ADR 0197). */}
               {safety}
               {consents.map((need) => {
                 const line = consentLine(need, who)

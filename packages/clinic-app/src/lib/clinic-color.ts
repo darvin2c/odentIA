@@ -1,4 +1,6 @@
-import { BRAND_COLOR_PATTERN, type BrandTokens, brandPalette } from "@odentia/clinical"
+import { clinicColorCss } from "@odentia/clinical"
+
+export { clinicColorCss }
 import { apiFetch } from "./api"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
@@ -51,40 +53,6 @@ export async function loadClinicAppearance(): Promise<ClinicAppearance> {
 /** Al guardar el color: la próxima carga de la raíz lo vuelve a pedir. */
 export function forgetClinicAppearance(): void {
   known = null
-}
-
-function tokens(t: BrandTokens): string {
-  return [
-    `--primary:${t.primary}`,
-    `--primary-foreground:${t.primaryForeground}`,
-    `--primary-fill:${t.fill}`,
-    `--primary-fill-foreground:${t.fillForeground}`,
-    `--primary-fill-hover:${t.fillHover}`,
-    `--primary-soft:${t.soft}`,
-    `--primary-soft-foreground:${t.softForeground}`,
-    `--ring:${t.primary}`,
-    `--sidebar-primary:${t.primary}`,
-    `--sidebar-primary-foreground:${t.primaryForeground}`,
-    `--sidebar-ring:${t.primary}`,
-    `--agent-soft:${t.agentSoft}`,
-    `--agent-border:${t.agentBorder}`,
-  ].join(";")
-}
-
-/**
- * Las reglas del color de la clínica. `:root:root:root` pesa más que `[data-brand]` y
- * que `.dark`, así no depende del orden de las hojas. Solo el color: los grises son los
- * de `globals.css`, sin tono, iguales para toda clínica. Lo que se ve como papel
- * (`.theme-light`) lleva el color en claro también con la app en oscuro.
- */
-export function clinicColorCss(brandColor: string | null | undefined): string | null {
-  if (!brandColor || !BRAND_COLOR_PATTERN.test(brandColor)) return null
-  const { light, dark } = brandPalette(brandColor)
-  return (
-    `:root:root:root{${tokens(light)}}` +
-    `:root:root:root .theme-light{${tokens(light)}}` +
-    `:root:root:root.dark{${tokens(dark)}}`
-  )
 }
 
 /** Para el `head` de la raíz: el `<style>` del color, o nada. */

@@ -1,5 +1,5 @@
 {
-  "id": "4cd1977a-bd1a-48ae-80ab-449be01c23bf",
+  "id": "aa665cf8-3c83-49b3-861d-152259e76fcf",
   "prevId": "24e3ce7a-c2c9-43cf-bc17-3d6f757fb93b",
   "version": "7",
   "dialect": "postgresql",
@@ -17784,12 +17784,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "anesthesia_at_signing": {
-          "name": "anesthesia_at_signing",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "visit_follow_up_id": {
           "name": "visit_follow_up_id",
           "type": "uuid",
@@ -19794,18 +19788,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "asa_class_set_at": {
-          "name": "asa_class_set_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "asa_class_set_by": {
-          "name": "asa_class_set_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "marital_status": {
           "name": "marital_status",
           "type": "text",
@@ -20021,20 +20003,6 @@
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_asa_class_set_by_user_id_fk": {
-          "name": "patient_asa_class_set_by_user_id_fk",
-          "tableFrom": "patient",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "asa_class_set_by"
           ],
           "columnsTo": [
             "id"
@@ -26365,12 +26333,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "local_anesthesia": {
-          "name": "local_anesthesia",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
         "session_gap_days": {
           "name": "session_gap_days",
           "type": "smallint",
@@ -28529,13 +28491,6 @@
           "notNull": true,
           "default": 1
         },
-        "local_anesthesia": {
-          "name": "local_anesthesia",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "session_gap_days": {
           "name": "session_gap_days",
           "type": "smallint",
@@ -29586,7 +29541,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"status\" = 'active' and \"channel\" in ('whatsapp', 'instagram', 'messenger', 'telegram')",
+          "where": "\"status\" = 'active' and \"channel\" = 'whatsapp'",
           "concurrently": false,
           "method": "btree",
           "with": {}
