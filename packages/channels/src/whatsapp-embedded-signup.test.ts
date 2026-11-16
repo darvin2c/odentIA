@@ -334,6 +334,7 @@ describe("repartir un aviso que llega a la dirección de la app", () => {
         ],
       }),
       headers: {},
+      config: {},
     })
     expect(parsed.accountEvents).toEqual([{ kind: "removed", reason: "disconnected_in_app", initiatedBy: "user", at: "2025-02-12T00:43:44.000Z" }])
     expect(parsed.messages).toEqual([])
