@@ -3,7 +3,8 @@
  * indica con un borrador a la vista entra ya en él, con la misma operación que al firmar; lo de
  * otra pieza va en todas las opciones, y lo de una pieza con caminos espera a que se diga en cuál.
  */
-import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
+import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { placeBudgetPath } from "./budget-paths.js"
 import {
@@ -15,6 +16,7 @@ import {
   getBudgetDetail,
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { finalizeEncounter } from "./encounters.js"
 import { budgetLine, getPlanNextSteps } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -82,6 +84,49 @@ it("B1d: sin opciones, con un borrador de ayer sin enviar, lo indicado hoy entra
   const after = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, sent.id))
   expect(after.totalCents).toBe(108000)
   expect(await draft()).toBeNull()
+})
+
+// Revisión del 16 nov (R3): Raúl tiene un borrador de ayer sin enviar y hoy se le indica la resina de
+// la 24, que entra ya en él. Al firmar no queda nada nuevo que agregar, pero «Atención finalizada»
+// igual dice «Presupuesto listo · ¿Enviárselo ahora?», como cuando entraba al firmar.
+/** Ayer: la corona de la 46 quedó en un borrador sin enviar y la atención se firmó. Hoy, otra atención. */
+async function draftFromYesterday({ f, service }: Awaited<ReturnType<typeof setup>>): Promise<string> {
+  const coronaService = await service("Corona", 90000)
+  const corona = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: coronaService.id, sourceEncounterId: f.encounter.id, toothNumber: 46 }),
+  )
+  await f.run((tx) => createBudget(tx, ...f.args, { planId: corona.planId, itemIds: [corona.id] }))
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`,
+  )
+  const [today] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: "org_a", patientId: f.patient.id, professionalUserId: f.actor, reason: "Control" })
+    .returning({ id: encounter.id })
+  return today!.id
+}
+
+it("R3: con el borrador de ayer, lo indicado hoy ya entró al indicarlo y al firmar el cierre igual ofrece enviarlo", async () => {
+  const setupResult = await setup()
+  const { f, service } = setupResult
+  const today = await draftFromYesterday(setupResult)
+  const resinaService = await service("Resina", 18000)
+  const resina = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: resinaService.id, sourceEncounterId: today, toothNumber: 24 }),
+  )
+  expect(resina.budgetId).not.toBeNull()
+  await f.ready(today)
+  const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, today))
+  expect(signed.budget).toMatchObject({ id: resina.budgetId, added: 1, itemCount: 2, totalCents: 108000 })
+})
+
+it("R3: sin nada indicado hoy, el borrador de ayer no se ofrece al firmar", async () => {
+  const setupResult = await setup()
+  const { f } = setupResult
+  const today = await draftFromYesterday(setupResult)
+  await f.ready(today)
+  const signed = await f.run((tx) => finalizeEncounter(tx, ...f.args, today))
+  expect(signed.budget).toBeNull()
 })
 
 it("B1c: elige A, acepta la endodoncia y lo común y «lo piensa» la corona: la línea dice lo aceptado y lo que piensa, y sigue esperando respuesta", async () => {
