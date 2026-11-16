@@ -6,7 +6,19 @@
  * agentes y el crédito del mes están en Resumen y Gastos. Solo la
  * administración (ADR 0094).
  */
-import { Button, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from "@odentia/ui"
+import {
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  toast,
+} from "@odentia/ui"
 import {
   ConfirmDialog,
   DatePickerButton,
@@ -19,6 +31,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChevronDown } from "lucide-react"
 import { useRef, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
@@ -64,6 +77,15 @@ interface BillingTerms {
   /** Último instante del descuento (issue 168); null = no vence. */
   discountEndsAt: string | null
   guaranteedUntil: string | null
+  /** El plan que rige cuando terminan sus condiciones de Fundadora, desde `startsAt`; null si nada cambia solo. */
+  next: {
+    name: string
+    currency: string
+    priceCents: number
+    creditCents: number
+    prices: Record<string, number | null>
+    startsAt: string
+  } | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
   /** Con ciclo quincenal, a los cuántos días del tramo se cobra (condiciones comerciales). */
@@ -148,6 +170,7 @@ const shortDay = (iso: string) =>
 function priceText(micros: number, currency: string): string {
   return new Intl.NumberFormat("es-PE", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
 }
+const moneyText = (cents: number, currency: string) => new Intl.NumberFormat("es-PE", { style: "currency", currency }).format(cents / 100)
 const discounted = (base: number, bps: number) => Math.round((base * (10_000 - bps)) / 10_000)
 
 type Plan = NonNullable<BillingTerms["plan"]>
@@ -202,14 +225,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-base font-medium">Precio y prueba</h2>
-      <p className="text-sm text-muted-foreground">
-        {plan ? `${plan.name} · ` : ""}
-        {data.status === "prueba" && data.trial.startedAt
-          ? `En prueba · día ${Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))} de ${data.trial.days}`
-          : `Estado: ${data.status}`}
-        {data.guaranteedUntil ? ` · Fundadora hasta el ${shortDay(data.guaranteedUntil)}` : ""}
-        {data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura {data.billingCycle === "quincenal" ? halfWords : "cada mes"}
-      </p>
+      <PlanSummary data={data} halfWords={halfWords} />
 
       {data.founders ? (
         <FoundersMoveSection
@@ -238,7 +254,10 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
       {plan ? (
         <div className="grid gap-4 md:grid-cols-2">
           <TrialForm organizationId={organizationId} data={data} plan={plan} money={money} onSaved={refresh} />
-          <DiscountForm organizationId={organizationId} data={data} plan={plan} onSaved={refresh} />
+          {/* Un plan sin descuento (Fundadores) no se negocia: no se ofrece. */}
+          {plan.maxDiscountBps > 0 || data.discountBps > 0 ? (
+            <DiscountForm organizationId={organizationId} data={data} plan={plan} onSaved={refresh} />
+          ) : null}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No hay un plan con precios por acción: configúralo en Facturación › Planes.</p>
@@ -285,6 +304,91 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * El plan que rige y, si cambia solo (una Fundadora al terminar sus condiciones), a cuál y
+ * desde cuándo, en una línea; los precios de los dos se despliegan. Debajo, la prueba, el
+ * vendedor y cómo se factura.
+ */
+function PlanSummary({ data, halfWords }: { data: BillingTerms; halfWords: string }) {
+  const { plan, next } = data
+  const status =
+    data.status === "prueba" && data.trial.startedAt
+      ? `En prueba · día ${Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))} de ${data.trial.days}${data.trial.endsAt ? `, hasta el ${shortDay(data.trial.endsAt)}` : ""}`
+      : `Estado: ${data.status}`
+  const facts = `${status}${data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura ${data.billingCycle === "quincenal" ? halfWords : "cada mes"}`
+  if (!plan) return <p className="text-sm text-muted-foreground">{facts}</p>
+  const rows = PRICE_ROWS.filter((row) => (plan.prices?.[row.key] ?? null) !== null || (next?.prices[row.key] ?? null) !== null)
+  const cell = "py-1 text-right tabular-nums"
+  return (
+    <Collapsible className="flex flex-col gap-3 rounded-lg border p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="text-sm">
+            Plan activo: <span className="font-medium">{plan.name}</span>
+            {/* «Hasta el … después»: lo mismo que se le dice a la clínica, y el cambio ocurre ese día. */}
+            {next ? (
+              <>
+                {" "}
+                hasta el {shortDay(next.startsAt)} · después pasa al <span className="font-medium">{next.name}</span>
+              </>
+            ) : data.guaranteedUntil ? (
+              <> · condiciones de Fundadora hasta el {shortDay(data.guaranteedUntil)}</>
+            ) : null}
+          </p>
+          <p className="text-xs text-muted-foreground">{facts}</p>
+        </div>
+        <CollapsibleTrigger render={<Button type="button" variant="ghost" size="sm" className="group shrink-0" />}>
+          Ver detalles
+          <ChevronDown aria-hidden className="transition-transform group-data-[panel-open]:rotate-180" />
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent>
+        <table className="w-full max-w-2xl text-sm">
+          <caption className="sr-only">{next ? `Precios de ${plan.name} y de ${next.name}` : `Precios de ${plan.name}`}</caption>
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground">
+              <th scope="col" className="py-1 font-medium">
+                Concepto
+              </th>
+              <th scope="col" className="py-1 text-right font-medium">
+                {next ? `${plan.name} (hasta el ${shortDay(next.startsAt)})` : plan.name}
+              </th>
+              {next ? (
+                <th scope="col" className="py-1 text-right font-medium">
+                  {next.name} (después)
+                </th>
+              ) : null}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="py-1">Cuota del mes</td>
+              <td className={cell}>{moneyText(plan.priceCents, plan.currency)}</td>
+              {next ? <td className={cell}>{moneyText(next.priceCents, next.currency)}</td> : null}
+            </tr>
+            <tr>
+              <td className="py-1">Crédito del mes</td>
+              <td className={cell}>{moneyText(plan.creditCents, plan.currency)}</td>
+              {next ? <td className={cell}>{moneyText(next.creditCents, next.currency)}</td> : null}
+            </tr>
+            {rows.map((row) => {
+              const today = plan.prices?.[row.key] ?? null
+              const later = next?.prices[row.key] ?? null
+              return (
+                <tr key={row.key}>
+                  <td className="py-1">{row.label}</td>
+                  <td className={cell}>{today === null ? "—" : priceText(today, plan.currency)}</td>
+                  {next ? <td className={cell}>{later === null ? "—" : priceText(later, next.currency)}</td> : null}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -504,6 +608,7 @@ function DiscountForm({
       .string()
       .refine((day) => !day || new Date(endOfDay(day)).getTime() > Date.now(), "El vencimiento tiene que ser una fecha futura"),
   })
+  const box = useRef<HTMLFormElement>(null)
   const form = useAppForm({
     defaultValues: { discount: String(data.discountBps / 100), discountEnd: dayOf(data.discountEndsAt) },
     validators: { onSubmit: schema },
@@ -514,6 +619,9 @@ function DiscountForm({
       })
       formApi.reset(value)
       toast.success(outcomeWords(result))
+      // En un plan sin descuento, quitar el que tenía hace desaparecer esta tarjeta: el foco queda en Precio y prueba.
+      const around = box.current?.parentElement ?? null
+      focusInsideLater(() => around)
       onSaved()
     },
   })
@@ -523,7 +631,7 @@ function DiscountForm({
   const bps = useStore(form.store, (state) => bpsOf(state.values.discount))
 
   return (
-    <form noValidate className="flex flex-col gap-2 rounded-lg border p-3" onSubmit={onSubmit}>
+    <form ref={box} noValidate className="flex flex-col gap-2 rounded-lg border p-3" onSubmit={onSubmit}>
       <p className="text-sm font-medium">Precio negociado</p>
       <div className="grid grid-cols-2 gap-2">
         <form.AppField name="discount">
@@ -564,14 +672,14 @@ function DiscountForm({
       </p>
       {Number.isFinite(bps) && bps >= 0 ? (
         <table className="w-full text-sm">
-          <caption className="sr-only">Precio de lista y lo que paga esta clínica</caption>
+          <caption className="sr-only">Precio del plan y lo que paga esta clínica</caption>
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th scope="col" className="py-1 font-medium">
                 Acción
               </th>
               <th scope="col" className="py-1 text-right font-medium">
-                Lista
+                Precio del plan
               </th>
               <th scope="col" className="py-1 text-right font-medium">
                 Paga esta clínica
@@ -601,7 +709,7 @@ function DiscountForm({
         </table>
       ) : null}
       {bps > 0 ? (
-        <p className="text-xs text-muted-foreground">Si sube el precio de lista, esta clínica sigue pagando {bps / 100} % menos sobre el precio nuevo.</p>
+        <p className="text-xs text-muted-foreground">Si sube el precio del plan, esta clínica sigue pagando {bps / 100} % menos sobre el precio nuevo.</p>
       ) : null}
       {data.negotiations.some((item) => item.kind === "descuento" && item.status !== "pendiente") ? (
         <p className="text-xs text-muted-foreground">

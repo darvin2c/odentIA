@@ -14,7 +14,7 @@ import {
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
-import { getActionPricing } from "./saas-actions.js"
+import { getActionPricing, planPrices } from "./saas-actions.js"
 import { chooseSaasPlan, createSaasPlan, getPublicTrialOffer, listClinicPlans, startSaasTrial, updateSaasPlan } from "./saas-billing.js"
 import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import {
@@ -47,7 +47,7 @@ import {
   waitlistHomeRows,
   waitlistStage,
 } from "./saas-founders.js"
-import { decideSaasNegotiation, getSaasAlerts, setSaasDiscount } from "./saas-terms.js"
+import { decideSaasNegotiation, getOrganizationBillingTerms, getSaasAlerts, setSaasDiscount } from "./saas-terms.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Fundadores (issue 165) y precio negociado con vencimiento (issue 168). */
@@ -277,6 +277,16 @@ describe("pasar a Fundadores desde la administración", () => {
     })
     expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - now.getTime()) / DAY)).toBe(90)
     expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
+    // La ficha dice a qué plan pasa, desde cuándo y a qué precios: los del plan de lista.
+    const [list] = await ownerDb.select().from(saasPlan).where(eq(saasPlan.id, listPlanId))
+    expect((await getOrganizationBillingTerms(ownerDb, orgId, now))?.next).toEqual({
+      name: "Plan odentIA",
+      currency: "USD",
+      priceCents: 2900,
+      creditCents: 2900,
+      prices: planPrices(list!),
+      startsAt: entered.guaranteedUntil,
+    })
     // Ya es Fundadora: no se ofrece ni pasa otra vez.
     expect(await getFoundersMove(ownerDb, orgId)).toBeNull()
     await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
@@ -285,7 +295,16 @@ describe("pasar a Fundadores desde la administración", () => {
     await ownerDb.update(saasSubscription).set({ guaranteedUntil: new Date(Date.now() - 60_000) }).where(eq(saasSubscription.organizationId, orgId))
     expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
     expect((await founderSeats(ownerDb, foundersPlanId)).used).toBe(before.used + 1)
+    // Terminadas sus condiciones, la ficha ya no anuncia otro cambio.
+    expect((await getOrganizationBillingTerms(ownerDb, orgId))?.next).toBeNull()
     await expect(moveClinicToFounders(ownerDb, admin, orgId)).rejects.toMatchObject({ code: "FOUNDERS_ALREADY" })
+  })
+
+  it("con sus condiciones vigentes pero ya en el plan de lista, la ficha no anuncia otro plan", async () => {
+    const orgId = await clinic({ planId: listPlanId, status: "activa", guaranteedUntil: new Date(Date.now() + 400 * DAY) })
+    const terms = await getOrganizationBillingTerms(ownerDb, orgId)
+    expect(terms?.plan?.id).toBe(listPlanId)
+    expect(terms?.next).toBeNull()
   })
 
   it("no pasa sin lugar, ni una demo, ni una clínica que ya paga, y solo Administración la pasa", async () => {
@@ -477,7 +496,10 @@ describe("una lista de precios por producto (ADR 0093)", () => {
   })
 
   it("al terminar Fundadores latidIA pasa al Plan latidIA", async () => {
-    const orgId = await consultorio({ planId: medicalFoundersId, guaranteedUntil: new Date(Date.now() - 60_000) })
+    const orgId = await consultorio({ planId: medicalFoundersId, guaranteedUntil: new Date(Date.now() + 30 * DAY) })
+    // La ficha anuncia el plan de lista de su producto, no el de odentIA.
+    expect((await getOrganizationBillingTerms(ownerDb, orgId))?.next?.name).toBe("Plan latidIA")
+    await ownerDb.update(saasSubscription).set({ guaranteedUntil: new Date(Date.now() - 60_000) }).where(eq(saasSubscription.organizationId, orgId))
     expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub).toMatchObject({ planId: medicalListId, guaranteedUntil: null })
