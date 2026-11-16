@@ -1204,7 +1204,7 @@
         "agenda": "no",
         "preguntaGuia": true,
         "noDice": [
-          "(?<!no )(?<!no se )(?<!no las )\\b(emite|emites|emitir|genera|generas|envia|envias)\\b[^.?!]{0,30}\\b(boletas?|facturas?)\\b(?![^.?!]{0,30}\\baparte\\b)"
+          "(?:^|[.?!;]\\s*)(?:(?!\\bno\\b)[^.?!;])*?\\b(emite|emites|emitir|genera|generas|envia|envias)\\b[^.?!;]{0,30}\\b(boletas?|facturas?)\\b(?![^.?!;]{0,30}\\baparte\\b)"
         ]
       }
     },

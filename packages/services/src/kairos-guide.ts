@@ -14,13 +14,19 @@
  */
 import { type ClinicalProduct, withoutPersonData } from "@odentia/clinical"
 import { decideHelp, exactHelpOption } from "./help.js"
+import { helpTopicLabel } from "./help-guide.js"
 import { type HelpDecider, helpAnswerText } from "./help-decision.js"
 import { agentTextsFor, helpTopicsFor } from "./products.js"
 
 /** Lo que la guía dice de una función, o que no lo dice. */
 export type KairosGuideAnswer =
   | { found: true; texts: string[]; topicIds: string[] }
-  | { found: false; why: "no_esta" | "duda" | "sin_guia" }
+  | {
+      found: false
+      why: "no_esta" | "duda" | "sin_guia"
+      /** Con duda: las preguntas de la guía que podrían ser (escritas así, responden sin modelo). */
+      close?: string[]
+    }
 
 /** Cuántas respuestas de la guía lee Kairós como mucho. */
 const MAX_TEXTS = 3
@@ -60,5 +66,15 @@ export async function askGuideForSale(
       topicIds: [...new Set(shown.map((option) => option.topic.id))],
     }
   }
-  return { found: false, why: selection.verdict === "duda" ? "duda" : "no_esta" }
+  if (selection.verdict === "duda")
+    return {
+      found: false,
+      why: "duda",
+      close: selection.offered
+        .slice(0, MAX_TEXTS)
+        .map((option) =>
+          option.kind === "faq" ? option.faq.q : `¿Qué es ${helpTopicLabel(option.topic)}?`,
+        ),
+    }
+  return { found: false, why: "no_esta" }
 }

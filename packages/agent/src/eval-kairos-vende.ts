@@ -447,7 +447,8 @@ function toolsOf(w: World, calls: string[]): KairosSellTools {
       w.guideAsked.push({ question, found: answer.found })
       guideStats.asked += 1
       if (answer.found) guideStats.found += 1
-      return answer.found ? { found: true, texts: answer.texts } : { found: false }
+      if (answer.found) return { found: true, texts: answer.texts }
+      return answer.close?.length ? { found: false, close: answer.close } : { found: false }
     },
     async slots(range) {
       calls.push("ver_horarios")

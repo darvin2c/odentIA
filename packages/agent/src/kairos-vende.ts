@@ -149,7 +149,10 @@ export interface KairosSellTools {
 }
 
 /** Lo que la guía de la Ayuda dice de una función, o que no lo dice. */
-export type KairosGuideReply = { found: true; texts: string[] } | { found: false }
+export type KairosGuideReply =
+  | { found: true; texts: string[] }
+  /** `close`: las preguntas de la guía que podrían ser lo que pregunta, si la guía duda. */
+  | { found: false; close?: string[] }
 
 /**
  * Los errores de las herramientas que no se arreglan insistiendo: un tope del día
@@ -188,7 +191,7 @@ Siempre:
 - Español de Perú, trato de tú, cálido, claro y profesional. De 1 a 4 frases cortas. Sin emojis, sin listas ni formato.
 - La primera vez que respondes en una conversación, preséntate: «Hola, soy Kairós, el asistente de Sallca.»
 - Usa solo los hechos del producto, los precios que se te dan y lo que te responda preguntar_a_ariadna. No inventes funciones, plazos, resultados ni promesas.
-- Si pregunta si el sistema hace algo o cómo funciona algo que no está en «Lo que sabes del producto», usa preguntar_a_ariadna antes de responder. Con lo que te diga, responde en tono de venta: qué gana su clínica con eso, en 1 o 2 frases, sin los pasos de la pantalla ni nombres de botones. Si Ariadna no lo encuentra, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo.
+- Si pregunta si el sistema hace algo o cómo funciona algo que no está en «Lo que sabes del producto», usa preguntar_a_ariadna antes de responder, con la pregunta de cómo se hace eso en el sistema («¿Cómo firma el paciente el consentimiento en la tablet?»). Con lo que te diga, responde en tono de venta: qué gana su clínica con eso, en 1 o 2 frases, sin los pasos de la pantalla ni nombres de botones. Si Ariadna no lo encuentra, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo.
 - Termina con el paso siguiente claro: qué puede hacer o qué pasa ahora.
 - Si solo saluda o escribe algo corto como «info», cuenta en una frase qué es y pregúntale qué necesita o de qué clínica es.
 - Si manda un audio, una imagen o un archivo que no puedes ver, díselo y pídele que te lo escriba.
@@ -324,7 +327,7 @@ const TOOL_SCHEMAS = {
       .min(2)
       .max(300)
       .describe(
-        "La función por la que pregunta, en sus palabras, como «¿se puede firmar en la tablet?»",
+        "Cómo se hace eso en el sistema, como lo preguntaría quien ya lo usa: «¿Cómo firma el paciente el consentimiento en la tablet?»",
       ),
   }),
   es_paciente: z.object({}),
@@ -359,6 +362,8 @@ interface TurnState {
   /** La presentación que canceló en este turno. */
   cancelled: { startsAt: Date } | null
   ended: Exclude<KairosSellResult, { kind: "respondio" }> | null
+  /** Ya se le pidió una vez reescribir lo que no pasó la comprobación. */
+  retried: boolean
   /** Se corta al acabarse el tiempo: desde ahí no corre ninguna herramienta. */
   signal: AbortSignal
 }
@@ -522,6 +527,8 @@ async function runTool(
         return "Pasado al equipo."
       case "preguntar_a_ariadna": {
         const reply = await tools.askGuide(String(value.pregunta), ctx)
+        if (!reply.found && reply.close?.length)
+          return `Ariadna no está segura. En su guía están estas preguntas:\n${reply.close.map((q) => `- ${q}`).join("\n")}\nSi una es lo que pregunta la persona, vuelve a usar preguntar_a_ariadna con esa pregunta tal cual. Si ninguna lo es, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación.`
         if (!reply.found)
           return "Ariadna no lo encuentra en la guía: no digas que el sistema lo hace ni que no lo hace. Ofrécele verlo en la presentación o, si insiste, usa pasar_al_equipo."
         return `Ariadna (la guía de la Ayuda):\n${reply.texts.map((text) => `- ${text}`).join("\n")}\nCuéntaselo en tono de venta, en 1 o 2 frases, sin pasos de pantalla ni nombres de botones, y sin agregar nada que no diga.`
@@ -910,20 +917,25 @@ async function runTurn(
         input.now,
         askedThisTurn(input.history),
       )
-      if (!check.ok)
-        return failedTurn(
-          input,
-          state,
-          `La respuesta traía lo que no se le dio (${check.unsupported.join("; ")})`.slice(0, 300),
-        )
-      const untrue = falseClaims(text, { ...state, presentation: input.presentation })
-      if (untrue.length)
-        return failedTurn(
-          input,
-          state,
-          `La respuesta daba por hecho lo que no hizo (${untrue.join(", ")})`,
-        )
-      return { kind: "respondio", text: out, booked: state.booked }
+      const untrue = check.ok
+        ? falseClaims(text, { ...state, presentation: input.presentation })
+        : []
+      if (check.ok && untrue.length === 0)
+        return { kind: "respondio", text: out, booked: state.booked }
+      const why = check.ok
+        ? `La respuesta daba por hecho lo que no hizo (${untrue.join(", ")})`
+        : `La respuesta traía lo que no se le dio (${check.unsupported.join("; ")})`.slice(0, 300)
+      // Como `verifyReply` de Sofi: la primera vez el modelo recibe lo que no pudo salir y lo
+      // vuelve a escribir; a la segunda, el aviso fijo y el caso al equipo.
+      if (state.retried) return failedTurn(input, state, why)
+      state.retried = true
+      messages.push(
+        new HumanMessage({
+          content: check.ok
+            ? `Eso no puede salir: da por hecho lo que no hiciste (${untrue.join(", ")}). Agendar, mover y cancelar solo con su herramienta; si no lo hiciste, no lo digas. Escribe de nuevo la respuesta.`
+            : `Eso no puede salir: trae lo que no se te dio en este turno (${check.unsupported.join("; ")}). Las horas y fechas solo pueden ser las de ver_horarios de este turno, la que espera su sí o la de su presentación; si eligió una hora que ofreciste antes, usa ver_horarios y proponer_hora. Los precios, solo los vigentes. Escribe de nuevo la respuesta.`,
+        }),
+      )
     }
     for (const call of calls) {
       if (state.signal.aborted) return failedTurn(input, state, "El modelo tardó demasiado")
@@ -975,6 +987,7 @@ export function createKairosSeller(deps: KairosSellerDeps): KairosSeller {
         booked: null,
         cancelled: null,
         ended: null,
+        retried: false,
         signal: controller.signal,
       }
       // Lo que ya hizo en la base se le confirma aunque el modelo falle o tarde después.

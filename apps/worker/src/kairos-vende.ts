@@ -158,7 +158,8 @@ export function toolsFor(
       if (ctx.signal.aborted) throw stopped()
       if (!deps.guide) return { found: false }
       const answer = await deps.guide.ask(product, question)
-      return answer.found ? { found: true, texts: answer.texts } : { found: false }
+      if (answer.found) return { found: true, texts: answer.texts }
+      return answer.close?.length ? { found: false, close: answer.close } : { found: false }
     },
   }
 }
