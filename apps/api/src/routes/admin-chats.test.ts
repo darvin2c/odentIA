@@ -1,7 +1,13 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createOwnerDb, type Db } from "@odentia/db"
-import { saasChat, saasClient, saasClientContact, saasOutreach } from "@odentia/db/schema/admin-arm"
+import {
+  saasChat,
+  saasClient,
+  saasClientContact,
+  saasClientFile,
+  saasOutreach,
+} from "@odentia/db/schema/admin-arm"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
 import { type AdminActor, type AdminChannels, ingestInboundChat } from "@odentia/services"
@@ -16,8 +22,8 @@ import { createAdminKairosRoute } from "./admin-kairos.js"
 /**
  * Responder desde el ARM contra Postgres real y un Graph de prueba: lo que Meta
  * acepta queda enviado con su `wamid`, lo que rechaza no salió, un corte queda
- * incierto (502) y no se repite; fuera de las 24 h, 409; Soporte no ve lo
- * comercial (404) y la plantilla solo existe en WhatsApp.
+ * incierto (502) y no se repite; fuera de las 24 h, 409; las conversaciones
+ * son de Administración (Soporte, 403) y la plantilla solo existe en WhatsApp.
  */
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -38,18 +44,28 @@ let container: StartedTestContainer
 let ownerDb: Db
 let app: Hono<{ Variables: { adminActor: AdminActor } }>
 
-let mode: "ok" | "reject" | "throw" = "ok"
+let mode: "ok" | "reject" | "throw" | "reject-media" = "ok"
 const calls: { url: string; body: Record<string, unknown> }[] = []
 const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? "{}")) })
+  const body = JSON.parse(String(init?.body ?? "{}"))
+  calls.push({ url: String(input), body })
   if (mode === "throw") throw new TypeError("fetch failed")
-  if (mode === "reject")
+  if (mode === "reject" || (mode === "reject-media" && body.type && body.type !== "text"))
     return Response.json({ error: { code: 100, message: "Invalid parameter" } }, { status: 400 })
   return Response.json({
     messages: [{ id: `wamid.${calls.length}` }],
     message_id: `mid.${calls.length}`,
   })
 }) as typeof fetch
+
+/** El bucket privado de prueba: firma la dirección de cada archivo que sale (con cuánto vale). */
+const signed: string[] = []
+const storage = {
+  async attachmentUrl(key: string, ttl?: number) {
+    signed.push(`${key}|${ttl}`)
+    return `https://r2.test/${key}`
+  },
+}
 
 function call(method: string, path: string, who: string, body?: unknown) {
   const headers = new Headers({ "x-test-user": who })
@@ -131,7 +147,7 @@ beforeAll(async () => {
     c.set("adminActor", { userId: id, role: id === ADMIN ? "admin" : "support" })
     await next()
   })
-  app.route(BASE, createAdminChatsRoute({ ownerDb, channels, fetch: fakeFetch }))
+  app.route(BASE, createAdminChatsRoute({ ownerDb, channels, fetch: fakeFetch, storage }))
 }, 180_000)
 
 afterAll(async () => {
@@ -228,10 +244,11 @@ describe("responder", () => {
 })
 
 describe("quién ve qué", () => {
-  it("Soporte no ve una conversación de venta: 404 al leerla y al responderla", async () => {
+  it("las conversaciones son de Administración: Soporte recibe 403 al leerlas y al responderlas", async () => {
     const chatId = await chatWith("whatsapp", "+51911000005")
-    await expectStatus(await call("GET", `/${chatId}`, SUPPORT), 404)
-    await expectStatus(await call("POST", `/${chatId}/reply`, SUPPORT, { body: "Hola" }), 404)
+    await expectStatus(await call("GET", `/${chatId}`, SUPPORT), 403)
+    await expectStatus(await call("POST", `/${chatId}/reply`, SUPPORT, { body: "Hola" }), 403)
+    await expectStatus(await call("POST", `/${chatId}/kairos-pause`, SUPPORT), 403)
     await expectStatus(await call("GET", `/${chatId}`, ADMIN), 200)
   })
 
@@ -246,8 +263,9 @@ describe("quién ve qué", () => {
     expect(undone?.notClinicAt).toBeNull()
   })
 
-  it("la configuración dice qué canales están", async () => {
-    const response = await call("GET", "/config", SUPPORT)
+  it("la configuración dice qué canales están (solo a Administración)", async () => {
+    await expectStatus(await call("GET", "/config", SUPPORT), 403)
+    const response = await call("GET", "/config", ADMIN)
     await expectStatus(response, 200)
     expect((await json(response)).data).toEqual({
       whatsapp: true,
@@ -280,8 +298,8 @@ describe("escribir por WhatsApp desde la ficha", () => {
     expect(opened.client?.id).toBe(client!.id)
     const again = await call("POST", "/open", ADMIN, body)
     expect((await json(again)).data).toMatchObject({ id: opened.id, created: false })
-    // Sin cuenta, la ficha es comercial: Soporte no la ve.
-    await expectStatus(await call("POST", "/open", SUPPORT, body), 404)
+    // Las conversaciones son de Administración: Soporte escribe por wa.me.
+    await expectStatus(await call("POST", "/open", SUPPORT, body), 403)
   })
 
   it("si ese celular ya escribió sin decir de quién es, 409 con su conversación y no la liga", async () => {
@@ -341,7 +359,7 @@ describe("Kairós en la conversación", () => {
     const chatId = await chatWith("whatsapp", "+51911000020")
     const before = await json(await call("GET", `/${chatId}`, ADMIN))
     expect(before.data).toMatchObject({ handledByKairos: true, kairosPausedAt: null })
-    await expectStatus(await call("POST", `/${chatId}/kairos-pause`, SUPPORT), 404)
+    await expectStatus(await call("POST", `/${chatId}/kairos-pause`, SUPPORT), 403)
     await expectStatus(await call("POST", `/${chatId}/kairos-pause`, ADMIN), 200)
     const paused = await json(await call("GET", `/${chatId}`, ADMIN))
     expect(paused.data.handledByKairos).toBe(false)
@@ -352,5 +370,137 @@ describe("Kairós en la conversación", () => {
     expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(true)
     await expectStatus(await ask("PUT", ADMIN, { enabled: false }), 200)
     expect((await json(await call("GET", `/${chatId}`, ADMIN))).data.handledByKairos).toBe(false)
+  })
+})
+
+/** Un cliente ligado a la conversación, con sus documentos (lo que la ficha guarda en el bucket). */
+async function linkedWithFiles(
+  chatId: string,
+  files: Array<{ filename: string; contentType: string; size?: number }>,
+) {
+  const [client] = await ownerDb
+    .insert(saasClient)
+    .values({ name: `Clínica con archivos ${chatId.slice(0, 6)} (ficticia)`, product: "dental" })
+    .returning({ id: saasClient.id })
+  if (!client) throw new Error("sin cliente")
+  await expectStatus(await call("POST", `/${chatId}/assign`, ADMIN, { clientId: client.id }), 200)
+  const ids: string[] = []
+  for (const file of files) {
+    const [row] = await ownerDb
+      .insert(saasClientFile)
+      .values({
+        clientId: client.id,
+        kind: "otro",
+        filename: file.filename,
+        objectKey: `clients/${client.id}/${crypto.randomUUID()}.${file.filename.split(".").at(-1)}`,
+        contentType: file.contentType,
+        sizeBytes: file.size ?? 1024,
+        adminOnly: true,
+      })
+      .returning({ id: saasClientFile.id })
+    if (!row) throw new Error("sin archivo")
+    ids.push(row.id)
+  }
+  return { clientId: client.id, fileIds: ids }
+}
+
+describe("responder con archivos", () => {
+  it("el texto y cada archivo en su propio mensaje, en orden, con la dirección firmada por una hora", async () => {
+    mode = "ok"
+    const chatId = await chatWith("whatsapp", "+51911000030")
+    const { fileIds } = await linkedWithFiles(chatId, [
+      { filename: "propuesta.pdf", contentType: "application/pdf" },
+      { filename: "foto.jpg", contentType: "image/jpeg" },
+    ])
+    const before = calls.length
+    const response = await call("POST", `/${chatId}/reply`, ADMIN, {
+      body: "Va la **propuesta**",
+      fileIds,
+    })
+    await expectStatus(response, 201)
+    const { data } = await json(response)
+    expect(
+      data.parts.map((part: { kind: string; filename: string | null; status: string }) => [
+        part.kind,
+        part.filename,
+        part.status,
+      ]),
+    ).toEqual([
+      ["texto", null, "enviado"],
+      ["archivo", "propuesta.pdf", "enviado"],
+      ["archivo", "foto.jpg", "enviado"],
+    ])
+    expect(data).toMatchObject({ outreachId: data.parts[0].outreachId, status: "enviado" })
+    const sent = calls.slice(before)
+    expect(sent.map((one) => one.body.type)).toEqual(["text", "document", "image"])
+    // WhatsApp manda sus marcas: **x** sale como *x*.
+    expect(sent[0]?.body).toMatchObject({ text: { body: "Va la *propuesta*\n\n— Ana · odentIA" } })
+    expect(sent[1]?.body).toMatchObject({
+      biz_opaque_callback_data: data.parts[1].outreachId,
+      document: {
+        link: expect.stringMatching(/^https:\/\/r2\.test\/clients\//),
+        filename: "propuesta.pdf",
+      },
+    })
+    expect(signed.slice(-2).every((entry) => entry.endsWith("|3600"))).toBe(true)
+    const rows = await ownerDb
+      .select()
+      .from(saasOutreach)
+      .where(eq(saasOutreach.chatId, chatId))
+      .orderBy(saasOutreach.createdAt)
+    expect(rows.map((row) => row.fileIds)).toEqual([[], [fileIds[0]], [fileIds[1]]])
+  })
+
+  it("si un archivo no sale, lo que seguía no se envía y queda no salió: 502 con cada parte", async () => {
+    mode = "reject-media"
+    const chatId = await chatWith("whatsapp", "+51911000031")
+    const { fileIds } = await linkedWithFiles(chatId, [
+      { filename: "propuesta.pdf", contentType: "application/pdf" },
+      { filename: "anexo.pdf", contentType: "application/pdf" },
+    ])
+    const before = calls.length
+    const response = await call("POST", `/${chatId}/reply`, ADMIN, { body: "Van dos", fileIds })
+    await expectStatus(response, 502)
+    const { error } = await json(response)
+    expect(error.code).toBe("SEND_REJECTED")
+    expect(error.message).toContain("«propuesta.pdf»")
+    expect(error.message).toContain("Lo que seguía no se envió")
+    expect(error.parts.map((part: { status: string }) => part.status)).toEqual([
+      "enviado",
+      "no_salio",
+      "no_salio",
+    ])
+    expect(error.outreachId).toBe(error.parts[1].outreachId)
+    // El último nunca llegó a Meta: no se reintenta ni se manda solo.
+    expect(calls.length).toBe(before + 2)
+    mode = "ok"
+  })
+
+  it("sin cliente, 409; lo que el canal no acepta o no cabe, 400; y nada queda reservado", async () => {
+    mode = "ok"
+    const lonely = await chatWith("whatsapp", "+51911000032")
+    const some = "6b1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f"
+    const orphan = await call("POST", `/${lonely}/reply`, ADMIN, { fileIds: [some] })
+    await expectStatus(orphan, 409)
+    expect((await json(orphan)).error.code).toBe("CHAT_FILES_NEED_CLIENT")
+    const ig = await chatWith("instagram", "igsid-archivos")
+    const { fileIds } = await linkedWithFiles(ig, [
+      {
+        filename: "pacientes.xlsx",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+    ])
+    const refused = await call("POST", `/${ig}/reply`, ADMIN, { fileIds })
+    await expectStatus(refused, 400)
+    expect((await json(refused)).error.fields["fileIds[0]"]).toContain("«pacientes.xlsx»")
+    const msgr = await chatWith("messenger", "psid-largo")
+    const long = await call("POST", `/${msgr}/reply`, ADMIN, { body: "a".repeat(1990) })
+    await expectStatus(long, 400)
+    expect((await json(long)).error.fields.body).toContain("2000 caracteres")
+    await expectStatus(await call("POST", `/${msgr}/reply`, ADMIN, {}), 400)
+    for (const chatId of [lonely, ig, msgr])
+      expect(
+        await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.chatId, chatId)),
+      ).toHaveLength(0)
   })
 })

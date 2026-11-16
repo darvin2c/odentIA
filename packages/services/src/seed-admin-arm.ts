@@ -4,8 +4,10 @@
  * documento, lo que cargó la skill (con un informe que no se sabe si salió),
  * el alta de cada clínica (ADR 0187: una posible carga por correo, la carga
  * con errores, una carga por borrarse y un «No aplica»), lo que llega por
- * WhatsApp e Instagram (con y sin cliente) y lo que prepara Kairós, para recorrer Hoy, Clientes, Embudo (Venta y Alta), Kairós y
- * Reportes en local.
+ * WhatsApp e Instagram (con y sin cliente), las conversaciones de la Bandeja (un hilo de correo,
+ * un WhatsApp sin cliente, un Instagram que respondió Kairós y un Messenger que no necesitaba
+ * respuesta) y lo que prepara Kairós, para recorrer Hoy, la Bandeja, Clientes, Embudo (Venta y
+ * Alta), Kairós y Reportes en local.
  *
  * Solo manual (seed-dev la llama al final, cuando ya existen las cuentas de la
  * semilla y las demos para presentar); NUNCA en CI ni importada por tests.
@@ -17,7 +19,8 @@
  * propuestas, así que no se llega a ese estado por la operación), escriben
  * «Lo que hay que saber» como lo guarda el worker de Kairós y arman la cuenta
  * de «Demo Datos» (su propietaria, su contrato y el primer paso de su alta
- * como lo dejó el relleno al desplegar).
+ * como lo dejó el relleno al desplegar) y anotan el turno de Kairós que respondió un Instagram,
+ * con en qué se basó, como lo deja su worker.
  *
  * Idempotente: cada cliente se reconoce por el correo de su persona y su
  * historia se siembra una sola vez; al volver a correrla solo se mueven las
@@ -30,6 +33,7 @@ import { AGREEMENT_VERSION } from "@odentia/auth/legal"
 import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  kairosChatTurn,
   kairosItem,
   type SaasClientOrigin,
   saasClient,
@@ -39,6 +43,7 @@ import {
   saasInboundEmail,
   saasInboundMessage,
   saasOpportunity,
+  saasOutreach,
   saasProposal,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
@@ -65,8 +70,15 @@ import {
   updateClientContact,
 } from "./admin-clients.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { assignChat, ingestInboundChat, openChatForContact } from "./admin-inbound-chat.js"
+import {
+  assignChat,
+  ingestInboundChat,
+  markChatOutreachSent,
+  openChatForContact,
+  prepareKairosChatReply,
+} from "./admin-inbound-chat.js"
 import { assignInboundEmail, ingestInboundEmail } from "./admin-inbound-email.js"
+import { settleConversation } from "./admin-inbox.js"
 import {
   decideKairosItem,
   type KairosExecutors,
@@ -1166,6 +1178,7 @@ export async function seedAdminArm(
 
   /* --- Lo que llega por WhatsApp e Instagram --- */
   await seedChats(tx, clock, storage, { sonrisaPhone: "+51987100001", deuda })
+  await seedInbox(tx, clock)
 
   /* --- Horarios, sala y una ausencia del equipo (Kairós agenda presentaciones con ellos) --- */
   await seedStaffSchedules(tx, clock, sonrisa)
@@ -1944,6 +1957,144 @@ async function seedChats(
   )
   if (received.chatId !== chat.chatId)
     throw new Error("El WhatsApp de la semilla entró en otra conversación")
+}
+
+/**
+ * Lo que se recorre en la Bandeja (ADR 0196), una sola vez cada cosa:
+ * - Un hilo de correo con Odonto Chiclayo: Hugo pregunta, Ada le responde y Hugo vuelve a
+ *   escribir en el mismo hilo (te toca; la pasada de Kairós deja la respuesta lista).
+ * - Un WhatsApp sin cliente que pregunta cuánto cuesta (te toca).
+ * - Un Instagram sin cliente que respondió Kairós, con su turno: en qué se basó («los precios de
+ *   la web»), como lo deja el worker de Kairós.
+ * - Un Messenger que solo agradecía: «No necesita respuesta».
+ */
+async function seedInbox(tx: Db, clock: Clock): Promise<void> {
+  const hola = `hola@${productMailDomain("dental")}`
+  const first = "<seed-bandeja-hilo-1@example.test>"
+  const asked = await ingestInboundEmail(
+    tx,
+    {
+      mailbox: "hola",
+      product: "dental",
+      messageId: first,
+      from: "hugo.chiclayo@example.test",
+      fromName: "Hugo Castillo (ficticio)",
+      to: hola,
+      subject: "¿Cómo es la carga de nuestros pacientes?",
+      text: "Hola, tenemos los pacientes en un Excel. ¿Ustedes lo cargan? (ejemplo ficticio)",
+      receivedAt: clock.ago(1, 6),
+      attachments: [],
+      senderVerified: true,
+    },
+    clock.now,
+  )
+  if (!asked.duplicate) {
+    const reply = await prepareEmailReply(
+      tx,
+      ADA,
+      asked.id,
+      {
+        body: "Hola, Hugo. Sí: nos mandas el Excel y lo cargamos nosotros. (ejemplo ficticio)",
+      },
+      clock.ago(1, 5),
+    )
+    await markOutreachSent(tx, ADA, reply.id, "enviado", clock.ago(1, 5))
+    const [sent] = await tx
+      .select({ messageId: saasOutreach.messageId })
+      .from(saasOutreach)
+      .where(eq(saasOutreach.id, reply.id))
+      .limit(1)
+    await ingestInboundEmail(
+      tx,
+      {
+        mailbox: "hola",
+        product: "dental",
+        messageId: "<seed-bandeja-hilo-2@example.test>",
+        from: "hugo.chiclayo@example.test",
+        fromName: "Hugo Castillo (ficticio)",
+        to: hola,
+        subject: "Re: ¿Cómo es la carga de nuestros pacientes?",
+        text: "Perfecto, gracias. ¿Cuánto demoran en tenerlo listo? (ejemplo ficticio)",
+        inReplyTo: sent?.messageId ?? null,
+        references: [first, sent?.messageId].filter(Boolean).join(" "),
+        receivedAt: clock.ago(0, 2),
+        attachments: [],
+        senderVerified: true,
+      },
+      clock.now,
+    )
+  }
+
+  const whatsapp = "wamid.seed-bandeja-precio-1"
+  if (!(await chatMessageSeeded(tx, whatsapp)))
+    await ingestInboundChat(
+      tx,
+      {
+        channel: "whatsapp",
+        address: "+51987100077",
+        waId: "51987100077",
+        displayName: "Sonríe Piura",
+        externalId: whatsapp,
+        body: "Hola, ¿cuánto cuesta odentIA para un consultorio con dos sillones? (ejemplo ficticio)",
+        media: [],
+        receivedAt: clock.ago(0, 1),
+      },
+      clock.now,
+    )
+
+  const instagram = "seed-bandeja-ig-precio-1"
+  if (!(await chatMessageSeeded(tx, instagram))) {
+    const at = clock.ago(0, 3)
+    const ig = await ingestInboundChat(
+      tx,
+      {
+        channel: "instagram",
+        address: "seed-igsid-consultorio-norte",
+        displayName: "@consultorio.norte",
+        externalId: instagram,
+        body: "Hola, ¿qué precio tiene? (ejemplo ficticio)",
+        media: [],
+        receivedAt: at,
+      },
+      at,
+    )
+    const reply = await prepareKairosChatReply(
+      tx,
+      ig.chatId,
+      {
+        body: "¡Hola! Los planes y sus precios están en la web de odentIA. ¿Cuántas personas atienden en tu consultorio? (ejemplo ficticio)",
+      },
+      at,
+    )
+    await markChatOutreachSent(tx, reply.outreachId, "seed-mid-bandeja-ig-1", at)
+    await tx.insert(kairosChatTurn).values({
+      chatId: ig.chatId,
+      messageId: ig.messageId,
+      outcome: "respondio",
+      outreachId: reply.outreachId,
+      basis: ["los precios de la web"],
+      createdAt: at,
+      updatedAt: at,
+    })
+  }
+
+  const messenger = "seed-bandeja-fb-gracias-1"
+  if (!(await chatMessageSeeded(tx, messenger))) {
+    const fb = await ingestInboundChat(
+      tx,
+      {
+        channel: "messenger",
+        address: "seed-psid-laura-gracias",
+        displayName: "Laura Gómez (ficticia)",
+        externalId: messenger,
+        body: "¡Gracias por la información! Por ahora no necesito nada más. (ejemplo ficticio)",
+        media: [],
+        receivedAt: clock.ago(0, 5),
+      },
+      clock.ago(0, 5),
+    )
+    await settleConversation(tx, ADA, { kind: "chat", id: fb.chatId }, clock.ago(0, 4))
+  }
 }
 
 /**
