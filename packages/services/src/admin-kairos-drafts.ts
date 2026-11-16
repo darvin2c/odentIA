@@ -17,8 +17,12 @@ import { user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, inArray, isNotNull, not, sql } from "drizzle-orm"
 import {
+  CLIENT_PHASE_WORDS,
   CLIENT_STAGE_WORDS,
+  CLIENT_STAGES,
   type ClientStage,
+  clientPaidSql,
+  clientPhaseOf,
   clientStageSql,
   inboundMailboxWords,
 } from "./admin-clients.js"
@@ -233,6 +237,32 @@ export interface KairosDraftJob {
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null
 
+/**
+ * Dónde está la clínica, en palabras, para Kairós: con cuenta, su fase (ADR
+ * 0196: «En alta» hasta su primer pago confirmado, «Activo» después), no
+ * «Entró», que juntaba a la que recién se da de alta con la que ya paga; sin
+ * cuenta, la etapa de la venta, que dice más para escribirle. La regla de la
+ * fase es la de siempre (`clientPhaseOf`).
+ */
+export function kairosStageWords(input: {
+  stage: unknown
+  hasAccount: boolean
+  paid: boolean
+}): string {
+  if (!(CLIENT_STAGES as readonly unknown[]).includes(input.stage)) return String(input.stage)
+  const stage = input.stage as ClientStage
+  const phase = clientPhaseOf({ stage, hasAccount: input.hasAccount, paid: input.paid })
+  return phase === "en_alta" || phase === "activo"
+    ? CLIENT_PHASE_WORDS[phase]
+    : CLIENT_STAGE_WORDS[stage]
+}
+
+/** Si tiene cuenta y si ya pagó, para `kairosStageWords`, en la consulta de `saas_client`. */
+const phaseFacts = {
+  hasAccount: sql<boolean>`(${saasClient.organizationId} is not null)`,
+  paid: clientPaidSql(),
+}
+
 /** Los datos de la clínica que ve el modelo, en palabras. */
 function clientFactsOf(
   client: {
@@ -242,7 +272,7 @@ function clientFactsOf(
     currentTool: string | null
   },
   product: ClinicalProduct,
-  stage: unknown,
+  where: { stage: unknown; hasAccount: boolean; paid: boolean },
 ): KairosDraftClientFacts {
   return {
     name: client.name,
@@ -254,7 +284,7 @@ function clientFactsOf(
     currentTool: client.currentTool
       ? (TOOL_WORDS[client.currentTool as SaasClientTool] ?? null)
       : null,
-    stage: CLIENT_STAGE_WORDS[stage as ClientStage] ?? String(stage),
+    stage: kairosStageWords(where),
   }
 }
 
@@ -327,6 +357,7 @@ export async function pendingKairosDraftJobs(
         ownerUserId: saasClient.ownerUserId,
       },
       stage: clientStageSql(now),
+      ...phaseFacts,
     })
     .from(kairosItem)
     .innerJoin(saasClient, eq(saasClient.id, kairosItem.clientId))
@@ -343,7 +374,7 @@ export async function pendingKairosDraftJobs(
     .limit(limit)
 
   const jobs: KairosDraftJob[] = []
-  for (const { item, client, stage } of pending) {
+  for (const { item, client, stage, hasAccount, paid } of pending) {
     const clientId = item.clientId
     if (!clientId) continue
     const payload = item.payload
@@ -396,7 +427,11 @@ export async function pendingKairosDraftJobs(
         channel && (SAAS_WRITE_CHANNELS as readonly string[]).includes(channel)
           ? (channel as SaasOutreachChannel)
           : null,
-      client: clientFactsOf(client, product, stage),
+      client: clientFactsOf(client, product, {
+        stage,
+        hasAccount: Boolean(hasAccount),
+        paid: Boolean(paid),
+      }),
       contact: contact ? { name: contact.name, title: contact.title } : null,
       senderName: sender?.name?.trim() || `El equipo de ${productWords(product).name}`,
       demo: demo ? { name: demo.name } : null,
@@ -469,6 +504,7 @@ export async function pendingKairosReplyJobs(
             name: saasClient.name,
             product: saasClient.product,
             stage: clientStageSql(now),
+            ...phaseFacts,
           })
           .from(saasClient)
           .where(eq(saasClient.id, email.clientId))
@@ -488,7 +524,11 @@ export async function pendingKairosReplyJobs(
           ? clientFactsOf(
               { name: client.name, city: null, professionals: null, currentTool: null },
               product,
-              client.stage,
+              {
+                stage: client.stage,
+                hasAccount: Boolean(client.hasAccount),
+                paid: Boolean(client.paid),
+              },
             )
           : null,
         from: {

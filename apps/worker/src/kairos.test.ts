@@ -7,6 +7,7 @@ import {
   saasClientContact,
   saasClientFile,
   saasInboundEmail,
+  saasOutreach,
   saasTask,
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit } from "@odentia/db/schema/admin-core"
@@ -15,7 +16,7 @@ import { organization, user } from "@odentia/db/schema/auth"
 import { saasFollowUp } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { kairosUseRecorder, runKairosTick } from "./kairos.js"
+import { clientSummaryFacts, kairosUseRecorder, runKairosTick } from "./kairos.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -58,6 +59,10 @@ function countingWriter(overrides: Partial<KairosWriter> = {}) {
     weeklySummary: async (input) => {
       calls.push("semana")
       return (overrides.weeklySummary ?? fakeKairosWriter.weeklySummary)(input)
+    },
+    improveText: async (input) => {
+      calls.push("mejorar")
+      return fakeKairosWriter.improveText(input)
     },
   }
   return { writer, calls }
@@ -244,6 +249,80 @@ describe("runKairosTick", () => {
     const [client] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, clientId))
     expect(client?.summaryAt?.toISOString()).toBe(monday.toISOString())
   })
+})
+
+it("«Lo que hay que saber»: lo que le escribimos va sin su texto; lo anotado a mano sigue como nota", async () => {
+  const [client] = await ownerDb
+    .insert(saasClient)
+    .values({ name: "Clínica Anuncio (ficticia)", product: "dental", origin: "web" })
+    .returning()
+  const id = client?.id ?? ""
+  const [rosa] = await ownerDb
+    .insert(saasClientContact)
+    .values({ clientId: id, name: "Rosa Anuncio", email: "rosa@anuncio.test", isPrimary: true })
+    .returning()
+  const sentAt = new Date("2026-11-12T15:00:00Z")
+  // El anuncio que salió por correo y su actividad, como la deja `outreachWentOut`.
+  await ownerDb.insert(saasOutreach).values({
+    clientId: id,
+    contactId: rosa?.id ?? null,
+    channel: "correo",
+    toAddress: "rosa@anuncio.test",
+    subject: "Meta nos verificó",
+    body: "Ya puedes conectar tu WhatsApp desde la app.",
+    status: "enviado",
+    sentAt,
+  })
+  await ownerDb.insert(saasFollowUp).values([
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "salio",
+      body: "Meta nos verificó\n\nYa puedes conectar tu WhatsApp desde la app.",
+      contactId: rosa?.id ?? null,
+      happenedAt: sentAt,
+    },
+    // Lo que escribió la clínica: sin su texto, con quién lo escribió.
+    {
+      clientId: id,
+      kind: "correo",
+      direction: "entro",
+      body: "Escribió a hola@: ¿Y ahora qué hago?",
+      contactId: rosa?.id ?? null,
+      happenedAt: new Date("2026-11-13T15:00:00Z"),
+    },
+    // Un WhatsApp anotado a mano (sin envío nuestro con su hora): es una nota del equipo.
+    {
+      clientId: id,
+      kind: "whatsapp",
+      direction: "salio",
+      body: "Le escribí para coordinar la demo",
+      outcome: "Quedó en avisar",
+      happenedAt: new Date("2026-11-14T15:00:00Z"),
+    },
+  ])
+  const facts = await clientSummaryFacts(ownerDb, {
+    id,
+    name: "Clínica Anuncio (ficticia)",
+    product: "dental",
+    city: null,
+    professionals: null,
+    current_tool: null,
+    origin: "web",
+    organization_id: null,
+    stage: "contacto",
+    paid: false,
+  })
+  const texts = facts.map((fact) => fact.text)
+  expect(texts).toContain(
+    "Le escribimos por correo el 12 de noviembre de 2026: «Meta nos verificó»",
+  )
+  expect(texts).toContain("Rosa Anuncio nos escribió por correo el 13 de noviembre de 2026")
+  expect(texts).toContain(
+    "WhatsApp del 14 de noviembre de 2026: Le escribí para coordinar la demo · quedó en: Quedó en avisar",
+  )
+  // El texto del anuncio nunca llega como hecho de la clínica.
+  expect(JSON.stringify(facts)).not.toContain("Ya puedes conectar")
 })
 
 it("el gasto de Kairós se anota como gasto de Sallca, sin clínica", async () => {
