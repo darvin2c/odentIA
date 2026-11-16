@@ -1,6 +1,7 @@
 import { type ChannelProvider, channelAdapters, unsubscribeAppFromAccount } from "@odentia/channels"
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
+  accountStillUsed,
   changeConnectionCredentials,
   checkMessageText,
   closeWhatsAppSignup,
@@ -65,7 +66,11 @@ const messageInput = z.object({
   buttonTitle: z.string().max(200).optional(),
 })
 
-export function createConnectionsRoute(deps: CrmDeps) {
+/**
+ * `accountsDb`: la conexión dueña de la base, solo para saber si otra clínica usa
+ * la misma cuenta de WhatsApp antes de quitar la suscripción de la app al desconectar.
+ */
+export function createConnectionsRoute(deps: CrmDeps & { accountsDb?: Db }) {
   const app = new Hono()
   const providerDeps = {
     fetch,
@@ -254,11 +259,18 @@ export function createConnectionsRoute(deps: CrmDeps) {
     const { orgId } = orgContextOf(c)
     const id = c.req.param("id")
     return runService(c, 200, async () => {
-      const { updated, access } = await withOrgContext(deps.db, orgId, async (tx) => ({
-        updated: await setConnectionStatus(tx, orgId, id, "disabled"),
-        access: await signupAccess(tx, orgId, deps.secretsKey, id),
-      }))
-      if (access && deps.metaGraphVersion && deps.validateExternal !== false) {
+      const { updated, access } = await withOrgContext(deps.db, orgId, async (tx) => {
+        // Se lee antes: si ya estaba desconectada, Meta no se toca otra vez.
+        const access = await signupAccess(tx, orgId, deps.secretsKey, id)
+        return { access, updated: await setConnectionStatus(tx, orgId, id, "disabled") }
+      })
+      if (
+        access?.active &&
+        deps.metaGraphVersion &&
+        deps.accountsDb &&
+        deps.validateExternal !== false &&
+        !(await accountStillUsed(deps.accountsDb, access.wabaId, id))
+      ) {
         await unsubscribeAppFromAccount({ graphVersion: deps.metaGraphVersion }, access.wabaId, access.token, { fetch: deps.fetch ?? fetch }).catch(
           (error: unknown) => {
             console.warn(`[connections] no se pudo quitar la suscripción de la app en Meta: ${error instanceof Error ? error.message : "sin detalle"}`)

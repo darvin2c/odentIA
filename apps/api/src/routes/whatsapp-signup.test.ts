@@ -846,6 +846,7 @@ describe("un número desconectado no queda tomado", () => {
         webhookBaseUrl: "https://api.example.com",
         metaGraphVersion: META.graphVersion,
         fetch: meta.fetch,
+        accountsDb: ownerDb,
       }),
     )
     return app
@@ -999,5 +1000,27 @@ describe("un número desconectado no queda tomado", () => {
     const row = await rowOf(old.id)
     expect(row.status).toBe("active")
     expect(row.signup?.subscribedAt).toBeTruthy()
+  })
+
+  it("con dos números de la misma cuenta en dos clínicas, desconectar uno no le quita los mensajes al otro", async () => {
+    await newOrg("org_n")
+    await newOrg("org_q")
+    const meta = fakeMeta()
+    const first = await connect("org_n", meta, { code: "codigo-n", wabaId: "7030", phoneNumberId: "9031" })
+    const second = await connect("org_q", meta, { code: "codigo-q", wabaId: "7030", phoneNumberId: "9032" })
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(201)
+    expect((await post(connections("org_n", meta), `/channels/connections/${first.data!.id}/disable`)).status).toBe(200)
+    // La suscripción es de la cuenta: la otra clínica la sigue usando.
+    expect(meta.of("DELETE", "/7030/subscribed_apps")).toHaveLength(0)
+    // Desconectada, «Reintentar» no vuelve a suscribir la app.
+    const retry = await post(buildApp("org_n", { fetch: meta.fetch }), `/channels/whatsapp/signup/${first.data!.id}/retry`)
+    expect(retry.status).toBe(400)
+    expect(((await retry.json()) as { error: { message: string } }).error.message).toBe("Esta conexión está desconectada: usa «Volver a conectar».")
+    // Ya desconectada, desconectar otra vez tampoco toca Meta.
+    expect((await post(connections("org_q", meta), `/channels/connections/${second.data!.id}/disable`)).status).toBe(200)
+    expect(meta.of("DELETE", "/7030/subscribed_apps")).toHaveLength(1)
+    expect((await post(connections("org_q", meta), `/channels/connections/${second.data!.id}/disable`)).status).toBe(200)
+    expect(meta.of("DELETE", "/7030/subscribed_apps")).toHaveLength(1)
   })
 })

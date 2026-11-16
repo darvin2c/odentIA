@@ -1274,7 +1274,7 @@ export function createApp(deps: AppDeps) {
     createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }),
   )
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
-  guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
+  guarded.route("/channels/connections", createConnectionsRoute({ ...crmDeps, accountsDb: deps.ownerDb }))
   guarded.route(
     "/channels/whatsapp/signup",
     createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }),

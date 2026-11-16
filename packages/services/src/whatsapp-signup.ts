@@ -23,7 +23,7 @@ import {
   contactIdentity,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm"
 import {
   adoptConnectionForSignup,
   changeConnectionCredentials,
@@ -386,6 +386,8 @@ export async function pendingSignupWork(
   if (!row.signup) {
     throw validation("Esta conexión no se hizo con «Conectar con Facebook»: no tiene pasos pendientes.")
   }
+  // Desconectada, la app ya no está suscrita a propósito: reintentar la volvería a suscribir.
+  if (row.status !== "active") throw validation("Esta conexión está desconectada: usa «Volver a conectar».")
   const pick = (key: string): string => {
     const value = config[key]
     if (typeof value !== "string" || !value) {
@@ -417,12 +419,36 @@ export async function signupAccess(
   orgId: string,
   secretsKey: Buffer,
   connectionId: string,
-): Promise<{ wabaId: string; token: string } | null> {
+): Promise<{ wabaId: string; token: string; active: boolean } | null> {
   const { row, config } = await getConnectionSecrets(tx, orgId, connectionId, secretsKey)
   if (!row.signup || row.channel !== "whatsapp") return null
   const wabaId = config["wabaId"]
   const token = config["accessToken"]
-  return typeof wabaId === "string" && wabaId && typeof token === "string" && token ? { wabaId, token } : null
+  return typeof wabaId === "string" && wabaId && typeof token === "string" && token
+    ? { wabaId, token, active: row.status === "active" }
+    : null
+}
+
+/**
+ * La suscripción de la app es de toda la cuenta de WhatsApp, no de un número:
+ * no se quita si otra conexión activa (de esta u otra clínica) usa la misma
+ * cuenta, porque esa dejaría de recibir sus mensajes. Mira todas las clínicas:
+ * va con la conexión dueña de la base, y solo cuenta.
+ */
+export async function accountStillUsed(ownerDb: Db, accountId: string, exceptConnectionId: string): Promise<boolean> {
+  const [row] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.provider, WHATSAPP.provider),
+        eq(channelConnection.accountExternalId, accountId),
+        eq(channelConnection.status, "active"),
+        ne(channelConnection.id, exceptConnectionId),
+      ),
+    )
+    .limit(1)
+  return Boolean(row)
 }
 
 /**
