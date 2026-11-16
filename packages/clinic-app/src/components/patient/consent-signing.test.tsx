@@ -53,6 +53,8 @@ const newProfile: ProfessionalProfile = {
 let profile: ProfessionalProfile
 /** Falso: el perfil no queda con la colegiatura (otra pestaña la quitó). */
 let savesProfile = true
+/** Los representantes legales vigentes de Carmen: con uno, primero se elige quién firma. */
+let representatives: unknown[] = []
 let sign: (body: Record<string, unknown>) => Promise<unknown>
 
 beforeAll(() => {
@@ -68,6 +70,7 @@ beforeAll(() => {
 beforeEach(() => {
   profile = { ...newProfile }
   savesProfile = true
+  representatives = []
   sign = async () => ({ data: { ...document, pdfDocumentId: "pdf-1" } })
   route.mockReset()
   route.mockImplementation(async (url, init) => {
@@ -85,7 +88,7 @@ beforeEach(() => {
           isMinor: false,
         },
       }
-    if (url === "/api/patients/p-carmen/responsibilities") return { data: [] }
+    if (url === "/api/patients/p-carmen/responsibilities") return { data: representatives }
     if (url === "/api/clinical-forms/consent-sheet")
       return {
         data: { clinic: null, declaration: "Declaro que me explicaron.", signatureNote: "" },
@@ -208,6 +211,80 @@ describe("«Confirma que informaste» sin colegiatura", () => {
       await screen.findByText("Registra tu colegiatura en tu perfil profesional para firmar"),
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Volver" }))
+    expect(await screen.findByText("¿No quedó bien? Usa «Limpiar» y vuelve a firmar.")).toBeTruthy()
+  })
+})
+
+describe("«Volver» a «¿Quién firma?»", () => {
+  /** Quien firma marca la casilla y traza su firma, sin pasar todavía de hoja. */
+  async function marksAndDraws(name: string) {
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Entendí lo que me explicaron/ }))
+    const pad = screen.getByRole("img", { name: `Firma de ${name}` })
+    fireEvent.pointerDown(pad, { clientX: 10, clientY: 10, pointerId: 1 })
+    fireEvent.pointerMove(pad, { clientX: 40, clientY: 20, pointerId: 1 })
+    fireEvent.pointerUp(pad, { pointerId: 1 })
+    await screen.findByText("¿No quedó bien? Usa «Limpiar» y vuelve a firmar.")
+  }
+
+  async function chooses(label: RegExp) {
+    fireEvent.click(await screen.findByRole("combobox", { name: /¿Quién firma\?/ }))
+    const option = await screen.findByRole("option", { name: label })
+    fireEvent.pointerDown(option, { pointerType: "mouse" })
+    fireEvent.click(option)
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: /¿Quién firma\?/ }).textContent).toMatch(label),
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Empezar" }))
+  }
+
+  beforeEach(() => {
+    profile = {
+      ...newProfile,
+      professionalTitle: "Cirujano dentista",
+      registrationBody: "COP",
+      registrationNumber: "12345",
+      complete: true,
+    }
+    representatives = [
+      {
+        id: "r-rosa",
+        kind: "representante_legal",
+        isCurrent: true,
+        contact: {
+          id: "c-rosa",
+          displayName: "Rosa Ruiz",
+          isActive: true,
+          docType: "dni",
+          docNumber: "44556677",
+        },
+      },
+    ]
+  })
+
+  it("si se elige a otra persona, la casilla y la firma de Carmen no pasan a Rosa", async () => {
+    open()
+    await chooses(/Carmen Ruiz · paciente/)
+    await marksAndDraws("Carmen Ruiz")
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }))
+    await chooses(/Rosa Ruiz · representante legal/)
+    // La hoja de Rosa empieza en blanco: ni la casilla ni el trazo de Carmen.
+    await screen.findByRole("img", { name: "Firma de Rosa Ruiz" })
+    expect(
+      screen
+        .getByRole("checkbox", { name: /Entendí lo que me explicaron/ })
+        .getAttribute("aria-checked"),
+    ).toBe("false")
+    expect(screen.queryByText("¿No quedó bien? Usa «Limpiar» y vuelve a firmar.")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Listo" }))
+    expect(await screen.findByText("Falta la firma de Rosa")).toBeTruthy()
+  })
+
+  it("si se vuelve a elegir a la misma persona, su firma sigue en la hoja", async () => {
+    open()
+    await chooses(/Carmen Ruiz · paciente/)
+    await marksAndDraws("Carmen Ruiz")
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Empezar" }))
     expect(await screen.findByText("¿No quedó bien? Usa «Limpiar» y vuelve a firmar.")).toBeTruthy()
   })
 })

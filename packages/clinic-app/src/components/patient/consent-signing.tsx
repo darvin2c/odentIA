@@ -272,6 +272,9 @@ function SigningFlow({
   // Con más de una persona habilitada, primero se elige quién firma.
   const [whoChosen, setWhoChosen] = useState(false)
   const choosing = choices.length > 1 && !whoChosen
+  // Quién marcó y firmó lo que hay en las hojas: si al volver a «¿Quién firma?» se elige a otra
+  // persona, su casilla y su trazo no pasan a la nueva (revisión del 16 nov, R1).
+  const drawnBy = useRef<string | null>(null)
   const [signed, setSigned] = useState<Set<string>>(new Set())
   // El rechazo del servidor espera a que su paso esté en pantalla para decirse junto a su campo.
   const [rejected, setRejected] = useState<{ error: unknown; index: number; done: number } | null>(
@@ -290,6 +293,16 @@ function SigningFlow({
     registrationBody: "",
     registrationNumber: "",
     docs: documents.map(() => ({ understood: false, strokes: [] })),
+  }
+
+  /** Casilla y firma de las hojas que aún no se firmaron, otra vez en blanco: las firma otra persona. */
+  const clearUnsigned = (done: ReadonlySet<string>) => {
+    const options = { dontUpdateMeta: true, dontValidate: true }
+    documents.forEach((document, position) => {
+      if (done.has(document.id)) return
+      form.setFieldValue(`docs[${position}].understood`, false, options)
+      form.setFieldValue(`docs[${position}].strokes`, [], options)
+    })
   }
 
   const finish = async (value: SigningValues, signer: SignerChoice): Promise<void> => {
@@ -335,17 +348,8 @@ function SigningFlow({
       if (("signerContactId" in fields || "signerDoc" in fields) && choices.length > 1) {
         // Otra persona firma: casilla y firma de lo que falta, otra vez.
         const first = documents.findIndex((document) => !done.has(document.id))
-        documents.forEach((document, position) => {
-          if (done.has(document.id)) return
-          form.setFieldValue(`docs[${position}].understood`, false, {
-            dontUpdateMeta: true,
-            dontValidate: true,
-          })
-          form.setFieldValue(`docs[${position}].strokes`, [], {
-            dontUpdateMeta: true,
-            dontValidate: true,
-          })
-        })
+        clearUnsigned(done)
+        drawnBy.current = null
         setStep({ kind: "sign", index: Math.max(first, 0) })
         setWhoChosen(false)
       } else if ("signatureData" in fields || "comprehensionConfirmed" in fields) {
@@ -405,8 +409,15 @@ function SigningFlow({
       },
     },
     onSubmit: async ({ value }) => {
-      if (choosing) setWhoChosen(true)
-      else if (step.kind === "sign")
+      if (choosing) {
+        // Otra persona que la que ya marcó o firmó: lo suyo no se guarda como firma de la nueva.
+        if (drawnBy.current && drawnBy.current !== value.signerContactId) {
+          clearUnsigned(signed)
+          form.setFieldValue("signerDoc", "", { dontUpdateMeta: true, dontValidate: true })
+        }
+        drawnBy.current = value.signerContactId
+        setWhoChosen(true)
+      } else if (step.kind === "sign")
         setStep(
           step.index < total - 1 ? { kind: "sign", index: step.index + 1 } : { kind: "confirm" },
         )
