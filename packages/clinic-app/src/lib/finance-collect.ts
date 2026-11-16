@@ -678,6 +678,22 @@ export interface AccountCurrency {
 }
 
 /**
+ * El detalle del saldo en el Resumen (QA del 16 nov, C19): con algo a favor, las tres cifras; con
+ * algo ya pagado, lo que debe y lo que pagó; solo sin ningún pago, «sin pago aplicado». Antes lo
+ * decía aunque hubiera pagado una parte.
+ */
+export function balanceDetailWords(
+  balance: AccountCurrency,
+  money: (cents: number, currency: string) => string,
+): string {
+  if (balance.aFavor > 0)
+    return `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
+  if (balance.pagado > 0)
+    return `Debe: ${money(balance.porCobrar, balance.currency)} · Ya pagó: ${money(balance.pagado, balance.currency)}`
+  return "Cargos emitidos sin pago aplicado."
+}
+
+/**
  * Los bloques de la cuenta: la moneda del negocio siempre (en cero si no hay nada); la
  * otra moneda de la clínica, solo si debe, tiene a favor o queda saldo en ella. Sin
  * otra moneda, todas las filas, como siempre.

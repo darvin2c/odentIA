@@ -10,7 +10,7 @@ import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
 import { type TaskItem, usePermission } from "../../lib/crm"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { balanceDetailWords, fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
 import { filiationGapsText, isHealthReviewPending, ownGaps } from "../../lib/patients"
@@ -264,10 +264,8 @@ export function PatientPendingCard({
           balance.saldo > 0
             ? `Saldo por cobrar de ${money(balance.saldo, balance.currency)}`
             : "Lo que tiene a favor cubre lo que debe",
-        detail:
-          balance.aFavor > 0
-            ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
-            : "Cargos emitidos sin pago aplicado.",
+        // «Sin pago aplicado» solo si no pagó nada (C19): con S/ 300 pagados lo decía igual.
+        detail: balanceDetailWords(balance, money),
         // El mismo cobro de Cobros, ahí mismo; «Aplicar…» siempre pide confirmar.
         action: collect.button({ size: "sm", variant: "outline", currency: balance.currency }),
       })
