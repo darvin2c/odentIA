@@ -565,10 +565,22 @@ describe("la ficha", () => {
       [id]: "en_alta",
       [paid]: "activo",
     })
-    expect((await listClients(ownerDb, admin, { view: "en_alta", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([id])
-    expect((await listClients(ownerDb, admin, { view: "activos", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([paid])
+    expect(
+      (await listClients(ownerDb, admin, { view: "en_alta", q: `fase ${tag}` })).items.map(
+        (i) => i.id,
+      ),
+    ).toEqual([id])
+    expect(
+      (await listClients(ownerDb, admin, { view: "activos", q: `fase ${tag}` })).items.map(
+        (i) => i.id,
+      ),
+    ).toEqual([paid])
     // Un enlace de antes, «Con cuenta», abre «En alta».
-    expect((await listClients(ownerDb, admin, { view: "con_cuenta", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([id])
+    expect(
+      (await listClients(ownerDb, admin, { view: "con_cuenta", q: `fase ${tag}` })).items.map(
+        (i) => i.id,
+      ),
+    ).toEqual([id])
 
     // Casos de soporte sin resolver: Soporte no cuenta los de cobro.
     await ownerDb.insert(supportCase).values([
@@ -698,7 +710,10 @@ describe("la ficha", () => {
       "Venta",
       null,
     ])
-    expect(detail.summary?.sources[0]).toMatchObject({ text: "Frase 0", source: `actividad:${rows[0]?.id}` })
+    expect(detail.summary?.sources[0]).toMatchObject({
+      text: "Frase 0",
+      source: `actividad:${rows[0]?.id}`,
+    })
   })
 
   it("cambiar datos: el responsable solo Administración; el producto de una cuenta no cambia; archivar es de Administración", async () => {
@@ -1580,7 +1595,10 @@ describe("el responsable al dar de alta", () => {
     expect(own?.ownerUserId).toBe(admin.userId)
 
     const kept = await newClient()
-    await ownerDb.update(saasClient).set({ ownerUserId: support.userId }).where(eq(saasClient.id, kept))
+    await ownerDb
+      .update(saasClient)
+      .set({ ownerUserId: support.userId })
+      .where(eq(saasClient.id, kept))
     await ownerDb.transaction((tx) =>
       createAssistedOrganization(tx, admin, {
         orgName: "Clínica Con Responsable",

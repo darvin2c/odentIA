@@ -897,7 +897,12 @@ describe("documentos", () => {
 
   it("se ve sin descargar: imagen por enlace de 5 minutos, PDF por la API y aislado; lo demás no", async () => {
     const clientId = await newClient("Clínica Vista (ficticia)", "vista@andes.test")
-    const uploaded = await call("POST", `/${clientId}/files`, ADMIN, form(pdfBytes, "application/pdf"))
+    const uploaded = await call(
+      "POST",
+      `/${clientId}/files`,
+      ADMIN,
+      form(pdfBytes, "application/pdf"),
+    )
     await expectStatus(uploaded, 201)
     const pdf = (await json(uploaded)).data
     const csv = new FormData()

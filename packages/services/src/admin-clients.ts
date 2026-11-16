@@ -1606,7 +1606,9 @@ function activitySentSql(column: SQL): SQL {
 }
 
 /** Quien escribió por WhatsApp, Instagram o Messenger: su persona, el nombre que dio el canal o su dirección. */
-const activityChatFromSql = sql<string | null>`case when ${FOLLOW_UP}.chat_id is not null and ${FOLLOW_UP}.direction = 'entro' then
+const activityChatFromSql = sql<
+  string | null
+>`case when ${FOLLOW_UP}.chat_id is not null and ${FOLLOW_UP}.direction = 'entro' then
   (select coalesce(nullif(trim(p.name), ''), nullif(trim(ch.display_name), ''), ch.address)
     from ${saasChat} ch left join ${saasClientContact} p on p.id = coalesce(${FOLLOW_UP}.contact_id, ch.contact_id)
     where ch.id = ${FOLLOW_UP}.chat_id) end`
@@ -1707,7 +1709,9 @@ async function openSupportCasesOf(tx: Db, staff: AdminActor, orgId: string): Pro
 /** Desde cuándo está activa: su primer pago que cuenta (`clientPaidSql`: confirmado o devuelto). */
 async function activeSinceOf(tx: Db, orgId: string): Promise<Date | null> {
   const [row] = await tx
-    .select({ at: sql<Date | null>`min(${saasPayment.confirmedAt})`.mapWith(saasPayment.confirmedAt) })
+    .select({
+      at: sql<Date | null>`min(${saasPayment.confirmedAt})`.mapWith(saasPayment.confirmedAt),
+    })
     .from(saasPayment)
     .where(
       and(
@@ -3119,7 +3123,12 @@ export async function clientTimeline(
         name: `${r.firstName} ${r.lastName}`.trim() || r.clinicName,
       }
       const link = { kind: "solicitud" as const, id: r.id }
-      const base = { category: "venta" as const, icon: "solicitud" as const, adminOnly: false, link }
+      const base = {
+        category: "venta" as const,
+        icon: "solicitud" as const,
+        adminOnly: false,
+        link,
+      }
       push({
         ...base,
         id: `solicitud:${r.id}:recibida`,
@@ -3353,7 +3362,12 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ")
         : undefined
-      const base = { category: "venta" as const, icon: "propuesta" as const, adminOnly: false, link }
+      const base = {
+        category: "venta" as const,
+        icon: "propuesta" as const,
+        adminOnly: false,
+        link,
+      }
       push({
         ...base,
         id: `propuesta:${p.id}:creada`,
@@ -3405,7 +3419,9 @@ export async function clientTimeline(
       .orderBy(desc(saasOutreach.createdAt))
       .limit(one)
     for (const o of rows) {
-      const channelKey = (o.channel in OUTREACH_CHANNEL_WORDS ? o.channel : "correo") as SaasOutreachChannel
+      const channelKey = (
+        o.channel in OUTREACH_CHANNEL_WORDS ? o.channel : "correo"
+      ) as SaasOutreachChannel
       const channel = OUTREACH_CHANNEL_WORDS[channelKey]
       const title =
         o.status === "pendiente"
@@ -3472,12 +3488,18 @@ export async function clientTimeline(
 
   // Los cambios del plan, de las dos auditorías (`listSaasPlanChanges`): se leen en Plan y pagos.
   if (orgId && wants("plan")) {
-    const changes = await listSaasPlanChanges(tx, orgId, { before, limit: many, forSupport: !admin })
+    const changes = await listSaasPlanChanges(tx, orgId, {
+      before,
+      limit: many,
+      forSupport: !admin,
+    })
     for (const change of changes) {
       push({
         id: `plan:${change.id}`,
         at: change.at,
-        who: change.by ? { kind: "persona", name: change.by.name } : { kind: "sistema", name: "Sistema" },
+        who: change.by
+          ? { kind: "persona", name: change.by.name }
+          : { kind: "sistema", name: "Sistema" },
         category: "plan",
         icon: "plan",
         title: change.words,
@@ -3515,7 +3537,12 @@ export async function clientTimeline(
       .limit(many)
     for (const p of rows) {
       const amount = admin ? moneyText(p.currency, p.amountCents) : undefined
-      const base = { category: "plan" as const, icon: "pago" as const, adminOnly: false, link: tab("pagos") }
+      const base = {
+        category: "plan" as const,
+        icon: "pago" as const,
+        adminOnly: false,
+        link: tab("pagos"),
+      }
       push({
         ...base,
         id: `pago:${p.id}:recibido`,
@@ -3703,7 +3730,9 @@ export async function clientTimeline(
       ...(row
         ? {
             envio: {
-              channel: (row.channel in OUTREACH_CHANNEL_WORDS ? row.channel : "correo") as SaasOutreachChannel,
+              channel: (row.channel in OUTREACH_CHANNEL_WORDS
+                ? row.channel
+                : "correo") as SaasOutreachChannel,
               to: row.toAddress,
               subject: row.subject,
               body: row.body,

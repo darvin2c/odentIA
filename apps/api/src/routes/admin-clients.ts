@@ -525,7 +525,11 @@ async function pdfBody(
     })
   }
   if (!storage.getAttachment)
-    throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el archivo. Inténtalo de nuevo.")
+    throw new ServiceError(
+      "STORAGE_UNAVAILABLE",
+      503,
+      "No se pudo leer el archivo. Inténtalo de nuevo.",
+    )
   const bytes = await storage.getAttachment(objectKey)
   return isPdfHead(bytes) ? bytes : null
 }
