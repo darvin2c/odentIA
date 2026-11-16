@@ -44,7 +44,8 @@ import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
-import { closestDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
+import { closestDiagnosisCode, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
+import { reviewDiagnosis } from "./dictation-diagnosis.js"
 import { recordEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
 import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
@@ -297,6 +298,12 @@ interface DictationScope {
   formQuestions: readonly DictationFormQuestion[]
   /** Lo dictado en la pausa: la oración de una respuesta de ficha dice de qué pregunta habla. */
   transcript?: string
+  /**
+   * Lo dictado en la atención que se tiene a mano, de lo más cerca a lo más lejos: la pausa, el final
+   * de la anterior y lo que citan las sugerencias pendientes. Con eso se ve si el nombre de un
+   * diagnóstico contradice lo dicho (`diagnosisClash`: «sin fístula» con la fístula dicha antes).
+   */
+  said?: string[]
   /** Con qué palabras se busca en el tarifario lo dicho. */
   serviceWords: ServiceWords
   /**
@@ -704,6 +711,22 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     const list = DIAGNOSIS_SYSTEM_INFO[diagnosisSystem].title
     if (!known) return { payload: { ...payload, diagnosisCode: code, diagnosisSystem }, status: "por_revisar", note: `El código ${code} no está en la lista ${list} de la clínica. Elige el diagnóstico.` }
     if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
+    // Un nombre que contradice lo dictado («sin fístula» con la fístula dicha) queda por revisar, con
+    // el hermano de la lista que calza si lo hay (prueba con voz del 15 nov, c4b, v07).
+    const review = await reviewDiagnosis({ code: known.code, title: known.description }, draft.sourceText ?? "", scope.said ?? (scope.transcript ? [scope.transcript] : []), async (words) =>
+      (await diagnosisCodesWith(tx, diagnosisSystem, words)).map((item) => ({ ...item, title: item.description })),
+    )
+    if (review) {
+      const { clash, sibling } = review
+      const chosen = sibling ?? known
+      return {
+        payload: { ...payload, diagnosisCode: chosen.code, diagnosisSystem, description: chosen.description },
+        status: "por_revisar",
+        note: sibling
+          ? `Dijiste «${clash.said}» y ${known.code} dice «${clash.named}»: te propongo ${sibling.code}, «${sibling.description}». Revísalo.`
+          : `Dijiste «${clash.said}» y ${known.code} dice «${clash.named}». Revísalo.`,
+      }
+    }
     return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "lista", note: null }
   }
   if (draft.kind === "plan") {
@@ -1548,6 +1571,8 @@ export interface DictationSegment {
   segmentId?: string | undefined
   /** Lo dictado en el tramo: la oración de una respuesta de ficha dice de qué pregunta habla. */
   transcript?: string | undefined
+  /** El final de lo dictado antes, como lo recibió Clío: un diagnóstico no contradice lo dicho ahí. */
+  context?: string | undefined
   /**
    * Las preguntas de ficha que vio Clío en esta pausa, con su número
    * (`dictationFormQuestions`). Sin ellas se leen otra vez.
@@ -1751,6 +1776,8 @@ export async function saveDictationSegment(
   }
   const recipeKey = (payload: Record<string, unknown>) => String(payload["genericName"] ?? "").toLowerCase()
   const pendingNow = await listDictationSuggestions(tx, orgId, patientId, encounterId)
+  // Lo dictado que se tiene a mano, de lo más cerca a lo más lejos, para ver si un diagnóstico lo contradice.
+  scope.said = [segment.transcript, segment.context, ...pendingNow.map((item) => item.sourceText)].filter((text): text is string => !!text?.trim())
   const pendingOwn = new Set(pendingNow.flatMap((item) => sameKey(item.kind, item.payload) ?? []))
   const pendingRecipes = new Set(pendingNow.filter((item) => item.kind === "receta").map((item) => recipeKey(item.payload)))
   // Lo mismo con el plan y los diagnósticos: la misma prestación o el mismo diagnóstico en el mismo sitio.

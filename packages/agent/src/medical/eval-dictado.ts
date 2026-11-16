@@ -15,10 +15,11 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { withPauseBridge } from "@odentia/services"
 import { examSystemsText } from "@odentia/services/medical"
 import { costMicrosOf } from "../ai-usage.js"
 import { askDictationModel } from "../dictation.js"
-import { consultaSummary, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
+import { consultaSummary, type ExpectedConsulta, scoreConsulta, serverDiagnoses } from "../eval-consulta.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { MEDICAL_DICTATION_PROFILE } from "./dictation.js"
 
@@ -220,9 +221,8 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
       read.drafts.some((draft) => draft.kind === "nota"),
     )
   scoreConsulta(dictation.espera.consulta, read.drafts, other)
-  const codes = read.drafts
-    .filter((draft) => draft.kind === "diagnostico")
-    .map((draft) => String(draft.payload["diagnosisCode"] ?? "").toUpperCase())
+  // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
+  const { codes } = await serverDiagnoses(read.drafts, [withPauseBridge(dictation.contexto, dictation.texto), dictation.contexto ?? ""])
   for (const code of dictation.espera.diagnosticos ?? [])
     other(
       `diagnóstico ${code}`,
