@@ -209,6 +209,41 @@ export function vitalsErrors(
   return errors
 }
 
+/**
+ * La presión que pide repetir la toma y pensar antes de lo electivo (QA del 16 nov): sistólica de
+ * 180 o más, o diastólica de 110 o más. Es un aviso, no una traba: decide el profesional.
+ *
+ * Fuentes: Little JW, Miller CS, Rhodus NL, *Little and Falace's Dental Management of the
+ * Medically Compromised Patient*, 9.ª ed., 2018, cap. 3 (Hipertensión): con 180/110 o más se
+ * difiere la atención electiva y se deriva (verificar la página); ACC/AHA 2017 (Whelton y col.,
+ * Hypertension 2018;71:e13-e115): con síntomas de daño de órgano es una emergencia; AHA
+ * (Muntner y col., Hypertension 2019;73:e35-e66): una toma aislada sobreestima, se repite.
+ */
+export const BLOOD_PRESSURE_DEFER = { systolic: 180, diastolic: 110 } as const
+
+/**
+ * Desde qué edad valen los cortes del adulto: la AAP 2017 (Flynn y col., Pediatrics
+ * 2017;140:e20171904) los usa desde los 13 años. Antes se juzga por percentiles de edad, sexo y
+ * talla, y no hay un corte fijo que se pueda afirmar: no se avisa.
+ */
+export const ADULT_BLOOD_PRESSURE_FROM_AGE = 13
+
+/**
+ * «Aviso: 185/115 mmHg. Repite la toma…», o null si no hace falta. Sin la edad (sin fecha de
+ * nacimiento) se avisa: callar ante 185/115 por un dato que falta sería peor que avisar de más.
+ */
+export function bloodPressureAlert(
+  vitals: Vitals | null | undefined,
+  ageYears: number | null | undefined,
+): string | null {
+  const systolic = vitals?.presionSistolica
+  const diastolic = vitals?.presionDiastolica
+  if (systolic === undefined || diastolic === undefined) return null
+  if (ageYears !== null && ageYears !== undefined && ageYears < ADULT_BLOOD_PRESSURE_FROM_AGE) return null
+  if (systolic < BLOOD_PRESSURE_DEFER.systolic && diastolic < BLOOD_PRESSURE_DEFER.diastolic) return null
+  return `Aviso: ${systolic}/${diastolic} mmHg. Repite la toma. Con ${BLOOD_PRESSURE_DEFER.systolic}/${BLOOD_PRESSURE_DEFER.diastolic} o más, lo electivo se suele diferir. Con dolor de pecho, dolor de cabeza fuerte o falta de aire, es una urgencia.`
+}
+
 /** «PA 120/80 mmHg · FC 72 lpm · T 36.5 °C». */
 export function formatVitals(vitals: Vitals | null | undefined): string {
   if (!vitals) return ""

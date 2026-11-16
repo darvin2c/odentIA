@@ -93,6 +93,7 @@ import {
   revokeDataConsent,
   ServiceError,
   savePatientHealth,
+  setPatientAsa,
   scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
   setDocumentPortalVisibility,
@@ -245,6 +246,10 @@ const allergyAddInput = z
 // El motivo es libre: lo vacío y lo largo los dice el servicio junto a «Motivo» (`removePatientAllergy`).
 const allergyRemoveInput = z.object({ reason: z.string() }).strict()
 const healthReviewedInput = z.object({ expectedRevision: z.number().int().min(0) }).strict()
+// La ASA de un toque antes de anestesiar (QA del 16 nov): I a VI o nula; en qué atención se puso.
+const healthAsaInput = z
+  .object({ asaClass: z.string().max(3).nullable(), encounterId: z.string().uuid().nullish() })
+  .strict()
 const healthDeniedInput = z
   .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })
   .strict()
@@ -474,6 +479,8 @@ const finalizeInput = z
       .nullish(),
     // Los controles que esta visita cumple; sin él, todos los que tocan.
     followUpIds: z.array(z.uuid()).max(50).nullish(),
+    // El anestésico de la línea de anestesia, solo para el máximo que guarda la atención firmada.
+    anesthetic: z.string().max(60).nullish(),
   })
   .strict()
 /** Lo que se va a registrar como servicio directo, para avisar si ya se hizo (`findEarlierTreatment`). */
@@ -1099,6 +1106,20 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         markHealthDenied(tx, orgId, userId, c.req.param("id"), [...new Set(parsed.data.groups)]),
+      ),
+    )
+  })
+  // La ASA de un toque, desde la línea de anestesia de la atención, sin rearmar los antecedentes.
+  app.post("/:id/health/asa", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = healthAsaInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setPatientAsa(tx, orgId, userId, c.req.param("id"), {
+          asaClass: parsed.data.asaClass,
+          encounterId: parsed.data.encounterId ?? null,
+        }),
       ),
     )
   })

@@ -847,6 +847,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "hoja-seguro-opcion-no-elegida",
+        q: "¿La hoja para el seguro lleva lo que el paciente no eligió?",
+        a: "No. La «Hoja de atención» sugiere solo lo que sigue en pie: nunca lo de la opción que no eligió ni lo que rechazó. Si le ofreciste opciones, lo de la que eligió va con su nombre y dice que es la elegida (Opción A, elegida), y lo común a todas va aparte, como tratamiento sugerido. Si todavía no elige, cada opción va con su nombre y dice que está por elegir, nunca todo junto. Si rechazó todo, la hoja no lleva tratamiento sugerido. Lo que ya se hizo va en procedimientos realizados.",
+        forms: ["la hoja del seguro sale con la exodoncia que no eligio", "hoja de atencion con dos opciones", "que dice la hoja para el seguro si le ofreci dos opciones", "la hoja sugiere lo que rechazo"],
+        area: "clinica",
+        own: true,
+      },
+      {
         id: "pongo-firma-papeles",
         q: "¿Cómo pongo mi firma en los papeles?",
         a: "Dibújala una vez en tu perfil profesional: al finalizar una atención, con «Agregar mi firma», o en Configuración › Equipo › «Mi perfil profesional» si puedes entrar ahí. Sale sola en los papeles que emites, junto a un sello con tu nombre, tu título y tu colegiatura, y cambiarla no toca lo ya emitido. Sin ella, el papel lleva una línea para firmar a mano. Solo tú puedes guardarla. Es el dibujo que se ve, no una firma digital certificada: el papel sigue diciendo «Firmado electrónicamente».",
@@ -1052,7 +1060,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "atencion-pide-enfermedades-medicacion",
         q: "¿Por qué la atención me pide sus enfermedades y su medicación?",
-        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. Si tiene representante, como un niño, dice a quién preguntarle: a su padre, a su madre o a quien lo represente, con su nombre. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. Si tiene representante, como un niño, dice a quién preguntarle: a su padre, a su madre o a quien lo represente, con su nombre. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si algo de hoy usa anestesia local (su servicio la usa, o lleva un anestésico entre sus materiales) y todavía falta algo de eso o su riesgo anestésico (ASA), lo dice «Anestesia local», en «Realizado hoy» y al firmar. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)», o con un toque en «Anestesia local».",
         forms: [
           "por que me pide antecedentes",
           "aviso de enfermedades y medicacion",

@@ -297,7 +297,8 @@ export async function renderAttentionSheetPdf(
   section("Diagnóstico", data.diagnoses)
   section("Procedimientos realizados", data.procedures)
   section("Exámenes auxiliares", data.exams)
-  section("Tratamiento sugerido", data.treatments)
+  // Con opciones, cada una con su nombre: nunca lo que no eligió (QA del 16 nov).
+  for (const group of data.treatments) section(group.heading, group.items)
   if (encounter.indications) {
     kit.subheading("Indicaciones", { before: 14 })
     kit.text(encounter.indications, { size: SIZE.read })

@@ -31,7 +31,7 @@ import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import {
   CONSENT_SIGNATURE_WORDS,
   type ConsentDocument,
@@ -42,10 +42,20 @@ import {
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
-import { fetchMyProfessionalProfile, registrationLabel } from "../../lib/encounters"
+import {
+  fetchMyProfessionalProfile,
+  type ProfessionalProfile,
+  registrationLabel,
+  type SignatureRegistration,
+  saveProfessionalProfileApi,
+  signatureRegistrationErrors,
+} from "../../lib/encounters"
+import { useOrgProfile } from "../../lib/org"
 import { hcLabel, type PatientFull } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 import { ConsentSheet } from "./consent-sheet"
 import { FirmaPad } from "./firma-pad"
+import { REGISTRATION_FIELDS, SignatureRegistrationFields } from "./signature-registration-fields"
 
 export interface SignerChoice {
   kind: "paciente" | "representante"
@@ -126,23 +136,71 @@ function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name
 }
 
-/** «Firmas como Ana Torres · Cirujano dentista · COP 12345», de su perfil profesional. */
+/**
+ * «Firmas como Ana Torres · Cirujano dentista · COP 12345», de su perfil profesional. Sin
+ * colegiatura no hay «Firmas como…» (`text` nulo): el servidor no deja firmar, y quien firma la
+ * escribe ahí mismo (`missingRegistration`; QA del 16 nov).
+ */
 export function useSignAs(): {
   text: string | null
   name: string | null
   detail: string | null
   loading: boolean
+  /** El perfil se leyó y no tiene colegiatura: se pide donde se firma. */
+  missingRegistration: boolean
+  profile: ProfessionalProfile | null
 } {
   const profile = useQuery({
     queryKey: ["professional-profile", "me"],
     queryFn: fetchMyProfessionalProfile,
   })
   const data = profile.data?.data
-  if (!data) return { text: null, name: null, detail: null, loading: profile.isPending }
+  if (!data)
+    return {
+      text: null,
+      name: null,
+      detail: null,
+      loading: profile.isPending,
+      missingRegistration: false,
+      profile: null,
+    }
   const name = data.signatureName ?? data.accountName
-  const detail =
-    [data.professionalTitle, registrationLabel(data)].filter(Boolean).join(" · ") || null
-  return { text: [name, detail].filter(Boolean).join(" · "), name, detail, loading: false }
+  const registration = registrationLabel(data)
+  const detail = [data.professionalTitle, registration].filter(Boolean).join(" · ") || null
+  return {
+    text: registration ? [name, detail].filter(Boolean).join(" · ") : null,
+    name,
+    detail,
+    loading: false,
+    missingRegistration: !registration,
+    profile: data,
+  }
+}
+
+/**
+ * La colegiatura que se propone al pedirla donde se firma: lo que ya tiene el perfil y, si falta,
+ * lo que propone el país (COP en odentIA, CMP en latidIA), como el cierre de la atención.
+ */
+function useSuggestedRegistration(profile: ProfessionalProfile | null): SignatureRegistration {
+  const countryCode = useOrgProfile().data?.countryCode
+  const suggested = productUi().country.professional(countryCode)
+  return {
+    professionalTitle: profile?.professionalTitle || suggested?.title || "",
+    registrationBody: profile?.registrationBody || suggested?.registrationBody || "",
+    registrationNumber: profile?.registrationNumber ?? "",
+  }
+}
+
+/** Lo que rechaza el servidor por la colegiatura (409 `PROFILE_INCOMPLETE`) va en su número. */
+function registrationRejection(error: unknown): unknown {
+  return error instanceof ApiError &&
+    error.shape.code === "PROFILE_INCOMPLETE" &&
+    error.shape.message
+    ? new ApiError(error.status, {
+        ...error.shape,
+        fields: { registrationNumber: error.shape.message },
+      })
+    : error
 }
 
 /**
@@ -180,7 +238,7 @@ export function ConsentSigningScreen({
 
 type Step = { kind: "sign"; index: number } | { kind: "confirm" }
 
-interface SigningValues {
+interface SigningValues extends SignatureRegistration {
   signerContactId: string
   /** El documento de su representante, si su ficha no lo tiene: la firma lo exige (se registró sin él). */
   signerDoc: string
@@ -220,11 +278,17 @@ function SigningFlow({
     null,
   )
   const signAs = useSignAs()
+  // Sin colegiatura, «Confirma que informaste» la pide ahí mismo, y la firma de la persona espera.
+  const needsRegistration = signAs.missingRegistration
+  const suggestedRegistration = useSuggestedRegistration(signAs.profile)
   const total = documents.length
   const current = step.kind === "sign" && !choosing ? documents[step.index] : undefined
   const defaultValues: SigningValues = {
     signerContactId: "",
     signerDoc: "",
+    professionalTitle: "",
+    registrationBody: "",
+    registrationNumber: "",
     docs: documents.map(() => ({ understood: false, strokes: [] })),
   }
 
@@ -233,6 +297,16 @@ function SigningFlow({
     let index = 0
     let docNotice: string | null = null
     try {
+      // Primero la colegiatura en su perfil: si el servidor la rechaza, nada se firmó y la firma
+      // de la persona sigue en su hoja.
+      if (needsRegistration) {
+        await saveProfessionalProfileApi("me", {
+          professionalTitle: value.professionalTitle.trim(),
+          registrationBody: value.registrationBody.trim(),
+          registrationNumber: value.registrationNumber.trim(),
+        })
+        await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+      }
       for (const [position, document] of documents.entries()) {
         if (done.has(document.id)) continue
         index = position
@@ -277,7 +351,10 @@ function SigningFlow({
       } else if ("signatureData" in fields || "comprehensionConfirmed" in fields) {
         setStep({ kind: "sign", index })
       }
-      setRejected({ error, index, done: done.size })
+      // El perfil cambió en otra pestaña o no se guardó: se vuelve a leer y la colegiatura se pide.
+      if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE")
+        void queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+      setRejected({ error: registrationRejection(error), index, done: done.size })
       return
     }
     await Promise.all(
@@ -310,7 +387,11 @@ function SigningFlow({
           return value.signerContactId
             ? undefined
             : { fields: { signerContactId: "Elige quién firma" } }
-        if (step.kind !== "sign") return undefined
+        if (step.kind === "confirm") {
+          if (!needsRegistration) return undefined
+          const missing = signatureRegistrationErrors(value)
+          return Object.keys(missing).length > 0 ? { fields: missing } : undefined
+        }
         const doc = value.docs[step.index]
         const fields: Record<string, string> = {}
         if (!doc?.understood)
@@ -353,15 +434,23 @@ function SigningFlow({
       form.setFieldValue("signerContactId", firstChoice, { dontUpdateMeta: true })
   }, [firstChoice, form])
 
-  // El recuadro de firma aparece en blanco cada vez que se muestra: el trazo guardado también.
+  // Al volver a una hoja, su recuadro muestra la firma que sigue guardada (`initialStrokes`): lo
+  // que se ve es lo que se guarda, y volver atrás no le pide firmar otra vez (QA del 16 nov).
   const shownIndex = current && step.kind === "sign" ? step.index : null
+
+  // «Confirma que informaste» sin colegiatura: los campos llegan con lo del perfil o lo del país,
+  // sin pisar lo que ya se escribió (un rechazo, o volver atrás y regresar).
+  const atConfirm = step.kind === "confirm"
+  const { professionalTitle, registrationBody, registrationNumber } = suggestedRegistration
   useEffect(() => {
-    if (typeof shownIndex === "number")
-      form.setFieldValue(`docs[${shownIndex}].strokes`, [], {
-        dontUpdateMeta: true,
-        dontValidate: true,
-      })
-  }, [shownIndex, form])
+    if (!atConfirm || !needsRegistration) return
+    const values = form.state.values
+    if (values.professionalTitle || values.registrationBody || values.registrationNumber) return
+    const options = { dontUpdateMeta: true, dontValidate: true }
+    form.setFieldValue("professionalTitle", professionalTitle, options)
+    form.setFieldValue("registrationBody", registrationBody, options)
+    form.setFieldValue("registrationNumber", registrationNumber, options)
+  }, [atConfirm, needsRegistration, professionalTitle, registrationBody, registrationNumber, form])
   // Cada hoja se empieza a leer desde arriba: al pasar a la siguiente, la vista y el foco van a su título.
   useEffect(() => {
     if (typeof shownIndex !== "number") return
@@ -560,6 +649,7 @@ function SigningFlow({
                             {(control) => (
                               <FirmaPad
                                 key={current.id}
+                                initialStrokes={field.state.value}
                                 label={`Firma de ${signer.name}`}
                                 id={control.id}
                                 invalid={control.invalid}
@@ -587,25 +677,35 @@ function SigningFlow({
                 signatureNote={frame.data?.data.signatureNote ?? null}
               />
             ) : step.kind === "confirm" ? (
-              <div className="flex flex-col gap-4">
+              // Una tarjeta con todo lo que se confirma: lo que firmó la persona y con qué firma
+              // el profesional (la novata vio el título suelto bajo el aviso, QA del 16 nov).
+              <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 sm:p-6">
                 <p>
                   <strong>Informé a {firstName(signer.name)} y resolví sus dudas.</strong>
                 </p>
-                <p className="text-base text-muted-foreground">
-                  {signAs.text
-                    ? `Firmas como ${signAs.text} · de tu perfil, sin dibujar otra firma.`
-                    : signAs.loading
-                      ? "Buscando tu perfil profesional…"
-                      : "Registra tu colegiatura en tu perfil profesional para firmar."}
-                </p>
-                <ul className="flex flex-col gap-1 text-base">
-                  {documents.map((document) => (
-                    <li key={document.id}>
-                      {signed.has(document.id) ? "✓ " : ""}
-                      {document.titleSnapshot}
-                    </li>
-                  ))}
-                </ul>
+                <ConsentSignedList
+                  documents={documents}
+                  signed={signed}
+                  who={firstName(signer.name)}
+                />
+                {needsRegistration ? (
+                  <SignatureRegistrationFields
+                    form={form}
+                    fields={REGISTRATION_FIELDS}
+                    signAs={signAs.name}
+                    askTitle={!signAs.profile?.professionalTitle}
+                    disabled={saving}
+                    reason="El consentimiento lleva tu nombre y colegiatura."
+                  />
+                ) : (
+                  <p className="text-base text-muted-foreground">
+                    {signAs.text
+                      ? `Firmas como ${signAs.text} · de tu perfil, sin dibujar otra firma.`
+                      : signAs.loading
+                        ? "Buscando tu perfil profesional…"
+                        : "No se pudo leer tu perfil profesional. Vuelve a intentarlo en un momento."}
+                  </p>
+                )}
               </div>
             ) : null}
           </div>
@@ -648,10 +748,14 @@ function SigningFlow({
                   <Button
                     type="button"
                     size="lg"
-                    disabled={saving || !signAs.text}
+                    disabled={saving || (!signAs.text && !needsRegistration)}
                     onClick={advance}
                   >
-                    {saving ? "Guardando…" : "Confirmar"}
+                    {saving
+                      ? "Guardando…"
+                      : needsRegistration
+                        ? "Guardar y confirmar"
+                        : "Confirmar"}
                   </Button>
                 )}
               </div>
@@ -689,6 +793,38 @@ function SigningFlow({
   )
 }
 
+/** «Lo que firmó Carmen: Tratamiento de conductos (endodoncia)»; con varios, uno por línea. */
+function ConsentSignedList({
+  documents,
+  signed,
+  who,
+}: {
+  documents: ConsentDocument[]
+  signed: Set<string>
+  who: string
+}): React.JSX.Element {
+  const title = (document: ConsentDocument) =>
+    `${signed.has(document.id) ? "✓ " : ""}${document.titleSnapshot}`
+  const [only] = documents
+  if (documents.length === 1 && only)
+    return (
+      <p className="text-base">
+        <span className="text-muted-foreground">Lo que firmó {who}: </span>
+        {title(only)}
+      </p>
+    )
+  return (
+    <div className="flex flex-col gap-1 text-base">
+      <p className="text-muted-foreground">Lo que firmó {who}:</p>
+      <ul className="flex flex-col gap-1">
+        {documents.map((document) => (
+          <li key={document.id}>{title(document)}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** «CIE-10 MINSA · K04.0 · Pulpitis», como lo escribe el papel. */
 function diagnosisOf(document: ConsentDocument): string | null {
   if (!document.diagnosisCode) return null
@@ -696,7 +832,7 @@ function diagnosisOf(document: ConsentDocument): string | null {
   return document.diagnosisDescription ? `${code} · ${document.diagnosisDescription}` : code
 }
 
-interface PaperSignValues {
+interface PaperSignValues extends SignatureRegistration {
   signerContactId: string
   /** Su documento, si su ficha no lo tiene (se pide solo entonces). */
   signerDoc: string
@@ -709,6 +845,16 @@ const paperSignSchema = z.object({
   signerDoc: z.string().max(40, "Escribe el documento en 40 caracteres o menos."),
   file: z.custom<File | null>().refine((file) => file !== null, "Sube la foto de la hoja firmada"),
   informed: z.boolean().refine((value) => value, "Confirma que informaste y resolviste sus dudas"),
+  // La colegiatura solo cuenta sin ella en el perfil (`paperSignWithRegistrationSchema`).
+  professionalTitle: z.string(),
+  registrationBody: z.string(),
+  registrationNumber: z.string(),
+})
+
+/** Sin colegiatura en el perfil, la hoja en papel también la pide (la misma regla que la tablet). */
+const paperSignWithRegistrationSchema = paperSignSchema.superRefine((value, context) => {
+  for (const [path, message] of Object.entries(signatureRegistrationErrors(value)))
+    context.addIssue({ code: "custom", path: [path], message })
 })
 
 /**
@@ -733,6 +879,8 @@ export function PaperSignDrawer({
   const queryClient = useQueryClient()
   const { choices, isMinor, loading } = useSignerChoices(patientId)
   const signAs = useSignAs()
+  const needsRegistration = signAs.missingRegistration
+  const suggestedRegistration = useSuggestedRegistration(signAs.profile)
   // La foto ya subida no se sube otra vez si lo que falla es la firma.
   const uploaded = useRef<{ file: File; id: string } | null>(null)
   const firstChoice = choices[0]?.contactId ?? ""
@@ -741,12 +889,23 @@ export function PaperSignDrawer({
     signerDoc: "",
     file: null,
     informed: false,
+    professionalTitle: "",
+    registrationBody: "",
+    registrationNumber: "",
   }
   const form = useAppForm({
     defaultValues,
-    validators: { onSubmit: paperSignSchema },
+    validators: { onSubmit: needsRegistration ? paperSignWithRegistrationSchema : paperSignSchema },
     onSubmit: async ({ value }) => {
       if (!document || !value.file) return
+      if (needsRegistration) {
+        await saveProfessionalProfileApi("me", {
+          professionalTitle: value.professionalTitle.trim(),
+          registrationBody: value.registrationBody.trim(),
+          registrationNumber: value.registrationNumber.trim(),
+        })
+        await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+      }
       let paperDocumentId = uploaded.current?.file === value.file ? uploaded.current.id : null
       if (!paperDocumentId) {
         const sheet = await uploadPatientFile(patientId, value.file, {
@@ -768,6 +927,10 @@ export function PaperSignDrawer({
         comprehensionConfirmed: true,
         method: "papel",
         paperDocumentId,
+      }).catch((error: unknown) => {
+        if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE")
+          void queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+        throw registrationRejection(error)
       })
       await generateConsentPdf(document.id).catch(() => null)
       await Promise.all(
@@ -804,6 +967,18 @@ export function PaperSignDrawer({
     if (firstChoice && !form.getFieldValue("signerContactId"))
       form.setFieldValue("signerContactId", firstChoice, { dontUpdateMeta: true })
   }, [firstChoice, form])
+
+  // Sin colegiatura, los campos llegan con lo del perfil o lo del país, sin pisar lo escrito.
+  const { professionalTitle, registrationBody, registrationNumber } = suggestedRegistration
+  useEffect(() => {
+    if (!open || !needsRegistration) return
+    const values = form.state.values
+    if (values.professionalTitle || values.registrationBody || values.registrationNumber) return
+    const options = { dontUpdateMeta: true, dontValidate: true }
+    form.setFieldValue("professionalTitle", professionalTitle, options)
+    form.setFieldValue("registrationBody", registrationBody, options)
+    form.setFieldValue("registrationNumber", registrationNumber, options)
+  }, [open, needsRegistration, professionalTitle, registrationBody, registrationNumber, form])
 
   const close = () => {
     if (surface.isSubmitting) return
@@ -883,6 +1058,16 @@ export function PaperSignDrawer({
               />
             )}
           </form.AppField>
+          {needsRegistration ? (
+            <SignatureRegistrationFields
+              form={form}
+              fields={REGISTRATION_FIELDS}
+              signAs={signAs.name}
+              askTitle={!signAs.profile?.professionalTitle}
+              disabled={surface.isSubmitting}
+              reason="El consentimiento lleva tu nombre y colegiatura."
+            />
+          ) : null}
           <p className="text-xs text-muted-foreground">{CONSENT_SIGNATURE_WORDS.papel}</p>
         </div>
       )}

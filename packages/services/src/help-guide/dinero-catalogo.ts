@@ -243,6 +243,14 @@ export const DINERO_CATALOGO: readonly HelpMore[] = [
         forms: ["subir el precio de un servicio", "actualizar mi tarifario", "editar un servicio"],
       },
       {
+        id: "servicios-anestesia-local",
+        q: "¿Cómo marco que un servicio usa anestesia?",
+        a: "En Servicios y precios, en el menú de su fila, «Ver y editar»: «Usa anestesia local», junto a «Sesiones habituales». Lo de la biblioteca ya viene marcado si casi siempre se anestesia (cirugías y exodoncias, endodoncias y pulpectomías, periodoncia quirúrgica, raspado radicular e implantes); una resina o un servicio propio, no: márcalo si en tu clínica se anestesia, o desmárcalo si no. Con la marca, la atención muestra antes de anestesiar sus alergias, su medicación, la ASA y, con su peso, la dosis máxima. Cambiarla no toca las atenciones ya firmadas.",
+        forms: ["usa anestesia local", "marcar que un servicio lleva anestesia", "la limpieza no lleva anestesia", "por que me pide la asa en este servicio"],
+        needs: "settings.write",
+        own: true,
+      },
+      {
         id: "servicios-desactivar",
         q: "¿Cómo elimino un servicio que ya no ofrezco?",
         a: "Un servicio no se borra: en el menú de su fila, «Desactivar». Deja de estar disponible para nuevas indicaciones y los registros históricos no cambian. Para verlo otra vez, pon el filtro «Estado» en «Inactivas»; «Reactivar» lo devuelve.",

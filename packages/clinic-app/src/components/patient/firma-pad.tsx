@@ -14,8 +14,14 @@ export function FirmaPad({
   describedBy,
   id,
   invalid = false,
+  initialStrokes,
 }: {
   onChange: (strokes: number[][][]) => void
+  /**
+   * Lo que ya firmó y sigue guardado: al volver a su hoja se ve (QA del 16 nov, la firma de la
+   * paciente no se pierde por volver atrás). Se lee al montar.
+   */
+  initialStrokes?: number[][][]
   disabled?: boolean
   /** Nombre accesible del recuadro (p. ej. «Firma de la paciente»). */
   label?: string
@@ -26,8 +32,8 @@ export function FirmaPad({
 }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawing = useRef<number[][] | null>(null)
-  const [strokes, setStrokes] = useState<number[][][]>([])
-  const [empty, setEmpty] = useState(true)
+  const [strokes, setStrokes] = useState<number[][][]>(() => initialStrokes ?? [])
+  const [empty, setEmpty] = useState(() => !initialStrokes?.length)
 
   useEffect(() => {
     const canvas = canvasRef.current

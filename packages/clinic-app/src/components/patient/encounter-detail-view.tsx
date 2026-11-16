@@ -1,5 +1,5 @@
 import { label } from "../../lib/glossary"
-import { diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText, visitAnswerLine } from "@odentia/clinical"
+import { ageInYears, diagnosisCodeLabel, formatVitals, isRetiredPlanStatus, planItemStateText, visitAnswerLine } from "@odentia/clinical"
 import { visitSeenWords, visitToldLabel } from "../../lib/visit-answer-words"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
@@ -10,6 +10,7 @@ import {
   DIAGNOSIS_TYPE_LABELS,
   type EncounterDetail,
   type PatientDocument,
+  type PatientFull,
   planStatusLabel,
 } from "../../lib/patients"
 import { formatTakenAt, takenAt } from "./document-labels"
@@ -17,7 +18,9 @@ import { EncounterAddendumDrawer } from "./encounter-addendum-drawer"
 import { diagnosisSiteSuffix } from "./encounter-diagnoses"
 import { EncounterMaterialsBlock } from "./encounter-materials"
 import { FormRecordView } from "./form-record"
+import { AnesthesiaAtSigningView } from "./encounter-anesthesia"
 import { HealthAtSigningList } from "./health-at-signing"
+import { VitalsPressureAlert } from "./vitals-alert"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
@@ -181,6 +184,14 @@ export function EncounterDetailView({
   const canRead = usePermission("clinical.read")
   const memberName = useMemberName()
   const { encounter, teeth, procedures, notes, documents, addenda } = detail
+  // Su edad ese día, para el aviso de la presión (desde los 13 años): la ficha ya está en caché.
+  const canPatients = usePermission("patients.read")
+  const birthDate = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canPatients,
+  }).data?.data.patient.birthDate
+  const ageAtVisit = ageInYears(birthDate, (encounter.startedAt ?? "").slice(0, 10))
   // Las fichas finalizadas en ella son algo que se anotó: van con sus respuestas. Lo agregado a una
   // después de firmar no es parte de lo firmado: va después de la firma.
   const forms = detail.forms ?? []
@@ -302,7 +313,20 @@ export function EncounterDetailView({
           {encounter.vitals && Object.keys(encounter.vitals).length > 0 ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Signos vitales</dt>
-              <dd className="text-sm">{formatVitals(encounter.vitals)}</dd>
+              <dd className="flex flex-col gap-1 text-sm">
+                {formatVitals(encounter.vitals)}
+                {/* La presión con su aviso, como se vio al atender (QA del 16 nov). */}
+                <VitalsPressureAlert vitals={encounter.vitals} ageYears={ageAtVisit} />
+              </dd>
+            </div>
+          ) : null}
+          {encounter.anesthesiaAtSigning ? (
+            // La anestesia de ese día: con qué ASA, quién la puso, el peso y el máximo (QA del 16 nov).
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">Anestesia local</dt>
+              <dd>
+                <AnesthesiaAtSigningView value={encounter.anesthesiaAtSigning} />
+              </dd>
             </div>
           ) : null}
           {examLines.length > 0 ? (

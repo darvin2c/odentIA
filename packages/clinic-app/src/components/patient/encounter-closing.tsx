@@ -14,7 +14,6 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   ScrollArea,
 } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
@@ -1122,49 +1121,6 @@ export function healthGapWords(gaps: readonly HealthGap[]): string {
 }
 
 /**
- * Con anestesia y algo por saber de su salud, el cierre lo dice junto a los
- * materiales (QA del 8 nov, A2): avisa y deja firmar; la firma guarda lo que
- * faltaba. Sin anestesia, lo que falta va en «Sin registrar».
- */
-export function AnesthesiaHealthLine({
-  anesthetics,
-  gaps,
-  risks = [],
-  onComplete,
-  disabled = false,
-}: {
-  anesthetics: readonly string[]
-  gaps: readonly HealthGap[]
-  /** Lo que dijo del corazón y de la anestesia que cambia una anestesia (QA del 14 nov, causa raíz). */
-  risks?: readonly string[]
-  /** «Completar en Antecedentes»: los abre encima de la atención. */
-  onComplete?: () => void
-  disabled?: boolean
-}): React.JSX.Element | null {
-  if (anesthetics.length === 0 || (gaps.length === 0 && risks.length === 0)) return null
-  const asked = healthGapWords(gaps)
-  const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
-    .filter(Boolean)
-    .join("; ")
-  return (
-    <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-medium">{missing ? "Anestesia con su salud por completar" : "Anestesia: revisa lo que dijo"}</span>
-        <span className="text-xs text-muted-foreground">
-          Se usa {listWords(anesthetics)}.{risks.length > 0 ? ` Dijo que ${listWords([...risks])}.` : ""}
-          {missing ? ` Falta ${missing}.` : ""} Puedes firmar igual{missing ? ": queda anotado lo que faltaba" : ""}.
-        </span>
-      </div>
-      {onComplete ? (
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
-          Completar en Antecedentes
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
-/**
  * Una ficha a medias de la atención, como la ve quien firma (revisión final del
  * 15 nov, propuesta 4): la ficha se cierra con la firma, sin un «Finalizar»
  * propio mientras la atención está en curso.
@@ -1329,8 +1285,7 @@ export function EncounterClosingDialog({
   children,
   nextVisit = null,
   mayCharge = true,
-  healthGaps = [],
-  onCompleteHealth,
+  safety = null,
   onCompleteForm,
   signForms = [],
   finishingForms,
@@ -1392,10 +1347,11 @@ export function EncounterClosingDialog({
    * plan). Sin eso, el cierre no promete «lo que se cargó hoy» (entrega 11).
    */
   mayCharge?: boolean
-  /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
-  healthGaps?: HealthGap[]
-  /** «Completar en Antecedentes» desde la línea de anestesia. */
-  onCompleteHealth?: () => void
+  /**
+   * Lo que avisa la seguridad del paciente antes de firmar, sin frenar (QA del 16 nov): la presión
+   * alta y la línea de anestesia (ASA y máximo por peso), las mismas de la atención.
+   */
+  safety?: React.ReactNode
   /** «Completar ahora» del formulario a medias: cierra el cierre y lo abre. */
   onCompleteForm?: (formId: string) => void
   /** Las fichas a medias de la atención, un bloque por ficha (`signFormsOf`). */
@@ -1466,6 +1422,8 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
+              {/* La presión y la anestesia avisan antes del consentimiento: son de lo que se decide (ADR 0195). */}
+              {safety}
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (
@@ -1516,13 +1474,6 @@ export function EncounterClosingDialog({
                   {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
                 </p>
               ) : null}
-              <AnesthesiaHealthLine
-                anesthetics={closing?.health?.anesthetics ?? []}
-                gaps={healthGaps}
-                risks={closing?.health?.risks ?? []}
-                onComplete={onCompleteHealth}
-                disabled={busy}
-              />
               {dictated}
               <FormsAtSign
                 id={`${ids}-forms`}
@@ -1604,68 +1555,5 @@ export function EncounterClosingDialog({
   )
 }
 
-/**
- * Sin colegiatura no se firma (ADR 0003: nombre y colegiatura en cada
- * atención): se pide en el mismo cierre, sin salir de la atención, y se
- * guarda en el perfil profesional para las siguientes. El título solo se pide
- * si el perfil no lo tiene; el colegio viene propuesto por el país del
- * producto (COP en odentIA, CMP en latidIA) y se puede cambiar. Cada falta se
- * dice en su campo.
- */
-export function SignatureRegistrationFields({
-  form,
-  signAs,
-  askTitle,
-  disabled,
-  numberRef,
-}: {
-  form: ClosingForm
-  /** El nombre con que firma, de su cuenta o su perfil. */
-  signAs: string | null
-  askTitle: boolean
-  disabled: boolean
-  /** El número es lo que falta escribir: ahí empieza el foco. */
-  numberRef?: React.Ref<HTMLInputElement>
-}): React.JSX.Element {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3">
-      <div className="flex flex-col">
-        <p className="font-medium">Falta tu colegiatura para firmar</p>
-        <p className="text-xs text-muted-foreground">
-          {signAs ? `Firmarás como ${signAs}. ` : ""}La historia clínica pide nombre y colegiatura.
-        </p>
-      </div>
-      {askTitle ? (
-        <form.AppField name="professionalTitle">
-          {(field) => <field.TextField label="Título profesional" maxLength={120} disabled={disabled} />}
-        </form.AppField>
-      ) : null}
-      <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3">
-        <form.AppField name="registrationBody">
-          {(field) => <field.TextField label="Colegio" maxLength={40} disabled={disabled} />}
-        </form.AppField>
-        <form.AppField name="registrationNumber">
-          {(field) => (
-            <field.Control
-              label="Número de colegiatura"
-              description="Se guarda en tu perfil profesional: no la volverá a pedir."
-            >
-              {(control) => (
-                <Input
-                  {...control.props}
-                  ref={numberRef}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  maxLength={20}
-                  disabled={disabled}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              )}
-            </field.Control>
-          )}
-        </form.AppField>
-      </div>
-    </div>
-  )
-}
+/** El bloque de la colegiatura vive aparte: también lo usa el consentimiento en la tablet. */
+export { SignatureRegistrationFields } from "./signature-registration-fields"

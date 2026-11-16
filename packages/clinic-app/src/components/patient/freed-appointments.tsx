@@ -52,11 +52,13 @@ export function FinalizedFreedAppointments({
   const [done, setDone] = useState<Record<string, "usada" | "liberada">>({})
   // Lo que se le puso a cada cita: después de usarla, `next` ya no lo ofrece.
   const [usedFor, setUsedFor] = useState<Record<string, string>>({})
+  // Antes de salir sin nada: los hooks son siempre los mismos aunque la última cita se libere
+  // («Rendered fewer hooks than expected», QA del 16 nov).
+  const [releasing, setReleasing] = useState<FreedAppointment | null>(null)
   if (appointments.length === 0) return null
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(
     new Date(),
   )
-  const [releasing, setReleasing] = useState<FreedAppointment | null>(null)
   const act = async (appointment: FreedAppointment, how: "usada" | "liberada", notify = false) => {
     setBusy(appointment.id)
     try {

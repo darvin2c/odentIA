@@ -2,6 +2,8 @@ import {
   ageInYears,
   appendDictated,
   type ClinicalProduct,
+  DEFAULT_LOCAL_ANESTHETIC,
+  type LocalAnestheticKey,
   formatMoney,
   formatVitals,
   gapWords,
@@ -151,7 +153,10 @@ import {
   useClosingForm,
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterContextBody, EncounterHealthReview } from "./encounter-context"
+import { EncounterAnesthesiaLine } from "./encounter-anesthesia"
 import { LinkSignedNotice } from "./link-signed-notice"
+import { VitalsPressureAlert } from "./vitals-alert"
+import { REGISTRATION_FIELDS } from "./signature-registration-fields"
 import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
@@ -730,6 +735,13 @@ export function EncounterEditor({
   // Lo que falta saber de su salud, como lo dice el servidor (la misma regla que guarda la firma;
   // odentIA también cuenta la ASA). Guardar Antecedentes o responder el aviso refresca el cierre.
   const healthGaps: HealthGap[] = closingQuery.data?.data.health?.gaps ?? []
+  // Lo de hoy que usa anestesia local: sus servicios marcados y los anestésicos de sus materiales
+  // (QA del 16 nov). El anestésico elegido solo sirve para el máximo, y la firma lo guarda con él.
+  const anesthesiaUses = [
+    ...new Set([...(closingQuery.data?.data.health?.uses ?? []), ...(closingQuery.data?.data.health?.anesthetics ?? [])]),
+  ]
+  const [anesthetic, setAnesthetic] = useState<LocalAnestheticKey>(DEFAULT_LOCAL_ANESTHETIC)
+  const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
@@ -1407,6 +1419,8 @@ export function EncounterEditor({
             dictatedControl(signIds),
             continuingAfterSign(askedSessions, sessionAnswers).length > 0,
           ),
+          // Con anestesia hoy, la atención firmada guarda el máximo con el anestésico elegido.
+          ...(anesthesiaUses.length > 0 ? { anesthetic } : {}),
         }),
       })
       onSigned?.()
@@ -1729,7 +1743,7 @@ export function EncounterEditor({
     .map((section) => section.title.toLowerCase())
   // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
   // aparte, junto a los materiales, y no se repite aquí. La ASA solo cuenta con anestesia.
-  const withAnesthesia = (closingQuery.data?.data.health?.anesthetics.length ?? 0) > 0
+  const withAnesthesia = anesthesiaUses.length > 0
   const unaskedHealth = healthGaps.filter((gap) => gap !== "asa")
   const unrecordedAll =
     !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
@@ -2133,6 +2147,8 @@ export function EncounterEditor({
             </draftForm.AppField>
           ))}
         </div>
+        {/* La presión que pide pensar antes de lo electivo, bajo sus campos: avisa y no frena (QA del 16 nov). */}
+        <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
         <p className="text-xs text-muted-foreground">
           La presión se registra completa (sistólica y diastólica).
         </p>
@@ -2325,6 +2341,7 @@ export function EncounterEditor({
   const registrationFields = needsRegistration ? (
     <SignatureRegistrationFields
       form={closingForm}
+      fields={REGISTRATION_FIELDS}
       signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
       askTitle={!profileQuery.data?.data.professionalTitle}
       disabled={finalizing}
@@ -2341,6 +2358,33 @@ export function EncounterEditor({
       }}
     />
   ) : null
+  /** La línea de anestesia de hoy: en «Realizado hoy» antes de anestesiar, y al firmar. */
+  const anesthesiaLine = (atSign: boolean) => (
+    <EncounterAnesthesiaLine
+      patientId={patientId}
+      encounterId={encounterId}
+      uses={anesthesiaUses}
+      asksAsa={closingQuery.data?.data.health?.asksAsa ?? false}
+      gaps={healthGaps}
+      risks={closingQuery.data?.data.health?.risks ?? []}
+      health={stripHealth.data?.data ?? null}
+      vitals={parsedVitals}
+      ageYears={patientAge}
+      anesthetic={anesthetic}
+      onAnestheticChange={setAnesthetic}
+      canWrite={canWrite}
+      disabled={locked}
+      atSign={atSign}
+      onComplete={
+        openWide
+          ? () => {
+              setConfirmOpen(false)
+              openWide({ id: "antecedentes", review: true })
+            }
+          : undefined
+      }
+    />
+  )
   const age = ageFrom(patient.patient.birthDate)
   // Al pasar la cabecera, la línea fija del paciente (P12): el nombre y sus alertas siguen a la vista.
   const headerEnd = useRef<HTMLSpanElement>(null)
@@ -2667,6 +2711,8 @@ export function EncounterEditor({
             "realizado",
             pastVisit ? "Realizado ese día" : "Realizado hoy",
             <>
+              {/* Antes de anestesiar: en cuanto algo de hoy usa anestesia local (QA del 16 nov). */}
+              {anesthesiaLine(false)}
               <EncounterTreatments
                 patientId={patientId}
                 encounterId={encounterId}
@@ -2935,14 +2981,12 @@ export function EncounterEditor({
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}
-        healthGaps={healthGaps}
-        onCompleteHealth={
-          openWide
-            ? () => {
-                setConfirmOpen(false)
-                openWide({ id: "antecedentes", review: true })
-              }
-            : undefined
+        // La presión alta y la línea de anestesia, las mismas de la atención: avisan y no frenan.
+        safety={
+          <>
+            <VitalsPressureAlert vitals={parsedVitals} ageYears={patientAge} />
+            {anesthesiaLine(true)}
+          </>
         }
         // No frena: quien quiera terminarlo antes de firmar lo abre desde aquí; si no, firma igual.
         onCompleteForm={(formId) => {

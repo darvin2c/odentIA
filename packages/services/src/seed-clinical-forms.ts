@@ -327,25 +327,24 @@ export async function seedClinicalForms(
     })
   }
 
-  // «Se pide para» (fase 3, paso 2B): la exodoncia pide su consentimiento y el
-  // de anestesia local; al registrarla, la atención propone prepararlos.
+  // «Se pide para» (fase 3, paso 2B): la exodoncia pide su consentimiento; al registrarla, la
+  // atención propone prepararlo. La anestesia local va dentro del consentimiento de cada
+  // procedimiento (el de la exodoncia, el de la endodoncia y el de la pulpectomía la explican):
+  // la demo ya no pide aparte el de anestesia solo para la exodoncia, que la hacía incoherente con
+  // la endodoncia (QA del 16 nov, C34). La plantilla sigue activa para quien la quiera aparte.
   const extractions = await tx
     .select({ id: serviceCatalog.id })
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.organizationId, orgId), ilike(serviceCatalog.name, "%exodoncia%")))
-  if (extractions.length > 0) {
-    for (const key of ["exodoncia", "anestesia-local"]) {
-      const consentTemplate = consentTemplates.get(key)
-      if (consentTemplate)
-        await setConsentTemplateServices(
-          tx,
-          orgId,
-          ownerUserId,
-          consentTemplate.id,
-          extractions.map((row) => row.id),
-        )
-    }
-  }
+  const extractionConsent = consentTemplates.get("exodoncia")
+  if (extractions.length > 0 && extractionConsent)
+    await setConsentTemplateServices(
+      tx,
+      orgId,
+      ownerUserId,
+      extractionConsent.id,
+      extractions.map((row) => row.id),
+    )
   // Las endodoncias propias de la demo (la posterior vital, sin plantilla de la biblioteca) también
   // piden el consentimiento de endodoncia: sin esto la de la 46 se firmaba sin él (QA del 9 nov).
   const endodontics = await tx
@@ -360,8 +359,8 @@ export async function seedClinicalForms(
       ...new Set([...linked.map((row) => row.serviceId), ...endodontics.map((row) => row.id)]),
     ])
   }
-  // La anestesia de la exodoncia: pendiente aquí; seed-dev la deja firmada en
-  // papel con la foto de la hoja.
+  // Un consentimiento de anestesia preparado a mano (no lo pide ningún servicio): pendiente aquí;
+  // seed-dev lo deja firmado en papel con la foto de la hoja.
   const anestesia = consentTemplates.get("anestesia-local")
   if (anestesia && !(await listConsentDocuments(tx, orgId, { patientId })).some((doc) => doc.templateId === anestesia.id)) {
     await createConsentDocument(tx, orgId, ownerUserId, {

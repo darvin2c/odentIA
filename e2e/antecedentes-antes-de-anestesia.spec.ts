@@ -2,8 +2,8 @@
  * Antes de anestesiar (QA del 8 nov, A2): la atención pide lo que nunca se le
  * preguntó de su salud (alergias, enfermedades y medicación), cada cosa con su
  * respuesta a un toque, y lo que sí tiene se escribe en Antecedentes encima de
- * la atención. Si se descuenta un anestésico local y aún falta algo, el cierre
- * lo dice junto a los materiales; nada de esto impide firmar. Los datos se
+ * la atención. Si algo de hoy usa anestesia local, la línea de anestesia lo dice
+ * antes de anestesiar y al firmar; nada de esto impide firmar. Los datos se
  * preparan por la API; lo que se ve y se responde, por la pantalla.
  */
 import { randomUUID } from "node:crypto"
@@ -93,12 +93,17 @@ test("la atención pide sus enfermedades y su medicación, y el cierre avisa la 
   await side.getByRole("button", { name: "Cerrar" }).click()
   await expect(page.getByText("ASA sin clasificar.")).toHaveCount(0)
 
-  // Al firmar, con lidocaína y sin saber su medicación ni su ASA, el cierre lo dice junto a los materiales.
+  // Con lidocaína, la línea de anestesia ya está en «Realizado hoy», antes de anestesiar (QA del 16 nov).
+  await expect(page.getByRole("region", { name: "Anestesia local · Lidocaína 2 % con epinefrina" })).toBeVisible()
+  // Al firmar, sin saber su medicación ni su ASA, el cierre lo repite: avisa y no frena.
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Finalizar y firmar" })
-  await expect(dialog).toContainText("Anestesia con su salud por completar")
-  await expect(dialog).toContainText("Se usa Lidocaína 2 % con epinefrina")
-  await expect(dialog).toContainText("Falta preguntarle por sus alergias y su medicación; clasificar su riesgo anestésico (ASA)")
+  await expect(dialog).toContainText("Anestesia local · Lidocaína 2 % con epinefrina")
+  await expect(dialog).toContainText(
+    "Niega enfermedades. Falta preguntarle por sus alergias y su medicación. Falta clasificar su riesgo anestésico (ASA). Puedes firmar igual.",
+  )
+  // Sin peso anotado no se inventa un máximo.
+  await expect(dialog).toContainText("Anota su peso en los signos vitales para ver la dosis máxima.")
   // Avisa, no frena: firmar sigue disponible.
   await expect(dialog.getByRole("button", { name: "Finalizar y firmar" })).toBeEnabled()
   await shot("cierre-con-anestesia")
