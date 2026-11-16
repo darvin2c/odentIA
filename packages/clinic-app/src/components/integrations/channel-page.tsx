@@ -120,7 +120,7 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
                 ))}
               </IntegrationBlock>
             ) : canWrite ? (
-              <section aria-label={`Conectar ${name}`} className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
+              <section aria-label={`Conecta ${name}`} className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
                 <div className="flex flex-col gap-1">
                   <h2 className="text-base font-semibold">Conecta {name}</h2>
                   <p className="text-sm text-muted-foreground">

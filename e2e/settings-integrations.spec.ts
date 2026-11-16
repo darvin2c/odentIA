@@ -175,7 +175,7 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   // Cada proveedor tiene su página: la fila de la lista lleva ahí, y desde ahí se conecta.
   await rowOf(messaging, "Telegram").getByRole("link", { name: "Conectar Telegram", exact: true }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Telegram" })).toBeVisible()
-  await page.getByRole("region", { name: "Conectar Telegram" }).getByRole("button", { name: "Conectar", exact: true }).click()
+  await page.getByRole("region", { name: "Conecta Telegram" }).getByRole("button", { name: "Conectar", exact: true }).click()
   // Conectar Telegram: un dato, con su nombre en palabras; al conectar dice qué pasó.
   const connect = surface(page, { name: "Conectar Telegram", exact: true })
   await expect(connect).toBeVisible()
@@ -238,7 +238,7 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   await panel.getByRole("button", { name: "Cerrar", exact: true }).click()
   await expect(panel).toBeHidden()
   // Desconectado, el bot pasa a «Desconectados» y «Conexión» vuelve a ofrecer conectar uno.
-  await expect(page.getByRole("region", { name: "Conectar Telegram" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Conecta Telegram" })).toBeVisible()
   await page.getByRole("tab", { name: "Desconectados · 1" }).click()
   await expect(rowOf(page.getByRole("region", { name: "Desconectados" }), "Telegram")).toContainText("Desconectado")
 })
@@ -356,7 +356,7 @@ test("integraciones en el teléfono: filas cortas que se tocan enteras; cada pro
     expect(box.height).toBeGreaterThanOrEqual(44)
     await page.touchscreen.tap(box.x + 24, box.y + box.height / 2)
     await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/integrations/telegram"))
-    await page.getByRole("region", { name: "Conectar Telegram" }).getByRole("button", { name: "Conectar", exact: true }).tap()
+    await page.getByRole("region", { name: "Conecta Telegram" }).getByRole("button", { name: "Conectar", exact: true }).tap()
     const drawer = page.getByRole("dialog", { name: "Conectar Telegram" })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByLabel("Clave del bot", { exact: true })).toBeVisible()
