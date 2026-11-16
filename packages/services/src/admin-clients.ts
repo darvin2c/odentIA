@@ -45,6 +45,7 @@ import {
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   inArray,
@@ -65,6 +66,7 @@ import {
   kairosCoolingRows,
   kairosRiskRows,
 } from "./admin-kairos.js"
+import { computeOnboarding, type OnboardingOptions } from "./admin-onboarding.js"
 import { listClinicLoads } from "./clinic-progress-report.js"
 import {
   invalidField,
@@ -77,6 +79,7 @@ import {
 import { limaDate } from "./peru-business-days.js"
 import { moneyText } from "./saas-emails.js"
 import { type WaitlistStage, waitlistStage } from "./saas-founders.js"
+import { listSaasPlanChanges } from "./saas-terms.js"
 
 /**
  * Los clientes del ARM de la administración (ADR 0185): la clínica es el eje,
@@ -417,17 +420,26 @@ export interface ClientSignal {
   words: string
 }
 
+/**
+ * Las vistas de la lista, por fase (ADR 0196): por vender, en alta, activos, no por ahora,
+ * perdidos y todos. «Con cuenta» se partió en «En alta» y «Activos»: el nombre de antes llega en
+ * enlaces guardados y abre «En alta» (`CLIENT_VIEW_INPUTS`).
+ */
 export const CLIENT_VIEWS = [
   "por_vender",
-  "con_cuenta",
+  "en_alta",
+  "activos",
   "no_por_ahora",
   "perdidos",
   "todos",
 ] as const
 export type ClientView = (typeof CLIENT_VIEWS)[number]
+/** Lo que se acepta al pedir la lista: las vistas y el nombre de antes, «con_cuenta». */
+export const CLIENT_VIEW_INPUTS = [...CLIENT_VIEWS, "con_cuenta"] as const
+export type ClientViewInput = (typeof CLIENT_VIEW_INPUTS)[number]
 
 export interface ClientListFilter {
-  view?: ClientView
+  view?: ClientViewInput
   product?: ClinicalProduct
   /** Un usuario, «mio» (quien consulta) o «sin» (sin responsable). */
   owner?: string
@@ -444,6 +456,8 @@ export interface ClientListItem {
   name: string
   product: ClinicalProduct
   stage: ClientStage
+  /** La fase (`clientPhaseOf`): con cuenta, «En alta» o «Activo»; sin ella, la de la venta. */
+  phase: ClientPhase
   nextStep: ClientNextStep | null
   owner: ClientPerson | null
   origin: SaasClientOrigin
@@ -660,13 +674,20 @@ function searchSql(q: string): SQL {
       ${byPhone})))`
 }
 
-function viewSql(view: ClientView, stage: SQL<ClientStage>): SQL {
+/**
+ * Cada vista en SQL, con la misma regla de la fase (`clientPhaseSql`): por vender es sin cuenta y
+ * en una etapa de la venta; en alta, con cuenta y sin un pago que cuente (`clientPaidSql`);
+ * activos, con cuenta y con él. `stage` y `paid` se calculan una vez por fila.
+ */
+function viewSql(view: ClientView, stage: SQL<ClientStage>, paid: SQL<boolean>): SQL {
   const selling = sql.raw(SELLING_STAGES.map((s) => `'${s}'`).join(","))
   switch (view) {
     case "por_vender":
       return sql`(${saasClient.organizationId} is null and ${stage} in (${selling}))`
-    case "con_cuenta":
-      return sql`(${saasClient.organizationId} is not null)`
+    case "en_alta":
+      return sql`(${saasClient.organizationId} is not null and not ${paid})`
+    case "activos":
+      return sql`(${saasClient.organizationId} is not null and ${paid})`
     case "no_por_ahora":
       return sql`(${stage} = 'no_por_ahora')`
     case "perdidos":
@@ -676,8 +697,13 @@ function viewSql(view: ClientView, stage: SQL<ClientStage>): SQL {
   }
 }
 
+/** La vista pedida, con el nombre de antes («con_cuenta») como «En alta». */
+const viewSchema = z
+  .enum(CLIENT_VIEW_INPUTS, "Elige una vista")
+  .transform((view): ClientView => (view === "con_cuenta" ? "en_alta" : view))
+
 const listFilterSchema = z.strictObject({
-  view: z.enum(CLIENT_VIEWS, "Elige una vista").optional(),
+  view: viewSchema.optional(),
   product: z.enum(CLINICAL_PRODUCTS, "Elige un producto").optional(),
   owner: z.string().trim().min(1).max(120).optional(),
   origin: z.enum(SAAS_CLIENT_ORIGINS, "Elige cómo llegó").optional(),
@@ -772,7 +798,7 @@ export async function nextSteps(
 }
 
 /**
- * La lista de clientes por vista (Por vender, Con cuenta, No por ahora,
+ * La lista de clientes por vista (Por vender, En alta, Activos, No por ahora,
  * Perdidos, Todos), con sus filtros. Los conteos de cada vista llevan los
  * mismos filtros. Las archivadas no salen.
  */
@@ -788,6 +814,7 @@ export async function listClients(
   const limit = filter.limit ?? 50
   const offset = filter.offset ?? 0
   const stage = clientStageSql(now)
+  const paid = clientPaidSql()
 
   const conditions: SQL[] = [isNull(saasClient.archivedAt)]
   if (filter.product) conditions.push(eq(saasClient.product, filter.product))
@@ -804,7 +831,7 @@ export async function listClients(
       Object.fromEntries(
         CLIENT_VIEWS.map((v) => [
           v,
-          sql<number>`(count(*) filter (where ${viewSql(v, stage)}))::int`,
+          sql<number>`(count(*) filter (where ${viewSql(v, stage, paid)}))::int`,
         ]),
       ) as Record<ClientView, SQL<number>>,
     )
@@ -825,11 +852,12 @@ export async function listClients(
       ownerUserId: saasClient.ownerUserId,
       ownerName: user.name,
       stage,
+      paid,
       lastContactAt: lastContactSql,
     })
     .from(saasClient)
     .leftJoin(user, eq(user.id, saasClient.ownerUserId))
-    .where(and(base, viewSql(view, stage)))
+    .where(and(base, viewSql(view, stage, paid)))
     .orderBy(
       // Soporte no ordena por una tarea que no ve.
       sql`(select min(t.due_on) from ${saasTask} t where t.client_id = ${saasClient.id} and t.status = 'abierta'
@@ -851,6 +879,11 @@ export async function listClients(
       name: row.name,
       product: row.product as ClinicalProduct,
       stage: row.stage,
+      phase: clientPhaseOf({
+        stage: row.stage,
+        hasAccount: row.organizationId !== null,
+        paid: Boolean(row.paid),
+      }),
       nextStep,
       owner: row.ownerUserId ? { userId: row.ownerUserId, name: row.ownerName ?? "" } : null,
       origin: row.origin as SaasClientOrigin,
@@ -1350,7 +1383,8 @@ export async function clientForOrganization(
  * cliente y su venta se cierra como «entró», en la misma transacción. Sin
  * cliente, nace uno con los datos de la cuenta. Si la cuenta ya tenía otro
  * cliente, se queda con ese (no se mueven cuentas entre fichas: eso es
- * fusionar). Una demo no es cliente: null.
+ * fusionar). Un cliente sin responsable queda con quien le dio el alta (el
+ * alta asistida; la invitación no tiene persona). Una demo no es cliente: null.
  */
 export async function linkClientToOrganization(
   tx: Db,
@@ -1389,6 +1423,8 @@ export async function linkClientToOrganization(
     .update(saasClient)
     .set({
       organizationId: input.organizationId,
+      // Sin responsable, lo lleva quien le dio el alta: su alta no queda sin nadie que la siga.
+      ownerUserId: client.ownerUserId ?? actor?.userId ?? null,
       archivedAt: null,
       archivedBy: null,
       updatedAt: now,
@@ -1474,6 +1510,21 @@ export interface ClientActivityRow {
   byKairos: boolean
   contactId: string | null
   adminOnly: boolean
+  /**
+   * Quien lo escribió, si llegó de fuera: del correo, su nombre o su dirección; del chat, su
+   * persona, el nombre que dio el canal o su dirección. Nulo en lo que anotó el equipo.
+   */
+  from: string | null
+  /** El correo que abre: el que llegó o el que respondimos. Solo Administración lo recibe. */
+  emailId: string | null
+  /** La conversación de WhatsApp, Instagram o Messenger. Solo Administración la recibe. */
+  chatId: string | null
+}
+
+/** Una frase de «Lo que hay que saber», con su fuente y cómo se dice esa fuente. */
+export interface ClientSummarySentence extends SaasClientSummarySource {
+  /** «Lo anotado», «Nos escribió por WhatsApp», «Propuesta»…; nulo, una fuente que no se conoce. */
+  label: string | null
 }
 
 export interface ClientDetail {
@@ -1481,6 +1532,17 @@ export interface ClientDetail {
   name: string
   product: ClinicalProduct
   stage: ClientStage
+  /** La fase (ADR 0196): por vender, en alta, activo, no por ahora o perdido. */
+  phase: ClientPhase
+  /**
+   * En alta: cuántos pasos van, de cuántos, y los nombres de los que faltan, en su orden (la misma
+   * cuenta de Alta, `computeOnboarding`). Nulo en las demás fases: la pestaña Alta lee lo suyo.
+   */
+  alta: { done: number; total: number; missing: string[] } | null
+  /** Activo: el día de su primer pago que cuenta (confirmado o devuelto); nulo en las demás fases. */
+  activeSince: Date | null
+  /** Los casos de soporte de su cuenta que no están resueltos (Soporte no cuenta los de cobro). */
+  openSupportCases: number
   countryCode: string
   city: string | null
   professionals: string | null
@@ -1508,7 +1570,7 @@ export interface ClientDetail {
     inviteExpiresAt: Date | null
     enteredAt: Date | null
   } | null
-  summary: { text: string; sources: SaasClientSummarySource[]; at: Date | null } | null
+  summary: { text: string; sources: ClientSummarySentence[]; at: Date | null } | null
   contacts: ClientContactRow[]
   openTasks: ClientTaskRow[]
   recentActivities: ClientActivityRow[]
@@ -1520,12 +1582,154 @@ export interface ClientDetail {
   createdAt: Date
 }
 
-/** La ficha del cliente: cabecera, datos, personas, tareas abiertas, últimas actividades y señales. */
+/* ---------- Lo que una actividad tiene de conversación ---------- */
+
+/** La fila de afuera de la bitácora, con su nombre completo: drizzle no califica las columnas de una sola tabla. */
+const FOLLOW_UP = sql.raw(`"admin"."saas_follow_up"`)
+
+/** Del correo que llegó con esta actividad (el mismo cliente y la misma hora), `column`; si no, null. */
+function activityInboundSql(column: SQL): SQL {
+  return sql`case when ${FOLLOW_UP}.kind = 'correo' and ${FOLLOW_UP}.direction = 'entro' then
+    (select ${column} from ${saasInboundEmail} e where e.client_id = ${FOLLOW_UP}.client_id
+      and e.received_at = ${FOLLOW_UP}.happened_at order by e.id limit 1) end`
+}
+
+/**
+ * Del envío que dejó esta actividad al salir (`outreachWentOut`: el mismo cliente, su canal y la
+ * hora en que salió), `column`; si no, null.
+ */
+function activitySentSql(column: SQL): SQL {
+  return sql`case when ${FOLLOW_UP}.direction = 'salio' then
+    (select ${column} from ${saasOutreach} o where o.client_id = ${FOLLOW_UP}.client_id
+      and o.status = 'enviado' and o.channel = ${FOLLOW_UP}.kind and o.sent_at = ${FOLLOW_UP}.happened_at
+      order by o.id limit 1) end`
+}
+
+/** Quien escribió por WhatsApp, Instagram o Messenger: su persona, el nombre que dio el canal o su dirección. */
+const activityChatFromSql = sql<string | null>`case when ${FOLLOW_UP}.chat_id is not null and ${FOLLOW_UP}.direction = 'entro' then
+  (select coalesce(nullif(trim(p.name), ''), nullif(trim(ch.display_name), ''), ch.address)
+    from ${saasChat} ch left join ${saasClientContact} p on p.id = coalesce(${FOLLOW_UP}.contact_id, ch.contact_id)
+    where ch.id = ${FOLLOW_UP}.chat_id) end`
+
+/**
+ * ¿Es parte de una conversación? Lo que entró o salió por un chat, el correo que llegó y lo que
+ * salió de un envío. Desde la Bandeja (ADR 0196) es de Administración: Soporte no lo ve, ni en
+ * la ficha ni en el historial; lo que anota el equipo a mano sigue a la vista.
+ */
+const activityIsConversationSql = sql<boolean>`(${FOLLOW_UP}.chat_id is not null
+  or ${activityInboundSql(sql`1`)} is not null or ${activitySentSql(sql`1`)} is not null)`
+
+/** Cómo se dice la fuente de una frase de «Lo que hay que saber», por su tipo (`tipo:id`). */
+const SUMMARY_SOURCE_WORDS: Record<string, string> = {
+  solicitud: "Solicitud",
+  contacto: "Persona",
+  tarea: "Tarea",
+  propuesta: "Propuesta",
+  cliente: "Ficha",
+  venta: "Venta",
+}
+
+const CHAT_KIND_WORDS: Partial<Record<SaasActivityKind, string>> = {
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
+}
+
+/** Cómo se dice una actividad como fuente: lo que es y si entró o salió. */
+export function activitySourceWords(activity: { kind: string; direction: string | null }): string {
+  const chat = CHAT_KIND_WORDS[activity.kind as SaasActivityKind]
+  if (activity.kind === "correo" || chat) {
+    const by = chat ? ` por ${chat}` : ""
+    if (activity.direction === "entro") return `Nos escribió${by}`
+    if (activity.direction === "salio") return `Le escribimos${by}`
+    return chat ?? "Correo"
+  }
+  switch (activity.kind) {
+    case "llamada":
+      return "Llamada"
+    case "reunion":
+      return "Reunión"
+    case "presentacion":
+      return "Presentación"
+    case "propuesta":
+      return "Propuesta"
+    default:
+      return "Lo anotado"
+  }
+}
+
+/** Las frases de Kairós con cómo se dice cada fuente; las actividades, por lo que fueron. */
+async function summarySentences(
+  tx: Db,
+  clientId: string,
+  sources: SaasClientSummarySource[],
+): Promise<ClientSummarySentence[]> {
+  const activityIds = [
+    ...new Set(
+      sources
+        .map((sentence) => sentence.source.match(/^actividad:(.+)$/)?.[1] ?? "")
+        .filter((activityId) => UUID.test(activityId)),
+    ),
+  ]
+  const activities = activityIds.length
+    ? await tx
+        .select({ id: saasFollowUp.id, kind: saasFollowUp.kind, direction: saasFollowUp.direction })
+        .from(saasFollowUp)
+        .where(and(eq(saasFollowUp.clientId, clientId), inArray(saasFollowUp.id, activityIds)))
+    : []
+  const byId = new Map(activities.map((activity) => [activity.id, activity]))
+  return sources.map((sentence) => {
+    const [kind, ref] = [sentence.source.split(":")[0] ?? "", sentence.source.split(":")[1] ?? ""]
+    if (kind === "actividad") {
+      const activity = byId.get(ref)
+      // Una actividad que ya no está (se fusionó o se movió) se dice como lo anotado.
+      return { ...sentence, label: activity ? activitySourceWords(activity) : "Lo anotado" }
+    }
+    return { ...sentence, label: SUMMARY_SOURCE_WORDS[kind] ?? null }
+  })
+}
+
+/** Cuántos casos de soporte de esa cuenta siguen sin resolver; Soporte no cuenta los de cobro. */
+async function openSupportCasesOf(tx: Db, staff: AdminActor, orgId: string): Promise<number> {
+  const [row] = await tx
+    .select({ n: count() })
+    .from(supportCase)
+    .where(
+      and(
+        eq(supportCase.organizationId, orgId),
+        ne(supportCase.status, "resuelto"),
+        isAdmin(staff) ? undefined : ne(supportCase.kind, "cobro"),
+      ),
+    )
+  return Number(row?.n ?? 0)
+}
+
+/** Desde cuándo está activa: su primer pago que cuenta (`clientPaidSql`: confirmado o devuelto). */
+async function activeSinceOf(tx: Db, orgId: string): Promise<Date | null> {
+  const [row] = await tx
+    .select({ at: sql<Date | null>`min(${saasPayment.confirmedAt})`.mapWith(saasPayment.confirmedAt) })
+    .from(saasPayment)
+    .where(
+      and(
+        eq(saasPayment.organizationId, orgId),
+        isNotNull(saasPayment.confirmedAt),
+        inArray(saasPayment.status, ["confirmado", "devuelto"]),
+      ),
+    )
+  return toDate(row?.at)
+}
+
+/**
+ * La ficha del cliente: cabecera, fase, datos, personas, tareas abiertas, últimas actividades y
+ * señales. En alta trae sus pasos con la misma cuenta de Alta (`computeOnboarding`); `options`
+ * es lo de la ruta del alta («Conectar con Facebook» configurado).
+ */
 export async function getClient(
   tx: Db,
   actor: AdminActor,
   id: string,
   now = new Date(),
+  options: OnboardingOptions = { metaSignupAvailable: false },
 ): Promise<ClientDetail> {
   const staff = requireStaff(actor)
   if (!UUID.test(id)) throw notFound("Cliente")
@@ -1534,6 +1738,7 @@ export async function getClient(
       client: saasClient,
       ownerName: user.name,
       stage: clientStageSql(now),
+      paidAccount: clientPaidSql(),
       lastContactAt: lastContactSql,
     })
     .from(saasClient)
@@ -1608,24 +1813,69 @@ export async function getClient(
     .leftJoin(user, eq(user.id, saasTask.assigneeUserId))
     .where(and(eq(saasTask.clientId, id), eq(saasTask.status, "abierta"), visibleTaskSql(staff)))
     .orderBy(asc(saasTask.dueOn), sql`${saasTask.dueAt} asc nulls last`, asc(saasTask.createdAt))
+  // Lo último que pasó, con quien lo escribió si llegó de fuera (nunca «Sistema» por lo que
+  // escribió una persona). Soporte no recibe lo de las conversaciones (ADR 0196).
   const activityRows = await tx
-    .select({ entry: saasFollowUp, authorName: user.name })
+    .select({
+      entry: saasFollowUp,
+      authorName: user.name,
+      inboundFrom: sql<
+        string | null
+      >`${activityInboundSql(sql`coalesce(nullif(trim(e.from_name), ''), e.from_address)`)}`,
+      chatFrom: activityChatFromSql,
+      inboundId: sql<string | null>`${activityInboundSql(sql`e.id::text`)}`,
+      repliedId: sql<string | null>`${activitySentSql(sql`o.in_reply_to_email_id::text`)}`,
+    })
     .from(saasFollowUp)
     .leftJoin(user, eq(user.id, saasFollowUp.authorUserId))
     .where(
       and(
         eq(saasFollowUp.clientId, id),
-        isAdmin(staff) ? undefined : eq(saasFollowUp.adminOnly, false),
+        isAdmin(staff)
+          ? undefined
+          : and(eq(saasFollowUp.adminOnly, false), sql`not ${activityIsConversationSql}`),
       ),
     )
     .orderBy(desc(saasFollowUp.happenedAt), desc(saasFollowUp.createdAt))
     .limit(5)
+
+  const phase = clientPhaseOf({
+    stage,
+    hasAccount: client.organizationId !== null,
+    paid: Boolean(row.paidAccount),
+  })
+  // En alta, la misma cuenta de la pestaña Alta; en las demás fases no se calcula (la página no
+  // la usa y una clínica activa tiene mucho que leer).
+  const onboarding =
+    phase === "en_alta" && client.organizationId
+      ? await computeOnboarding(
+          tx,
+          { id: client.id, organizationId: client.organizationId },
+          now,
+          options,
+        )
+      : null
 
   return {
     id: client.id,
     name: client.name,
     product: client.product as ClinicalProduct,
     stage,
+    phase,
+    alta: onboarding
+      ? {
+          done: onboarding.done,
+          total: onboarding.total,
+          missing: onboarding.steps.filter((step) => step.state === "falta").map((s) => s.label),
+        }
+      : null,
+    activeSince:
+      phase === "activo" && client.organizationId
+        ? await activeSinceOf(tx, client.organizationId)
+        : null,
+    openSupportCases: client.organizationId
+      ? await openSupportCasesOf(tx, staff, client.organizationId)
+      : 0,
     countryCode: client.countryCode,
     city: client.city,
     professionals: client.professionals,
@@ -1662,7 +1912,11 @@ export async function getClient(
         }
       : null,
     summary: client.summary
-      ? { text: client.summary, sources: client.summarySources ?? [], at: client.summaryAt }
+      ? {
+          text: client.summary,
+          sources: await summarySentences(tx, client.id, client.summarySources ?? []),
+          at: client.summaryAt,
+        }
       : null,
     contacts: await listClientContacts(tx, staff, id),
     openTasks: taskRows.map(({ task, assigneeName }) => ({
@@ -1679,18 +1933,23 @@ export async function getClient(
       byKairos: task.byKairos,
       overdue: taskOverdue(task, now),
     })),
-    recentActivities: activityRows.map(({ entry, authorName }) => ({
-      id: entry.id,
-      kind: entry.kind as SaasActivityKind,
-      direction: (entry.direction as "salio" | "entro" | null) ?? null,
-      body: entry.body,
-      outcome: entry.outcome,
-      happenedAt: entry.happenedAt,
-      author: entry.authorUserId ? { userId: entry.authorUserId, name: authorName ?? "" } : null,
-      byKairos: entry.byKairos,
-      contactId: entry.contactId,
-      adminOnly: entry.adminOnly,
-    })),
+    recentActivities: activityRows.map(
+      ({ entry, authorName, inboundFrom, chatFrom, inboundId, repliedId }) => ({
+        id: entry.id,
+        kind: entry.kind as SaasActivityKind,
+        direction: (entry.direction as "salio" | "entro" | null) ?? null,
+        body: entry.body,
+        outcome: entry.outcome,
+        happenedAt: entry.happenedAt,
+        author: entry.authorUserId ? { userId: entry.authorUserId, name: authorName ?? "" } : null,
+        byKairos: entry.byKairos,
+        contactId: entry.contactId,
+        adminOnly: entry.adminOnly,
+        from: inboundFrom ?? chatFrom ?? null,
+        emailId: inboundId ?? repliedId ?? null,
+        chatId: entry.chatId,
+      }),
+    ),
     signals: (await clientSignals(tx, staff, [id], now)).get(id) ?? [],
     riskSignals: client.organizationId
       ? await clientRiskSignals(tx, staff, client.organizationId, now)
@@ -2362,9 +2621,80 @@ export async function listClientContacts(
 
 /* ---------- Historial ---------- */
 
-export const TIMELINE_FILTERS = ["todo", "contactos", "venta", "cuenta", "soporte"] as const
+/**
+ * Los filtros del historial (ADR 0196): por lo que pasó, no por la tabla de donde sale.
+ * «Plan y pagos» es de Administración en la pantalla, como su pestaña; a Soporte el servidor le
+ * da igual solo lo que puede ver.
+ */
+export const TIMELINE_FILTERS = [
+  "todo",
+  "conversaciones",
+  "venta",
+  "alta",
+  "plan",
+  "soporte",
+] as const
 export type TimelineFilter = (typeof TIMELINE_FILTERS)[number]
 export type TimelineCategory = Exclude<TimelineFilter, "todo">
+/**
+ * Lo que se acepta al pedirlo: los filtros y los nombres de antes, que llegan en enlaces
+ * guardados. «contactos» es Conversaciones y «cuenta» (Cuenta y pagos) es Alta más Plan y pagos.
+ */
+export const TIMELINE_FILTER_INPUTS = [...TIMELINE_FILTERS, "contactos", "cuenta"] as const
+export type TimelineFilterInput = (typeof TIMELINE_FILTER_INPUTS)[number]
+
+/** Lo que dice el ícono de cada fila: el canal o lo que es. */
+export type TimelineIcon =
+  | "llamada"
+  | "whatsapp"
+  | "instagram"
+  | "messenger"
+  | "correo"
+  | "reunion"
+  | "nota"
+  | "presentacion"
+  | "propuesta"
+  | "solicitud"
+  | "venta"
+  | "tarea"
+  | "archivo"
+  | "persona"
+  | "alta"
+  | "informe"
+  | "carga"
+  | "pago"
+  | "plan"
+  | "soporte"
+  | "kairos"
+
+/** La pestaña de la ficha a la que lleva una fila sin un cajón propio. */
+export type TimelineTab =
+  | "resumen"
+  | "venta"
+  | "alta"
+  | "pagos"
+  | "soporte"
+  | "contactos"
+  | "documentos"
+
+/** Lo que abre cada fila: toda fila abre algo. */
+export type TimelineLink =
+  | {
+      kind:
+        | "solicitud"
+        | "propuesta"
+        | "envio"
+        | "soporte"
+        | "archivo"
+        | "tarea"
+        | "correo"
+        | "chat"
+        | "actividad"
+      id: string
+    }
+  | { kind: "pestana"; id: TimelineTab }
+  | { kind: "informe"; id: string; orgId: string; number: number }
+  | { kind: "carga"; id: string; orgId: string; loadId: string }
 
 export interface TimelineEntry {
   /** Fuente e id: único en la línea de tiempo. */
@@ -2372,12 +2702,21 @@ export interface TimelineEntry {
   at: Date
   who: { kind: "persona" | "kairos" | "sistema" | "clinica"; name: string }
   category: TimelineCategory
+  icon: TimelineIcon
   title: string
   detail?: string
   adminOnly: boolean
-  link?: {
-    kind: "solicitud" | "propuesta" | "envio" | "soporte" | "archivo" | "tarea" | "correo" | "chat"
-    id: string
+  link: TimelineLink
+  /** Una actividad: su texto entero y en qué quedó, para leerla en su cajón. */
+  body?: string
+  outcome?: string
+  /** Un envío que no es de una conversación: por dónde, a quién, qué decía y cómo quedó. */
+  envio?: {
+    channel: SaasOutreachChannel
+    to: string
+    subject: string | null
+    body: string
+    status: string
   }
 }
 
@@ -2387,99 +2726,171 @@ export interface ClientTimeline {
   nextBefore: Date | null
 }
 
-/** El número de un informe de la carga en la auditoría (`informe-<n>`). */
+/** El número de un informe de la carga en la auditoría (`informe-<n>`), o null. */
+const reportNumberOf = (entityId: string | null): number | null => {
+  const number = Number(entityId?.match(/^informe-(\d+)$/)?.[1])
+  return Number.isInteger(number) && number > 0 ? number : null
+}
 const reportNumberWords = (entityId: string | null) => {
-  const number = entityId?.match(/^informe-(\d+)$/)?.[1]
+  const number = reportNumberOf(entityId)
   return number ? ` N.º ${number}` : ""
 }
 
+type AuditRow = {
+  entityId: string | null
+  organizationId: string | null
+  metadata: Record<string, unknown> | null
+}
+
+const tab = (id: TimelineTab): TimelineLink => ({ kind: "pestana", id })
+
+/** Un informe abre su cajón (quién, cuándo, a quién y su PDF); sin número ni cuenta, el Alta. */
+const reportLink = (audit: AuditRow): TimelineLink => {
+  const number = reportNumberOf(audit.entityId)
+  return number && audit.organizationId
+    ? { kind: "informe", id: String(number), orgId: audit.organizationId, number }
+    : tab("alta")
+}
+
 /**
- * Una frase por código de la auditoría de la administración (de la cuenta o
- * del cliente). Lo que no está aquí no se muestra: nunca el código. Lo de
- * pagos sale de `saas_payment` y lo de la solicitud y la bitácora de sus
- * tablas, para no contarlo dos veces. Las cargas de la skill (`org.setup_import`
- * y `org.data_import`, una fila por tanda) salen agrupadas de `listClinicLoads`,
- * con sus cifras; `org.progress_report_sending` es el paso de en medio de cada
- * envío y no se dice: lo dice cómo terminó (y Alta, si quedó a medias).
+ * Una frase por código de la auditoría de la administración (de la cuenta o del cliente), con
+ * su categoría, su ícono y lo que abre. Lo que no está aquí no se muestra: nunca el código. Los
+ * cambios del plan salen de `listSaasPlanChanges` (de las dos auditorías), lo de pagos de
+ * `saas_payment` y lo de la solicitud y la bitácora de sus tablas, para no contarlo dos veces.
+ * Las cargas de la skill (`org.setup_import` y `org.data_import`, una fila por tanda) salen
+ * agrupadas de `listClinicLoads`, con sus cifras; `org.progress_report_sending` es el paso de en
+ * medio de cada envío y no se dice: lo dice cómo terminó (y Alta, si quedó a medias).
  */
 export const TIMELINE_AUDIT_PHRASES: Record<
   string,
   {
     title: string
     category: TimelineCategory
+    icon: TimelineIcon
     adminOnly?: boolean
     /** La frase con lo de esa fila (el número del informe), si lo hay. */
-    titleOf?: (audit: {
-      entityId: string | null
-      metadata: Record<string, unknown> | null
-    }) => string
+    titleOf?: (audit: AuditRow) => string
+    link: (audit: AuditRow) => TimelineLink
   }
 > = {
   "org.assisted_create_invited": {
     title: "Se creó su cuenta con el alta asistida y se invitó a la propietaria",
-    category: "cuenta",
+    category: "alta",
+    icon: "alta",
+    link: () => tab("alta"),
   },
-  "org.invitation_resend": { title: "Se reenvió una invitación a su equipo", category: "cuenta" },
-  "org.invitation_cancel": { title: "Se anuló una invitación a su equipo", category: "cuenta" },
+  "org.invitation_resend": {
+    title: "Se reenvió una invitación a su equipo",
+    category: "alta",
+    icon: "alta",
+    link: () => tab("alta"),
+  },
+  "org.invitation_cancel": {
+    title: "Se anuló una invitación a su equipo",
+    category: "alta",
+    icon: "alta",
+    link: () => tab("alta"),
+  },
   "org.progress_report_sent": {
     title: "Salió el informe de la carga",
-    category: "cuenta",
+    category: "alta",
+    icon: "informe",
     adminOnly: true,
     titleOf: ({ entityId, metadata }) =>
       metadata?.registered === true
         ? `Se registró el informe${reportNumberWords(entityId)}, que salió por correo aparte`
         : `Salió el informe${reportNumberWords(entityId)}${metadata?.resent === true ? ", reenviado" : ""}`,
+    link: reportLink,
   },
   "org.progress_report_unknown": {
     title: "No se sabe si salió el informe de la carga",
-    category: "cuenta",
+    category: "alta",
+    icon: "informe",
     adminOnly: true,
     titleOf: ({ entityId }) => `No se sabe si salió el informe${reportNumberWords(entityId)}`,
+    link: reportLink,
   },
-  "saas.activated": { title: "Se activó su plan", category: "cuenta" },
-  "saas.paused": { title: "Se pausó su plan", category: "cuenta" },
-  "saas.resumed": { title: "Se reanudó su plan", category: "cuenta" },
-  "saas.charge_created": { title: "Se le generó un cobro", category: "cuenta", adminOnly: true },
-  "saas.discount_expired": {
-    title: "Terminó su precio especial",
-    category: "cuenta",
+  "saas.charge_created": {
+    title: "Se le generó un cobro",
+    category: "plan",
+    icon: "pago",
     adminOnly: true,
+    link: () => tab("pagos"),
   },
-  "saas.guarantee_ended": {
-    title: "Terminaron sus condiciones de Fundadora",
-    category: "cuenta",
-    adminOnly: true,
-  },
-  "saas.founders_entered": { title: "Pasó a Fundadores", category: "cuenta", adminOnly: true },
   "recovery.case_open": {
     title: "Se abrió una recuperación de la propiedad de la cuenta",
-    category: "cuenta",
+    category: "soporte",
+    icon: "soporte",
+    link: () => tab("soporte"),
   },
   "recovery.case_decide": {
     title: "Se decidió la recuperación de la propiedad de la cuenta",
-    category: "cuenta",
+    category: "soporte",
+    icon: "soporte",
+    link: () => tab("soporte"),
   },
   "recovery.case_execute": {
     title: "Se completó la recuperación de la propiedad de la cuenta",
-    category: "cuenta",
+    category: "soporte",
+    icon: "soporte",
+    link: () => tab("soporte"),
   },
-  "client.updated": { title: "Se actualizaron sus datos", category: "venta" },
-  "client.archived": { title: "Se archivó el cliente", category: "venta" },
-  "client.merged": { title: "Se unió con otra ficha de la misma clínica", category: "venta" },
-  "client.contact_added": { title: "Se agregó una persona", category: "contactos" },
-  "client.contact_linked": { title: "Se ligó una persona a su usuario", category: "contactos" },
-  "kairos.client_created": { title: "Kairós creó el cliente al ver su cuenta", category: "cuenta" },
-  "kairos.client_linked": { title: "Kairós ligó su cuenta a esta ficha", category: "cuenta" },
+  "client.updated": {
+    title: "Se actualizaron sus datos",
+    category: "venta",
+    icon: "venta",
+    link: () => tab("resumen"),
+  },
+  "client.archived": {
+    title: "Se archivó el cliente",
+    category: "venta",
+    icon: "venta",
+    link: () => tab("resumen"),
+  },
+  "client.merged": {
+    title: "Se unió con otra ficha de la misma clínica",
+    category: "venta",
+    icon: "venta",
+    link: () => tab("resumen"),
+  },
+  "client.contact_added": {
+    title: "Se agregó una persona",
+    category: "conversaciones",
+    icon: "persona",
+    link: () => tab("contactos"),
+  },
+  "client.contact_linked": {
+    title: "Se ligó una persona a su usuario",
+    category: "conversaciones",
+    icon: "persona",
+    link: () => tab("contactos"),
+  },
+  "kairos.client_created": {
+    title: "Kairós creó el cliente al ver su cuenta",
+    category: "alta",
+    icon: "kairos",
+    link: () => tab("alta"),
+  },
+  "kairos.client_linked": {
+    title: "Kairós ligó su cuenta a esta ficha",
+    category: "alta",
+    icon: "kairos",
+    link: () => tab("alta"),
+  },
   "arm.proposal_applied": {
     title: "Se pusieron en su plan las condiciones de la propuesta aceptada",
     category: "venta",
+    icon: "propuesta",
     adminOnly: true,
+    link: () => tab("pagos"),
   },
   "arm.proposal_not_applied": {
     title:
       "Las condiciones de la propuesta aceptada no se pusieron solas: hay que ponerlas en Plan y pagos",
     category: "venta",
+    icon: "propuesta",
     adminOnly: true,
+    link: () => tab("pagos"),
   },
 }
 
@@ -2518,10 +2929,15 @@ const OUTREACH_CHANNEL_WORDS: Record<SaasOutreachChannel, string> = {
   messenger: "Messenger",
 }
 
-const SALE_TASKS: readonly string[] = ["presentacion", "propuesta"]
-const ACCOUNT_TASKS: readonly string[] = ["alta", "cobro"]
+/** La categoría de una tarea por su tipo: la venta, el alta, el cobro o la conversación. */
 const taskCategory = (kind: string): TimelineCategory =>
-  SALE_TASKS.includes(kind) ? "venta" : ACCOUNT_TASKS.includes(kind) ? "cuenta" : "contactos"
+  kind === "presentacion" || kind === "propuesta"
+    ? "venta"
+    : kind === "alta"
+      ? "alta"
+      : kind === "cobro"
+        ? "plan"
+        : "conversaciones"
 
 const FILE_TITLES: Record<string, string> = {
   carta: "Carta de bienvenida",
@@ -2546,6 +2962,20 @@ function fileTitle(file: { kind: string; source: string | null }): string {
   return FILE_TITLES[file.kind] ?? "Documento"
 }
 
+/**
+ * La categoría de un documento: lo que llegó en una conversación, Conversaciones; la carta y lo
+ * de la carga, Alta; lo demás (propuestas, presentaciones y otros), Venta.
+ */
+function fileCategory(file: { kind: string; source: string | null }): TimelineCategory {
+  if (file.kind === "correo") return "conversaciones"
+  if (file.kind === "carta" || file.kind === "archivo_clinica") return "alta"
+  return "venta"
+}
+
+/** Una tarea que Kairós cerró sola dentro de este tiempo después de un hecho se dice en él. */
+const KAIROS_FOLD_MS = 15 * 60_000
+const KAIROS_CLOSED = "Kairós la cerró"
+
 const day = (date: Date) =>
   new Intl.DateTimeFormat("es-PE", {
     timeZone: "America/Lima",
@@ -2561,10 +2991,39 @@ const clip = (text: string | null | undefined, max = 280) => {
 }
 
 const timelineSchema = z.strictObject({
-  filter: z.enum(TIMELINE_FILTERS, "Elige qué ver").optional(),
+  filter: z
+    .enum(TIMELINE_FILTER_INPUTS, "Elige qué ver")
+    .transform((value) => (value === "contactos" ? "conversaciones" : value))
+    .optional(),
   before: z.date().optional(),
   limit: z.number().int().min(1).max(100).optional(),
 })
+
+/**
+ * La tarea que Kairós cerró sola poco después de un hecho de su misma categoría no es una fila
+ * aparte: el hecho la dice («Salió el informe N.º 3 · cerró la tarea «Enviar el informe»»).
+ * Solo dentro de la misma página: si el hecho quedó en la siguiente, la tarea sigue en su fila.
+ */
+function foldKairosClosings(page: TimelineEntry[], closed: Map<string, string>): TimelineEntry[] {
+  if (!closed.size) return page
+  const out = page.map((entry) => ({ ...entry }))
+  const folded = new Set<string>()
+  for (const task of out) {
+    const title = closed.get(task.id)
+    if (!title) continue
+    let best: TimelineEntry | null = null
+    for (const fact of out) {
+      if (fact === task || fact.link.kind === "tarea" || fact.category !== task.category) continue
+      const gap = task.at.getTime() - fact.at.getTime()
+      if (gap < 0 || gap > KAIROS_FOLD_MS) continue
+      if (!best || fact.at.getTime() > best.at.getTime()) best = fact
+    }
+    if (!best) continue
+    best.title = `${best.title} · cerró la tarea «${title}»`
+    folded.add(task.id)
+  }
+  return out.filter((entry) => !folded.has(entry.id))
+}
 
 /**
  * El historial del cliente, en palabras, armado al leer desde sus fuentes
@@ -2572,15 +3031,17 @@ const timelineSchema = z.strictObject({
  * venció, entró, descartada), la bitácora, las tareas hechas, las decisiones
  * de venta, las propuestas, los envíos sin confirmar (los que salieron ya
  * dejaron su actividad), la auditoría de la cuenta y del cliente (una frase
- * por código), los pagos, los casos de soporte, los
+ * por código), los cambios del plan, los pagos, los casos de soporte, los
  * correos que llegaron (sin la actividad que los registró) y los archivos.
- * Soporte no ve lo «solo administración» ni importes ni casos de cobro.
+ * Cada fila dice su categoría (Conversaciones, Venta, Alta, Plan y pagos o
+ * Soporte) y lo que abre. Soporte no ve lo «solo administración», importes,
+ * casos de cobro ni lo de las conversaciones (ADR 0196).
  */
 export async function clientTimeline(
   tx: Db,
   actor: AdminActor,
   clientId: string,
-  raw: { filter?: TimelineFilter; before?: Date; limit?: number } = {},
+  raw: { filter?: TimelineFilterInput; before?: Date; limit?: number } = {},
   now = new Date(),
 ): Promise<ClientTimeline> {
   const staff = requireStaff(actor)
@@ -2591,7 +3052,10 @@ export async function clientTimeline(
   const admin = isAdmin(staff)
   const client = await loadClient(tx, clientId)
   const orgId = client.organizationId
-  const wants = (category: TimelineCategory) => filter === "todo" || filter === category
+  const wants = (category: TimelineCategory) =>
+    filter === "todo" ||
+    filter === category ||
+    (filter === "cuenta" && (category === "alta" || category === "plan"))
   const beforeOf = (column: AnyPgColumn) => (before ? lt(column, before) : undefined)
   // Una fila más que la página por fuente dice si hay más; las que dan varias entradas, más filas.
   const one = limit + 1
@@ -2602,12 +3066,17 @@ export async function clientTimeline(
     who: TimelineEntry["who"] | { userId: string | null; fallback: TimelineEntry["who"] }
   }
   const pending: Pending[] = []
+  /** Las tareas que cerró Kairós: su fila y su título, para decirlas en el hecho que las cerró. */
+  const closedByKairos = new Map<string, string>()
+  /** Los envíos que salieron sin conversación: su cajón dice qué decían. */
+  const sentOutreach = new Set<string>()
   const push = (entry: Pending) => {
-    if (before && entry.at >= before) return
-    if (!wants(entry.category)) return
-    if (entry.adminOnly && !admin) return
+    if (before && entry.at >= before) return false
+    if (!wants(entry.category)) return false
+    if (entry.adminOnly && !admin) return false
     if ("userId" in entry.who && entry.who.userId) people.add(entry.who.userId)
     pending.push(entry)
+    return true
   }
   const byUser = (
     userId: string | null,
@@ -2616,6 +3085,7 @@ export async function clientTimeline(
     userId,
     fallback,
   })
+  const kairos = { kind: "kairos", name: "Kairós" } as const
 
   // El cliente, cuando lo agregó una persona.
   if (client.createdBy) {
@@ -2624,6 +3094,7 @@ export async function clientTimeline(
       at: client.createdAt,
       who: byUser(client.createdBy),
       category: "venta",
+      icon: "venta",
       title: "Se agregó como cliente",
       detail: [
         CLIENT_ORIGIN_WORDS[client.origin as SaasClientOrigin] ?? client.origin,
@@ -2632,6 +3103,7 @@ export async function clientTimeline(
         .filter(Boolean)
         .join(" · "),
       adminOnly: false,
+      link: tab("resumen"),
     })
   }
 
@@ -2647,115 +3119,86 @@ export async function clientTimeline(
         name: `${r.firstName} ${r.lastName}`.trim() || r.clinicName,
       }
       const link = { kind: "solicitud" as const, id: r.id }
+      const base = { category: "venta" as const, icon: "solicitud" as const, adminOnly: false, link }
       push({
+        ...base,
         id: `solicitud:${r.id}:recibida`,
         at: r.createdAt,
         who: r.source === "web" ? person : { kind: "sistema", name: "Sistema" },
-        category: "venta",
         title:
           r.source === "web"
             ? "Pidió entrar desde la web"
             : "Se preparó su solicitud para invitarla",
         detail: r.source === "web" ? `${r.clinicName} · ${r.city}` : undefined,
-        adminOnly: false,
-        link,
       })
       if (r.confirmationSentAt) {
         push({
+          ...base,
           id: `solicitud:${r.id}:confirmacion`,
           at: r.confirmationSentAt,
           who: { kind: "sistema", name: "Sistema" },
-          category: "venta",
           title: "Le llegó la confirmación de su solicitud",
-          adminOnly: false,
-          link,
         })
       }
       if (r.invitedAt) {
         push({
+          ...base,
           id: `solicitud:${r.id}:invitada`,
           at: r.invitedAt,
           who: byUser(r.decidedBy),
-          category: "venta",
           title: "La invitamos a entrar",
           detail: r.inviteExpiresAt
             ? `La invitación vale hasta el ${day(r.inviteExpiresAt)}`
             : undefined,
-          adminOnly: false,
-          link,
         })
       }
       if (r.status === "invitada" && r.inviteExpiresAt && r.inviteExpiresAt <= now) {
         push({
+          ...base,
           id: `solicitud:${r.id}:vencio`,
           at: r.inviteExpiresAt,
           who: { kind: "sistema", name: "Sistema" },
-          category: "venta",
           title: "Venció su invitación sin que entrara",
-          adminOnly: false,
-          link,
         })
       }
       if (r.enteredAt) {
         push({
+          ...base,
           id: `solicitud:${r.id}:entro`,
           at: r.enteredAt,
           who: person,
-          category: "venta",
           title: "Abrió su cuenta con la invitación",
-          adminOnly: false,
-          link,
         })
       }
       if (r.status === "descartada" && r.decidedAt) {
         push({
+          ...base,
           id: `solicitud:${r.id}:descartada`,
           at: r.decidedAt,
           who: byUser(r.decidedBy),
-          category: "venta",
           title: "Se descartó su solicitud",
           detail: clip(r.discardReason),
-          adminOnly: false,
-          link,
         })
       }
     }
   }
 
-  // La bitácora (las actividades). La de un correo que entró se abre en ese
-  // correo (misma hora y cliente), y la de una respuesta que salió, en el
-  // correo que respondió (salió a la hora del envío). Soporte solo abre lo
-  // que llegó a soporte@.
-  if (wants("contactos") || wants("venta")) {
-    const mailboxOk = admin ? sql`true` : sql`e.mailbox = 'soporte'`
-    // La fila de afuera, con su nombre completo: drizzle no califica las columnas de una sola tabla.
-    const outer = sql.raw(`"admin"."saas_follow_up"`)
-    // El correo de una actividad que entró: el mismo cliente y la misma hora.
-    const inbound = (column: SQL) =>
-      sql`case when ${outer}.kind = 'correo' and ${outer}.direction = 'entro' then
-          (select ${column} from ${saasInboundEmail} e where e.client_id = ${outer}.client_id
-            and e.received_at = ${outer}.happened_at and ${mailboxOk} order by e.id limit 1) end`
+  // La bitácora (las actividades). La de un correo que entró se abre en ese correo (misma hora y
+  // cliente), la de una respuesta que salió, en el correo que respondió, y la de un chat, en su
+  // conversación. Lo que es de una conversación es solo de Administración (ADR 0196); lo que
+  // anota el equipo se abre en su cajón, con el texto entero.
+  if (wants("conversaciones") || wants("venta")) {
     const rows = await tx
       .select({
         f: saasFollowUp,
-        inboundId: sql<string | null>`${inbound(sql`e.id::text`)}`,
+        inboundId: sql<string | null>`${activityInboundSql(sql`e.id::text`)}`,
         // Quién lo escribió: su nombre o, sin nombre, su correo.
         inboundFrom: sql<
           string | null
-        >`${inbound(sql`coalesce(nullif(trim(e.from_name), ''), e.from_address)`)}`,
-        repliedId: sql<
-          string | null
-        >`case when ${outer}.kind = 'correo' and ${outer}.direction = 'salio' then
-          (select o.in_reply_to_email_id::text from ${saasOutreach} o join ${saasInboundEmail} e on e.id = o.in_reply_to_email_id
-            where o.client_id = ${outer}.client_id and o.status = 'enviado'
-              and o.sent_at = ${outer}.happened_at and ${mailboxOk} order by o.id limit 1) end`,
-        // Quién escribió por WhatsApp, Instagram o Messenger: su contacto, el nombre que dio Meta o su número.
-        chatFrom: sql<
-          string | null
-        >`case when ${outer}.chat_id is not null and ${outer}.direction = 'entro' then
-          (select coalesce(nullif(trim(p.name), ''), nullif(trim(ch.display_name), ''), ch.address)
-            from ${saasChat} ch left join ${saasClientContact} p on p.id = coalesce(${outer}.contact_id, ch.contact_id)
-            where ch.id = ${outer}.chat_id) end`,
+        >`${activityInboundSql(sql`coalesce(nullif(trim(e.from_name), ''), e.from_address)`)}`,
+        repliedId: sql<string | null>`${activitySentSql(sql`o.in_reply_to_email_id::text`)}`,
+        sentId: sql<string | null>`${activitySentSql(sql`o.id::text`)}`,
+        chatFrom: activityChatFromSql,
       })
       .from(saasFollowUp)
       .where(
@@ -2767,9 +3210,9 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasFollowUp.happenedAt))
       .limit(one)
-    for (const { f, inboundId, inboundFrom, repliedId, chatFrom } of rows) {
-      const kind = f.kind as SaasActivityKind
-      const titles = ACTIVITY_TITLES[kind] ?? ACTIVITY_TITLES.nota
+    for (const { f, inboundId, inboundFrom, repliedId, sentId, chatFrom } of rows) {
+      const kind = (f.kind in ACTIVITY_TITLES ? f.kind : "nota") as SaasActivityKind
+      const titles = ACTIVITY_TITLES[kind]
       const title = repliedId
         ? "Le respondimos su correo"
         : f.direction === "entro"
@@ -2778,7 +3221,15 @@ export async function clientTimeline(
             ? titles.salio
             : titles.nota
       const emailId = inboundId ?? repliedId
-      push({
+      const link: TimelineLink = emailId
+        ? { kind: "correo", id: emailId }
+        : f.chatId
+          ? // Lo que entró o salió por WhatsApp, Instagram o Messenger abre su conversación.
+            { kind: "chat", id: f.chatId }
+          : sentId
+            ? { kind: "envio", id: sentId }
+            : { kind: "actividad", id: f.id }
+      const shown = push({
         id: `actividad:${f.id}`,
         at: f.happenedAt,
         // El correo que entró lo escribió quien lo mandó, aunque lo haya anotado Kairós.
@@ -2786,29 +3237,30 @@ export async function clientTimeline(
           (inboundFrom ?? chatFrom)
             ? { kind: "clinica", name: inboundFrom ?? chatFrom ?? "" }
             : f.byKairos
-              ? { kind: "kairos", name: "Kairós" }
+              ? kairos
               : byUser(f.authorUserId, {
                   kind: "persona",
                   name: "Nota anterior, sin autor registrado",
                 }),
-        category: kind === "presentacion" || kind === "propuesta" ? "venta" : "contactos",
+        category: kind === "presentacion" || kind === "propuesta" ? "venta" : "conversaciones",
+        icon: kind,
         title,
         detail:
           [clip(f.body), f.outcome ? `Quedó en: ${clip(f.outcome, 200)}` : null]
             .filter(Boolean)
             .join(" · ") || undefined,
-        adminOnly: f.adminOnly,
-        ...(emailId
-          ? { link: { kind: "correo" as const, id: emailId } }
-          : f.chatId
-            ? // Lo que entró o salió por WhatsApp, Instagram o Messenger abre su conversación.
-              { link: { kind: "chat" as const, id: f.chatId } }
-            : {}),
+        adminOnly: f.adminOnly || link.kind !== "actividad",
+        link,
+        ...(link.kind === "actividad"
+          ? { body: f.body, ...(f.outcome ? { outcome: f.outcome } : {}) }
+          : {}),
       })
+      if (shown && link.kind === "envio") sentOutreach.add(link.id)
     }
   }
 
-  // Tareas hechas.
+  // Tareas hechas. La que cerró Kairós sola lo dice (no «Sistema»), y si fue poco después de un
+  // hecho de su misma categoría, la dice ese hecho (`foldKairosClosings`).
   {
     const rows = await tx
       .select()
@@ -2826,21 +3278,25 @@ export async function clientTimeline(
       .limit(one)
     for (const t of rows) {
       if (!t.doneAt) continue
-      push({
-        id: `tarea:${t.id}`,
+      const closedByIt = !t.doneBy && Boolean(t.doneNote?.startsWith(KAIROS_CLOSED))
+      const id = `tarea:${t.id}`
+      const shown = push({
+        id,
         at: t.doneAt,
-        who: byUser(t.doneBy),
+        who: byUser(t.doneBy, closedByIt ? kairos : undefined),
         category: taskCategory(t.kind),
+        icon: "tarea",
         title: `Hecho: ${t.title}`,
         detail: clip(t.doneNote),
         // Una tarea de cobro o marcada solo de Administración: Soporte no la ve (ADR 0181).
         adminOnly: taskHiddenFromSupport(t),
         link: { kind: "tarea", id: t.id },
       })
+      if (shown && closedByIt) closedByKairos.set(id, t.title)
     }
   }
 
-  // Decisiones de venta y ventas nuevas.
+  // Decisiones de venta y ventas nuevas: se leen en la Venta.
   if (wants("venta")) {
     const rows = await tx
       .select()
@@ -2854,8 +3310,10 @@ export async function clientTimeline(
           at: o.createdAt,
           who: byUser(o.createdBy),
           category: "venta",
+          icon: "venta",
           title: "Se abrió otra venta",
           adminOnly: false,
+          link: tab("venta"),
         })
       }
       if (!o.decidedAt || !o.decision || o.decision === "entro") return
@@ -2865,6 +3323,7 @@ export async function clientTimeline(
         at: o.decidedAt,
         who: byUser(o.decidedBy),
         category: "venta",
+        icon: "venta",
         title:
           o.decision === "no_por_ahora" && o.returnOn
             ? `No por ahora: volver el ${civilDay(o.returnOn)}`
@@ -2873,6 +3332,7 @@ export async function clientTimeline(
               : "Se perdió la venta",
         detail: [reason, clip(o.reasonDetail)].filter(Boolean).join(" · ") || undefined,
         adminOnly: false,
+        link: tab("venta"),
       })
     })
   }
@@ -2893,50 +3353,47 @@ export async function clientTimeline(
             .filter(Boolean)
             .join(" · ")
         : undefined
+      const base = { category: "venta" as const, icon: "propuesta" as const, adminOnly: false, link }
       push({
+        ...base,
         id: `propuesta:${p.id}:creada`,
         at: p.createdAt,
         who: byUser(p.createdBy),
-        category: "venta",
         title: `Se preparó la propuesta ${p.version}`,
         detail: terms,
-        adminOnly: false,
-        link,
       })
       if (p.sentAt) {
         push({
+          ...base,
           id: `propuesta:${p.id}:enviada`,
           at: p.sentAt,
           who: byUser(p.createdBy),
-          category: "venta",
           title: `Se envió la propuesta ${p.version}`,
           detail: `Vale hasta el ${civilDay(p.validUntil)}`,
-          adminOnly: false,
-          link,
         })
       }
       if (p.decidedAt && (p.status === "aceptada" || p.status === "no_aceptada")) {
         push({
+          ...base,
           id: `propuesta:${p.id}:decidida`,
           at: p.decidedAt,
           who: byUser(p.decidedBy),
-          category: "venta",
           title:
             p.status === "aceptada"
               ? `Aceptó la propuesta ${p.version}`
               : `No aceptó la propuesta ${p.version}`,
           detail: clip(p.acceptedNote),
-          adminOnly: false,
-          link,
         })
       }
     }
   }
 
-  // Envíos que todavía no dejaron su actividad: por confirmar, inciertos o que no salieron.
-  if (wants("contactos")) {
+  // Envíos que todavía no dejaron su actividad: por confirmar, inciertos o que no salieron. Son
+  // de una conversación: solo Administración (ADR 0196). El de un chat abre su conversación; el
+  // otro, su cajón con lo que decía.
+  if (wants("conversaciones")) {
     const rows = await tx
-      .select({ outreach: saasOutreach, adminOnly: outreachAdminOnlySql(`"saas_outreach"`) })
+      .select()
       .from(saasOutreach)
       .where(
         and(
@@ -2947,8 +3404,9 @@ export async function clientTimeline(
       )
       .orderBy(desc(saasOutreach.createdAt))
       .limit(one)
-    for (const { outreach: o, adminOnly } of rows) {
-      const channel = OUTREACH_CHANNEL_WORDS[o.channel as SaasOutreachChannel] ?? "correo"
+    for (const o of rows) {
+      const channelKey = (o.channel in OUTREACH_CHANNEL_WORDS ? o.channel : "correo") as SaasOutreachChannel
+      const channel = OUTREACH_CHANNEL_WORDS[channelKey]
       const title =
         o.status === "pendiente"
           ? `Mensaje por ${channel}: falta decir si salió`
@@ -2959,12 +3417,23 @@ export async function clientTimeline(
         id: `envio:${o.id}`,
         at: o.resolvedAt ?? o.createdAt,
         who: byUser(o.resolvedBy ?? o.createdBy),
-        category: "contactos",
+        category: "conversaciones",
+        icon: channelKey,
         title,
         detail: clip(o.subject ?? o.body, 140),
-        // El de una propuesta o de algo de Kairós solo de Administración: Soporte no lo ve.
-        adminOnly: Boolean(adminOnly),
+        adminOnly: true,
         link: o.chatId ? { kind: "chat", id: o.chatId } : { kind: "envio", id: o.id },
+        ...(o.chatId
+          ? {}
+          : {
+              envio: {
+                channel: channelKey,
+                to: o.toAddress,
+                subject: o.subject,
+                body: o.body,
+                status: o.status,
+              },
+            }),
       })
     }
   }
@@ -2988,18 +3457,37 @@ export async function clientTimeline(
         id: `auditoria:${a.id}`,
         at: a.createdAt,
         who: a.action.startsWith("kairos.")
-          ? { kind: "kairos", name: "Kairós" }
+          ? kairos
           : a.actorRole === "system" || !a.actorUserId
             ? { kind: "sistema", name: "Sistema" }
             : byUser(a.actorUserId),
         category: phrase.category,
+        icon: phrase.icon,
         title: phrase.titleOf ? phrase.titleOf(a) : phrase.title,
         adminOnly: phrase.adminOnly === true,
+        link: phrase.link(a),
       })
     }
   }
 
-  if (orgId && admin && wants("cuenta")) {
+  // Los cambios del plan, de las dos auditorías (`listSaasPlanChanges`): se leen en Plan y pagos.
+  if (orgId && wants("plan")) {
+    const changes = await listSaasPlanChanges(tx, orgId, { before, limit: many, forSupport: !admin })
+    for (const change of changes) {
+      push({
+        id: `plan:${change.id}`,
+        at: change.at,
+        who: change.by ? { kind: "persona", name: change.by.name } : { kind: "sistema", name: "Sistema" },
+        category: "plan",
+        icon: "plan",
+        title: change.words,
+        adminOnly: !change.support,
+        link: tab("pagos"),
+      })
+    }
+  }
+
+  if (orgId && admin && wants("alta")) {
     // Lo que cargó la skill en el servidor (ADR 0183): el mismo registro de Alta, con sus cifras.
     const loads = await listClinicLoads(tx, orgId)
     for (const load of loads) {
@@ -3007,15 +3495,18 @@ export async function clientTimeline(
         id: `carga:${load.id}`,
         at: new Date(load.at),
         who: load.by ? { kind: "persona", name: load.by } : { kind: "sistema", name: "Sistema" },
-        category: "cuenta",
+        category: "alta",
+        icon: "carga",
         title: `${load.kind === "configuracion" ? "Se cargó la configuración" : "Se cargaron los pacientes"}: ${load.summary}`,
         adminOnly: true,
+        link: { kind: "carga", id: load.id, orgId, loadId: load.id },
       })
     }
   }
 
-  if (orgId && wants("cuenta")) {
-    // Pagos: confirmados, rechazados (con su motivo), revertidos y devueltos; importes solo para Administración.
+  if (orgId && wants("plan")) {
+    // Pagos: confirmados, rechazados (con su motivo), revertidos y devueltos; importes solo para
+    // Administración. Se leen en Plan y pagos.
     const rows = await tx
       .select()
       .from(saasPayment)
@@ -3024,51 +3515,49 @@ export async function clientTimeline(
       .limit(many)
     for (const p of rows) {
       const amount = admin ? moneyText(p.currency, p.amountCents) : undefined
+      const base = { category: "plan" as const, icon: "pago" as const, adminOnly: false, link: tab("pagos") }
       push({
+        ...base,
         id: `pago:${p.id}:recibido`,
         at: p.createdAt,
         who: { kind: "clinica", name: client.name },
-        category: "cuenta",
         title: "Mandó un comprobante de pago",
         detail: amount,
-        adminOnly: false,
       })
       if (p.confirmedAt)
         push({
+          ...base,
           id: `pago:${p.id}:confirmado`,
           at: p.confirmedAt,
           who: byUser(p.confirmedBy),
-          category: "cuenta",
           title: "Se confirmó su pago",
           detail: amount,
-          adminOnly: false,
         })
       if (p.rejectedAt)
         push({
+          ...base,
           id: `pago:${p.id}:rechazado`,
           at: p.rejectedAt,
           who: byUser(p.rejectedBy),
-          category: "cuenta",
           title: "Se rechazó su comprobante",
           detail: clip(p.rejectReason),
-          adminOnly: false,
         })
       if (p.reversedAt) {
         push({
+          ...base,
           id: `pago:${p.id}:revertido`,
           at: p.reversedAt,
           who: byUser(p.reversedBy),
-          category: "cuenta",
           title: p.status === "devuelto" ? "Se le devolvió un pago" : "Se revirtió un pago",
           detail: [amount, clip(p.reverseReason)].filter(Boolean).join(" · ") || undefined,
-          adminOnly: false,
         })
       }
     }
   }
 
   if (orgId && wants("soporte")) {
-    // Casos de soporte: abiertos y resueltos (Soporte no ve los de cobro). La pregunta queda en el caso.
+    // Casos de soporte: abiertos y resueltos (Soporte no ve los de cobro). La pregunta queda en el
+    // caso, que se abre en la cola.
     const rows = await tx
       .select({
         id: supportCase.id,
@@ -3089,31 +3578,31 @@ export async function clientTimeline(
       .limit(many)
     for (const s of rows) {
       const link = { kind: "soporte" as const, id: s.id }
+      const base = { category: "soporte" as const, icon: "soporte" as const, link }
       push({
+        ...base,
         id: `soporte:${s.id}:abierto`,
         at: s.createdAt,
         who: { kind: "clinica", name: client.name },
-        category: "soporte",
         title: s.kind === "cobro" ? "Abrió un caso de cobro" : "Abrió un caso de soporte",
         adminOnly: s.kind === "cobro",
-        link,
       })
       if (s.resolvedAt && s.status === "resuelto") {
         push({
+          ...base,
           id: `soporte:${s.id}:resuelto`,
           at: s.resolvedAt,
           who: { kind: "sistema", name: "Soporte" },
-          category: "soporte",
           title: "Se resolvió su caso",
           adminOnly: s.kind === "cobro",
-          link,
         })
       }
     }
   }
 
-  if (wants("contactos")) {
-    // Correos que llegaron y no dejaron su actividad (la actividad de un correo que entró lleva su misma hora).
+  if (wants("conversaciones") && admin) {
+    // Correos que llegaron y no dejaron su actividad (la actividad de un correo que entró lleva su
+    // misma hora). Son de una conversación: solo Administración (ADR 0196).
     const rows = await tx
       .select()
       .from(saasInboundEmail)
@@ -3133,21 +3622,22 @@ export async function clientTimeline(
         id: `correo:${e.id}`,
         at: e.receivedAt,
         who: { kind: "clinica", name: e.fromName?.trim() || e.fromAddress },
-        category: "contactos",
+        category: "conversaciones",
+        icon: "correo",
         title: `Nos escribió a ${inboundMailboxWords(e)}@`,
         detail:
           [clip(e.subject, 140), files ? `${files} ${files === 1 ? "adjunto" : "adjuntos"}` : null]
             .filter(Boolean)
             .join(" · ") || undefined,
-        // Lo que no llegó a soporte@ es comercial: Soporte no lo ve.
-        adminOnly: e.mailbox !== "soporte",
+        adminOnly: true,
         link: { kind: "correo" as const, id: e.id },
       })
     }
   }
 
   {
-    // Documentos (los adjuntos de un correo ya los cuenta el correo).
+    // Documentos (los adjuntos de un correo ya los cuenta el correo). Cada uno se abre en el
+    // visor; uno borrado lo dice ahí.
     const rows = await tx
       .select()
       .from(saasClientFile)
@@ -3162,16 +3652,15 @@ export async function clientTimeline(
       .orderBy(desc(saasClientFile.createdAt))
       .limit(many)
     for (const f of rows) {
-      const category: TimelineCategory =
-        f.kind === "propuesta" || f.kind === "presentacion" ? "venta" : "cuenta"
-      const who: Pending["who"] =
-        f.source === "kairos" ? { kind: "kairos", name: "Kairós" } : byUser(f.createdBy)
+      const category = fileCategory(f)
+      const who: Pending["who"] = f.source === "kairos" ? kairos : byUser(f.createdBy)
       const link = { kind: "archivo" as const, id: f.id }
       push({
         id: `archivo:${f.id}:subido`,
         at: f.createdAt,
         who,
         category,
+        icon: "archivo",
         title: `${fileTitle(f)}: ${f.filename}`,
         adminOnly: f.adminOnly,
         link,
@@ -3182,11 +3671,22 @@ export async function clientTimeline(
           at: f.deletedAt,
           who: { kind: "sistema", name: "Sistema" },
           category,
+          icon: "archivo",
           title: `Se borró ${f.filename}`,
           adminOnly: f.adminOnly,
+          link,
         })
     }
   }
+
+  // Lo que decía cada envío que salió sin conversación (su cajón lo muestra).
+  const outreach = sentOutreach.size
+    ? await tx
+        .select()
+        .from(saasOutreach)
+        .where(inArray(saasOutreach.id, [...sentOutreach]))
+    : []
+  const sent = new Map(outreach.map((row) => [row.id, row]))
 
   const names = await userNames(tx, people)
   for (const entry of pending) {
@@ -3196,14 +3696,32 @@ export async function clientTimeline(
           ? { kind: "persona", name: names.get(entry.who.userId) ?? "Alguien del equipo" }
           : entry.who.fallback
         : entry.who
-    entries.push({ ...entry, who })
+    const row = entry.link.kind === "envio" && !entry.envio ? sent.get(entry.link.id) : undefined
+    entries.push({
+      ...entry,
+      who,
+      ...(row
+        ? {
+            envio: {
+              channel: (row.channel in OUTREACH_CHANNEL_WORDS ? row.channel : "correo") as SaasOutreachChannel,
+              to: row.toAddress,
+              subject: row.subject,
+              body: row.body,
+              status: row.status,
+            },
+          }
+        : {}),
+    })
   }
   entries.sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? -1 : 1))
   // La página no corta entre dos entradas del mismo instante: «Cargar más» pide lo anterior a él.
   let end = Math.min(limit, entries.length)
   const cut = entries[end - 1]
   while (cut && end < entries.length && entries[end]?.at.getTime() === cut.at.getTime()) end += 1
-  const items = entries.slice(0, end)
-  const last = items[items.length - 1]
-  return { items, nextBefore: entries.length > end && last ? last.at : null }
+  const page = entries.slice(0, end)
+  const last = page[page.length - 1]
+  return {
+    items: foldKairosClosings(page, closedByKairos),
+    nextBefore: entries.length > end && last ? last.at : null,
+  }
 }

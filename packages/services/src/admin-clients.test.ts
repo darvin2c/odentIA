@@ -13,6 +13,7 @@ import {
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
+import { auditEvent } from "@odentia/db/schema/org"
 import {
   saasFollowUp,
   saasPayment,
@@ -381,10 +382,13 @@ describe("la lista", () => {
     expect(all.counts).toMatchObject({
       por_vender: 2,
       no_por_ahora: 1,
-      con_cuenta: 0,
+      en_alta: 0,
+      activos: 0,
       perdidos: 0,
       todos: 3,
     })
+    expect(all.items.find((i) => i.id === lost.id)?.phase).toBe("no_por_ahora")
+    expect(all.items.find((i) => i.id === mine.id)?.phase).toBe("por_vender")
     expect((await listClients(ownerDb, support, { q })).items.map((i) => i.id).sort()).toEqual(
       [mine.id, nobody.id].sort(),
     )
@@ -530,6 +534,171 @@ describe("la ficha", () => {
     await expect(getClient(ownerDb, admin, "no-es-uuid")).rejects.toMatchObject({
       code: "NOT_FOUND",
     })
+  })
+
+  it("su fase, sus pasos del alta, los casos abiertos y lo último con quien lo escribió (ADR 0196)", async () => {
+    const tag = uniq()
+    const email = `fase-${tag}@clinica.test`
+    // En alta: con cuenta y sin pago que cuente.
+    const { orgId, userId: openedBy } = await clinicWithMember(`dueña-${tag}@clinica.test`)
+    const id = await newClient({ email, name: `Fase ${tag} Alta` })
+    await ownerDb.update(saasClient).set({ organizationId: orgId }).where(eq(saasClient.id, id))
+    // Activa: un pago confirmado.
+    const { orgId: paidOrg } = await clinicWithMember(`otra-${tag}@clinica.test`)
+    const paid = await newClient({ name: `Fase ${tag} Activa` })
+    await ownerDb.update(saasClient).set({ organizationId: paidOrg }).where(eq(saasClient.id, paid))
+    const confirmedAt = new Date(Date.now() - 3 * DAY)
+    await ownerDb.insert(saasPayment).values({
+      organizationId: paidOrg,
+      amountCents: 2900,
+      currency: "USD",
+      methodCode: "transferencia",
+      status: "confirmado",
+      idempotencyKey: randomUUID(),
+      confirmedAt,
+      confirmedBy: admin.userId,
+    })
+
+    const list = await listClients(ownerDb, admin, { view: "todos", q: `fase ${tag}` })
+    expect(list.counts).toMatchObject({ en_alta: 1, activos: 1, por_vender: 0, todos: 2 })
+    expect(Object.fromEntries(list.items.map((i) => [i.id, i.phase]))).toEqual({
+      [id]: "en_alta",
+      [paid]: "activo",
+    })
+    expect((await listClients(ownerDb, admin, { view: "en_alta", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([id])
+    expect((await listClients(ownerDb, admin, { view: "activos", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([paid])
+    // Un enlace de antes, «Con cuenta», abre «En alta».
+    expect((await listClients(ownerDb, admin, { view: "con_cuenta", q: `fase ${tag}` })).items.map((i) => i.id)).toEqual([id])
+
+    // Casos de soporte sin resolver: Soporte no cuenta los de cobro.
+    await ownerDb.insert(supportCase).values([
+      {
+        organizationId: orgId,
+        kind: "problema",
+        question: "No entra",
+        dedupeKey: randomUUID(),
+        openedBy,
+      },
+      {
+        organizationId: orgId,
+        kind: "cobro",
+        question: "Me cobraron",
+        dedupeKey: randomUUID(),
+        openedBy,
+      },
+      {
+        organizationId: orgId,
+        kind: "pregunta",
+        question: "Ya está",
+        dedupeKey: randomUUID(),
+        openedBy,
+        status: "resuelto",
+        resolvedAt: new Date(),
+      },
+    ])
+    // Un correo que llegó y su actividad, a la misma hora: lo escribió quien lo mandó.
+    const received = new Date(Date.now() - 60_000)
+    const [inbound] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        clientId: id,
+        mailbox: "soporte",
+        product: "dental",
+        messageId: `<fase-${tag}@x>`,
+        fromAddress: email,
+        fromName: "Rosa Díaz",
+        toAddress: "soporte@odentia32.com",
+        subject: "No me llega el código",
+        receivedAt: received,
+      })
+      .returning({ id: saasInboundEmail.id })
+    const [note] = await ownerDb
+      .insert(saasFollowUp)
+      .values([
+        {
+          clientId: id,
+          kind: "correo",
+          direction: "entro",
+          body: "Escribió a soporte@: No me llega el código",
+          byKairos: true,
+          happenedAt: received,
+        },
+        {
+          clientId: id,
+          kind: "llamada",
+          direction: "salio",
+          body: "Le expliqué la carga",
+          authorUserId: support.userId,
+          happenedAt: new Date(Date.now() - 120_000),
+        },
+      ])
+      .returning({ id: saasFollowUp.id })
+
+    const detail = await getClient(ownerDb, admin, id)
+    expect(detail.phase).toBe("en_alta")
+    expect(detail.alta).toMatchObject({ done: expect.any(Number), total: expect.any(Number) })
+    expect(detail.alta?.missing).toContain("Primer pago confirmado")
+    expect(detail.activeSince).toBeNull()
+    expect(detail.openSupportCases).toBe(2)
+    const mail = detail.recentActivities.find((a) => a.id === note?.id)
+    expect(mail).toMatchObject({ from: "Rosa Díaz", emailId: inbound?.id, author: null })
+    expect(detail.recentActivities.find((a) => a.kind === "llamada")?.from).toBeNull()
+
+    const forSupport = await getClient(ownerDb, support, id)
+    expect(forSupport.openSupportCases).toBe(1)
+    // Lo de las conversaciones es de Administración: Soporte ve lo anotado, no el correo.
+    expect(forSupport.recentActivities.map((a) => a.kind)).toEqual(["llamada"])
+
+    const active = await getClient(ownerDb, admin, paid)
+    expect(active).toMatchObject({ phase: "activo", alta: null, openSupportCases: 0 })
+    expect(active.activeSince?.getTime()).toBe(confirmedAt.getTime())
+    const prospect = await getClient(ownerDb, admin, await newClient())
+    expect(prospect).toMatchObject({ phase: "por_vender", alta: null, activeSince: null })
+  })
+
+  it("cada fuente de «Lo que hay que saber» dice lo que fue", async () => {
+    const id = await newClient()
+    const at = new Date()
+    const rows = await ownerDb
+      .insert(saasFollowUp)
+      .values([
+        { clientId: id, kind: "nota", body: "Le interesa la agenda", happenedAt: at },
+        { clientId: id, kind: "correo", direction: "entro", body: "Preguntó", happenedAt: at },
+        { clientId: id, kind: "correo", direction: "salio", body: "Respondimos", happenedAt: at },
+        { clientId: id, kind: "whatsapp", direction: "entro", body: "Hola", happenedAt: at },
+        { clientId: id, kind: "instagram", direction: "salio", body: "Hola", happenedAt: at },
+        { clientId: id, kind: "llamada", direction: "salio", body: "Llamé", happenedAt: at },
+        { clientId: id, kind: "reunion", body: "Nos vimos", happenedAt: at },
+        { clientId: id, kind: "presentacion", body: "Vio la demo", happenedAt: at },
+      ])
+      .returning({ id: saasFollowUp.id })
+    const sources = [
+      ...rows.map((row, index) => ({ text: `Frase ${index}`, source: `actividad:${row.id}` })),
+      { text: "Una de otro cliente", source: `actividad:${randomUUID()}` },
+      { text: "La solicitud", source: `solicitud:${randomUUID()}` },
+      { text: "La venta", source: `venta:${randomUUID()}` },
+      { text: "Algo nuevo", source: "otra:cosa" },
+    ]
+    await ownerDb
+      .update(saasClient)
+      .set({ summary: "Resumen", summarySources: sources, summaryAt: at })
+      .where(eq(saasClient.id, id))
+    const detail = await getClient(ownerDb, admin, id)
+    expect(detail.summary?.sources.map((s) => s.label)).toEqual([
+      "Lo anotado",
+      "Nos escribió",
+      "Le escribimos",
+      "Nos escribió por WhatsApp",
+      "Le escribimos por Instagram",
+      "Llamada",
+      "Reunión",
+      "Presentación",
+      "Lo anotado",
+      "Solicitud",
+      "Venta",
+      null,
+    ])
+    expect(detail.summary?.sources[0]).toMatchObject({ text: "Frase 0", source: `actividad:${rows[0]?.id}` })
   })
 
   it("cambiar datos: el responsable solo Administración; el producto de una cuenta no cambia; archivar es de Administración", async () => {
@@ -1019,6 +1188,207 @@ describe("el historial", () => {
     }
     expect(pages).toEqual(forAdmin.items.map((i) => i.id))
   })
+
+  it("por lo que pasó (ADR 0196): cada fila con su categoría y lo que abre, el plan de las dos auditorías y la tarea que cerró Kairós", async () => {
+    const tag = uniq()
+    const { orgId, userId } = await clinicWithMember(`dueña-${tag}@clinica.test`)
+    const id = await newClient({ email: `h2-${tag}@clinica.test` })
+    await ownerDb.update(saasClient).set({ organizationId: orgId }).where(eq(saasClient.id, id))
+    const at = (minutes: number) => new Date(Date.now() - minutes * 60_000)
+
+    const received = at(60)
+    const [inbound] = await ownerDb
+      .insert(saasInboundEmail)
+      .values({
+        clientId: id,
+        mailbox: "soporte",
+        product: "dental",
+        messageId: `<h2-${tag}@x>`,
+        fromAddress: `h2-${tag}@clinica.test`,
+        toAddress: "soporte@odentia32.com",
+        subject: "No entra",
+        receivedAt: received,
+      })
+      .returning({ id: saasInboundEmail.id })
+    const [note, mail] = await ownerDb
+      .insert(saasFollowUp)
+      .values([
+        {
+          clientId: id,
+          kind: "llamada",
+          direction: "salio",
+          body: "Le expliqué la carga paso a paso",
+          outcome: "Manda el Excel mañana",
+          authorUserId: support.userId,
+          happenedAt: at(59),
+        },
+        {
+          clientId: id,
+          kind: "correo",
+          direction: "entro",
+          body: "Escribió a soporte@: No entra",
+          byKairos: true,
+          happenedAt: received,
+        },
+      ])
+      .returning({ id: saasFollowUp.id })
+    // El informe N.º 3 salió, y Kairós cerró su tarea 4 minutos después.
+    await ownerDb.insert(adminAudit).values([
+      {
+        actorUserId: admin.userId,
+        actorRole: "admin",
+        action: "org.progress_report_sent",
+        organizationId: orgId,
+        entityId: "informe-3",
+        createdAt: at(30),
+      },
+      {
+        actorUserId: admin.userId,
+        actorRole: "admin",
+        action: "org.setup_import",
+        organizationId: orgId,
+        metadata: { planSha256: "f".repeat(64), nueva: 3 },
+        createdAt: at(50),
+      },
+    ])
+    await ownerDb.insert(saasTask).values([
+      {
+        clientId: id,
+        kind: "alta",
+        title: "Enviar el informe",
+        dueOn: "2026-11-12",
+        status: "hecha",
+        byKairos: true,
+        doneAt: at(26),
+        doneNote: "Kairós la cerró: salió el informe N.º 3",
+      },
+      {
+        clientId: id,
+        kind: "alta",
+        title: "Pedir sus datos",
+        dueOn: "2026-11-12",
+        status: "hecha",
+        byKairos: true,
+        doneAt: at(10),
+        doneNote: "Kairós la cerró: llegaron sus archivos",
+      },
+    ])
+    // El plan: un precio especial (de la clínica) y una pausa que quedó en las dos auditorías.
+    const paused = at(20)
+    await ownerDb.insert(auditEvent).values([
+      {
+        organizationId: orgId,
+        actorUserId: admin.userId,
+        action: "saas.discount_set",
+        entity: "saas_subscription",
+        entityId: orgId,
+        metadata: { discountBps: 1000, discountEndsAt: null },
+        createdAt: at(21),
+      },
+      {
+        organizationId: orgId,
+        actorUserId: admin.userId,
+        action: "saas.paused",
+        entity: "saas_subscription",
+        entityId: orgId,
+        metadata: { pauseReason: "Pidió una pausa por vacaciones" },
+        createdAt: paused,
+      },
+    ])
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: "saas.paused",
+      organizationId: orgId,
+      createdAt: paused,
+    })
+    await ownerDb.insert(saasPayment).values({
+      organizationId: orgId,
+      amountCents: 2900,
+      currency: "USD",
+      methodCode: "transferencia",
+      status: "pendiente",
+      idempotencyKey: randomUUID(),
+      createdAt: at(5),
+    })
+    await ownerDb.insert(supportCase).values({
+      organizationId: orgId,
+      kind: "problema",
+      question: "No entra",
+      dedupeKey: randomUUID(),
+      openedBy: userId,
+      createdAt: at(4),
+    })
+
+    const forAdmin = await clientTimeline(ownerDb, admin, id, { limit: 100 })
+    const byTitle = (title: string) => forAdmin.items.find((i) => i.title === title)
+    expect(byTitle("La llamamos")).toMatchObject({
+      category: "conversaciones",
+      icon: "llamada",
+      adminOnly: false,
+      link: { kind: "actividad", id: note?.id },
+      body: "Le expliqué la carga paso a paso",
+      outcome: "Manda el Excel mañana",
+    })
+    // El correo es de una conversación: solo Administración, también el que llegó a soporte@.
+    expect(forAdmin.items.find((i) => i.id === `actividad:${mail?.id}`)).toMatchObject({
+      category: "conversaciones",
+      adminOnly: true,
+      link: { kind: "correo", id: inbound?.id },
+    })
+    // La tarea que cerró Kairós poco después del informe la dice el informe, no su propia fila.
+    expect(byTitle("Salió el informe N.º 3 · cerró la tarea «Enviar el informe»")).toMatchObject({
+      category: "alta",
+      icon: "informe",
+      link: { kind: "informe", orgId, number: 3 },
+    })
+    expect(byTitle("Hecho: Enviar el informe")).toBeUndefined()
+    // Sin un hecho cerca, sigue en su fila, y la cerró Kairós (no «Sistema»).
+    expect(byTitle("Hecho: Pedir sus datos")).toMatchObject({
+      who: { kind: "kairos", name: "Kairós" },
+      category: "alta",
+      link: { kind: "tarea" },
+    })
+    const load = forAdmin.items.find((i) => i.title.startsWith("Se cargó la configuración"))
+    expect(load?.link).toMatchObject({ kind: "carga", orgId })
+    expect(load?.category).toBe("alta")
+    expect(byTitle("Precio especial: 10 % menos en cada acción, sin fecha de fin")).toMatchObject({
+      category: "plan",
+      adminOnly: true,
+      who: { kind: "persona", name: "Marta Admin" },
+      link: { kind: "pestana", id: "pagos" },
+    })
+    // La pausa quedó en las dos auditorías: se dice una vez, con su motivo.
+    const pauses = forAdmin.items.filter((i) => i.title.startsWith("Se pausó su plan"))
+    expect(pauses.map((i) => i.title)).toEqual(["Se pausó su plan: Pidió una pausa por vacaciones"])
+    expect(byTitle("Mandó un comprobante de pago")).toMatchObject({
+      category: "plan",
+      link: { kind: "pestana", id: "pagos" },
+    })
+    expect(byTitle("Abrió un caso de soporte")).toMatchObject({
+      category: "soporte",
+      link: { kind: "soporte" },
+    })
+    // Toda fila abre algo.
+    expect(forAdmin.items.every((i) => Boolean(i.link?.kind))).toBe(true)
+
+    // Los filtros por categoría, y el nombre de antes («contactos») como Conversaciones.
+    const plan = await clientTimeline(ownerDb, admin, id, { filter: "plan", limit: 100 })
+    expect(new Set(plan.items.map((i) => i.category))).toEqual(new Set(["plan"]))
+    const old = await clientTimeline(ownerDb, admin, id, { filter: "contactos", limit: 100 })
+    expect(new Set(old.items.map((i) => i.category))).toEqual(new Set(["conversaciones"]))
+    const account = await clientTimeline(ownerDb, admin, id, { filter: "cuenta", limit: 100 })
+    expect(new Set(account.items.map((i) => i.category))).toEqual(new Set(["alta", "plan"]))
+
+    // Soporte: lo anotado sí; el correo, el precio especial y el motivo de la pausa, no.
+    const forSupport = await clientTimeline(ownerDb, support, id, { limit: 100 })
+    const seen = forSupport.items.map((i) => i.title)
+    expect(seen).toContain("La llamamos")
+    expect(forSupport.items.some((i) => i.link?.kind === "correo")).toBe(false)
+    expect(seen.some((title) => title.startsWith("Precio especial"))).toBe(false)
+    expect(seen).toContain("Se pausó su plan")
+    expect(forSupport.items.every((i) => !i.adminOnly)).toBe(true)
+  })
 })
 
 describe("enganches: la solicitud y la cuenta", () => {
@@ -1189,6 +1559,39 @@ describe("enganches: la solicitud y la cuenta", () => {
         .from(saasClient)
         .where(eq(saasClient.organizationId, demo.organizationId)),
     ).toEqual([])
+  })
+})
+
+describe("el responsable al dar de alta", () => {
+  it("el alta asistida de un cliente sin responsable lo deja con quien la da; el que ya tenía, se queda", async () => {
+    const free = await newClient()
+    await updateClient(ownerDb, admin, free, { ownerUserId: null })
+    const created = await ownerDb.transaction((tx) =>
+      createAssistedOrganization(tx, admin, {
+        orgName: "Clínica Sin Responsable",
+        slug: `t-libre-${uniq()}`,
+        email: `libre-${uniq()}@x.test`,
+        countryCode: "PE",
+        clientId: free,
+      }),
+    )
+    expect(created.clientId).toBe(free)
+    const [own] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, free))
+    expect(own?.ownerUserId).toBe(admin.userId)
+
+    const kept = await newClient()
+    await ownerDb.update(saasClient).set({ ownerUserId: support.userId }).where(eq(saasClient.id, kept))
+    await ownerDb.transaction((tx) =>
+      createAssistedOrganization(tx, admin, {
+        orgName: "Clínica Con Responsable",
+        slug: `t-lleva-${uniq()}`,
+        email: `lleva-${uniq()}@x.test`,
+        countryCode: "PE",
+        clientId: kept,
+      }),
+    )
+    const [still] = await ownerDb.select().from(saasClient).where(eq(saasClient.id, kept))
+    expect(still?.ownerUserId).toBe(support.userId)
   })
 })
 

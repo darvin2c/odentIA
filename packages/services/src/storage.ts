@@ -56,8 +56,15 @@ export interface Storage {
     contentType: string
     ext: string
   }): Promise<AttachmentRef>
-  /** URL firmada de lectura para un adjunto (por defecto 15 min). */
-  attachmentUrl(objectKey: string, ttlSeconds?: number): Promise<string>
+  /**
+   * URL firmada de lectura para un adjunto (por defecto 15 min). Con `inline`, el almacenamiento
+   * lo sirve para verse (no para guardarse) y con ese tipo, el que se revisó al recibirlo.
+   */
+  attachmentUrl(
+    objectKey: string,
+    ttlSeconds?: number,
+    inline?: { filename: string; contentType: string },
+  ): Promise<string>
   /** Elimina un objeto del bucket privado por clave (best-effort huérfanos). */
   deleteAttachment(objectKey: string): Promise<void>
   /**
@@ -106,6 +113,17 @@ export interface Storage {
     contentType: string
     ext: string
   }): Promise<AttachmentRef>
+}
+
+/**
+ * Un nombre de archivo para `filename*` (RFC 5987): `encodeURIComponent` deja `'()*` sin
+ * escapar, y la comilla es el separador del juego de caracteres.
+ */
+export function rfc5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
 }
 
 /**
@@ -164,14 +182,24 @@ export function createStorage(env: StorageEnv): Storage {
         size: bytes.byteLength,
       }
     },
-    async attachmentUrl(objectKey, ttlSeconds = 900) {
+    async attachmentUrl(objectKey, ttlSeconds = 900, inline) {
       // Soporte mirando la clínica: el archivo pasa por la API, que comprueba el permiso
       // en cada pedido; una URL firmada seguiría sirviendo después de quitarlo.
       const proxy = fileProxy.getStore()
       if (proxy) return proxy(objectKey)
       return getSignedUrl(
         client,
-        new GetObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey }),
+        new GetObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          // Para verse: el nombre en RFC 5987 (acentos y espacios) y el tipo que se revisó.
+          ...(inline
+            ? {
+                ResponseContentDisposition: `inline; filename*=UTF-8''${rfc5987(inline.filename)}`,
+                ResponseContentType: inline.contentType,
+              }
+            : {}),
+        }),
         {
           expiresIn: ttlSeconds,
         },

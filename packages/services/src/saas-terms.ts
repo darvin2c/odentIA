@@ -1,9 +1,10 @@
 import type { Db } from "@odentia/db"
 import { aiUsage } from "@odentia/db/schema/agent"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { organization, user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
 import { saasNegotiation, saasNotice, saasPlan, saasSeller, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { formatMoney } from "@odentia/clinical"
@@ -255,6 +256,262 @@ export async function setSaasBillingCycle(tx: Db, actor: AdminActor, orgId: stri
   if (cycle !== "mensual" && cycle !== "quincenal") throw validation("Ciclo inválido")
   await tx.update(saasSubscription).set({ billingCycle: cycle, updatedAt: new Date() }).where(eq(saasSubscription.organizationId, orgId))
   await audit(tx, orgId, actor.userId, "saas.billing_cycle_set", { cycle })
+}
+
+/* ---------- Cambios del plan (Plan y pagos y el historial, ADR 0196) ---------- */
+
+/** Un cambio del plan de una clínica, en palabras: lo que dice Plan y pagos y el historial. */
+export interface SaasPlanChange {
+  /** La fila de donde sale (`evento:<id>` o `auditoria:<id>`): única. */
+  id: string
+  at: Date
+  action: string
+  /** Qué cambió, con lo que dice su fila: el plan, el precio especial, la prueba… */
+  words: string
+  /** Quien lo hizo; nulo, lo hizo el sistema. */
+  by: { userId: string; name: string } | null
+  /** Soporte lo lee en el historial: no dice importes ni condiciones negociadas. */
+  support: boolean
+}
+
+type PlanChangeMeta = Record<string, unknown>
+interface PlanChangeContext {
+  currency: string
+  /** El nombre del plan de la fila; nulo si no se sabe o si lee Soporte. */
+  planName: (meta: PlanChangeMeta) => string | null
+  /** Lee Soporte: sin el nombre del plan ni el motivo de la pausa (pueden ser de la venta). */
+  forSupport: boolean
+}
+
+const metaNumber = (meta: PlanChangeMeta, key: string): number | null =>
+  typeof meta[key] === "number" && Number.isFinite(meta[key]) ? (meta[key] as number) : null
+const metaText = (meta: PlanChangeMeta, key: string): string | null =>
+  typeof meta[key] === "string" && (meta[key] as string).trim() ? (meta[key] as string).trim() : null
+const longDay = (iso: string | null): string | null => {
+  const at = iso ? new Date(iso) : null
+  return at && !Number.isNaN(at.getTime())
+    ? new Intl.DateTimeFormat("es-PE", { timeZone: "America/Lima", day: "numeric", month: "long", year: "numeric" }).format(at)
+    : null
+}
+const percent = (bps: number) => `${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(bps / 100)} %`
+
+/**
+ * Lo que cuenta como cambio del plan y cómo se dice. Las filas están en dos auditorías: la de la
+ * clínica (`audit_event`, lo que escriben `saas-billing` y estas condiciones) y la de la
+ * administración (`admin_audit`, lo que escriben las rutas de Cobros y Fundadores); una misma
+ * acción puede quedar en las dos en la misma transacción, con la misma hora, y se dice una vez.
+ * Lo que no está aquí no se muestra, nunca con su código.
+ */
+const PLAN_CHANGE_WORDS: Record<string, { support: boolean; words: (meta: PlanChangeMeta, ctx: PlanChangeContext) => string }> = {
+  "saas.trial_started": {
+    support: true,
+    words: (meta) => {
+      const until = longDay(metaText(meta, "trialEndsAt"))
+      return until ? `Empezó su prueba, hasta el ${until}` : "Empezó su prueba"
+    },
+  },
+  "saas.trial_terms_set": {
+    support: false,
+    words: (meta, ctx) => {
+      const credit = metaNumber(meta, "trialCreditCents")
+      const days = metaNumber(meta, "trialDays")
+      const parts = [credit !== null ? `${formatMoney(Math.round(credit), ctx.currency, "es")} de regalo` : null, days !== null ? `${days} días` : null].filter(Boolean)
+      return parts.length ? `Su prueba pasó a ${parts.join(" y ")}` : "Cambió su prueba"
+    },
+  },
+  "saas.trial_completed": {
+    support: true,
+    words: (meta, ctx) => {
+      const plan = ctx.planName(meta)
+      return plan ? `Terminó su prueba y empezó su plan: ${plan}` : "Terminó su prueba y empezó su plan"
+    },
+  },
+  "saas.trial_ended": { support: true, words: () => "Terminó su prueba y empezó su plan" },
+  "saas.activated": {
+    support: true,
+    words: (meta, ctx) => {
+      const plan = ctx.planName(meta)
+      return plan ? `Se activó su plan: ${plan}` : "Se activó su plan"
+    },
+  },
+  "saas.activated_now": {
+    support: true,
+    words: (meta, ctx) => {
+      const plan = ctx.planName(meta)
+      return plan ? `Empezó su plan sin prueba: ${plan}` : "Empezó su plan sin prueba"
+    },
+  },
+  "saas.plan_changed": {
+    support: true,
+    words: (meta, ctx) => {
+      const plan = ctx.planName(meta)
+      return plan ? `Cambió de plan: ${plan}` : "Cambió de plan"
+    },
+  },
+  "saas.paused": {
+    support: true,
+    words: (meta, ctx) => {
+      const why = ctx.forSupport ? null : metaText(meta, "pauseReason")
+      return why ? `Se pausó su plan: ${why}` : "Se pausó su plan"
+    },
+  },
+  "saas.resumed": { support: true, words: () => "Se reanudó su plan" },
+  "saas.restricted": { support: true, words: () => "Pasó a solo lectura por un cobro sin pagar" },
+  "saas.restricted_no_plan": { support: true, words: () => "Pasó a solo lectura: terminó su prueba sin plan" },
+  "saas.founders_entered": {
+    support: false,
+    words: (meta, ctx) => {
+      const plan = ctx.planName(meta)
+      const discount = metaNumber(meta, "discountBps")
+      return `Pasó a Fundadores${plan ? ` (${plan})` : ""}${discount ? `; se quitó su precio especial de ${percent(discount)}` : ""}`
+    },
+  },
+  "saas.guarantee_ended": {
+    support: false,
+    words: (meta, ctx) => {
+      const plan = ctx.planName({ planId: meta.toPlanId })
+      return plan ? `Terminaron sus condiciones de Fundadora; ahora rige ${plan}` : "Terminaron sus condiciones de Fundadora"
+    },
+  },
+  "saas.discount_set": {
+    support: false,
+    words: (meta) => {
+      const bps = metaNumber(meta, "discountBps") ?? 0
+      if (bps <= 0) return "Se quitó su precio especial"
+      const until = longDay(metaText(meta, "discountEndsAt"))
+      return `Precio especial: ${percent(bps)} menos en cada acción${until ? ` hasta el ${until}` : ", sin fecha de fin"}`
+    },
+  },
+  "saas.discount_expired": { support: false, words: () => "Terminó su precio especial" },
+  "saas.billing_cycle_set": {
+    support: false,
+    words: (meta) =>
+      meta.cycle === "quincenal" ? "Lo que pasa del crédito se factura a mitad y al cerrar el mes" : "Lo que pasa del crédito se factura al cerrar el mes",
+  },
+  "saas.spend_cap_set": {
+    support: false,
+    words: (meta, ctx) => {
+      const cap = metaNumber(meta, "capCents")
+      return cap === null ? "Se quitó su presupuesto del mes" : `Su presupuesto del mes pasó a ${formatMoney(Math.round(cap), ctx.currency, "es")}`
+    },
+  },
+  "saas.spend_cap_default": {
+    support: false,
+    words: (meta, ctx) => {
+      const cap = metaNumber(meta, "capCents")
+      return cap === null ? "Su presupuesto del mes quedó sin tope" : `Su presupuesto del mes siguió a su plan: ${formatMoney(Math.round(cap), ctx.currency, "es")}`
+    },
+  },
+  "saas.negotiation_requested": {
+    support: false,
+    words: (meta) => (meta.kind === "prueba" ? "Se pidió aprobar una prueba más larga" : "Se pidió aprobar un precio especial"),
+  },
+  "saas.negotiation_approved": {
+    support: false,
+    words: (meta) => (meta.kind === "prueba" ? "Se aprobó la prueba pedida" : "Se aprobó el precio especial pedido"),
+  },
+  "saas.negotiation_rejected": {
+    support: false,
+    words: (meta) => (meta.kind === "prueba" ? "No se aprobó la prueba pedida" : "No se aprobó el precio especial pedido"),
+  },
+}
+
+/** Las acciones que son cambios del plan (las mismas que dice el historial en «Plan y pagos»). */
+export const SAAS_PLAN_CHANGE_ACTIONS: readonly string[] = Object.keys(PLAN_CHANGE_WORDS)
+
+/**
+ * Los cambios del plan de una clínica, del más nuevo al más viejo, con quién los hizo: de las
+ * dos auditorías, sin repetir lo que quedó en ambas. `before` y `limit` paginan como el
+ * historial; `forSupport` deja solo lo que Soporte lee, sin nombres de plan ni motivos. Solo
+ * lee; con owner.
+ */
+export async function listSaasPlanChanges(
+  tx: Db,
+  orgId: string,
+  options: { before?: Date | null; limit?: number; forSupport?: boolean } = {},
+): Promise<SaasPlanChange[]> {
+  const forSupport = options.forSupport === true
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
+  const before = options.before ?? null
+  const events = await tx
+    .select({ id: auditEvent.id, at: auditEvent.createdAt, action: auditEvent.action, actorUserId: auditEvent.actorUserId, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, orgId), inArray(auditEvent.action, SAAS_PLAN_CHANGE_ACTIONS as string[]), before ? lt(auditEvent.createdAt, before) : undefined))
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(limit)
+  const admins = await tx
+    .select({ id: adminAudit.id, at: adminAudit.createdAt, action: adminAudit.action, actorUserId: adminAudit.actorUserId, metadata: adminAudit.metadata })
+    .from(adminAudit)
+    .where(and(eq(adminAudit.organizationId, orgId), inArray(adminAudit.action, SAAS_PLAN_CHANGE_ACTIONS as string[]), before ? lt(adminAudit.createdAt, before) : undefined))
+    .orderBy(desc(adminAudit.createdAt))
+    .limit(limit)
+  // Lo que quedó en las dos auditorías en la misma transacción tiene la misma hora: una sola fila,
+  // con lo que dice cada una (la de la clínica trae el detalle) y la persona que lo hizo.
+  const rows = new Map<string, { id: string; at: Date; action: string; actorUserId: string | null; metadata: PlanChangeMeta }>()
+  const person = (id: string | null) => (id && id !== "system" ? id : null)
+  for (const [prefix, list] of [["evento", events], ["auditoria", admins]] as const) {
+    for (const row of list) {
+      const key = `${row.action}|${row.at.getTime()}`
+      const meta = (row.metadata && typeof row.metadata === "object" ? row.metadata : {}) as PlanChangeMeta
+      const seen = rows.get(key)
+      if (seen) {
+        seen.metadata = { ...meta, ...seen.metadata }
+        seen.actorUserId = seen.actorUserId ?? person(row.actorUserId)
+        continue
+      }
+      rows.set(key, { id: `${prefix}:${row.id}`, at: row.at, action: row.action, actorUserId: person(row.actorUserId), metadata: meta })
+    }
+  }
+  const list = [...rows.values()].sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? -1 : 1)).slice(0, limit)
+  if (!list.length) return []
+
+  const userIds = [...new Set(list.map((row) => row.actorUserId).filter((id): id is string => Boolean(id)))]
+  const names = new Map(
+    userIds.length ? (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, userIds))).map((row) => [row.id, row.name]) : [],
+  )
+  const codes = [...new Set(list.map((row) => metaText(row.metadata, "planCode")).filter((code): code is string => Boolean(code)))]
+  const planIds = [
+    ...new Set(
+      list.flatMap((row) => [metaText(row.metadata, "planId"), metaText(row.metadata, "toPlanId")]).filter((id): id is string => Boolean(id && /^[0-9a-f-]{36}$/i.test(id))),
+    ),
+  ]
+  const plans =
+    codes.length || planIds.length
+      ? await tx
+          .select({ id: saasPlan.id, code: saasPlan.code, name: saasPlan.name })
+          .from(saasPlan)
+          .where(or(codes.length ? inArray(saasPlan.code, codes) : undefined, planIds.length ? inArray(saasPlan.id, planIds) : undefined))
+      : []
+  const [current] = await tx
+    .select({ currency: saasPlan.currency })
+    .from(saasSubscription)
+    .innerJoin(saasPlan, eq(saasPlan.id, saasSubscription.planId))
+    .where(eq(saasSubscription.organizationId, orgId))
+    .limit(1)
+  const ctx: PlanChangeContext = {
+    currency: current?.currency ?? "USD",
+    planName: (meta) => {
+      if (forSupport) return null
+      const code = metaText(meta, "planCode")
+      const id = metaText(meta, "planId")
+      return plans.find((plan) => (code && plan.code === code) || (id && plan.id === id))?.name ?? null
+    },
+    forSupport,
+  }
+  return list.flatMap((row) => {
+    const phrase = PLAN_CHANGE_WORDS[row.action]
+    if (!phrase || (forSupport && !phrase.support)) return []
+    return [
+      {
+        id: row.id,
+        at: row.at,
+        action: row.action,
+        words: phrase.words(row.metadata, ctx),
+        by: row.actorUserId ? { userId: row.actorUserId, name: names.get(row.actorUserId) ?? "Alguien del equipo" } : null,
+        support: phrase.support,
+      },
+    ]
+  })
 }
 
 /* ---------- Avisos, alarma y límite (tablero C4) ---------- */

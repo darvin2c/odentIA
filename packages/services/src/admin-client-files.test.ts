@@ -10,7 +10,10 @@ import {
   cargaDeleteAfter,
   clearDueCargaNow,
   clientFileDeleteAfter,
+  clientFileContent,
   clientFileKey,
+  clientFilePreviewKind,
+  clientFilePreviewUrl,
   clientFileUrl,
   deleteClientFile,
   dueClientFileDeletions,
@@ -549,5 +552,77 @@ describe("lo que puede ser la carga", () => {
         isLikelyCarga({ filename: row.filename, contentType: row.content_type }),
       )
     expect(() => likelyCargaSql("f; drop")).toThrow()
+  })
+})
+
+describe("ver sin descargar (ADR 0196)", () => {
+  it("imágenes y PDF se ven con una dirección de 5 minutos y se anotan una vez al día; lo demás se descarga", async () => {
+    const asked: Array<{ key: string; ttl?: number; inline?: unknown }> = []
+    const storage = {
+      async attachmentUrl(key: string, ttl?: number, inline?: unknown) {
+        asked.push({ key, ttl, inline })
+        return `https://bucket.test/${key}?firma=1`
+      },
+    }
+    const register = (filename: string, contentType: string, adminOnly: boolean, sizeBytes = 10) =>
+      registerClientFile(ownerDb, admin, {
+        clientId,
+        kind: "otro",
+        filename,
+        objectKey: clientFileKey(clientId, filename.split(".").pop() ?? "bin"),
+        contentType,
+        sizeBytes,
+        adminOnly,
+      })
+    const photo = await register("foto del sillón.jpg", "image/jpeg", false)
+    const pdf = await register("contrato.pdf", "application/pdf", true)
+    const sheet = await register("lista.csv", "text/csv", false)
+    const huge = await register("escaneo.pdf", "application/pdf", false, 11 * 1024 * 1024)
+    const morning = new Date("2026-11-16T14:00:00Z")
+    const evening = new Date("2026-11-16T23:00:00Z")
+    const nextDay = new Date("2026-11-17T15:00:00Z")
+
+    expect(clientFilePreviewKind("IMAGE/PNG")).toBe("imagen")
+    expect(clientFilePreviewKind("application/pdf")).toBe("pdf")
+    expect(clientFilePreviewKind("image/svg+xml")).toBeNull()
+    const { url } = await clientFilePreviewUrl(ownerDb, admin, storage, photo.id, morning)
+    expect(url).toContain(`clients/${clientId}/`)
+    expect(asked.at(-1)).toEqual({
+      key: expect.stringContaining(`clients/${clientId}/`),
+      ttl: 300,
+      inline: { filename: "foto del sillón.jpg", contentType: "image/jpeg" },
+    })
+    // Lo que no tiene vista se descarga: ni dirección ni bytes.
+    await expect(clientFilePreviewUrl(ownerDb, admin, storage, sheet.id)).rejects.toMatchObject({
+      code: "PREVIEW_UNSUPPORTED",
+    })
+    await expect(clientFileContent(ownerDb, admin, photo.id)).rejects.toMatchObject({
+      code: "PREVIEW_UNSUPPORTED",
+    })
+    await expect(clientFileContent(ownerDb, admin, huge.id)).rejects.toMatchObject({
+      code: "PREVIEW_TOO_LARGE",
+    })
+    // El mismo permiso que descargar: lo de Administración no existe para Soporte.
+    await expect(clientFileContent(ownerDb, support, pdf.id)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    expect(await clientFileContent(ownerDb, admin, pdf.id, morning)).toMatchObject({
+      filename: "contrato.pdf",
+      objectKey: expect.stringContaining(`clients/${clientId}/`),
+    })
+    // Una constancia por persona, archivo y día de Lima, por más que se mire.
+    await clientFileContent(ownerDb, admin, pdf.id, evening)
+    await clientFilePreviewUrl(ownerDb, admin, storage, pdf.id, evening)
+    await clientFilePreviewUrl(ownerDb, support, storage, photo.id, evening)
+    await clientFileContent(ownerDb, admin, pdf.id, nextDay)
+    const views = await ownerDb
+      .select({ actor: adminAudit.actorUserId, entityId: adminAudit.entityId })
+      .from(adminAudit)
+      .where(eq(adminAudit.action, "client_file.viewed"))
+    const count = (actor: AdminActor, fileId: string) =>
+      views.filter((row) => row.actor === actor.userId && row.entityId === fileId).length
+    expect(count(admin, pdf.id)).toBe(2)
+    expect(count(admin, photo.id)).toBe(1)
+    expect(count(support, photo.id)).toBe(1)
   })
 })

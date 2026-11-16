@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto"
+import { formatMoney } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
+import { adminAudit } from "@odentia/db/schema/admin-core"
 import { member, user } from "@odentia/db/schema/auth"
+import { auditEvent } from "@odentia/db/schema/org"
 import { saasAction, saasNotice, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -11,6 +14,7 @@ import {
   getAgentSpendGate,
   getSaasAlerts,
   listSaasNegotiations,
+  listSaasPlanChanges,
   setSaasDiscount,
   setSaasSpendCap,
   setSaasTrialTerms,
@@ -195,5 +199,55 @@ describe("avisos, alarma y límite", () => {
     await spent(orgId, 6000)
     expect(await withOrgContext(appDb, orgId, (tx) => getSaasAlerts(tx, orgId))).toEqual([])
     await ownerDb.execute(sql`select 1`)
+  })
+})
+
+describe("cambios del plan (ADR 0196)", () => {
+  it("de las dos auditorías, del más nuevo al más viejo, en palabras, una vez cada uno y con quién; Soporte, solo lo suyo", async () => {
+    const orgId = await clinic("activa")
+    await setSaasDiscount(ownerDb, admin, orgId, { discountBps: 1000 })
+    await setSaasSpendCap(ownerDb, orgId, admin.userId, 5000)
+    // Lo que escribe la ruta de Cobros en la administración, a la misma hora que el servicio.
+    const paused = new Date(Date.now() + 60_000)
+    await ownerDb.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId: admin.userId,
+      action: "saas.paused",
+      entity: "saas_subscription",
+      entityId: orgId,
+      metadata: { pauseReason: "Vacaciones de la clínica" },
+      createdAt: paused,
+    })
+    await ownerDb.insert(adminAudit).values({
+      actorUserId: admin.userId,
+      actorRole: "admin",
+      action: "saas.paused",
+      organizationId: orgId,
+      createdAt: paused,
+    })
+    await ownerDb.insert(adminAudit).values({
+      actorRole: "system",
+      action: "saas.guarantee_ended",
+      organizationId: orgId,
+      metadata: { fromPlanId: null, toPlanId: planId },
+      createdAt: new Date(Date.now() + 120_000),
+    })
+
+    const changes = await listSaasPlanChanges(ownerDb, orgId)
+    expect(changes.map((change) => change.words)).toEqual([
+      "Terminaron sus condiciones de Fundadora; ahora rige Plan odentIA",
+      "Se pausó su plan: Vacaciones de la clínica",
+      `Su presupuesto del mes pasó a ${formatMoney(5000, "USD", "es")}`,
+      "Precio especial: 10 % menos en cada acción, sin fecha de fin",
+    ])
+    expect(changes[0]?.by).toBeNull()
+    expect(changes[1]?.by).toEqual({ userId: admin.userId, name: "Administración" })
+    expect((await listSaasPlanChanges(ownerDb, orgId, { before: paused })).map((c) => c.action)).toEqual([
+      "saas.spend_cap_set",
+      "saas.discount_set",
+    ])
+    // Soporte: sin precios, presupuestos ni el motivo de la pausa.
+    const forSupport = await listSaasPlanChanges(ownerDb, orgId, { forSupport: true })
+    expect(forSupport.map((change) => change.words)).toEqual(["Se pausó su plan"])
   })
 })
