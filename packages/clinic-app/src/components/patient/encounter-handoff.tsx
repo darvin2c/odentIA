@@ -2,28 +2,26 @@ import { Badge, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
 import { fetchConsentNeeds } from "../../lib/encounter-documents"
 import { consentsStillAsked } from "./encounter-documents"
-import {
-  fetchFollowUps,
-  formatDate,
-  formatDateTime,
-} from "../../lib/clinical-journey"
+import { fetchEncounterNextSteps, type PlanNextStep } from "../../lib/budgets"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { usePermission } from "../../lib/crm"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
-import type { EncounterDetail, PatientSummary } from "../../lib/patients"
+import type { EncounterDetail } from "../../lib/patients"
+import { StepNotice } from "./next-up"
+import { NextStepButton } from "./plan/next-step-action"
+
+/** Lo que no es del plan: el consentimiento por recabar y el saldo. */
 interface Step {
   key: string
   /** Quién continúa el trabajo. */
-  owner: "Clínica" | "Recepción" | "Caja"
+  owner: "Clínica" | "Caja"
   title: string
   detail: string
-  tone: "warning" | "success"
   section: PatientSectionId
   /** Documentos abre en «Requieren acción». */
   pending?: boolean
@@ -32,26 +30,39 @@ interface Step {
   action: string
 }
 
+/** Lo que ya tiene su cita no falta: se dice en verde. */
+function settled(step: PlanNextStep): boolean {
+  return step.kind === "reservado" || (step.kind === "control" && !!step.action?.appointmentId)
+}
+
 /**
- * Cierre y relevo de una atención finalizada: qué quedó hecho y qué recibe cada
- * rol para continuar. Cada dato se pide solo con el permiso que lo autoriza; lo
- * que este usuario no puede ver se enuncia sin detalle.
+ * Cierre y relevo de una atención finalizada: qué queda por hacer y quién lo
+ * continúa. Lo del plan es la lista de «Qué sigue» de la ficha, con sus
+ * palabras y sus botones, y lo de esta atención primero (la ordena el servidor,
+ * `getEncounterNextSteps`): no se arma otra lista aquí. Debajo, el
+ * consentimiento por recabar y el saldo, cada uno con el permiso que lo
+ * autoriza.
  */
 export function EncounterHandoff({
   patientId,
+  patientName,
   detail,
 }: {
   patientId: string
+  /** Para «Nueva cita» y las demás acciones: la persona ya puesta. */
+  patientName: string
   detail: EncounterDetail
 }) {
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
   const orgLocale = useOrgProfile().data?.locale
   const encounterId = detail.encounter.id
-  const followUps = useQuery({
-    queryKey: ["follow-ups", patientId],
-    queryFn: () => fetchFollowUps(patientId),
+  // La misma caché de «Qué sigue»: lo que se reserva o responde aquí la vuelve a leer.
+  const next = useQuery({
+    queryKey: ["plan-next", patientId, "atencion", encounterId],
+    queryFn: () => fetchEncounterNextSteps(patientId, encounterId),
     enabled: canClinical,
+    retry: false,
   })
   const consents = useQuery({
     queryKey: ["consents", patientId],
@@ -63,30 +74,22 @@ export function EncounterHandoff({
     queryFn: () => fetchConsentNeeds(patientId, encounterId),
     enabled: canClinical,
   })
-  const summary = useQuery({
-    queryKey: ["patient-summary", patientId],
-    queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
-    enabled: canClinical,
-  })
   const account = useQuery({
     queryKey: ["patient-account", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
-  const ownControls = (followUps.data?.data ?? []).filter(
-    (row) => row.originEncounterId === encounterId,
-  )
   // Lo que ya no se pide (no lo aceptó o eligió otro camino) no queda por recabar.
   const { pendingSignatures: pendingConsents } = consentsStillAsked(
     (consents.data?.data ?? []).filter((row) => row.encounterId === encounterId && row.status === "pendiente"),
     needs,
   )
-  const proposed = summary.data?.data.proposedBudgets ?? []
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
     (balance) => balance.porCobrar > 0,
   )
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
   const priced = activeProcedures.length
+  const planSteps = next.data?.data ?? []
 
   const steps: Step[] = []
   for (const consent of pendingConsents)
@@ -99,46 +102,9 @@ export function EncounterHandoff({
       detail: consent.personSignedAt
         ? "Lo firmó desde su enlace: se confirma en su atención en curso, con la persona delante."
         : "Debe firmarlo el paciente o su representante legal vigente.",
-      tone: "warning",
       section: "documentos",
       pending: true,
       action: consent.personSignedAt ? "Ver" : "Recabar firma",
-    })
-  for (const control of ownControls.filter((row) => row.status === "pendiente"))
-    steps.push({
-      key: `control-${control.id}`,
-      owner: "Recepción",
-      title: `Reservar el control: ${control.title}`,
-      detail: `Corresponde el ${formatDate(control.dueAt)}. Falta reservarle la cita.`,
-      tone: "warning",
-      section: "plan",
-      action: "Programar",
-    })
-  for (const control of ownControls.filter(
-    (row) => row.status === "programado" && row.appointment,
-  ))
-    steps.push({
-      key: `control-ok-${control.id}`,
-      owner: "Recepción",
-      title: `Control con cita: ${control.title}`,
-      detail: control.appointment ? formatDateTime(control.appointment.startsAt) : "",
-      tone: "success",
-      section: "plan",
-      action: "Ver controles",
-    })
-  if (proposed.length > 0)
-    steps.push({
-      key: "budgets",
-      owner: "Recepción",
-      title:
-        proposed.length === 1
-          ? `Seguimiento del presupuesto «${proposed[0].title}»`
-          : `Seguimiento de ${proposed.length} presupuestos sin decisión`,
-      // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
-      detail: "Espera la respuesta de quien decide.",
-      tone: "warning",
-      section: "plan",
-      action: "Ver presupuestos",
     })
   if (canFinance) {
     for (const balance of outstanding)
@@ -152,7 +118,6 @@ export function EncounterHandoff({
             : "Aplicar lo que tiene a favor",
         detail:
           balance.saldo > 0 ? "Saldo por cobrar en la cuenta del paciente." : "Lo que tiene a favor cubre lo que debe.",
-        tone: "warning",
         section: "cuenta",
         collect: true,
         action: balance.saldo > 0 ? "Cobrar" : "Aplicar",
@@ -160,7 +125,7 @@ export function EncounterHandoff({
   }
 
   const loading =
-    (canClinical && (followUps.isPending || consents.isPending)) ||
+    (canClinical && (next.isPending || consents.isPending)) ||
     (canFinance && account.isPending)
 
   const linkTo = (section: PatientSectionId, label: string, pending?: boolean, collect?: boolean): ReactNode => (
@@ -174,8 +139,9 @@ export function EncounterHandoff({
     </Link>
   )
 
+  const total = planSteps.length + steps.length
   // Sin nada pendiente no hay bloque: lo hecho ya se lee en la atención de abajo.
-  if (!loading && steps.length === 0 && (canFinance || priced === 0)) return null
+  if (!loading && total === 0 && (canFinance || priced === 0)) return null
   return (
     <section
       className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6"
@@ -186,8 +152,27 @@ export function EncounterHandoff({
       </h2>
       {loading ? (
         <p className="text-sm text-muted-foreground">Consultando lo que queda por hacer…</p>
-      ) : steps.length === 0 ? null : (
+      ) : total === 0 ? null : (
         <ul className="flex flex-col divide-y">
+          {planSteps.map((step) => (
+            <li
+              key={`${step.kind}-${step.action?.followUpId ?? step.action?.budgetId ?? step.action?.planItemIds?.join() ?? ""}-${step.action?.appointmentId ?? ""}-${step.text}`}
+              className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+            >
+              <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
+                <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                  {/* Lo del plan lo coordina recepción; lo suspendido se retoma en la clínica. */}
+                  <Badge variant={settled(step) ? "success" : "warning"}>
+                    {step.kind === "suspendido" ? "Clínica" : "Recepción"}
+                  </Badge>
+                  {step.text}
+                </span>
+                {step.detail ? <span className="text-sm text-muted-foreground">{step.detail}</span> : null}
+                <StepNotice notice={step.notice} />
+              </div>
+              <NextStepButton patient={{ id: patientId, name: patientName }} step={step} size="sm" variant="outline" />
+            </li>
+          ))}
           {steps.map((step) => (
             <li
               key={step.key}
@@ -195,9 +180,7 @@ export function EncounterHandoff({
             >
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  <Badge variant={step.tone === "success" ? "success" : "warning"}>
-                    {step.owner}
-                  </Badge>
+                  <Badge variant="warning">{step.owner}</Badge>
                   {step.title}
                 </span>
                 {step.detail ? (

@@ -310,6 +310,8 @@ export interface WorkspaceToday {
   timezone: string
   summary: WorkspaceTodaySummary
   appointments: WorkspaceAppointment[]
+  /** Solo en `mine`: lo que abrió hoy sin una de sus citas de hoy, con «Continuar». No suma a las cifras. */
+  openEncounters?: Array<{ id: string; patientId: string; patientName: string; openedAt: string }>
 }
 export interface WorkspaceCash {
   branchId: string

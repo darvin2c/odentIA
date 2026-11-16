@@ -783,6 +783,11 @@ export function fetchPlanNextSteps(patientId: string): Promise<{ data: PlanNextS
   return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/next-steps`)
 }
 
+/** La misma lista, con lo de una atención primero: «Lo que sigue» de la atención firmada. */
+export function fetchEncounterNextSteps(patientId: string, encounterId: string): Promise<{ data: PlanNextStep[] }> {
+  return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/encounters/${encounterId}/next-steps`)
+}
+
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */
 export const PLAN_QUERY_KEYS = [
   "budgets",

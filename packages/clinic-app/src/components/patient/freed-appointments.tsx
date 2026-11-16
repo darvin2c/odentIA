@@ -42,8 +42,8 @@ export function FinalizedFreedAppointments({
   onChanged,
 }: {
   appointments: FreedAppointment[]
-  /** Lo aceptado que falta reservar, para «Usarla para…»: el primero. */
-  next: { planItemId: string; title: string } | null
+  /** Lo que falta reservar, para «Usarla para…»: la elección de «¿Cuándo vuelve?», todo junto. */
+  next: { planItemIds: string[]; title: string } | null
   canBook: boolean
   onChanged: (id: string, result: "usada" | "liberada") => void
 }): React.JSX.Element | null {
@@ -65,7 +65,7 @@ export function FinalizedFreedAppointments({
           method: "POST",
           body: JSON.stringify({
             expectedVersion: appointment.version,
-            planItemId: next.planItemId,
+            planItemIds: next.planItemIds,
           }),
         })
       else await releaseAppointment(appointment.id, notify, whenSaid(appointment.startsAt, activeOrgTimeZone(), today))

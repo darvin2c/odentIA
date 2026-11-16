@@ -188,7 +188,16 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
             ...faq,
             a: faq.a
               .replace("«En 6 meses»", "«En 1 año»")
-              .replace("(la corona tras la endodoncia)", "(una terapia indicada que aún no empieza)"),
+              .replace("(la corona tras la endodoncia)", "(una terapia indicada que aún no empieza)")
+              // Sin piezas ni «va después» en el consultorio: lo del mismo plan es lo indicado.
+              .replace(
+                "primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento",
+                "lo indicado del mismo plan en los últimos 6 meses",
+              )
+              .replace(
+                " Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar.",
+                "",
+              ),
           },
         ]
       // En el consultorio la ASA no se pide al anestesiar: solo se ve si alguien la clasificó.

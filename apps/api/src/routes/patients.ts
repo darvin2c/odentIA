@@ -46,6 +46,7 @@ import {
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
+  getEncounterNextSteps,
   getPlanNextStep,
   getPlanNextSteps,
   allergiesSaidNoByPatient,
@@ -1558,6 +1559,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) =>
         // Quien atiende y abre su borrador queda como quien vio lo que contó el paciente antes de venir.
         getEncounterDetail(tx, orgId, c.req.param("id"), c.req.param("encounterId"), userId),
+      ),
+    )
+  })
+  // «Lo que sigue» de la atención firmada: la lista de «Qué sigue», con lo de esta atención primero.
+  app.get("/:id/encounters/:encounterId/next-steps", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getEncounterNextSteps(tx, orgId, c.req.param("id"), c.req.param("encounterId"), (permission) => canAccess(memberRole, permission), {
+          viewerUserId: userId,
+        }),
       ),
     )
   })

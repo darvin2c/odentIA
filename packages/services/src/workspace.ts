@@ -423,6 +423,21 @@ export interface WorkspaceToday {
   timezone: string
   summary: WorkspaceTodaySummary
   appointments: WorkspaceAppointment[]
+  /**
+   * Solo en `mine`: las atenciones propias abiertas hoy que no son de una de sus citas de hoy
+   * (`openEncountersToday`): «Atención abierta desde las 12:41 · falta firmar · Continuar». No
+   * suman a las cifras del día ni a «Te espera».
+   */
+  openEncounters?: WorkspaceOpenEncounter[]
+}
+
+/** Una atención propia abierta hoy, sin nada de la historia: de quién y desde cuándo. */
+export interface WorkspaceOpenEncounter {
+  id: string
+  patientId: string
+  patientName: string
+  /** Cuándo se abrió. */
+  openedAt: string
 }
 
 /** La agenda de la sede en una línea, para quien atiende y además ve la sede (la dueña que atiende). */
@@ -470,6 +485,33 @@ async function hasOwnAppointmentsToday(tx: Db, orgId: string, userId: string, ti
       and a.status in ('programada','confirmada','atendida','no_asistio')) as found`)
   return row?.found ?? false
 }
+
+/**
+ * Las atenciones en borrador que quien mira abrió hoy (estudio de la atención, entrega 7: la que
+ * quedó a medias por una llamada no aparecía hasta el día siguiente). Sin la de una de sus citas de
+ * hoy, que ya sale como «En atención», y sin pasar por el cierre: no es «Te espera», que es de lo
+ * de otro día (`waitingStaleEncounters`). La de una cita pasada que se abrió hoy también: se está
+ * registrando ahora.
+ */
+async function openEncountersToday(tx: Db, orgId: string, userId: string, timezone: string): Promise<WorkspaceOpenEncounter[]> {
+  const { start, end } = dayBounds(timezone)
+  const rows = await tx.execute<WorkspaceOpenEncounter & Record<string, unknown>>(sql`
+    select e.id, e.patient_id as "patientId", pp.display_name as "patientName", ${iso(sql`e.created_at`)} as "openedAt"
+    from encounter e
+    join patient p on p.organization_id = e.organization_id and p.id = e.patient_id
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where e.organization_id = ${orgId} and e.professional_user_id = ${userId} and e.status = 'borrador'
+      and ((e.started_at >= ${start} and e.started_at < ${end}) or e.created_at >= ${start})
+      and not exists (select 1 from appointment a where a.organization_id = e.organization_id and a.id = e.appointment_id
+        and a.professional_user_id = ${userId} and not a.is_test and a.starts_at >= ${start} and a.starts_at < ${end}
+        and a.status in ('programada','confirmada','atendida','no_asistio'))
+    order by e.created_at, e.id
+    limit ${OPEN_ENCOUNTERS_TODAY}`)
+  return [...rows]
+}
+
+/** Atenciones abiertas hoy que llegan a «Mis pacientes de hoy» a la vez. */
+const OPEN_ENCOUNTERS_TODAY = 20
 
 /** Orden de lectura: la sala (por llegada), lo que está en atención, lo que falta y, al final, lo terminado. */
 const VISIT_ORDER: Record<AppointmentVisit, number> = {
@@ -1235,9 +1277,15 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
 
   // «Mis pacientes de hoy» es de quien atiende: el odontólogo siempre y, si hoy
   // tiene citas propias, también la dueña o quien dirige y atiende (ADR 0032).
+  // Lo que dejó abierto hoy también es de su día: con eso solo, ya tiene «Mis pacientes de hoy».
+  const openToday = access.attends ? await openEncountersToday(tx, orgId, userId, timezone) : []
   const ownToday = access.appointments && (access.ownAppointments
-    || (access.attends === true && await hasOwnAppointmentsToday(tx, orgId, userId, timezone)))
-  const today = access.appointments ? await workspaceToday(tx, orgId, userId, ownToday, branch, timezone) : null
+    || (access.attends === true && (openToday.length > 0 || await hasOwnAppointmentsToday(tx, orgId, userId, timezone))))
+  const today = access.appointments
+    ? await workspaceToday(tx, orgId, userId, ownToday, branch, timezone).then((day) =>
+        day.scope === "mine" ? { ...day, openEncounters: openToday } : day,
+      )
+    : null
   // Quien además ve la sede tiene su agenda en una línea, como la caja.
   const branchDay = ownToday && !access.ownAppointments && branch ? await workspaceToday(tx, orgId, userId, false, branch, timezone) : null
   const agendaLine: WorkspaceAgendaLine | null = branchDay?.branch ? { branch: branchDay.branch, summary: branchDay.summary } : null
