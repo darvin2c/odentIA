@@ -276,6 +276,42 @@ describe("lo que propone Clío en la ficha", () => {
     expect(screen.queryByText(/Dictaste:/)).toBeNull()
   })
 
+  // Cuando Clío duda entre dos opciones, la pregunta las ofrece: un toque la escribe la persona y la duda se descarta con lo elegido.
+  it("«¿Cuál?»: las opciones entre las que dudó Clío se eligen con un toque; la respuesta es de la persona", async () => {
+    serverSaves()
+    const discard = vi.fn()
+    const frio = {
+      ...response,
+      templateSnapshot: {
+        sections: [{ id: "s1", title: "Pruebas", fields: [{ id: "frio", label: "Prueba de frío", type: "opcion_unica", options: ["Normal", "Aumentada, cede al retirar el estímulo", "Aumentada, persiste", "Sin respuesta"] }] }],
+      },
+      answers: { frio: null },
+    } as unknown as FormResponse
+    const doubt = {
+      ...proposal({ fieldId: "frio", value: null, choices: ["Aumentada, cede al retirar el estímulo", "Aumentada, persiste"] }),
+      status: "por_revisar" as const,
+      note: "Dijiste «prueba de frío aumentada»: no alcanza para elegir entre «Aumentada, cede al retirar el estímulo» y «Aumentada, persiste». Elige tú.",
+    }
+    const value = { items: [doubt], accept: async () => {}, discard, restore: () => {}, busy: false, setFormOpen: () => {}, hint: null, openAt: () => {}, clearHint: () => {} }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ClioFormProposalsContext.Provider value={value}>
+          <ResponseDetail response={frio} canWrite onChanged={async () => {}} />
+        </ClioFormProposalsContext.Provider>
+      </QueryClientProvider>,
+    )
+    const group = await screen.findByRole("group", { name: "¿Cuál? Prueba de frío" })
+    expect(group.textContent).toContain("Aumentada, persiste")
+    expect(group.textContent).not.toContain("Sin respuesta")
+    // Son los botones de siempre (`ChoiceButtons`): se recorren con las flechas y se eligen con Enter o Espacio.
+    fireEvent.click(screen.getByRole("button", { name: "Aumentada, persiste" }))
+    await waitFor(() => expect(discard).toHaveBeenCalledWith(doubt, "Aumentada, persiste"))
+    expect(update).toHaveBeenCalledWith("r1", expect.objectContaining({ answers: expect.objectContaining({ frio: "Aumentada, persiste" }) }))
+    // Se descarta una sola vez: la que la descarta al ver la respuesta escrita no lo repite.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(discard).toHaveBeenCalledTimes(1)
+  })
+
   // El doble toque real (dos clics antes de volver a pintar) no se reproduce aquí: lo ve el verificador.
   it("el doble toque en «Confirmar» confirma una vez", async () => {
     const accept = vi.fn(() => new Promise<void>(() => {}))

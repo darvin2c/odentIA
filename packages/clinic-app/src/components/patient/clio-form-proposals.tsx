@@ -31,7 +31,8 @@ export interface ClioFormProposals {
   items: DictationSuggestion[]
   /** Confirma en el orden de la ficha: la pregunta de la que depende otra, primero. */
   accept: (items: DictationSuggestion[]) => Promise<void>
-  discard: (item: DictationSuggestion) => void
+  /** `chosen`: la opción que eligió la persona entre las que Clío dudaba (`choicesOf`); queda la constancia. */
+  discard: (item: DictationSuggestion, chosen?: string) => void
   /** «Deshacer» de la ×: la propuesta vuelve a su pregunta. */
   restore: (item: DictationSuggestion) => void
   busy: boolean
@@ -134,6 +135,15 @@ export const reread = (item: DictationSuggestion): boolean => item.kind === "fic
  * de la segunda lectura. La respuesta de ficha sin valor es un aviso («elige tú»).
  */
 export const proposesValue = (item: DictationSuggestion): boolean => item.status === "lista" || (item.kind === "ficha" && item.payload["value"] != null)
+
+/**
+ * Las opciones entre las que Clío dudó en una pregunta («no alcanza para elegir entre «Aumentada, cede…» y
+ * «Aumentada, persiste»»): la pregunta las ofrece en botones. Vacío si no dudó entre opciones.
+ */
+export const choicesOf = (item: DictationSuggestion): string[] =>
+  item.kind === "ficha" && item.payload["value"] == null && Array.isArray(item.payload["choices"])
+    ? (item.payload["choices"] as unknown[]).filter((choice): choice is string => typeof choice === "string")
+    : []
 
 /** «1 respuesta», «3 respuestas». */
 export const answersWords = (count: number): string => (count === 1 ? "1 respuesta" : `${count} respuestas`)

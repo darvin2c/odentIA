@@ -939,6 +939,18 @@ describe("la ficha empezada recibe lo que propone Clío (base)", () => {
     await expect(fx.run((tx) => restoreDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, molar.id))).rejects.toMatchObject({ code: "SUGGESTION_DECIDED" })
   })
 
+  it("la duda entre dos opciones lleva las dos; al elegir una, la duda se descarta con lo elegido", async () => {
+    const { save, fx } = await startedForm()
+    const [molar] = (await save([{ payload: { question: 1, answer: "Clase II división 1" }, sourceText: "clase molar derecha clase dos" }])).suggestions
+    expect(molar).toMatchObject({ status: "por_revisar", payload: { value: null, choices: ["Clase II división 1", "Clase II división 2"] } })
+    // Lo que no estaba entre las de Clío no se acepta como su elección.
+    await expect(fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, molar!.id, "Clase I"))).rejects.toMatchObject({ status: 400 })
+    await fx.run((tx) => discardDictationSuggestion(tx, ORG, fx.actor, fx.patient.id, fx.encounter.id, molar!.id, "Clase II división 2"))
+    const [row] = await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, molar!.id))
+    expect(row).toMatchObject({ status: "descartada", decidedBy: fx.actor })
+    expect((row!.payload as { _meta?: { discarded?: unknown } })._meta?.discarded).toEqual({ status: "por_revisar", chosen: "Clase II división 2" })
+  })
+
   it("anular la atención descarta lo que Clío proponía", async () => {
     const { save, fx } = await startedForm()
     await save([{ payload: { question: 2, answer: "6" }, sourceText: "overjet de seis" }])

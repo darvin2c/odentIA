@@ -186,8 +186,11 @@ interface SuggestionMeta {
   onFile?: string | undefined
   /** Una respuesta de ficha que entró con la firma: la ficha dice «confirmó al firmar». */
   atSign?: true | undefined
-  /** Descartada con la × de su ficha: cómo estaba, para «Deshacer». */
-  discarded?: { status: "lista" | "por_revisar" } | undefined
+  /**
+   * Descartada con la × de su ficha: cómo estaba, para «Deshacer». `chosen`: la opción que eligió
+   * la persona entre las que Clío dudaba (`choices`); la respuesta la escribió ella.
+   */
+  discarded?: { status: "lista" | "por_revisar"; chosen?: string } | undefined
 }
 const META = "_meta"
 
@@ -2851,7 +2854,11 @@ async function settleRows(tx: Db, actorUserId: string, ids: string[], entityId: 
     .where(inArray(encounterDictationSuggestion.id, ids))
 }
 
-/** Descartar: la sugerencia no entra a la historia. */
+/**
+ * Descartar: la sugerencia no entra a la historia. `chosen`: en una respuesta de ficha en la que
+ * Clío dudaba entre opciones (`choices`), la que eligió la persona con un toque; ella escribe la
+ * respuesta en la ficha y aquí queda la constancia de que Clío había dudado.
+ */
 export async function discardDictationSuggestion(
   tx: Db,
   orgId: string,
@@ -2859,16 +2866,19 @@ export async function discardDictationSuggestion(
   patientId: string,
   encounterId: string,
   id: string,
+  chosen?: string,
 ): Promise<void> {
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   // La de una ficha se puede deshacer desde su aviso: se conserva cómo estaba.
   const parts = splitMeta(row.payload)
+  const choices = Array.isArray(parts.data["choices"]) ? (parts.data["choices"] as unknown[]) : []
+  if (chosen !== undefined && (row.kind !== "ficha" || !choices.includes(chosen))) throw invalidField("chosen", "Esa opción no es de las que proponía Clío")
   await tx
     .update(encounterDictationSuggestion)
     .set({
       status: "descartada",
-      ...(row.kind === "ficha" ? { payload: withMeta(parts.data, { ...parts.meta, discarded: { status: row.status as "lista" | "por_revisar" } }) } : {}),
+      ...(row.kind === "ficha" ? { payload: withMeta(parts.data, { ...parts.meta, discarded: { status: row.status as "lista" | "por_revisar", ...(chosen !== undefined ? { chosen } : {}) } }) } : {}),
       decidedBy: actorUserId,
       decidedAt: new Date(),
       updatedAt: new Date(),
