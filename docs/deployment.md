@@ -263,8 +263,9 @@ cayeron todas las pantallas (ADR 0193). En cada zona, una regla personalizada de
 de la base, en el dominio de su producto. Es aparte de «Bloquear robot de escaneo y rutas de
 archivos secretos», que el sistema no toca. La API la pone al día al abrir, renombrar o borrar
 una clínica, con el alta asistida y al pedir o borrar una demo; el worker, al armar o vencer
-una demo, al arrancar y una vez al día (en una hora si Cloudflare falló). Un fallo queda en el
-registro (`clinic-hosts:`) y la clínica se crea igual. Si la lectura de las clínicas falla o la
+una demo, al arrancar y cada hora (un GET por zona, que solo escribe si la lista cambió). Un
+fallo queda en el registro (`clinic-hosts:`) y la clínica se crea igual: su subdominio queda
+bloqueado como mucho hasta la próxima hora. Si la lectura de las clínicas falla o la
 expresión pasaría de 4000 caracteres, la regla queda como estaba; desde 3200 el registro avisa
 que hay que pasar a Workers Paid o a otra estrategia.
 
