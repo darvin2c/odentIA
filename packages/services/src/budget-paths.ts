@@ -171,6 +171,9 @@ export async function dropPathsWithoutOwn(
   opts: BudgetActorOpts = {},
 ): Promise<BudgetWithTotals> {
   let budget = start
+  // Quitar un camino vacío es consecuencia de lo que la persona ya hizo y pudo hacer: no se le
+  // vuelve a pedir ser dueña del borrador, y «Quitar» no falla por llevarse su única línea (R9).
+  const consequence: BudgetActorOpts = { ...opts, memberRole: undefined }
   for (;;) {
     if (budget.options.length < 2) break
     const common = commonPlanItems(budget.items, budget.options.length)
@@ -179,7 +182,7 @@ export async function dropPathsWithoutOwn(
         !budget.items.some((line) => line.optionId === option.id && !common.has(line.planItemId)),
     )
     if (!empty) break
-    budget = await removeBudgetOption(tx, orgId, actorUserId, patientId, budget.id, empty.id, opts)
+    budget = await removeBudgetOption(tx, orgId, actorUserId, patientId, budget.id, empty.id, consequence)
   }
   return budget
 }

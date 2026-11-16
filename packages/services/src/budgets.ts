@@ -2105,7 +2105,19 @@ export async function restoreDraftBudget(
 ): Promise<void> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, snapshot.budgetId)
-  await assertOwnBudget(tx, orgId, current.id, actorUserId, opts.memberRole)
+  // Quien lo quitó puede deshacerlo aunque «Quitar» se llevara su única línea (R9): el
+  // borrador pudo ser de otro. Se mira lo que vuelve, no el borrador de ahora.
+  const returning = [...new Set(snapshot.lines.map((line) => line.planItemId))]
+  const owners =
+    returning.length === 0
+      ? []
+      : await tx
+          .select({ createdBy: treatmentPlanItem.createdBy })
+          .from(treatmentPlanItem)
+          .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, returning)))
+  // La misma regla de «propio» (alguna línea suya), pero sobre lo que vuelve.
+  const returnsOwn = owners.some((row) => row.createdBy === actorUserId)
+  if (!returnsOwn) await assertOwnBudget(tx, orgId, current.id, actorUserId, opts.memberRole)
   if (current.status !== "borrador" || current.supersedesBudgetId) {
     throw conflict("UNDO_BUDGET_GONE", "Su presupuesto ya se entregó: vuelve a indicarlo")
   }
@@ -2127,7 +2139,8 @@ export async function restoreDraftBudget(
       .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, move.id)))
   }
   const kept = new Set(options.map((option) => option.id))
-  for (const option of snapshot.options.filter((row) => !kept.has(row.id))) {
+  const comeBack = snapshot.options.filter((row) => !kept.has(row.id))
+  for (const option of comeBack) {
     await tx.insert(treatmentBudgetOption).values({
       id: option.id,
       organizationId: orgId,
@@ -2153,7 +2166,8 @@ export async function restoreDraftBudget(
       .set({ isRecommended: true, updatedAt: new Date() })
       .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, recommended.id)))
   }
-  for (const { createdAt, ...line } of snapshot.lines) {
+  const lines = snapshot.lines
+  for (const { createdAt, ...line } of lines) {
     await tx.insert(treatmentBudgetItem).values({
       ...line,
       organizationId: orgId,
@@ -2162,7 +2176,7 @@ export async function restoreDraftBudget(
       createdAt: new Date(createdAt),
     })
   }
-  const itemIds = [...new Set(snapshot.lines.map((line) => line.planItemId))]
+  const itemIds = [...new Set(lines.map((line) => line.planItemId))]
   if (itemIds.length > 0) {
     await tx
       .update(treatmentPlanItem)
@@ -2178,8 +2192,8 @@ export async function restoreDraftBudget(
   await audit(tx, orgId, actorUserId, "budget.items_restored", current.id, {
     patientId,
     itemIds,
-    lineCount: snapshot.lines.length,
-    options: snapshot.options.filter((row) => !kept.has(row.id)).map((row) => row.position),
+    lineCount: lines.length,
+    options: comeBack.map((row) => row.position),
   })
   await notifyBudget(tx, orgId)
 }

@@ -3,8 +3,10 @@
  * opción del presupuesto, con su precio y en su orden; la otra opción no cambia ni pasa a
  * «va después» de él.
  */
-import { serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { serviceCatalog, treatmentBudget, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { user } from "@odentia/db/schema/auth"
 import { eq } from "drizzle-orm"
+import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
 import { placeBudgetPath } from "./budget-paths.js"
 import { adjustBudgetLines, type BudgetWithTotals, deliverBudget, findDraftBudget, getBudgetDetail } from "./budgets.js"
@@ -114,4 +116,25 @@ it("sin presupuesto vuelve tal cual; con el presupuesto ya entregado no adivina 
   ).rejects.toMatchObject({ code: "UNDO_BUDGET_GONE" })
   const [still] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, resina.id))
   expect(still).toMatchObject({ status: "cancelado" })
+})
+
+// Revisión del 16 nov (R9): el borrador de ayer es de otra persona; hoy atiende quien indicó la
+// resina. Su «Quitar» y su «Deshacer» funcionan aunque se lleve su única línea.
+it("R9: un clínico con el borrador de otra persona puede quitar y deshacer lo suyo", async () => {
+  const { f, resina } = await marta()
+  const draft = (await f.run((tx) => findDraftBudget(tx, "org_a", f.patient.id)))!
+  const other = randomUUID()
+  await ownerDb.insert(user).values({ id: other, name: "Otra doctora", email: `${other}@example.test` })
+  await ownerDb.update(treatmentBudget).set({ createdBy: other }).where(eq(treatmentBudget.id, draft.id))
+  // De lo indicado hoy, solo la resina es de este clínico; lo otro lo indicó la otra doctora.
+  await ownerDb
+    .update(treatmentPlanItem)
+    .set({ createdBy: other })
+    .where(eq(treatmentPlanItem.budgetId, draft.id))
+  await ownerDb.update(treatmentPlanItem).set({ createdBy: f.args[1] }).where(eq(treatmentPlanItem.id, resina.id))
+  const opts = { memberRole: "clinician" }
+  await f.run((tx) => removeIndicatedFromEncounter(tx, ...f.args, f.encounter.id, resina.id, opts))
+  await f.run((tx) => restoreRemovedInEncounter(tx, ...f.args, f.encounter.id, resina.id, opts))
+  const [back] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, resina.id))
+  expect(back).toMatchObject({ status: "pendiente", budgetId: draft.id })
 })
