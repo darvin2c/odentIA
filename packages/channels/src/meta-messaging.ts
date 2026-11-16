@@ -9,6 +9,9 @@
 // - IG webhooks: https://developers.facebook.com/docs/instagram-platform/webhooks/
 // Messenger: host graph.facebook.com, token de página, permiso pages_messaging,
 // envío POST /{PAGE-ID}/messages con messaging_type RESPONSE.
+// Instagram por Facebook («Conectar con Facebook»): host graph.facebook.com, el
+// token de la página a la que está unida la cuenta, permisos instagram_basic +
+// instagram_manage_messages, envío POST /{PAGE-ID}/messages.
 // Instagram Login: host graph.instagram.com, token de usuario de Instagram,
 // permisos instagram_business_basic + instagram_business_manage_messages,
 // envío POST /{IG-ID}/messages (sin messaging_type), texto máx. 1000 bytes,
@@ -35,14 +38,23 @@ const IG_HOST = "https://graph.instagram.com"
 export interface MessengerConfig {
   pageId: string
   pageAccessToken: string
+  /** Vacía si se conectó con el botón: sus avisos llegan firmados con la clave de la app de odentIA. */
   appSecret: string
 }
 
 export interface InstagramConfig {
   /** ID de la cuenta profesional de Instagram (IG-ID). */
   instagramId: string
-  /** Token de usuario de Instagram con instagram_business_manage_messages. */
+  /**
+   * «instagram»: Instagram Login, token de usuario de Instagram (la app propia).
+   * «facebook»: «Conectar con Facebook», token de la página a la que está unida.
+   */
+  via: "instagram" | "facebook"
+  /** El token con que se envía: el de Instagram o el de la página. */
   accessToken: string
+  /** La página unida, si se conectó por Facebook. */
+  pageId: string | null
+  /** Vacía si se conectó con el botón (como Messenger). */
   appSecret: string
 }
 
@@ -54,19 +66,35 @@ function pick(config: Record<string, unknown>, key: string, label: string): stri
   return v
 }
 
+const optional = (config: Record<string, unknown>, key: string): string =>
+  typeof config[key] === "string" ? (config[key] as string) : ""
+
 function messengerConfig(config: Record<string, unknown>): MessengerConfig {
   return {
     pageId: pick(config, "pageId", "Messenger"),
     pageAccessToken: pick(config, "pageAccessToken", "Messenger"),
-    appSecret: pick(config, "appSecret", "Messenger"),
+    appSecret: optional(config, "appSecret"),
   }
 }
 
 function instagramConfig(config: Record<string, unknown>): InstagramConfig {
+  const instagramId = pick(config, "instagramId", "Instagram")
+  // Con el botón llega la clave de la página: se habla con la API de Facebook.
+  if (typeof config["pageAccessToken"] === "string" && config["pageAccessToken"]) {
+    return {
+      instagramId,
+      via: "facebook",
+      accessToken: config["pageAccessToken"] as string,
+      pageId: pick(config, "pageId", "Instagram"),
+      appSecret: optional(config, "appSecret"),
+    }
+  }
   return {
-    instagramId: pick(config, "instagramId", "Instagram"),
+    instagramId,
+    via: "instagram",
     accessToken: pick(config, "accessToken", "Instagram"),
-    appSecret: pick(config, "appSecret", "Instagram"),
+    pageId: null,
+    appSecret: optional(config, "appSecret"),
   }
 }
 
@@ -482,10 +510,11 @@ export const instagramAdapter: ChannelAdapter = {
 
   async sendMessage(config, msg, deps) {
     const cfg = instagramConfig(config)
+    const byFacebook = cfg.via === "facebook"
     return sendViaGraph(
       "Instagram",
-      `${IG_HOST}/${metaGraphVersion()}`,
-      `${cfg.instagramId}/messages`,
+      `${byFacebook ? GRAPH_HOST : IG_HOST}/${metaGraphVersion()}`,
+      `${byFacebook ? cfg.pageId : cfg.instagramId}/messages`,
       cfg.accessToken,
       stripPrefix(msg.to, "ig"),
       msg.kind,
@@ -505,7 +534,7 @@ export const instagramAdapter: ChannelAdapter = {
       cfg.accessToken,
       {},
       deps,
-      `${IG_HOST}/${metaGraphVersion()}`,
+      `${cfg.via === "facebook" ? GRAPH_HOST : IG_HOST}/${metaGraphVersion()}`,
     )
     if (status >= 500) throw new Error(`Instagram no respondió al comprobar la cuenta: ${graphError(status, json)}`)
     if (status >= 400 || !json || typeof json !== "object" || !("id" in json)) {

@@ -35,6 +35,7 @@ export type MetaSignupStep =
   | "comprobar"
   | "leer"
   | "desuscribir"
+  | "paginas"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -112,7 +113,7 @@ export function failure(step: MetaSignupStep, answer: GraphAnswer): MetaSignupEr
 }
 
 /** `{ "success": true }`; la referencia del registro admite también el texto `"true"`. */
-function succeeded(json: unknown): boolean {
+export function succeeded(json: unknown): boolean {
   if (!json || typeof json !== "object" || !("success" in json)) return false
   return json.success === true || json.success === "true"
 }

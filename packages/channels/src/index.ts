@@ -32,6 +32,15 @@ export {
   unsubscribeAppFromAccount,
 } from "./whatsapp-embedded-signup.js"
 export {
+  buildPagesLoginUrl,
+  exchangePagesCode,
+  listSharedPages,
+  PAGE_FIELDS,
+  type SharedPage,
+  subscribeAppToPage,
+  unsubscribeAppFromPage,
+} from "./meta-pages-login.js"
+export {
   inspectOwnAppToken,
   type OwnAppNumber,
   type OwnAppToken,
