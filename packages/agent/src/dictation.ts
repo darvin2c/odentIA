@@ -293,9 +293,9 @@ const HEARD_HINT =
 
 /**
  * Cómo se responden las fichas empezadas: igual para toda ficha y toda atención,
- * así que va en un mensaje propio antes del de la pausa, con su corte de caché
- * (`dictationMessages`). Solo con una ficha empezada: sin ella el modelo no lee
- * nada nuevo y lo de siempre no cambia.
+ * así que va al final de las instrucciones fijas, en el mensaje de sistema, con
+ * su corte de caché (`dictationMessages`). Solo con una ficha empezada: sin ella
+ * el modelo no lee nada nuevo y lo de siempre no cambia.
  */
 export const DICTATION_FORMS_RULES = [
   "Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.",
@@ -348,14 +348,18 @@ function newText(context: string, transcript: string): string {
  * nunca se vuelve a leer; por /v1/responses ese pedido no se envía.
  *
  * Con una ficha empezada, cómo se responden las fichas (`DICTATION_FORMS_RULES`,
- * igual en toda atención) va en un mensaje propio, antes del de la pausa y con
- * su corte: la pausa siguiente, y cualquier atención con ficha, lo leen de la
- * caché. Antes iba dentro de la pausa, después de la fecha, y se pagaba entero
- * en cada pausa (medido el 16 nov: 87 % de la entrada leída de la caché con
- * ficha, 98 % sin ella). Las preguntas siguen donde siempre, junto a lo nuevo.
- * Medido el 16 nov: con las preguntas también antes de la pausa, Clío proponía
- * a veces pulpitis (K04.0) por la necrosis dictada; con todo al principio del
- * mensaje de la pausa, dejaba fuera de la consulta lo que se hizo.
+ * igual en toda atención) va al final de las instrucciones, en el mismo mensaje
+ * de sistema y antes de su corte: la pausa siguiente, y cualquier atención con
+ * ficha, lo leen de la caché. Antes iba dentro de la pausa, después de la fecha,
+ * y se pagaba entero en cada pausa (medido el 16 nov: 87 % de la entrada leída
+ * de la caché con ficha, 98 % sin ella). Las preguntas siguen donde siempre,
+ * junto a lo nuevo. Medido el 16 nov: con las preguntas también antes de la
+ * pausa, Clío proponía a veces pulpitis (K04.0) por la necrosis dictada; con
+ * todo al principio del mensaje de la pausa, dejaba fuera de la consulta lo que
+ * se hizo. Como un mensaje del usuario aparte, antes del de la pausa, las leía
+ * peor con el tarifario entero de una clínica (prueba con voz c6): a veces no
+ * respondía ninguna pregunta, respondía un conteo con palabras o callaba lo que
+ * era de dos hermanas.
  */
 export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({
@@ -380,11 +384,8 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
   ]
     .filter(Boolean)
     .join("\n\n")
-  return [
-    new SystemMessage({ content: cachedPrompt(input.provider, fixed, responses) }),
-    ...(forms.length ? [new HumanMessage({ content: cachedPrompt(input.provider, DICTATION_FORMS_RULES, responses) })] : []),
-    new HumanMessage({ content: pause }),
-  ]
+  const instructions = forms.length ? `${fixed}\n\n${DICTATION_FORMS_RULES}` : fixed
+  return [new SystemMessage({ content: cachedPrompt(input.provider, instructions, responses) }), new HumanMessage({ content: pause })]
 }
 
 const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
