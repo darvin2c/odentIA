@@ -263,7 +263,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
         id: "canales-instagram-messenger",
         q: "¿Cómo conecto Instagram?",
         a: "En Configuración › Integraciones, entra a Instagram o a Messenger y pulsa «Conectar con Facebook»: entras con el Facebook de quien administra la página de la clínica, marcas sus páginas y vuelves con Messenger de cada página y el Instagram unido a cada una, sin pegar nada. Si una página no tiene un Instagram de empresa unido, se conecta su Messenger y te dice que unas el Instagram en Meta Business Suite y vuelvas a conectar. Lo que respondas desde Meta Business Suite también aparece en la Bandeja. Si Facebook deja de permitir una cuenta (se quitó el permiso o cambió quien administra la página), su fila dice «Necesita atención» y la campana avisa: en «Revisar», «Volver a conectar con Facebook» la deja como estaba, con sus conversaciones. «Con tu propia app de Meta» sigue para quien tiene su app: pide el identificador, la «Clave de acceso» y la «Clave secreta de la app», y luego pegar la «Dirección de avisos» y la «Clave de verificación» en Webhooks; la clave de Instagram hecha así se renueva sola.",
-        forms: ["como conecto messenger", "instagram dice que falta pegar la direccion de avisos", "conectar instagram con facebook", "mi pagina no tiene instagram", "contesto desde business suite se ve en odentia"],
+        forms: ["como conecto messenger", "instagram dice que falta pegar la direccion de avisos", "conectar instagram con facebook", "mi pagina no tiene instagram", "lo que contesto desde business suite aparece en la bandeja"],
       },
       {
         id: "canales-telegram",
