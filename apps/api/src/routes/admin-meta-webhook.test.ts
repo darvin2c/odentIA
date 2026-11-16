@@ -313,6 +313,9 @@ describe("WhatsApp", () => {
     expect(response.status).toBe(200)
     const [row] = await ownerDb.select().from(saasOutreach).where(eq(saasOutreach.id, outreachId))
     expect(row).toMatchObject({ status: "enviado", externalId: "wamid.respuesta" })
+    // Y anota cuándo llegó al teléfono (ADR 0196); todavía no se leyó.
+    expect(row?.deliveredAt).toBeInstanceOf(Date)
+    expect(row?.readAt).toBeNull()
   })
 })
 

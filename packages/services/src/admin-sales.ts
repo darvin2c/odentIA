@@ -2574,11 +2574,11 @@ export function replyReferences(email: {
 /**
  * Prepara la respuesta a un correo que llegó: queda `pendiente` como
  * cualquier envío y la ruta la manda después del commit. Va al remitente, con
- * «Re: <asunto>», las cabeceras del hilo y su propio Message-ID. Lo que llegó
- * a soporte@ sale desde soporte@ y lo pueden responder Soporte y
- * Administración; lo demás (hola@, contacto@, fundadores@, la dirección de
- * una persona) sale con el nombre y la dirección de quien responde y solo lo
- * responde Administración. Un correo sin cliente se responde igual, sin ligarlo.
+ * «Re: <asunto>», las cabeceras del hilo y su propio Message-ID. Los correos
+ * los responde Administración (ADR 0196): lo que llegó a soporte@ sale desde
+ * soporte@; lo demás (hola@, contacto@, fundadores@, la dirección de una
+ * persona), con el nombre y la dirección de quien responde. Un correo sin
+ * cliente se responde igual, sin ligarlo.
  */
 export async function prepareEmailReply(
   tx: Db,
@@ -2597,8 +2597,7 @@ export async function prepareEmailReply(
     .limit(1)
   if (!email) throw notFound("Correo")
   const mailbox = email.mailbox as SaasInboundMailbox
-  if (actor.role !== "admin" && mailbox !== "soporte")
-    throw forbidden("Soporte responde solo lo que llegó a soporte@")
+  if (actor.role !== "admin") throw forbidden("Solo el rol Administración puede hacer esto")
   const body = trimmed("body", input.body, 5000, "la respuesta")
   const client = email.clientId ? await lockClient(tx, email.clientId) : null
   const product = productOf(client?.product ?? email.product)
@@ -2784,7 +2783,8 @@ async function closeKairosReplyDrafts(
  * El envío, bloqueado, con si es solo de Administración (`outreachAdminOnlySql`:
  * lleva una propuesta, sale de algo de Kairós solo de Administración o responde
  * lo que no llegó a soporte@). Para Soporte ese no existe: la misma respuesta
- * que uno que no hay.
+ * que uno que no hay. Tampoco la respuesta a un correo o en un chat: las
+ * conversaciones son de Administración (ADR 0196).
  */
 async function lockOutreach(tx: Db, actor: AdminActor, id: string) {
   if (!UUID.test(id)) throw notFound("Envío")
@@ -2794,7 +2794,9 @@ async function lockOutreach(tx: Db, actor: AdminActor, id: string) {
     .where(eq(saasOutreach.id, id))
     .limit(1)
     .for("update")
-  if (!found || (found.adminOnly && actor.role !== "admin")) throw notFound("Envío")
+  const conversation = Boolean(found?.row.chatId || found?.row.inReplyToEmailId)
+  if (!found || ((found.adminOnly || conversation) && actor.role !== "admin"))
+    throw notFound("Envío")
   return { ...found.row, adminOnly: Boolean(found.adminOnly) }
 }
 

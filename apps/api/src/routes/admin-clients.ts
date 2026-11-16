@@ -752,30 +752,30 @@ export function createAdminClientsRoute(deps: AdminClientsDeps) {
     }),
   )
 
-  /* ----- Correos entrantes ----- */
+  /* ----- Correos entrantes: solo Administración (ADR 0196) ----- */
 
   app.post("/inbound/:emailId/assign", async (c) => {
     const raw = await bodyOf(c)
-    return staffRun(c, 200, (actor) => {
+    return adminRun(c, 200, (actor) => {
       const body = parse(assignBody, raw)
       return owner((tx) => assignInboundEmail(tx, actor, c.req.param("emailId"), body.clientId))
     })
   })
 
-  /** Un correo que llegó, para leerlo y responderlo. Soporte solo ve lo de soporte@. */
+  /** Un correo que llegó, para leerlo y responderlo (el hilo entero, en la Bandeja). */
   app.get("/inbound/:emailId", (c) =>
-    staffRun(c, 200, (actor) => owner((tx) => getInboundEmail(tx, actor, c.req.param("emailId")))),
+    adminRun(c, 200, (actor) => owner((tx) => getInboundEmail(tx, actor, c.req.param("emailId")))),
   )
 
   /**
    * Responder un correo que llegó (con o sin cliente): la misma reserva y el
-   * mismo envío de «Escribir». Lo de soporte@ sale desde soporte@ y lo responde
-   * Soporte o Administración; lo demás, solo Administración, con su dirección.
+   * mismo envío de «Escribir». Solo Administración: lo de soporte@ sale desde
+   * soporte@; lo demás, con su dirección.
    */
   app.post("/inbound/:emailId/reply", async (c) => {
     const raw = await bodyOf(c)
     try {
-      const actor = staffOf(c)
+      const actor = adminOf(c)
       const body = parse(replyBody, raw)
       const { outreach, mail } = await owner(async (tx) => {
         const row = await prepareEmailReply(tx, actor, c.req.param("emailId"), body)

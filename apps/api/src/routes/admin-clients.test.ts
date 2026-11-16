@@ -643,9 +643,21 @@ describe("responder un correo", () => {
     return result.id
   }
 
-  it("Soporte responde lo de soporte@ desde soporte@; lo demás le responde 403", async () => {
+  it("lo de soporte@ sale desde soporte@ y lo responde Administración; a Soporte, 403", async () => {
     const support = await arrived("soporte", "<r-soporte@gmail.test>")
-    const response = await call("POST", `/inbound/${support}/reply`, SUPPORT, {
+    // Los correos son de Administración (ADR 0196): Soporte no los lee ni los responde.
+    await expectStatus(
+      await call("POST", `/inbound/${support}/reply`, SUPPORT, { body: "Ya lo revisamos." }),
+      403,
+    )
+    await expectStatus(await call("GET", `/inbound/${support}`, SUPPORT), 403)
+    await expectStatus(
+      await call("POST", `/inbound/${support}/assign`, SUPPORT, {
+        clientId: "5e1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f",
+      }),
+      403,
+    )
+    const response = await call("POST", `/inbound/${support}/reply`, ADMIN, {
       body: "Ya lo revisamos.",
     })
     await expectStatus(response, 201)
@@ -668,9 +680,8 @@ describe("responder un correo", () => {
       await call("POST", `/inbound/${commercial}/reply`, SUPPORT, { body: "Hola" }),
       403,
     )
-    // Tampoco lo lee: para Soporte no existe.
-    await expectStatus(await call("GET", `/inbound/${commercial}`, SUPPORT), 404)
-    const read = await call("GET", `/inbound/${support}`, SUPPORT)
+    await expectStatus(await call("GET", `/inbound/${commercial}`, SUPPORT), 403)
+    const read = await call("GET", `/inbound/${support}`, ADMIN)
     await expectStatus(read, 200)
     expect((await json(read)).data).toMatchObject({
       id: support,
@@ -995,10 +1006,8 @@ describe("documentos", () => {
     expect(email.files).toEqual([
       expect.objectContaining({ fileId: old.fileId, kind: "archivo_clinica", deleted: true }),
     ])
-    // Soporte no recibe la lista de adjuntos.
-    expect((await json(await call("GET", `/inbound/${old.emailId}`, SUPPORT))).data.files).toEqual(
-      [],
-    )
+    // Soporte no abre los correos.
+    expect((await call("GET", `/inbound/${old.emailId}`, SUPPORT)).status).toBe(403)
     // Lo ya borrado, o lo que no existe, no está.
     expect((await call("POST", `/files/${old.fileId}/carga`, ADMIN)).status).toBe(404)
     expect(

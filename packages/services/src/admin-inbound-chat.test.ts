@@ -346,7 +346,7 @@ describe("assignChat", () => {
 })
 
 describe("getChat y quién la ve", () => {
-  it("Soporte no ve una conversación sin cliente ni de venta, y sí la de una clínica con su app", async () => {
+  it("las conversaciones son de Administración: Soporte no ve ninguna, ni la de una clínica con su app", async () => {
     const lonely = await ingestInboundChat(ownerDb, message({ address: phone() }))
     const forSale = await ingestInboundChat(ownerDb, message({ address: phone() }))
     await assignChat(ownerDb, admin, forSale.chatId, { clientId: sales })
@@ -366,8 +366,7 @@ describe("getChat y quién la ve", () => {
       }),
     )
     await assignChat(ownerDb, admin, withApp.chatId, { clientId: clinic, contactId: clinicContact })
-    // Lo que llegó antes de decir de quién era quedó de la venta; lo que llega ahora lo ve Soporte.
-    const afterAssign = await ingestInboundChat(
+    await ingestInboundChat(
       ownerDb,
       message({
         address: appAddress,
@@ -382,40 +381,36 @@ describe("getChat y quién la ve", () => {
       }),
     )
 
-    for (const id of [lonely.chatId, forSale.chatId])
-      await expect(getChat(ownerDb, support, id)).rejects.toMatchObject({ status: 404 })
-    await expect(
-      prepareChatReply(ownerDb, support, forSale.chatId, { body: "Hola" }),
-    ).rejects.toMatchObject({ status: 404 })
+    for (const id of [lonely.chatId, forSale.chatId, withApp.chatId]) {
+      await expect(getChat(ownerDb, support, id)).rejects.toMatchObject({
+        status: 403,
+        code: "FORBIDDEN",
+      })
+      await expect(prepareChatReply(ownerDb, support, id, { body: "Hola" })).rejects.toMatchObject({
+        status: 403,
+      })
+    }
 
-    const seen = await getChat(ownerDb, support, withApp.chatId)
-    expect(seen.client).toMatchObject({ id: clinic, hasAccount: true })
-    expect(seen.contact).toMatchObject({ id: clinicContact, name: "Luis Paredes" })
-    expect(seen.files).toEqual([])
-    expect(seen.entries[0]).toMatchObject({
-      kind: "entro",
-      id: afterAssign.messageId,
-      media: [],
-      mediaCount: 1,
-    })
-
-    // Lo que Administración marca «Solo administración» no le llega a Soporte.
+    // Lo que Administración marca «Solo administración» lo dice el envío; ella lo ve todo.
     const hidden = await prepareChatReply(ownerDb, admin, withApp.chatId, {
       body: "Sobre el cobro",
       adminOnly: true,
     })
     const visible = await prepareChatReply(ownerDb, admin, withApp.chatId, { body: "Ya lo vemos" })
-    const supportSees = (await getChat(ownerDb, support, withApp.chatId)).entries
-      .filter((entry) => entry.kind === "salio")
-      .map((entry) => entry.id)
-    expect(supportSees).toEqual([visible.outreachId])
     const adminView = await getChat(ownerDb, admin, withApp.chatId)
-    expect(adminView.entries.filter((entry) => entry.kind === "salio").map((e) => e.id)).toEqual([
-      hidden.outreachId,
-      visible.outreachId,
+    expect(adminView.client).toMatchObject({ id: clinic, hasAccount: true, phase: "en_alta" })
+    expect(adminView.contact).toMatchObject({ id: clinicContact, name: "Luis Paredes" })
+    const sent = adminView.entries.filter((entry) => entry.kind === "salio")
+    expect(sent.map((entry) => [entry.id, entry.adminOnly])).toEqual([
+      [hidden.outreachId, true],
+      [visible.outreachId, false],
     ])
     expect(adminView.files).toHaveLength(2)
     expect(adminView.canReplyFreely).toBe(true)
+    // Lo que acepta su canal y su estado en la Bandeja: le respondió una persona.
+    expect(adminView.rules).toMatchObject({ channel: "whatsapp", maxChars: 4096 })
+    expect(adminView.state).toBe("respondida")
+    expect(adminView.attendedBy).toEqual({ id: admin.userId, name: "Ada Lovelace" })
   })
 
   it("sugiere solo cuando un único contacto de un cliente vivo tiene ese número", async () => {
@@ -493,10 +488,18 @@ describe("prepareChatReply y su resultado", () => {
       ["entro", true],
       ["salio", false],
     ])
-    // Un «read» después no deja otra actividad.
+    // El «delivered» que la pasó a enviado anota cuándo llegó; un «read» después, cuándo lo leyó,
+    // sin dejar otra actividad. Repetido, ya no cambia nada.
+    expect((await outreachOf(reply.outreachId)).deliveredAt).not.toBeNull()
+    expect(
+      await applyChatStatus(ownerDb, { externalId: "wamid.tarde", status: "read" }),
+    ).toMatchObject({ status: "enviado", changed: true })
+    const read = await outreachOf(reply.outreachId)
+    expect(read.readAt).not.toBeNull()
     expect(
       await applyChatStatus(ownerDb, { externalId: "wamid.tarde", status: "read" }),
     ).toMatchObject({ changed: false })
+    expect((await outreachOf(reply.outreachId)).readAt).toEqual(read.readAt)
     expect(await activitiesOfChat(chatId)).toHaveLength(2)
   })
 
@@ -663,7 +666,7 @@ describe("prepareChatMessage: escribirle primero a una persona del cliente", () 
     expect(activities.at(-1)).toMatchObject({ direction: "salio", proposalId: proposal.id })
   })
 
-  it("si nunca escribió, la plantilla para retomar, sin la propuesta; Soporte no lo hace en una venta", async () => {
+  it("si nunca escribió, la plantilla para retomar, sin la propuesta; Soporte no lo envía", async () => {
     const number = phone()
     const target = await client("Clínica que nunca escribió (ficticia)")
     const person = await contact(target, "Ana Ruiz", number)
@@ -742,7 +745,7 @@ describe("lo que la revisión encontró", () => {
     ).toHaveLength(0)
   })
 
-  it("lo que llegó o salió antes de ser de una clínica con app no lo ve Soporte después", async () => {
+  it("lo que llegó o salió antes de ser de una clínica con app sigue siendo solo de Administración", async () => {
     const address = phone()
     const before = await ingestInboundChat(ownerDb, message({ address, body: "Precio, por favor" }))
     const sale = await prepareChatReply(ownerDb, admin, before.chatId, { body: "Son 29 dólares" })
@@ -751,8 +754,14 @@ describe("lo que la revisión encontró", () => {
     const after = await ingestInboundChat(ownerDb, message({ address, body: "Ya tengo la app" }))
     const visible = await prepareChatReply(ownerDb, admin, before.chatId, { body: "¡Genial!" })
     expect((await outreachOf(visible.outreachId)).adminOnly).toBe(false)
-    const seen = await getChat(ownerDb, support, before.chatId)
-    expect(seen.entries.map((entry) => entry.id)).toEqual([after.messageId, visible.outreachId])
+    const seen = await getChat(ownerDb, admin, before.chatId)
+    expect(
+      seen.entries.filter((entry) => entry.kind === "salio").map((e) => [e.id, e.adminOnly]),
+    ).toEqual([
+      [sale.outreachId, true],
+      [visible.outreachId, false],
+    ])
+    expect(seen.entries.map((entry) => entry.id)).toContain(after.messageId)
     const [message0] = await ownerDb
       .select({ adminOnly: saasInboundMessage.adminOnly })
       .from(saasInboundMessage)
@@ -774,7 +783,7 @@ describe("lo que la revisión encontró", () => {
     const inbound = await ingestInboundChat(ownerDb, message({ address }))
     const reply = await prepareChatReply(ownerDb, admin, opened.chatId, { body: "Hola" })
     await markChatOutreachSent(ownerDb, reply.outreachId, `wamid.${crypto.randomUUID()}`)
-    expect((await getChat(ownerDb, support, opened.chatId)).entries).toHaveLength(2)
+    expect((await outreachOf(reply.outreachId)).adminOnly).toBe(false)
     await assignChat(ownerDb, admin, opened.chatId, { clientId: sales })
     const [row] = await ownerDb
       .select({ adminOnly: saasInboundMessage.adminOnly })
@@ -783,10 +792,10 @@ describe("lo que la revisión encontró", () => {
     expect(row?.adminOnly).toBe(true)
     expect((await outreachOf(reply.outreachId)).adminOnly).toBe(true)
     expect((await activitiesOfChat(opened.chatId)).every((entry) => entry.adminOnly)).toBe(true)
-    await expect(getChat(ownerDb, support, opened.chatId)).rejects.toMatchObject({ status: 404 })
+    await expect(getChat(ownerDb, support, opened.chatId)).rejects.toMatchObject({ status: 403 })
     // Volver a una clínica con app no lo baja.
     await assignChat(ownerDb, admin, opened.chatId, { clientId: clinic })
-    expect((await getChat(ownerDb, support, opened.chatId)).entries).toHaveLength(0)
+    expect((await outreachOf(reply.outreachId)).adminOnly).toBe(true)
   })
 
   it("«¿Salió?» no se resuelve en un envío pendiente de menos de 10 minutos", async () => {
