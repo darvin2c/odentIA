@@ -2058,6 +2058,12 @@ export interface BudgetRemovalSnapshot {
   budgetId: string
   options: BudgetOptionSnapshot[]
   lines: BudgetLineSnapshot[]
+  /**
+   * Las opciones que se fueron con este «Quitar» (revisión del 16 nov, R8). «Deshacer» devuelve
+   * solo esas: una que se fue con otro «Quitar» posterior no vuelve vacía. Sin este dato (un
+   * «Quitar» anterior a él), vuelven las de la foto que ya no están.
+   */
+  removedOptionIds?: string[]
 }
 
 /** Las opciones y líneas de un borrador, para guardar lo que se va a quitar. */
@@ -2139,7 +2145,9 @@ export async function restoreDraftBudget(
       .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, move.id)))
   }
   const kept = new Set(options.map((option) => option.id))
-  const comeBack = snapshot.options.filter((row) => !kept.has(row.id))
+  const removedHere = snapshot.removedOptionIds ? new Set(snapshot.removedOptionIds) : null
+  const comeBack = snapshot.options.filter((row) => !kept.has(row.id) && (!removedHere || removedHere.has(row.id)))
+  const present = new Set([...kept, ...comeBack.map((row) => row.id)])
   for (const option of comeBack) {
     await tx.insert(treatmentBudgetOption).values({
       id: option.id,
@@ -2166,7 +2174,8 @@ export async function restoreDraftBudget(
       .set({ isRecommended: true, updatedAt: new Date() })
       .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, recommended.id)))
   }
-  const lines = snapshot.lines
+  // Una línea cuya opción se fue después con otro «Quitar» ya no tiene dónde volver.
+  const lines = snapshot.lines.filter((line) => present.has(line.optionId))
   for (const { createdAt, ...line } of lines) {
     await tx.insert(treatmentBudgetItem).values({
       ...line,

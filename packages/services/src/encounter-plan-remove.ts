@@ -15,6 +15,7 @@ import {
   type BudgetActorOpts,
   type BudgetRemovalSnapshot,
   draftBudgetSnapshot,
+  getBudgetDetail,
   removeBudgetItems,
   restoreDraftBudget,
 } from "./budgets.js"
@@ -94,11 +95,14 @@ export async function removeIndicatedFromEncounter(
     // La opción que quedó sin nada suyo se va con él: un camino vacío, o solo con lo común, no
     // es una opción (la regla de los caminos).
     await dropPathsWithoutOwn(tx, orgId, actorUserId, patientId, left, opts)
-    const after = new Set((await draftBudgetSnapshot(tx, orgId, item.budgetId)).lines.map((line) => line.id))
+    const afterSnapshot = await draftBudgetSnapshot(tx, orgId, item.budgetId)
+    const after = new Set(afterSnapshot.lines.map((line) => line.id))
+    const afterOptions = new Set(afterSnapshot.options.map((option) => option.id))
     budget = {
       budgetId: item.budgetId,
       options: before.options,
       lines: before.lines.filter((line) => !after.has(line.id)),
+      removedOptionIds: before.options.filter((option) => !afterOptions.has(option.id)).map((option) => option.id),
     }
   }
   await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemId, {
@@ -177,8 +181,13 @@ export async function restoreRemovedInEncounter(
     .update(treatmentPlanItem)
     .set({ status: "pendiente", statusReason: null, updatedAt: new Date() })
     .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, planItemId)))
-  if (budget && budget.lines.length > 0)
+  if (budget && budget.lines.length > 0) {
     await restoreDraftBudget(tx, orgId, actorUserId, patientId, budget, opts)
+    // Lo que volvió pudo dejar un camino sin nada suyo (otro «Quitar» se llevó lo que lo sostenía):
+    // no es una opción (R8, la regla de los caminos).
+    const restored = await getBudgetDetail(tx, orgId, patientId, budget.budgetId)
+    await dropPathsWithoutOwn(tx, orgId, actorUserId, patientId, restored, opts)
+  }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

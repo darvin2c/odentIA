@@ -118,6 +118,33 @@ it("sin presupuesto vuelve tal cual; con el presupuesto ya entregado no adivina 
   expect(still).toMatchObject({ status: "cancelado" })
 })
 
+// Revisión del 16 nov (R8): se quita la resina y después la exodoncia; «Deshacer» de la resina no
+// deja un camino sin nada suyo (B con solo la limpieza común).
+it("R8: «Deshacer» en otro orden no deja un camino vacío, y la opción que se fue con otro «Quitar» no vuelve vacía", async () => {
+  const { f, resina, exodoncia, limpieza } = await marta()
+  const draft = (await f.run((tx) => findDraftBudget(tx, "org_a", f.patient.id)))!
+  await f.run((tx) => removeIndicatedFromEncounter(tx, ...f.args, f.encounter.id, resina.id))
+  await f.run((tx) => removeIndicatedFromEncounter(tx, ...f.args, f.encounter.id, exodoncia.id))
+  await f.run((tx) => restoreRemovedInEncounter(tx, ...f.args, f.encounter.id, resina.id))
+  const after = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, draft.id))
+  // Sin la exodoncia, B solo tenía lo común: un solo camino, con la resina y la limpieza.
+  expect(shape(after).map((option) => option.lines.map((line) => line.split(":")[0]).sort())).toEqual([
+    [limpieza.id, resina.id].sort(),
+  ])
+  expect(after.options).toHaveLength(1)
+})
+
+it("R8: al revés (primero la exodoncia, después la resina), «Deshacer» de la exodoncia no resucita la opción A vacía", async () => {
+  const { f, resina, exodoncia, limpieza } = await marta()
+  const draft = (await f.run((tx) => findDraftBudget(tx, "org_a", f.patient.id)))!
+  await f.run((tx) => removeIndicatedFromEncounter(tx, ...f.args, f.encounter.id, exodoncia.id))
+  await f.run((tx) => removeIndicatedFromEncounter(tx, ...f.args, f.encounter.id, resina.id))
+  await f.run((tx) => restoreRemovedInEncounter(tx, ...f.args, f.encounter.id, exodoncia.id))
+  const after = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, draft.id))
+  expect(after.options).toHaveLength(1)
+  expect(shape(after)[0]!.lines.map((line) => line.split(":")[0]).sort()).toEqual([exodoncia.id, limpieza.id].sort())
+})
+
 // Revisión del 16 nov (R9): el borrador de ayer es de otra persona; hoy atiende quien indicó la
 // resina. Su «Quitar» y su «Deshacer» funcionan aunque se lleve su única línea.
 it("R9: un clínico con el borrador de otra persona puede quitar y deshacer lo suyo", async () => {
