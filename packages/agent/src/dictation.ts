@@ -252,8 +252,15 @@ export interface DictationAsk {
   forms?: readonly DictationFormQuestion[] | undefined
 }
 
-/** Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo. */
-function formQuestionWords(question: DictationFormQuestion): string {
+/** Lo que ya dice una pregunta respondida, como lo lee el modelo. */
+const answeredWords = (question: DictationFormQuestion) =>
+  question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
+
+/**
+ * Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo.
+ * `answered`: con lo que ya dice; sin eso, la pregunta es igual en toda la atención.
+ */
+function formQuestionWords(question: DictationFormQuestion, answered = true): string {
   const range =
     question.min !== null && question.max !== null
       ? `, de ${question.min} a ${question.max}`
@@ -278,8 +285,7 @@ function formQuestionWords(question: DictationFormQuestion): string {
   const depends = question.dependsOn
     ? ` (solo si «${question.dependsOn.label}» es «${equals === true ? "Sí" : equals === false ? "No" : String(equals)}»)`
     : ""
-  const now = question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
-  return `${question.number}. ${question.label} · ${how}${depends}${now}`
+  return `${question.number}. ${question.label} · ${how}${depends}${answered ? answeredWords(question) : ""}`
 }
 
 /**
@@ -292,9 +298,11 @@ const HEARD_HINT =
   "Lo dictado viene del reconocimiento de voz del navegador y puede traer mal escritos los términos de estas preguntas: con otra letra que suena igual (b o v; s, c o z; ll o y; sin la h), una sigla con espacios entre sus letras, una palabra en inglés escrita como suena u otra parecida. Léelos por cómo suenan cuando no haya duda de cuál es."
 
 /**
- * Las fichas empezadas con sus preguntas (y lo que ya dicen) y cómo se responden. Va en el
- * mensaje de la pausa y no en las instrucciones fijas: sin ficha empezada el
- * modelo no lee nada nuevo y lo de siempre no cambia.
+ * Las fichas empezadas con sus preguntas y cómo se responden. Va en el mensaje
+ * de la pausa y no en las instrucciones fijas: sin ficha empezada el modelo no
+ * lee nada nuevo y lo de siempre no cambia. Es igual en toda la atención (lo que
+ * ya dice cada pregunta va aparte, `dictationFormsAnswered`), así que abre el
+ * mensaje de la pausa con su propio corte de caché (`dictationMessages`).
  */
 export function dictationFormsText(forms: readonly DictationFormQuestion[]): string {
   if (!forms.length) return ""
@@ -312,8 +320,19 @@ export function dictationFormsText(forms: readonly DictationFormQuestion[]): str
     "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
     `- ${HEARD_HINT} En \`dicho\` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.`,
     "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.",
-    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
+    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map((question) => formQuestionWords(question, false))].join("\n")),
   ].join("\n")
+}
+
+/**
+ * Lo que ya dicen las preguntas respondidas de las fichas empezadas: cambia
+ * cuando el profesional acepta una respuesta, así que va con lo de la pausa,
+ * después de lo fijo. Sin ninguna respondida, nada.
+ */
+export function dictationFormsAnswered(forms: readonly DictationFormQuestion[]): string {
+  const answered = forms.filter((question) => question.answered !== undefined)
+  if (!answered.length) return ""
+  return ["Preguntas de las fichas abiertas que ya tienen respuesta:", ...answered.map((question) => `${question.number}. ${question.label}${answeredWords(question)}`)].join("\n")
 }
 
 /**
@@ -341,6 +360,13 @@ function newText(context: string, transcript: string): string {
  * no la leía nunca (medido el 2026-10-17, ADR 0012). Con `explicitCache`,
  * por Chat Completions, el proveedor no escribe además lo de cada pausa, que
  * nunca se vuelve a leer; por /v1/responses ese pedido no se envía.
+ *
+ * Con una ficha empezada, sus reglas y preguntas abren el mensaje de la pausa
+ * con su propio corte: son iguales en toda la atención y la pausa siguiente
+ * las lee de la caché. Lo que ya dicen las respondidas va con lo que cambia.
+ * Antes iban después de la fecha y de lo ya ordenado y se pagaban enteras en
+ * cada pausa (medido el 16 nov: 87 % de la entrada leída de la caché con
+ * ficha, 98 % sin ella).
  */
 export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({
@@ -353,20 +379,22 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     dateStyle: "full",
   }).format(input.now)
   const context = input.context.trim().slice(-600)
-  const human = [
+  const forms = input.forms ?? []
+  const pause = [
     `Hoy es ${today}, ${input.now.toISOString()} (zona ${input.zone.timezone}).`,
     context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
       : "",
-    dictationFormsText(input.forms ?? []),
+    dictationFormsAnswered(forms),
     newText(context, input.transcript),
   ]
     .filter(Boolean)
     .join("\n\n")
+  const formsText = dictationFormsText(forms)
   return [
     new SystemMessage({ content: cachedPrompt(input.provider, fixed, responses) }),
-    new HumanMessage({ content: human }),
+    new HumanMessage({ content: formsText ? cachedPrompt(input.provider, formsText, responses, `\n\n${pause}`) : pause }),
   ]
 }
 

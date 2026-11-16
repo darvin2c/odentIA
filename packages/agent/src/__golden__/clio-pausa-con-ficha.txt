@@ -1,11 +1,3 @@
-Hoy es lunes, 16 de noviembre de 2026, 2026-11-16T15:00:00.000Z (zona America/Lima).
-
-Ya ordenado antes en este dictado (no lo registres otra vez):
-«Overjet de seis milímetros.»
-
-Sugerencias pendientes de este dictado:
-1. Fichas · Overjet: 6 mm
-
 Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.
 - Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).
 - Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.
@@ -21,7 +13,7 @@ Ficha de ortodoncia:
 2. Clase molar izquierda (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
 3. Clase canina derecha · una opción: Clase I | Clase II | Clase III
 4. Clase canina izquierda · una opción: Clase I | Clase II | Clase III
-5. Overjet · número en mm, de -10 a 20 · ya dice «6 mm»
+5. Overjet · número en mm, de -10 a 20
 6. Overbite · número en mm, de -10 a 15
 7. Línea media superior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
 8. Desviación de la línea media superior · número en mm, de 0 a 15
@@ -30,6 +22,18 @@ Ficha de ortodoncia:
 11. Mordida cruzada · varias opciones: No tiene | Anterior | Posterior derecha | Posterior izquierda
 12. Apiñamiento · una opción: No | Leve | Moderado | Severo
 13. Hábitos · varias opciones: Ninguno | Succión digital | Respiración bucal | Deglución atípica | Onicofagia | Bruxismo
+⟦corte de caché⟧
+
+Hoy es lunes, 16 de noviembre de 2026, 2026-11-16T15:00:00.000Z (zona America/Lima).
+
+Ya ordenado antes en este dictado (no lo registres otra vez):
+«Overjet de seis milímetros.»
+
+Sugerencias pendientes de este dictado:
+1. Fichas · Overjet: 6 mm
+
+Preguntas de las fichas abiertas que ya tienen respuesta:
+5. Overjet · ya dice «6 mm»
 
 Lo nuevo que dictó:
 «Overbite de dos.»

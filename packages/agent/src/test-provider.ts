@@ -68,5 +68,9 @@ export function toolCallReply(response: ServerResponse, url: string | undefined,
 export const systemBlock = (request: Received | undefined) =>
   ((request?.body.input ?? request?.body.messages) as Array<{ content: unknown[] }> | undefined)?.[0]?.content[0]
 
+/** Los bloques del mensaje que sigue al de sistema (la pausa del dictado), tal como llegaron. */
+export const pauseBlocks = (request: Received | undefined) =>
+  ((request?.body.input ?? request?.body.messages) as Array<{ content: unknown }> | undefined)?.[1]?.content
+
 /** Un bloque con el corte de caché explícito. */
 export const cacheMarked = (type: "text" | "input_text", text: unknown = expect.any(String)) => ({ type, text, prompt_cache_breakpoint: { mode: "explicit" } })
