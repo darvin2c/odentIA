@@ -5,6 +5,7 @@ import {
   checkSellReply,
   createKairosSeller,
   falseClaims,
+  KAIROS_BASIS,
   KAIROS_SELL_FALLBACK,
   KAIROS_SELL_HANDOFF,
   KAIROS_SELL_INTRO,
@@ -434,7 +435,12 @@ describe("Kairós vende: lo que hizo se confirma aunque el modelo no escriba", (
       }),
       t.tools,
     )
-    expect(result).toEqual({ kind: "respondio", text: moved.confirmation, booked: moved })
+    expect(result).toEqual({
+      kind: "respondio",
+      text: moved.confirmation,
+      booked: moved,
+      basis: [KAIROS_BASIS.booked],
+    })
   })
 
   it("canceló y el modelo no escribió nada: le dice que quedó cancelada", async () => {
@@ -447,7 +453,12 @@ describe("Kairós vende: lo que hizo se confirma aunque el modelo no escriba", (
       }),
       t.tools,
     )
-    expect(result).toEqual({ kind: "respondio", text: sellCancelledText(monday10), booked: null })
+    expect(result).toEqual({
+      kind: "respondio",
+      text: sellCancelledText(monday10),
+      booked: null,
+      basis: [KAIROS_BASIS.cancelled],
+    })
     expect(result.text).toContain("lunes, 16 de noviembre a las 10:00 (hora de Lima)")
   })
 
@@ -498,6 +509,88 @@ describe("Kairós vende: la hora que pidió, en cualquier forma", () => {
       onlyAfternoon().tools,
     )
     expect(result.kind).toBe("fallo")
+  })
+})
+
+describe("Kairós vende: en qué se basó", () => {
+  it("las horas que ofreció salen de las horas libres para presentaciones", async () => {
+    const { model } = scripted([
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { tool: "proponer_hora", args: { referencia: "h1" } },
+      { text: "Te propongo el lunes 16 de noviembre a las 10:00 con Ana. ¿Te la confirmo?" },
+    ])
+    const result = await seller(model).seller.answer(input(), tools().tools)
+    expect(result).toMatchObject({ kind: "respondio", basis: [KAIROS_BASIS.slots] })
+  })
+
+  it("un importe o un porcentaje que cita sale de los precios de la web; sin consultar nada, vacío", async () => {
+    const priced = scripted([{ text: "Como Fundador no pagas cuota y tienes USD 100 de regalo." }])
+    expect(await seller(priced.model).seller.answer(input(), tools().tools)).toMatchObject({
+      kind: "respondio",
+      basis: [KAIROS_BASIS.prices],
+    })
+    const percent = scripted([{ text: "Fundadores paga 50 % menos en cada trabajo." }])
+    expect(await seller(percent.model).seller.answer(input(), tools().tools)).toMatchObject({
+      basis: [KAIROS_BASIS.prices],
+    })
+    const plain = scripted([{ text: "Te cuento cómo funciona." }])
+    expect(await seller(plain.model).seller.answer(input(), tools().tools)).toMatchObject({
+      kind: "respondio",
+      basis: [],
+    })
+  })
+
+  it("lo que dijo Ariadna lleva su pregunta, y lo que su guía no tiene también se dice", async () => {
+    const found = scripted([
+      {
+        tool: "preguntar_a_ariadna",
+        args: { pregunta: "¿Cómo firma el paciente el consentimiento en la tablet?" },
+      },
+      {
+        text: "Sí: tu paciente firma en la tablet, sin papel. ¿Quieres verlo en una presentación?",
+      },
+    ])
+    const withGuide = tools({
+      askGuide: async () => ({ found: true, texts: ["El paciente firma en la tablet."] }),
+    })
+    expect(await seller(found.model).seller.answer(input(), withGuide.tools)).toMatchObject({
+      kind: "respondio",
+      basis: ["la guía de la Ayuda: «¿Cómo firma el paciente el consentimiento en la tablet?»"],
+    })
+    const missing = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿Emite facturas electrónicas?" } },
+      { text: "Eso te lo muestro en una presentación de 45 minutos. ¿Te agendo una?" },
+    ])
+    expect(await seller(missing.model).seller.answer(input(), tools().tools)).toMatchObject({
+      basis: ["la guía de la Ayuda, que no lo tiene: «¿Emite facturas electrónicas?»"],
+    })
+  })
+
+  it("cada cosa una vez y corta a 200 caracteres, con la pregunta cerrada", async () => {
+    const long = `¿${"a".repeat(280)}?`
+    const { model } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: long } },
+      { tool: "preguntar_a_ariadna", args: { pregunta: long } },
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { tool: "ver_horarios", args: { desde: null, hasta: null } },
+      { text: "Eso te lo muestro en una presentación de 45 minutos. ¿Te agendo una?" },
+    ])
+    const result = await seller(model).seller.answer(input(), tools().tools)
+    if (result.kind !== "respondio") throw new Error(`no respondió: ${result.kind}`)
+    expect(result.basis).toHaveLength(2)
+    expect(result.basis[0]?.length).toBe(200)
+    expect(result.basis[0]?.endsWith("…»")).toBe(true)
+    expect(result.basis[1]).toBe(KAIROS_BASIS.slots)
+  })
+
+  it("un aviso fijo no lleva en qué se basó: no se basó en nada", async () => {
+    const { model } = scripted([
+      { tool: "preguntar_a_ariadna", args: { pregunta: "¿Hace descuentos?" } },
+      { tool: "pasar_al_equipo", args: { motivo: "Pide un descuento" } },
+    ])
+    const result = await seller(model).seller.answer(input(), tools().tools)
+    expect(result.kind).toBe("paso")
+    expect("basis" in result).toBe(false)
   })
 })
 

@@ -52,9 +52,9 @@ import { eq } from "drizzle-orm"
  *
  * Cada mensaje, una vez: se reclama su turno con el candado de la conversación
  * (`claimKairosTurn`), el modelo responde con sus herramientas fuera de toda
- * transacción, la respuesta se reserva junto con el cierre del turno y sale
- * después del commit por el mismo envío que la de una persona
- * (`sendChatOutreach`): enviado, no salió o incierto, nunca se reintenta. Si el
+ * transacción, la respuesta se reserva junto con el cierre del turno (con en qué
+ * se basó, `basis`) y sale después del commit por el mismo envío que la de una
+ * persona (`sendChatOutreach`): enviado, no salió o incierto, nunca se reintenta. Si el
  * worker se cae a mitad, el turno queda «en curso» y a los 10 minutos Hoy lo
  * muestra: nunca se responde dos veces el mismo mensaje.
  */
@@ -259,6 +259,8 @@ async function answerOne(
           outcome: OUTCOME[result.kind],
           why: result.kind === "respondio" ? null : result.why,
           outreachId: reply.outreachId,
+          // «En qué se basó», junto a la respuesta en la Bandeja; un aviso fijo no se basa en nada.
+          basis: result.kind === "respondio" ? result.basis : [],
         },
         now,
       )

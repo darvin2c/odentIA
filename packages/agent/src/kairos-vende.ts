@@ -34,7 +34,9 @@ import { clockMinutesIn, type Evidence, verifyReply } from "./verify.js"
  * horas que ofreció, la que espera su sí, la que agendó, los hechos), cada
  * importe tiene que ser un precio de un plan y cada porcentaje, el de la web.
  * Si no, no sale: va el aviso fijo y el caso pasa al equipo. También si el
- * modelo falla o tarda. Nunca deja a nadie sin respuesta.
+ * modelo falla o tarda. Nunca deja a nadie sin respuesta. Lo que responde
+ * lleva en qué se basó (`KAIROS_BASIS`: lo que consultó con sus herramientas
+ * y los precios que cita), que la Bandeja muestra junto a la respuesta.
  *
  * El texto de las instrucciones está en `SELLER_SYSTEM` (abajo).
  */
@@ -162,7 +164,13 @@ export type KairosGuideReply =
 const HANDOVER_CODES = new Set(["KAIROS_TOPE", "PRESENTATION_EXISTS"])
 
 export type KairosSellResult =
-  | { kind: "respondio"; text: string; booked: KairosSellBooked | null }
+  | {
+      kind: "respondio"
+      text: string
+      booked: KairosSellBooked | null
+      /** En qué se basó lo que respondió (`KAIROS_BASIS`): lo que consultó en el turno. */
+      basis: string[]
+    }
   | { kind: "paso"; text: string; why: string }
   | { kind: "paciente"; text: string; why: string }
   | { kind: "fallo"; text: string; why: string }
@@ -366,6 +374,49 @@ interface TurnState {
   retried: boolean
   /** Se corta al acabarse el tiempo: desde ahí no corre ninguna herramienta. */
   signal: AbortSignal
+  /** Lo que consultó en el turno, en el orden en que lo hizo (`KAIROS_BASIS`). */
+  basis: string[]
+}
+
+/* ---------- En qué se basó (ADR 0196) ---------- */
+
+/** Lo más largo de cada cosa de «En qué se basó» (`kairos_chat_turn.basis`) y cuántas como mucho. */
+const BASIS_CHARS = 200
+const BASIS_MAX = 8
+
+/** La pregunta entre comillas, corta para que todo quepa en `BASIS_CHARS`. */
+function quotedBasis(prefix: string, question: string): string {
+  const room = BASIS_CHARS - prefix.length - 2
+  const clean = question.replace(/\s+/g, " ").trim()
+  return `${prefix}«${clean.length > room ? `${clean.slice(0, room - 1)}…` : clean}»`
+}
+
+/**
+ * «En qué se basó» cada respuesta, en palabras para la Bandeja: sale de las herramientas que de
+ * verdad usó en el turno y de los precios que cita, nunca de lo que diga el modelo. No cambia lo
+ * que lee el modelo ni lo que hacen sus herramientas.
+ */
+export const KAIROS_BASIS = {
+  guide: (question: string) => quotedBasis("la guía de la Ayuda: ", question),
+  guideMissing: (question: string) =>
+    quotedBasis("la guía de la Ayuda, que no lo tiene: ", question),
+  slots: "las horas libres para presentaciones",
+  booked: "la presentación agendada",
+  cancelled: "la presentación cancelada",
+  prices: "los precios de la web",
+} as const
+
+function addBasis(state: TurnState, basis: string): void {
+  if (!state.basis.includes(basis)) state.basis.push(basis)
+}
+
+/** En qué se basó lo que sale: lo consultado y, si cita un importe o un porcentaje, los precios de la web. */
+function basisOf(state: TurnState, text: string): string[] {
+  const out = [...state.basis]
+  const bare = text.replace(/\bhttps?:\/\/\S+/g, " ")
+  if ((bare.match(MONEY_IN) || /\d\s?%/.test(bare)) && !out.includes(KAIROS_BASIS.prices))
+    out.push(KAIROS_BASIS.prices)
+  return out.slice(0, BASIS_MAX)
 }
 
 /** Palabras que dicen qué es, no cómo se llama: «Consultorio dental», «mi óptica». */
@@ -455,6 +506,7 @@ async function runTool(
         const untilDay = typeof value.hasta === "string" ? limaDayStart(value.hasta) : null
         const to = untilDay ? new Date(untilDay.getTime() + 86_400_000) : null
         const slots = await tools.slots({ from, to }, ctx)
+        addBasis(state, KAIROS_BASIS.slots)
         if (slots.length === 0)
           return "No hay horas libres en esos días. Ofrece buscar otros días o pásalo al equipo."
         const lines = slots.map((slot) => {
@@ -483,6 +535,7 @@ async function runTool(
             ? await tools.book(input.proposal.id, ctx)
             : await tools.move(input.proposal.id, ctx)
         state.booked = booked
+        addBasis(state, KAIROS_BASIS.booked)
         return `Listo: ${sellWhenWords(booked.startsAt)} con ${booked.assigneeName}. La confirmación la agrega el sistema: no la repitas.`
       }
       case "cancelar": {
@@ -491,6 +544,7 @@ async function runTool(
           ctx,
         )
         state.cancelled = { startsAt: cancelled.startsAt }
+        addBasis(state, KAIROS_BASIS.cancelled)
         return `Cancelada la presentación del ${sellWhenWords(cancelled.startsAt)}.`
       }
       case "pedir_contacto": {
@@ -527,6 +581,12 @@ async function runTool(
         return "Pasado al equipo."
       case "preguntar_a_ariadna": {
         const reply = await tools.askGuide(String(value.pregunta), ctx)
+        addBasis(
+          state,
+          reply.found
+            ? KAIROS_BASIS.guide(String(value.pregunta))
+            : KAIROS_BASIS.guideMissing(String(value.pregunta)),
+        )
         if (!reply.found && reply.close?.length)
           return `Ariadna no está segura. En su guía están estas preguntas:\n${reply.close.map((q) => `- ${q}`).join("\n")}\nSi una es lo que pregunta la persona, vuelve a usar preguntar_a_ariadna con esa pregunta tal cual. Si ninguna lo es, no digas que el sistema lo hace ni que no lo hace: ofrécele verlo en la presentación.`
         if (!reply.found)
@@ -855,14 +915,14 @@ export function sellCancelledText(startsAt: Date): string {
  * equipo algo que no lo necesita.
  */
 function actedOf(input: KairosSellInput, state: TurnState): KairosSellResult | null {
-  if (state.booked)
-    return { kind: "respondio", text: finalText(input, state, ""), booked: state.booked }
-  if (state.cancelled)
-    return {
-      kind: "respondio",
-      text: finalText(input, state, sellCancelledText(state.cancelled.startsAt)),
-      booked: null,
-    }
+  if (state.booked) {
+    const text = finalText(input, state, "")
+    return { kind: "respondio", text, booked: state.booked, basis: basisOf(state, text) }
+  }
+  if (state.cancelled) {
+    const text = finalText(input, state, sellCancelledText(state.cancelled.startsAt))
+    return { kind: "respondio", text, booked: null, basis: basisOf(state, text) }
+  }
   return null
 }
 
@@ -921,7 +981,7 @@ async function runTurn(
         ? falseClaims(text, { ...state, presentation: input.presentation })
         : []
       if (check.ok && untrue.length === 0)
-        return { kind: "respondio", text: out, booked: state.booked }
+        return { kind: "respondio", text: out, booked: state.booked, basis: basisOf(state, out) }
       const why = check.ok
         ? `La respuesta daba por hecho lo que no hizo (${untrue.join(", ")})`
         : `La respuesta traía lo que no se le dio (${check.unsupported.join("; ")})`.slice(0, 300)
@@ -989,6 +1049,7 @@ export function createKairosSeller(deps: KairosSellerDeps): KairosSeller {
         ended: null,
         retried: false,
         signal: controller.signal,
+        basis: [],
       }
       // Lo que ya hizo en la base se le confirma aunque el modelo falle o tarde después.
       const failed = (why: string): KairosSellResult => failedTurn(input, state, why)

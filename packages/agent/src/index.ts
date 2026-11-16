@@ -70,9 +70,13 @@ export { FAKE_REPLY_TEXT, FakeChatModel } from "./fake-model.js"
 export { compileAgentGraph } from "./graph.js"
 export { createHelpWriter, fakeHelpWriter } from "./help-writer.js"
 export {
+  checkImprovedText,
   createKairosWriter,
+  fakeImprovedText,
   fakeKairosWriter,
+  improveInventions,
   KAIROS_GOALS,
+  type KairosActivityEntry,
   type KairosAnnotation,
   type KairosChatModel,
   type KairosClientFacts,
@@ -83,6 +87,7 @@ export {
   readDraft,
   readSummary,
   readWeekly,
+  summaryActivityFact,
 } from "./kairos.js"
 export {
   checkSellReply,
@@ -90,6 +95,7 @@ export {
   createKairosSeller,
   fakeSellerModel,
   falseClaims,
+  KAIROS_BASIS,
   KAIROS_SELL_FALLBACK,
   KAIROS_SELL_HANDOFF,
   KAIROS_SELL_INTRO,

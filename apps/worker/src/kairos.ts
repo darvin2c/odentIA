@@ -1,4 +1,9 @@
-import type { KairosUse, KairosWriter } from "@odentia/agent"
+import {
+  type KairosActivityEntry,
+  type KairosUse,
+  type KairosWriter,
+  summaryActivityFact,
+} from "@odentia/agent"
 import type { Db } from "@odentia/db"
 import {
   type SaasClientOrigin,
@@ -7,14 +12,14 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import {
   CLIENT_ORIGIN_WORDS,
-  CLIENT_STAGE_WORDS,
-  type ClientStage,
+  clientPaidSql,
   clientStageSql,
   draftPendingKairosItems,
   KAIROS_DRAFTS_PER_PASS,
   kairosAiUseRecorder,
   kairosAllowedFact,
   kairosRulesPass,
+  kairosStageWords,
   LOST_REASON_WORDS,
   purgeDueClientFiles,
   type Storage,
@@ -115,16 +120,6 @@ export async function claimKairosDay(ownerDb: Db, now: Date): Promise<string | n
 
 /* ---------- «Lo que hay que saber» ---------- */
 
-const ACTIVITY_WORDS: Record<string, string> = {
-  llamada: "Llamada",
-  whatsapp: "WhatsApp",
-  correo: "Correo",
-  reunion: "Reunión",
-  presentacion: "Presentación",
-  propuesta: "Propuesta",
-  nota: "Nota",
-}
-
 const ROLE_WORDS: Record<string, string> = { decide: "decide", usa: "lo usaría", paga: "paga" }
 
 const PROPOSAL_WORDS: Record<string, string> = {
@@ -141,7 +136,7 @@ const DECISION_WORDS: Record<string, string> = {
   perdido: "Perdido",
 }
 
-type SummaryClient = {
+export type SummaryClient = {
   id: string
   name: string
   product: "dental" | "medical" | "optical"
@@ -151,6 +146,8 @@ type SummaryClient = {
   origin: string
   organization_id: string | null
   stage: string
+  /** Su cuenta ya tiene un pago confirmado (`clientPaidSql`): con cuenta, «Activo»; sin él, «En alta». */
+  paid: boolean
 }
 
 /**
@@ -159,7 +156,8 @@ type SummaryClient = {
  */
 async function summaryCandidates(ownerDb: Db, now: Date, limit: number): Promise<SummaryClient[]> {
   return ownerDb.execute<SummaryClient>(sql`select saas_client.id, saas_client.name, saas_client.product, saas_client.city, saas_client.professionals,
-      saas_client.current_tool, saas_client.origin, saas_client.organization_id, ${clientStageSql(now)} as stage
+      saas_client.current_tool, saas_client.origin, saas_client.organization_id, ${clientStageSql(now)} as stage,
+      ${clientPaidSql()} as paid
     from ${saasClient}
     where saas_client.archived_at is null
       and (exists (select 1 from saas_follow_up f where f.client_id = saas_client.id)
@@ -190,11 +188,49 @@ const DAY_WORDS = new Intl.DateTimeFormat("es-PE", {
 export const summaryDay = (iso: string): string =>
   /^\d{4}-\d{2}-\d{2}$/.test(iso) ? DAY_WORDS.format(new Date(`${iso}T00:00:00Z`)) : iso
 
+/** Una actividad de la bitácora como sale de la consulta de `clientSummaryFacts`. */
+export type SummaryActivityRow = {
+  id: string
+  kind: string
+  direction: string | null
+  outcome: string | null
+  body: string
+  /** Día de Lima, AAAA-MM-DD. */
+  day: string
+  /** Llegó o salió por una conversación de WhatsApp, Instagram o Messenger. */
+  from_chat: boolean
+  /** Hay un envío nuestro con el mismo canal y la misma hora en que salió (`sent_at`). */
+  sent: boolean
+  sent_subject: string | null
+  contact_name: string | null
+}
+
+/**
+ * La actividad como la lee «Lo que hay que saber» (`summaryActivityFact`): lo que salió por
+ * Sallca es el envío con la misma hora (así lo anota `outreachWentOut`) o la respuesta de una
+ * conversación; lo demás que salió lo anotó una persona y sigue siendo su nota.
+ */
+export function summaryActivityEntry(row: SummaryActivityRow): KairosActivityEntry {
+  const sent = Boolean(row.sent) || (Boolean(row.from_chat) && row.direction === "salio")
+  return {
+    kind: row.kind,
+    direction: row.direction,
+    outcome: row.outcome,
+    body: row.body,
+    day: summaryDay(row.day),
+    sent: sent ? { subject: row.sent_subject } : null,
+    fromChat: Boolean(row.from_chat),
+    contactName: row.contact_name,
+  }
+}
+
 /**
  * Los hechos de un cliente, cada uno con su fuente (`actividad:<id>`,
  * `contacto:<id>`…). Lo ve también Soporte: sin lo que es solo de
- * administración, sin importes, sin el cuerpo de un correo que llegó y sin
- * nada que parezca de un paciente (`kairosAllowedFact`).
+ * administración, sin importes, sin el cuerpo de un correo que llegó, sin el
+ * texto de lo que le escribimos (es lo que le contamos, no algo de la clínica:
+ * `summaryActivityFact`) y sin nada que parezca de un paciente
+ * (`kairosAllowedFact`).
  */
 export async function clientSummaryFacts(
   ownerDb: Db,
@@ -209,7 +245,14 @@ export async function clientSummaryFacts(
     `Llegó por: ${CLIENT_ORIGIN_WORDS[client.origin as SaasClientOrigin] ?? "Otro"}`,
     "cliente:origen",
   )
-  if (client.organization_id) add("Ya tiene su cuenta abierta", "cliente:cuenta")
+  // Su fase (ADR 0196): en alta hasta su primer pago confirmado, activa después.
+  if (client.organization_id)
+    add(
+      client.paid
+        ? "Ya tiene su cuenta abierta y está activa: tiene un pago confirmado"
+        : "Ya tiene su cuenta abierta y está en alta: aún no tiene su primer pago confirmado",
+      "cliente:cuenta",
+    )
   const requests = await ownerDb.execute<{ id: string; day: string }>(sql`select id,
       to_char(created_at at time zone 'America/Lima', 'YYYY-MM-DD') as day
     from saas_waitlist_request where client_id = ${client.id}::uuid order by created_at desc limit 1`)
@@ -232,32 +275,26 @@ export async function clientSummaryFacts(
       `contacto:${contact.id}`,
     )
   }
-  const activities = await ownerDb.execute<{
-    id: string
-    kind: string
-    direction: string | null
-    outcome: string | null
-    body: string
-    day: string
-  }>(
-    sql`select id, kind, direction, outcome, body,
-        to_char(happened_at at time zone 'America/Lima', 'YYYY-MM-DD') as day
-      from saas_follow_up
-      where client_id = ${client.id}::uuid and not admin_only and not from_note
-      order by happened_at desc limit ${SUMMARY_ACTIVITIES}`,
+  // Lo que salió de un envío nuestro (`outreachWentOut` y la respuesta de una conversación anotan
+  // la actividad con la hora en que salió): de ahí su asunto, nunca su texto.
+  const activities = await ownerDb.execute<SummaryActivityRow>(
+    sql`select f.id, f.kind, f.direction, f.outcome, f.body,
+        to_char(f.happened_at at time zone 'America/Lima', 'YYYY-MM-DD') as day,
+        (f.chat_id is not null) as from_chat, k.name as contact_name,
+        (went.found is not null) as sent, went.subject as sent_subject
+      from saas_follow_up f
+      left join saas_client_contact k on k.id = f.contact_id
+      left join lateral (select true as found, o.subject from saas_outreach o
+          where f.direction = 'salio' and o.client_id = f.client_id and o.channel = f.kind
+            and o.sent_at = f.happened_at
+          order by (o.body = f.body or f.body = left(coalesce(o.subject || E'\\n\\n', '') || o.body, 2000)) desc,
+            o.created_at desc
+          limit 1) went on true
+      where f.client_id = ${client.id}::uuid and not f.admin_only and not f.from_note
+      order by f.happened_at desc limit ${SUMMARY_ACTIVITIES}`,
   )
-  for (const entry of activities) {
-    const label = ACTIVITY_WORDS[entry.kind] ?? "Actividad"
-    if (entry.kind === "correo" && entry.direction === "entro") {
-      add(`${label} de la clínica el ${summaryDay(entry.day)}`, `actividad:${entry.id}`)
-      continue
-    }
-    const by = entry.direction === "entro" ? " de la clínica" : ""
-    add(
-      `${label}${by} del ${summaryDay(entry.day)}: ${entry.body}${entry.outcome ? ` · quedó en: ${entry.outcome}` : ""}`,
-      `actividad:${entry.id}`,
-    )
-  }
+  for (const entry of activities)
+    add(summaryActivityFact(summaryActivityEntry(entry)), `actividad:${entry.id}`)
   // Las tareas solo de Administración (y las de cobro) no las ve Soporte.
   const tasks = await ownerDb.execute<{ id: string; title: string; due_on: string }>(
     sql`select t.id, t.title, t.due_on::text as due_on from saas_task t
@@ -325,7 +362,12 @@ export async function renewClientSummaries(
           city: client.city,
           professionals: client.professionals,
           currentTool: client.current_tool,
-          stage: CLIENT_STAGE_WORDS[client.stage as ClientStage] ?? client.stage,
+          // Con cuenta, su fase («En alta», «Activo»), no «Entró».
+          stage: kairosStageWords({
+            stage: client.stage,
+            hasAccount: Boolean(client.organization_id),
+            paid: Boolean(client.paid),
+          }),
         },
         facts,
       })
