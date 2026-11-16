@@ -6,8 +6,10 @@
  * servidor (`getCorrectionPreview`); aquí solo se marca.
  */
 import { Checkbox, Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@odentia/ui"
+import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { ApiError } from "../../lib/api"
 import {
   type CorrectionChoice,
   type CorrectionPreview,
@@ -31,21 +33,52 @@ function marked(preview: CorrectionPreview | undefined): CorrectionMarks {
   return { findingIds: ids(preview.findings), diagnosisIds: ids(preview.diagnoses), planItemIds: ids(preview.planItems) }
 }
 
+/** Se quiso confirmar sin saber qué cae: no se anula a medias (QA del 16 nov, Q2). */
+export const CORRECTION_NOT_READY =
+  "Todavía no se sabe qué más cae con esta anulación. Espera a que cargue o reinténtalo: no se anuló nada."
+
 /**
- * La vista previa de lo que cae y lo marcado. `start` nulo: cerrado, no pide nada. Si la vista
- * previa falla, se anula solo lo pedido, como antes.
+ * La vista previa de lo que cae y lo marcado. `start` nulo: cerrado, no pide nada.
+ *
+ * Mientras la lista no llegó (`ready` falso) no se confirma: con la red lenta se anulaba solo el
+ * hallazgo y su diagnóstico seguía «Definitivo» para firmarse (QA del 16 nov, Q2). Tampoco se pinta
+ * la lista de la vez anterior mientras llega la nueva, y si la vista previa falla se dice y se
+ * reintenta: nunca se anula «solo lo pedido» sin haberlo elegido.
  */
-export function useCorrection(patientId: string, encounterId: string, start: CorrectionStart | null) {
+export function useCorrection(
+  patientId: string,
+  encounterId: string,
+  start: CorrectionStart | null,
+  /** Mientras se guarda la anulación, la lista no se vuelve a pedir: ya se decidió con ella. */
+  saving = false,
+) {
   const preview = useQuery({
     queryKey: ["encounter-correction", patientId, encounterId, start],
     queryFn: () => fetchCorrectionPreview(patientId, encounterId, start!),
-    enabled: start !== null,
+    enabled: start !== null && !saving,
     staleTime: 0,
+    retry: false,
   })
-  const data = preview.data?.data
-  const [marks, setMarks] = useState<CorrectionMarks>(NONE)
-  useEffect(() => setMarks(marked(data)), [data])
-  return { preview: data, loading: preview.isPending && start !== null, marks, setMarks }
+  const open = start !== null
+  const loading = open && preview.isFetching
+  const failed = open && !preview.isFetching && preview.isError
+  const data = open && !loading && !failed ? preview.data?.data : undefined
+  // Lo marcado vale para la lista con que se marcó: con otra lista, todo lo marcable otra vez.
+  const [chosen, setChosen] = useState<{ of: CorrectionPreview; marks: CorrectionMarks } | null>(null)
+  const marks = data && chosen?.of === data ? chosen.marks : marked(data)
+  return {
+    preview: data,
+    loading,
+    failed,
+    error: failed && preview.error instanceof ApiError ? preview.error.shape : null,
+    /** La lista de lo que cae ya llegó: solo entonces se puede confirmar. */
+    ready: data !== undefined,
+    retry: () => void preview.refetch(),
+    marks,
+    setMarks: (next: CorrectionMarks) => {
+      if (data) setChosen({ of: data, marks: next })
+    },
+  }
 }
 
 const WORDS: Record<keyof CorrectionMarks, string> = {
@@ -54,20 +87,41 @@ const WORDS: Record<keyof CorrectionMarks, string> = {
   planItemIds: "Y el tratamiento indicado hoy",
 }
 
-/** Las casillas de lo que cae con la anulación, y lo que no se deshace. Sin nada, no muestra nada. */
+/**
+ * Las casillas de lo que cae con la anulación, y lo que no se deshace. Sin nada, no muestra nada.
+ * Mientras se busca, lo dice; si no se pudo saber, lo dice con «Reintentar».
+ */
 export function CorrectionChoices({
   preview,
   marks,
   onMarksChange,
   disabled,
   idPrefix,
+  loading = false,
+  failed = false,
+  error = null,
+  onRetry,
 }: {
   preview: CorrectionPreview | undefined
   marks: CorrectionMarks
   onMarksChange: (marks: CorrectionMarks) => void
   disabled?: boolean
   idPrefix: string
+  loading?: boolean
+  failed?: boolean
+  error?: ApiError["shape"] | null
+  onRetry?: () => void
 }): React.JSX.Element | null {
+  if (loading) return <LoadingState message="Buscando qué más cae con esta anulación…" />
+  if (failed)
+    return (
+      <ErrorState
+        title="No se pudo saber qué más cae con esta anulación"
+        message={`${error?.message ? `${error.message} ` : ""}No se anuló nada.`}
+        onRetry={onRetry}
+        className="py-4"
+      />
+    )
   if (!preview) return null
   const groups: Array<[keyof CorrectionMarks, CorrectionChoice[]]> = [
     ["findingIds", preview.findings],

@@ -1,4 +1,8 @@
-import { CorrectionChoices, useCorrection } from "@odentia/clinic-app/components/patient/correction-choices"
+import {
+  CORRECTION_NOT_READY,
+  CorrectionChoices,
+  useCorrection,
+} from "@odentia/clinic-app/components/patient/correction-choices"
 import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
 import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
@@ -555,16 +559,14 @@ export function ToothDrawer({
 
   // Anular el hallazgo trae, marcados, su diagnóstico de esta atención y lo indicado hoy desde
   // él (QA del 16 nov, E2): un motivo y una sola operación en el servidor, todo o nada.
-  const correction = useCorrection(
-    patientId,
-    encounterId ?? "",
-    voiding && encounterId ? { findingIds: voiding.ids } : null,
-  )
   const voidForm = useAppForm({
     defaultValues: EMPTY_VOID,
     validators: { onSubmit: voidSchema },
     onSubmit: async ({ value }) => {
       if (!voiding || !encounterId) return
+      // Sin la lista de lo que cae no se anula: saldría sin su diagnóstico ni lo indicado desde él
+      // (QA del 16 nov, Q2).
+      if (!correction.ready) throw new Error(CORRECTION_NOT_READY)
       onPendingChange?.(true)
       try {
         await beforeWrite?.()
@@ -591,6 +593,12 @@ export function ToothDrawer({
     },
   })
   const voidSurface = useFormSurface(voidForm)
+  const correction = useCorrection(
+    patientId,
+    encounterId ?? "",
+    voiding && encounterId ? { findingIds: voiding.ids } : null,
+    voidSurface.isSubmitting,
+  )
 
   const busy = surface.isSubmitting || voidSurface.isSubmitting
   const fieldDisabled = !canMutate || disabled || busy
@@ -1448,7 +1456,7 @@ export function ToothDrawer({
         }
         submitLabel="Confirmar anulación"
         cancelLabel="Volver al registro"
-        submitDisabled={!canMutate || disabled}
+        submitDisabled={!canMutate || disabled || !correction.ready}
       >
         <CorrectionChoices
           preview={correction.preview}
@@ -1456,6 +1464,10 @@ export function ToothDrawer({
           onMarksChange={correction.setMarks}
           disabled={voidSurface.isSubmitting}
           idPrefix={`${uid}-void`}
+          loading={correction.loading}
+          failed={correction.failed}
+          error={correction.error}
+          onRetry={correction.retry}
         />
         <voidForm.AppField name="reason">
           {(field) => (

@@ -20,7 +20,7 @@ import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, correctApi, type EncounterDiagnosis } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
-import { CorrectionChoices, useCorrection } from "./correction-choices"
+import { CORRECTION_NOT_READY, CorrectionChoices, useCorrection } from "./correction-choices"
 import {
   areaWords,
   DiagnosisPicker,
@@ -286,12 +286,13 @@ export function EncounterDiagnoses({
 
   // Anular el diagnóstico trae, marcado, el hallazgo con que nació y lo indicado hoy desde él
   // (QA del 16 nov, E2): un motivo y una sola operación en el servidor.
-  const correction = useCorrection(patientId, encounter.id, voiding ? { diagnosisId: voiding.id } : null)
   const voidForm = useAppForm({
     defaultValues: { reason: "" },
     validators: { onSubmit: reasonSchema },
     onSubmit: async ({ value }) => {
       if (!voiding) return
+      // Sin la lista de lo que cae no se anula: saldría sin lo que nació con él (QA del 16 nov, Q2).
+      if (!correction.ready) throw new Error(CORRECTION_NOT_READY)
       await write(() =>
         correctApi(patientId, encounter.id, {
           start: { diagnosisId: voiding.id },
@@ -308,6 +309,12 @@ export function EncounterDiagnoses({
   })
   const voidSubmitting = useStore(voidForm.store, (state) => state.isSubmitting)
   const voidError = useFormSubmitError(voidForm)
+  const correction = useCorrection(
+    patientId,
+    encounter.id,
+    voiding ? { diagnosisId: voiding.id } : null,
+    voidSubmitting,
+  )
 
   const busy = disabled || surface.isSubmitting || voidSubmitting
 
@@ -553,6 +560,7 @@ export function EncounterDiagnoses({
         description={`${voiding ? diagnosisCodeLabel(voiding.diagnosisSystem, voiding.diagnosisCode) : ""}${voiding ? diagnosisSiteSuffix(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
         confirmLabel="Anular diagnóstico"
         pending={voidSubmitting}
+        confirmDisabled={!correction.ready}
         error={voidError}
         onConfirm={() => void submitForm(voidForm)}
         onClose={() => {
@@ -565,6 +573,10 @@ export function EncounterDiagnoses({
           onMarksChange={correction.setMarks}
           disabled={voidSubmitting}
           idPrefix={`${typeGroupId}-anular`}
+          loading={correction.loading}
+          failed={correction.failed}
+          error={correction.error}
+          onRetry={correction.retry}
         />
         <voidForm.AppField name="reason">
           {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_TEXT} aria-required />}
