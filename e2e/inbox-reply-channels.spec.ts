@@ -12,7 +12,7 @@ import { gotoHydrated } from "./hydration"
  * bot activo por clínica: el anterior se apaga antes de conectar el nuevo.
  * Sin proveedor: no acredita que Telegram entregue el mensaje.
  */
-test("«Responder por» no ofrece un canal apagado y el hilo abierto por él pasa a uno activo", async ({ owner, fixtureDb }) => {
+test("«Responder por» no ofrece un canal apagado y el hilo abierto por él se responde por el activo", async ({ owner, fixtureDb }) => {
   const { page, org } = owner
   const user = 4_200_000 + Math.floor(Math.random() * 100_000)
   const bots: Record<string, string> = {}
@@ -37,10 +37,10 @@ test("«Responder por» no ofrece un canal apagado y el hilo abierto por él pas
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${off.id}`))
   // Su historial sigue: lo que escribió por el bot apagado está en el hilo.
   await expect(page.getByText("Hola por Bot Apagado", { exact: true })).toBeVisible()
-  // Se responde por uno activo, y el menú solo ofrece los activos.
-  const trigger = page.getByRole("button", { name: /^Responder por Telegram · Bot Uno, abierto/ })
-  await expect(trigger).toBeVisible()
-  await trigger.click()
-  await expect(page.getByRole("menuitem")).toHaveCount(1)
+  // Se responde por el bot activo: con un solo canal por el que sale algo no hay qué elegir,
+  // y el apagado no se ofrece en ninguna parte.
+  await expect(page.getByText("Hola por Bot Uno", { exact: true })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeEnabled()
+  await expect(page.getByRole("button", { name: /^Responder por/ })).toHaveCount(0)
   await expect(page.getByRole("menuitem", { name: /Bot Apagado/ })).toHaveCount(0)
 })

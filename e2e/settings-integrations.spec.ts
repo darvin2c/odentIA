@@ -237,10 +237,11 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   expect((await connections()).find((item) => item.id === created?.id)?.status).toBe("disabled")
   await panel.getByRole("button", { name: "Cerrar", exact: true }).click()
   await expect(panel).toBeHidden()
-  // Desconectado, el bot pasa a «Desconectados» y «Conexión» vuelve a ofrecer conectar uno.
-  await expect(page.getByRole("region", { name: "Conecta Telegram" })).toBeVisible()
-  await page.getByRole("tab", { name: "Desconectados · 1" }).click()
+  // Desconectado, el bot pasa a «Desconectados» y la página lo sigue ahí; «Conexión» vuelve a ofrecer conectar uno.
+  await expect(page.getByRole("tab", { name: "Desconectados · 1" })).toHaveAttribute("aria-selected", "true")
   await expect(rowOf(page.getByRole("region", { name: "Desconectados" }), "Telegram")).toContainText("Desconectado")
+  await page.getByRole("tab", { name: "Conexión", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Conecta Telegram" })).toBeVisible()
 })
 
 test("integraciones: Messenger muestra siempre la dirección de avisos y su clave; el correo pide confirmar antes de desconectar", async ({ owner }) => {
