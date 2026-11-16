@@ -21,6 +21,11 @@ export const mailboxOauthState = pgTable("mailbox_oauth_state", {
   codeVerifier: text("code_verifier").notNull(),
   /** redirect_uri exacta registrada ante el proveedor. */
   redirectUri: text("redirect_uri").notNull(),
+  /**
+   * «Conectar con Facebook» de Messenger: las páginas que la persona marcó, con
+   * sus claves, cifradas, mientras elige una en odentIA. Nulo en los demás.
+   */
+  payloadEncrypted: text("payload_encrypted"),
   /** Corta duración (10 min): pasado este punto el callback la rechaza. */
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

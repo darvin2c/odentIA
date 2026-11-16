@@ -967,6 +967,13 @@
       "when": 1794859198364,
       "tag": "0137_estado_oauth_paginas_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794869934460,
+      "tag": "0138_estado_oauth_instagram",
+      "breakpoints": true
     }
   ]
 }

@@ -25,7 +25,7 @@ import {
   secretFields,
 } from "../../lib/integrations"
 import { appWords } from "../../lib/product-words"
-import { FacebookPagesButton } from "./facebook-pages-button"
+import { MetaConnectButton, useMetaConnect } from "./facebook-pages-button"
 import { AccountField } from "./whatsapp/account-field"
 
 /** La cuenta que el proveedor reconoce con unos datos; cada parte puede faltar. */
@@ -159,6 +159,7 @@ export function ChannelPanel({
   // La dirección y su clave son de quien administra la configuración: el servidor no las entrega a nadie más.
   // Con Facebook no hay dirección ni clave que pegar: los avisos llegan a la app de odentIA.
   const byFacebook = connection?.signup != null
+  const reconnect = useMetaConnect(channel, canWrite && byFacebook)
   const showsSetup = setup.pasteAddress && connection !== null && canWrite && !byFacebook
   const setupQuery = useQuery({
     queryKey: ["connection-setup", connection?.id],
@@ -386,8 +387,8 @@ export function ChannelPanel({
               </section>
             ) : byFacebook ? (
               <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
-                Conectada con Facebook: no hay nada que copiar ni pegar. Si algo cambia en Facebook, vuelve a conectar con Facebook y
-                sigue la misma cuenta, con sus conversaciones.
+                Conectada con un botón de Meta: no hay nada que copiar ni pegar. Si algo cambia, vuelve a conectarla y sigue la
+                misma cuenta, con sus conversaciones.
               </p>
             ) : setup.pasteAddress ? null : (
               <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
@@ -398,8 +399,8 @@ export function ChannelPanel({
             {canWrite ? (
               <div className="flex flex-col gap-2">
                 {/* Facebook cortó la cuenta: la salida está aquí mismo, y deja la misma cuenta con sus conversaciones. */}
-                {byFacebook && active && row.tone === "attention" ? (
-                  <FacebookPagesButton label="Volver a conectar con Facebook" />
+                {byFacebook && active && row.tone === "attention" && reconnect.way ? (
+                  <MetaConnectButton way={reconnect.way} label={`Volver a conectar con ${reconnect.way === "instagram" ? "Instagram" : "Facebook"}`} />
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   {active ? (

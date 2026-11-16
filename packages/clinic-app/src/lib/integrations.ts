@@ -422,10 +422,10 @@ function pagePending(connection: ConnectionItem): string | null {
   const signup = connection.signup
   if (!signup) return null
   if (signup.metaRemoved || signup.tokenDead) {
-    return "Facebook ya no deja usar esta cuenta (se quitó el permiso o cambió quien administra la página): no recibe ni envía mensajes hasta volver a conectar con Facebook."
+    return "Meta ya no deja usar esta cuenta (se quitó el permiso o cambió quien la administra): no recibe ni envía mensajes hasta volver a conectarla."
   }
   const step = signup.pending[0]
-  return step ? (step.problem ?? "Falta un paso para terminar de conectarla: vuelve a conectar con Facebook.") : null
+  return step ? (step.problem ?? "Falta un paso para terminar de conectarla: vuelve a conectarla.") : null
 }
 
 function channelRow(channel: MessagingChannel, connection: ConnectionItem, index: number, since: Since): ChannelRow {

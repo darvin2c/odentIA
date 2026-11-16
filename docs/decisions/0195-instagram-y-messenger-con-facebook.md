@@ -27,3 +27,8 @@ WhatsApp se conecta con un botón de Facebook; Instagram y Messenger pedían cre
 
 - Depende de que Meta apruebe para la app de odentIA `pages_show_list`, `pages_manage_metadata`, `pages_messaging`, `pages_read_engagement`, `instagram_basic` e `instagram_manage_messages`. Sin la configuración de páginas el botón no aparece y queda «Con tu propia app de Meta».
 - Sin probar contra Meta real: las pruebas usan respuestas con la forma que publica Meta.
+
+## Cambio del 16 nov, antes de abrir el botón a las clínicas
+
+- **Instagram se conecta con Instagram** («Conectar con Instagram», Business Login de Instagram): sirve a una cuenta profesional sin página de Facebook. Usa la app de Instagram del caso de uso (`META_INSTAGRAM_APP_ID`, `META_INSTAGRAM_APP_SECRET`, `META_INSTAGRAM_REDIRECT_URI`); sus avisos llegan a la misma dirección firmados con esa clave, que solo vale para avisos de Instagram. La clave dura 60 días y la vuelta diaria la renueva cada 7. Sin esa app, Instagram sigue por su página de Facebook.
+- **Una página a la vez.** Si en Facebook se marcan varias páginas, no se conecta ninguna: quedan cifradas 10 minutos (`mailbox_oauth_state.payload_encrypted`) y la clínica elige una en Messenger, con o sin su Instagram. Con una sola marcada se conecta directo. Así no entra por error una página que no es de la clínica.

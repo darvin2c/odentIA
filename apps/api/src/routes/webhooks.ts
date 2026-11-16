@@ -39,7 +39,14 @@ export interface WebhookDeps {
    * y con `verifyToken` se responde el reto de su dirección. Sin ella esa
    * dirección no existe.
    */
-  metaApp?: { appSecret: string; verifyToken: string } | undefined
+  metaApp?:
+    | {
+        appSecret: string
+        verifyToken: string
+        /** «Conectar con Instagram»: sus avisos llegan firmados con la clave de la app de Instagram. */
+        instagramAppSecret?: string
+      }
+    | undefined
 }
 
 // El chat web no entra por aquí: sus mensajes llegan por `/api/webchat` con la
@@ -318,7 +325,10 @@ export function createWebhooksRoute(deps: WebhookDeps) {
   app.post("/meta/pages", async (c) => {
     if (!deps.metaApp) return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
     const rawBody = await c.req.text().catch(() => "")
-    if (!verifyMetaSignature(c.req.header(), rawBody, deps.metaApp.appSecret)) {
+    const signedByApp = verifyMetaSignature(c.req.header(), rawBody, deps.metaApp.appSecret)
+    const signedByInstagram =
+      !signedByApp && Boolean(deps.metaApp.instagramAppSecret) && verifyMetaSignature(c.req.header(), rawBody, deps.metaApp.instagramAppSecret ?? "")
+    if (!signedByApp && !signedByInstagram) {
       return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
     }
     let body: { object?: unknown; entry?: unknown }
@@ -328,6 +338,8 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       return c.json({ ok: true }, 200)
     }
     const provider: ChannelProvider | null = body.object === "page" ? "messenger" : body.object === "instagram" ? "instagram" : null
+    // La clave de Instagram solo vale para avisos de Instagram.
+    if (signedByInstagram && provider !== "instagram") return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
     if (!provider || !Array.isArray(body.entry)) return c.json({ ok: true }, 200)
     const adapter = channelAdapters[provider]
     if (!adapter) return c.json({ ok: true }, 200)
