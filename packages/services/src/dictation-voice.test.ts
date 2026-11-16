@@ -213,6 +213,33 @@ describe("el relato no recoge lo que no es del paciente", () => {
     expect(withoutFormNotes(drafts, kid, FDI, heard).filter((draft) => draft.kind === "nota")).toEqual([])
   })
 
+  it("lo examinado que tomó la ficha en la pausa no se repite en el relato; lo demás de la oración se queda (c4)", () => {
+    const voice =
+      "mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1"
+    const habits = [
+      { kind: "nota", payload: { presentIllness: "Se le soltó un bracket de abajo hace como una semana y está maltratando el carrillo. Duerme con la boca abierta y se come las uñas." } },
+      { kind: "ficha", payload: { question: at(ortho, "habitos"), answers: ["Respiración bucal", "Onicofagia"] }, sourceText: "hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas" },
+    ]
+    expect(withoutFormNotes(habits, ortho, FDI, voice)[0]?.payload).toEqual({ presentIllness: "Se le soltó un bracket de abajo hace como una semana y está maltratando el carrillo." })
+    const heard = "beso 18 kg me duele descarriados uno con extracción indicada dos obturados higiene oral regular tiene placa en los molares"
+    const hygiene = [
+      { kind: "nota", payload: { evolution: "Higiene oral regular, con placa en los molares." } },
+      { kind: "ficha", payload: { question: at(kid, "higiene"), answer: "Regular" }, sourceText: "higiene oral regular" },
+    ]
+    expect(withoutFormNotes(hygiene, kid, FDI, heard)[0]?.payload).toEqual({ evolution: "Placa en los molares." })
+    // El dolor que cuenta el paciente es del relato aunque la ficha también lo tenga, y lo que se apoya en lo quitado tampoco se parte.
+    const pain = [
+      { kind: "nota", payload: { presentIllness: "Dolor espontáneo, no la deja dormir." } },
+      { kind: "ficha", payload: { question: at(endo, "dolor"), answer: "Espontáneo" }, sourceText: "dolor espontáneo" },
+    ]
+    expect(withoutFormNotes(pain, endo, FDI, "dolor espontáneo no la deja dormir")[0]?.payload).toEqual({ presentIllness: "Dolor espontáneo, no la deja dormir." })
+    const leans = [
+      { kind: "nota", payload: { evolution: "Higiene oral regular, que mejoró desde el último control." } },
+      { kind: "ficha", payload: { question: at(kid, "higiene"), answer: "Regular" }, sourceText: "higiene oral regular" },
+    ]
+    expect(withoutFormNotes(leans, kid, FDI, "higiene oral regular que mejoró desde el último control")[0]?.payload).toEqual({ evolution: "Higiene oral regular, que mejoró desde el último control." })
+  })
+
   it("lo que se le preguntó al paciente se quita en toda pausa, también sin ficha", () => {
     const drafts = [{ kind: "nota", payload: { presentIllness: "¿Te duele cuando comes? Refiere dolor al masticar desde hace una semana." } }]
     expect(withoutFormNotes(drafts, [], FDI)).toEqual([{ kind: "nota", payload: { presentIllness: "Refiere dolor al masticar desde hace una semana." } }])

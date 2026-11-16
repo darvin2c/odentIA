@@ -350,6 +350,7 @@ const SAID_AS: Record<string, RegExp> = {
   onicofagia: /\b(come|comia|muerde|mordia)n? las unas\b/,
   "succion digital": /\b(chupa|chupaba|succiona)n? (el|los) dedos?\b/,
   bruxismo: /\b(rechina|aprieta)n? los dientes\b/,
+  "respiracion bucal": /\b(duerme|respira|respirando)n? (con la boca abierta|por la boca)\b/,
 }
 /** La opción de una prueba que dio positiva: «Positiva», «Positivo». */
 const isPositiveOption = (option: string) => /^positiv[oa]\b/.test(plain(option))
@@ -942,11 +943,23 @@ const meaningful = (text: string) =>
  * nov): se quita la oración que es la frase de la ficha, o casi solo eso, y la
  * que solo corrige («perdón…», «no, es…», «corrijo…»). La oración que además
  * dice otra cosa («dolor espontáneo desde hace tres días») se queda entera: la
- * evolución no pierde lo que sí es suyo.
+ * evolución no pierde lo que sí es suyo. De ella sale solo la parte que repite lo
+ * examinado que tomó la ficha (`ficha`, prueba con voz del 15 nov, c4): el hábito
+ * dicho como se dice en la consulta («se come las uñas», de una onicofagia
+ * elegida) o la frase de una respuesta tal cual («Higiene oral regular, con placa
+ * en los molares» deja «Placa en los molares»).
  */
-export function withoutFormPhrases(text: string, formPhrases: readonly string[]): string {
+export function withoutFormPhrases(
+  text: string,
+  formPhrases: readonly string[],
+  /** Lo examinado que tomó la ficha en la pausa: las frases de sus respuestas y las opciones elegidas. */
+  ficha: { phrases?: readonly string[]; options?: readonly string[] } = {},
+): string {
   const phrases = formPhrases.map((phrase) => plain(phrase).replace(/[.;,]+$/, "").trim()).filter((phrase) => phrase.length >= 4)
   const covered = new Set(phrases.flatMap(meaningful).map((word) => word.slice(0, 5)))
+  const examined = new Set((ficha.phrases ?? []).map(saidOf))
+  const habits = (ficha.options ?? []).flatMap((option) => SAID_AS[plain(option)] ?? [])
+  const repeats = (clause: string) => habits.some((pattern) => pattern.test(clause)) || (meaningful(clause).length >= 2 && examined.has(clause))
   const sentences = sentencesOf(text)
   const kept = sentences.filter((sentence) => {
     const said = saidOf(sentence)
@@ -962,7 +975,34 @@ export function withoutFormPhrases(text: string, formPhrases: readonly string[])
     // alto y colabora pero con miedo», prueba con voz del 15 nov, v08): cuenta solo lo que no es de ninguna.
     return words.filter((word) => !used.has(word) && !covered.has(word.slice(0, 5))).length >= 2
   })
-  return kept.join(" ").trim()
+  return kept
+    .map((sentence) => withoutRepeatedClauses(sentence, repeats))
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+}
+
+/** Lo que sigue a una parte quitada y no se sostiene sin ella: «desde hace tres días», «que no la deja dormir». */
+const LEANS_ON = /^(desde|hace|que|cuando|al|a|de|del|por|para|en|sin|segun|durante|hasta|tras|despues|antes|no|lo|la|le|se)\b/
+
+/**
+ * La oración sin sus partes (entre comas o «y») que repiten lo de la ficha (`repeats`, sobre la
+ * parte sin tildes). Si lo que queda se apoya en lo quitado, la oración se queda entera; si no queda
+ * nada, vacía.
+ */
+function withoutRepeatedClauses(sentence: string, repeats: (clause: string) => boolean): string {
+  const clauses = sentence.trim().split(/,\s+|\s+y\s+/)
+  if (clauses.length < 2) return sentence
+  const drop = clauses.map((clause) => repeats(saidOf(clause)))
+  if (!drop.some(Boolean)) return sentence
+  if (drop.every(Boolean)) return ""
+  if (clauses.some((_, index) => drop[index] && drop[index + 1] === false && LEANS_ON.test(saidOf(clauses[index + 1] ?? "")))) return sentence
+  const rest = clauses
+    .filter((_, index) => !drop[index])
+    .join(", ")
+    .replace(/^(y|e|con|pero|ademas|además|tambien|también)\s+/i, "")
+  const out = rest.charAt(0).toUpperCase() + rest.slice(1)
+  return /[.!?]$/.test(sentence.trim()) && !/[.!?]$/.test(out) ? `${out}.` : out
 }
 
 /** Una oración como se compara: sin tildes ni mayúsculas, sin la puntuación del final. */
@@ -1009,9 +1049,19 @@ function formPhrasesCleaner<T extends FormDraftLike>(
 ): (text: string) => string {
   // De la frase de una ficha, las oraciones que nombran su pregunta: si la frase abarca otra cosa
   // («… Se cementan brackets»), eso sigue siendo de la consulta.
-  const phrases = drafts
+  const answers = drafts
     .filter((draft) => draft.kind === "ficha" && draft.sourceText?.trim())
-    .filter((draft) => prepareFormAnswer(draft, questions, site, transcript) !== null || formAnswerDropReason(draft, questions) !== null)
+    .map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, site, transcript) }))
+  // Lo examinado que tomó la ficha: sus frases y las opciones elegidas. El dolor que cuenta el paciente
+  // es del relato aunque la ficha también lo tenga (verificación del 14 nov).
+  const examined = answers.filter(({ ready }) => ready?.payload["value"] != null && !PAIN_SAID.test(plain(String(ready.payload["label"] ?? ""))))
+  const ficha = {
+    phrases: examined.map(({ draft }) => draft.sourceText ?? ""),
+    options: examined.flatMap(({ ready }) => [ready?.payload["value"]].flat().filter((value): value is string => typeof value === "string")),
+  }
+  const phrases = answers
+    .filter(({ draft, ready }) => ready !== null || formAnswerDropReason(draft, questions) !== null)
+    .map(({ draft }) => draft)
     .flatMap((draft) => {
       const said = draft.sourceText ?? ""
       const parts = sentencesOf(said).filter((part) => part.trim())
@@ -1020,7 +1070,7 @@ function formPhrasesCleaner<T extends FormDraftLike>(
       const label = labelStems(question.label)
       return parts.filter((part) => stemsOf(heardBy(question, part)).some((stem) => label.includes(stem)))
     })
-  return (text) => withoutFormPhrases(text, phrases)
+  return (text) => withoutFormPhrases(text, phrases, ficha)
 }
 
 /** Una nota con cada texto limpio; si queda vacía, no se propone. */
