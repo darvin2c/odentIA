@@ -165,8 +165,8 @@ export function FormatTools({
           size="icon"
           variant="ghost"
           aria-label="Negrita"
-          title="Negrita: **texto**"
-          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "**"))}
+          title="Negrita: *texto*"
+          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "*"))}
         >
           <Bold aria-hidden />
         </Button>
@@ -175,8 +175,8 @@ export function FormatTools({
           size="icon"
           variant="ghost"
           aria-label="Cursiva"
-          title="Cursiva: *texto*"
-          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "*"))}
+          title="Cursiva: _texto_"
+          onClick={() => apply((v, s, e) => wrapSelection(v, s, e, "_"))}
         >
           <Italic aria-hidden />
         </Button>
@@ -218,4 +218,4 @@ export function FormatTools({
 
 /** La ayuda del campo: qué formato acepta. */
 export const FORMAT_HINT =
-  "Puedes usar **negrita**, *cursiva*, [enlaces](https://…) y listas con «- » o «1. »."
+  "Se escribe como en WhatsApp: *negrita*, _cursiva_, ~tachado~, [enlaces](https://…) y listas con «- » o «1. »."
