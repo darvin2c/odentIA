@@ -272,15 +272,7 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
         own: true,
       },
-      {
-        id: "pacientes-odontograma-siglas-caries",
-        q: "¿Qué es CDP?",
-        a: "Es una de las siglas de la profundidad de la caries en el odontograma de la norma (NTS 188): MB, mancha blanca; CE, lesión de caries a nivel del esmalte; CD, a nivel de la dentina; y CDP, a nivel de la dentina con compromiso de la pulpa. Al elegir una, debajo se lee su nombre entero. Con CDP aparecen además, para elegir con un toque, los diagnósticos pulpares (pulpitis, necrosis pulpar o periodontitis apical), que se deciden por la vitalidad y los síntomas. En clínicas fuera de Perú la profundidad se elige con su nombre entero.",
-        forms: ["que significa cdp", "que es ce cd mb en el odontograma", "siglas de la caries", "que quiere decir cdp en la caries"],
-        area: "clinica",
-        needs: "clinical.read",
-        own: true,
-      },
+      // «¿Qué es CDP?» la responde una sola palabra: «palabras-siglas-caries», más abajo.
       {
         id: "pacientes-odontograma-pieza-se-cierra",
         q: "¿Por qué se cerró la pieza al abrir la respuesta?",
@@ -665,8 +657,9 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "palabras-siglas-caries",
         q: "¿Qué significan MB, CE, CD y CDP?",
-        a: "Son las siglas de la caries en el odontograma, según hasta dónde llega: MB, mancha blanca; CE, caries del esmalte; CD, caries de la dentina; y CDP, caries de la dentina que ya compromete la pulpa.",
-        forms: ["que es cdp", "que significa cdp", "que es mb", "que es cd en el odontograma", "que es ce en el odontograma", "siglas de la caries"],
+        a: "Son las siglas de la caries en el odontograma, según hasta dónde llega: MB, mancha blanca; CE, caries del esmalte; CD, caries de la dentina; y CDP, caries de la dentina que ya compromete la pulpa. Al elegir una, debajo se lee su nombre entero.",
+        // Una sola respuesta para las dos formas de preguntar: la sigla suelta y todas juntas.
+        forms: ["¿Qué es CDP?", "que es cdp", "que significa cdp", "que quiere decir cdp en la caries", "que es mb", "que es cd en el odontograma", "que es ce en el odontograma", "que es ce cd mb en el odontograma", "siglas de la caries"],
         general: true,
         area: "clinica",
         own: true,
