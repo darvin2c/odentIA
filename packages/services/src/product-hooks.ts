@@ -331,8 +331,13 @@ export interface DictationPrepared {
   said?: string
 }
 
-/** Si un servicio puede ser lo dicho (`ProductDictation.serviceFit`): sí, solo si ninguno de su grupo de piezas calza, o nunca. */
-export type DictationServiceFit = "fits" | "otherGroup" | "never"
+/**
+ * Si un servicio puede ser lo dicho (`ProductDictation.serviceFit`): sí; sí, pero no se da por bueno
+ * solo si el tarifario tiene otra variante (`unsure`: lo que la decide no se sabe); solo para elegir,
+ * si ninguno de los que calzan calza con lo dicho (`fallback`: el de otro grupo de piezas, la
+ * variante que contradice el diagnóstico); o nunca.
+ */
+export type DictationServiceFit = "fits" | "unsure" | "fallback" | "never"
 
 /** Un servicio del tarifario, como lo mira `ProductDictation.serviceFit`. */
 export interface DictationService {
@@ -341,9 +346,27 @@ export interface DictationService {
   code?: string | null
 }
 
-/** Lo del paciente que decide qué prestaciones pueden ser lo dicho: si es adulto (null: no se sabe su edad). */
+/**
+ * Un diagnóstico de la atención como lo mira `ProductDictation.serviceFit`: su código y su nombre, o
+ * lo dicho (la respuesta de una ficha, la frase de la misma indicación), con su sitio si lo tiene.
+ */
+export interface DictationDiagnosis {
+  code?: string | null
+  text: string
+  /** El sitio, con los campos del producto (odentIA: `toothNumber`); vacío: de toda la atención. */
+  where?: Record<string, unknown>
+}
+
+/** Lo del paciente que decide qué prestaciones pueden ser lo dicho. */
 export interface DictationPatient {
+  /** Si es adulto (null: no se sabe su edad). */
   adult: boolean | null
+  /**
+   * Lo diagnosticado en la atención (en la pausa, propuesto o confirmado, y lo que responden sus
+   * fichas): decide la variante que depende de eso (odentIA: la endodoncia vital o no vital, prueba
+   * con voz del 15 nov, c5). Sin nada, no se sabe.
+   */
+  diagnoses?: readonly DictationDiagnosis[]
 }
 
 /**
@@ -373,8 +396,11 @@ export interface ProductDictation {
    * c3): el tarifario se busca primero entre los que calzan y, si ninguno calza con lo dicho, entre
    * los de otro grupo de piezas, solo para elegir; los que no pueden ser nunca se proponen. odentIA:
    * uno de diente de leche nunca para una pieza permanente ni para un adulto sin pieza dicha, ni uno
-   * de permanente para una temporal; la endodoncia anterior en la 36 es de otro grupo. `context`:
-   * lo que el producto leyó; sin él, lo que dicen su nombre y su código.
+   * de permanente para una temporal; la endodoncia anterior en la 36 es de otro grupo. La variante
+   * que depende del diagnóstico sigue lo diagnosticado (`patient.diagnoses`): la que lo contradice
+   * solo se ofrece para elegir y, si no se sabe, ninguna se da por buena (c5: con la pulpitis dictada, la
+   * endodoncia no vital no queda lista). `context`: lo que el producto leyó; sin él, lo que dicen su
+   * nombre y su código.
    */
   serviceFit(service: DictationService, where: Record<string, unknown>, patient: DictationPatient, context?: unknown): DictationServiceFit
   /** El «dónde» dictado de un diagnóstico o una indicación, en los valores del sistema; `invalid`: por qué no vale. */
@@ -440,6 +466,12 @@ export interface ProductForms {
    * especialidad que recibe `kind` (odentIA: odontopediatría a menores de 12). null: no ofrece por edad.
    */
   byAge: { underYears: number; kind: string } | null
+  /**
+   * Las opciones de sus fichas que son un diagnóstico, como se escriben en la ficha, con su código de
+   * la CIE-10 (OMS): la respuesta dictada va también a Diagnóstico si Clío no lo propuso (prueba con
+   * voz del 15 nov, c5; `withFormDiagnoses`). odentIA: el diagnóstico pulpar y el apical de la AAE.
+   */
+  diagnoses?: Readonly<Record<string, string>>
 }
 
 /** Un producto que no trae fichas ni ofrece por edad. */

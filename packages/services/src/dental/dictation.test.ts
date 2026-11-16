@@ -51,6 +51,9 @@ import { nextPatientNumber } from "../patients.js"
 import { insertTestPatients, setTestPatientIdentity } from "../test-patient.js"
 import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { treatmentTemplate } from "@odentia/db/schema/clinical"
+import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/clinical-forms"
+import { dictationFormQuestions } from "../dictation-forms.js"
+import { productHooksFor } from "../products.js"
 import { createService } from "../service-catalog.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
@@ -1109,6 +1112,168 @@ describe("lo que encontró la cuarta prueba con voz (15 nov, c4b)", () => {
       ["K04.7", "lista"],
       ["K04.5", "por_revisar"],
     ])
+    await enable(false)
+  })
+})
+
+describe("lo que encontró la quinta prueba con voz (15 nov, c5)", () => {
+  const K04 = [
+    { code: "K04", title: "Enfermedades de la pulpa y de los tejidos periapicales", isCategory: true },
+    { code: "K04.0", title: "Pulpitis" },
+    { code: "K04.1", title: "Necrosis de la pulpa" },
+    { code: "K04.4", title: "Periodontitis apical aguda originada en la pulpa" },
+    { code: "K04.5", title: "Periodontitis apical crónica" },
+    { code: "K04.6", title: "Absceso periapical con fístula" },
+    { code: "K04.7", title: "Absceso periapical sin fístula" },
+  ]
+
+  /** Una ficha de odentIA empezada en la atención, con las preguntas que vería Clío. */
+  async function startForm(fx: Awaited<ReturnType<typeof openSession>>, key: string) {
+    const suggested = productHooksFor("dental").forms.suggestions.find((item) => item.key === key)!
+    const [template] = await ownerDb
+      .insert(clinicalFormTemplate)
+      .values({ organizationId: ORG, key: `${key}-${fx.actor}`, title: suggested.title, status: "publicado", schema: suggested.schema })
+      .returning()
+    await ownerDb.insert(clinicalFormResponse).values({
+      organizationId: ORG,
+      templateId: template!.id,
+      templateVersion: 1,
+      templateTitle: suggested.title,
+      templateSnapshot: suggested.schema,
+      patientId: fx.patient.id,
+      encounterId: fx.encounter.id,
+      professionalUserId: fx.actor,
+      authorUserId: fx.actor,
+      status: "borrador",
+      source: "staff",
+      answers: {},
+    })
+    const questions = await fx.run((tx) => dictationFormQuestions(tx, ORG, fx.encounter.id))
+    const at = (fieldId: string) => questions.find((item) => item.fieldId === fieldId)!.number
+    const answer = (fieldId: string, value: string, said: string) => ({ kind: "ficha" as const, payload: { question: at(fieldId), answer: value }, sourceText: said })
+    return { questions, answer }
+  }
+
+  /** Las endodoncias de la biblioteca que falten en el tarifario de la prueba. */
+  async function withEndodontics(fx: Awaited<ReturnType<typeof openSession>>) {
+    await seedOdentiaCatalog(ownerDb)
+    const templates = await ownerDb.select({ id: treatmentTemplate.id, key: treatmentTemplate.key, name: treatmentTemplate.name }).from(treatmentTemplate)
+    const have = new Set((await ownerDb.select({ name: serviceCatalog.name }).from(serviceCatalog).where(eq(serviceCatalog.organizationId, ORG))).map((row) => row.name))
+    for (const key of ["endodoncia-posterior-vital", "endodoncia-posterior-no-vital", "endodoncia-anterior-vital", "endodoncia-anterior-no-vital"]) {
+      const template = templates.find((row) => row.key === key)!
+      if (!have.has(template.name)) await fx.run((tx) => createService(tx, ORG, fx.actor, { templateId: template.id, priceCents: key.includes("no-vital") ? 70_000 : 65_000 }))
+    }
+  }
+
+  it("con la pulpitis dictada, la endodoncia es la vital, y la pulpitis de la ficha llega a Diagnóstico (v06)", async () => {
+    await seedDiagnosisCodes(K04)
+    await enable(true)
+    const fx = await openSession("Apertura cameral")
+    await withEndodontics(fx)
+    await setTestPatientIdentity(ownerDb, fx.patient.id, { birthDate: "1984-03-02" })
+    const { questions, answer } = await startForm(fx, "evaluacion-de-endodoncia")
+    // Lo que oyó Chrome y lo que respondió Clío en c5: solo K04.4, y la endodoncia no vital.
+    const transcript =
+      "este 10 a 36 intensidad 9 de 10 diagnóstico pulpar pulpitis Irreversible sintomática apical periodontitis apical sintomática plan endodoncia de la 36 y luego Corona"
+    const { suggestions } = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+        drafts: [
+          answer("pieza", "36", "este 10 a 36"),
+          answer("diagnostico_pulpar", "Pulpitis irreversible sintomática", "diagnóstico pulpar pulpitis Irreversible sintomática"),
+          answer("diagnostico_apical", "Periodontitis apical sintomática", "apical periodontitis apical sintomática"),
+          { kind: "diagnostico", payload: { diagnosisCode: "K04.4", diagnosisType: "confirmed", toothNumber: 36 }, sourceText: "diagnóstico pulpar pulpitis Irreversible sintomática apical periodontitis apical sintomática" },
+          { kind: "plan", payload: { service: "Endodoncia posterior no vital", toothNumber: 36 }, sourceText: "plan endodoncia de la 36 y luego Corona" },
+        ],
+        transcript,
+        formQuestions: questions,
+      }),
+    )
+    expect(suggestions.find((item) => item.kind === "plan")).toMatchObject({ status: "lista", payload: { serviceName: "Endodoncia posterior vital", toothNumber: 36 } })
+    expect(suggestions.filter((item) => item.kind === "diagnostico").map((item) => [item.payload["diagnosisCode"], item.payload["toothNumber"], item.status])).toEqual([
+      ["K04.4", 36, "lista"],
+      ["K04.0", 36, "lista"],
+    ])
+    // Sin el diagnóstico de la pulpa en esa pieza, no elige: las dos para elegir.
+    const [loose] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "Endodoncia posterior no vital", toothNumber: 46 }, sourceText: "endodoncia de la 46" }] }),
+      )
+    ).suggestions
+    expect(loose).toMatchObject({ status: "por_revisar", payload: { candidates: [{ name: "Endodoncia posterior no vital" }, { name: "Endodoncia posterior vital" }] } })
+    // Lo que elige una persona para lo hecho hoy no se juzga: queda ese servicio.
+    const [done] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "procedimiento", payload: { service: "Endodoncia posterior vital", toothNumber: 46 }, sourceText: "hoy hacemos la endodoncia de la 46" }] }),
+      )
+    ).suggestions
+    const vital = (done!.payload["candidates"] as Array<{ id: string; name: string }>).find((item) => item.name === "Endodoncia posterior vital")!
+    const picked = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, done!.id, { serviceId: vital.id }))
+    expect(picked.payload).toMatchObject({ serviceId: vital.id, serviceName: "Endodoncia posterior vital" })
+    expect(picked.payload).not.toHaveProperty("candidates")
+    // Lo corregido por voz también sigue lo diagnosticado: con la pulpitis de la 46 pendiente, la vital.
+    await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "diagnostico", payload: { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 46 }, sourceText: "pulpitis en la 46" }] }),
+    )
+    const corrected = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [], corrections: [{ suggestionId: loose!.id, changes: { service: "endodoncia posterior" }, said: "la endodoncia posterior de la 46" }] }),
+    )
+    expect(corrected.corrected).toEqual([loose!.id])
+    const [plan] = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).filter((item) => item.id === loose!.id)
+    expect(plan).toMatchObject({ status: "lista", payload: { serviceName: "Endodoncia posterior vital", toothNumber: 46 } })
+    await enable(false)
+  })
+
+  it("la necrosis y el absceso de la ficha llegan a Diagnóstico con su pieza, y el relato no se repite (v07)", async () => {
+    await seedDiagnosisCodes(K04)
+    await enable(true)
+    const fx = await openSession("Endodoncia de la quinta prueba")
+    const { questions, answer } = await startForm(fx, "evaluacion-de-endodoncia")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, { formQuestions: questions, ...input }))
+    // Las tres pausas como las oyó Chrome y las ordenó Clío en c5.
+    await segment({
+      drafts: [
+        answer("pieza", "21", "pieza 21"),
+        {
+          kind: "nota",
+          payload: { reason: "Golpe en diente", presentIllness: "Paciente refiere que el diente se le ha ido poniendo oscuro tras un golpe.", illnessDuration: "Hace 2 años" },
+          sourceText: "paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro",
+        },
+      ],
+      transcript: "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro",
+    })
+    const second = await segment({
+      drafts: [
+        { kind: "nota", payload: { presentIllness: "Refiere que el diente se le ha ido poniendo oscuro." }, sourceText: "ha ido poniendo oscuro" },
+        answer("fistula", "Sí", "presenta fístula a nivel apical por vestibular"),
+      ],
+      transcript: "ha ido poniendo oscuro sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+    })
+    expect(second.suggestions.map((item) => item.kind)).toEqual(["ficha"])
+    const third = await segment({
+      drafts: [answer("diagnostico_pulpar", "Necrosis pulpar", "necrosis pulpar"), answer("diagnostico_apical", "Absceso apical crónico", "absceso apical crónico")],
+      transcript: "sin respuesta también percusión negativa palpación positiva radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico",
+      context: "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+    })
+    expect(third.suggestions.filter((item) => item.kind === "diagnostico").map((item) => [item.payload["diagnosisCode"], item.payload["toothNumber"], item.status])).toEqual([
+      ["K04.1", 21, "lista"],
+      ["K04.6", 21, "lista"],
+    ])
+    await enable(false)
+  })
+
+  it("el IHO-S que Clío propuso con un decimal menos va a «No pude usar esto» (v12)", async () => {
+    await enable(true)
+    const fx = await openSession("Profilaxis de la quinta prueba", "general")
+    const { questions, answer } = await startForm(fx, "ficha-odontoestomatologica")
+    const saved = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+        drafts: [answer("ihos", "0.9", "Este 0,99")],
+        transcript: "muy buenos días p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor ese Este 0,99",
+        formQuestions: questions,
+      }),
+    )
+    expect(saved.suggestions).toEqual([])
+    expect(saved.droppedForms).toContainEqual({ said: "Este 0,99", why: "Dijiste «Este 0,99»: revisa los decimales.", targets: [expect.objectContaining({ fieldId: "ihos" })] })
     await enable(false)
   })
 })

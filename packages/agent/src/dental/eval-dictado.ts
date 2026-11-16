@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { dictatedService, withPauseBridge } from "@odentia/services"
+import { dictatedDiagnoses, dictatedService, withPauseBridge } from "@odentia/services"
 import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/dental"
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
@@ -82,6 +82,12 @@ interface PracticeDictation {
      * ni en el plan: otro procedimiento, con su precio (prueba con voz del 15 nov, «cambiamos el arco»).
      */
     serviciosNo?: string[]
+    /**
+     * Servicios del banco que el servidor no debe dar por buenos (listos) en lo hecho ni en el plan,
+     * aunque pueda ofrecerlos para elegir: la variante que contradice lo diagnosticado (prueba con voz
+     * c5, la endodoncia no vital con la pulpitis dictada).
+     */
+    serviciosNoListos?: string[]
     /** Servicios del banco que el servidor sí debe proponer para lo hecho o el plan. */
     serviciosSi?: string[]
     /** Palabras de las indicaciones de la consulta: lo que se le indica al paciente para su casa. */
@@ -116,7 +122,7 @@ function variantOf(condition: string, spoken: unknown): string | undefined {
   return finding.variants.filter((item) => plain(item.label).includes(plain(spoken))).sort((a, b) => a.label.length - b.label.length)[0]?.value
 }
 
-const totals = { esperados: 0, bien: 0, detalleBien: 0, detalleEsperado: 0, perdidos: 0, inventados: 0, otrosBien: 0, otrosEsperados: 0, costo: 0, sinCosto: 0, serviciosOtros: 0, diagnosticosContrarios: 0 }
+const totals = { esperados: 0, bien: 0, detalleBien: 0, detalleEsperado: 0, perdidos: 0, inventados: 0, otrosBien: 0, otrosEsperados: 0, costo: 0, sinCosto: 0, serviciosOtros: 0, serviciosContrarios: 0, diagnosticosContrarios: 0 }
 const now = new Date()
 
 for (const dictation of bank.dictados) {
@@ -258,16 +264,21 @@ for (const dictation of bank.dictados) {
   }
   if (dictation.espera.materiales) other("ningún material de más", materials.length === dictation.espera.materiales.length)
   // Lo que el servidor propone del tarifario para lo hecho y el plan, con la misma búsqueda (`dictatedService`):
-  // solo entre lo que puede ir en la pieza dicha y para el paciente, con lo que dice el nombre de cada servicio.
-  const offered = read.drafts
+  // solo entre lo que puede ir en la pieza dicha y para el paciente, con lo que dice el nombre de cada servicio
+  // y lo diagnosticado en el dictado más lo dicho de la misma prestación (la endodoncia vital o no vital).
+  const patient = { adult: dictation.adulto ?? null, diagnoses: dictatedDiagnoses(read.drafts, []) }
+  const found = read.drafts
     .filter((draft) => draft.kind === "procedimiento" || draft.kind === "plan")
-    .flatMap((draft) => {
-      const found = dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, "dental", draft.payload, { adult: dictation.adulto ?? null })
-      return [found.match ?? [], found.candidates].flat()
-    })
+    .map((draft) => dictatedService(String(draft.payload["service"] ?? ""), bank.servicios, "dental", draft.payload, patient, draft.sourceText))
+  const offered = found.flatMap((item) => [item.match ?? [], item.candidates].flat())
   for (const name of dictation.espera.serviciosNo ?? []) {
     totals.serviciosOtros += Number(offered.includes(name))
     other(`sin «${name}»`, !offered.includes(name))
+  }
+  for (const name of dictation.espera.serviciosNoListos ?? []) {
+    const ready = found.some((item) => item.match === name)
+    totals.serviciosContrarios += Number(ready)
+    other(`sin «${name}» listo`, !ready)
   }
   for (const name of dictation.espera.serviciosSi ?? []) other(`propone «${name}»`, offered.includes(name))
   const indications = plain(read.drafts.filter((draft) => draft.kind === "nota").map((draft) => String(draft.payload["indications"] ?? "")).join(" "))
@@ -292,6 +303,7 @@ console.log(`Hallazgos: ${totals.bien} de ${totals.esperados} bien (${pct(totals
 console.log(`Variante y estado dichos: ${totals.detalleBien} de ${totals.detalleEsperado} bien (${pct(totals.detalleBien, totals.detalleEsperado)})`)
 console.log(`Lo demás (diagnósticos, indicaciones, controles, nota, correcciones, quitar): ${totals.otrosBien} de ${totals.otrosEsperados} (${pct(totals.otrosBien, totals.otrosEsperados)})`)
 console.log(`Servicios de otro procedimiento propuestos en lo hecho o el plan: ${totals.serviciosOtros}`)
+console.log(`Servicios que contradicen lo diagnosticado y quedan listos: ${totals.serviciosContrarios}`)
 console.log(`Diagnósticos que contradicen lo dictado y quedan listos: ${totals.diagnosticosContrarios}`)
 if (consultaSummary()) console.log(consultaSummary())
 console.log(

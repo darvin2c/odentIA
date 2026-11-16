@@ -44,7 +44,7 @@ import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
-import { closestDiagnosisCode, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
+import { closestDiagnosisCode, type DiagnosisCodeOption, diagnosisCodesWith, orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { reviewDiagnosis } from "./dictation-diagnosis.js"
 import { recordEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
@@ -59,7 +59,9 @@ import { createPrescription, prescribingSituationOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import {
   answerFormFromDictation,
+  type DiagnosedItem,
   type DictationFormQuestion,
+  dictatedDiagnoses,
   dictationFormQuestions,
   formAnswerFragments,
   formAnswerWords,
@@ -67,10 +69,12 @@ import {
   pendingFormValues,
   prepareFormAnswer,
   withDiagnosisFormAnswers,
+  withFormDiagnoses,
   withFormTwins,
   withoutFormNotes,
+  withoutRepeatedNotes,
 } from "./dictation-forms.js"
-import type { DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
+import type { DictationDiagnosis, DictationPatient, DictationPrepared, DictationServiceFit, ProductDictation, ProductHooks } from "./product-hooks.js"
 import type { ProductCatalog } from "./product-catalog.js"
 import { productHooks, productHooksFor, requireDictatingProduct } from "./products.js"
 import { patientAge } from "./responsibilities.js"
@@ -310,6 +314,13 @@ interface DictationScope {
   /** Con qué palabras se busca en el tarifario lo dicho. */
   serviceWords: ServiceWords
   /**
+   * Las opciones de las fichas del producto que son un diagnóstico, con su código de la CIE-10
+   * (`ProductForms.diagnoses`): solo si la lista de la clínica es una CIE-10.
+   */
+  formDiagnoses: Readonly<Record<string, string>> | undefined
+  /** Los códigos ya buscados en la lista de la clínica en este tramo (`closestCode`). */
+  codes: Map<string, Promise<DiagnosisCodeOption | null>>
+  /**
    * Si el paciente es adulto: a un adulto no se le propone lo de diente de leche
    * (`ProductDictation.serviceFit`). Sin `patientId` en `dictationScope` (lo que no busca en el
    * tarifario: las recetas, el presupuesto), no se sabe.
@@ -325,10 +336,14 @@ async function dictationScope(tx: Db, orgId: string, patientId?: string): Promis
   const dictation = await requireDictatingProduct(tx, orgId)
   const hooks = await productHooks(tx, orgId)
   const age = patientId ? await patientAge(tx, orgId, patientId) : null
+  const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   return {
     services: await activeServices(tx, orgId),
     products: await careProducts(tx, orgId),
-    diagnosisSystem: await orgDiagnosisSystem(tx, orgId),
+    diagnosisSystem,
+    // Los códigos de las fichas son de la CIE-10: con la CIE-11 no se propone ninguno.
+    formDiagnoses: diagnosisSystem === "ICD-10" || diagnosisSystem === "ICD-10-PE" ? hooks.forms.diagnoses : undefined,
+    codes: new Map(),
     medications: hooks.prescribing.catalog,
     dictation,
     product: await dictation.context(tx, orgId),
@@ -443,21 +458,32 @@ function matchService<T extends { name: string }>(spoken: string, services: T[],
  * con voz del 15 nov, c3): primero los que calzan en la pieza y para el paciente; si ninguno calza
  * con lo dicho, los de otro grupo de piezas, solo para elegir (la endodoncia anterior en la 36 si
  * la clínica no tiene la posterior); los que no pueden ser (lo de leche en una permanente), nunca.
+ * La variante que depende de lo que no se sabe (`unsure`: la endodoncia vital o no vital sin el
+ * diagnóstico de la pulpa) no se da por buena si el tarifario tiene otra que calce con lo dicho: se
+ * elige entre ellas (prueba con voz del 15 nov, c5: Clío escribió «Endodoncia posterior no vital»).
  */
 function matchFitting<T extends { name: string }>(spoken: string, services: T[], fit: (service: T) => DictationServiceFit, lookup: ServiceWords): { match: T | null; candidates: T[] } {
-  const fits = services.map((service) => ({ service, fit: fit(service) }))
-  const own = matchService(spoken, fits.flatMap((item) => (item.fit === "fits" ? [item.service] : [])), lookup)
+  const fitOf = new Map(services.map((service) => [service, fit(service)]))
+  const among = (...wanted: DictationServiceFit[]) => services.filter((service) => wanted.includes(fitOf.get(service) ?? "fits"))
+  const own = matchService(spoken, among("fits", "unsure"), lookup)
+  const { match } = own
+  if (match && fitOf.get(match) === "unsure") {
+    const rest = matchService(spoken, among("unsure").filter((service) => service !== match), lookup)
+    const others = rest.match ? [rest.match] : rest.candidates
+    if (others.length) return { match: null, candidates: [match, ...others].slice(0, SERVICE_CANDIDATES) }
+  }
   if (own.match || own.candidates.length) return own
-  const other = matchService(spoken, fits.flatMap((item) => (item.fit === "otherGroup" ? [item.service] : [])), lookup)
+  const other = matchService(spoken, among("fallback"), lookup)
   return { match: null, candidates: other.match ? [other.match] : other.candidates }
 }
 
 /**
  * El servicio de lo dicho en un producto (`matchFitting`), por nombre: el que
- * se da por bueno o las candidatas, con la pieza dicha y si el paciente es
- * adulto (con lo que dice el nombre de cada servicio). Lo usa la medición del
- * dictado (`eval:dictado`) para contar los procedimientos que calzan con otro,
- * o con el de otra pieza o de otra dentición.
+ * se da por bueno o las candidatas, con la pieza dicha, si el paciente es
+ * adulto, lo diagnosticado y la frase de la prestación (`said`; con lo que dice
+ * el nombre de cada servicio). Lo usa la medición del dictado (`eval:dictado`)
+ * para contar los procedimientos que calzan con otro, o con el de otra pieza o
+ * de otra dentición.
  */
 export function dictatedService(
   spoken: string,
@@ -465,9 +491,11 @@ export function dictatedService(
   product: ClinicalProduct,
   where: Record<string, unknown> = {},
   patient: DictationPatient = { adult: null },
+  said?: string,
 ): { match: string | null; candidates: string[] } {
   const hooks = productHooksFor(product)
-  const fit = (service: { name: string }) => hooks.dictation?.serviceFit(service, where, patient) ?? "fits"
+  const withIt = withSaid(patient, said, where)
+  const fit = (service: { name: string }) => hooks.dictation?.serviceFit(service, where, withIt) ?? "fits"
   const { match, candidates } = matchFitting(spoken, names.map((name) => ({ name })), fit, serviceWordsOf(hooks))
   return { match: match?.name ?? null, candidates: candidates.map((item) => item.name) }
 }
@@ -710,7 +738,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     // Se valida contra la lista de la clínica: un código de otra lista no se acepta. Uno que no está
     // en ella pasa a su padre que sí está (K04.02 → K04.0, prueba con voz del 15 nov, c3).
     const code = String(payload["diagnosisCode"] ?? "").trim().toUpperCase()
-    const known = code ? await closestDiagnosisCode(tx, diagnosisSystem, code) : null
+    const known = code ? await closestCode(tx, scope, code) : null
     const list = DIAGNOSIS_SYSTEM_INFO[diagnosisSystem].title
     if (!known) return { payload: { ...payload, diagnosisCode: code, diagnosisSystem }, status: "por_revisar", note: `El código ${code} no está en la lista ${list} de la clínica. Elige el diagnóstico.` }
     if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
@@ -732,11 +760,13 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     }
     return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "lista", note: null }
   }
+  // Lo dicho de la misma prestación también dice su variante: «la endodoncia no vital de la 36».
+  const lookup = draft.kind === "plan" || draft.kind === "cita" || draft.kind === "procedimiento" ? { ...scope, patient: withSaid(scope.patient, draft.sourceText, payload) } : scope
   if (draft.kind === "plan") {
     // «Resina, o si no una corona»: los otros caminos se buscan igual que la principal.
     const { alternatives, ...main } = payload
     const options = scope.choices && Array.isArray(alternatives) ? alternatives.filter((spoken) => typeof spoken === "string" && spoken.trim()).map((spoken) => ({ service: String(spoken).trim() })) : []
-    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, scope)
+    return settlePlan({ ...main, ...(options.length ? { options } : {}) }, lookup)
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
@@ -750,7 +780,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
     // La cita no lleva un servicio que no existe (prueba con voz del 15 nov, c3: «adaptación y
     // profilaxis», lo de hoy): sin uno de tus servicios que calce, va sin servicio.
     if (typeof payload["service"] === "string") {
-      const what = chooseService(payload as PlanChoice, scope, payload)
+      const what = chooseService(payload as PlanChoice, lookup, payload)
       if (what.serviceId || what.candidates?.length) Object.assign(payload, what)
       else delete payload["service"]
     }
@@ -759,12 +789,28 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
-  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, scope, payload) }, status: "lista", note: null }
+  if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, lookup, payload) }, status: "lista", note: null }
   return { payload, status: "lista", note: null }
 }
 
 /** Con qué se busca en el tarifario una prestación dicha: sus servicios, las palabras del producto y lo que decide cuáles pueden ser lo dicho. */
 type ServiceLookup = Pick<DictationScope, "services" | "dictation" | "serviceWords" | "patient" | "product">
+
+/** Lo del paciente con que se elige una prestación, más su propia frase como lo dicho en su sitio. */
+function withSaid(patient: DictationPatient, said: string | undefined, where: Record<string, unknown>): DictationPatient {
+  if (!said?.trim()) return patient
+  return { ...patient, diagnoses: [...(patient.diagnoses ?? []), { text: said, where }] }
+}
+
+/** El código de la lista de la clínica más cercano al dicho (`closestDiagnosisCode`), una vez por código en el tramo. */
+function closestCode(tx: Db, scope: DictationScope, code: string): Promise<DiagnosisCodeOption | null> {
+  let found = scope.codes.get(code)
+  if (!found) {
+    found = closestDiagnosisCode(tx, scope.diagnosisSystem, code)
+    scope.codes.set(code, found)
+  }
+  return found
+}
 
 /** Lo que se busca en el tarifario de una prestación dicha: el servicio si hay uno solo, o las candidatas. */
 type PlanChoice = { service?: string; serviceId?: string; serviceName?: string; priceCents?: number; currency?: string; serviceScope?: string | null; candidates?: ServiceOption[] }
@@ -778,9 +824,19 @@ function chooseService(choice: PlanChoice, scope: ServiceLookup, where: Record<s
   const chosen = typeof choice.serviceId === "string" ? services.find((service) => service.id === choice.serviceId) : undefined
   const fit = (service: ServiceOption) => scope.dictation.serviceFit(service, where, scope.patient, scope.product)
   const { match, candidates } = chosen ? { match: chosen, candidates: [] } : matchFitting(String(choice.service ?? ""), services, fit, scope.serviceWords)
-  if (match) return { service: choice.service ?? match.name, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }
+  if (match) return serviceOf(match, choice.service)
   return { service: choice.service ?? "", candidates }
 }
+
+/** Un servicio del tarifario como lo lleva lo dicho, con cómo se dijo. */
+const serviceOf = (match: ServiceOption, said?: string): PlanChoice => ({
+  service: said ?? match.name,
+  serviceId: match.id,
+  serviceName: match.name,
+  priceCents: match.priceCents,
+  currency: match.currency,
+  serviceScope: match.scope,
+})
 
 const OPTION_LETTER = ["A", "B", "C"]
 
@@ -979,8 +1035,14 @@ async function revise(
     if (typeof patch["serviceId"] === "string") {
       const chosen = services.find((service) => service.id === patch["serviceId"])
       if (!chosen) throw invalidField("serviceId", "Esa prestación no está activa en tus servicios")
-      payload = { ...payload, service: chosen.name }
-    } else if (typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
+      // Lo que eligió una persona no se juzga: ese servicio, aunque su variante (vital o no vital)
+      // dependa de lo que no se sabe. Sin esto se buscaría de nuevo por su nombre.
+      const prepared = await prepare(tx, { kind, payload: { ...payload, service: chosen.name } }, scope)
+      if (!prepared) return null
+      const { candidates: _candidates, ...rest } = prepared.payload
+      return { ...prepared, payload: { ...rest, ...serviceOf(chosen) } }
+    }
+    if (typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
       for (const key of [...MAIN_SERVICE_KEYS.filter((key) => key !== "service"), "planItemId", "acceptOnDo", "source"]) delete payload[key]
     }
     return prepare(tx, { kind, payload }, scope)
@@ -1633,6 +1695,44 @@ export async function dictationSegmentSeen(tx: Db, orgId: string, patientId: str
 }
 
 /**
+ * Lo diagnosticado en la atención (`dictatedDiagnoses`): los diagnósticos de la pausa con el nombre
+ * de su código en la lista de la clínica (con la CIE-11, el nombre dice la pulpitis), lo que responde
+ * la pausa en sus fichas, ya comprobado, y lo pendiente o confirmado (`earlier`).
+ */
+async function encounterDiagnoses(
+  tx: Db,
+  scope: DictationScope,
+  drafts: readonly DictationDraft[],
+  earlier: readonly DiagnosedItem[],
+  pending: ReadonlyMap<number, unknown>,
+): Promise<DictationDiagnosis[]> {
+  const now: DiagnosedItem[] = []
+  for (const draft of drafts) {
+    if (draft.kind === "diagnostico") {
+      const code = String(draft.payload["diagnosisCode"] ?? "").trim().toUpperCase()
+      const known = code ? await closestCode(tx, scope, code) : null
+      now.push({ kind: "diagnostico", payload: { ...draft.payload, diagnosisCode: known?.code ?? code, description: known?.description ?? "" } })
+    } else if (draft.kind === "ficha") {
+      const ready = prepareFormAnswer(draft, scope.formQuestions, scope.site, scope.transcript)
+      if (ready) now.push({ kind: "ficha", payload: ready.payload, status: ready.status })
+    }
+  }
+  // Lo de la pausa, al final: de dos respuestas a la misma pregunta vale la última.
+  return dictatedDiagnoses([...earlier, ...now], scope.formQuestions, { pending, codes: scope.formDiagnoses })
+}
+
+/**
+ * Lo diagnosticado en la atención fuera de una pausa (al corregir a mano, o antes de aplicar lo
+ * corregido por voz): lo pendiente, lo confirmado y lo escrito en sus fichas.
+ */
+async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounterId: string, scope: DictationScope): Promise<DictationDiagnosis[]> {
+  const pending = await listDictationSuggestions(tx, orgId, patientId, encounterId)
+  const confirmed = await listConfirmedDictation(tx, orgId, patientId, encounterId)
+  const questions = scope.formQuestions.length ? scope.formQuestions : await dictationFormQuestions(tx, orgId, encounterId)
+  return dictatedDiagnoses([...confirmed, ...pending], questions, { pending: pendingFormValues(pending, questions), codes: scope.formDiagnoses })
+}
+
+/**
  * Guarda un tramo del dictado: sugerencias nuevas y, si el odontólogo siguió
  * hablando, lo que corrigió o pidió quitar de las que aún no decide. Solo quien
  * lleva la atención en borrador puede dictar en ella. Nada entra a la historia
@@ -1725,6 +1825,8 @@ export async function saveDictationSegment(
     if (!corrected.includes(row.id)) corrected.push(row.id)
     return true
   }
+  // Lo corregido por voz también elige la variante con lo diagnosticado en la atención.
+  if (segment.corrections?.length) scope.patient = { ...scope.patient, diagnoses: await savedDiagnoses(tx, orgId, patientId, encounterId, scope) }
   for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) await correct(correction.suggestionId, correction.changes, correction.said)
 
   const removed: string[] = []
@@ -1794,10 +1896,23 @@ export async function saveDictationSegment(
   const formQuestionOf = (draft: DictationDraft) => scope.formQuestions.find((item) => item.number === draft.payload["question"])
   // Lo que responde una pregunta de ficha responde también su gemela en otra ficha empezada, y lo
   // que fue para una ficha no se repite en el texto de la consulta.
-  // Un diagnóstico dicho que también pregunta una ficha va a los dos lugares.
+  // Un diagnóstico dicho que también pregunta una ficha va a los dos lugares, y la respuesta de ficha
+  // que es un diagnóstico, también a Diagnóstico si Clío no lo propuso (prueba con voz del 15 nov, c5).
   const dictated = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
   const fromDiagnoses = withDiagnosisFormAnswers(dictated, scope.formQuestions).slice(dictated.length)
-  const { drafts, twins } = withFormTwins(withoutFormNotes([...dictated, ...fromDiagnoses], scope.formQuestions, scope.site, scope.transcript), scope.formQuestions)
+  const pendingValues = pendingFormValues(pendingNow, scope.formQuestions)
+  // Sin nada nuevo en la pausa no hay qué elegir ni qué llevar a Diagnóstico: lo confirmado no hace falta.
+  const confirmed = dictated.length ? await listConfirmedDictation(tx, orgId, patientId, encounterId) : []
+  const known = [...pendingNow, ...confirmed].filter((item) => item.kind === "diagnostico").map((item) => item.payload)
+  const fromForms = withFormDiagnoses([...dictated, ...fromDiagnoses], scope.formQuestions, scope.formDiagnoses, { site: scope.site, transcript: scope.transcript, known, pending: pendingValues })
+  // Lo diagnosticado en la atención decide la variante de una prestación: la endodoncia vital o no vital.
+  scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, [...dictated, ...fromDiagnoses], [...pendingNow, ...confirmed], pendingValues) }
+  // Lo que ya cuenta una nota pendiente no se cuenta otra vez (c5: la frase que cortó la pausa).
+  const pendingNotes = pendingNow.filter((item) => item.kind === "nota").flatMap((item) => Object.values(item.payload).filter((value): value is string => typeof value === "string"))
+  const { drafts, twins } = withFormTwins(
+    withoutRepeatedNotes(withoutFormNotes([...dictated, ...fromDiagnoses, ...fromForms], scope.formQuestions, scope.site, scope.transcript), pendingNotes),
+    scope.formQuestions,
+  )
   for (const draft of fromDiagnoses) twins.add(draft)
   const outcomes: Array<{ draft: DictationDraft; ready: boolean }> = []
   for (const draft of drafts) {
@@ -1812,7 +1927,6 @@ export async function saveDictationSegment(
   // Lo que no se propuso va a «No pude usar esto», por dato y con su motivo (revisión final del 15 nov,
   // U5), y la oración que nombra una pregunta sin propuesta ni aviso tampoco se pierde en silencio
   // (medición del 15 nov). Lo que ya propone una pendiente de otra pausa solo avisa si se dijo otro valor.
-  const pendingValues = pendingFormValues(pendingNow, scope.formQuestions)
   for (const { said, why, questions } of formDropNotices(outcomes, twins, scope.formQuestions, { site: scope.site, transcript: scope.transcript }, pendingValues)) {
     const targets = questions.flatMap((number) => {
       const question = scope.formQuestions.find((item) => item.number === number)
@@ -2101,6 +2215,8 @@ export async function updateDictationSuggestion(
     const error = fieldsError(Object.fromEntries(edited))
     if (error) throw error
   }
+  // Lo diagnosticado en la atención sigue decidiendo la variante al corregir a mano.
+  scope.patient = { ...scope.patient, diagnoses: await savedDiagnoses(tx, orgId, patientId, encounterId, scope) }
   const revised = await revise(tx, row.kind, data, patch, scope)
   if (!revised) throw validation("La sugerencia quedó vacía; descártala si no aplica")
   const ready = await withPatient(tx, orgId, patientId, encounterId, row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope)
@@ -2980,6 +3096,8 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  */
 export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">>> {
   const scope = await dictationScope(tx, orgId)
+  // Sin atención, lo diagnosticado es lo de la práctica misma.
+  scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, drafts, [], new Map()) }
   const zone = await findOrgLocale(tx, orgId)
   const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {

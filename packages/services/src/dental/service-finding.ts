@@ -65,15 +65,23 @@ export interface TemplateToothAnatomy {
 
 /**
  * Los servicios activos de la clínica con la anatomía de su tratamiento de la biblioteca (la misma
- * regla que `toothAnatomy`: la tiene si su familia no es nula), o `null` si no la tiene. Lo lee Clío
- * una vez por pausa para no proponer lo de otra pieza (prueba con voz del 15 nov, c3).
+ * regla que `toothAnatomy`: la tiene si su familia no es nula), o `null` si no la tiene, y su familia
+ * (`endodoncia-vital`, `endodoncia-no-vital`…). Lo lee Clío una vez por pausa para no proponer lo de
+ * otra pieza (prueba con voz del 15 nov, c3) ni la endodoncia que contradice la pulpa (c5).
  */
 export async function activeServiceAnatomies(
   tx: Db,
   orgId: string,
-): Promise<Array<{ id: string; name: string; code: string | null; anatomy: Pick<TemplateToothAnatomy, "groups" | "dentition"> | null }>> {
+): Promise<Array<{ id: string; name: string; code: string | null; family: string | null; anatomy: Pick<TemplateToothAnatomy, "groups" | "dentition"> | null }>> {
   const rows = await tx
-    .select({ id: serviceCatalog.id, name: serviceCatalog.name, code: serviceCatalog.code, groups: dentalTemplateRule.toothGroups, dentition: dentalTemplateRule.dentition })
+    .select({
+      id: serviceCatalog.id,
+      name: serviceCatalog.name,
+      code: serviceCatalog.code,
+      family: dentalTemplateRule.family,
+      groups: dentalTemplateRule.toothGroups,
+      dentition: dentalTemplateRule.dentition,
+    })
     .from(serviceCatalog)
     .leftJoin(dentalTemplateRule, and(eq(dentalTemplateRule.templateId, serviceCatalog.templateId), isNotNull(dentalTemplateRule.family)))
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
