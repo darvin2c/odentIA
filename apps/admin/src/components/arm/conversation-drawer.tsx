@@ -4,7 +4,7 @@
  * un correo, por cualquiera de los correos de su hilo (el servidor arma el hilo entero).
  */
 import { ChatDrawer } from "./chat-drawer"
-import { EmailDrawer } from "./email-drawer"
+import { EmailThreadView } from "./email-thread"
 
 export type ConversationTarget = { kind: "chat"; chatId: string } | { kind: "correo"; emailId: string }
 
@@ -19,5 +19,5 @@ export function ConversationDrawer({
 }) {
   if (!open || !target) return null
   if (target.kind === "chat") return <ChatDrawer open chatId={target.chatId} onClose={onClose} />
-  return <EmailDrawer open emailId={target.emailId} onClose={onClose} />
+  return <EmailThreadView key={target.emailId} emailId={target.emailId} layout="drawer" onClose={onClose} />
 }
