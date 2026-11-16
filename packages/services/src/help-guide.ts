@@ -957,6 +957,13 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "plan",
       },
       {
+        id: "indique-despues-presupuesto-incluida",
+        q: "Indiqué otra cosa después de darle el presupuesto, ¿ya está incluida?",
+        a: "Si el presupuesto sigue por enviar, sí: lo que indicas en la atención entra en él al momento, con los totales y el PDF al día. Si es de otra pieza, entra en todas las opciones; si es de la pieza que ya tiene opciones (un perno en la 36), la atención te pregunta «¿En qué opción va…?» y entra cuando eliges. Si ya se lo entregaste o ya respondió, lo que tiene no cambia: la línea del presupuesto dice «… entra al firmar, en un presupuesto aparte», y al firmar nace ese presupuesto. Lo que no tiene precio no entra. Si quitas algo con «Quitar», «Deshacer» lo devuelve a su opción, con su precio.",
+        forms: ["indique algo despues del presupuesto", "el presupuesto no tiene lo nuevo", "agregue un tratamiento y no esta en el presupuesto", "la resina nueva no sale en el total", "deshacer quitar en el presupuesto"],
+        area: "plan",
+      },
+      {
         id: "pasa-cambio-precio-despues-enviarlo",
         q: "¿Qué pasa si cambio un precio después de enviarlo?",
         a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Si todavía no eligió camino, la revisión lleva todos los caminos: desmarca solo lo que ya no le ofreces. Mientras no responda, se cobra lo que ya había aceptado.",

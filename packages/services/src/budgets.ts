@@ -1417,7 +1417,8 @@ export async function assembleEncounterBudget(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  opts: { onRequest?: boolean } = {},
+  /** `itemIds`: solo esos de lo indicado en ella (lo recién indicado, `quoteIndicatedNow`). */
+  opts: { onRequest?: boolean; itemIds?: readonly string[] } = {},
 ): Promise<AssembledBudget | null> {
   const required = (await productHooks(tx, orgId)).budgetRequired
   if (!required && !opts.onRequest) return null
@@ -1440,6 +1441,7 @@ export async function assembleEncounterBudget(
         isNull(treatmentPlanItem.budgetId),
         eq(treatmentPlanItem.status, "pendiente"),
         eq(treatmentPlanItem.decisionStatus, required ? "pendiente" : "aceptado"),
+        ...(opts.itemIds ? [inArray(treatmentPlanItem.id, [...opts.itemIds])] : []),
       ),
     )
     .orderBy(
@@ -1496,6 +1498,50 @@ export async function assembleEncounterBudget(
     }
   }
   return null
+}
+
+/**
+ * Lo recién indicado entra ya al presupuesto en borrador (QA del 16 nov, E3): con la misma
+ * operación que lo arma al firmar (`assembleEncounterBudget`), así el total, cada opción y el PDF
+ * que ve la persona traen todo lo indicado hasta ese momento. Pasa también sin opciones, con un
+ * borrador de ayer sin enviar. Solo si hay un borrador: sin él, nace al firmar o con «Armarlo
+ * ahora», y lo indicado después de entregarlo nace al firmar en uno aparte. Lo de otra pieza entra
+ * como común a las opciones; lo de una pieza que ya tiene caminos no entra solo, porque un perno
+ * en la 36 no va con la exodoncia de la 36: la atención pregunta a qué opción va
+ * (`placeBudgetPath`). Lo que no se puede cotizar (sin precio, de otro plan) no entra ni frena.
+ */
+export async function quoteIndicatedNow(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  itemIds: readonly string[],
+): Promise<void> {
+  if (itemIds.length === 0 || !(await productHooks(tx, orgId)).budgetRequired) return
+  const draft = await findDraftBudget(tx, orgId, patientId)
+  if (!draft) return
+  let ids = [...itemIds]
+  const options = await listOptions(tx, orgId, [draft.id])
+  if (options.length > 1) {
+    const lines = await listBudgetLines(tx, orgId, patientId, draft.id)
+    const common = commonPlanItems(lines, options.length)
+    const siteOf = (row: { siteSystem: string | null; siteCode: string | null }) =>
+      row.siteSystem && row.siteCode ? `${row.siteSystem}:${row.siteCode}` : null
+    const contested = new Set(
+      lines.filter((line) => !common.has(line.planItemId)).map(siteOf).filter((key): key is string => key !== null),
+    )
+    const items = await tx
+      .select({ id: treatmentPlanItem.id, siteSystem: treatmentPlanItem.siteSystem, siteCode: treatmentPlanItem.siteCode })
+      .from(treatmentPlanItem)
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, ids)))
+    ids = items.filter((item) => {
+      const key = siteOf(item)
+      return !key || !contested.has(key)
+    }).map((item) => item.id)
+  }
+  if (ids.length === 0) return
+  await assembleEncounterBudget(tx, orgId, actorUserId, patientId, encounterId, { itemIds: ids })
 }
 
 export async function updateBudgetDraft(

@@ -705,8 +705,9 @@ type PathQuestion =
 /**
  * Si lo indicado hoy compite con otro de la misma pieza (endodoncia o
  * exodoncia de la 46), se pregunta en su fila. No es obligatorio: sin respuesta,
- * va en todas las opciones, como hasta ahora, y no traba firmar. El servidor
- * vuelve a comprobarlo todo.
+ * va en todas las opciones al firmar y no traba firmar. En una pieza que ya tiene
+ * caminos, lo nuevo no entra solo al presupuesto (un perno no va con la
+ * exodoncia): espera esta respuesta. El servidor vuelve a comprobarlo todo.
  */
 function pathQuestion(
   item: PlanItem,
@@ -790,7 +791,8 @@ function PathQuestionRow({
             {path.title || budgetOptionLabel(path.position)}
           </Button>
         ))}
-        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>
+        {/* En las dos: entra ya en todas las opciones, no solo deja de preguntar (QA del 16 nov, E3). */}
+        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => onPlace("todos")}>
           {inAllPathsLabel(group.pathCount)}
         </Button>
       </div>
