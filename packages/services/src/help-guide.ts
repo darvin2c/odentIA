@@ -834,6 +834,14 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "hoja-seguro-opcion-no-elegida",
+        q: "¿La hoja para el seguro lleva lo que el paciente no eligió?",
+        a: "No. La «Hoja de atención» sugiere solo lo que sigue en pie: nunca lo de la opción que no eligió ni lo que rechazó. Si le ofreciste opciones, lo de la que eligió va bajo «Tratamiento sugerido · Opción A (elegida)», y lo común a todas, bajo «Tratamiento sugerido». Si todavía no elige, cada opción va con su nombre y «(a elegir)», nunca todo junto. Si rechazó todo, la hoja no lleva tratamiento sugerido. Lo que ya se hizo va en «Procedimientos realizados».",
+        forms: ["la hoja del seguro sale con la exodoncia que no eligio", "hoja de atencion con dos opciones", "que dice la hoja para el seguro si le ofreci dos opciones", "la hoja sugiere lo que rechazo"],
+        area: "clinica",
+        own: true,
+      },
+      {
         id: "pongo-firma-papeles",
         q: "¿Cómo pongo mi firma en los papeles?",
         a: "Dibújala una vez en tu perfil profesional: al finalizar una atención, con «Agregar mi firma», o en Configuración › Equipo › «Mi perfil profesional» si puedes entrar ahí. Sale sola en los papeles que emites, junto a un sello con tu nombre, tu título y tu colegiatura, y cambiarla no toca lo ya emitido. Sin ella, el papel lleva una línea para firmar a mano. Solo tú puedes guardarla. Es el dibujo que se ve, no una firma digital certificada: el papel sigue diciendo «Firmado electrónicamente».",
