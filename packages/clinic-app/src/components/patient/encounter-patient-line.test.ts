@@ -47,7 +47,7 @@ describe("las alertas de la línea fija, por riesgo", () => {
     ])
   })
 
-  it("sin alergias: «Niega alergias» queda detrás del anticoagulante, y «no preguntado» va adelante", () => {
+  it("sin alergias: «Niega alergias» queda detrás del anticoagulante, y «no se le preguntó» va adelante", () => {
     const anticoagulated = {
       ...base,
       currentMedications: [{ id: "warfarina", name: "Warfarina", dose: null, atcCode: "B01AA03" }],
@@ -57,7 +57,7 @@ describe("las alertas de la línea fija, por riesgo", () => {
       "Niega alergias",
     ])
     expect(alertsByRisk({ ...anticoagulated, allergyReview: "unknown" }, null).map((alert) => alert.label)).toEqual([
-      "Alergias: no preguntado",
+      "Alergias: no se le preguntó",
       "Anticoagulante: Warfarina",
     ])
   })

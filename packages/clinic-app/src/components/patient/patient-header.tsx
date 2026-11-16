@@ -126,6 +126,7 @@ export function alertsByRisk(
     "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidUnknown"
   >,
   health: Pick<PatientHealth, "pregnancy"> | null | undefined,
+  sex?: string | null,
 ): Array<{ id: string; label: string; tone: "destructive" | "warning" | "secondary" }> {
   const alerts = clinicalAlerts(detail)
   const allergyIds = new Set(detail.activeAllergies.map((row) => row.id))
@@ -136,7 +137,8 @@ export function alertsByRisk(
       ? [
           {
             id: "alergias",
-            label: `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`,
+            // La misma frase que la franja, la ficha y la atención (revisión del 16 nov, R14).
+            label: noAllergiesWords({ review: "unknown", saidUnknown: detail.allergySaidUnknown }, sex),
             tone: "warning" as const,
           },
         ]
