@@ -613,3 +613,11 @@ export function removeIndicatedApi(patientId: string, encounterId: string, planI
     method: "DELETE",
   })
 }
+
+/** «Deshacer» de «Quitar»: el mismo tratamiento vuelve a su opción, con su precio y su orden. */
+export function restoreIndicatedApi(patientId: string, encounterId: string, planItemId: string) {
+  return apiFetch(`${base(patientId)}/encounters/${encounterId}/indicated/${planItemId}/restore`, {
+    method: "POST",
+    body: "{}",
+  })
+}

@@ -1962,6 +1962,159 @@ export async function removeBudgetOption(
   return loadBudget(tx, orgId, patientId, current)
 }
 
+// ------------------------------------------------- «Quitar» y «Deshacer» ---
+
+/** Una opción del borrador tal como estaba, para devolverla igual. */
+export interface BudgetOptionSnapshot {
+  id: string
+  position: number
+  isRecommended: boolean
+  name: string | null
+  pros: string | null
+  cons: string | null
+}
+
+/** Una línea del borrador tal como estaba: su opción y lo acordado en ella (precio, motivo, promoción). */
+export type BudgetLineSnapshot = Omit<
+  typeof treatmentBudgetItem.$inferSelect,
+  "organizationId" | "patientId" | "createdAt" | "updatedAt"
+> & { createdAt: string }
+
+/**
+ * Lo que «Quitar» sacó de un borrador (QA del 16 nov, B1e): sus opciones de antes y las
+ * líneas que salieron, con su precio. Queda en la auditoría del «Quitar», y «Deshacer» lo
+ * devuelve igual: a su opción, en su orden y con su precio, no como una indicación nueva.
+ */
+export interface BudgetRemovalSnapshot {
+  budgetId: string
+  options: BudgetOptionSnapshot[]
+  lines: BudgetLineSnapshot[]
+}
+
+/** Las opciones y líneas de un borrador, para guardar lo que se va a quitar. */
+export async function draftBudgetSnapshot(
+  tx: Db,
+  orgId: string,
+  budgetId: string,
+): Promise<Omit<BudgetRemovalSnapshot, "budgetId">> {
+  const options = await listOptions(tx, orgId, [budgetId])
+  const lines = await tx
+    .select()
+    .from(treatmentBudgetItem)
+    .where(
+      and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, budgetId)),
+    )
+  return {
+    options: options.map((option) => ({
+      id: option.id,
+      position: option.position,
+      isRecommended: option.isRecommended,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+    })),
+    lines: lines.map(({ organizationId: _org, patientId: _patient, updatedAt: _updated, createdAt, ...line }) => ({
+      ...line,
+      createdAt: createdAt.toISOString(),
+    })),
+  }
+}
+
+/**
+ * «Deshacer» de «Quitar»: devuelve al borrador lo que salió, tal como estaba. Las opciones
+ * que se fueron vuelven a su lugar (A sigue siendo A), con su nombre y la recomendada de
+ * antes, y cada línea a su opción con su precio. Si el borrador ya no es el mismo (se
+ * entregó, o tiene otra opción), no adivina: lo dice, y lo quitado sigue quitado.
+ */
+export async function restoreDraftBudget(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  snapshot: BudgetRemovalSnapshot,
+  opts: BudgetActorOpts = {},
+): Promise<void> {
+  await requirePatient(tx, orgId, patientId)
+  const current = await lockForWrite(tx, orgId, patientId, snapshot.budgetId)
+  await assertOwnBudget(tx, orgId, current.id, actorUserId, opts.memberRole)
+  if (current.status !== "borrador" || current.supersedesBudgetId) {
+    throw conflict("UNDO_BUDGET_GONE", "Su presupuesto ya se entregó: vuelve a indicarlo")
+  }
+  const options = await listOptions(tx, orgId, [current.id])
+  const before = new Map(snapshot.options.map((option) => [option.id, option]))
+  if (options.some((option) => !before.has(option.id))) {
+    throw conflict("UNDO_BUDGET_CHANGED", "El presupuesto cambió desde que lo quitaste: vuelve a indicarlo")
+  }
+  // Las que quedaron vuelven a su posición, de la última a la primera: cada una sube a un
+  // lugar ya libre (quitar solo las corrió hacia arriba) y el índice único no choca.
+  const moves = options
+    .map((option) => ({ id: option.id, from: option.position, to: before.get(option.id)!.position }))
+    .sort((a, b) => b.to - a.to)
+  for (const move of moves) {
+    if (move.from === move.to) continue
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ position: move.to, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, move.id)))
+  }
+  const kept = new Set(options.map((option) => option.id))
+  for (const option of snapshot.options.filter((row) => !kept.has(row.id))) {
+    await tx.insert(treatmentBudgetOption).values({
+      id: option.id,
+      organizationId: orgId,
+      patientId,
+      budgetId: current.id,
+      position: option.position,
+      isRecommended: false,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+      createdBy: actorUserId,
+    })
+  }
+  // La recomendada de antes (quitar la había pasado a la primera que quedó).
+  const recommended = snapshot.options.find((option) => option.isRecommended)
+  if (recommended) {
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: false, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, current.id)))
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ isRecommended: true, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, recommended.id)))
+  }
+  for (const { createdAt, ...line } of snapshot.lines) {
+    await tx.insert(treatmentBudgetItem).values({
+      ...line,
+      organizationId: orgId,
+      patientId,
+      budgetId: current.id,
+      createdAt: new Date(createdAt),
+    })
+  }
+  const itemIds = [...new Set(snapshot.lines.map((line) => line.planItemId))]
+  if (itemIds.length > 0) {
+    await tx
+      .update(treatmentPlanItem)
+      .set({ budgetId: current.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          inArray(treatmentPlanItem.id, itemIds),
+        ),
+      )
+  }
+  await audit(tx, orgId, actorUserId, "budget.items_restored", current.id, {
+    patientId,
+    itemIds,
+    lineCount: snapshot.lines.length,
+    options: snapshot.options.filter((row) => !kept.has(row.id)).map((row) => row.position),
+  })
+  await notifyBudget(tx, orgId)
+}
+
 // ---------------------------------------------------------------- entregar ---
 
 /**

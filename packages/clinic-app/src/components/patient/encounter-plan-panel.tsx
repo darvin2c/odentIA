@@ -43,7 +43,7 @@ import {
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
-import { removeIndicatedApi } from "../../lib/encounters"
+import { removeIndicatedApi, restoreIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
 import {
@@ -266,32 +266,16 @@ export function EncounterPlanPanel({
     await onChanged()
   }
   /**
-   * «Deshacer» de «Quitar» (QA del 10 nov, B12): quitar no se deshace en el servidor (lo quitado
-   * queda cancelado en la auditoría), así que se vuelve a indicar con lo mismo, por la misma
-   * operación de «Indicar»: servicio, sitio, hallazgo, diagnóstico, detalle y sesiones. Vuelve
-   * con el precio de la tarifa y sin la opción del presupuesto en que estaba.
+   * «Deshacer» de «Quitar» (QA del 10 nov, B12): el servidor devuelve el mismo tratamiento, a
+   * su opción del presupuesto, con su precio y en su orden (QA del 16 nov, B1e). Antes se
+   * volvía a indicar: entraba con la tarifa, fuera de su opción, y lo de la otra opción pasaba
+   * a «va después» de él.
    */
-  const indicateAgain = async (item: PlanItem) => {
-    if (!item.serviceId) return
-    const body: Record<string, unknown> = {
-      serviceId: item.serviceId,
-      sourceEncounterId: encounterId,
-      detail: item.detail,
-      diagnosisCode: item.diagnosisCode ?? null,
-      odontogramEntryId: item.odontogramEntryId ?? null,
-      ...(item.plannedSessions != null ? { plannedSessions: item.plannedSessions } : {}),
-    }
-    if (item.toothNumber != null) body.toothNumber = item.toothNumber
-    if (item.toothNumber != null && item.surfaces.length > 0) body.surfaces = item.surfaces
-    if (item.quadrant != null) body.quadrant = item.quadrant
-    if (item.arch) body.arch = item.arch
+  const restore = async (item: PlanItem) => {
     onPendingChange(true)
     try {
       await beforeWrite()
-      await apiFetch(`/api/patients/${patientId}/plan/items`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      })
+      await restoreIndicatedApi(patientId, encounterId, item.id)
       await refreshPlan()
       toast.success(`${item.title} vuelve a estar indicado`)
     } catch (err) {
@@ -313,9 +297,7 @@ export function EncounterPlanPanel({
       await refreshPlan()
       // Un clic lo quitaba sin vuelta atrás: el aviso ofrece «Deshacer», como al quitar una alergia.
       toast.success(removed ? `Quitado: ${removed.title}` : "Quitado", {
-        ...(removed?.serviceId
-          ? { action: { label: "Deshacer", onClick: () => void indicateAgain(removed) } }
-          : {}),
+        ...(removed ? { action: { label: "Deshacer", onClick: () => void restore(removed) } } : {}),
       })
     } catch (err) {
       setRowError({ itemId, message: submitErrorMessage(err) })

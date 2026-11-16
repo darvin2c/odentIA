@@ -88,6 +88,7 @@ import {
   reopenPlanItemForSession,
   requirePatient,
   restorePatientAllergy,
+  restoreRemovedInEncounter,
   retirePatientDocument,
   revokeDataConsent,
   ServiceError,
@@ -1800,6 +1801,26 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           {
             memberRole,
           },
+        ),
+      )
+      return { ok: true }
+    })
+  })
+  // «Deshacer» de «Quitar»: el mismo tratamiento vuelve, a su opción y con su precio.
+  app.post("/:id/encounters/:encounterId/indicated/:planItemId/restore", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const planItemId = z.uuid().safeParse(c.req.param("planItemId"))
+    if (!planItemId.success) return validationError(c, planItemId.error.issues)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        restoreRemovedInEncounter(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("encounterId"),
+          planItemId.data,
+          { memberRole },
         ),
       )
       return { ok: true }
