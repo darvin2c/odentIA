@@ -268,10 +268,12 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     materials: null,
     // La persona nueva: nunca se le preguntó por su salud; sin anestesia, nada más que decir.
     health: { gaps: ["allergies", "conditions", "medications", "asa"], anesthetics: [], risks: [], uses: [], asksAsa: true },
-    // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
-    sessions: { finishing: [], continuing: [], notRegistered: [], accepted: [] },
+    // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?» ni propone lo que va después.
+    sessions: { finishing: [], continuing: [], notRegistered: [], accepted: [], waiting: [], afterUnbooked: [] },
     // Sin tratamiento terminado hoy, no hay diagnóstico que resolver.
     resolvable: [],
+    // Sin caries y restauración en la misma cara, el cierre no lo avisa.
+    sameFace: [],
     // Sin formularios a medias, el cierre no avisa ninguno.
     openForms: [],
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
