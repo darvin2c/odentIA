@@ -1,0 +1,2 @@
+DROP INDEX "channel_connection_one_active_per_channel_uidx";--> statement-breakpoint
+CREATE UNIQUE INDEX "channel_connection_one_active_per_channel_uidx" ON "channel_connection" USING btree ("organization_id","channel") WHERE "status" = 'active' and "channel" = 'whatsapp';

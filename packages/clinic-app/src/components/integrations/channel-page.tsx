@@ -5,7 +5,12 @@ import { MessageCircle } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
-import { channelAccountRows, INTEGRATIONS, type PanelChannel, sinceWords } from "../../lib/integrations"
+import {
+  channelAccountRows,
+  INTEGRATIONS,
+  type PanelChannel,
+  sinceWords,
+} from "../../lib/integrations"
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
 import { SettingsNoAccess } from "../settings/no-access"
 import { ChannelPanel } from "./channel-panel"
@@ -50,8 +55,14 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
     openings.current += 1
     setOpen({ connectionId, opening: openings.current })
   }
-  const openRow = open?.connectionId ? [...active, ...disconnected].find((row) => row.connection?.id === open.connectionId) ?? null : null
-  const openGone = open?.connectionId != null && openRow === null && !listQuery.isFetching && listQuery.data !== undefined
+  const openRow = open?.connectionId
+    ? ([...active, ...disconnected].find((row) => row.connection?.id === open.connectionId) ?? null)
+    : null
+  const openGone =
+    open?.connectionId != null &&
+    openRow === null &&
+    !listQuery.isFetching &&
+    listQuery.data !== undefined
   useEffect(() => {
     if (openGone) setOpen(null)
   }, [openGone])
@@ -63,7 +74,12 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
     else if (openStatus) setTab("desconectados")
   }, [openStatus])
 
-  const header = <PageHeader title={name} subtitle={<IntegrationsCrumbWithText current={name} text={INTEGRATIONS[channel].purpose} />} />
+  const header = (
+    <PageHeader
+      title={name}
+      subtitle={<IntegrationsCrumbWithText current={name} text={INTEGRATIONS[channel].purpose} />}
+    />
+  )
   if (!canRead) {
     return (
       <div className="flex flex-col gap-4">
@@ -101,31 +117,50 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
               ]}
             />
           ) : null}
-          {tab === "conexion" ? (
-            hasActive ? (
-              <IntegrationBlock title="Conectada" note={`Solo una cuenta de ${name} a la vez: para conectar otra, primero desconecta esta.`}>
-                {active.map((row) => (
-                  <IntegrationRow
-                    key={row.key}
-                    row={row}
-                    open={open?.connectionId === row.connection?.id}
-                    actions={[
-                      {
-                        label: row.tone === "attention" ? "Revisar" : canWrite ? "Administrar" : "Ver",
-                        emphasis: row.tone === "attention" ? "primary" : "secondary",
-                        onSelect: () => show(row.connection?.id ?? null),
-                      },
-                    ]}
-                  />
-                ))}
-              </IntegrationBlock>
-            ) : canWrite ? (
-              <section aria-label={`Conecta ${name}`} className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4">
+          {tab === "conexion" && hasActive ? (
+            <IntegrationBlock title="Conectadas">
+              {active.map((row) => (
+                <IntegrationRow
+                  key={row.key}
+                  row={row}
+                  open={open?.connectionId === row.connection?.id}
+                  actions={[
+                    {
+                      label:
+                        row.tone === "attention" ? "Revisar" : canWrite ? "Administrar" : "Ver",
+                      emphasis: row.tone === "attention" ? "primary" : "secondary",
+                      onSelect: () => show(row.connection?.id ?? null),
+                    },
+                  ]}
+                />
+              ))}
+            </IntegrationBlock>
+          ) : null}
+          {tab === "conexion" && hasActive && canWrite ? (
+            // Como varios buzones de correo: otra cuenta se suma a las que ya están.
+            <Button
+              type="button"
+              variant="outline"
+              className="self-start"
+              onClick={() => show(null)}
+            >
+              Conectar otra cuenta
+            </Button>
+          ) : null}
+          {tab === "conexion" && !hasActive ? (
+            canWrite ? (
+              <section
+                aria-label={`Conecta ${name}`}
+                className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4"
+              >
                 <div className="flex flex-col gap-1">
                   <h2 className="text-base font-semibold">Conecta {name}</h2>
                   <p className="text-sm text-muted-foreground">
-                    <strong className="font-semibold text-foreground">Para conectar:</strong> {INTEGRATIONS[channel].toConnect}
-                    {disconnected.length > 0 ? " También puedes volver a conectar una cuenta anterior en «Desconectados»." : null}
+                    <strong className="font-semibold text-foreground">Para conectar:</strong>{" "}
+                    {INTEGRATIONS[channel].toConnect}
+                    {disconnected.length > 0
+                      ? " También puedes volver a conectar una cuenta anterior en «Desconectados»."
+                      : null}
                   </p>
                 </div>
                 <Button type="button" className="self-start" onClick={() => show(null)}>
@@ -139,18 +174,25 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
                 description="Lo conecta quien administra la clínica."
               />
             )
-          ) : (
+          ) : null}
+          {tab === "desconectados" ? (
             <IntegrationBlock title="Desconectados" note="Sus conversaciones siguen en la Bandeja.">
               {disconnected.map((row) => (
                 <IntegrationRow
                   key={row.key}
                   row={row}
                   open={open?.connectionId === row.connection?.id}
-                  actions={[{ label: canWrite ? "Administrar" : "Ver", emphasis: "secondary", onSelect: () => show(row.connection?.id ?? null) }]}
+                  actions={[
+                    {
+                      label: canWrite ? "Administrar" : "Ver",
+                      emphasis: "secondary",
+                      onSelect: () => show(row.connection?.id ?? null),
+                    },
+                  ]}
                 />
               ))}
             </IntegrationBlock>
-          )}
+          ) : null}
           {listQuery.data === undefined ? <IntegrationRowsSkeleton rows={1} /> : null}
         </>
       )}
@@ -163,7 +205,6 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
           row={openRow}
           loading={open.connectionId !== null && openRow === null}
           canWrite={canWrite}
-          otherActive={openRow?.connection?.status !== "active" && hasActive}
           onClose={() => setOpen(null)}
           onConnected={(connectionId) => {
             setOpen({ ...open, connectionId })

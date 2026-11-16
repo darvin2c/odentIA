@@ -850,16 +850,19 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect(shown.data.find((item) => item.id === manual!.id)?.ownApp?.registeredAt).toBeNull()
   })
 
-  it("la base no deja dos cuentas activas del mismo canal en una clínica, aunque se escriban a la vez", async () => {
+  it("la base no deja dos WhatsApp activos en una clínica, aunque se escriban a la vez; los demás canales admiten varios", async () => {
     await newOrg("org_r")
-    const values = (n: number) => ({
-      organizationId: "org_r", channel: "telegram", provider: "telegram_bot_api", displayName: `Bot ${n}`,
-      configEncrypted: "c", webhookSecret: `s-${n}`, status: "active",
+    const wa = (n: number, status = "active") => ({
+      organizationId: "org_r", channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: `WA ${n}`,
+      externalId: `wa-r-${n}`, configEncrypted: "c", webhookSecret: `w-${n}`, status,
     })
-    await ownerDb.insert(channelConnection).values(values(1))
-    await expect(ownerDb.insert(channelConnection).values(values(2))).rejects.toThrow()
-    // Desconectada, la segunda sí entra; y el correo admite varios buzones.
-    await ownerDb.insert(channelConnection).values({ ...values(3), status: "disabled" })
+    await ownerDb.insert(channelConnection).values(wa(1))
+    await expect(ownerDb.insert(channelConnection).values(wa(2))).rejects.toThrow()
+    // Desconectado, el segundo sí entra.
+    await ownerDb.insert(channelConnection).values(wa(3, "disabled"))
+    // Telegram, Messenger, Instagram y el correo: varias cuentas activas a la vez.
+    const bot = (n: number) => ({ organizationId: "org_r", channel: "telegram", provider: "telegram_bot_api", displayName: `Bot ${n}`, configEncrypted: "c", webhookSecret: `t-${n}`, status: "active" })
+    await ownerDb.insert(channelConnection).values([bot(1), bot(2)])
     const mail = (n: number) => ({ organizationId: "org_r", channel: "email", provider: "gmail", displayName: `buzon${n}@x.test`, externalId: `buzon${n}@x.test`, configEncrypted: "c", webhookSecret: `m-${n}`, status: "active" })
     await ownerDb.insert(channelConnection).values([mail(1), mail(2)])
   })

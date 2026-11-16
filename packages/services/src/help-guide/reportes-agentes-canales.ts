@@ -274,7 +274,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "canales-administrar",
         q: "¿Cómo desconecto Instagram, Messenger o Telegram?",
-        a: "En Configuración › Integraciones, entra al canal y, en «Conexión», «Administrar» en su cuenta: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan. La cuenta pasa a la pestaña «Desconectados», donde «Volver a conectar» la retoma. Cada canal tiene una sola cuenta activa: para usar otra, primero desconecta la que está. Ahí también «Probar» dice si la cuenta responde y «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
+        a: "En Configuración › Integraciones, entra al canal y, en «Conexión», «Administrar» en su cuenta: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan. La cuenta pasa a la pestaña «Desconectados», donde «Volver a conectar» la retoma. Instagram, Messenger y Telegram admiten varias cuentas a la vez («Conectar otra cuenta»); WhatsApp, uno solo. Ahí también «Probar» dice si la cuenta responde y «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
         forms: ["como desconecto instagram", "como se si telegram funciona", "cambie la clave en meta donde la pongo", "puedo tener dos cuentas de instagram", "cuantos whatsapp puedo conectar"],
       },
       {

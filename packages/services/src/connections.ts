@@ -762,20 +762,17 @@ export async function assertSingleWhatsApp(
 }
 
 /**
- * Los canales de mensajería que tienen una sola cuenta activa por clínica. El
- * correo no está: una clínica puede tener varios buzones (recepción, citas).
+ * El único canal con una sola cuenta activa por clínica: por WhatsApp sale lo
+ * automático (recordatorios, avisos, el agente). Instagram, Messenger, Telegram
+ * y el correo admiten varias, como varios buzones.
  */
 const SINGLE_ACTIVE_CHANNELS: Record<string, string> = {
   whatsapp: "La clínica ya tiene un WhatsApp conectado («{name}»). Para usar otro número, desconecta primero ese.",
-  instagram: "La clínica ya tiene un Instagram conectado («{name}»). Para usar otra cuenta, desconecta primero esa.",
-  messenger: "La clínica ya tiene una página de Messenger conectada («{name}»). Para usar otra, desconecta primero esa.",
-  telegram: "La clínica ya tiene un bot de Telegram conectado («{name}»). Para usar otro, desconecta primero ese.",
 }
 
 /**
- * Una cuenta activa por canal de mensajería: la pantalla muestra «tu WhatsApp»,
- * «tu Instagram»; para usar otra se desconecta antes la actual (sus
- * conversaciones se conservan). `exceptId` es la conexión que se está
+ * Un solo WhatsApp activo por clínica: para usar otro número se desconecta antes
+ * el actual (sus conversaciones se conservan). Los demás canales no tienen tope. `exceptId` es la conexión que se está
  * reactivando; `exceptExternalId`, la cuenta que se intenta conectar.
  */
 export async function assertSingleActive(
