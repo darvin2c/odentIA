@@ -55,6 +55,13 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
   useEffect(() => {
     if (openGone) setOpen(null)
   }, [openGone])
+  // La cuenta abierta se desconectó o volvió a conectarse: la pestaña la sigue, para que al
+  // cerrar el panel siga a la vista.
+  const openStatus = openRow?.connection?.status
+  useEffect(() => {
+    if (openStatus === "active") setTab("conexion")
+    else if (openStatus) setTab("desconectados")
+  }, [openStatus])
 
   const header = <PageHeader title={name} subtitle={<IntegrationsCrumbWithText current={name} text={INTEGRATIONS[channel].purpose} />} />
   if (!canRead) {

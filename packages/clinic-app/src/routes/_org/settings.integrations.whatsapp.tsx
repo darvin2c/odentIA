@@ -2,7 +2,7 @@ import { EmptyState, ErrorState, PageHeader, SkeletonRegion, ViewTabs } from "@o
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { WhatsAppConnect } from "../../components/integrations/whatsapp/connect"
 import { WhatsAppConnection } from "../../components/integrations/whatsapp/connection"
@@ -72,6 +72,27 @@ function WhatsAppPage() {
   }, [offering])
   // De vuelta del panel con la conexión hecha con el botón: se dice como si se hubiera hecho aquí.
   // Lo pendiente y los mensajes los lee la tarjeta del servidor; `conectado` solo dice cuál fue.
+  // Un número se desconectó o volvió a conectarse: su tarjeta cambia de pestaña. La página
+  // lo dice arriba y muestra la pestaña donde quedó, para que no desaparezca sin explicación.
+  const [moved, setMoved] = useState<string | null>(null)
+  const statuses = useRef<Map<string, string> | null>(null)
+  useEffect(() => {
+    if (listQuery.data === undefined) return
+    const now = new Map(connections.map((connection) => [connection.id, connection.status]))
+    const before = statuses.current
+    statuses.current = now
+    if (!before) return
+    for (const [id, status] of now) {
+      const was = before.get(id)
+      if (!was || was === status) continue
+      if (status === "active") {
+        setTab("conexion")
+        setMoved("WhatsApp volvió a conectarse.")
+      } else {
+        setMoved("WhatsApp quedó desconectado. Sus conversaciones se guardan; el número está en «Desconectados».")
+      }
+    }
+  }, [connections, listQuery.data])
   // Sin desconectados no hay pestaña que ver.
   useEffect(() => {
     if (disconnected.length === 0 && tab === "desconectados") setTab("conexion")
@@ -132,6 +153,11 @@ function WhatsAppPage() {
         )
       ) : (
         <>
+          {moved ? (
+            <p role="status" className="text-sm font-medium text-success">
+              {moved}
+            </p>
+          ) : null}
           {disconnected.length > 0 ? (
             <ViewTabs
               label="Qué ver de WhatsApp"
@@ -172,6 +198,13 @@ function WhatsAppPage() {
           {/* Con un número conectado no se ofrece otro: lo automático sale por uno solo y una conexión
               no pertenece a una sede. Quien lo desconecta puede conectar otro; el anterior queda en «Desconectados». */}
           {tab === "conexion" && canWrite && connectOpen && offerConnect ? connect : null}
+          {tab === "conexion" && activeCount === 0 && !canWrite ? (
+            <EmptyState
+              icon={MessageCircle}
+              title="WhatsApp no está conectado"
+              description="Lo conecta quien administra la clínica. Los números anteriores están en «Desconectados»."
+            />
+          ) : null}
         </>
       )}
     </div>
