@@ -548,7 +548,7 @@
       "id": "voz-v03-1",
       "texto": "Sí señor este paciente que viene a su control de ortodoncia va en el primer año de tratamiento prefiere que hace como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
       "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"], "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "revisarCon": { "ficha-de-ortodoncia.overjet": 7 }, "noEnNota": ["te duele", "uñas", "boca abierta"] }
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"], "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "revisarCon": { "ficha-de-ortodoncia.overjet": 7 }, "noEnNota": ["te duele", "uñas", "boca abierta"], "avisar": ["ficha-de-ortodoncia.overjet"] }
     },
     {
       "id": "voz-v03-2",
@@ -598,7 +598,7 @@
       "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
       "previas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" },
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
-      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"] }
+      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"], "avisar": ["evaluacion-de-endodoncia.sondaje"] }
     },
     {
       "id": "voz-v08-1",
@@ -628,7 +628,7 @@
       "id": "voz-v10-1",
       "texto": "niño de 4 años primera consulta la mamá refiere que le duelen las muelitas cuando come dulces peso 15 kg y medio sé o d cinco cariados dos con extracción indicada ser obturados",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 15.5, "ficha-de-odontopediatria.ceod_c": 5, "ficha-de-odontopediatria.ceod_e": 2 } },
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 15.5, "ficha-de-odontopediatria.ceod_c": 5, "ficha-de-odontopediatria.ceod_e": 2 }, "avisar": ["ficha-de-odontopediatria.ceod_o"] },
       "ignora": ["ficha-de-odontopediatria.ceod_o"]
     },
     {
@@ -707,6 +707,24 @@
       "notasPrevias": ["Paciente refiere que el diente se le ha ido poniendo oscuro tras un golpe."],
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
       "espera": { "fichas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" }, "noEnNota": ["oscuro"] }
+    },
+    {
+      "id": "voz-c7-v07-3",
+      "texto": "sin respuesta también percusión negativa palpación positiva",
+      "contexto": "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
+      "previas": {"evaluacion-de-endodoncia.pieza": 21, "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.frio": "Sin respuesta"},
+      "notasPrevias": ["Evaluación de endodoncia", "Paciente refiere un golpe y que el diente se le ha ido poniendo oscuro.", "Hace 2 años"],
+      "fichas": [{"ficha": "evaluacion-de-endodoncia"}],
+      "espera": {"fichas": {"evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva"}}
+    },
+    {
+      "id": "voz-c7-v07-4",
+      "texto": "sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico",
+      "contexto": "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor sin respuesta también percusión negativa palpación positiva",
+      "previas": {"evaluacion-de-endodoncia.pieza": 21, "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.frio": "Sin respuesta", "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva"},
+      "notasPrevias": ["Evaluación de endodoncia", "Paciente refiere un golpe y que el diente se le ha ido poniendo oscuro.", "Hace 2 años"],
+      "fichas": [{"ficha": "evaluacion-de-endodoncia"}],
+      "espera": {"fichas": {"evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico"}, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"], "avisar": ["evaluacion-de-endodoncia.sondaje"]}
     },
     {
       "id": "voz-v13-1-clase-sin-division",

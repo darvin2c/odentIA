@@ -149,6 +149,8 @@ export interface DictationDraft {
    * (`formNetMisses`): si calza queda por revisar, y si no, la oración sigue avisada.
    */
   reread?: boolean
+  /** Una respuesta de varias opciones que Clío citó en pedazos con «...», cada uno tal cual en lo dictado (`FormAnswerDraft`). */
+  pieces?: string[]
 }
 
 export interface DictationSuggestion {
