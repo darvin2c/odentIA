@@ -1,0 +1,35 @@
+Hoy es lunes, 16 de noviembre de 2026, 2026-11-16T15:00:00.000Z (zona America/Lima).
+
+Ya ordenado antes en este dictado (no lo registres otra vez):
+«Overjet de seis milímetros.»
+
+Sugerencias pendientes de este dictado:
+1. Fichas · Overjet: 6 mm
+
+Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.
+- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).
+- Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.
+- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.
+- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.
+- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta. Lo demás que dijo (lo que siente el paciente, desde cuándo, lo que se hizo) sí va en la consulta, como siempre.
+- Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.
+- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.
+- Lo dictado viene del reconocimiento de voz del navegador y puede traer mal escritos los términos de estas preguntas: con otra letra que suena igual (b o v; s, c o z; ll o y; sin la h), una sigla con espacios entre sus letras, una palabra en inglés escrita como suena u otra parecida. Léelos por cómo suenan cuando no haya duda de cuál es. En `dicho` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.
+- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.
+Ficha de ortodoncia:
+1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
+2. Clase molar izquierda (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
+3. Clase canina derecha · una opción: Clase I | Clase II | Clase III
+4. Clase canina izquierda · una opción: Clase I | Clase II | Clase III
+5. Overjet · número en mm, de -10 a 20 · ya dice «6 mm»
+6. Overbite · número en mm, de -10 a 15
+7. Línea media superior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
+8. Desviación de la línea media superior · número en mm, de 0 a 15
+9. Línea media inferior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
+10. Desviación de la línea media inferior · número en mm, de 0 a 15
+11. Mordida cruzada · varias opciones: No tiene | Anterior | Posterior derecha | Posterior izquierda
+12. Apiñamiento · una opción: No | Leve | Moderado | Severo
+13. Hábitos · varias opciones: Ninguno | Succión digital | Respiración bucal | Deglución atípica | Onicofagia | Bruxismo
+
+Lo nuevo que dictó:
+«Overbite de dos.»
