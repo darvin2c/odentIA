@@ -1,8 +1,8 @@
-import { EmptyState, ErrorState, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { WhatsAppConnect } from "../../components/integrations/whatsapp/connect"
 import { WhatsAppConnection } from "../../components/integrations/whatsapp/connection"
@@ -48,6 +48,8 @@ function WhatsAppPage() {
   const canWrite = usePermission("settings.write")
   const [fresh, setFresh] = useState<Fresh | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
+  // Abre siempre en «Conexión»: lo de hoy. Lo desconectado va aparte para no interrumpir.
+  const [tab, setTab] = useState<"conexion" | "desconectados">("conexion")
 
   const listQuery = useQuery({
     queryKey: ["connections"],
@@ -59,6 +61,8 @@ function WhatsAppPage() {
     () => whatsappNumbers((listQuery.data?.data ?? []).filter((connection) => connection.channel === "whatsapp")),
     [listQuery.data],
   )
+  const activeConnections = connections.filter((connection) => connection.status === "active")
+  const disconnected = connections.filter((connection) => connection.status !== "active")
   const offering = listQuery.data !== undefined && offerConnect
   // Sin ningún número conectado la página ofrece conectar uno: la clínica sin números y la que
   // desconectó el suyo, que así puede poner otro. El bloque sigue montado hasta que el intento
@@ -68,9 +72,35 @@ function WhatsAppPage() {
   }, [offering])
   // De vuelta del panel con la conexión hecha con el botón: se dice como si se hubiera hecho aquí.
   // Lo pendiente y los mensajes los lee la tarjeta del servidor; `conectado` solo dice cuál fue.
+  // Un número se desconectó o volvió a conectarse: su tarjeta cambia de pestaña. La página
+  // lo dice arriba y muestra la pestaña donde quedó, para que no desaparezca sin explicación.
+  const [moved, setMoved] = useState<string | null>(null)
+  const statuses = useRef<Map<string, string> | null>(null)
+  useEffect(() => {
+    if (listQuery.data === undefined) return
+    const now = new Map(connections.map((connection) => [connection.id, connection.status]))
+    const before = statuses.current
+    statuses.current = now
+    if (!before) return
+    for (const [id, status] of now) {
+      const was = before.get(id)
+      if (!was || was === status) continue
+      if (status === "active") {
+        setTab("conexion")
+        setMoved("WhatsApp volvió a conectarse.")
+      } else {
+        setMoved("WhatsApp quedó desconectado. Sus conversaciones se guardan; el número está en «Desconectados».")
+      }
+    }
+  }, [connections, listQuery.data])
+  // Sin desconectados no hay pestaña que ver.
+  useEffect(() => {
+    if (disconnected.length === 0 && tab === "desconectados") setTab("conexion")
+  }, [disconnected.length, tab])
   useEffect(() => {
     if (!conectado || listQuery.data === undefined) return
     if (connections.some((connection) => connection.id === conectado)) {
+      setTab("conexion")
       setConnectOpen(false)
       setFresh({ result: { id: conectado }, byButton: true, read: true })
     }
@@ -88,7 +118,7 @@ function WhatsAppPage() {
 
   const connect = (
     <WhatsAppConnect
-      another={connections.length > 0}
+      another={activeCount > 0}
       onCreated={(result) => {
         setConnectOpen(false)
         setFresh({ result, byButton: false, read: false })
@@ -123,7 +153,23 @@ function WhatsAppPage() {
         )
       ) : (
         <>
-          {connections.map((connection) => {
+          {moved ? (
+            <p role="status" className="text-sm font-medium text-success">
+              {moved}
+            </p>
+          ) : null}
+          {disconnected.length > 0 ? (
+            <ViewTabs
+              label="Qué ver de WhatsApp"
+              value={tab}
+              onValueChange={setTab}
+              options={[
+                { value: "conexion", label: "Conexión" },
+                { value: "desconectados", label: "Desconectados", count: disconnected.length },
+              ]}
+            />
+          ) : null}
+          {(tab === "conexion" ? activeConnections : disconnected).map((connection) => {
             const own = fresh?.result.id === connection.id ? fresh : null
             return (
               <WhatsAppConnection
@@ -141,9 +187,24 @@ function WhatsAppPage() {
               />
             )
           })}
+          {tab === "conexion" && activeCount > 0 && canWrite ? (
+            <p className="text-sm text-muted-foreground">
+              Solo un WhatsApp a la vez: para conectar otro número, primero desconecta este. Sus conversaciones se guardan.
+            </p>
+          ) : null}
+          {tab === "desconectados" && activeCount === 0 && canWrite ? (
+            <p className="text-sm text-muted-foreground">Vuelve a conectar uno de estos números, o conecta otro en «Conexión».</p>
+          ) : null}
           {/* Con un número conectado no se ofrece otro: lo automático sale por uno solo y una conexión
-              no pertenece a una sede. Quien lo desconecta puede conectar otro; el anterior queda de historial. */}
-          {canWrite && connectOpen && offerConnect ? connect : null}
+              no pertenece a una sede. Quien lo desconecta puede conectar otro; el anterior queda en «Desconectados». */}
+          {tab === "conexion" && canWrite && connectOpen && offerConnect ? connect : null}
+          {tab === "conexion" && activeCount === 0 && !canWrite ? (
+            <EmptyState
+              icon={MessageCircle}
+              title="WhatsApp no está conectado"
+              description="Lo conecta quien administra la clínica. Los números anteriores están en «Desconectados»."
+            />
+          ) : null}
         </>
       )}
     </div>

@@ -24,7 +24,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import { getPatientRegistrationConfig, registerFromConversation, savePatientRegistrationConfig } from "./patient-registration.js"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { activeConnectionId, appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 beforeAll(async () => {
@@ -73,6 +73,8 @@ function textEvent(sender: string, eventId: string, text: string): NormalizedInb
 }
 
 async function connectionId(): Promise<string> {
+  const existing = await activeConnectionId(ORG, "telegram")
+  if (existing) return existing
   return withOrgContext(appDb, ORG, (tx) =>
     createConnection(tx, ORG, KEY,
       { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },

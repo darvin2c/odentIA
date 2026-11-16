@@ -4,6 +4,7 @@ import type { ConnectionItem } from "./crm"
 import {
   awaitsAddress,
   CHANNEL_SETUP,
+  channelAccountRows,
   channelRows,
   type MailState,
   mailNotice,
@@ -73,23 +74,21 @@ describe("mensajería", () => {
     expect(rowShortWord(rows[1]!)).toEqual({ text: "Sin conectar", tone: "muted" })
   })
 
-  it("WhatsApp conectado dice su número, su última actividad y lo que pide revisión", () => {
-    const [whatsapp] = channelRows(
-      [
-        connection({
-          lastInboundAt: minutesAgo(12),
-          health: { number: "+51 999 000 111", name: "Clínica Dental Smile", quality: "alta", dailyLimit: 1000 },
-          messages: { aprobados: 6, enRevision: 1, rechazados: 1, pausados: 0 },
-        }),
-      ],
-      since,
-    )
+  it("WhatsApp conectado dice su última actividad y lo que pide revisión; su número, al entrar", () => {
+    const connected = connection({
+      lastInboundAt: minutesAgo(12),
+      health: { number: "+51 999 000 111", name: "Clínica Dental Smile", quality: "alta", dailyLimit: 1000 },
+      messages: { aprobados: 6, enRevision: 1, rechazados: 1, pausados: 0 },
+    })
+    const [whatsapp] = channelRows([connected], since)
+    // La lista muestra el proveedor, no la cuenta: el número se ve al entrar.
+    expect(channelAccountRows([connected], "whatsapp", since).active[0]?.detail).toMatchObject({ account: "+51 999 000 111" })
     expect(whatsapp).toMatchObject({
       tone: "ok",
       status: "Conectado",
       detail: {
         kind: "account",
-        account: "+51 999 000 111",
+        account: null,
         activity: "último mensaje hace 12 minutos · 6 mensajes aprobados · 1 en revisión",
       },
       review: [{ label: "1 mensaje rechazado", short: "1 rechazado", tone: "danger" }],
@@ -102,7 +101,7 @@ describe("mensajería", () => {
     expect(whatsapp).toMatchObject({
       status: "Conectado",
       review: [],
-      detail: { kind: "account", account: "Clínica", activity: null },
+      detail: { kind: "account", account: null, activity: null },
       problem: null,
     })
     // Con el dato en `null` sí se sabe: todavía no llegó nada.
@@ -110,11 +109,21 @@ describe("mensajería", () => {
     expect(quiet?.detail).toMatchObject({ activity: "todavía no llegó ningún mensaje" })
   })
 
-  it("una fila por conexión del mismo canal", () => {
-    const rows = channelRows([connection({ id: "a" }), connection({ id: "b", displayName: "Sede Norte" })], since)
-    expect(rows.filter((row) => row.channel === "whatsapp").map((row) => row.connection?.id)).toEqual(["a", "b"])
-    expect(rows).toHaveLength(5)
-    expect(new Set(rows.map((row) => row.key)).size).toBe(5)
+  it("una fila por proveedor: la cuenta activa manda y lo desconectado no cambia la fila", () => {
+    const rows = channelRows(
+      [connection({ id: "viejo", displayName: "Sede Norte", status: "disabled" }), connection({ id: "a" })],
+      since,
+    )
+    expect(rows.map((row) => row.channel)).toEqual(["whatsapp", "instagram", "messenger", "telegram"])
+    expect(rows[0]).toMatchObject({ connection: { id: "a" }, status: "Conectado" })
+    expect(new Set(rows.map((row) => row.key)).size).toBe(4)
+    // Solo desconectadas: el proveedor se ofrece para conectar, como si no tuviera ninguna.
+    const [onlyOld] = channelRows([connection({ id: "viejo", status: "disabled" })], since)
+    expect(onlyOld).toMatchObject({ connection: null, status: "Sin conectar", detail: { kind: "connect" } })
+    // Al entrar, cada cuenta en su lugar.
+    const accounts = channelAccountRows([connection({ id: "viejo", status: "disabled" }), connection({ id: "a" })], "whatsapp", since)
+    expect(accounts.active.map((row) => row.connection?.id)).toEqual(["a"])
+    expect(accounts.disconnected.map((row) => row.connection?.id)).toEqual(["viejo"])
   })
 
   it("un WhatsApp que Meta desconectó pide atención y dice que hay que volver a conectarlo", () => {
@@ -167,9 +176,11 @@ describe("mensajería", () => {
   })
 
   it("una conexión desconectada conserva su cuenta y dice que no funciona", () => {
-    const row = channelRows([connection({ channel: "telegram", provider: "telegram_bot_api", displayName: "@clinica_bot", status: "disabled" })], since).find(
-      (item) => item.channel === "telegram",
-    )
+    const [row] = channelAccountRows(
+      [connection({ channel: "telegram", provider: "telegram_bot_api", displayName: "@clinica_bot", status: "disabled" })],
+      "telegram",
+      since,
+    ).disconnected
     expect(row).toMatchObject({
       tone: "off",
       status: "Desconectado",
@@ -178,9 +189,7 @@ describe("mensajería", () => {
   })
 
   it("un nombre igual al del canal no identifica la cuenta: se muestra su identificador", () => {
-    const row = channelRows([connection({ channel: "telegram", displayName: "Telegram", externalId: "@clinica_bot" })], since).find(
-      (item) => item.channel === "telegram",
-    )
+    const [row] = channelAccountRows([connection({ channel: "telegram", displayName: "Telegram", externalId: "@clinica_bot" })], "telegram", since).active
     expect(row?.detail).toMatchObject({ account: "@clinica_bot" })
   })
 

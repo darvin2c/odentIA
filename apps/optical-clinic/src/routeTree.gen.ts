@@ -80,6 +80,9 @@ import { Route as SettingsDotteamRouteImport } from './../../../packages/clinic-
 import { Route as SettingsDotwebchatRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.webchat'
 import { Route as ResumenLunesDotbajaDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/resumen-lunes.baja.$token'
 import { Route as SettingsDotintegrationsDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.index'
+import { Route as SettingsDotintegrationsDotinstagramRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.instagram'
+import { Route as SettingsDotintegrationsDotmessengerRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.messenger'
+import { Route as SettingsDotintegrationsDottelegramRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.telegram'
 import { Route as SettingsDotintegrationsDotwebchatRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.webchat'
 import { Route as SettingsDotintegrationsDotwhatsappRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.integrations.whatsapp'
 import { Route as SettingsDotplanDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.plan.index'
@@ -488,6 +491,24 @@ const SettingsDotintegrationsDotindexRoute =
     path: '/integrations/',
     getParentRoute: () => SettingsRoute,
   } as any)
+const SettingsDotintegrationsDotinstagramRoute =
+  SettingsDotintegrationsDotinstagramRouteImport.update({
+    id: '/integrations/instagram',
+    path: '/integrations/instagram',
+    getParentRoute: () => SettingsRoute,
+  } as any)
+const SettingsDotintegrationsDotmessengerRoute =
+  SettingsDotintegrationsDotmessengerRouteImport.update({
+    id: '/integrations/messenger',
+    path: '/integrations/messenger',
+    getParentRoute: () => SettingsRoute,
+  } as any)
+const SettingsDotintegrationsDottelegramRoute =
+  SettingsDotintegrationsDottelegramRouteImport.update({
+    id: '/integrations/telegram',
+    path: '/integrations/telegram',
+    getParentRoute: () => SettingsRoute,
+  } as any)
 const SettingsDotintegrationsDotwebchatRoute =
   SettingsDotintegrationsDotwebchatRouteImport.update({
     id: '/integrations/webchat',
@@ -614,6 +635,9 @@ export interface FileRoutesByFullPath {
   '/people/': typeof PeopleDotindexRoute
   '/services/': typeof ServicesDotindexRoute
   '/settings/': typeof SettingsDotindexRoute
+  '/settings/integrations/instagram': typeof SettingsDotintegrationsDotinstagramRoute
+  '/settings/integrations/messenger': typeof SettingsDotintegrationsDotmessengerRoute
+  '/settings/integrations/telegram': typeof SettingsDotintegrationsDottelegramRoute
   '/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
   '/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
   '/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
@@ -693,6 +717,9 @@ export interface FileRoutesByTo {
   '/people': typeof PeopleDotindexRoute
   '/services': typeof ServicesDotindexRoute
   '/settings': typeof SettingsDotindexRoute
+  '/settings/integrations/instagram': typeof SettingsDotintegrationsDotinstagramRoute
+  '/settings/integrations/messenger': typeof SettingsDotintegrationsDotmessengerRoute
+  '/settings/integrations/telegram': typeof SettingsDotintegrationsDottelegramRoute
   '/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
   '/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
   '/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
@@ -776,6 +803,9 @@ export interface FileRoutesById {
   '/_org/people/': typeof PeopleDotindexRoute
   '/_org/services/': typeof ServicesDotindexRoute
   '/_org/settings/': typeof SettingsDotindexRoute
+  '/_org/settings/integrations/instagram': typeof SettingsDotintegrationsDotinstagramRoute
+  '/_org/settings/integrations/messenger': typeof SettingsDotintegrationsDotmessengerRoute
+  '/_org/settings/integrations/telegram': typeof SettingsDotintegrationsDottelegramRoute
   '/_org/settings/integrations/webchat': typeof SettingsDotintegrationsDotwebchatRoute
   '/_org/settings/integrations/whatsapp': typeof SettingsDotintegrationsDotwhatsappRoute
   '/_org/settings/plan/acciones': typeof SettingsDotplanDotaccionesRoute
@@ -859,6 +889,9 @@ export interface FileRouteTypes {
     | '/people/'
     | '/services/'
     | '/settings/'
+    | '/settings/integrations/instagram'
+    | '/settings/integrations/messenger'
+    | '/settings/integrations/telegram'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
     | '/settings/plan/acciones'
@@ -938,6 +971,9 @@ export interface FileRouteTypes {
     | '/people'
     | '/services'
     | '/settings'
+    | '/settings/integrations/instagram'
+    | '/settings/integrations/messenger'
+    | '/settings/integrations/telegram'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
     | '/settings/plan/acciones'
@@ -1020,6 +1056,9 @@ export interface FileRouteTypes {
     | '/_org/people/'
     | '/_org/services/'
     | '/_org/settings/'
+    | '/_org/settings/integrations/instagram'
+    | '/_org/settings/integrations/messenger'
+    | '/_org/settings/integrations/telegram'
     | '/_org/settings/integrations/webchat'
     | '/_org/settings/integrations/whatsapp'
     | '/_org/settings/plan/acciones'
@@ -1550,6 +1589,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDotintegrationsDotindexRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_org/settings/integrations/instagram': {
+      id: '/_org/settings/integrations/instagram'
+      path: '/integrations/instagram'
+      fullPath: '/settings/integrations/instagram'
+      preLoaderRoute: typeof SettingsDotintegrationsDotinstagramRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/_org/settings/integrations/messenger': {
+      id: '/_org/settings/integrations/messenger'
+      path: '/integrations/messenger'
+      fullPath: '/settings/integrations/messenger'
+      preLoaderRoute: typeof SettingsDotintegrationsDotmessengerRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/_org/settings/integrations/telegram': {
+      id: '/_org/settings/integrations/telegram'
+      path: '/integrations/telegram'
+      fullPath: '/settings/integrations/telegram'
+      preLoaderRoute: typeof SettingsDotintegrationsDottelegramRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_org/settings/integrations/webchat': {
       id: '/_org/settings/integrations/webchat'
       path: '/integrations/webchat'
@@ -1651,6 +1711,9 @@ interface SettingsRouteChildren {
   SettingsDotteamRoute: typeof SettingsDotteamRoute
   SettingsDotwebchatRoute: typeof SettingsDotwebchatRoute
   SettingsDotindexRoute: typeof SettingsDotindexRoute
+  SettingsDotintegrationsDotinstagramRoute: typeof SettingsDotintegrationsDotinstagramRoute
+  SettingsDotintegrationsDotmessengerRoute: typeof SettingsDotintegrationsDotmessengerRoute
+  SettingsDotintegrationsDottelegramRoute: typeof SettingsDotintegrationsDottelegramRoute
   SettingsDotintegrationsDotwebchatRoute: typeof SettingsDotintegrationsDotwebchatRoute
   SettingsDotintegrationsDotwhatsappRoute: typeof SettingsDotintegrationsDotwhatsappRoute
   SettingsDotplanDotaccionesRoute: typeof SettingsDotplanDotaccionesRoute
@@ -1677,6 +1740,12 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDotteamRoute: SettingsDotteamRoute,
   SettingsDotwebchatRoute: SettingsDotwebchatRoute,
   SettingsDotindexRoute: SettingsDotindexRoute,
+  SettingsDotintegrationsDotinstagramRoute:
+    SettingsDotintegrationsDotinstagramRoute,
+  SettingsDotintegrationsDotmessengerRoute:
+    SettingsDotintegrationsDotmessengerRoute,
+  SettingsDotintegrationsDottelegramRoute:
+    SettingsDotintegrationsDottelegramRoute,
   SettingsDotintegrationsDotwebchatRoute:
     SettingsDotintegrationsDotwebchatRoute,
   SettingsDotintegrationsDotwhatsappRoute:
