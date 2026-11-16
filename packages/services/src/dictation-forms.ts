@@ -781,6 +781,18 @@ function saysValue(question: DictationFormQuestion, sentence: string): boolean {
   )
 }
 
+/**
+ * Lo dicho sin el máximo de la escala que va tras otro número: en «seis de diez» el diez dice sobre
+ * cuánto es, no la respuesta (medición del 16 nov: Clío propuso 6 y 10 con la misma frase, y quedaba el
+ * 10). Solo detrás de un número: «overjet de 20» sí dice 20.
+ */
+function withoutOutOf(text: string, max: number | null): string {
+  if (max === null) return text
+  return text.replace(/(\S+)\s+(?:de|sobre)\s+(\S+)/gi, (whole, before: string, after: string) =>
+    saidNumbers(before).length > 0 && saidNumbers(after)[0] === max ? before : whole,
+  )
+}
+
 /** Cómo se dice la unidad que, en su ficha, solo tiene esta pregunta («18 kg» es el peso); si otra también va en ella, ninguna. */
 function ownUnit(question: DictationFormQuestion, questions: readonly DictationFormQuestion[]): RegExp | undefined {
   const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
@@ -1750,7 +1762,11 @@ function checkFormAnswer(
       // pregunta que no se mide en tiempo.
       const measuresTime = TIME_WORDS.has(plain(question.unit ?? ""))
       const numbers =
-        question.type === "pieza" ? toothNumbersIn(said) : measuresTime ? heard : saidNumbers(`${said} ${wordsAfter(said, sentence, 1)}`, { roman: "largos", times: false })
+        question.type === "pieza"
+          ? toothNumbersIn(said)
+          : measuresTime
+            ? heard
+            : saidNumbers(withoutOutOf(`${said} ${wordsAfter(said, sentence, 1)}`, question.type === "escala" ? (question.max ?? 10) : question.max), { roman: "largos", times: false })
       if (!containsAll(numbers, [proposed])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null

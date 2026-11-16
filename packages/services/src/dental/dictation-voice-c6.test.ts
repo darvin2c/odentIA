@@ -55,6 +55,25 @@ describe("la red avisa el número que nombra su pregunta por la unidad (v08)", (
   })
 })
 
+// Medición del 16 nov con el tarifario de la demo (`tiempo-2-intensidad-y-tiempo`): Clío respondió la
+// intensidad dos veces con la misma frase, «6» y «10», y quedaba lista la de 10, el máximo de la escala.
+describe("el máximo de la escala dicho tras otro número no es la respuesta", () => {
+  const endo = formOf("evaluacion-de-endodoncia")
+  const said = "intensidad seis de diez"
+  const transcript = "intensidad seis de diez empezó hace tres días"
+  const ask = (value: string, phrase = said, heard = transcript) => prepareFormAnswer(answer(endo, "dolor_intensidad", value, phrase), endo, FDI, heard)
+
+  it("«seis de diez» es 6, nunca 10", () => {
+    expect(ask("10")).toBeNull()
+    expect(ask("6")).toMatchObject({ status: "lista", payload: { value: 6 } })
+  })
+
+  it("«diez de diez» sí es 10; y el máximo dicho solo, también", () => {
+    expect(ask("10", "intensidad diez de diez", "intensidad diez de diez")).toMatchObject({ status: "lista", payload: { value: 10 } })
+    expect(ask("10", "intensidad 10", "intensidad 10")).toMatchObject({ status: "lista", payload: { value: 10 } })
+  })
+})
+
 describe("la red avisa lo dicho entre dos hermanas sin decir cuál (v11)", () => {
   const estomato = formOf("ficha-odontoestomatologica")
   const V11 = "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8"
