@@ -1200,6 +1200,26 @@ describe("lo que encontró la quinta prueba con voz (15 nov, c5)", () => {
       )
     ).suggestions
     expect(loose).toMatchObject({ status: "por_revisar", payload: { candidates: [{ name: "Endodoncia posterior no vital" }, { name: "Endodoncia posterior vital" }] } })
+    // Lo que elige una persona para lo hecho hoy no se juzga: queda ese servicio.
+    const [done] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "procedimiento", payload: { service: "Endodoncia posterior vital", toothNumber: 46 }, sourceText: "hoy hacemos la endodoncia de la 46" }] }),
+      )
+    ).suggestions
+    const vital = (done!.payload["candidates"] as Array<{ id: string; name: string }>).find((item) => item.name === "Endodoncia posterior vital")!
+    const picked = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, done!.id, { serviceId: vital.id }))
+    expect(picked.payload).toMatchObject({ serviceId: vital.id, serviceName: "Endodoncia posterior vital" })
+    expect(picked.payload).not.toHaveProperty("candidates")
+    // Lo corregido por voz también sigue lo diagnosticado: con la pulpitis de la 46 pendiente, la vital.
+    await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "diagnostico", payload: { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 46 }, sourceText: "pulpitis en la 46" }] }),
+    )
+    const corrected = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [], corrections: [{ suggestionId: loose!.id, changes: { service: "endodoncia posterior" }, said: "la endodoncia posterior de la 46" }] }),
+    )
+    expect(corrected.corrected).toEqual([loose!.id])
+    const [plan] = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).filter((item) => item.id === loose!.id)
+    expect(plan).toMatchObject({ status: "lista", payload: { serviceName: "Endodoncia posterior vital", toothNumber: 46 } })
     await enable(false)
   })
 

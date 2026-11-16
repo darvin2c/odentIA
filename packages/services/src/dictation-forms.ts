@@ -662,7 +662,13 @@ function dropReasonOf(
   }
   // El número de Clío que es lo dicho con menos decimales no se pierde en silencio, aunque la frase no
   // nombre la pregunta (prueba con voz del 15 nov, c5, v12: Chrome oyó «ese Este 0,99» y Clío propuso 0,9).
-  if (fewerDecimals(question, draft, heard, sentenceOf(where?.transcript, said))) return about(`Dijiste «${shortSaid(said)}»: revisa los decimales.`)
+  // Si nombra otra que lleva un número, y no esta, es de esa otra («intensidad 2,5» no es el sondaje).
+  const namesOther = questions.some(
+    (other) => other !== question && other.responseId === question.responseId && takesNumber(other) && labelNamed(other, heardBy(other, said), where?.site),
+  )
+  if (!(namesOther && !labelNamed(question, heard, where?.site)) && fewerDecimals(question, draft, heard, sentenceOf(where?.transcript, said))) {
+    return about(`Dijiste «${shortSaid(said)}»: revisa los decimales.`)
+  }
   // La frase que no nombra la pregunta no era de la ficha («el diagnóstico es maloclusión clase dos»
   // no nombra «Clase molar derecha»): no se avisa como si lo fuera. La misma regla que la red (`labelNamed`).
   if (!labelNamed(question, heard, where?.site)) return null
@@ -1178,39 +1184,53 @@ function formTooth(
  * Diagnóstico (prueba con voz del 15 nov, c5: en v06 faltó la pulpitis y en v07 no quedó ninguno).
  * Solo la respuesta que queda lista, con la pieza de su ficha y su misma frase; se comprueba como los
  * demás diagnósticos (`reviewDiagnosis`: el absceso crónico con la fístula negada pasa al que no la
- * tiene). No se propone si en la pausa, pendiente o confirmado (`known`) ya hay uno de los que da esa
- * pregunta: de la apical, K04.4 a K04.7, aunque Clío haya elegido otro. Devuelve solo los nuevos.
+ * tiene). No se propone si en la pausa, pendiente o confirmado (`known`) ya hay, en esa pieza o sin
+ * pieza, uno de los que da esa pregunta: de la apical, K04.4 a K04.7, aunque Clío haya elegido otro.
+ * De dos respuestas a la misma pregunta en la pausa vale la última, como al guardarlas. Devuelve solo
+ * los nuevos.
  */
 export function withFormDiagnoses(
   drafts: readonly FormDraftLike[],
   questions: readonly DictationFormQuestion[],
   /** Las opciones que son un diagnóstico, con su código (`ProductForms.diagnoses`); sin ellas, nada. */
   codes: Readonly<Record<string, string>> | undefined,
-  where: { site: ProductSite; transcript?: string | undefined; known?: readonly string[]; pending?: ReadonlyMap<number, unknown> },
+  /** `known`: los diagnósticos pendientes o confirmados de la atención, con su código y su pieza. */
+  where: { site: ProductSite; transcript?: string | undefined; known?: ReadonlyArray<Record<string, unknown>>; pending?: ReadonlyMap<number, unknown> },
 ): DerivedDiagnosisDraft[] {
   if (!codes || !questions.length) return []
   const byOption = optionCodes(codes)
-  const codeOf = (value: unknown) => String(value ?? "").trim().toUpperCase()
-  const known = [...(where.known ?? []), ...drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => draft.payload["diagnosisCode"])].map(codeOf).filter(Boolean)
-  // Las respuestas de ficha de la pausa que quedan listas, como las guarda el servidor.
-  const answers = drafts.flatMap((draft) => {
-    const ready = draft.kind === "ficha" ? prepareFormAnswer(draft, questions, where.site, where.transcript) : null
-    return ready?.status === "lista" ? [{ draft, payload: ready.payload }] : []
+  const known = [...(where.known ?? []), ...drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => draft.payload)].flatMap((payload) => {
+    const code = String(payload["diagnosisCode"] ?? "").trim().toUpperCase()
+    return code ? [{ code, tooth: typeof payload["toothNumber"] === "number" ? payload["toothNumber"] : null }] : []
   })
+  // Las respuestas de ficha de la pausa que quedan listas, como las guarda el servidor: la última de cada pregunta.
+  const answers = lastAnswers(
+    drafts.flatMap((draft) => {
+      const ready = draft.kind === "ficha" ? prepareFormAnswer(draft, questions, where.site, where.transcript) : null
+      return ready ? [{ draft, payload: ready.payload, status: ready.status }] : []
+    }),
+  ).filter((item) => item.status === "lista")
   const payloads = answers.map((item) => item.payload)
   const extra: DerivedDiagnosisDraft[] = []
   for (const { draft, payload } of answers) {
     const code = typeof payload["value"] === "string" ? byOption.get(plain(payload["value"])) : undefined
     if (!code) continue
-    // Los códigos que da su pregunta: si ya hay uno, Diagnóstico ya tiene lo de esa pregunta.
+    const tooth = formTooth(payload["responseId"], payloads, questions, where.pending)
+    // Los códigos que da su pregunta: si ya hay uno en esa pieza, Diagnóstico ya tiene lo de esa pregunta.
     const options = questions.find((item) => item.responseId === payload["responseId"] && item.fieldId === payload["fieldId"])?.options ?? []
     const family = options.flatMap((option) => byOption.get(plain(option)) ?? [])
-    if (known.some((have) => family.some((one) => have.startsWith(one)))) continue
-    known.push(code)
-    const tooth = formTooth(payload["responseId"], payloads, questions, where.pending)
+    if (known.some((have) => (have.tooth === null || tooth === null || have.tooth === tooth) && family.some((one) => have.code.startsWith(one)))) continue
+    known.push({ code, tooth })
     extra.push({ kind: "diagnostico", payload: { diagnosisCode: code, diagnosisType: "confirmed", ...(tooth === null ? {} : { toothNumber: tooth }) }, sourceText: draft.sourceText ?? "" })
   }
   return extra
+}
+
+/** De las respuestas de ficha, la última de cada pregunta (`responseId` y `fieldId`), en su lugar. */
+function lastAnswers<T extends { payload: Record<string, unknown> }>(items: readonly T[]): T[] {
+  const keyOf = (item: T) => `${String(item.payload["responseId"])}:${String(item.payload["fieldId"])}`
+  const last = new Map(items.map((item) => [keyOf(item), item]))
+  return items.filter((item) => last.get(keyOf(item)) === item)
 }
 
 /** Las opciones que son un diagnóstico, sin tildes ni mayúsculas, con su código. */
@@ -1228,7 +1248,8 @@ export interface DiagnosedItem {
  * (`DictationPatient.diagnoses`; odentIA: la endodoncia vital o no vital): los diagnósticos de la
  * pausa, pendientes o confirmados, con su código, su nombre y su sitio, y lo que responden las fichas
  * (lo listo de la pausa y de las pendientes, y lo ya escrito), con la pieza de su ficha y, si la
- * opción es un diagnóstico (`codes`), su código. Las de ficha llegan ya comprobadas.
+ * opción es un diagnóstico (`codes`), su código. Las de ficha llegan ya comprobadas y, de dos a la
+ * misma pregunta, vale la última (`items` va de lo más viejo a lo más nuevo).
  */
 export function dictatedDiagnoses(
   items: readonly DiagnosedItem[],
@@ -1236,7 +1257,9 @@ export function dictatedDiagnoses(
   options: { pending?: ReadonlyMap<number, unknown>; codes?: Readonly<Record<string, string>> | undefined } = {},
 ): DictationDiagnosis[] {
   // De una ficha, solo lo que quedó listo: lo que se revisa no decide nada.
-  const answers = items.filter((item) => item.kind === "ficha" && item.status === "lista").map((item) => item.payload)
+  const answers = lastAnswers(items.filter((item) => item.kind === "ficha"))
+    .filter((item) => item.status === "lista")
+    .map((item) => item.payload)
   const byOption = optionCodes(options.codes ?? {})
   const fromForm = (responseId: unknown, text: unknown): DictationDiagnosis[] => {
     if (typeof text !== "string" || !text.trim()) return []
@@ -1253,8 +1276,8 @@ export function dictatedDiagnoses(
 }
 
 /** Lo que dice una oración de la consulta, para compararla: sus raíces y sus negaciones. */
-function noteWords(sentence: string): { stems: string[]; negations: string[] } {
-  return { stems: stemsOf(sentence), negations: [...new Set(negationsOf(sentence))].sort() }
+function noteWords(sentence: string): { stems: string[]; numbers: number[]; negations: string[] } {
+  return { stems: stemsOf(sentence), numbers: saidNumbers(sentence, { articles: false }), negations: [...new Set(negationsOf(sentence))].sort() }
 }
 
 /**
@@ -1262,15 +1285,20 @@ function noteWords(sentence: string): { stems: string[]; negations: string[] } {
  * la pausa llega otra vez al comienzo de lo nuevo (`withPauseBridge`) y Clío lo vuelve a contar
  * (prueba con voz del 15 nov, c5, v07: «el diente se le ha ido poniendo oscuro», dos veces en el
  * relato). Sale la oración de tres palabras o más que están todas en una misma oración pendiente,
- * con las mismas negaciones: «No refiere dolor» no repite «Refiere dolor». Si la nota queda vacía, no
- * se propone.
+ * con sus números y las mismas negaciones: «No refiere dolor» no repite «Refiere dolor», ni «en la 46»
+ * repite «en la 36». Si la nota queda vacía, no se propone.
  */
 export function withoutRepeatedNotes<T extends FormDraftLike>(drafts: readonly T[], pendingNotes: readonly string[]): T[] {
   const before = pendingNotes.flatMap(sentencesOf).map(noteWords)
   if (!before.length) return [...drafts]
   const repeated = (sentence: string) => {
     const now = noteWords(sentence)
-    return now.stems.length >= 3 && before.some((old) => now.stems.every((stem) => old.stems.includes(stem)) && now.negations.join() === old.negations.join())
+    return (
+      now.stems.length >= 3 &&
+      before.some(
+        (old) => now.stems.every((stem) => old.stems.includes(stem)) && now.numbers.every((number) => old.numbers.includes(number)) && now.negations.join() === old.negations.join(),
+      )
+    )
   }
   const clean = (text: string) => {
     const sentences = sentencesOf(text)

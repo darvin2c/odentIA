@@ -142,8 +142,29 @@ describe("la respuesta de la ficha que es un diagnóstico va también a Diagnós
       { kind: "diagnostico", payload: { diagnosisCode: "K04.1", diagnosisType: "confirmed", toothNumber: 21 }, sourceText: "necrosis pulpar" },
       { kind: "diagnostico", payload: { diagnosisCode: "K04.6", diagnosisType: "confirmed", toothNumber: 21 }, sourceText: "absceso apical crónico" },
     ])
-    // Con uno de esa pregunta ya propuesto (aunque sea otro), no se propone el de la ficha.
-    expect(withFormDiagnoses(drafts, endo, codes, { site, transcript: heard, pending, known: ["K04.7", "K04.1"] })).toEqual([])
+    // Con uno de esa pregunta ya propuesto en esa pieza o sin pieza (aunque sea otro), no se propone el de la ficha.
+    expect(withFormDiagnoses(drafts, endo, codes, { site, transcript: heard, pending, known: [{ diagnosisCode: "K04.7", toothNumber: 21 }, { diagnosisCode: "K04.1" }] })).toEqual([])
+    // El de otra pieza no cuenta: la necrosis de la 21 se propone aunque haya una pulpitis en la 46.
+    expect(withFormDiagnoses(drafts, endo, codes, { site, transcript: heard, pending, known: [{ diagnosisCode: "K04.0", toothNumber: 46 }] }).map((item) => item.payload["diagnosisCode"])).toEqual([
+      "K04.1",
+      "K04.6",
+    ])
+  })
+
+  it("si se corrigió en la misma pausa, vale lo último: el diagnóstico y la pieza", () => {
+    const heard = "pieza 36 no perdón 46 pulpitis irreversible sintomática no mejor dicho necrosis pulpar"
+    const drafts = [
+      answer(endo, "pieza", "36", "pieza 36"),
+      answer(endo, "diagnostico_pulpar", "Pulpitis irreversible sintomática", "pulpitis irreversible sintomática"),
+      answer(endo, "pieza", "46", "46"),
+      answer(endo, "diagnostico_pulpar", "Necrosis pulpar", "necrosis pulpar"),
+    ]
+    expect(withFormDiagnoses(drafts, endo, codes, { site, transcript: heard })).toEqual([
+      { kind: "diagnostico", payload: { diagnosisCode: "K04.1", diagnosisType: "confirmed", toothNumber: 46 }, sourceText: "necrosis pulpar" },
+    ])
+    // Lo diagnosticado para elegir la endodoncia, también: la necrosis en la 46, no la pulpitis.
+    const items = drafts.map((draft) => ({ kind: "ficha", status: "lista", payload: prepareFormAnswer(draft, endo, site, heard)?.payload ?? {} }))
+    expect(dictatedDiagnoses(items, endo)).toEqual([{ code: null, text: "Necrosis pulpar", where: { toothNumber: 46 } }])
   })
 
   it("sin códigos del producto (latidIA) o con la respuesta sin decir, nada", () => {
@@ -175,6 +196,12 @@ describe("un número que se pierde no se pierde en silencio (v12)", () => {
     expect(prepareFormAnswer(draft, endo, dental.site, said)).toBeNull()
     expect(formDropNotices([{ draft, ready: false }], new Set(), endo, { site: dental.site, transcript: said }).filter((item) => item.by === "motivo")).toEqual([])
   })
+
+  it("el número de otra pregunta con un decimal menos no avisa en esta: «intensidad 2,5» no es el sondaje", () => {
+    const said = "intensidad 2,5"
+    const draft = answer(endo, "sondaje", "2", said)
+    expect(formDropNotices([{ draft, ready: false }], new Set(), endo, { site: dental.site, transcript: said }).filter((item) => item.by === "motivo")).toEqual([])
+  })
 })
 
 describe("el relato no repite lo que ya cuenta una nota pendiente (v07)", () => {
@@ -193,5 +220,12 @@ describe("el relato no repite lo que ya cuenta una nota pendiente (v07)", () => 
     const finding = answer(endo, "dolor", "Sin dolor", "sin dolor")
     expect(withoutRepeatedNotes([finding], before)).toEqual([finding])
     expect(withoutRepeatedNotes([denied], [])).toEqual([denied])
+  })
+
+  it("otra pieza u otro número es otra cosa: no se quita", () => {
+    const other = { kind: "nota", payload: { presentIllness: "Dolor espontáneo en la pieza 46." } }
+    expect(withoutRepeatedNotes([other], ["Dolor espontáneo en la pieza 36."])).toEqual([other])
+    const longer = { kind: "nota", payload: { presentIllness: "Dolor desde hace cinco días." } }
+    expect(withoutRepeatedNotes([longer], ["Dolor desde hace 2 días."])).toEqual([longer])
   })
 })

@@ -824,9 +824,19 @@ function chooseService(choice: PlanChoice, scope: ServiceLookup, where: Record<s
   const chosen = typeof choice.serviceId === "string" ? services.find((service) => service.id === choice.serviceId) : undefined
   const fit = (service: ServiceOption) => scope.dictation.serviceFit(service, where, scope.patient, scope.product)
   const { match, candidates } = chosen ? { match: chosen, candidates: [] } : matchFitting(String(choice.service ?? ""), services, fit, scope.serviceWords)
-  if (match) return { service: choice.service ?? match.name, serviceId: match.id, serviceName: match.name, priceCents: match.priceCents, currency: match.currency, serviceScope: match.scope }
+  if (match) return serviceOf(match, choice.service)
   return { service: choice.service ?? "", candidates }
 }
+
+/** Un servicio del tarifario como lo lleva lo dicho, con cómo se dijo. */
+const serviceOf = (match: ServiceOption, said?: string): PlanChoice => ({
+  service: said ?? match.name,
+  serviceId: match.id,
+  serviceName: match.name,
+  priceCents: match.priceCents,
+  currency: match.currency,
+  serviceScope: match.scope,
+})
 
 const OPTION_LETTER = ["A", "B", "C"]
 
@@ -1025,8 +1035,14 @@ async function revise(
     if (typeof patch["serviceId"] === "string") {
       const chosen = services.find((service) => service.id === patch["serviceId"])
       if (!chosen) throw invalidField("serviceId", "Esa prestación no está activa en tus servicios")
-      payload = { ...payload, service: chosen.name }
-    } else if (typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
+      // Lo que eligió una persona no se juzga: ese servicio, aunque su variante (vital o no vital)
+      // dependa de lo que no se sabe. Sin esto se buscaría de nuevo por su nombre.
+      const prepared = await prepare(tx, { kind, payload: { ...payload, service: chosen.name } }, scope)
+      if (!prepared) return null
+      const { candidates: _candidates, ...rest } = prepared.payload
+      return { ...prepared, payload: { ...rest, ...serviceOf(chosen) } }
+    }
+    if (typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
       for (const key of [...MAIN_SERVICE_KEYS.filter((key) => key !== "service"), "planItemId", "acceptOnDo", "source"]) delete payload[key]
     }
     return prepare(tx, { kind, payload }, scope)
@@ -1701,7 +1717,19 @@ async function encounterDiagnoses(
       if (ready) now.push({ kind: "ficha", payload: ready.payload, status: ready.status })
     }
   }
-  return dictatedDiagnoses([...now, ...earlier], scope.formQuestions, { pending, codes: scope.formDiagnoses })
+  // Lo de la pausa, al final: de dos respuestas a la misma pregunta vale la última.
+  return dictatedDiagnoses([...earlier, ...now], scope.formQuestions, { pending, codes: scope.formDiagnoses })
+}
+
+/**
+ * Lo diagnosticado en la atención fuera de una pausa (al corregir a mano, o antes de aplicar lo
+ * corregido por voz): lo pendiente, lo confirmado y lo escrito en sus fichas.
+ */
+async function savedDiagnoses(tx: Db, orgId: string, patientId: string, encounterId: string, scope: DictationScope): Promise<DictationDiagnosis[]> {
+  const pending = await listDictationSuggestions(tx, orgId, patientId, encounterId)
+  const confirmed = await listConfirmedDictation(tx, orgId, patientId, encounterId)
+  const questions = scope.formQuestions.length ? scope.formQuestions : await dictationFormQuestions(tx, orgId, encounterId)
+  return dictatedDiagnoses([...confirmed, ...pending], questions, { pending: pendingFormValues(pending, questions), codes: scope.formDiagnoses })
 }
 
 /**
@@ -1797,6 +1825,8 @@ export async function saveDictationSegment(
     if (!corrected.includes(row.id)) corrected.push(row.id)
     return true
   }
+  // Lo corregido por voz también elige la variante con lo diagnosticado en la atención.
+  if (segment.corrections?.length) scope.patient = { ...scope.patient, diagnoses: await savedDiagnoses(tx, orgId, patientId, encounterId, scope) }
   for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) await correct(correction.suggestionId, correction.changes, correction.said)
 
   const removed: string[] = []
@@ -1871,9 +1901,9 @@ export async function saveDictationSegment(
   const dictated = segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
   const fromDiagnoses = withDiagnosisFormAnswers(dictated, scope.formQuestions).slice(dictated.length)
   const pendingValues = pendingFormValues(pendingNow, scope.formQuestions)
-  // Un tramo sin nada nuevo (solo correcciones) no necesita lo ya confirmado.
+  // Sin nada nuevo en la pausa no hay qué elegir ni qué llevar a Diagnóstico: lo confirmado no hace falta.
   const confirmed = dictated.length ? await listConfirmedDictation(tx, orgId, patientId, encounterId) : []
-  const known = [...pendingNow, ...confirmed].filter((item) => item.kind === "diagnostico").map((item) => String(item.payload["diagnosisCode"] ?? ""))
+  const known = [...pendingNow, ...confirmed].filter((item) => item.kind === "diagnostico").map((item) => item.payload)
   const fromForms = withFormDiagnoses([...dictated, ...fromDiagnoses], scope.formQuestions, scope.formDiagnoses, { site: scope.site, transcript: scope.transcript, known, pending: pendingValues })
   // Lo diagnosticado en la atención decide la variante de una prestación: la endodoncia vital o no vital.
   scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, [...dictated, ...fromDiagnoses], [...pendingNow, ...confirmed], pendingValues) }
@@ -2185,6 +2215,8 @@ export async function updateDictationSuggestion(
     const error = fieldsError(Object.fromEntries(edited))
     if (error) throw error
   }
+  // Lo diagnosticado en la atención sigue decidiendo la variante al corregir a mano.
+  scope.patient = { ...scope.patient, diagnoses: await savedDiagnoses(tx, orgId, patientId, encounterId, scope) }
   const revised = await revise(tx, row.kind, data, patch, scope)
   if (!revised) throw validation("La sugerencia quedó vacía; descártala si no aplica")
   const ready = await withPatient(tx, orgId, patientId, encounterId, row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope)
@@ -3064,6 +3096,8 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  */
 export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">>> {
   const scope = await dictationScope(tx, orgId)
+  // Sin atención, lo diagnosticado es lo de la práctica misma.
+  scope.patient = { ...scope.patient, diagnoses: await encounterDiagnoses(tx, scope, drafts, [], new Map()) }
   const zone = await findOrgLocale(tx, orgId)
   const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
