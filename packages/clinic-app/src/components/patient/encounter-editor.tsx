@@ -82,6 +82,7 @@ import {
   saveProfessionalProfileApi,
   takeOverEncounterApi,
 } from "../../lib/encounters"
+import { discardableHere } from "../../lib/encounter-discard"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
@@ -1698,6 +1699,12 @@ export function EncounterEditor({
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty)
+  // «Descartar esta atención» pide que esté vacía también en la página (QA del 16 nov, B3d).
+  const emptyHere = discardableHere({
+    texts: TEXT_KEYS.map((key) => draftValues[key]),
+    indicated: liveIndicated.length,
+    sections,
+  })
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
   // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
@@ -2861,11 +2868,10 @@ export function EncounterEditor({
               )}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-              {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov). */}
-              {openRef.data?.data?.id === encounterId &&
-              openRef.data.data.empty &&
-              detail.procedures.length === 0 &&
-              activeDiagnosisRows.length === 0 ? (
+              {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov).
+                  Solo vacía de verdad: lo guardado (el servidor) y lo de la página, también lo que aún no
+                  se guarda, como un motivo recién escrito; con algo indicado, solo «Anular» (QA del 16 nov, B3d). */}
+              {openRef.data?.data?.id === encounterId && openRef.data.data.empty && emptyHere ? (
                 <Button
                   type="button"
                   variant="ghost"

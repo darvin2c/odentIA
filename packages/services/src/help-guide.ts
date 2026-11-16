@@ -991,6 +991,15 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "descartar-atencion-vacia",
+        q: "¿Por qué ya no me sale «Descartar esta atención»?",
+        a: "Porque ya no está vacía. «Descartar esta atención» solo aparece mientras no tiene nada: nada escrito, aunque aún no se haya guardado (también el motivo), y nada indicado, registrado ni firmado. La borra de un toque, sin motivo ni rastro en la Historia. En cuanto escribes o indicas algo, abajo queda «Anular esta atención…», que pide el motivo y deja constancia.",
+        forms: ["no aparece descartar atencion", "como borro una atencion que abri por error", "descartar atencion con motivo escrito", "me dio error al descartar la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "guarda-escribo-atencion",
         q: "¿Se guarda lo que escribo en la atención?",
         a: "Sí, solo, mientras escribes: todo se escribe en la misma página, sin abrir nada, y arriba dice «Guardado» con la hora o «Guardando…». Si no se pudo guardar, el aviso dice por qué, con «Reintentar». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
