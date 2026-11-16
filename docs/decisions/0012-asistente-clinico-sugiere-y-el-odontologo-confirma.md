@@ -87,6 +87,25 @@ Una prueba con ChatGPT 6 en la pantalla real dejó una receta dictada dentro de 
 - **Descartado: listas opcionales en la herramienta.** Clío escribe las doce listas vacías en cada pausa, y quitarlas bajaba la salida un 35 %. Con las listas opcionales, Clío escribía la ficha antes que el diagnóstico y lo cambiaba. En `voz-v07-3` proponía K04.5 en vez de K04.6, el absceso con la fístula dicha en la pausa anterior, y salió bien 4 de 11 veces frente a 11 de 11 en main. Las listas siguen requeridas.
 - **No se hizo: claves cortas ni opciones por número.** Los nombres de los campos son los de cada operación, y los usan el servicio, las correcciones por voz y las instrucciones. Cambiar las opciones de una ficha por su número rompería el «¿Cuál?» de lo dicho a medias. La ganancia sería de pocos tokens por pausa.
 
+## Actualización del 2026-11-16 (c6): las reglas de las fichas, al final de las instrucciones
+
+- **El problema.** En la sexta prueba con voz (sobre el cambio anterior), Chrome oyó lo mismo que en la quinta, y aun así en v08 la primera lectura no respondió ninguna pregunta: el peso («beso 18 kg») se perdió sin aviso. En v11, «2 obturados» se perdió sin aviso.
+- **La causa, separada con el modelo real.** Se corrieron los dos tramos, tal como los oyó Chrome, en las tres versiones: antes y después del #648 y después del #650.
+  - Con los cinco servicios del banco no se vio nada: el peso quedó listo 10 de 10 veces en las tres versiones.
+  - Con el tarifario de la demo (113 servicios, como en la prueba con voz), 30 corridas por lado, con las reglas en un mensaje del usuario aparte:
+    - la primera lectura no respondió ninguna pregunta 2 veces, frente a 1 sin ese cambio;
+    - respondió «obturados» con palabras 5 veces, frente a 0;
+    - calló lo que era del CPOD o del ceod 13 veces, frente a 5.
+  - En el banco entero con ese tarifario dio 211 y 199 respuestas bien de 219. Sin el cambio, 212 y 214. En la segunda corrida, `voz-v06-1` y `voz-v08-2` no respondieron la ficha en la primera lectura.
+  - Además, la red no avisaba el peso: Chrome oyó «beso». Tampoco avisaba lo dicho entre dos hermanas sin decir cuál. Esas dos fallas ya estaban antes del #650.
+- **Qué cambió.**
+  - Las reglas van al final del mensaje de sistema, antes de su corte. En los dos tramos, 30 corridas: la primera lectura vacía 0 veces, «obturados» con palabras 1 y lo de las hermanas callado 6. En el banco con el tarifario, 213 y 211 de 219. El costo es el mismo que con el mensaje aparte.
+  - Se descartó dejar las reglas al principio del mensaje de la pausa, en su propio bloque con corte. Fue peor: el peso se perdió 4 de 30 veces.
+  - La red avisa el número con la unidad que solo tiene una pregunta. También avisa, en las dos hermanas, lo dicho entre ellas sin decir cuál.
+  - «No pude usar esto» deja de avisar la frase que cortó la pausa cuando la pausa siguiente la propone.
+- **Un costo que queda.** Con las reglas en el mensaje de sistema, la parte fija con ficha y sin ficha son dos entradas distintas de la caché. La primera pausa con ficha de una atención que ya dictó sin ficha vuelve a escribir las instrucciones, si ninguna otra atención con ficha de la clínica las dejó en la caché. Cuesta unos USD 0,0009, una vez.
+- **Para medir.** `eval:dictado-fichas -- --servicios=eval/servicios-demo.json` lee el tarifario de la demo. Se usa cuando cambia dónde o cómo lee Clío las fichas.
+
 ## Referencias
 
 - Lo común: `packages/services/src/encounter-dictation.ts`, `packages/agent/src/dictation.ts` y `extract-dictation.ts`, `apps/api/src/routes/encounter-dictation.ts` y `clio-practice.ts`, `packages/clinic-app/src/components/patient/dictation-*.ts(x)`. Lo de cada producto (ADR 0079): `ProductDictation` en sus ganchos (odentIA: `packages/services/src/dental/dictation.ts`) y su `DictationProfile` (odentIA: `packages/agent/src/dental/dictation.ts` y `eval-dictado.ts`), elegido en `packages/agent/src/products.ts`; operaciones `atencion.nota`, `atencion.diagnostico`, `plan.indicacion`, `control.crear`, `odontograma.hallazgo` y `receta.medicamento`, migraciones `0054`, `0087` y `0088`.
