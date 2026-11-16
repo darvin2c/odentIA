@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest"
-import { budgetAnswerText, budgetOptionLabel, budgetStateText, isRetiredPlanStatus, planItemStateText } from "./budget-words.js"
+import {
+  budgetAnswerLine,
+  budgetAnswerText,
+  budgetOptionLabel,
+  budgetStateText,
+  isRetiredPlanStatus,
+  planItemStateText,
+} from "./budget-words.js"
 
 describe("un solo nombre para cada estado del presupuesto", () => {
   it("dice cada estado con las palabras del tablero 3", () => {
     const said = (status: string) => budgetStateText({ status, items: [] })
     expect(said("borrador")).toBe("Por enviar")
     expect(said("presentado")).toBe("Entregado · espera respuesta")
-    expect(said("pospuesto")).toBe("Lo está pensando")
+    expect(said("pospuesto")).toBe("Lo piensa")
     expect(said("aceptado")).toBe("Aceptó todo")
     expect(said("rechazado")).toBe("No aceptó")
     expect(said("sustituido")).toBe("Reemplazado")
@@ -47,7 +54,7 @@ describe("un solo nombre para cada estado del presupuesto", () => {
   })
 
   it("la respuesta por tratamiento y la letra de cada opción", () => {
-    expect(budgetAnswerText("pospuesto")).toBe("Lo está pensando")
+    expect(budgetAnswerText("pospuesto")).toBe("Lo piensa")
     expect(budgetAnswerText("no_elegida")).toBe("No elegida")
     expect(budgetAnswerText(null)).toBe("Por responder")
     expect([1, 2, 3].map(budgetOptionLabel)).toEqual(["Opción A", "Opción B", "Opción C"])
@@ -58,7 +65,7 @@ describe("un solo nombre para cada estado del presupuesto", () => {
 describe("una sola etiqueta por tratamiento, plegado y abierto", () => {
   it("lo que no empezó dice su decisión; lo empezado o quitado, su estado", () => {
     expect(planItemStateText("pendiente", "pendiente")).toBe("Por responder")
-    expect(planItemStateText("pendiente", "pospuesto")).toBe("Lo está pensando")
+    expect(planItemStateText("pendiente", "pospuesto")).toBe("Lo piensa")
     expect(planItemStateText("pendiente", "aceptado")).toBe("Aceptado")
     expect(planItemStateText("programado", "aceptado")).toBe("Con cita")
     expect(planItemStateText("en_curso", "aceptado")).toBe("En curso")
@@ -72,5 +79,43 @@ describe("una sola etiqueta por tratamiento, plegado y abierto", () => {
     expect(isRetiredPlanStatus("reemplazado")).toBe(true)
     expect(isRetiredPlanStatus("realizado")).toBe(false)
     expect(isRetiredPlanStatus("en_curso")).toBe(false)
+  })
+})
+
+// QA del 16 nov (E3, B1c): la línea de lo elegido decía el total de la opción y «Lo está pensando».
+describe("lo respondido en una línea", () => {
+  const money = (cents: number) => `S/ ${(cents / 100).toFixed(2)}`
+  const line = (planItemId: string, optionId: string, title: string, cents: number, decision: string) => ({
+    planItemId,
+    optionId,
+    title,
+    lineTotalCents: cents,
+    currency: "PEN",
+    decision,
+  })
+  it("eligió la opción A: lo aceptado, no el total de la opción, y «lo piensa» con lo que suma", () => {
+    const options = [
+      { id: "a", position: 1, decision: "elegida" },
+      { id: "b", position: 2, decision: "no_elegida" },
+    ]
+    const items = [
+      line("endo", "a", "Endodoncia", 65000, "aceptado"),
+      line("corona", "a", "Corona cerámica", 90000, "pospuesto"),
+      line("resina", "a", "Resina", 18000, "aceptado"),
+      line("limpieza", "a", "Profilaxis", 12000, "aceptado"),
+      line("exo", "b", "Exodoncia", 15000, "no_elegida"),
+      line("resina", "b", "Resina", 18000, "no_elegida"),
+      line("limpieza", "b", "Profilaxis", 12000, "no_elegida"),
+    ]
+    expect(budgetAnswerLine({ status: "parcial", items, options }, money)).toBe(
+      "Eligió la opción A · aceptó S/ 950.00 · lo piensa: Corona cerámica · S/ 900.00",
+    )
+  })
+  it("sin opciones: «Aceptó todo» con su importe; sin respuesta, nada", () => {
+    const items = [line("r", "a", "Resina", 18000, "aceptado"), line("c", "a", "Corona", 90000, "aceptado")]
+    expect(budgetAnswerLine({ status: "aceptado", items, options: [{ id: "a", decision: "pendiente" }] }, money)).toBe(
+      "Aceptó todo · S/ 1080.00",
+    )
+    expect(budgetAnswerLine({ status: "presentado", items, options: [] }, money)).toBeNull()
   })
 })

@@ -344,5 +344,5 @@ it("«Lo piensa» también cierra el «volver a llamar»: la fila dice lo que re
   await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: resina.id, decision: "pospuesto" }] }))
   const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.idempotencyKey, `${BUDGET_CALLBACK_KEY}${budget.id}`))
   expect(task?.status).toBe("done")
-  expect((await steps(f)).find((step) => step.kind === "respuesta")?.text).toBe("Lo está pensando")
+  expect((await steps(f)).find((step) => step.kind === "respuesta")?.text).toBe("Lo piensa")
 })

@@ -1,5 +1,5 @@
 /**
- * «Lo está pensando» con una aceptación parcial (repaso final de la ficha del 10 nov, M2):
+ * «Lo piensa» con una aceptación parcial (repaso final de la ficha del 10 nov, M2):
  * aceptó la resina y dejó la profilaxis para después. La fila nombraba la resina y decía el
  * total (S/ 340); recepción llamaba por algo ya aceptado. Sin base: solo la regla.
  */

@@ -7,7 +7,7 @@
  * arma el borrador y cambia precios, y recepción lo envía, anota la respuesta
  * y agenda (decisión 4).
  */
-import { type BudgetChange, budgetChanges } from "@odentia/clinical"
+import { type BudgetChange, budgetAnswerLine, budgetChanges } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -543,8 +543,11 @@ function BudgetCard({
     day(budget.presentedAt ?? budget.createdAt),
     several ? `${budget.options.length} opciones` : totalsWords(budget, budget.currency, money),
   ].join(" · ")
+  // Lo respondido, con la misma frase de la atención y de lo que leen Sofi y Argos: lo aceptado y lo
+  // que piensa, no el total de la opción (QA del 16 nov, E3).
   const stateLine = accepted
-    ? `${budget.stateText} · ${acceptedWords(budget, budget.currency, money)}`
+    ? (budgetAnswerLine(budget, (cents, currency) => money(cents, currency)) ??
+      `${budget.stateText} · ${acceptedWords(budget, budget.currency, money)}`)
     : budget.stateText
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 

@@ -599,7 +599,7 @@ function stableUuid(key: string): string {
 const BUDGET_LINE_DECISION: Record<string, string> = {
   pendiente: "sin responder",
   aceptado: "aceptado",
-  pospuesto: "lo dejó para después",
+  pospuesto: "lo piensa",
   rechazado: "no lo aceptó",
   no_elegida: "no elegida",
 }

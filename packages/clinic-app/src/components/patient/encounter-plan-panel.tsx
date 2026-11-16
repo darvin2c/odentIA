@@ -9,7 +9,7 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
+import { budgetAnswerLine, budgetOptionLabel, formatMoney, isLeftOut, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -641,10 +641,18 @@ export function EncounterPlanPanel({
           encounterId={encounterId}
           patientName={patientName}
           beforeWrite={beforeWrite}
-          // Lo indicado hoy que aún no está en ningún presupuesto: entra al firmar.
+          // Lo indicado hoy que aún no está en ningún presupuesto: entra al firmar. Lo de una pieza con
+          // caminos espera «¿En qué opción va…?» en su fila: no se repite aquí.
           unquoted={indicatedItems.filter(
-            (item) => !item.budgetId && item.status === "pendiente" && item.decisionStatus === "pendiente" && item.priceCents != null,
+            (item) =>
+              !item.budgetId &&
+              item.status === "pendiente" &&
+              item.decisionStatus === "pendiente" &&
+              item.priceCents != null &&
+              !pathGroups.some((group) => group.toothNumber != null && group.toothNumber === item.toothNumber),
           )}
+          // Los presupuestos de lo indicado hoy: el que ya se entregó o respondió sigue a la vista.
+          budgetIds={[...new Set(indicatedItems.map((item) => item.budgetId).filter((id): id is string => !!id))]}
         />
         {canWrite ? (
           <Collapsible
@@ -862,9 +870,35 @@ function PathsBox({
     // Sin un precio en alguna línea, el total no es una cifra: se dice así.
     return moneyTotalsText(totalsOf(option, detail.currency), (cents, unit) => formatMoney(cents, unit, locale), "") || "por definir"
   }
-  // El total suma también lo que va en todas (la limpieza): se dice, para que cuadre con lo que se ve.
-  const withShared = detail ? commonPlanItemIds(detail.items, detail.options.length).size > 0 : false
-  const totalWords = withShared ? `Total con lo que va en ${group.pathCount === 2 ? "las dos" : "todas"}` : "Total de la opción"
+  // El total suma también lo que va en todas (la limpieza): se dice de dónde sale, para que cuadre
+  // con lo que se ve: «S/ 1,550.00 de la opción + S/ 480.00 de lo común» (QA del 16 nov, H6).
+  const shared = detail ? commonPlanItemIds(detail.items, detail.options.length) : new Set<string>()
+  const withShared = shared.size > 0
+  const totalWords = withShared ? "Total" : "Total de la opción"
+  const partsOf = (position: number): string | null => {
+    const option = detail?.options.find((candidate) => candidate.position === position)
+    if (!detail || !option || !locale || !withShared) return null
+    const lines = detail.items.filter((line) => line.optionId === option.id)
+    const sum = (rows: typeof lines) => {
+      const currencies = [...new Set(rows.map((row) => row.currency))].sort()
+      return moneyTotalsText(
+        currencies.map((currency) => {
+          const own = rows.filter((row) => row.currency === currency)
+          return {
+            currency,
+            totalCents: own.some((row) => row.lineTotalCents == null)
+              ? null
+              : own.reduce((total, row) => total + (row.lineTotalCents ?? 0), 0),
+          }
+        }),
+        (cents, unit) => formatMoney(cents, unit, locale),
+        "",
+      )
+    }
+    const own = sum(lines.filter((line) => !shared.has(line.planItemId)))
+    const common = sum(lines.filter((line) => shared.has(line.planItemId)))
+    return own && common ? `${own} de la opción + ${common} de lo común` : null
+  }
   const heading = group.site
     ? `${group.site} · ${count} opciones: ${chooser} elegirá una`
     : `${count.charAt(0).toUpperCase()}${count.slice(1)} opciones: ${chooser} elegirá una`
@@ -892,6 +926,9 @@ function PathsBox({
                   <span className="text-sm tabular-nums">
                     {totalWords}: {total}
                   </span>
+                ) : null}
+                {partsOf(path.position) ? (
+                  <span className="text-xs text-muted-foreground tabular-nums">{partsOf(path.position)}</span>
                 ) : null}
               </div>
               {path.items.length === 0 ? (
@@ -994,6 +1031,7 @@ export function EncounterBudgetSend({
   patientName,
   beforeWrite,
   unquoted = [],
+  budgetIds = [],
 }: {
   patientId: string
   encounterId?: string
@@ -1001,37 +1039,48 @@ export function EncounterBudgetSend({
   beforeWrite: () => Promise<void>
   /** Lo indicado hoy fuera de todo presupuesto: se dice y se puede armar ya. */
   unquoted?: PlanItem[]
+  /** Los presupuestos de lo indicado en esta atención (del servidor: siguen al recargar). */
+  budgetIds?: string[]
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const canQuote = usePermission("budgets.write")
   const queryClient = useQueryClient()
+  const orgLocale = useOrgProfile().data?.locale
   const [assembling, setAssembling] = useState(false)
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
   // El presupuesto que se ofreció en esta atención: si se envía o se anota su respuesta, la
-  // línea no desaparece sin rastro, queda qué eligió (QA del 8 nov). Se recuerda por paciente
-  // fuera del componente; al recargar la página se olvida (el Plan lo sigue diciendo).
+  // línea no desaparece sin rastro, queda qué eligió y qué aceptó (QA del 8 nov). Sale de lo
+  // indicado hoy, que lo dice el servidor: sigue al recargar (QA del 16 nov, E3; antes vivía en
+  // memoria y se perdía).
   const offeredNow = step?.kind === "enviar" ? (step.action?.budgetId ?? null) : null
-  const [offered, setOffered] = useState<string | null>(() => OFFERED_BUDGET.get(patientId) ?? null)
-  useEffect(() => {
-    if (!offeredNow) return
-    OFFERED_BUDGET.set(patientId, offeredNow)
-    setOffered(offeredNow)
-  }, [offeredNow, patientId])
-  // Lo indicado hoy que aún no entra en un presupuesto (una indicación sola, después de otro
-  // presupuesto ya ofrecido): se dice y se arma ya, sin esperar a firmar (QA del 9 nov).
+  const answered = budgetIds.filter((id) => id !== offeredNow)
+  // Lo indicado hoy que no entró en el presupuesto, siempre a la vista (también al mostrarlo): con
+  // uno ya entregado o respondido, nace al firmar en otro aparte; sin ninguno, al firmar.
+  const pendingWords =
+    unquoted.length > 0
+      ? `${unquoted
+          .map((item) =>
+            [
+              item.title,
+              treatmentSiteLabel(item),
+              item.priceCents != null && orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          )
+          .join(", ")} · entra al firmar${answered.length > 0 ? ", en un presupuesto aparte" : ""}`
+      : null
   const pendingLine =
-    canSend && canQuote && encounterId && !offeredNow && unquoted.length > 0 ? (
+    canSend && encounterId && pendingWords ? (
       <section
         aria-label="Presupuesto por armar"
         className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-dashed bg-background px-3 py-2"
       >
         <p className="min-w-0 flex-1 basis-60 text-sm">
           <span className="font-medium">Presupuesto</span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {unquoted.map((item) => item.title).join(", ")}: entra al firmar
-          </span>
+          <span className="text-muted-foreground"> · {pendingWords}</span>
         </p>
+        {canQuote && !offeredNow ? (
         <Button
           type="button"
           size="sm"
@@ -1061,18 +1110,23 @@ export function EncounterBudgetSend({
         >
           Armarlo ahora
         </Button>
+        ) : null}
       </section>
     ) : null
-  if (canSend && !offeredNow && offered)
+  const after = canSend
+    ? answered.map((id) => <EncounterBudgetAfter key={id} patientId={patientId} budgetId={id} />)
+    : null
+  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId)
     return (
       <>
-        <EncounterBudgetAfter patientId={patientId} budgetId={offered} />
+        {after}
         {pendingLine}
       </>
     )
-  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return pendingLine
   const budgetId = step.action.budgetId
   return (
+    <>
+    {after}
     <section
       aria-label="Presupuesto"
       className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border bg-background px-3 py-2"
@@ -1099,21 +1153,22 @@ export function EncounterBudgetSend({
           patientName={patientName}
           beforeWrite={beforeWrite}
           menu
+          note={pendingWords ? `No está en este presupuesto: ${pendingWords}` : null}
         />
       </div>
       {/* «Imprimir y entregar» y «Anotar su respuesta» no pasan por «Revisar antes»: la marca se dice aquí. */}
       <RecommendedLine patientId={patientId} budgetId={budgetId} />
     </section>
+    {pendingLine}
+    </>
   )
 }
 
-/** El presupuesto que se ofreció en la atención abierta de cada paciente (ver `EncounterBudgetSend`). */
-const OFFERED_BUDGET = new Map<string, string>()
-
 /**
- * Lo que quedó del presupuesto ofrecido en esta atención: su número y qué
- * eligió, con el total de esa opción («Eligió la opción A · S/ 1,350»; nunca
- * «Aceptó todo» si eligió una), y quién lo anotó. Es constancia: se cambia en el Plan.
+ * Lo que quedó del presupuesto ofrecido en esta atención: su número, qué eligió y
+ * qué aceptó («Eligió la opción A · aceptó S/ 950 · lo piensa: Corona cerámica ·
+ * S/ 900»; la misma frase del Plan y de lo que leen Sofi y Argos), y quién lo
+ * anotó. Es constancia: se cambia en el Plan.
  */
 function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budgetId: string }): React.JSX.Element | null {
   const format = useBudgetFormat()
@@ -1122,16 +1177,10 @@ function EncounterBudgetAfter({ patientId, budgetId }: { patientId: string; budg
     queryKey: ["budget", patientId, budgetId],
     queryFn: () => fetchBudgetDetail(patientId, budgetId),
   }).data?.data
-  if (!budget || budget.status === "borrador") return null
-  const chosen =
-    budget.options.length > 1
-      ? budget.options.find((option) => option.decision === "elegida")
-      : undefined
+  if (!budget || budget.status === "borrador" || budget.status === "cancelado") return null
   const money = (cents: number, currency: string) =>
     orgLocale ? formatMoney(cents, currency, orgLocale) : "…"
-  const state = chosen
-    ? `Eligió la ${chosen.label.charAt(0).toLowerCase()}${chosen.label.slice(1)} · ${moneyTotalsText(totalsOf(chosen, budget.currency), money, "precio por definir")}`
-    : budget.stateText
+  const state = budgetAnswerLine(budget, money) ?? budget.stateText
   return (
     <div className="flex w-full flex-col gap-0.5 rounded-lg border bg-background px-3 py-2" role="status">
       <span className="text-sm">

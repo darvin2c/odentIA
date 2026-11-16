@@ -404,7 +404,7 @@ function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
           {heading}
         </h3>
         <Badge variant={thinking ? "warning" : "secondary"}>
-          {thinking ? "Lo está pensando" : "Por responder"}
+          {thinking ? "Lo piensa" : "Por responder"}
         </Badge>
       </div>
       <ul className="flex flex-col gap-1 text-sm">

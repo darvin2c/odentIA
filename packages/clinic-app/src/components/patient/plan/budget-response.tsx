@@ -72,7 +72,8 @@ import {
 } from "../../../lib/budgets"
 import { fetchResponsibilities } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
-import { hcLabel, type PatientFull } from "../../../lib/patients"
+import { hcLabel, type PatientFull, type PlanItem } from "../../../lib/patients"
+import { lowerFirst } from "./plan-paths"
 import { ChoiceSelect } from "../../ui/choice-select"
 import {
   acceptedWords,
@@ -88,9 +89,14 @@ import { type BudgetSignRow, BudgetSigningScreen } from "./budget-signing"
 
 type Answer = "aceptado" | "pospuesto" | "rechazado"
 
+/**
+ * Una sola palabra para lo que espera (QA del 16 nov, E3): «Lo piensa», la misma del Plan, la ficha,
+ * Sofi y Argos; cuenta como «espera respuesta». Lo que la clínica hará después de otro tratamiento
+ * (la corona tras la endodoncia) es «Acepta»: el orden lo pone «va después».
+ */
 const ANSWER_OPTIONS: ReadonlyArray<{ value: Answer; label: string }> = [
   { value: "aceptado", label: "Acepta" },
-  { value: "pospuesto", label: "Para después" },
+  { value: "pospuesto", label: "Lo piensa" },
   { value: "rechazado", label: "No" },
 ]
 
@@ -494,6 +500,15 @@ export function BudgetResponse({
     queryFn: () => fetchResponsibilities(patientId),
     enabled: active && canPatients,
   })
+  // Lo que va después de otro (la corona tras la endodoncia): se acepta y el orden ya está.
+  const canClinical = usePermission("clinical.read")
+  const planQuery = useQuery({
+    queryKey: ["plan-items", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: active && canClinical,
+  })
+  const afterOf = (planItemId: string) =>
+    planQuery.data?.data.find((item) => item.id === planItemId)?.waitsFor?.title ?? null
 
   const chosenOption = budget.options.find((option) => option.decision === "elegida") ?? null
   const several = budget.options.length > 1
@@ -833,9 +848,17 @@ export function BudgetResponse({
             {finalAnswerText(line, budget.status)}
           </p>
         ) : index >= 0 && withButtons ? (
-          <form.AppField name={`decisions[${index}].decision`}>
-            {() => <AnswerButtons title={line.title} disabled={saving} />}
-          </form.AppField>
+          <>
+            <form.AppField name={`decisions[${index}].decision`}>
+              {() => <AnswerButtons title={line.title} disabled={saving} />}
+            </form.AppField>
+            {afterOf(line.planItemId) ? (
+              <p className="text-xs text-muted-foreground">
+                Si la hará después: «Acepta» · va después de {lowerFirst(afterOf(line.planItemId) ?? "")}. «Lo piensa» es
+                si aún no decide.
+              </p>
+            ) : null}
+          </>
         ) : null}
       </li>
     )

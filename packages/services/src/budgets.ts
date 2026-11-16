@@ -4117,7 +4117,7 @@ function decisionWordsOf(
     aceptado: "Aceptó",
     parcial: "Aceptó una parte",
     rechazado: "No aceptó",
-    pospuesto: "Lo dejó para después",
+    pospuesto: "Lo piensa",
   }
   const said = verb[budget.status] ?? "Respondió"
   // La firma dice lo de su momento: si respondió algo después, eso se dice con su canal.

@@ -6,8 +6,16 @@
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { expect, it } from "vitest"
 import { placeBudgetPath } from "./budget-paths.js"
-import { type BudgetWithTotals, createBudget, deliverBudget, findDraftBudget, getBudgetDetail } from "./budgets.js"
+import {
+  type BudgetWithTotals,
+  createBudget,
+  decideBudget,
+  deliverBudget,
+  findDraftBudget,
+  getBudgetDetail,
+} from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { budgetLine, getPlanNextSteps } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -74,4 +82,38 @@ it("B1d: sin opciones, con un borrador de ayer sin enviar, lo indicado hoy entra
   const after = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, sent.id))
   expect(after.totalCents).toBe(108000)
   expect(await draft()).toBeNull()
+})
+
+it("B1c: elige A, acepta la endodoncia y lo común y «lo piensa» la corona: la línea dice lo aceptado y lo que piensa, y sigue esperando respuesta", async () => {
+  const { f, service, indicate, draft } = await setup()
+  const endo = await indicate((await service("Endodoncia", 65000)).id, 36)
+  const corona = await indicate((await service("Corona cerámica", 90000)).id, 36)
+  const exo = await indicate((await service("Exodoncia", 15000)).id, 36)
+  const resina = await indicate((await service("Resina", 18000)).id, 15)
+  const limpieza = await indicate((await service("Profilaxis", 12000, "general")).id, null)
+  await f.run((tx) => placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exo.id, path: "nuevo" }))
+  const built = (await draft())!
+  await f.run((tx) => deliverBudget(tx, ...f.args, built.id))
+  const optionA = [...built.options].sort((a, b) => a.position - b.position)[0]!
+  const answered = await f.run((tx) =>
+    decideBudget(tx, ...f.args, built.id, {
+      optionId: optionA.id,
+      decisions: [
+        { planItemId: endo.id, decision: "aceptado" },
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: limpieza.id, decision: "aceptado" },
+        { planItemId: corona.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  const spaced = (text: string) => text.replace(/ /g, " ")
+  expect(spaced(budgetLine(answered, "es-PE"))).toBe(
+    "Eligió la opción A · aceptó S/ 950.00 · lo piensa: Corona cerámica · S/ 900.00",
+  )
+  // Sigue esperando respuesta (Sofi y Argos no la cuentan como aceptada), con la misma palabra.
+  expect(answered.awaitsAnswer).toBe(true)
+  const { steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, () => true))
+  const waiting = steps.find((step) => step.kind === "respuesta")
+  expect(waiting).toMatchObject({ text: "Lo piensa" })
+  expect(spaced(waiting?.detail ?? "")).toContain("Corona cerámica · S/ 900.00")
 })
