@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildPagesLoginUrl, exchangePagesCode, listSharedPages, subscribeAppToPage, unsubscribeAppFromPage } from "./meta-pages-login.js"
+import { buildPagesLoginUrl, exchangePagesCode, listSharedPages, subscribeAppToPage } from "./meta-pages-login.js"
 
 const APP = { appId: "APP1", appSecret: "secreto", graphVersion: "v25.0" }
 
@@ -62,11 +62,10 @@ describe("Conectar con Facebook: páginas e Instagram", () => {
     expect(meta.calls[0]!.auth).toBe("Bearer LARGA")
   })
 
-  it("suscribe y quita la app de la página con su clave", async () => {
+  it("suscribe la app a la página con su clave", async () => {
     const meta = fakeFetch(() => ({ json: { success: true } }))
     await subscribeAppToPage(APP, "P1", "TP1", { fetch: meta.fetch })
-    await unsubscribeAppFromPage(APP, "P1", "TP1", { fetch: meta.fetch })
-    expect(meta.calls.map((call) => `${call.method} ${call.url.pathname}`)).toEqual(["POST /v25.0/P1/subscribed_apps", "DELETE /v25.0/P1/subscribed_apps"])
+    expect(meta.calls.map((call) => `${call.method} ${call.url.pathname}`)).toEqual(["POST /v25.0/P1/subscribed_apps"])
     expect(meta.calls[0]!.url.searchParams.get("subscribed_fields")).toContain("message_echoes")
     expect(meta.calls[0]!.auth).toBe("Bearer TP1")
   })

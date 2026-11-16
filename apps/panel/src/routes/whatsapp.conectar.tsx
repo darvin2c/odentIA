@@ -89,14 +89,17 @@ function WhatsAppConnectPage() {
   })
   const brandColor = appearance.data?.data.brandColor ?? null
   // Un nombre largo pasa a la línea siguiente en vez de salirse de la tarjeta.
+  // En el celular, solo «Volver»: el nombre ya está en las migas y en el título.
   const back = clinic ? (
     <Button
       variant="outline"
-      className="h-auto min-h-11 whitespace-normal text-left sm:min-h-9"
+      className="min-h-11 min-w-0 shrink sm:min-h-9"
+      aria-label={`Volver a ${clinic.organizationName}`}
       render={<a href={whatsappPage(clinic)} />}
     >
       <ChevronLeft aria-hidden data-icon="inline-start" />
-      Volver a {clinic.organizationName}
+      <span className="sm:hidden">Volver</span>
+      <span className="hidden truncate sm:inline">Volver a {clinic.organizationName}</span>
     </Button>
   ) : null
 

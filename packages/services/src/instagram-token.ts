@@ -1,7 +1,8 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { channelConnection } from "@odentia/db/schema/crm"
-import { and, eq, inArray, isNull } from "drizzle-orm"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 
@@ -29,7 +30,16 @@ export async function listInstagramTokensDue(
       updatedAt: channelConnection.updatedAt,
     })
     .from(channelConnection)
-    .where(and(eq(channelConnection.provider, "instagram"), eq(channelConnection.status, "active"), isNull(channelConnection.signup)))
+    .leftJoin(saasSubscription, eq(saasSubscription.organizationId, channelConnection.organizationId))
+    .where(
+      and(
+        eq(channelConnection.provider, "instagram"),
+        eq(channelConnection.status, "active"),
+        isNull(channelConnection.signup),
+        // Una demo no: sus claves son de ejemplo.
+        or(isNull(saasSubscription.isDemo), eq(saasSubscription.isDemo, false)),
+      ),
+    )
   return rows.flatMap((row) => {
     let config: Record<string, unknown>
     try {

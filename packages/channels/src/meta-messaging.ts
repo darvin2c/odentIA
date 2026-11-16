@@ -79,8 +79,9 @@ function messengerConfig(config: Record<string, unknown>): MessengerConfig {
 
 function instagramConfig(config: Record<string, unknown>): InstagramConfig {
   const instagramId = pick(config, "instagramId", "Instagram")
-  // Con el botón llega la clave de la página: se habla con la API de Facebook.
-  if (typeof config["pageAccessToken"] === "string" && config["pageAccessToken"]) {
+  // Con el botón llegan la página y su clave: se habla con la API de Facebook.
+  // Sin `pageId` (la cuenta de Instagram de la administración) sigue Instagram Login.
+  if (typeof config["pageAccessToken"] === "string" && config["pageAccessToken"] && typeof config["pageId"] === "string" && config["pageId"]) {
     return {
       instagramId,
       via: "facebook",
@@ -230,7 +231,8 @@ function toNormalized(
     // Bandeja; lo respondido desde Meta Business Suite o la app del celular
     // entra como respuesta del equipo, para no contestar dos veces. Solo con
     // el botón se sabe cuál es la app de odentIA: sin eso, ningún eco entra.
-    if (msg.is_echo && (!ownAppId || String(msg.app_id ?? "") === ownAppId)) return
+    // Si el eco no dice de qué app salió, tampoco entra: podría ser uno nuestro.
+    if (msg.is_echo && (!ownAppId || msg.app_id === undefined || String(msg.app_id) === ownAppId)) return
     if (typeof msg.mid !== "string" || !msg.mid) return
     const base = {
       externalEventId: msg.mid,

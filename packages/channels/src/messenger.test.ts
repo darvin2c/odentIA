@@ -329,6 +329,8 @@ it("messenger con el botón: lo respondido desde Meta Business Suite entra como 
           { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440000000, message: { mid: "mid.suite", text: "Sí, mañana a las 4", is_echo: true, app_id: 263902037430900 } },
           // Desde odentIA: ya está en la Bandeja.
           { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440001000, message: { mid: "mid.nuestro", text: "Te esperamos", is_echo: true, app_id: "APP1" } },
+          // Sin decir de qué app salió: podría ser uno nuestro, no entra.
+          { sender: { id: "PAGE1" }, recipient: { id: "PSID1" }, timestamp: 1727440002000, message: { mid: "mid.sinapp", text: "Hola", is_echo: true } },
         ],
       },
     ],

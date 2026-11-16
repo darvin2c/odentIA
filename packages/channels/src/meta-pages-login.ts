@@ -129,14 +129,3 @@ export async function subscribeAppToPage(
   const answer = await graph("suscribir", `${base(app)}/${encodeURIComponent(pageId)}/subscribed_apps?${query.toString()}`, { method: "POST", token: pageToken }, deps)
   if (answer.status >= 400 || !succeeded(answer.json)) throw failure("suscribir", answer)
 }
-
-/** Al desconectar la última cuenta de la página: deja de escuchar sus avisos. No toca la página. */
-export async function unsubscribeAppFromPage(
-  app: Pick<MetaPlatformApp, "graphVersion">,
-  pageId: string,
-  pageToken: string,
-  deps: ChannelAdapterDeps,
-): Promise<void> {
-  const answer = await graph("desuscribir", `${base(app)}/${encodeURIComponent(pageId)}/subscribed_apps`, { method: "DELETE", token: pageToken }, deps)
-  if (answer.status >= 400 || !succeeded(answer.json)) throw failure("desuscribir", answer)
-}

@@ -29,15 +29,15 @@ export function ConnectLayout({
     <div className="flex min-h-svh flex-col bg-muted">
       {css ? <style>{css}</style> : null}
       <header className="flex items-center justify-between gap-3 border-b bg-background px-4 py-3 sm:px-8">
-        <Brand className="w-32" />
+        <Brand className="w-28 shrink-0 sm:w-32" />
         {back}
       </header>
       <main className="flex flex-1 justify-center px-4 py-8 sm:px-8 sm:py-10">
         <div className="flex w-full max-w-2xl flex-col gap-4">
           {clinicName ? (
-            <p className="text-sm text-muted-foreground">{clinicName} · Integraciones · WhatsApp</p>
+            <p className="text-sm break-words text-muted-foreground">{clinicName} · Integraciones · WhatsApp</p>
           ) : null}
-          <h1 className="text-2xl font-bold text-balance">{title}</h1>
+          <h1 className="text-2xl font-bold text-balance break-words">{title}</h1>
           {intro ? <p className="text-sm text-muted-foreground">{intro}</p> : null}
           <section className="elevated flex flex-col gap-4 rounded-xl border bg-card p-4 sm:p-5">{children}</section>
         </div>

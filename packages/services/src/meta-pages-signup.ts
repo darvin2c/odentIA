@@ -10,7 +10,9 @@ import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm"
 import { mailboxOauthState } from "@odentia/db/schema/mailbox"
-import { and, eq, inArray } from "drizzle-orm"
+import { canAccess } from "@odentia/auth/permissions"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import { randomBytes } from "node:crypto"
 import { SIGNUP_TOKEN_DEAD } from "./connections.js"
 import { isUniqueViolation, ServiceError } from "./errors.js"
@@ -93,9 +95,8 @@ export async function completeMetaPagesLogin(
 ): Promise<MetaPagesResult> {
   const nonce = parseOauthStateParam(secretsKey, input.state)
   if (!nonce) throw new ServiceError("FORBIDDEN", 403, "La vuelta de Facebook no es válida. Vuelve a intentarlo.")
-  const [pending] = await ownerDb.select().from(mailboxOauthState).where(eq(mailboxOauthState.nonce, nonce)).limit(1)
-  // Consumido primero: el código de Facebook es de un solo uso.
-  if (pending) await ownerDb.delete(mailboxOauthState).where(eq(mailboxOauthState.nonce, nonce))
+  // Consumido al leerlo, en un solo paso: dos vueltas con el mismo state no pasan las dos.
+  const [pending] = await ownerDb.delete(mailboxOauthState).where(eq(mailboxOauthState.nonce, nonce)).returning()
   if (!pending || pending.provider !== PROVIDER) {
     throw new ServiceError("FORBIDDEN", 403, "La conexión con Facebook venció o ya se usó. Vuelve a intentarlo.")
   }
@@ -103,12 +104,13 @@ export async function completeMetaPagesLogin(
     throw new ServiceError("FORBIDDEN", 403, "Pasaron más de 10 minutos. Vuelve a intentarlo.")
   }
   if (pending.userId !== input.userId) throw new ServiceError("FORBIDDEN", 403, "Esta conexión la empezó otra persona.")
-  const [role] = await ownerDb
+  const [membership] = await ownerDb
     .select({ role: member.role })
     .from(member)
-    .where(and(eq(member.organizationId, pending.organizationId), eq(member.userId, input.userId), inArray(member.role, ["owner", "admin"])))
+    .where(and(eq(member.organizationId, pending.organizationId), eq(member.userId, input.userId)))
     .limit(1)
-  if (!role) throw new ServiceError("FORBIDDEN", 403, "Conecta los canales quien administra la clínica.")
+  // La misma regla que al empezar: conecta quien administra la configuración.
+  if (!membership || !canAccess(membership.role, "settings.write")) throw new ServiceError("FORBIDDEN", 403, "Conecta los canales quien administra la clínica.")
 
   const userToken = await exchangePagesCode(app, { code: input.code, redirectUri: pending.redirectUri }, deps)
   const pages = await listSharedPages(app, userToken, deps)
@@ -259,7 +261,14 @@ export async function listPageConnections(ownerDb: Db): Promise<Array<{ orgId: s
   const rows = await ownerDb
     .select({ orgId: channelConnection.organizationId, connectionId: channelConnection.id, signup: channelConnection.signup })
     .from(channelConnection)
-    .where(and(inArray(channelConnection.provider, ["messenger", "instagram"]), eq(channelConnection.status, "active")))
+    .leftJoin(saasSubscription, eq(saasSubscription.organizationId, channelConnection.organizationId))
+    .where(
+      and(
+        inArray(channelConnection.provider, ["messenger", "instagram"]),
+        eq(channelConnection.status, "active"),
+        or(isNull(saasSubscription.isDemo), eq(saasSubscription.isDemo, false)),
+      ),
+    )
   return rows.filter((row) => row.signup !== null).map(({ orgId, connectionId }) => ({ orgId, connectionId }))
 }
 

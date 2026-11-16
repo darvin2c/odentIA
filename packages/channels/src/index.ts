@@ -38,7 +38,6 @@ export {
   PAGE_FIELDS,
   type SharedPage,
   subscribeAppToPage,
-  unsubscribeAppFromPage,
 } from "./meta-pages-login.js"
 export {
   inspectOwnAppToken,
