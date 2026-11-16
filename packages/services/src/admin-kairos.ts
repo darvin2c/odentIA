@@ -20,7 +20,7 @@ import {
 } from "@odentia/db/schema/admin-arm"
 import { adminAudit, adminStaff } from "@odentia/db/schema/admin-core"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, desc, eq, inArray, lte, ne, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, ne, notInArray, type SQL, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import {
   type ClientFileRow,
@@ -852,9 +852,25 @@ function toItemView(
   }
 }
 
+/**
+ * Lo de Kairós que se decide dentro de su conversación, en la Bandeja (ADR 0196): se sigue
+ * creando (y se aprueba con `decideKairosItem`), pero no sale en Kairós ni en Hoy.
+ */
+export const KAIROS_CONVERSATION_KINDS = [
+  "correo_sin_cliente",
+  "chat_sin_cliente",
+  "responder_chat",
+  "responder_correo",
+] as const satisfies readonly KairosItemKind[]
+
 export interface KairosItemFilter {
   /** «espera»: lo que espera un sí; «hecho»: lo ya decidido, vencido o ejecutado. */
   status: "espera" | "hecho"
+  /**
+   * También lo de las conversaciones (`KAIROS_CONVERSATION_KINDS`), que se decide en la Bandeja:
+   * sin pedirlo no sale.
+   */
+  conversations?: boolean
   /** Solo lo listo para decidir (`isReady`): lo que muestra Hoy. */
   ready?: boolean
   clientId?: string
@@ -869,7 +885,8 @@ export interface KairosItemFilter {
 /**
  * Lo que preparó Kairós: lo que espera un sí (lo que vence antes arriba) o lo
  * ya decidido (lo último arriba). Soporte no ve lo que es solo de
- * administración. Vence antes lo que esperó 48 h.
+ * administración. Vence antes lo que esperó 48 h. Lo de las conversaciones se
+ * decide en la Bandeja: solo sale si se pide (`conversations`).
  */
 export async function listKairosItems(
   tx: Db,
@@ -889,6 +906,7 @@ export async function listKairosItems(
     filter.clientId ? eq(kairosItem.clientId, filter.clientId) : undefined,
     actor.role === "admin" ? undefined : eq(kairosItem.adminOnly, false),
     filter.ready ? kairosReadySql : undefined,
+    filter.conversations ? undefined : notInArray(kairosItem.kind, [...KAIROS_CONVERSATION_KINDS]),
   )
   const cargaFirst = filter.status === "espera" && filter.cargaFirst === true
   // Hoy: la posible carga urgente (a 5 días o menos de borrarse si se marca, o de una clínica

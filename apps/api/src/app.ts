@@ -69,6 +69,7 @@ import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
 import { createAdminChatsRoute } from "./routes/admin-chats.js"
 import { createAdminClientsRoute } from "./routes/admin-clients.js"
+import { createAdminInboxRoute } from "./routes/admin-inbox.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
 import {
   createAccountAdminAccessRoute,
@@ -588,9 +589,12 @@ export function createApp(deps: AppDeps) {
     createAdminChatsRoute({
       ownerDb: deps.ownerDb,
       channels: deps.adminChannels,
+      storage: deps.storage,
       ...(deps.adminChannelsFetch ? { fetch: deps.adminChannelsFetch } : {}),
     }),
   )
+  // La Bandeja (ADR 0196): lo que nos escriben por fuera de la app, solo Administración.
+  app.route("/api/admin/inbox", createAdminInboxRoute({ ownerDb: deps.ownerDb }))
   app.route(
     "/api/admin/kairos",
     createAdminKairosRoute({
