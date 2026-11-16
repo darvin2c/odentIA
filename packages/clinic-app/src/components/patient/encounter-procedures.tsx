@@ -18,7 +18,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -90,8 +90,10 @@ function isPlanPending(plan: PlanItem | null): boolean {
 /**
  * Lo mismo que pide la API (`procedureInput` y `addEncounterProcedure`): qué
  * registrar, el sitio que pide su ámbito y la cantidad. Cada falta, en su campo.
+ * `mustChoose`: hay tratamientos del plan y no se eligió ninguno ni «Otro servicio del catálogo»;
+ * el catálogo no se ve y lo que falta es elegir qué se hizo (revisión del 16 nov, R10).
  */
-function procedureSchema(planById: Record<string, PlanItem>) {
+export function procedureSchema(planById: Record<string, PlanItem>, mustChoose: () => boolean = () => false) {
   return z
     .object({
       freeMode: z.boolean(),
@@ -114,6 +116,10 @@ function procedureSchema(planById: Record<string, PlanItem>) {
           else if (plan.scope === "surfaces" && value.site.surfaces.length === 0)
             ctx.addIssue({ code: "custom", path: ["site"], message: "Marca al menos una cara" })
         }
+        return
+      }
+      if (!value.freeMode && !value.service && mustChoose()) {
+        ctx.addIssue({ code: "custom", path: ["planItemId"], message: "Elige qué hiciste" })
         return
       }
       if (value.freeMode) {
@@ -316,6 +322,9 @@ export function EncounterProcedures({
     allItems.map((item) => [item.id, item]),
   )
 
+  // Lo dice la pantalla (depende de la pieza elegida): el esquema lo consulta al enviar.
+  const mustChoose = useRef(false)
+
   const form = useAppForm({
     defaultValues: {
       freeMode: false,
@@ -329,7 +338,7 @@ export function EncounterProcedures({
       diagnosisCode: "",
       diagnosisSystem: null as string | null,
     },
-    validators: { onSubmit: procedureSchema(planById) },
+    validators: { onSubmit: procedureSchema(planById, () => mustChoose.current) },
     onSubmit: async ({ value, formApi }) => {
       const plan = value.planItemId ? (planById[value.planItemId] ?? null) : null
       const trimmedCie = value.diagnosisCode.trim()
@@ -451,6 +460,10 @@ export function EncounterProcedures({
   const planItems: Record<string, string> = {}
   for (const item of options) planItems[item.id] = planOptionLabel(item, orgLocale)
   planItems[NO_PLAN] = OTHER_SERVICE
+  // Con tratamientos por elegir, el catálogo aparece al elegir «Otro servicio del catálogo»: no
+  // antes, para no registrar un acto suelto sin querer (R10).
+  const choosing = !selectedPlan && !otherPicked && options.length > 0
+  mustChoose.current = choosing
 
   // El ámbito del servicio decide qué sitio pide: pieza, superficies,
   // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
@@ -783,7 +796,7 @@ export function EncounterProcedures({
                   )}
                 </form.AppField>
               )}
-              {!selectedPlan && !freeMode && (
+              {!selectedPlan && !freeMode && !choosing && (
                 <form.AppField name="service">
                   {(field) => (
                     <field.Control label="Tratamiento">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { PlanItem } from "../../lib/patients"
-import { sessionChoices } from "./encounter-procedures"
+import { procedureSchema, sessionChoices } from "./encounter-procedures"
 
 const item = (over: Partial<PlanItem> & Pick<PlanItem, "id" | "title">): PlanItem =>
   ({
@@ -114,5 +114,38 @@ describe("lo que trae puesto «Registrar lo de hoy»", () => {
       sessionChoices([oldPending], { encounterId: "hoy", brought: new Set(), doneToday: none })
         .preset,
     ).toBeNull()
+  })
+})
+
+describe("procedureSchema (revisión del 16 nov, R10)", () => {
+  const empty = {
+    freeMode: false,
+    description: "",
+    service: null,
+    planItemId: "",
+    site: { toothNumber: null, surfaces: [] },
+    quadrant: "",
+    arch: "",
+    quantity: "1",
+    diagnosisCode: "",
+    diagnosisSystem: null,
+  }
+
+  it("con tratamientos por elegir y nada elegido, pide «Elige qué hiciste» en el tratamiento, no en el catálogo oculto", () => {
+    const result = procedureSchema({}, () => true).safeParse(empty)
+    expect(result.success).toBe(false)
+    if (!result.success)
+      expect(result.error.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([
+        ["planItemId", "Elige qué hiciste"],
+      ])
+  })
+
+  it("elegido «Otro servicio del catálogo» (o sin tratamientos), pide el servicio como siempre", () => {
+    const result = procedureSchema({}, () => false).safeParse(empty)
+    expect(result.success).toBe(false)
+    if (!result.success)
+      expect(result.error.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([
+        ["service", "Elige el tratamiento"],
+      ])
   })
 })
