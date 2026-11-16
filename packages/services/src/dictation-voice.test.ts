@@ -151,6 +151,46 @@ describe("un número mal oído no queda listo", () => {
   })
 })
 
+describe("un número queda listo solo si lo dicho nombra su pregunta (c4)", () => {
+  it("«hace 2 años» es un tiempo: no es la intensidad del dolor (v07)", () => {
+    const heard = "pieza 21 incisivo central superior izquierdo paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro"
+    expect(ask(endo, "dolor_intensidad", "2", "Hace 2 años", heard)).toBeNull()
+    // Citado sin la unidad, la oración dice que es un tiempo.
+    expect(ask(endo, "dolor_intensidad", "2", "Hace 2", heard)).toBeNull()
+    // Tampoco un conteo, una medida en mm ni un peso.
+    expect(ask(kid, "ceod_c", "3", "cariados desde hace 3 semanas")).toBeNull()
+    expect(ask(endo, "sondaje", "3", "sondaje de hace 3 meses")).toBeNull()
+    expect(ask(kid, "peso", "2", "peso hace 2 días")).toBeNull()
+    // El número de la pregunta, dicho junto a un tiempo, sigue valiendo.
+    expect(ask(endo, "dolor_intensidad", "6", "intensidad 6 desde hace 3 días")).toMatchObject({ status: "lista", payload: { value: 6 } })
+  })
+
+  it("lo que nombra su pregunta sigue listo: «overjet de 4», «intensidad 8», «ocho de diez» tras «dolor»", () => {
+    expect(ask(ortho, "overjet", "4", "overjet de 4 mm")).toMatchObject({ status: "lista", payload: { value: 4 } })
+    expect(ask(endo, "dolor_intensidad", "8", "intensidad 8")).toMatchObject({ status: "lista", payload: { value: 8 } })
+    expect(ask(endo, "dolor_intensidad", "8", "8 de 10", "pieza 3 6 dolor espontáneo 8 de 10 prueba de frío aumentada que persiste")).toMatchObject({ status: "lista", payload: { value: 8 } })
+    expect(ask(endo, "dolor_intensidad", "8", "ocho de diez", "Dolor a la percusión en la cuatro seis, ocho de diez.")).toMatchObject({ status: "lista", payload: { value: 8 } })
+    // «Le duele como un nueve»: entre las que llevan un número, el dolor es solo de la intensidad.
+    expect(ask(endo, "dolor_intensidad", "9", "le duele como un nueve")).toMatchObject({ status: "lista", payload: { value: 9 } })
+    // La unidad que solo tiene una pregunta de la ficha la nombra: «18 kg» es el peso.
+    expect(ask(kid, "peso", "18", "18 kg", "beso 18 kg me duele")).toMatchObject({ status: "lista", payload: { value: 18 } })
+    // La oración la nombra y la frase está en lo que dice de ella: el medio milímetro es de la inferior.
+    const voice = "caninos el derecho clase 2 El izquierdo clase 1 línea Media Superior centrada la inferior desviada a la derecha eh medio milímetro"
+    expect(ask(ortho, "linea_media_inferior_mm", "0.5", "eh medio milímetro", voice)).toMatchObject({ status: "lista", payload: { value: 0.5 } })
+    expect(ask(ortho, "linea_media_superior_mm", "0.5", "eh medio milímetro", voice)).toMatchObject({ status: "por_revisar" })
+    const cpod = "muy buenos días p o D cariados 3 perdidos uno obturados a ver 8 no 7 por favor"
+    expect(ask(adult, "cpod_c", "3", "cariados 3", cpod)).toMatchObject({ status: "lista", payload: { value: 3 } })
+  })
+
+  it("si no la nombra, Clío la propone y se revisa", () => {
+    const voice = "Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor"
+    expect(ask(ortho, "overjet", "7", "7 mm", voice)).toMatchObject({ status: "por_revisar", payload: { value: 7 }, note: "Dijiste «7 mm» sin nombrar «Overjet»: revísala." })
+    expect(ask(ortho, "overbite", "4", "over byte de 4", voice)).toMatchObject({ status: "lista", payload: { value: 4 } })
+    // Un número suelto sin nada de la ficha no nombra la escala.
+    expect(ask(endo, "dolor_intensidad", "5", "cinco")).toMatchObject({ status: "por_revisar", payload: { value: 5 } })
+  })
+})
+
 describe("la frase que se muestra es la del número que se usó (v08)", () => {
   const heard = "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares"
   it("e = 1 dice «uno con extracción indicada», no «con extracción indicada dos»", () => {

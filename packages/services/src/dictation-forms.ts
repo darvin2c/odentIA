@@ -220,15 +220,22 @@ const UNIT_WORDS = new Set(["mm", "milimetro", "milimetros", "cm", "centimetro",
 /** Las muletillas de quien dicta («digamos», «este», «a ver», «o sea»): no dicen nada de la pregunta (prueba con voz del 15 nov). */
 const MULETILLAS = new Set(["digamos", "este", "eh", "ehh", "mmm", "emm", "osea", "sea", "ver", "bueno", "pues"])
 const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 }
+/**
+ * Lo que dice que un número es un tiempo: «hace 2 años», «desde hace tres días». Un tiempo no
+ * responde una intensidad, un conteo ni una medida en mm o kg (prueba con voz del 15 nov, c4, v07:
+ * «Hace 2 años» quedaba lista como «Intensidad del dolor: 2»).
+ */
+const TIME_WORDS = new Set(["ano", "anos", "mes", "meses", "semana", "semanas", "dia", "dias", "hora", "horas", "minuto", "minutos", "segundo", "segundos"])
 
 /**
  * Los números que se dijeron en una frase, con sus repeticiones: en cifras
  * («6», «6,5», «-2»), en palabras («seis», «cuarenta y seis», «veintiséis»,
  * «seis y medio», «seis coma cinco», «menos dos») y, con `roman`, en romanos
  * sueltos («Clase II»: así se escriben las opciones; «largos», solo los de dos
- * letras o más, para lo dictado).
+ * letras o más, para lo dictado). Con `times: false`, sin los que son un tiempo
+ * («hace 2 años»: el número que sigue una unidad de tiempo).
  */
-export function saidNumbers(text: string, options: { roman?: "todos" | "largos"; articles?: boolean } = {}): number[] {
+export function saidNumbers(text: string, options: { roman?: "todos" | "largos"; articles?: boolean; times?: boolean } = {}): number[] {
   const found: number[] = []
   if (options.roman) {
     // En lo dictado o escrito, una «I» suelta es casi siempre otra cosa: ahí solo los de dos letras o más («clase II»).
@@ -273,7 +280,7 @@ export function saidNumbers(text: string, options: { roman?: "todos" | "largos";
         next = decimal.next
       }
     }
-    found.push(negative ? -value : value)
+    if (options.times !== false || !TIME_WORDS.has(words[next] ?? "")) found.push(negative ? -value : value)
     index = next - 1
   }
   return found
@@ -1089,6 +1096,12 @@ const tokensOf = (text: string) =>
     .map((word) => word.replace(/\.+$/, ""))
     .filter(Boolean)
 
+/** Las primeras palabras que siguen a lo dicho en su oración, sin tildes: el modelo a veces cita sin lo que viene después. */
+function wordsAfter(said: string, sentence: string, count: number): string {
+  const at = plain(sentence).indexOf(plain(said))
+  return at >= 0 && said.trim() ? tokensOf(plain(sentence).slice(at + plain(said).length)).slice(0, count).join(" ") : ""
+}
+
 /** El primer número desde `from`, saltando hasta dos palabras de enlace en esa dirección. */
 function numberNear(words: string[], from: number, step: 1 | -1): { value: number; next: number; at: number } | null {
   for (let at = from, skipped = 0; at >= 0 && at < words.length && skipped <= 2; at += step, skipped += 1) {
@@ -1106,9 +1119,7 @@ function numberNear(words: string[], from: number, step: 1 | -1): { value: numbe
  * cede» no corrige nada.
  */
 function correctedNumber(said: string, sentence = ""): number | null {
-  const at = plain(sentence).indexOf(plain(said))
-  const tail = at >= 0 && said.trim() ? tokensOf(plain(sentence).slice(at + plain(said).length)).slice(0, 4).join(" ") : ""
-  const words = tokensOf(`${said} ${tail}`)
+  const words = tokensOf(`${said} ${wordsAfter(said, sentence, 4)}`)
   for (let index = words.length - 1; index > 0; index -= 1) {
     if (!["no", "perdon", "corrijo"].includes(words[index] ?? "")) continue
     const fixed = numberNear(words, index + 1, 1)
@@ -1267,6 +1278,59 @@ function spansOf(question: DictationFormQuestion, others: readonly DictationForm
   return spans.length ? spans : [heard]
 }
 
+/** Cómo se dice cada unidad de una ficha: «18 kg» es el peso si ninguna otra pregunta de la ficha va en kg. */
+const UNIT_SAID: Record<string, RegExp> = {
+  mm: /\b(mm|milimetros?)\b/,
+  cm: /\b(cm|centimetros?)\b/,
+  kg: /\b(kg|kilos?|kilogramos?)\b/,
+  g: /\b(g|gramos?)\b/,
+}
+
+/** «Le duele como un nueve»: el dolor también se dice con el verbo. */
+const PAIN_SAID = /\b(dolor|duele|duelen|dolia|dolio|doler)\b/
+
+/**
+ * Las preguntas de la ficha que pueden recibir un número: las de número, escala y pieza, y las
+ * opciones numeradas («Grado 1», «3 · Positiva»). Entre ellas, lo que es solo de una la nombra.
+ */
+const takesNumber = (item: { type: string; options: readonly string[] | null }) =>
+  item.type === "numero" || item.type === "escala" || item.type === "pieza" || (item.options ?? []).some((option) => optionNumbers(option).length > 0)
+
+/**
+ * ¿Lo dicho nombra la pregunta de este número? Un número queda listo solo así (prueba con voz del
+ * 15 nov, c4, v07: «Hace 2 años» quedaba lista como «Intensidad del dolor: 2»). Como la red: la
+ * frase la nombra (`namesQuestion`, con su rótulo o la palabra que solo ella tiene), o la nombra su
+ * oración y la frase está en lo que la oración dice de ella (`spansOf`: en «superior centrada la
+ * inferior desviada a la derecha eh medio milímetro», el medio milímetro es de la inferior). Entre
+ * las que llevan un número, también lo que solo tiene esta: una palabra de su rótulo en la frase
+ * («le duele como un nueve» es la intensidad del dolor), su unidad («18 kg» es el peso) o, en una
+ * escala, «ocho de diez» con una palabra suya en la oración. `said` y `sentence`, ya leídos.
+ */
+function numberNamed(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], site: ProductSite, said: string, sentence: string): boolean {
+  if (namesQuestion(question, said, site)) return true
+  const kin = questions.filter((other) => other !== question && other.responseId === question.responseId && takesNumber(other))
+  const theirs = new Set(kin.flatMap((other) => meaningful(other.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
+  const own = meaningful(question.label.replace(/\([^)]*\)/g, " ")).filter((word) => !theirs.has(word.slice(0, 5)))
+  const spoken = (text: string) => {
+    const words = meaningful(text)
+    return own.some((word) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3) || (word === "dolor" && PAIN_SAID.test(plain(text))))
+  }
+  if (spoken(said)) return true
+  const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
+  if (unit?.test(plain(said)) && !kin.some((other) => other.unit === question.unit)) return true
+  if (question.type === "escala" && question.max !== null) {
+    const outOf = new RegExp(`\\b(de|sobre) (${question.max}|${plain(String(saidWordOf(question.max)))})\\b`)
+    if (outOf.test(plain(said)) && spoken(sentence || said)) return true
+  }
+  if (!sentence || !namesQuestion(question, sentence, site)) return false
+  const others = questions.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, heardBy(other, sentence), site))
+  const phrase = plain(said)
+  return spansOf(question, others, sentence).some((span) => plain(span).includes(phrase))
+}
+
+/** El número en palabras, para leer «de diez» como «de 10». */
+const saidWordOf = (value: number) => Object.entries({ ...UNITS, ...TEENS, ...TENS }).find(([word, number]) => number === value && word !== "un" && word !== "una")?.[0] ?? String(value)
+
 function checkFormAnswer(
   draft: { payload: Record<string, unknown>; sourceText?: string | undefined },
   questions: readonly DictationFormQuestion[],
@@ -1396,7 +1460,11 @@ function checkFormAnswer(
       if (!raw || !Number.isFinite(proposed)) return null
       // El número tiene que estar en lo dicho: nunca uno que el modelo dedujo o convirtió.
       // La pieza también se dice dígito a dígito («la cuatro seis»), como en el odontograma.
-      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : heard, [proposed])) return null
+      // Un tiempo («hace 2 años», también con la unidad después de la frase citada) no responde una
+      // pregunta que no se mide en tiempo.
+      const timed = question.type !== "pieza" && !TIME_WORDS.has(plain(question.unit ?? ""))
+      const numbers = timed ? saidNumbers(`${said} ${wordsAfter(said, sentence, 1)}`, { roman: "largos", times: false }) : heard
+      if (!containsAll(question.type === "pieza" ? toothNumbersIn(said) : numbers, [proposed])) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
@@ -1427,12 +1495,16 @@ function checkFormAnswer(
       // es 6 o 2). Si ese orden se dedujo y no da lo que propuso Clío, o hay un número a cada lado, la
       // propone por revisar. Chrome a veces escribe una cifra de más («0,99» por «cero coma nueve», v12):
       // con más de un decimal, también.
+      // Y queda lista solo si lo dicho nombra su pregunta (`numberNamed`): si no, Clío la propone y
+      // la persona la revisa (prueba con voz del 15 nov, c4: «déjame medir 7 mm» no dice que es el overjet).
       const prepared =
         paired && (paired.ambiguous || (!paired.sure && paired.value !== null && paired.value !== proposed))
           ? review(number, `Dijiste «${shortSaid(shown ?? dictated)}»: no queda claro qué número es de «${question.label}». Revísala.`)
           : (String(number).split(".")[1]?.length ?? 0) > NUMBER_DECIMALS
             ? review(number, `Dijiste «${shortSaid(dictated)}»: revisa los decimales.`)
-            : ready(number)
+            : !(paired?.sure && paired.value !== null) && !numberNamed(question, questions, site, said, sentence)
+              ? review(number, `Dijiste «${shortSaid(dictated)}» sin nombrar «${question.label}»: revísala.`)
+              : ready(number)
       return shown ? { ...prepared, said: shown } : prepared
     }
   }
