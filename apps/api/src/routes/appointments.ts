@@ -584,9 +584,15 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "appointments.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar citas"), 403)
     }
+    // Uno (`planItemId`, «Qué sigue») o varios (`planItemIds`, «Atención finalizada»: lo que se vuelve a hacer).
     const parsed = z
-      .object({ expectedVersion: z.number().int().min(0), planItemId: z.uuid() })
+      .object({
+        expectedVersion: z.number().int().min(0),
+        planItemId: z.uuid().optional(),
+        planItemIds: z.array(z.uuid()).min(1).max(6).optional(),
+      })
       .strict()
+      .refine((body) => !!body.planItemId || !!body.planItemIds, { message: "Elige para qué se usa la cita", path: ["planItemIds"] })
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

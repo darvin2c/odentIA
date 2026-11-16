@@ -239,6 +239,8 @@ it("D4: el cierre pregunta por lo trabajado hoy; a mitad no cierra nada, «Falta
     continuing: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
     notRegistered: [],
     accepted: [],
+    waiting: [],
+    afterUnbooked: [],
   })
   // Lo que no se trabajó en esta atención no se responde.
   await expect(
@@ -324,6 +326,8 @@ it("D4: si la cita traía el tratamiento y no se registró su sesión, el cierre
     continuing: [],
     notRegistered: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
     accepted: [],
+    waiting: [],
+    afterUnbooked: [],
   })
   // Registrada la sesión, ya no es un aviso: sigue en curso.
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, today, { planItemId: item.id }))

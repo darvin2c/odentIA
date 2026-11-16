@@ -26,8 +26,13 @@ export const INVITED_TO_RETURN_ACTION = "paciente.invitada_a_volver"
 export const INVITE_CYCLE_MONTHS = 6
 
 export interface InviteCase {
-  /** La última cita atendida, que es el caso de la invitación. */
-  appointmentId: string
+  /**
+   * La última visita, que es el caso de la invitación: su cita atendida o, si vino sin cita, su
+   * atención firmada (`visitRowsSql`). La clave que evita repetir la invitación la lleva.
+   */
+  visitId: string
+  /** La cita de esa visita; nula si vino sin cita. */
+  appointmentId: string | null
   patientId: string
   personId: string
   personName: string
@@ -57,7 +62,8 @@ export async function lapsedToInvite(
     ? sql`and l.starts_at >= ${options.since.toISOString()}::timestamptz - make_interval(months => ${months})`
     : sql``
   const rows = await tx.execute<{
-    appointment_id: string
+    visit_id: string
+    appointment_id: string | null
     patient_id: string
     person_id: string
     person_name: string
@@ -65,7 +71,7 @@ export async function lapsedToInvite(
     invites: number
   }>(sql`
     with ${lapsedSql(orgId, { branch: null, timezone }, now, months)}
-    select l.id as appointment_id, l.patient_id, p.person_id, pp.display_name as person_name, l.starts_at as last_visit,
+    select l.id as visit_id, l.appointment_id, l.patient_id, p.person_id, pp.display_name as person_name, l.starts_at as last_visit,
       (select count(*)::int from audit_event ae
         where ae.organization_id = ${orgId} and ae.action = ${INVITED_TO_RETURN_ACTION}
           and ae.entity = 'patient' and ae.entity_id = l.patient_id::text) as invites
@@ -87,6 +93,7 @@ export async function lapsedToInvite(
     ${limit}
   `)
   return rows.map((row) => ({
+    visitId: row.visit_id,
     appointmentId: row.appointment_id,
     patientId: row.patient_id,
     personId: row.person_id,

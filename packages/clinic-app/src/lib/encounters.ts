@@ -55,8 +55,16 @@ export interface ClosingCheck {
     finishing: ClosingSession[]
     continuing: ClosingSession[]
     notRegistered?: ClosingSession[]
-    /** Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso (la corona tras la endodoncia). */
+    /**
+     * Lo aceptado sin empezar, a lo que vuelve si nada sigue en curso: primero lo de la misma pieza
+     * (la corona tras la endodoncia) y después lo del mismo plan (la resina 15 y la limpieza).
+     */
     accepted?: ClosingSession[]
+    /**
+     * Lo que iba después de lo que hoy termina y no tiene cita (la corona tras la endodoncia):
+     * el cierre propone un control a 30 días.
+     */
+    afterUnbooked?: ClosingSession[]
   }
   /**
    * Los diagnósticos activos que resuelve un tratamiento de hoy si queda
@@ -100,6 +108,8 @@ export interface ClosingSession {
   place?: string
   /** La cita por venir que ya lleva su próxima sesión; sin cita, no viene. */
   booked?: BookedSession
+  /** Lo trabajado hoy que va antes, en la misma pieza (la endodoncia, de la corona). */
+  before?: { planItemId: string; title: string }
 }
 
 /** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */

@@ -268,6 +268,12 @@ export function visitWhenSaid(iso: string): string {
   return whenSaid(iso, timeZone, zonedDateOf(new Date().toISOString(), timeZone))
 }
 
+/** «Resina · 15», «Resina · 15 y Limpieza», «Corona · 36, Resina · 15 y Limpieza»; vacío sin nada. */
+export function listSaid(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
+}
+
 /** «Endodoncia · 46 · sesión 2 de 2»; uno de una sola sesión, solo su nombre. */
 export function sessionLine(label: string, n: number, m: number): string {
   return showsSession(n, m) ? `${label} · ${sessionWords(n, m)}` : label
@@ -458,6 +464,7 @@ export function ClosingNextVisit({
   busy,
   continuing = [],
   canBook = true,
+  afterUnbooked = [],
 }: {
   form: ClosingForm
   controls: ClosingControls | null | undefined
@@ -468,19 +475,40 @@ export function ClosingNextVisit({
   continuing?: ContinuingVisit[]
   /** Quien firma puede reservar la cita: se le dice que la reserva al firmar. */
   canBook?: boolean
+  /**
+   * Lo que iba después de lo que hoy termina y aún no tiene cita («Corona · 36»): se propone un
+   * control a 30 días, sin marcarlo (estudio de la atención, 16 nov).
+   */
+  afterUnbooked?: string[]
 }): React.JSX.Element | null {
   const ids = useId()
   const values = useStore(form.store, (state) => state.values)
   if (!controls) return null
   const known = knownReturn(values, controls, dictated)
-  const sessionsLines = continuing.map((visit) => {
-    if (visit.booked)
-      return `Vuelve ${visitWhenSaid(visit.booked.startsAt)} para ${sessionLine(visit.label, visit.booked.n, visit.booked.m)}, con su cita.`
-    const line = sessionLine(visit.label, visit.n, visit.m)
-    return canBook
-      ? `Vuelve para ${line}: al firmar puedes reservar su cita aquí mismo.`
-      : `Vuelve para ${line}: recepción la verá en «Qué sigue» para reservarla.`
-  })
+  const booked = continuing.flatMap((visit) =>
+    visit.booked
+      ? [`Vuelve ${visitWhenSaid(visit.booked.startsAt)} para ${sessionLine(visit.label, visit.booked.n, visit.booked.m)}, con su cita.`]
+      : [],
+  )
+  // Lo que no tiene cita va en una sola frase: «Vuelve para Resina · 15 y Limpieza».
+  const unbooked = continuing.filter((visit) => !visit.booked)
+  const unbookedWhat = listSaid(unbooked.map((visit) => sessionLine(visit.label, visit.n, visit.m)))
+  // Las mismas palabras en los tres productos: en latidIA y vistIA lo indicado ya queda aceptado.
+  const unbookedLine = !unbookedWhat
+    ? null
+    : canBook
+      ? `Vuelve para ${unbookedWhat}: al firmar puedes reservar su cita aquí mismo.`
+      : `Vuelve para ${unbookedWhat}: recepción la verá en «Qué sigue» para reservarla.`
+  const sessionsLines = [...booked, ...(unbookedLine ? [unbookedLine] : [])]
+  // El control corto que se propone, sin marcarlo: quien firma decide.
+  const proposal =
+    afterUnbooked.length > 0 && !known && values.nextControl !== "month"
+      ? `${listSaid(afterUnbooked)} ${afterUnbooked.length === 1 ? "va después de lo que hoy termina y aún no tiene cita" : "van después de lo que hoy termina y aún no tienen cita"}: conviene un control en 1 mes.`
+      : null
+  const proposeMonth = () => {
+    set("askControl", true)
+    set("nextControl", "month")
+  }
   const recall = controls.recallMonths
   const options: Array<{ value: Exclude<NextControlChoice, "" | "none">; label: string }> = [
     { value: "week", label: "En 1 semana" },
@@ -539,7 +567,21 @@ export function ClosingNextVisit({
             {line}
           </p>
         ))}
-        {sessionsLines.length > 0 && !known && !values.askControl ? (
+        {sessionsLines.length > 0 && !known && !values.askControl && proposal ? (
+          <p className="text-xs text-muted-foreground">
+            {proposal}{" "}
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto p-0 text-xs"
+              disabled={busy}
+              onClick={proposeMonth}
+            >
+              Indicar el control en 1 mes
+            </Button>
+          </p>
+        ) : sessionsLines.length > 0 && !known && !values.askControl ? (
           <p className="text-xs text-muted-foreground">
             {/* Lo de hoy terminó (la endodoncia): su control se indica ahora, si hace falta (segunda mesa del 9 nov). */}
             {continuing.every((visit) => visit.accepted)
@@ -575,6 +617,21 @@ export function ClosingNextVisit({
             {beside ? (
               <p id={`${ids}-control`} className="text-sm font-medium">
                 {beside.title}
+              </p>
+            ) : null}
+            {proposal ? (
+              <p className="text-sm">
+                {proposal}{" "}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="h-auto p-0"
+                  disabled={busy}
+                  onClick={proposeMonth}
+                >
+                  Indicar el control en 1 mes
+                </Button>
               </p>
             ) : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">

@@ -780,6 +780,11 @@ export function EncounterEditor({
     setSessionAnswers((current) => ({ ...current, [planItemId]: answer }))
   // Lo que sigue en curso si se firma así: «¿Cuándo vuelve?» es su próxima sesión.
   const continuingVisits = continuingAfterSign(closingQuery.data?.data.sessions, sessionAnswers, sessionLabelOf)
+  // Lo que iba después de lo que hoy termina y no tiene cita: el cierre propone un control a 30 días.
+  // Si lo de antes sigue («Falta otra sesión»), no termina hoy y no se propone.
+  const afterUnbooked = (closingQuery.data?.data.sessions?.afterUnbooked ?? [])
+    .filter((session) => !session.before || sessionAnswers[session.before.planItemId] !== "otra")
+    .map(sessionLabelOf)
   const canBook = usePermission("appointments.write")
 
   const valuesRef = useRef<DraftValues>({
@@ -3053,6 +3058,7 @@ export function EncounterEditor({
             dictated={dictatedControl(signIdsRef.current)}
             busy={finalizing}
             continuing={continuingVisits}
+            afterUnbooked={afterUnbooked}
             canBook={canBook}
           />
         }
@@ -3124,17 +3130,28 @@ export function EncounterEditor({
           {/* La cita reservada para lo que hoy quedó hecho: usarla para lo que sigue o liberarla (M1). */}
           <FinalizedFreedAppointments
             appointments={finalizedFreed}
+            // La misma elección de «¿Cuándo vuelve?» (la que el servidor devolvió al firmar): lo que
+            // sigue sin cita, todo junto («Usarla para Resina · 15 · Limpieza»).
             next={(() => {
-              const first = finalizedNext.find((session) => session.toBook && !session.booked)
-              return first ? { planItemId: first.planItemId, title: first.title } : null
+              const open = finalizedNext.filter((session) => session.toBook && !session.booked)
+              return open.length > 0
+                ? {
+                    planItemIds: open.map((session) => session.planItemId),
+                    title: open
+                      .map((session) => sessionLabelOf({ planItemId: session.planItemId, title: session.title, n: 0, m: 0 }))
+                      .join(" · "),
+                  }
+                : null
             })()}
             canBook={canBook}
             // Su Plan, «Qué sigue» y sus citas cambian: lo de esta persona se vuelve a leer.
             onChanged={(_, how) => {
               // Lo que ya va en esa cita no se ofrece otra vez (revisión antes de entregar).
               if (how === "usada") {
-                const used = finalizedNext.find((session) => session.toBook && !session.booked)?.planItemId
-                if (used) setFinalizedNext((current) => current.filter((session) => session.planItemId !== used))
+                const used = new Set(
+                  finalizedNext.filter((session) => session.toBook && !session.booked).map((session) => session.planItemId),
+                )
+                if (used.size > 0) setFinalizedNext((current) => current.filter((session) => !used.has(session.planItemId)))
               }
               void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(patientId) })
             }}

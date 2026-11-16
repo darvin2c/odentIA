@@ -66,6 +66,7 @@ import {
   isToSchedule,
   LIVE_APPOINTMENT_STATUSES,
   pairsWithAccepted,
+  type SequencedItem,
   type SessionCount,
   servedToday,
   sessionCountsOf,
@@ -138,6 +139,11 @@ export interface PlanNextStep {
    * Solo para quien puede reservar.
    */
   alsoToSchedule?: string[]
+  /**
+   * De qué tratamientos y controles habla la fila, tenga o no botón: la vista de una atención
+   * firmada pone primero lo suyo (`focusOn`) sin quitar ni agregar filas.
+   */
+  about?: { planItemIds: string[]; followUpIds: string[] }
 }
 
 export type Can = (permission: string) => boolean
@@ -314,6 +320,68 @@ export async function getPlanNextSteps(
 ): Promise<{ step: PlanNextStep; steps: PlanNextStep[] }> {
   const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId)
   return { step: planNextStepFrom(facts, context, can), steps: planStepsFrom(facts, context, can) }
+}
+
+/**
+ * «Lo que sigue» de una atención firmada (estudio de la atención, entrega 7): la misma lista
+ * de la ficha (`planStepsFrom`, con sus palabras y sus botones), con lo de esta atención
+ * primero (`focusOn`): quien relee la endodoncia ve «Reservar la sesión 2» antes que el
+ * presupuesto. No arma otra lista en la pantalla ni quita o agrega filas.
+ */
+export async function getEncounterNextSteps(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+  can: Can,
+  opts: { viewerUserId?: string } = {},
+): Promise<PlanNextStep[]> {
+  const [here] = await tx
+    .select({ id: encounter.id })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.id, encounterId)))
+    .limit(1)
+  if (!here) throw notFound("Atención")
+  const { facts, context } = await planFactsOf(tx, orgId, patientId, opts.viewerUserId)
+  return focusOn(planStepsFrom(facts, context, can), await encounterFocusOf(tx, orgId, encounterId))
+}
+
+/**
+ * Lo de una atención: lo trabajado en ella (un procedimiento vigente), lo indicado en ella y lo
+ * que se trajo a ella, y los controles que nacieron en ella.
+ */
+async function encounterFocusOf(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+): Promise<{ planItemIds: ReadonlySet<string>; followUpIds: ReadonlySet<string> }> {
+  const items = await tx.execute<{ id: string }>(sql`
+    select item.id from treatment_plan_item item
+    where item.organization_id = ${orgId}
+      and (item.source_encounter_id = ${encounterId}
+        or exists (select 1 from encounter_procedure proc where proc.organization_id = item.organization_id
+          and proc.plan_item_id = item.id and proc.encounter_id = ${encounterId} and proc.voided_at is null)
+        or exists (select 1 from encounter_plan_item linked where linked.organization_id = item.organization_id
+          and linked.plan_item_id = item.id and linked.encounter_id = ${encounterId}))`)
+  const controls = await tx
+    .select({ id: clinicalFollowUp.id })
+    .from(clinicalFollowUp)
+    .where(and(eq(clinicalFollowUp.organizationId, orgId), eq(clinicalFollowUp.originEncounterId, encounterId)))
+  return { planItemIds: new Set(items.map((row) => row.id)), followUpIds: new Set(controls.map((row) => row.id)) }
+}
+
+/**
+ * La lista con lo de una atención primero, en el orden que ya tenía; el resto después, igual.
+ * Pura: no cambia ninguna fila.
+ */
+export function focusOn(
+  steps: readonly PlanNextStep[],
+  focus: { planItemIds: ReadonlySet<string>; followUpIds: ReadonlySet<string> },
+): PlanNextStep[] {
+  const ours = (step: PlanNextStep) =>
+    (step.about?.planItemIds ?? []).some((id) => focus.planItemIds.has(id)) ||
+    (step.about?.followUpIds ?? []).some((id) => focus.followUpIds.has(id))
+  return [...steps.filter(ours), ...steps.filter((step) => !ours(step))]
 }
 
 /** Lo de una persona que decide su «Qué sigue». */
@@ -900,6 +968,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       kind: "continuar",
       text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
       detail: bookedBy,
+      about: { planItemIds: [item.id], followUpIds: [] },
       ...(unrecordedWords
         ? { notice: unrecordedWords }
         : laterBooked && seesAgenda
@@ -936,6 +1005,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       // La siguiente se reserva en esa cita: en la corona depende del laboratorio.
       detail: more ? `Con su cita · la sesión ${n + 1} se reserva en esa cita` : "Con su cita",
       action: null,
+      about: { planItemIds: [item.id], followUpIds: [] },
     }
   }
 
@@ -1016,6 +1086,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
       .find((budget) => budget.items.some((line) => list.some((item) => item.id === line.planItemId)))
     const label = context.budgetRequired ? "Reservar lo aceptado" : "Reservar lo indicado"
     const answered = decided?.decidedAt ? `respondió el ${day(decided.decidedAt)}` : null
+    const about = { planItemIds: list.map((item) => item.id), followUpIds: controls.map((row) => row.id) }
 
     // Todo lo que falta va después de otro tratamiento: la fila dice de cuál y cuándo es.
     if (listReady.length === 0 && listWaiting.length > 0 && controls.length === 0) {
@@ -1029,6 +1100,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
         kind: "agendar",
         text: `${namesOf(listWaiting)}: va después de terminar ${blocker.title}`,
         detail: [capital(before), answered, bookedBy].filter(Boolean).join(" · "),
+        about,
         action: can("appointments.write")
           ? {
               label,
@@ -1106,6 +1178,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     return {
       kind: "agendar",
       text,
+      about,
       detail:
         [
           named || null,
@@ -1200,8 +1273,14 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     }
   }
 
+  /** Un control, con de qué habla: su control y el tratamiento que controla. */
+  const controlStep = (control: FollowUpRow): PlanNextStep => ({
+    ...controlStepOf(control),
+    about: { planItemIds: control.planItemId ? [control.planItemId] : [], followUpIds: [control.id] },
+  })
+
   /** Un control, con quién lo indicó y cuándo (QA del 8 nov: no decía para qué era). */
-  const controlStep = (control: FollowUpRow): PlanNextStep => {
+  const controlStepOf = (control: FollowUpRow): PlanNextStep => {
     const due = `${dayKey(control.dueAt) < dayKey(new Date()) ? "Tocaba el" : "Toca el"} ${day(control.dueAt)}`
     const origin = controlOrigins?.get(control.id) ?? null
     const why =
@@ -1425,4 +1504,94 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   if ((first.kind === "enviar" || first.kind === "respuesta") && p.startedFirst)
     return { ...first, detail: `${first.detail} · también falta la cita de la próxima sesión de ${p.startedFirst.title}`, ...alsoToSchedule }
   return { ...first, ...alsoToSchedule }
+}
+
+/**
+ * Hasta cuánto atrás «¿Cuándo vuelve?» mira lo aceptado del mismo plan que no es de la pieza
+ * trabajada hoy: un blanqueamiento aceptado hace un año no cambia cada cierre (QA del 9 nov).
+ * Es el supuesto de la voz clínica del estudio de la atención (16 nov), por confirmar con una
+ * clínica real.
+ */
+export const RETURN_ACCEPTED_MONTHS = 6
+
+/** Un tratamiento del plan con lo que pide la elección de «¿Cuándo vuelve?». */
+export interface ReturnCandidate extends SequencedItem {
+  planId: string
+  createdAt: Date
+  decidedAt: Date | null
+}
+
+/** Un tratamiento y lo que va antes de él (otro de la misma pieza, de una fase anterior). */
+export interface ReturnAfter<T> {
+  item: T
+  before: T
+}
+
+/** La elección de «¿Cuándo vuelve?» (`returnChoiceOf`). */
+export interface ReturnChoice<T> {
+  ready: Array<{ item: T; before: T | null }>
+  waiting: Array<ReturnAfter<T>>
+  afterFinishing: Array<ReturnAfter<T>>
+}
+
+/**
+ * A qué vuelve al firmar (estudio de la atención, entrega 7): es la regla de «va después» de
+ * «Qué sigue» (`waitingFor`), con lo que la firma termina hoy ya terminado. `items` son todos
+ * los de la persona, en el orden del plan; `worked`, los que tienen un procedimiento hoy;
+ * `finishing`, los que hoy llegan a sus sesiones.
+ *
+ * - `ready`: lo aceptado sin empezar, primero lo de la misma pieza que lo trabajado hoy (la
+ *   corona, al terminar la endodoncia) y después lo del mismo plan aceptado desde `since` (la
+ *   resina 15 y la limpieza), sin lo que todavía va después de otro. Nada si otro tratamiento
+ *   sigue en curso sin su sesión de hoy: esa sesión va primero.
+ * - `waiting`: lo aceptado de la misma pieza que todavía espera a lo trabajado hoy que sigue en
+ *   curso (la corona detrás de la sesión 2 de la endodoncia).
+ * - `afterFinishing`: lo que iba después de lo que hoy termina, respondido o no (la corona que
+ *   «lo piensa»): si no tiene cita, el cierre propone un control a 30 días.
+ *
+ * `before` de cada uno es lo trabajado hoy que iba antes.
+ */
+export function returnChoiceOf<T extends ReturnCandidate>(
+  items: readonly T[],
+  opts: { worked: ReadonlySet<string>; finishing: ReadonlySet<string>; phases: readonly string[]; since: Date },
+): ReturnChoice<T> {
+  const none: ReturnChoice<T> = { ready: [], waiting: [], afterFinishing: [] }
+  const worked = items.filter((item) => opts.worked.has(item.id))
+  if (worked.length === 0) return none
+  const notStarted = (item: T) => item.status === "pendiente" || item.status === "programado"
+  // Lo que va antes de cada uno, hoy (sin la firma): de ahí sale de qué trabajo de hoy espera.
+  const beforeToday = (item: T): T | null => {
+    const before = waitingFor(item, items, opts.phases)
+    return before && opts.worked.has(before.id) ? before : null
+  }
+  const afterFinishing = items.flatMap((item) => {
+    const before = beforeToday(item)
+    return before &&
+      opts.finishing.has(before.id) &&
+      notStarted(item) &&
+      ["aceptado", "pendiente", "pospuesto"].includes(item.decisionStatus)
+      ? [{ item, before }]
+      : []
+  })
+  // Otro tratamiento sigue en curso sin su sesión de hoy: vuelve para esa sesión.
+  if (items.some((item) => item.status === "en_curso" && !opts.worked.has(item.id))) return { ...none, afterFinishing }
+  // Con la firma, lo que hoy termina ya no va antes de nada.
+  const signed = items.map((item) => (opts.finishing.has(item.id) ? { ...item, status: "realizado" } : item))
+  const sameSite = (item: T) =>
+    !!item.siteCode && worked.some((done) => done.siteSystem === item.siteSystem && done.siteCode === item.siteCode)
+  const samePlan = (item: T) =>
+    worked.some((done) => done.planId === item.planId) && (item.decidedAt ?? item.createdAt) >= opts.since
+  const open = items.filter(
+    (item) => item.decisionStatus === "aceptado" && notStarted(item) && !opts.worked.has(item.id) && (sameSite(item) || samePlan(item)),
+  )
+  const blocked = (item: T) => !!waitingFor(item, signed, opts.phases)
+  const ready = open.filter((item) => !blocked(item))
+  return {
+    ready: [...ready.filter(sameSite), ...ready.filter((item) => !sameSite(item))].map((item) => ({ item, before: beforeToday(item) })),
+    waiting: open.flatMap((item) => {
+      const before = beforeToday(item)
+      return blocked(item) && before ? [{ item, before }] : []
+    }),
+    afterFinishing,
+  }
 }

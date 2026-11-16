@@ -167,7 +167,7 @@ function EncounterPage() {
         }
       />
       {detail.encounter.status === "finalizada" ? (
-        <EncounterHandoff patientId={patientId} detail={detail} />
+        <EncounterHandoff patientId={patientId} patientName={patient.patient.displayName} detail={detail} />
       ) : null}
       <EncounterDetailView patientId={patientId} detail={detail} showDocuments={false} />
       {/* Anulada, no queda nada por trabajar en ella: sus papeles anulados siguen en Documentos de la persona. */}

@@ -164,7 +164,16 @@ const PATIENT_FAQS: Record<string, (faq: Faq) => Faq[]> = {
         )
         .replace("(lo aceptado, o lo que indicaste hoy)", "(lo que indicaste hoy o antes)")
         .replace("tiene algo aceptado sin empezar", "tiene algo indicado sin empezar")
-        .replace("Lo aceptado se reserva sin esperar al control", "Lo indicado se reserva sin esperar al control"),
+        .replace("Lo aceptado se reserva sin esperar al control", "Lo indicado se reserva sin esperar al control")
+        // Sin piezas ni «va después» en la óptica: lo del mismo plan es lo indicado.
+        .replace(
+          "primero lo de la misma pieza y después lo aceptado del mismo plan en los últimos 6 meses (una resina de otra pieza, la limpieza), sin lo que todavía va después de otro tratamiento",
+          "lo indicado del mismo plan en los últimos 6 meses",
+        )
+        .replace(
+          " Si lo que va después de lo que terminas hoy aún no tiene cita, te propone un control en 1 mes: «Indicar el control en 1 mes» lo elige y lo puedes cambiar o quitar.",
+          "",
+        ),
     },
   ],
   // Una sola fase: el plan no habla de fases.

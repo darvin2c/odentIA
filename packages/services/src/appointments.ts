@@ -2146,8 +2146,12 @@ export async function reuseAppointment(
   orgId: string,
   actorUserId: string,
   id: string,
-  input: { expectedVersion: number; planItemId: string },
+  input: { expectedVersion: number; planItemId?: string; planItemIds?: string[] },
 ): Promise<AppointmentItem> {
+  // Uno o varios: «Usarla para Resina · 15 · Limpieza» lleva todo lo que se vuelve a hacer (estudio
+  // de la atención, entrega 7). El servicio de la cita es el del primero.
+  const wanted = [...new Set([...(input.planItemIds ?? []), ...(input.planItemId ? [input.planItemId] : [])])]
+  if (wanted.length === 0) throw validation("Elige para qué se usa la cita")
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   const links = await tx
     .select({ planItemId: appointmentPlanItem.planItemId })
@@ -2155,29 +2159,29 @@ export async function reuseAppointment(
     .where(
       and(eq(appointmentPlanItem.organizationId, orgId), eq(appointmentPlanItem.appointmentId, id)),
     )
-  const [item] = await tx
-    .select({ serviceId: treatmentPlanItem.serviceId })
+  const items = await tx
+    .select({ id: treatmentPlanItem.id, serviceId: treatmentPlanItem.serviceId })
     .from(treatmentPlanItem)
     .where(
       and(
         eq(treatmentPlanItem.organizationId, orgId),
         eq(treatmentPlanItem.patientId, current.patientId),
-        eq(treatmentPlanItem.id, input.planItemId),
+        inArray(treatmentPlanItem.id, wanted),
       ),
     )
-    .limit(1)
-  if (!item) throw notFound("Tratamiento")
+  if (items.length !== wanted.length) throw notFound("Tratamiento")
+  const first = items.find((item) => item.id === wanted[0])
   const changed = await setAppointmentPlanItems(tx, orgId, actorUserId, id, {
     expectedVersion: input.expectedVersion,
-    add: [input.planItemId],
+    add: wanted,
     remove: links
       .map((row) => row.planItemId)
-      .filter((planItemId) => planItemId !== input.planItemId),
+      .filter((planItemId) => !wanted.includes(planItemId)),
   })
-  if (item.serviceId && item.serviceId !== current.serviceId)
+  if (first?.serviceId && first.serviceId !== current.serviceId)
     return updateAppointment(tx, orgId, actorUserId, id, {
       expectedVersion: changed.version,
-      serviceId: item.serviceId,
+      serviceId: first.serviceId,
     })
   return changed
 }

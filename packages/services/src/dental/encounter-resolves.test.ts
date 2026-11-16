@@ -202,7 +202,9 @@ it("una resina de una cara no resuelve la caries de dos caras: el cierre no lo p
   expect(closing.resolvable.filter((found) => found.label.includes(code))).toEqual([])
 })
 
-it("lo aceptado de otra pieza no es a lo que vuelve: el cierre sigue preguntando el control", async () => {
+// Lo de otra pieza del mismo plan sí es a lo que vuelve desde el estudio de la atención (16 nov), pero
+// solo lo aceptado en los últimos meses (`RETURN_ACCEPTED_MONTHS`): lo de hace un año no cambia el cierre.
+it("lo aceptado de otra pieza hace más de un año no es a lo que vuelve: el cierre sigue preguntando el control", async () => {
   const f = await clinicalFixture()
   const corona = await toothService("tooth", "Corona metal-cerámica")
   const endodoncia = await toothService("tooth", "Endodoncia posterior vital")
@@ -221,6 +223,7 @@ it("lo aceptado de otra pieza no es a lo que vuelve: el cierre sigue preguntando
     currency: "PEN",
     status: "pendiente",
     decisionStatus: "aceptado",
+    decidedAt: new Date(Date.now() - 400 * 86_400_000),
   })
   await f.ready(f.encounter.id)
   const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))

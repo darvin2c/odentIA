@@ -61,6 +61,14 @@ export const PERSONAS_VENTAS: readonly HelpMore[] = [
         needs: "patients.write",
       },
       {
+        id: "ultima-visita-sin-cita",
+        q: "¿Por qué no sale la última visita de un paciente que vino sin cita?",
+        a: "Sí sale: «Última visita» cuenta la cita atendida y también la atención firmada sin cita, con su fecha. Una atención que sigue sin firmar o que se anuló no cuenta, ni una cita de prueba. Es la misma regla de Reportes (pacientes activos y «Sin venir hace más de…») y de «Por invitar a volver»: quien solo se atendió sin cita también recibe la invitación cuando le toca, una sola vez.",
+        forms: ["no sale la ultima visita", "ultima visita vacia de un paciente que atendi", "vino sin cita y dice ultima visita guion", "por que no cuenta la atencion sin cita"],
+        area: "ficha",
+        needs: "appointments.read",
+      },
+      {
         id: "pacientes-filtro-de-atajos",
         q: "¿Dónde está el filtro para ver solo los que deben o los que están por agendar?",
         a: "En Pacientes, en la vista «Pacientes», abre el filtro «Qué necesita algo»: cada opción trae cuántas personas hay y, al elegirla, su regla se lee debajo del buscador. Solo salen los atajos que tu rol puede ver. Si no hay nadie, «Ver todos» quita el filtro.",

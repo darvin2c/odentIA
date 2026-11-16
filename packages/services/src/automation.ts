@@ -1559,7 +1559,8 @@ export async function syncLapsedInvites(tx: Db, orgId: string, now: Date): Promi
     const job = await enqueueJob(tx, orgId, {
       ruleId: rule.id,
       kind: "invitar_a_volver",
-      dedupeKey: `invitar_a_volver:${row.patientId}:${row.appointmentId}:${row.invites}`,
+      // La visita es la cita atendida o, sin cita, la atención firmada: con una cita, la clave es la de siempre.
+      dedupeKey: `invitar_a_volver:${row.patientId}:${row.visitId}:${row.invites}`,
       scheduledFor: sendTimeFor(now, now, await writingScheduleOf(tx, orgId, timezone)) ?? now,
       contactId,
       appointmentId: row.appointmentId,
