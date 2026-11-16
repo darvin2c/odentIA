@@ -40,6 +40,15 @@ export {
   subscribeAppToPage,
 } from "./meta-pages-login.js"
 export {
+  buildInstagramLoginUrl,
+  completeInstagramLoginCode,
+  INSTAGRAM_LOGIN_FIELDS,
+  INSTAGRAM_LOGIN_SCOPES,
+  type InstagramLoginAccount,
+  type InstagramLoginApp,
+  subscribeAppToInstagram,
+} from "./instagram-login.js"
+export {
   inspectOwnAppToken,
   type OwnAppNumber,
   type OwnAppToken,

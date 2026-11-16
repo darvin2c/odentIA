@@ -123,6 +123,14 @@ const envSchema = z.object({
   META_PAGES_CONFIG_ID: z.string().default(""),
   META_PAGES_REDIRECT_URI: z.string().default(""),
   /**
+   * «Conectar con Instagram»: la app de Instagram del caso de uso de Instagram
+   * (su propio identificador y clave secreta, distintos de los de Facebook) y la
+   * vuelta fija de la API. Sin las tres, Instagram se conecta con Facebook.
+   */
+  META_INSTAGRAM_APP_ID: z.string().default(""),
+  META_INSTAGRAM_APP_SECRET: z.string().default(""),
+  META_INSTAGRAM_REDIRECT_URI: z.string().default(""),
+  /**
    * Los canales de la administración (ADR 0189): la app de Meta propia de
    * Sallca, con su número de WhatsApp, su página de Facebook (Messenger) y su
    * cuenta de Instagram. Cada canal se prende con sus variables y las dos

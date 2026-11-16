@@ -9,7 +9,7 @@ import { configureMailLinks, createMailer } from "@odentia/mail"
 import { adminChannelsFromEnv, adminChannelsWarning, clinicHostsFromEnv, createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, kairosAiUseRecorder, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
-import { metaPagesFromEnv } from "./routes/meta-pages.js"
+import { instagramLoginFromEnv, metaPagesFromEnv } from "./routes/meta-pages.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 
 // Una sola versión del Graph de Meta: el botón de Facebook, WhatsApp, Messenger e Instagram.
@@ -151,6 +151,7 @@ const app = createApp({
   },
   metaSignup,
   metaPages: metaPagesFromEnv(metaSignup, env),
+  instagramLogin: instagramLoginFromEnv(env),
   adminChannels,
   adminChannelsFetch,
   vapidPublicKey: env.VAPID_PUBLIC_KEY,
