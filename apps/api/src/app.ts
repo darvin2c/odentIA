@@ -1242,7 +1242,7 @@ export function createApp(deps: AppDeps) {
     storage: deps.storage,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
-    ...(deps.metaSignup ? { metaAppId: deps.metaSignup.appId } : {}),
+    ...(deps.metaSignup ? { metaAppId: deps.metaSignup.appId, metaGraphVersion: deps.metaSignup.graphVersion } : {}),
   }
   guarded.route(
     "/",
@@ -1274,7 +1274,7 @@ export function createApp(deps: AppDeps) {
     createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }),
   )
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
-  guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
+  guarded.route("/channels/connections", createConnectionsRoute({ ...crmDeps, accountsDb: deps.ownerDb }))
   guarded.route(
     "/channels/whatsapp/signup",
     createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }),

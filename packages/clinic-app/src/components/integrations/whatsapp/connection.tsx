@@ -20,6 +20,7 @@ import {
   ownAppSignatureProblem,
   ownAppTokenRejected,
   ownMessageData,
+  WHATSAPP_DISCONNECT_BUTTON,
   WHATSAPP_DISCONNECT_CONSEQUENCE,
   WHATSAPP_KEY_FIELDS,
   whatsappMessagesKey,
@@ -605,7 +606,7 @@ export function WhatsAppConnection({
         }}
         onConfirm={() => setStatus.mutate("disable")}
         title="Desconectar WhatsApp"
-        description={WHATSAPP_DISCONNECT_CONSEQUENCE}
+        description={byButton ? `${WHATSAPP_DISCONNECT_CONSEQUENCE} ${WHATSAPP_DISCONNECT_BUTTON}` : WHATSAPP_DISCONNECT_CONSEQUENCE}
         confirmLabel="Desconectar"
         pending={setStatus.isPending}
         error={statusError}

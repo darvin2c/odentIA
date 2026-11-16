@@ -175,9 +175,11 @@ export const channelConnection = pgTable(
     ...timestamps,
   },
   (table) => [
+    // Un número o cuenta solo está ocupado mientras su conexión está activa: el que una
+    // clínica desconectó puede conectarlo otra, y la vieja guarda sus conversaciones.
     uniqueIndex("channel_connection_provider_external_uidx")
       .on(table.provider, table.externalId)
-      .where(sql`"external_id" is not null`),
+      .where(sql`"external_id" is not null and "status" = 'active'`),
     index("channel_connection_account_idx")
       .on(table.provider, table.accountExternalId)
       .where(sql`"account_external_id" is not null`),

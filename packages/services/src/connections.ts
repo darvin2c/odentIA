@@ -379,6 +379,25 @@ export interface SignupOrigin {
   businessApp?: boolean
 }
 
+/** Lo que se sabe de una conexión hecha con el botón en el momento del permiso. */
+function freshSignup(origin: SignupOrigin) {
+  return {
+    grantedAt: origin.at.toISOString(),
+    subscribedAt: null,
+    // El de la app del celular ya está registrado: registrarlo otra vez lo sacaría de ella.
+    registeredAt: origin.businessApp ? origin.at.toISOString() : null,
+    problems: {},
+    ...(origin.businessApp ? { businessApp: true } : {}),
+    tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
+    tokenProblem: null,
+  }
+}
+
+const ACTIVE_ELSEWHERE = "Esa cuenta ya está conectada en otra clínica de odentIA."
+
+const REACTIVATE_ELSEWHERE =
+  "Ese número ahora está conectado en otra clínica de odentIA. Para usarlo aquí, primero tienen que desconectarlo allá."
+
 /** Canales cuya dirección de avisos se da de alta a mano en la página de Meta. */
 const MANUAL_WEBHOOK_PROVIDERS = ["whatsapp_cloud_api", "messenger", "instagram"]
 
@@ -833,28 +852,13 @@ export async function createConnection(
           webhookSecret: crypto.randomUUID(),
           status: "active",
           ...(ownAppKeys ? { ownApp: freshOwnApp(ownAppKeys) } : {}),
-          ...(origin
-            ? {
-                accountExternalId: origin.accountId,
-                signup: {
-                  grantedAt: origin.at.toISOString(),
-                  subscribedAt: null,
-                  // El de la app del celular ya está registrado: registrarlo otra vez lo sacaría de ella.
-                  registeredAt: origin.businessApp ? origin.at.toISOString() : null,
-                  problems: {},
-                  ...(origin.businessApp ? { businessApp: true } : {}),
-                  tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
-                  tokenProblem: null,
-                },
-              }
-            : {}),
+          ...(origin ? { accountExternalId: origin.accountId, signup: freshSignup(origin) } : {}),
         })
         .returning(),
     )
   } catch (error) {
     if (!isUniqueViolation(error)) throw error
-    const message = "Esa cuenta ya está conectada en otra clínica de odentIA."
-    throw new ServiceError("CONNECTION_EXISTS", 409, message, accountField(input.provider, message))
+    throw new ServiceError("CONNECTION_EXISTS", 409, ACTIVE_ELSEWHERE, accountField(input.provider, ACTIVE_ELSEWHERE))
   }
   if (!created) throw new Error("No se pudo crear la conexión")
   if (origin) {
@@ -884,6 +888,74 @@ export async function createConnection(
 }
 
 /** Conexión con config descifrada: solo worker/webhooks (nunca a la UI). */
+/**
+ * El número que la ventana de Meta devolvió ya estuvo conectado en esta clínica
+ * y se puede seguir en esa misma conexión, con sus conversaciones, en vez de
+ * frenar con «ya está conectada»: si está desconectada o se hizo a mano con la
+ * app propia. Una activa hecha con el botón no: ya está como se pide, y para
+ * renovar su permiso está «Volver a conectar con Facebook». Nula si no hay
+ * ninguna que seguir. Con base y sin red.
+ */
+export async function findWhatsAppByNumber(tx: Db, orgId: string, externalId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: channelConnection.id, status: channelConnection.status, signup: channelConnection.signup })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.provider, "whatsapp_cloud_api"),
+        eq(channelConnection.externalId, externalId),
+      ),
+    )
+    .limit(1)
+  if (!row || (row.status === "active" && row.signup)) return null
+  return row.id
+}
+
+/**
+ * Pasa al botón una conexión de WhatsApp que ya existía con ese número: toma el
+ * permiso recién dado, deja de usar la app propia y queda activa. Conserva su
+ * identidad, su dirección de avisos y sus conversaciones. El PIN de registro que
+ * ya tenía se conserva: Meta exige el mismo si el número lo usó.
+ */
+export async function adoptConnectionForSignup(
+  tx: Db,
+  orgId: string,
+  id: string,
+  secretsKey: Buffer,
+  config: Record<string, unknown>,
+  origin: SignupOrigin,
+): Promise<{ id: string; registrationPin: string | null }> {
+  const { row, config: previous } = await getConnectionSecrets(tx, orgId, id, secretsKey)
+  if (row.channel !== "whatsapp") throw validation("Esa conexión no es de WhatsApp.")
+  await assertSingleWhatsApp(tx, orgId, id)
+  const registrationPin =
+    typeof previous["registrationPin"] === "string" && previous["registrationPin"] ? previous["registrationPin"] : null
+  const next = { ...config, ...(registrationPin ? { registrationPin } : {}) }
+  assertFields(SIGNUP_FIELDS, next)
+  try {
+    // Punto de retorno: el número puede estar activo en otra clínica.
+    await tx.transaction((inner) =>
+      inner
+        .update(channelConnection)
+        .set({
+          configEncrypted: encryptJson(secretsKey, next),
+          externalId: origin.checked.externalId,
+          accountExternalId: origin.accountId,
+          signup: freshSignup(origin),
+          ownApp: null,
+          status: "active",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId))),
+    )
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error
+    throw new ServiceError("CONNECTION_EXISTS", 409, ACTIVE_ELSEWHERE)
+  }
+  return { id, registrationPin }
+}
+
 export async function getConnectionSecrets(
   tx: Db,
   orgId: string,
@@ -918,16 +990,30 @@ export async function setConnectionStatus(
       .limit(1)
     if (current?.channel === "whatsapp") await assertSingleWhatsApp(tx, orgId, id)
   }
-  const [updated] = await tx
-    .update(channelConnection)
-    .set({
-      status,
-      updatedAt: new Date(),
-      // Reactivar empieza de cero: si Meta sigue sin aceptar la clave, el próximo envío lo vuelve a avisar.
-      ...(status === "active" ? { ownApp: sql`case when ${channelConnection.ownApp} is null then null else ${channelConnection.ownApp} - 'tokenRejectedAt' end` } : {}),
-    })
-    .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
-    .returning()
+  let updated: ConnectionRow | undefined
+  try {
+    // Punto de retorno: mientras estuvo desconectada, otra clínica pudo conectar ese número.
+    ;[updated] = await tx.transaction((inner) =>
+      inner
+        .update(channelConnection)
+        .set({
+          status,
+          updatedAt: new Date(),
+          // Reactivar empieza de cero: si Meta sigue sin aceptar la clave, el próximo envío lo vuelve a avisar.
+          ...(status === "active" ? { ownApp: sql`case when ${channelConnection.ownApp} is null then null else ${channelConnection.ownApp} - 'tokenRejectedAt' end` } : {}),
+          // Hecha con el botón, desconectar quita en Meta la suscripción de la app: al volver
+          // a conectar se pide de nuevo. Se anota aunque Meta no conteste: repetirla no cambia nada.
+          ...(status === "disabled"
+            ? { signup: sql`case when ${channelConnection.signup} is null then null else ${channelConnection.signup} || '{"subscribedAt": null}'::jsonb end` }
+            : {}),
+        })
+        .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
+        .returning(),
+    )
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error
+    throw new ServiceError("CONNECTION_EXISTS", 409, REACTIVATE_ELSEWHERE)
+  }
   if (!updated) throw notFound("Conexión")
   if (status === "active" && options.secretsKey && options.deps) {
     await registerTelegramWebhook(
