@@ -114,5 +114,7 @@ describe("la pregunta de número nombrada sin un número no se pierde en silenci
     expect(noticesOf(tests, endo, c6)).toContainEqual(expect.objectContaining({ said: "sondaje no lo pude medir bien", questions: [numberOf(endo, "sondaje")] }))
     // Lo que no es de número no avisa por nombrarse solo: «percusión igual que la vez pasada».
     expect(noticesOf([], endo, "percusión igual que la vez pasada")).toEqual([])
+    // «periodontitis» es de una opción del diagnóstico apical, no el «Sondaje periodontal» (banco, endo-6).
+    expect(noticesOf([], endo, "con periodontitis apical sintomática.")).toEqual([])
   })
 })

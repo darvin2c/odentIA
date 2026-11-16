@@ -598,7 +598,7 @@
       "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
       "previas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" },
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
-      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"] }
+      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"], "avisar": ["evaluacion-de-endodoncia.sondaje"] }
     },
     {
       "id": "voz-v08-1",

@@ -977,21 +977,23 @@ function unvaluedPhrase(
   pending: ReadonlyMap<number, unknown>,
 ): string | null {
   if (question.type !== "numero" || question.answered !== undefined || pending.has(question.number)) return null
-  // Por su palabra propia, que basta sola («sondaje no lo pude medir»), y con lo que la distingue de una hermana.
-  const said = withoutOtherTests(question, heardBy(question, sentence))
-  if (!ownWordSaid(question, meaningful(said)) || !talksAbout(question, new Set(stemsOf(said)))) return null
+  const ficha = fichaStemsOf(question)
+  // Su palabra propia, tal cual se dictó (si solo se oyó parecida, no hay de dónde citarla), que basta sola
+  // («sondaje no lo pude medir»), y que no sea de otra pregunta de la ficha: «periodontitis», de una opción
+  // del diagnóstico apical, no nombra el «Sondaje periodontal».
+  const ownHere = (word: string) => ownWordSaid(question, meaningful(word)) && !stemsOf(word).some((stem) => ficha.has(stem))
   const words = sentence.trim().split(/\s+/)
+  if (!words.some(ownHere) || !talksAbout(question, new Set(stemsOf(withoutOtherTests(question, heardBy(question, sentence)))))) return null
   const plainWords = words.map(plain)
   for (const span of spansOf(question, othersOf(question), words.join(" "))) {
     if (saysValue(question, span)) continue
     const part = span.split(" ")
     const at = plainWords.findIndex((_, index) => part.every((word, offset) => plainWords[index + offset] === word))
     if (at < 0) continue
-    // Desde su palabra, tal cual se dictó (si solo se oyó parecida, no hay de dónde citarla), con la de
-    // antes si no es de otra pregunta de la ficha: «ser obturados», pero no «positiva sondaje».
-    const own = words.findIndex((word, index) => index >= at && index < at + part.length && ownWordSaid(question, meaningful(word)))
+    // Desde su palabra, con la de antes si no es de otra pregunta de la ficha: «ser obturados», pero no
+    // «positiva sondaje».
+    const own = words.findIndex((word, index) => index >= at && index < at + part.length && ownHere(word))
     if (own < 0) continue
-    const ficha = fichaStemsOf(question)
     const start = own > at && !stemsOf(words[own - 1] ?? "").some((stem) => ficha.has(stem)) ? own - 1 : own
     return words.slice(start, Math.min(at + part.length, start + 6)).join(" ")
   }
