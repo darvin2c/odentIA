@@ -2,7 +2,12 @@
  * Medición de lo que Clío propone en una ficha de consulta empezada
  * (entrega 11, ADR 0188). Uso:
  *
- *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>[,<id>…]] [--crudo=<archivo>]
+ *   pnpm --filter @odentia/agent eval:dictado-fichas [-- --file=eval/dictado-fichas.json] [--producto=odentia|latidia] [--solo=<id>[,<id>…]] [--crudo=<archivo>] [--servicios=eval/servicios-demo.json]
+ *
+ * Con `--servicios`, Clío lee ese tarifario en vez del corto del banco: el de la
+ * demo tiene los 113 servicios de Dental Smile, como en una clínica. Con los
+ * cinco del banco no se vio que, con las reglas de las fichas en un mensaje
+ * aparte, Clío a veces no respondía ninguna pregunta (prueba con voz c6).
  *
  * Pasa cada dictado por el modelo real con la misma llamada que la atención
  * (`askDictationModel`), con las preguntas de sus fichas armadas con la misma
@@ -110,6 +115,8 @@ const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/dictado-fichas.js
   fichasPropias?: Record<string, { title: string; schema: unknown }>
   dictados: FormCase[]
 }
+const servicesFile = arg("servicios", "")
+if (servicesFile) bank.servicios = JSON.parse(readFileSync(resolve(servicesFile), "utf8")) as string[]
 const spec = resolveLlmSpec(platformLlmFromEnv(process.env))
 if (spec.provider === "fake") throw new Error("Esta medición es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor")
 

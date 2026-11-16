@@ -158,6 +158,36 @@ export interface UnusedDictation {
 
 const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false, why: {}, targets: {} }
 
+/**
+ * Lo que «No pude usar esto» ya no tiene que decir: la frase de una pausa anterior cuya pregunta de
+ * ficha quedó propuesta en esta con una frase que la contiene. Es la frase que cortó la pausa (prueba
+ * con voz del 16 nov, c6, v07: «…frío sin respuesta calor» avisaba «calor», y la pausa siguiente
+ * proponía «calor sin respuesta»). Lo que se propuso con otras palabras sigue avisado.
+ */
+export function withoutAnsweredUnused(unused: UnusedDictation, suggestions: readonly DictationSuggestion[]): UnusedDictation {
+  // Sin mayúsculas, tildes ni puntuación: «Calor, sin respuesta.» contiene «calor».
+  const loose = (text: string) =>
+    text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+  const answered = suggestions.filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))
+  const resolved = (phrase: string) => {
+    const targets = unused.targets[phrase] ?? []
+    return answered.some(
+      (item) =>
+        targets.some((target) => target.responseId === item.payload["responseId"] && target.fieldId === item.payload["fieldId"]) &&
+        ` ${loose(item.sourceText)} `.includes(` ${loose(phrase)} `),
+    )
+  }
+  const gone = new Set(unused.phrases.filter(resolved))
+  if (!gone.size) return unused
+  const keep = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([phrase]) => !gone.has(phrase)))
+  return { ...unused, phrases: unused.phrases.filter((phrase) => !gone.has(phrase)), why: keep(unused.why), targets: keep(unused.targets) }
+}
+
 export type DictationMode = "off" | "listening" | "paused"
 
 export type DictationSession = ReturnType<typeof useDictationSession>
@@ -279,14 +309,17 @@ export function useDictationSession({
       // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
       for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       for (const name of data.alreadyDone ?? []) toast(`Ya está registrado en esta atención: «${name}». No se vuelve a sumar.`)
-      if (data.omitted > 0) {
-        setUnused((current) => ({
+      setUnused((before) => {
+        // Lo avisado antes que esta pausa respondió ya no se avisa; después, lo que esta no pudo usar.
+        const current = withoutAnsweredUnused(before, data.suggestions)
+        if (data.omitted === 0) return current
+        return {
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
           unnamed: current.unnamed || data.unused.length === 0,
           why: { ...current.why, ...(data.unusedWhy ?? {}) },
           targets: { ...current.targets, ...(data.unusedFor ?? {}) },
-        }))
-      }
+        }
+      })
       await refresh()
     },
     [base, refresh],

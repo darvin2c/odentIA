@@ -21,13 +21,15 @@ it("el dictado de latidIA razona por /v1/responses y su parte fija llega con el 
     expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text"))
     // Por /v1/responses no se pide prompt_cache_options: el proveedor pone además su propio corte.
     expect(provider.requests[0]?.body).not.toHaveProperty("prompt_cache_options")
-    // Con una ficha empezada, cómo se responden va en su mensaje con su corte, también en un bloque `input_text`.
+    // Con una ficha empezada, cómo se responden va al final de las instrucciones, antes de su corte, también en un bloque `input_text`.
     const snapshot = { sections: [{ id: "control", title: "Control", fields: [{ id: "peso", label: "Peso", type: "numero", unit: "kg", min: 0, max: 200 }] }] }
     const forms = formQuestionsOf([{ id: "ficha", title: "Control de niño sano", snapshot, answers: {} }])
     await askDictationModel(model, spec, { ...pause, forms, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:01:00Z") }, profile)
-    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("input_text", DICTATION_FORMS_RULES)])
-    expect(JSON.stringify(messageContent(provider.requests[1], 2))).toContain("Lo nuevo que dictó")
-    expect(JSON.stringify(messageContent(provider.requests[1], 2))).not.toContain("prompt_cache_breakpoint")
+    expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("input_text"))
+    expect((systemBlock(provider.requests[1]) as { text: string }).text.endsWith(DICTATION_FORMS_RULES)).toBe(true)
+    expect(JSON.stringify(messageContent(provider.requests[1], 1))).toContain("Lo nuevo que dictó")
+    expect(JSON.stringify(messageContent(provider.requests[1], 1))).not.toContain("prompt_cache_breakpoint")
+    expect(messageContent(provider.requests[1], 2)).toBeUndefined()
   } finally {
     await provider.close()
   }

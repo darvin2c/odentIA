@@ -102,22 +102,20 @@ describe("prompts de odentIA, iguales a los de antes", () => {
     await expect(json(compiled)).toMatchFileSnapshot(golden("argos-cifras-sin-venir.json"))
   })
 
+  const clioFixed = { services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", catalog: dictationFindingsText() }
+
   it("Clío", async () => {
-    await expect(systemPrompt({ services: ["Resina compuesta", "Endodoncia"], diagnosisList: "CIE-10", catalog: dictationFindingsText() })).toMatchFileSnapshot(
-      golden("clio.txt"),
-    )
+    await expect(systemPrompt(clioFixed)).toMatchFileSnapshot(golden("clio.txt"))
     await expect(json(z.toJSONSchema(extraction))).toMatchFileSnapshot(golden("clio-esquema.json"))
   })
 
   it("Clío en una pausa con una ficha empezada: el mensaje de la pausa y sus cortes de caché", async () => {
     const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-de-ortodoncia")
     const forms = formQuestionsOf([{ id: "orto", title: form?.title ?? null, snapshot: form?.schema, answers: { overjet: 6 } }])
-    const [, ...pause] = dictationMessages(
+    const messages = dictationMessages(
       {
         provider: "openai",
-        services: ["Resina compuesta", "Endodoncia"],
-        diagnosisList: "CIE-10",
-        catalog: dictationFindingsText(),
+        ...clioFixed,
         zone,
         now: new Date("2026-11-16T15:00:00Z"),
         transcript: "Overbite de dos.",
@@ -128,13 +126,14 @@ describe("prompts de odentIA, iguales a los de antes", () => {
       DENTAL_DICTATION_PROFILE,
       false,
     )
-    // Cada mensaje después del de sistema tal como llega al proveedor; tras un bloque con corte, la marca: lo de antes se lee de la caché.
-    const shown = pause.map((message) =>
+    // Cada mensaje tal como llega al proveedor, con las instrucciones de siempre (`clio.txt`) abreviadas.
+    // Tras un bloque con corte, la marca: lo de antes se lee de la caché.
+    const shown = messages.map((message) =>
       typeof message.content === "string"
         ? message.content
         : (message.content as Array<{ text: string; prompt_cache_breakpoint?: unknown }>).map((block) => `${block.text}${block.prompt_cache_breakpoint ? "\n⟦corte de caché⟧" : ""}`).join(""),
     )
-    await expect(shown.join("\n⟦otro mensaje⟧\n")).toMatchFileSnapshot(golden("clio-pausa-con-ficha.txt"))
+    await expect(shown.join("\n⟦otro mensaje⟧\n").replace(systemPrompt(clioFixed), "⟦instrucciones de siempre⟧")).toMatchFileSnapshot(golden("clio-pausa-con-ficha.txt"))
   })
 })
 

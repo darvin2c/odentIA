@@ -1,3 +1,5 @@
+⟦instrucciones de siempre⟧
+
 Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.
 - Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).
 - Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.

@@ -604,7 +604,7 @@
       "id": "voz-v08-1",
       "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"], "noEnNota": ["dolor", "duele", "tranquil", "higiene"], "dicho": { "ficha-de-odontopediatria.ceod_e": "uno con extracción indicada" } }
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"], "noEnNota": ["dolor", "duele", "tranquil", "higiene"], "dicho": { "ficha-de-odontopediatria.ceod_e": "uno con extracción indicada" }, "avisar": ["ficha-de-odontopediatria.peso"] }
     },
     {
       "id": "voz-v08-2",
@@ -653,7 +653,7 @@
       "id": "voz-v11-2",
       "texto": "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8",
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
-      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8, "ficha-odontoestomatologica.cpod_p": 2 } },
+      "espera": { "fichas": { "ficha-odontoestomatologica.ihos": 1.8, "ficha-odontoestomatologica.cpod_p": 2 }, "avisar": ["ficha-odontoestomatologica.cpod_o"] },
       "ignora": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_o", "ficha-odontoestomatologica.ceod_c", "ficha-odontoestomatologica.ceod_e", "ficha-odontoestomatologica.ceod_o"]
     },
     {
