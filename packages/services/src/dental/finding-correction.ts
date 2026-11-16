@@ -18,7 +18,7 @@ import {
   surfaceLabel,
   toothSiteCode,
 } from "@odentia/dental"
-import { and, asc, eq, inArray, isNull } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import type { CorrectionFinding, EncounterMoment } from "../product-hooks.js"
 import { voidOdontogramEntry } from "./odontogram.js"
 
@@ -132,6 +132,11 @@ export async function voidCorrectionFindings(
  * restauración: el cierre lo avisa y propone registrarla como restauración en mal estado.
  * Las dos puertas son a propósito (el hallazgo es lo que se ve; lo tratado lo dibuja el
  * servicio): por eso avisa y no frena.
+ *
+ * Lo que se trata en esta atención no cuenta (revisión del 16 nov, R4): la caries O de la 16 y la
+ * resina O hecha hoy son la caries y su tratamiento, no caries bajo la restauración. Ni la caries
+ * unida a un tratamiento registrado hoy (se resuelve al firmar), ni la restauración que dibujó un
+ * tratamiento registrado hoy.
  */
 export async function sameFaceFindings(
   tx: Db,
@@ -146,6 +151,17 @@ export async function sameFaceFindings(
       condition: odontogramEntry.condition,
       details: odontogramEntry.details,
       encounterId: odontogramEntry.encounterId,
+      treatedHere: sql<boolean>`(
+        exists (select 1 from dental.plan_item_finding link
+          join encounter_procedure today on today.organization_id = link.organization_id
+            and today.plan_item_id = link.plan_item_id
+          where link.organization_id = dental.odontogram_entry.organization_id
+            and link.odontogram_entry_id = dental.odontogram_entry.id
+            and today.encounter_id = ${encounterId}::uuid and today.voided_at is null)
+        or (dental.odontogram_entry.left_by_plan_item_id is not null and exists (select 1 from encounter_procedure today
+          where today.organization_id = dental.odontogram_entry.organization_id
+            and today.plan_item_id = dental.odontogram_entry.left_by_plan_item_id
+            and today.encounter_id = ${encounterId}::uuid and today.voided_at is null)))`,
     })
     .from(odontogramEntry)
     .where(
@@ -158,5 +174,8 @@ export async function sameFaceFindings(
         inArray(odontogramEntry.condition, ["caries", "definitive_restoration"]),
       ),
     )
-  return cariesOnRestoredFaces(rows, encounterId)
+  return cariesOnRestoredFaces(
+    rows.filter((row) => !row.treatedHere),
+    encounterId,
+  )
 }
