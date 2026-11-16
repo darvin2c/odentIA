@@ -16,7 +16,7 @@ import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm
 import { mailboxOauthState } from "@odentia/db/schema/mailbox"
 import { canAccess } from "@odentia/auth/permissions"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { randomBytes } from "node:crypto"
 import { SIGNUP_TOKEN_DEAD } from "./connections.js"
 import { isUniqueViolation, ServiceError } from "./errors.js"
@@ -47,6 +47,7 @@ export interface MetaPagesApp extends MetaPlatformApp {
 
 const STATE_TTL_MS = 10 * 60 * 1000
 const PROVIDER = "meta_pages"
+const IG_PROVIDER = "instagram_login"
 
 /** Empieza: guarda el state de un solo uso (10 minutos) y devuelve la ventana de Facebook. */
 export async function beginMetaPagesLogin(
@@ -141,6 +142,10 @@ export async function completeMetaPagesLogin(
   if (pages.length === 1) {
     return { kind: "connected", ...(await connectPages(withOrgContext, secretsKey, app, deps, orgId, pages, true)) }
   }
+  // Las elecciones vencidas no se guardan: llevan claves de página que no vencen.
+  await ownerDb
+    .delete(mailboxOauthState)
+    .where(and(inArray(mailboxOauthState.provider, [PROVIDER, IG_PROVIDER]), lt(mailboxOauthState.expiresAt, new Date())))
   const pick = randomBytes(32).toString("hex")
   await ownerDb.insert(mailboxOauthState).values({
     nonce: pick,
@@ -175,6 +180,8 @@ async function readPick(ownerDb: Db, secretsKey: Buffer, input: { pick: string; 
     row.organizationId !== input.orgId ||
     row.expiresAt.getTime() < Date.now()
   ) {
+    // Vencida: se borra al verla, con sus claves.
+    if (row && row.expiresAt.getTime() < Date.now()) await ownerDb.delete(mailboxOauthState).where(eq(mailboxOauthState.nonce, row.nonce))
     throw new ServiceError("FORBIDDEN", 403, PICK_GONE)
   }
   const pages = decryptConfig(secretsKey, row.payloadEncrypted)["pages"]
@@ -420,7 +427,7 @@ export async function notePageTokenState(tx: Db, orgId: string, connectionId: st
       dedupeKey: `clave-meta:${connectionId}:${userId}`,
       subject: `clave-meta:${connectionId}`,
       title: `${name} dejó de recibir mensajes`,
-      body: `Facebook ya no deja usar la cuenta (se quitó el permiso o cambió quien administra la página). Vuelve a conectar con Facebook en Configuración › Integraciones › ${name}.`,
+      body: `Meta ya no deja usar la cuenta (se quitó el permiso o cambió quien la administra). Vuelve a conectarla en Configuración › Integraciones › ${name}.`,
       href: `/settings/integrations/${row.channel}`,
       permission: "settings.write",
     })
@@ -435,7 +442,6 @@ export interface InstagramLoginConfig extends InstagramLoginApp {
   redirectUri: string
 }
 
-const IG_PROVIDER = "instagram_login"
 
 /** Empieza: guarda el state de un solo uso y devuelve la ventana de Instagram. */
 export async function beginInstagramLogin(

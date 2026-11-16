@@ -151,7 +151,8 @@ const app = createApp({
   },
   metaSignup,
   metaPages: metaPagesFromEnv(metaSignup, env),
-  instagramLogin: instagramLoginFromEnv(env),
+  // Sin la app de odentIA no hay dirección de avisos: Instagram quedaría conectado sin recibir nada.
+  instagramLogin: metaSignup ? instagramLoginFromEnv(env) : undefined,
   adminChannels,
   adminChannelsFetch,
   vapidPublicKey: env.VAPID_PUBLIC_KEY,
