@@ -283,7 +283,8 @@ export interface IntegrationReview {
 
 /** Tercera línea de la fila: con qué cuenta está, qué hace falta, o una nota. */
 export type IntegrationDetail =
-  | { kind: "account"; account: string; activity: string | null }
+  // Sin cuenta (nula) es la fila de un proveedor: dice cómo está, no con qué cuenta.
+  | { kind: "account"; account: string | null; activity: string | null }
   | { kind: "connect"; needs: string }
   | { kind: "note"; text: string }
 
@@ -465,13 +466,35 @@ function channelRow(channel: MessagingChannel, connection: ConnectionItem, index
   }
 }
 
-/** Una fila por conexión de cada canal; el canal sin conexión muestra cómo conectarlo. */
+/**
+ * Una fila por proveedor: cómo está su cuenta activa, sin nombrarla (las
+ * cuentas se ven al entrar). Hay una sola activa por canal; lo desconectado no
+ * cambia la fila: sin cuenta activa, el canal se ofrece para conectar.
+ */
 export function channelRows(connections: ConnectionItem[], since: Since): ChannelRow[] {
-  return MESSAGING_CHANNELS.flatMap((channel): ChannelRow[] => {
-    const own = connections.filter((connection) => connection.channel === channel)
-    if (own.length === 0) return [{ ...notConnected(channel), channel, connection: null }]
-    return own.map((connection, index) => channelRow(channel, connection, index, since))
+  return MESSAGING_CHANNELS.map((channel): ChannelRow => {
+    const active = connections.filter((connection) => connection.channel === channel && connection.status === "active")
+    const [first] = active
+    if (!first) return { ...notConnected(channel), channel, connection: null }
+    // Si quedaran dos activas de antes de la regla, manda la que necesita atención.
+    const rows = active.map((connection) => channelRow(channel, connection, 0, since))
+    const row = rows.find((candidate) => candidate.tone === "attention") ?? rows[0] ?? channelRow(channel, first, 0, since)
+    return row.detail.kind === "account" ? { ...row, detail: { ...row.detail, account: null } } : row
   })
+}
+
+/** Las cuentas de un canal, activas y desconectadas, una fila cada una: lo que se ve al entrar. */
+export function channelAccountRows(
+  connections: ConnectionItem[],
+  channel: MessagingChannel,
+  since: Since,
+): { active: ChannelRow[]; disconnected: ChannelRow[] } {
+  const own = connections.filter((connection) => connection.channel === channel)
+  const rows = own.map((connection, index) => channelRow(channel, connection, index, since))
+  return {
+    active: rows.filter((row) => row.connection?.status === "active"),
+    disconnected: rows.filter((row) => row.connection?.status !== "active"),
+  }
 }
 
 /* ---------- Chat web ---------- */

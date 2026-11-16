@@ -5,7 +5,12 @@ import type { ReactNode } from "react"
 import { type IntegrationRowModel, rowShortWord } from "../../lib/integrations"
 
 /** Pantallas propias a las que lleva una fila. */
-export type IntegrationPath = "/settings/integrations/whatsapp" | "/settings/integrations/webchat"
+export type IntegrationPath =
+  | "/settings/integrations/whatsapp"
+  | "/settings/integrations/instagram"
+  | "/settings/integrations/messenger"
+  | "/settings/integrations/telegram"
+  | "/settings/integrations/webchat"
 
 /** Lo que se puede hacer con una fila: ir a su pantalla o hacer algo aquí mismo. */
 export interface IntegrationAction {
@@ -201,10 +206,13 @@ export function IntegrationRow({
           <span className="hidden @xl:inline">{row.purpose}</span>
         </p>
         {row.detail.kind === "account" ? (
-          <p className="truncate text-sm text-foreground/80 @xl:whitespace-normal">
-            <strong className="font-semibold text-foreground">{row.detail.account}</strong>
-            {row.detail.activity ? ` · ${row.detail.activity}` : null}
-          </p>
+          row.detail.account || row.detail.activity ? (
+            <p className="truncate text-sm text-foreground/80 @xl:whitespace-normal">
+              {row.detail.account ? <strong className="font-semibold text-foreground">{row.detail.account}</strong> : null}
+              {row.detail.account && row.detail.activity ? " · " : null}
+              {row.detail.activity}
+            </p>
+          ) : null
         ) : row.detail.kind === "connect" ? (
           // En corto la fila ya ofrece conectarla: lo que hace falta se lee al abrirla.
           <p className="hidden text-sm text-foreground/80 @xl:block">

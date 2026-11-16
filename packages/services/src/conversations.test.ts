@@ -23,7 +23,7 @@ import {
 } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, container, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
+import { activeConnectionId, appDb, container, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
@@ -85,6 +85,8 @@ function textEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
 }
 
 async function makeTelegramConnection(orgId: string): Promise<string> {
+  const existing = await activeConnectionId(orgId, "telegram")
+  if (existing) return existing
   return withOrgContext(appDb, orgId, async (tx) => {
     const created = await createConnection(
       tx,
@@ -361,7 +363,7 @@ it("nota de voz entrante se transcribe al body", async () => {
   const job: InboundMessageJob = {
     orgId: "org_a",
     connectionId: connId,
-    event: audioEvent({ externalEventId: "evt-t1", externalMessageId: "ext-t1" }),
+    event: audioEvent({ externalEventId: "evt-t1", externalMessageId: "ext-t1", externalThreadId: "tg:voz-t1", senderExternalId: "tg:voz-t1" }),
   }
   const depsT: IngestDeps = { ...deps, transcribe: async () => "hola, quiero cita" }
   const { conversationId } = await withAgentOn(() =>
@@ -413,7 +415,7 @@ it("fallo de transcripción no pierde la ingesta del audio", async () => {
   const job: InboundMessageJob = {
     orgId: "org_a",
     connectionId: connId,
-    event: audioEvent({ externalEventId: "evt-t2", externalMessageId: "ext-t2" }),
+    event: audioEvent({ externalEventId: "evt-t2", externalMessageId: "ext-t2", externalThreadId: "tg:voz-t2", senderExternalId: "tg:voz-t2" }),
   }
   const depsT: IngestDeps = {
     ...deps,

@@ -2,11 +2,11 @@ import { Alert, AlertDescription } from "@odentia/ui"
 import { ErrorState, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
-import { ChannelPanel } from "../../components/integrations/channel-panel"
+import { useEffect, useState } from "react"
 import {
   type IntegrationAction,
   IntegrationBlock,
+  type IntegrationPath,
   IntegrationRow,
   IntegrationRowsSkeleton,
 } from "../../components/integrations/integration-list"
@@ -19,14 +19,13 @@ import {
   type ChannelRow,
   channelRows,
   INTEGRATIONS,
-  isPanelChannel,
   type MailboxProvider,
   type MailRow,
   type MailState,
   mailNotice,
   mailRows,
   modelRow,
-  type PanelChannel,
+  type MessagingChannel,
   sinceWords,
   validateIntegrationsSearch,
   type WebchatRow,
@@ -46,16 +45,15 @@ export const Route = createFileRoute("/_org/settings/integrations/")({
 const orgRouteApi = getRouteApi("/_org")
 
 /** Lo que está abierto al lado: un canal de mensajería o un buzón. */
-type OpenPanel =
-  | {
-      kind: "channel"
-      channel: PanelChannel
-      connectionId: string | null
-      /** Cada apertura es una superficie nueva; conectar dentro de ella no la reinicia. */
-      opening: number
-    }
-  | { kind: "mail"; provider: MailboxProvider; connectionId: string }
-  | null
+type OpenPanel = { kind: "mail"; provider: MailboxProvider; connectionId: string } | null
+
+/** La página de cada proveedor de mensajería: ahí están sus cuentas. */
+const CHANNEL_PAGE: Record<MessagingChannel, IntegrationPath> = {
+  whatsapp: "/settings/integrations/whatsapp",
+  instagram: "/settings/integrations/instagram",
+  messenger: "/settings/integrations/messenger",
+  telegram: "/settings/integrations/telegram",
+}
 
 /** Lo que la página mira de cada consulta, sea cual sea su dato. */
 interface LoadState {
@@ -65,11 +63,11 @@ interface LoadState {
   refetch: () => unknown
 }
 
-const SUBTITLE = "Lo que se conecta una vez. Cada fila dice para qué sirve, con qué cuenta y cómo está."
+const SUBTITLE = "Lo que se conecta una vez. Cada fila dice para qué sirve y cómo está."
 const SUBTITLE_SHORT = "Lo que se conecta una vez: para qué sirve y cómo está."
 
 const MESSAGING_NOTE =
-  "Lo automático sale por WhatsApp y, si no se puede, por correo. Instagram, Messenger y Telegram solo responden a quien escribió primero."
+  "Una cuenta activa por canal. Lo automático sale por WhatsApp y, si no se puede, por correo. Instagram, Messenger y Telegram solo responden a quien escribió primero."
 
 /**
  * Integraciones: una página con lo que la clínica conecta una vez —mensajería,
@@ -88,7 +86,6 @@ function IntegrationsPage() {
   // El aviso es el de la llegada: no cambia aunque después cambie la dirección.
   const [arrival] = useState(() => mailNotice(search))
   const [panel, setPanel] = useState<OpenPanel>(null)
-  const openings = useRef(0)
 
   const connectionsQuery = useQuery({
     queryKey: ["connections"],
@@ -139,19 +136,10 @@ function IntegrationsPage() {
   // Mientras se comprueba, la fila lo dice; la página no espera a la llamada al modelo.
   const model = modelRow(modelQuery.data?.data)
 
-  const panelChannelRow =
-    panel?.kind === "channel"
-      ? (channels?.find(
-          (row) => row.channel === panel.channel && (row.connection?.id ?? null) === panel.connectionId,
-        ) ?? null)
-      : null
   const panelMailRow =
     panel?.kind === "mail" ? (mailboxes?.find((row) => row.connection?.id === panel.connectionId) ?? null) : null
-  // La conexión abierta ya no existe (se quitó aquí o en otra parte): el panel no tiene qué mostrar.
-  const panelGone =
-    panel?.kind === "channel"
-      ? panel.connectionId !== null && panelChannelRow === null && !connectionsQuery.isFetching
-      : panel?.kind === "mail" && panelMailRow === null && !mailQuery.isFetching
+  // El buzón abierto ya no existe (se quitó aquí o en otra parte): el panel no tiene qué mostrar.
+  const panelGone = panel?.kind === "mail" && panelMailRow === null && !mailQuery.isFetching
   useEffect(() => {
     if (panelGone) setPanel(null)
   }, [panelGone])
@@ -177,30 +165,17 @@ function IntegrationsPage() {
   const loading = tried.some((query) => query !== modelQuery && query.isPending)
   const modelFailed = neverLoaded(modelQuery)
 
-  /** Lo que ofrece cada fila. Un enlace o una acción solo se ofrece a quien puede usarla. */
+  /**
+   * Lo que ofrece cada fila: entrar a la página del proveedor, donde están sus
+   * cuentas. El botón dice qué hace falta: conectar, revisar o solo abrir.
+   */
   function channelActions(row: ChannelRow): IntegrationAction[] {
     if (!row.connection && !canWrite) return []
-    if (row.channel === "whatsapp") {
-      return [
-        {
-          label: row.connection ? "Abrir" : "Conectar",
-          emphasis: row.connection ? "secondary" : "primary",
-          to: "/settings/integrations/whatsapp",
-        },
-      ]
-    }
-    if (!isPanelChannel(row.channel)) return []
-    const channel = row.channel
-    const needsStep = !row.connection || row.tone === "attention"
     return [
       {
-        label: !row.connection ? "Conectar" : row.tone === "attention" ? "Terminar de conectar" : canWrite ? "Administrar" : "Ver",
-        ...(row.connection && row.tone === "attention" ? { short: "Terminar" } : {}),
-        emphasis: needsStep ? "primary" : "secondary",
-        onSelect: () => {
-          openings.current += 1
-          setPanel({ kind: "channel", channel, connectionId: row.connection?.id ?? null, opening: openings.current })
-        },
+        label: !row.connection ? "Conectar" : row.tone === "attention" ? "Revisar" : "Abrir",
+        emphasis: !row.connection || row.tone === "attention" ? "primary" : "secondary",
+        to: CHANNEL_PAGE[row.channel],
       },
     ]
   }
@@ -290,16 +265,7 @@ function IntegrationsPage() {
         <IntegrationBlock title="Mensajería" note={MESSAGING_NOTE}>
           {channels ? (
             channels.map((row) => (
-              <IntegrationRow
-                key={row.key}
-                row={row}
-                actions={channelActions(row)}
-                open={
-                  panel?.kind === "channel" &&
-                  panel.channel === row.channel &&
-                  panel.connectionId === (row.connection?.id ?? null)
-                }
-              />
+              <IntegrationRow key={row.key} row={row} actions={channelActions(row)} />
             ))
           ) : (
             <IntegrationRowsSkeleton rows={4} />
@@ -340,18 +306,6 @@ function IntegrationsPage() {
         </IntegrationBlock>
       )}
 
-      {/* Una sola superficie lateral a la vez; `key` la reinicia al abrir otra fila. */}
-      {panel?.kind === "channel" ? (
-        <ChannelPanel
-          key={panel.opening}
-          channel={panel.channel}
-          row={panelChannelRow}
-          loading={panel.connectionId !== null && panelChannelRow === null}
-          canWrite={canWrite}
-          onClose={() => setPanel(null)}
-          onConnected={(connectionId) => setPanel({ ...panel, connectionId })}
-        />
-      ) : null}
       {panel?.kind === "mail" && panelMailRow ? (
         <MailPanel
           key={panelMailRow.key}

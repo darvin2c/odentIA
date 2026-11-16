@@ -47,7 +47,7 @@ import { listPatientsByContact, nextPatientNumber, setPatientContact } from "./p
 import { listPersonNotes } from "./people.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { activeConnectionId, appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients, selectTestPatients } from "./test-patient.js"
 
 /** Memoria de la persona: datos prácticos con fecha y origen, nunca clínicos, que se reemplazan o se quitan. */
@@ -92,10 +92,11 @@ const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY }
 
 /** Una persona que escribió por Telegram: su contacto y su conversación. */
 async function person(sender: string): Promise<{ contactId: string; conversationId: string }> {
-  const connectionId = await run((tx) =>
+  const existing = await activeConnectionId(ORG, "telegram")
+  const connectionId: string = existing ?? (await run((tx) =>
     createConnection(tx, ORG, KEY,
       { channel: "telegram", provider: "telegram_bot_api", displayName: `Bot ${sender}`, config: { botToken: sender } },
-      { fetch, validateExternal: false }).then((c) => c.id))
+      { fetch, validateExternal: false }).then((c) => c.id)))
   const event: NormalizedInbound = {
     externalEventId: `evt-${sender}`, externalMessageId: `evt-${sender}`,
     externalThreadId: `tg:${sender}`, senderExternalId: `tg:${sender}`, senderDisplayName: sender,

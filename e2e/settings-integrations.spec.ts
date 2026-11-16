@@ -164,6 +164,7 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
     await expect(rowOf(messaging, name)).toContainText("Sin conectar")
     await expect(rowOf(messaging, name)).toContainText(needs)
   }
+  await expect(messaging).toContainText("Una cuenta activa por canal.")
   await expect(messaging).toContainText("Instagram, Messenger y Telegram solo responden a quien escribió primero.")
   await expect(page.getByRole("region", { name: "Tu sitio web" }).getByRole("listitem")).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Inteligencia artificial" })).toContainText("ChatGPT 6")
@@ -171,9 +172,11 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   await expect(page.getByRole("region", { name: "Inteligencia artificial" })).toContainText("Responde")
   await info.attach("integraciones", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
+  // Cada proveedor tiene su página: la fila de la lista lleva ahí, y desde ahí se conecta.
+  await rowOf(messaging, "Telegram").getByRole("link", { name: "Conectar Telegram", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Telegram" })).toBeVisible()
+  await page.getByRole("region", { name: "Conectar Telegram" }).getByRole("button", { name: "Conectar", exact: true }).click()
   // Conectar Telegram: un dato, con su nombre en palabras; al conectar dice qué pasó.
-  const telegram = rowOf(messaging, "Telegram")
-  await telegram.getByRole("button", { name: "Conectar Telegram", exact: true }).click()
   const connect = surface(page, { name: "Conectar Telegram", exact: true })
   await expect(connect).toBeVisible()
   const key = connect.getByLabel("Clave del bot", { exact: true })
@@ -192,8 +195,11 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   const panel = surface(page, { name: "Telegram", exact: true })
   await expect(panel).toContainText("Conectado")
   await expect(panel).toContainText("No hay nada que copiar ni pegar")
+  // En «Conexión», la cuenta conectada; una sola por canal.
+  const telegram = rowOf(page.getByRole("region", { name: "Conectada" }), "Telegram")
   await expect(telegram).toContainText("Conectado")
   await expect(telegram.getByRole("button", { name: "Administrar Telegram", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Conectada" })).toContainText("Solo una cuenta de Telegram a la vez")
   const [created] = (await connections()).filter((item) => item.channel === "telegram")
   expect(created).toMatchObject({ status: "active" })
   await info.attach("telegram-conectado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -227,13 +233,14 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   expect((await connections()).find((item) => item.id === created?.id)?.status).toBe("active")
   await panel.getByRole("button", { name: "Desconectar", exact: true }).click()
   await confirm.getByRole("button", { name: "Desconectar", exact: true }).click()
-  await expect(telegram).toContainText("Desconectado")
   await expect(panel.getByRole("button", { name: "Volver a conectar", exact: true })).toBeVisible()
   expect((await connections()).find((item) => item.id === created?.id)?.status).toBe("disabled")
   await panel.getByRole("button", { name: "Cerrar", exact: true }).click()
   await expect(panel).toBeHidden()
-  // El foco vuelve al control de la fila que abrió el panel.
-  await expect(telegram.getByRole("button", { name: "Administrar Telegram", exact: true })).toBeFocused()
+  // Desconectado, el bot pasa a «Desconectados» y «Conexión» vuelve a ofrecer conectar uno.
+  await expect(page.getByRole("region", { name: "Conectar Telegram" })).toBeVisible()
+  await page.getByRole("tab", { name: "Desconectados · 1" }).click()
+  await expect(rowOf(page.getByRole("region", { name: "Desconectados" }), "Telegram")).toContainText("Desconectado")
 })
 
 test("integraciones: Messenger muestra siempre la dirección de avisos y su clave; el correo pide confirmar antes de desconectar", async ({ owner }) => {
@@ -267,9 +274,13 @@ test("integraciones: Messenger muestra siempre la dirección de avisos y su clav
   const mail = page.getByRole("region", { name: "Correo de la clínica" })
 
   // Messenger: la dirección y la clave se pueden volver a ver cuando haga falta.
+  // La lista muestra el proveedor, no la cuenta: la cuenta se ve al entrar.
   const row = rowOf(messaging, "Messenger")
-  await expect(row).toContainText("Página E2E")
-  const openMessenger = row.getByRole("button", { name: /^(Administrar|Terminar de conectar) Messenger$/ })
+  await expect(row).not.toContainText("Página E2E")
+  await row.getByRole("link", { name: /^(Abrir|Revisar) Messenger$/ }).click()
+  const account = rowOf(page.getByRole("region", { name: "Conectada" }), "Messenger")
+  await expect(account).toContainText("Página E2E")
+  const openMessenger = account.getByRole("button", { name: /^(Administrar|Revisar) Messenger$/ })
   await openMessenger.click()
   const panel = surface(page, { name: "Messenger", exact: true })
   const address = panel.getByLabel("Dirección de avisos", { exact: true })
@@ -294,6 +305,7 @@ test("integraciones: Messenger muestra siempre la dirección de avisos y su clav
   await keyForm.getByRole("button", { name: "Cancelar", exact: true }).click()
   await panel.getByRole("button", { name: "Cerrar", exact: true }).click()
   await expect(panel).toBeHidden()
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations"))
 
   // Correo: con problema se dice el motivo y se ofrece volver a conectar; sin conectar, qué hace falta.
   const gmail = rowOf(mail, "Gmail")
@@ -322,7 +334,7 @@ test("integraciones: Messenger muestra siempre la dirección de avisos y su clav
   expect(disconnects).toBe(0)
 })
 
-test("integraciones en el teléfono: filas cortas que se tocan enteras; WhatsApp abre su página y las demás su detalle", async ({ owner, browser }) => {
+test("integraciones en el teléfono: filas cortas que se tocan enteras; cada proveedor abre su página", async ({ owner, browser }) => {
   await withTouchPage(browser, owner, async (page) => {
     await gotoHydrated(page, tenant(owner.org.slug, "/settings/integrations"))
     const messaging = page.getByRole("region", { name: "Mensajería" })
@@ -332,22 +344,29 @@ test("integraciones en el teléfono: filas cortas que se tocan enteras; WhatsApp
     // En corto: para qué sirve en breve y, a la derecha, qué hacer.
     await expect(telegram.getByText("Responder lo que le escriben al bot", { exact: true })).toBeVisible()
     await expect(telegram.getByText("Responder en la Bandeja lo que le escriben al bot de la clínica.", { exact: true })).toBeHidden()
-    const tap = telegram.getByRole("button", { name: "Conectar Telegram", exact: true })
+    const tap = telegram.getByRole("link", { name: "Conectar Telegram", exact: true })
     await expect(tap).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
     ).toBeLessThanOrEqual(0)
 
-    // La fila se toca entera, no solo la palabra: el detalle se abre en el cajón.
+    // La fila se toca entera, no solo la palabra: lleva a la página de Telegram, y conectar abre el cajón.
     const box = await telegram.boundingBox()
     if (!box) throw new Error("La fila de Telegram no está en pantalla")
     expect(box.height).toBeGreaterThanOrEqual(44)
     await page.touchscreen.tap(box.x + 24, box.y + box.height / 2)
+    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/integrations/telegram"))
+    await page.getByRole("region", { name: "Conectar Telegram" }).getByRole("button", { name: "Conectar", exact: true }).tap()
     const drawer = page.getByRole("dialog", { name: "Conectar Telegram" })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByLabel("Clave del bot", { exact: true })).toBeVisible()
     await drawer.getByRole("button", { name: "Cancelar", exact: true }).tap()
     await expect(drawer).toBeHidden()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+    ).toBeLessThanOrEqual(0)
+    await page.getByRole("navigation", { name: "breadcrumb" }).getByRole("link", { name: "Integraciones", exact: true }).tap()
+    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/integrations"))
 
     // WhatsApp abre su página, con el camino de vuelta a Integraciones.
     const whatsapp = rowOf(messaging, "WhatsApp")
