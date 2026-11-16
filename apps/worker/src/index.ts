@@ -24,6 +24,7 @@ import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   adminChannelsFromEnv,
   askHelpByChat,
+  clinicHostsFromEnv,
   configureDocumentChecks,
   configureDocumentLogos,
   configurePublicLinks,
@@ -36,6 +37,7 @@ import {
   metaSignupConfigured,
   type Storage,
   secretsKeyFromEnv,
+  syncClinicHosts,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
@@ -102,6 +104,9 @@ const storage: Storage = createStorage({
 })
 // El logo de cada clínica en sus papeles: se lee del almacenamiento, nunca por HTTP.
 configureDocumentLogos(storage)
+
+// Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193). Sin token ni zonas, no hace nada.
+const clinicHosts = clinicHostsFromEnv(env, publicLinks)
 
 const transcribe = createTranscriber(env)
 
@@ -391,6 +396,7 @@ queues.push(
         secretsKey,
         fetch,
         deleteObject: (key) => storage.deleteAttachment(key),
+        clinicHosts,
       })
       return result.started || result.advanced > 0 || result.expired > 0
     },
@@ -419,6 +425,24 @@ queues.push(
     },
   },
 )
+
+// La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y una vez al día: lo que
+// no se sincronizó al crear o borrar una clínica. Sin esperarla, como los videos: Cloudflare lento no detiene
+// la ingesta. Si una zona falló, se reintenta en una hora.
+if (clinicHosts) {
+  let nextClinicHostsPoll = 0
+  queues.push({
+    name: "clinic_hosts",
+    poll: async () => {
+      if (Date.now() < nextClinicHostsPoll) return false
+      nextClinicHostsPoll = Date.now() + 24 * 3_600_000
+      void syncClinicHosts(ownerDb, clinicHosts).then((results) => {
+        if (!results || results.some((zone) => zone.outcome === "error")) nextClinicHostsPoll = Date.now() + 3_600_000
+      })
+      return false
+    },
+  })
+}
 
 // La clave de «Conectar con Facebook» vence a los 60 días: se renueva sola (#121).
 const metaApp =

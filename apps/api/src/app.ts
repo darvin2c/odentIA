@@ -10,6 +10,7 @@ import {
   CLINIC_LOGO_MAX_BYTES,
   CLINIC_LOGO_MIME_EXT,
   type AdminChannels,
+  type ClinicHosts,
   CONVERSATION_STATE_ACTIONS,
   clinicLogoColors,
   clinicLogoFolder,
@@ -46,6 +47,7 @@ import {
   refreshSuggestedNotice,
   saveOrgProfile,
   setUpNewClinic,
+  syncClinicHosts,
   updateBranch,
   updateOrgRegion,
 } from "@odentia/services"
@@ -221,6 +223,11 @@ export interface AppDeps {
   adminChannels?: AdminChannels | undefined
   /** Solo pruebas (e2e): cómo hablan con Meta los canales de la administración. */
   adminChannelsFetch?: typeof fetch | undefined
+  /**
+   * La lista de hosts permitidos de cada zona de Cloudflare (CLOUDFLARE_WAF_TOKEN y los
+   * ids de zona; ADR 0193). Sin ella, crear o borrar una clínica no la toca.
+   */
+  clinicHosts?: ClinicHosts | null
 }
 
 // Lo que dice una regla sin mensaje propio, en el español de la interfaz: el
@@ -478,6 +485,14 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true })
   })
 
+  // Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193): abrir,
+  // renombrar o borrar una clínica pone al día la regla de Cloudflare antes de responder.
+  // Un fallo queda en el registro y la clínica sigue; lo repite la reconciliación del worker.
+  app.use("/api/auth/organization/:change{create|update|delete}", async (c, next) => {
+    await next()
+    if (c.res.status >= 200 && c.res.status < 300) await syncClinicHosts(deps.ownerDb, deps.clinicHosts)
+  })
+
   // Subdominios reservados: nunca son slugs de tenant (la lista vive en services).
   const RESERVED_SLUGS = RESERVED_ORG_SLUGS
   app.use("/api/auth/organization/create", async (c, next) => {
@@ -503,6 +518,13 @@ export function createApp(deps: AppDeps) {
   app.on(["GET", "POST"], "/api/auth/*", (c) => authOf(c).handler(c.req.raw))
 
   app.use("/api/admin/*", requireAdminContext(deps))
+  // Lo mismo con el alta asistida y las demos (ADR 0193), después de cada intento del
+  // personal y no solo del que sale bien: una clínica creada cuyo correo no salió responde 502.
+  for (const path of ["/api/admin/organizations/assisted", "/api/admin/clients/:id/assisted", "/api/admin/demos", "/api/admin/demos/:id"])
+    app.use(path, async (c, next) => {
+      await next()
+      if (c.req.method === "POST" || c.req.method === "DELETE") await syncClinicHosts(deps.ownerDb, deps.clinicHosts)
+    })
   app.route("/api/admin/access", createAdminCoreRoute(deps))
   app.route(
     "/api/admin/organizations",
