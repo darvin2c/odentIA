@@ -389,10 +389,14 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
   "subo-radiografia": (faq) => [
     {
       ...faq,
-      a: swap(
+      a: swaps(
         faq.a,
-        "imagen o archivo, con su tipo y la fecha de toma",
-        "imagen o archivo, con su tipo (radiografía, ecografía, tomografía computarizada, resonancia magnética, mamografía o foto clínica) y la fecha de toma",
+        [
+          "imagen o archivo, con su tipo y la fecha de toma",
+          "imagen o archivo, con su tipo (radiografía, ecografía, tomografía computarizada, resonancia magnética, mamografía o foto clínica) y la fecha de toma",
+        ],
+        // Sin piezas en un consultorio: la atención no propone dónde.
+        ["; en una imagen subida desde una atención, también su pieza (si son varias, la eliges de un toque en la fila)", ""],
       ),
       forms: [...(faq.forms ?? []), "donde subo una ecografia", "subir una resonancia", "subir una mamografia"],
     },

@@ -38,6 +38,7 @@ import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/
 import type { MedicalLeave } from "../../lib/medical-leaves"
 import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
+import { teethWords } from "../../lib/document-list"
 import { productUi } from "../../product/product-ui"
 import { RecetasPanel } from "./clinical-panels"
 import {
@@ -48,6 +49,7 @@ import {
 } from "./consent-link-actions"
 import { ConsentSigningScreen, PaperSignDrawer, useConsentSignerWord } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
+import { categoryLabel, formatTakenAt, imageTypeLabel } from "./document-labels"
 import { DocumentOpenButton } from "./document-open-button"
 import {
   AttentionSheetPaper,
@@ -62,6 +64,7 @@ import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { fetchFormOffers, formRowTitle, formsBelowOffers } from "../../lib/consultation-forms"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
+import { useOpenWide } from "./wide-section"
 
 const errorMessage = (e: unknown, fallback: string) =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : fallback
@@ -225,6 +228,21 @@ type ViewedPaper =
   | { kind: "leave"; leave: MedicalLeave }
   | { kind: "attention" }
 
+/**
+ * La segunda línea de un archivo de la atención, como en Documentos: qué es (si el título no lo
+ * dice ya), cuándo se tomó y sus piezas («Tomada 12/11/2026 · Pieza 46»).
+ */
+function fileDetail(file: EncounterDetail["documents"][number]): string {
+  const what = (imageTypeLabel(file.imageType) ?? categoryLabel(file.category)).replace(/\s*\([^)]*\)$/, "")
+  return [
+    file.label.toLowerCase().includes(what.toLowerCase()) ? null : what,
+    formatTakenAt(file),
+    teethWords(file.toothNumbers),
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 function firstName(patient: PatientFull): string {
   return (patient.patient.givenNames ?? patient.patient.displayName).trim().split(/\s+/)[0] ?? ""
 }
@@ -262,6 +280,7 @@ export function EncounterDocumentsBlock({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const me = useMyUserId()
+  const openWide = useOpenWide()
   const docs = useEncounterDocuments(patientId, encounterId, detail)
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<NewDocumentKind | null>(null)
@@ -705,11 +724,22 @@ export function EncounterDocumentsBlock({
           <li key={file.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="break-words text-sm font-medium">{file.label}</span>
-              <span className="text-xs text-muted-foreground">
-                Imagen o archivo de esta atención
-              </span>
+              <span className="text-xs text-muted-foreground">{fileDetail(file)}</span>
             </div>
-            <DocumentOpenButton patientId={patientId} documentId={file.id} label="Ver" />
+            {openWide ? (
+              // Se ve en el visor de la ficha, como en Documentos, no como archivo suelto.
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label={`Ver ${file.label}`}
+                onClick={() => openWide({ id: "documentos", documentId: file.id })}
+              >
+                Ver
+              </Button>
+            ) : (
+              <DocumentOpenButton patientId={patientId} documentId={file.id} label={file.label} />
+            )}
           </li>
         ))}
         {docs.total === 0 && docs.pendingSignatures.length === 0 && !signed ? (
@@ -821,6 +851,8 @@ export function EncounterDocumentsBlock({
         encounters={encounters}
         planItems={attentionItems}
         suggestions={paperFor ? [`Hoja firmada: ${paperFor.title}`] : []}
+        // Es la hoja de un consentimiento: un PDF no se propone como «Informe».
+        defaultCategory="consentimiento"
         open={paperFor !== null}
         onOpenChange={(open) => {
           if (!open) setPaperFor(null)
