@@ -789,6 +789,38 @@ function saysValue(question: DictationFormQuestion, sentence: string): boolean {
   )
 }
 
+/**
+ * ¿La oración dice un número con la unidad que, en su ficha, solo tiene esta pregunta? «18 kg» es
+ * el peso aunque no se oiga «peso» (prueba con voz del 16 nov, c6, v08: Chrome oyó «beso 18 kg»).
+ * Es lo mismo que deja listo ese número (`numberNamed`); la unidad sola, sin número, no nombra nada.
+ */
+function unitNamed(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], sentence: string): boolean {
+  const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
+  if (!unit || questions.some((other) => other !== question && other.responseId === question.responseId && other.unit === question.unit)) return false
+  const words = plain(sentence).split(/[^a-z0-9,.]+/)
+  return words.some((word, index) => index > 0 && unit.test(word) && saidNumbers(words[index - 1] ?? "").length > 0)
+}
+
+/**
+ * Las hermanas que la oración nombra por igual, sin decir cuál (prueba con voz del 16 nov, c6, v11:
+ * «2 obturados», ¿del CPOD o del ceod?): del mismo tipo y ficha, se distinguen en una sola palabra y la
+ * oración dice todo lo demás de su rótulo, pero no lo que distingue a ninguna. Como el motivo de lo
+ * parado (`dropReasonOf`), para que la red lo avise aunque Clío no lo proponga. Vacío si la oración
+ * dice cuál es o si no hay hermanas así.
+ */
+function twinsNamedAlike(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], heard: string): DictationFormQuestion[] {
+  const spoken = new Set(stemsOf(heard))
+  const own = labelStems(question.label)
+  return questions.filter((other) => {
+    if (other === question || other.responseId !== question.responseId || other.type !== question.type) return false
+    const theirs = labelStems(other.label)
+    const shared = own.filter((stem) => theirs.includes(stem))
+    const mine = own.filter((stem) => !theirs.includes(stem))
+    const its = theirs.filter((stem) => !own.includes(stem))
+    return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && mine.length === 1 && its.length === 1 && !spoken.has(mine[0] ?? "") && !spoken.has(its[0] ?? "")
+  })
+}
+
 /** «Parece de «Percusión»: revísala en la ficha.»; con varias, «… «Pieza» y «Percusión»: revísalas…». */
 function looksLike(labels: string[]): string {
   return `Parece de ${listOf(labels.map((label) => `«${label}»`), "y")}: ${labels.length > 1 ? "revísalas" : "revísala"} en la ficha.`
@@ -819,7 +851,10 @@ export function formSentencesWithoutAnswer(
     if (!said) return []
     const named = open.filter((question) => {
       const heard = heardBy(question, said)
-      if (!namesQuestion(question, heard, site) || !saysValue(question, heard)) return false
+      // Lo dicho entre dos hermanas sin decir cuál se avisa en las dos, si Clío no respondió ninguna.
+      const alike = twinsNamedAlike(question, questions, heard)
+      const between = alike.length > 0 && alike.every((twin) => !handled.has(twin.number))
+      if (!(namesQuestion(question, heard, site) || unitNamed(question, questions, heard) || between) || !saysValue(question, heard)) return false
       if (saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered)) return false
       // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar cerca de
       // lo que distingue a esta: en «línea media superior centrada la inferior desviada dos
