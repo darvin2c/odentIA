@@ -113,6 +113,59 @@ export function clinicalAlerts(
   return [...severe, ...marked, ...other, ...conditions, ...medications.filter((m) => m.tone !== "warning")]
 }
 
+/**
+ * Las alertas en una línea, por riesgo (P12, la voz clínica): la alergia grave; que no se le
+ * preguntó por alergias; el anticoagulante o la medicina para los huesos; las demás alergias; el
+ * embarazo; las enfermedades; lo demás que toma; y al final «Niega alergias». Con una sola a la
+ * vista (el teléfono), nunca queda «Niega alergias» con el anticoagulante escondido en «+N».
+ * Son las mismas que la franja de arriba (`clinicalAlerts`): no es otra fuente.
+ */
+export function alertsByRisk(
+  detail: Pick<
+    PatientFull,
+    "activeAllergies" | "activeConditions" | "currentMedications" | "allergyReview" | "allergySaidUnknown"
+  >,
+  health: Pick<PatientHealth, "pregnancy"> | null | undefined,
+): Array<{ id: string; label: string; tone: "destructive" | "warning" | "secondary" }> {
+  const alerts = clinicalAlerts(detail)
+  const allergyIds = new Set(detail.activeAllergies.map((row) => row.id))
+  const medicationIds = new Set(detail.currentMedications.map((row) => row.id))
+  const noAllergies = !detail.activeAllergies.some((row) => row.verification !== "descartada")
+  const unasked =
+    noAllergies && detail.allergyReview === "unknown"
+      ? [
+          {
+            id: "alergias",
+            label: `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`,
+            tone: "warning" as const,
+          },
+        ]
+      : []
+  const denies =
+    noAllergies && detail.allergyReview === "none"
+      ? [{ id: "alergias", label: "Niega alergias", tone: "secondary" as const }]
+      : []
+  const pregnancy = health?.pregnancy
+    ? [
+        {
+          id: "embarazo",
+          label: pregnancyChip(health.pregnancy),
+          tone: health.pregnancy.state === "vigente" ? ("warning" as const) : ("secondary" as const),
+        },
+      ]
+    : []
+  return [
+    ...alerts.filter((alert) => alert.tone === "destructive"),
+    ...unasked,
+    ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone === "warning"),
+    ...alerts.filter((alert) => allergyIds.has(alert.id) && alert.tone !== "destructive"),
+    ...pregnancy,
+    ...alerts.filter((alert) => !allergyIds.has(alert.id) && !medicationIds.has(alert.id)),
+    ...alerts.filter((alert) => medicationIds.has(alert.id) && alert.tone !== "warning"),
+    ...denies,
+  ]
+}
+
 /** «No se le preguntó» no es «dijo que no»: lo que se sabe de cada clase, en la atención. */
 const CLASS_ANSWER_WORDS: Record<Exclude<MedicineClassAnswer["answer"], "yes">, (said: boolean) => string> = {
   unasked: () => "no se le preguntó",

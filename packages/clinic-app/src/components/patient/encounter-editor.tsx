@@ -167,6 +167,8 @@ import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { useDiscardEncounter, useOpenEncounter } from "./stale-encounter"
 import { PatientClinicalStrip } from "./patient-header"
+import { EncounterPatientLine, shortPatientName, usePastHeader, useReservedTop } from "./encounter-patient-line"
+import { dictationIdle } from "./dictation-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 
 export interface EncounterEditorProps {
@@ -2335,6 +2337,10 @@ export function EncounterEditor({
     />
   ) : null
   const age = ageFrom(patient.patient.birthDate)
+  // Al pasar la cabecera, la línea fija del paciente (P12): el nombre y sus alertas siguen a la vista.
+  const headerEnd = useRef<HTMLSpanElement>(null)
+  const pastHeader = usePastHeader(headerEnd)
+  useReservedTop()
   // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
   const saveChip =
     saveState === "offline"
@@ -2448,9 +2454,29 @@ export function EncounterEditor({
                 onType={() => setDictationTyping(true)}
               />
             ) : null}
+            {/* Dónde termina la cabecera: al pasar por arriba, aparece la línea fija del paciente. */}
+            <span ref={headerEnd} aria-hidden className="h-px w-px shrink-0" />
           </>
         }
       />
+      {pastHeader ? (
+        <EncounterPatientLine
+          detail={patient}
+          health={stripHealth.data?.data ?? null}
+          displayName={patient.patient.displayName}
+          shortName={shortPatientName(patient.patient)}
+          age={age !== "" ? `${age} a` : ""}
+          save={saveChip}
+          canDictate={attending && dictation.enabled && dictation.canListen && dictationIdle(dictation)}
+          onDictate={() => {
+            startDictation()
+            dictation.start()
+          }}
+          dictating={attending && dictation.enabled && dictation.dictating}
+          onFinishDictation={finishDictation}
+          onAntecedentes={() => setContextOpen(true)}
+        />
+      ) : null}
       {saveState === "offline" ? (
         <p role="status" className="text-sm text-muted-foreground">
           Sin conexión: lo escrito se queda en la pantalla y se guarda al volver. Mientras tanto no se puede firmar.
