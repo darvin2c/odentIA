@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { DENTAL_FORMS } from "./dental/forms.js"
-import { dentalProductSite } from "./dental/site.js"
-import { formDiagnosesOf, formDiagnosisKey } from "./form-diagnoses.js"
-import { encounterDiagnosisLines } from "./patient-history.js"
-import type { ProductSite } from "./product-hooks.js"
+import { DENTAL_FORMS } from "./forms.js"
+import { dentalProductSite } from "./site.js"
+import { formDiagnosesOf, formDiagnosisKey } from "../form-diagnoses.js"
+import { encounterDiagnosisLines } from "../patient-history.js"
+import type { ProductSite } from "../product-hooks.js"
 
 const TITLES = new Map([
   ["ICD-10|K02.1", "Caries de la dentina"],

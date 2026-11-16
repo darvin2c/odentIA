@@ -2,12 +2,12 @@ import { clinicalFormResponse, clinicalFormTemplate } from "@odentia/db/schema/c
 import { encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
-import { DENTAL_FORMS } from "./dental/forms.js"
-import { getDiagnosisSuggestions } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
-import { getTimeline } from "./patient-history.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { clinicalFixture, seedDiagnosisCodes } from "../clinical-test-fixture.js"
+import { DENTAL_FORMS } from "./forms.js"
+import { getDiagnosisSuggestions } from "../diagnosis-codes.js"
+import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
+import { getTimeline } from "../patient-history.js"
+import { ownerDb, setupTestDb } from "../test-setup.js"
 
 /**
  * Estudio de la atención del 16 nov (E10b, B1 y B1b): la ficha de endodoncia llenada a mano dice
