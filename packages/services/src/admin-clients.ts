@@ -3213,7 +3213,11 @@ export async function clientTimeline(
       .where(
         and(
           eq(saasFollowUp.clientId, clientId),
-          admin ? undefined : eq(saasFollowUp.adminOnly, false),
+          // A Soporte no le llega lo de las conversaciones: se filtra aquí, no después, para que
+          // la página no se llene de filas que no ve y «Ver más» siga encontrando lo anterior.
+          admin
+            ? undefined
+            : and(eq(saasFollowUp.adminOnly, false), sql`not ${activityIsConversationSql}`),
           beforeOf(saasFollowUp.happenedAt),
         ),
       )
@@ -3405,7 +3409,7 @@ export async function clientTimeline(
   // Envíos que todavía no dejaron su actividad: por confirmar, inciertos o que no salieron. Son
   // de una conversación: solo Administración (ADR 0196). El de un chat abre su conversación; el
   // otro, su cajón con lo que decía.
-  if (wants("conversaciones")) {
+  if (wants("conversaciones") && admin) {
     const rows = await tx
       .select()
       .from(saasOutreach)
