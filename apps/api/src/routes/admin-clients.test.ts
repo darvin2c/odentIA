@@ -907,7 +907,7 @@ describe("documentos", () => {
   })
 
   it("se ve sin descargar: imagen por enlace de 5 minutos, PDF por la API y aislado; lo demás no", async () => {
-    const clientId = await newClient("Clínica Vista (ficticia)", "vista@andes.test")
+    const clientId = await newClient("Odontología Tambopata Visor (ficticia)", "vista@andes.test")
     const uploaded = await call(
       "POST",
       `/${clientId}/files`,
