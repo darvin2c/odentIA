@@ -470,8 +470,14 @@ export interface ProductForms {
    * Las opciones de sus fichas que son un diagnóstico, como se escriben en la ficha, con su código de
    * la CIE-10 (OMS): la respuesta dictada va también a Diagnóstico si Clío no lo propuso (prueba con
    * voz del 15 nov, c5; `withFormDiagnoses`). odentIA: el diagnóstico pulpar y el apical de la AAE.
+   * Llenada a mano, la ficha también lo propone para la atención, con «Usar» (`formDiagnosesOf`).
    */
   diagnoses?: Readonly<Record<string, string>>
+  /**
+   * Lo que una de esas opciones le suma al nombre de su código, para la Historia: «irreversible
+   * sintomática» de K04.0. Se lee de la ficha; el diagnóstico no lo guarda.
+   */
+  qualifiers?: Readonly<Record<string, string>>
 }
 
 /** Un producto que no trae fichas ni ofrece por edad. */

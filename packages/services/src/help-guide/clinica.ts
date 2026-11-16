@@ -322,6 +322,21 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        // Estudio de la atención del 16 nov (E10b): llenada a mano, la ficha no proponía nada y la periodontitis
+        // apical quedaba fuera de Diagnóstico.
+        id: "pacientes-ficha-endodoncia-propone-diagnostico",
+        q: "Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?",
+        a: "No lo escribes otra vez: debajo de su «Diagnóstico», la ficha muestra «Lo que propone la ficha para el diagnóstico de la atención», con su código y su pieza (por ejemplo, K04.0 Pulpitis · irreversible sintomática · 36). «Usar» lo registra en Diagnóstico como definitivo; nada entra solo. Si ya estaba, dice «Ya está en Diagnóstico». Lo que la ficha le suma al código (irreversible sintomática) no lo cambia: la Historia lo dice junto a él.",
+        forms: [
+          "llene la ficha de endodoncia tengo que poner el diagnostico",
+          "la ficha de endodoncia no pasa al diagnostico",
+          "periodontitis apical de la ficha no esta en diagnostico",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-cuestionario-respondio-antes-de-venir",
         q: "¿Dónde veo lo que respondió antes de venir?",
         a: "Lo que contó de esa visita (a qué viene, si le duele y cuánto) sale en «Hoy viene a…», arriba de la atención de su cita, con quién lo envió y cuándo, y «Usar como motivo» pone sus palabras en el motivo sin teclear. Si vino antes de su cita o sin cita, sale lo que contó para su cita que viene («Para su cita del lun 16 nov contó…»), también con «Usar como motivo»; queda visto en esta atención y el día de su cita no se repite. El sistema anota que lo viste al abrir la atención, y después de firmar sigue ahí y en la Historia; lo que nadie leyó todavía también está en la Historia, el día en que lo envió. Lo que dijo de su salud (alergias, enfermedades, medicinas, embarazo) está arriba de su ficha, en su caja «Lo dijo ella… sin revisar», y en la atención, en «Revisa con… lo que dijo de su salud» (o en «Pregúntale a…», si además falta preguntarle algo): «Ver lo que dijo» lo abre y «Lo revisé con ella» lo deja revisado en un toque. Si respondió un cuestionario de los de antes, está en su página › Clínica › Documentos, como «Por revisar», con «Ver»: lo que escribió no se cambia, y ahí «Marcar como revisado» deja quién lo revisó y cuándo, y el aviso dice qué pasó a Antecedentes o que nada pasó: solo pasan las alergias que escribió, si el cuestionario las pregunta, como dichas por ella y sin confirmar. Mientras la atención sigue abierta, lo revisado queda a la vista en ella; después de firmarla, y si lo revisaste desde Documentos, se ve en Documentos (con «Ver») y en la Historia, dentro de esa atención.",
