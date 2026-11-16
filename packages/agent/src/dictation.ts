@@ -298,11 +298,11 @@ const HEARD_HINT =
   "Lo dictado viene del reconocimiento de voz del navegador y puede traer mal escritos los términos de estas preguntas: con otra letra que suena igual (b o v; s, c o z; ll o y; sin la h), una sigla con espacios entre sus letras, una palabra en inglés escrita como suena u otra parecida. Léelos por cómo suenan cuando no haya duda de cuál es."
 
 /**
- * Las fichas empezadas con sus preguntas y cómo se responden. Va en el mensaje
- * de la pausa y no en las instrucciones fijas: sin ficha empezada el modelo no
+ * Las fichas empezadas con sus preguntas y cómo se responden. Va con la pausa y
+ * no en las instrucciones fijas: sin ficha empezada el modelo no
  * lee nada nuevo y lo de siempre no cambia. Es igual en toda la atención (lo que
- * ya dice cada pregunta va aparte, `dictationFormsAnswered`), así que abre el
- * mensaje de la pausa con su propio corte de caché (`dictationMessages`).
+ * ya dice cada pregunta va aparte, `dictationFormsAnswered`), así que va en un
+ * mensaje propio antes del de la pausa, con su corte de caché (`dictationMessages`).
  */
 export function dictationFormsText(forms: readonly DictationFormQuestion[]): string {
   if (!forms.length) return ""
@@ -361,12 +361,15 @@ function newText(context: string, transcript: string): string {
  * por Chat Completions, el proveedor no escribe además lo de cada pausa, que
  * nunca se vuelve a leer; por /v1/responses ese pedido no se envía.
  *
- * Con una ficha empezada, sus reglas y preguntas abren el mensaje de la pausa
- * con su propio corte: son iguales en toda la atención y la pausa siguiente
- * las lee de la caché. Lo que ya dicen las respondidas va con lo que cambia.
- * Antes iban después de la fecha y de lo ya ordenado y se pagaban enteras en
- * cada pausa (medido el 16 nov: 87 % de la entrada leída de la caché con
- * ficha, 98 % sin ella).
+ * Con una ficha empezada, sus reglas y preguntas van en un mensaje propio,
+ * antes del de la pausa y con su corte: son iguales en toda la atención y la
+ * pausa siguiente las lee de la caché. Lo que ya dicen las respondidas va con
+ * lo que cambia. Antes iban dentro de la pausa, después de la fecha y de lo ya
+ * ordenado, y se pagaban enteras en cada pausa (medido el 16 nov: 87 % de la
+ * entrada leída de la caché con ficha, 98 % sin ella). En un mensaje propio, y
+ * no al principio del de la pausa: así este empieza como siempre, con la
+ * fecha, y Clío lo lee igual; empezando por las fichas, dejaba fuera de la
+ * consulta lo que se hizo (5 de 8 veces en nota-3-correccion, frente a 1 de 8).
  */
 export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({
@@ -394,7 +397,8 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
   const formsText = dictationFormsText(forms)
   return [
     new SystemMessage({ content: cachedPrompt(input.provider, fixed, responses) }),
-    new HumanMessage({ content: formsText ? cachedPrompt(input.provider, formsText, responses, `\n\n${pause}`) : pause }),
+    ...(formsText ? [new HumanMessage({ content: cachedPrompt(input.provider, formsText, responses) })] : []),
+    new HumanMessage({ content: pause }),
   ]
 }
 

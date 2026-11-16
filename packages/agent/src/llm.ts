@@ -221,20 +221,15 @@ export function viaResponses(model: unknown): boolean {
  * (el modelo de demostración), el texto solo. Medido el 2026-10-29 (ADR 0012 y
  * 0075): en Argos y en el dictado de latidIA, donde la parte fija es todo el
  * mensaje de sistema, OpenAI ya la leía sin el corte de lo que guardó la
- * llamada anterior, y el corte no bajó su costo.
- *
- * `rest`: lo que sigue en el mismo mensaje y cambia en cada llamada, en otro
- * bloque sin corte (el dictado con una ficha empezada: sus preguntas son fijas
- * y la pausa no). Solo en un mensaje del usuario: probado con la API el
- * 2026-11-16, ahí el corte queda al final de su bloque, por Chat Completions y
- * por /v1/responses; en uno de sistema, por Chat Completions, OpenAI lo corre
- * al final del mensaje y `rest` se escribiría en la caché. Sin caché, el texto
- * seguido.
+ * llamada anterior, y el corte no bajó su costo. Probado con la API el
+ * 2026-11-16: varios cortes en una llamada se leen cada uno (el dictado con
+ * una ficha lleva el de las instrucciones y el de las fichas); en un bloque de
+ * un mensaje de sistema, por Chat Completions, OpenAI corre el corte al final
+ * de ese mensaje, y por /v1/responses lo deja al final del bloque.
  */
-export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean, rest = ""): string | ContentBlock[] {
-  if (provider !== "openai") return `${text}${rest}`
-  const type = responses ? "input_text" : "text"
-  return [{ type, text, prompt_cache_breakpoint: { mode: "explicit" } }, ...(rest ? [{ type, text: rest }] : [])]
+export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean): string | ContentBlock[] {
+  if (provider !== "openai") return text
+  return [{ type: responses ? "input_text" : "text", text, prompt_cache_breakpoint: { mode: "explicit" } }]
 }
 
 /** El cuerpo de error del proveedor: OpenAI `{ error: { code, message } }`. */

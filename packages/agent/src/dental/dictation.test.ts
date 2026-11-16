@@ -12,7 +12,7 @@ import {
   rereadFormSentences,
 } from "../dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "../llm.js"
-import { cacheMarked, fakeProvider, pauseBlocks, systemBlock, toolCallReply } from "../test-provider.js"
+import { cacheMarked, fakeProvider, messageContent, systemBlock, toolCallReply } from "../test-provider.js"
 import { DENTAL_DICTATION_PROFILE, demoExtraction, demoSegment } from "./dictation.js"
 
 it("el dictado de odentIA no razona: va por Chat Completions con su parte fija marcada y prompt_cache_options", async () => {
@@ -28,10 +28,12 @@ it("el dictado de odentIA no razona: va por Chat Completions con su parte fija m
     expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("text"))
     // Por Chat Completions el proveedor guarda solo hasta el corte.
     expect(provider.requests[0]?.body).toMatchObject({ prompt_cache_options: { mode: "explicit" } })
-    // Con una ficha empezada, sus preguntas abren la pausa con su corte y lo de la pausa va detrás, sin él.
+    // Con una ficha empezada, sus preguntas van en su mensaje con su corte, y la pausa después, sin él.
     const forms = formQuestionsOf([{ id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} }])
     await askDictationModel(model, spec, { ...pause, forms, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:01:00Z") }, profile)
-    expect(pauseBlocks(provider.requests[1])).toEqual([cacheMarked("text", expect.stringContaining("Fichas abiertas")), { type: "text", text: expect.stringContaining("Lo nuevo que dictó") }])
+    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("text", expect.stringContaining("Fichas abiertas"))])
+    expect(JSON.stringify(messageContent(provider.requests[1], 2))).toContain("Lo nuevo que dictó")
+    expect(JSON.stringify(messageContent(provider.requests[1], 2))).not.toContain("prompt_cache_breakpoint")
   } finally {
     await provider.close()
   }
@@ -277,22 +279,23 @@ describe("lo que recibe el modelo en cada pausa", () => {
       { number: 2, responseId: "r1", formTitle: "Ficha de ortodoncia", fieldId: "overjet", label: "Overjet", type: "numero" as const, options: null, unit: "mm", min: -10, max: 20, order: 1, dependsOn: null },
     ]
     const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript: "Overjet de seis.", context: "", pending: [] }
-    const [fixedWith, humanWith] = dictationMessages({ ...base, forms }, DENTAL_DICTATION_PROFILE, false)
-    const [fixedWithout, humanWithout] = dictationMessages(base, DENTAL_DICTATION_PROFILE, false)
-    expect(fixedWith?.content).toEqual(fixedWithout?.content)
-    // Las reglas y las preguntas abren el mensaje de la pausa, con su corte; la pausa va después, sin él.
-    const [questions, pause] = (humanWith?.content ?? []) as Array<{ text: string; prompt_cache_breakpoint?: unknown }>
+    const [fixedWith, formsWith, pauseWith] = dictationMessages({ ...base, forms }, DENTAL_DICTATION_PROFILE, false)
+    const without = dictationMessages(base, DENTAL_DICTATION_PROFILE, false)
+    expect(fixedWith?.content).toEqual(without[0]?.content)
+    // Las reglas y las preguntas van en su mensaje, con su corte; la pausa, después y como siempre.
+    const [questions] = (formsWith?.content ?? []) as Array<{ text: string }>
     expect(questions).toMatchObject({ type: "text", prompt_cache_breakpoint: { mode: "explicit" } })
     expect(questions?.text).toContain(
       ["Ficha de ortodoncia:", "1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1", "2. Overjet · número en mm, de -10 a 20"].join("\n"),
     )
     expect(questions?.text).toContain("el silencio no es «No»")
-    expect(pause).not.toHaveProperty("prompt_cache_breakpoint")
-    expect(pause?.text).toMatch(/^\n\nHoy es /)
-    expect(pause?.text).toContain("Lo nuevo que dictó:\n«Overjet de seis.»")
-    expect(String(humanWithout?.content)).not.toContain("Fichas abiertas")
-    // Sin caché (el modelo de demostración), el mismo texto seguido.
-    expect(dictationMessages({ ...base, provider: "fake", forms }, DENTAL_DICTATION_PROFILE, false)[1]?.content).toBe(`${questions?.text}${pause?.text}`)
+    expect(pauseWith?.content).toMatch(/^Hoy es /)
+    expect(pauseWith?.content).toContain("Lo nuevo que dictó:\n«Overjet de seis.»")
+    // Sin ficha, la pausa es la de siempre: el mensaje de sistema y el de la pausa, igual que con ficha.
+    expect(without).toHaveLength(2)
+    expect(without[1]?.content).toEqual(pauseWith?.content)
+    // Sin caché (el modelo de demostración), el mismo texto, sin marca.
+    expect(dictationMessages({ ...base, provider: "fake", forms }, DENTAL_DICTATION_PROFILE, false)[1]?.content).toBe(questions?.text)
   })
 
   it("con ficha, lo fijo de la atención es igual entre pausas; lo que ya dice una pregunta va con lo que cambia", () => {
@@ -306,15 +309,15 @@ describe("lo que recibe el modelo en cada pausa", () => {
       DENTAL_DICTATION_PROFILE,
       false,
     )
+    // Todo hasta el corte de las fichas es igual: la pausa siguiente lo lee de la caché.
     expect(next[0]?.content).toEqual(first[0]?.content)
-    const [fixedFirst] = (first[1]?.content ?? []) as Array<{ text: string }>
-    const [fixedNext, pauseNext] = (next[1]?.content ?? []) as Array<{ text: string }>
-    expect(fixedNext).toEqual(fixedFirst)
-    expect(fixedNext?.text).not.toContain("· ya dice")
+    expect(next[1]?.content).toEqual(first[1]?.content)
+    expect(JSON.stringify(next[1]?.content)).not.toContain("· ya dice")
     const overjet = questionsOf({}).find((item) => item.fieldId === "overjet")
-    expect(pauseNext?.text).toContain(`Preguntas de las fichas abiertas que ya tienen respuesta:\n${overjet?.number}. ${overjet?.label} · ya dice «6 mm»`)
+    const pauseNext = String(next[2]?.content)
+    expect(pauseNext).toContain(`Preguntas de las fichas abiertas que ya tienen respuesta:\n${overjet?.number}. ${overjet?.label} · ya dice «6 mm»`)
     // Lo que cambia va al final, en este orden: la fecha, lo ya ordenado, lo pendiente, lo respondido y lo nuevo.
-    const order = ["Hoy es ", "Ya ordenado antes", "Sugerencias pendientes", "ya tienen respuesta", "Lo nuevo que dictó"].map((words) => pauseNext?.text.indexOf(words) ?? -1)
+    const order = ["Hoy es ", "Ya ordenado antes", "Sugerencias pendientes", "ya tienen respuesta", "Lo nuevo que dictó"].map((words) => pauseNext.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
