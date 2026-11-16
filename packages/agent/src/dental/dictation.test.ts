@@ -124,6 +124,15 @@ describe("dictado en modo de demostración", () => {
     expect(groundSource("«Frankl cuatro»", "Frankl tres, colaboró bien.")).toBe("")
     expect(groundSource("dice «me duele»", "La mamá dice «me duele» al masticar.")).toBe("dice «me duele»")
   })
+
+  it("lo que el modelo salta con «...» no se junta: queda el pedazo más largo, tal cual (medición del 16 nov)", () => {
+    // Juntos, «cinco con extracción indicada» no se dijo: el cinco era de «cariados».
+    const heard = "sé o d cinco cariados dos con extracción indicada ser obturados"
+    expect(groundSource("cinco ... con extracción indicada", heard)).toBe("con extracción indicada")
+    expect(groundSource("«cinco… con extracción indicada»", heard)).toBe("con extracción indicada")
+    // Con los puntos solo al principio o al final, es un pedazo y queda como siempre.
+    expect(groundSource("cinco cariados...", heard)).toBe("cinco cariados")
+  })
 })
 
 /**

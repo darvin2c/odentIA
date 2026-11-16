@@ -411,6 +411,11 @@ export function groundSource(said: string | undefined, transcript: string): stri
       .filter((sentence) => sentence.length >= 3 && heard.includes(loose(sentence)))
       .join(" ")
   }
+  // Con «...» entre palabras el modelo saltó lo de en medio: los pedazos no se juntan, porque juntos no
+  // se dijeron; queda el más largo que está tal cual (medición del 16 nov: «cinco ... con extracción
+  // indicada» dejaba lista una «e» de 5, y el cinco era de «cariados»).
+  const pieces = fragment.replace(QUOTES, "").split(/\s*(?:\.{3}|…)\s*/u).filter((piece) => piece.trim())
+  if (pieces.length > 1) return pieces.map(ground).reduce((longest, piece) => (piece.length > longest.length ? piece : longest), "")
   // Lo dictado le llega al modelo entre comillas (`dictationMessages`) y a veces las copia («Frankl
   // tres»), o marca con «...» que cita un pedazo: sin eso era lo dicho. Medido el 15 nov: 5 de 9
   // respuestas de ficha perdidas eran las comillas.
