@@ -35,6 +35,16 @@ const envSchema = z.object({
   HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
   MEDICAL_HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
   OPTICAL_HELP_VIDEOS_PLAYLIST: z.string().trim().optional(),
+  /**
+   * Solo los subdominios de clínicas reales llegan a las pantallas (ADR 0193): un token de
+   * Cloudflare con «Zone WAF: Edit» solo en las zonas de los productos, y el id de la zona
+   * del dominio de cada uno. La API y el worker ponen al día la regla de hosts permitidos de
+   * cada zona. Vacías: no se toca Cloudflare. vistIA no tiene su dominio ahí todavía.
+   */
+  CLOUDFLARE_WAF_TOKEN: z.string().trim().default(""),
+  CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
+  MEDICAL_CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
+  OPTICAL_CLOUDFLARE_ZONE_ID: z.string().trim().default(""),
   /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
   META_GRAPH_VERSION: z
     .string()
