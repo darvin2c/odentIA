@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { SideColumn, useSideColumnWidth } from "./side-dock.js"
+import { SideColumn, useSideColumnWidth, useStaysBeside } from "./side-dock.js"
 
 function setViewport(width: number) {
   Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: width })
@@ -90,5 +90,61 @@ describe("useSideColumnWidth", () => {
     act(() => result.current[1](200))
     expect(result.current[0]).toBe(416)
     expect(window.localStorage.getItem("odentia.side-panel.prueba")).toBe("416")
+  })
+})
+
+describe("useStaysBeside (regla 5)", () => {
+  function Page(props: { open: boolean; fits: boolean; dirty?: boolean; onClose: () => void }) {
+    const { beside, confirmDialog } = useStaysBeside({
+      open: props.open,
+      fits: props.fits,
+      dirty: props.dirty ?? false,
+      lost: "No se registró el hallazgo de la 36.",
+      onClose: props.onClose,
+    })
+    return (
+      <>
+        <p>{props.open ? (beside ? "al lado" : "en cajón") : "cerrada"}</p>
+        {confirmDialog}
+      </>
+    )
+  }
+
+  it("al lado y sin nada escrito: al perder el ancho se cierra, sin pasar por ventana", () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits onClose={onClose} />)
+    expect(screen.getByText("al lado")).toBeTruthy()
+    rerender(<Page open fits={false} onClose={onClose} />)
+    // Hasta que la página la cierra, sigue al lado: nunca un cuadro como cajón.
+    expect(screen.getByText("al lado")).toBeTruthy()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("con algo escrito pregunta antes; «Seguir aquí» la deja al lado aunque no quepa", async () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits dirty onClose={onClose} />)
+    rerender(<Page open fits={false} dirty onClose={onClose} />)
+    expect(await screen.findByText("No se registró el hallazgo de la 36.")).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Seguir aquí" }))
+    expect(screen.getByText("al lado")).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("con algo escrito, «Descartar y salir» la cierra", async () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits dirty onClose={onClose} />)
+    rerender(<Page open fits={false} dirty onClose={onClose} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar y salir" }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("abierta sin sitio va en cajón, y pasa al lado cuando lo hay", () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Page open fits={false} onClose={onClose} />)
+    expect(screen.getByText("en cajón")).toBeTruthy()
+    rerender(<Page open fits onClose={onClose} />)
+    expect(screen.getByText("al lado")).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

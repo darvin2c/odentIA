@@ -320,6 +320,19 @@ export interface ProductEncounterBlocks {
   blocks: ProductEncounterBlock[]
   /** Lo que el producto monta sobre la atención (odentIA: la captura del periodontograma a pantalla completa). */
   overlay: ReactNode
+  /**
+   * El sitio que se tiene elegido ahora (odentIA: la pieza abierta o marcada en el arco, con su
+   * hallazgo de hoy): «Indicar un tratamiento» empieza con él, no con lo último que se registró.
+   * Sin sitio (latidIA, vistIA, o nada elegido), null.
+   */
+  site?: EncounterOpenSite | null
+}
+
+/** La pieza elegida en el odontograma de la atención y lo que se registró hoy en ella. */
+export interface EncounterOpenSite {
+  teeth: number[]
+  /** El hallazgo de esta atención en esa pieza (el más reciente), si lo hay. */
+  findingId: string | null
 }
 
 export interface ProductEncounterBlock {

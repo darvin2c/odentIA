@@ -24,7 +24,7 @@ export {
   AgentSurface,
   type AgentSurfaceProps,
 } from "./agent-mark.js"
-export { AppShell, isNavItemActive } from "./app-shell.js"
+export { AppShell, isNavItemActive, useIconSidebarWhileMounted } from "./app-shell.js"
 export {
   FlowDiagram,
   type FlowDiagramActor,
@@ -153,11 +153,13 @@ export {
   type SideDockScope,
   SideDockScopeProvider,
   SideDockSlot,
+  type StaysBesideOptions,
   useSideColumnWidth,
   useDraftKeptInPage,
   useSideDock,
   useSideDockScope,
   useSidebarWidth,
+  useStaysBeside,
 } from "./side-dock.js"
 export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"

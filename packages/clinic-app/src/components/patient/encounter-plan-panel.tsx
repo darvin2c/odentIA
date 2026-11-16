@@ -1319,6 +1319,26 @@ function IndicationForm({
       }
     },
   })
+  // Con el formulario abierto, abrir otra pieza en el arco la trae aquí con su hallazgo y su
+  // diagnóstico, mientras quien indica no haya cambiado a mano la pieza de partida (P09).
+  const startedWith = useRef({ tooth: initial.teeth[0] ?? null, finding: initial.odontogramEntryId })
+  const defaultTooth = defaults?.teeth?.[0] ?? null
+  const defaultFinding = defaults?.odontogramEntryId ?? ""
+  const defaultDiagnosis = defaults?.diagnosisCode ?? ""
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lo dispara la pieza elegida, no cada render.
+  useEffect(() => {
+    if (editing || defaultTooth == null) return
+    const before = startedWith.current
+    const now = form.state.values
+    const untouched = (now.teeth[0] ?? null) === before.tooth && now.odontogramEntryId === before.finding
+    if (!untouched || (defaultTooth === before.tooth && defaultFinding === before.finding)) return
+    startedWith.current = { tooth: defaultTooth, finding: defaultFinding }
+    form.setFieldValue("scope", "tooth")
+    form.setFieldValue("teeth", [defaultTooth])
+    form.setFieldValue("surfaces", [])
+    form.setFieldValue("odontogramEntryId", defaultFinding)
+    form.setFieldValue("diagnosisCode", defaultDiagnosis)
+  }, [defaultTooth, defaultFinding])
   const error = useFormSubmitError(form)
   const pending = useStore(form.store, (state) => state.isSubmitting)
   const scope = useStore(form.store, (state) => state.values.scope)

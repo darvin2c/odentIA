@@ -2,6 +2,7 @@ import { cn, useSidebarOptional } from "@odentia/ui"
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { common } from "./common.js"
+import { UnsavedDialog } from "./confirm-dialog.js"
 import type { KeptInPage } from "./draft-blocker.js"
 
 /**
@@ -30,6 +31,11 @@ import type { KeptInPage } from "./draft-blocker.js"
  *    remontaría el formulario.
  * 4. Los Avisos no son un formulario: ceden la columna si alguien la
  *    pide y se abre como cajón si ya está ocupada (lo decide la app).
+ * 5. Lo que una página pone al lado de sí misma, en su propia rejilla (la
+ *    pieza junto al odontograma), nunca pasa a ventana porque se abrió otra
+ *    cosa y le quitó el ancho: se cierra, y la página deja marcado lo que
+ *    tenía abierto para reabrirlo con un toque. Si tenía algo escrito,
+ *    pregunta antes, como un borrador (`useStaysBeside`).
  */
 
 interface SideDockState {
@@ -185,6 +191,73 @@ export function SideDockPortal({
   // Sin columna en el layout (o sin su hueco montado) no hay dónde ir.
   if (!dock?.slot || decision === "fallback") return fallback
   return decision === "column" ? createPortal(children, dock.slot) : null
+}
+
+export interface StaysBesideOptions {
+  /** La página tiene la superficie abierta. */
+  open: boolean
+  /** Hoy cabe al lado (el ancho de su contenedor y `useDetailMode()` lo permiten). */
+  fits: boolean
+  /** Tiene algo escrito que se perdería al cerrarla. */
+  dirty: boolean
+  /** Qué se pierde, dicho para quien decide; sin él, la frase común. */
+  lost?: string | null
+  /** Cerrarla: la página la deja marcada (la selección sigue) para reabrirla con un toque. */
+  onClose: () => void
+}
+
+/**
+ * Regla 5: una superficie que la página pone al lado de sí misma (no en la
+ * columna del layout) se decide al abrir, como en la regla 3: al lado si cabe,
+ * en cajón si no; si después hay sitio, pasa al lado. Una vez al lado, perder
+ * el ancho porque se abrió otra cosa (la columna, el dictado) nunca la vuelve
+ * ventana encima: se cierra. Si tenía algo escrito, se pregunta como al salir
+ * sin guardar: «Seguir aquí» la deja al lado aunque quede justa hasta que se
+ * cierre, y «Descartar y salir» la cierra (WCAG 3.2.2: nada cambia de contexto
+ * sin que la persona lo pida).
+ *
+ * `beside` es lo que la página pinta: al lado o en cajón. `confirmDialog` va
+ * montado junto a la superficie.
+ */
+export function useStaysBeside({ open, fits, dirty, lost = null, onClose }: StaysBesideOptions): {
+  beside: boolean
+  confirmDialog: React.ReactNode
+} {
+  const [placed, setPlaced] = React.useState<"beside" | "drawer" | null>(null)
+  const [held, setHeld] = React.useState(false)
+  const [asking, setAsking] = React.useState(false)
+  // Lo que corresponde ahora, decidido al pintar (sin un cuadro intermedio en cajón).
+  let current = placed
+  if (!open) current = null
+  else if (placed === null || (placed === "drawer" && fits)) current = fits ? "beside" : "drawer"
+  if (current !== placed) setPlaced(current)
+  if (!open && (held || asking)) {
+    setHeld(false)
+    setAsking(false)
+  }
+  const close = React.useRef(onClose)
+  close.current = onClose
+  const squeezed = open && current === "beside" && !fits && !held
+  React.useEffect(() => {
+    if (!squeezed || asking) return
+    if (dirty) setAsking(true)
+    else close.current()
+  }, [squeezed, asking, dirty])
+  const confirmDialog = (
+    <UnsavedDialog
+      open={asking}
+      lost={lost}
+      onStay={() => {
+        setAsking(false)
+        setHeld(true)
+      }}
+      onDiscard={() => {
+        setAsking(false)
+        close.current()
+      }}
+    />
+  )
+  return { beside: open && current === "beside", confirmDialog }
 }
 
 /**

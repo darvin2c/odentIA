@@ -24,6 +24,7 @@ import {
   encounterDiagnosis,
   encounterDictationSuggestion,
   encounterProcedure,
+  encounterSite,
   imagingStudy,
   patient,
   patientContact,
@@ -1681,6 +1682,25 @@ export async function createFormResponse(
     encounterId = input.encounterId
     attendingUserId = visible.professionalUserId
   }
+  const site = await siteOf(tx, orgId)
+  // La ficha de una especialidad empezada en la atención toma la pieza de la atención, sin pedirla
+  // en otro odontograma (P09), solo si la atención tiene una sola: con la 36 y la 46, adivinar
+  // sería un error. Lo que la persona mandó escrito gana; queda como respuesta editable.
+  const given = input.answers ?? {}
+  // Lo que no es un objeto de respuestas lo rechaza `assertAnswers` tal como llegó.
+  const startAnswers: unknown =
+    typeof given === "object" && given !== null && !Array.isArray(given) ? { ...(given as Record<string, unknown>) } : given
+  const askedSite = schema.sections.flatMap((section) => section.fields).filter((field) => field.type === "pieza")
+  const open = (answers: unknown): answers is Record<string, unknown> =>
+    typeof answers === "object" && answers !== null && !Array.isArray(answers)
+  if (encounterId && site.system && open(startAnswers) && askedSite.some((field) => startAnswers[field.id] == null)) {
+    const sites = await tx
+      .select({ siteCode: encounterSite.siteCode })
+      .from(encounterSite)
+      .where(and(eq(encounterSite.organizationId, orgId), eq(encounterSite.encounterId, encounterId)))
+    const only = sites.length === 1 ? site.value(sites[0]?.siteCode) : null
+    if (only !== null) for (const field of askedSite) if (startAnswers[field.id] == null) startAnswers[field.id] = only
+  }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
     await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
@@ -1689,7 +1709,7 @@ export async function createFormResponse(
     // Desde la atención, el responsable por defecto es quien atiende.
     professionalUserId = attendingUserId
   }
-  const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false, site: await siteOf(tx, orgId) })
+  const answers = assertAnswers(schema, startAnswers, { requireAll: false, site })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
   // Dos «Empezar» seguidos (o a la vez) de la misma persona, del mismo formulario, para el mismo
   // paciente y la misma atención, son el mismo borrador: se devuelve el que acaba de nacer, tal

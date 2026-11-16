@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { common, useDetailMode } from "@odentia/ui-patterns"
+import { common, useDetailMode, useStaysBeside } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
@@ -89,6 +89,13 @@ function useContainerWide(): {
     return () => observer.disconnect()
   }, [])
   return { ref, wide, narrow }
+}
+
+/** Lo que se pierde si la pieza abierta se cierra con un hallazgo a medias. */
+function selectedToothLost(selection: readonly number[]): string {
+  return selection.length === 1
+    ? `No se registró el hallazgo de la ${selection[0]}. Si cierras la pieza, se pierde.`
+    : "No se registró el hallazgo de las piezas elegidas. Si las cierras, se pierde."
 }
 
 /** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
@@ -156,13 +163,17 @@ function StudioBody({
   const queryClient = useQueryClient()
   const id = useId()
   const { ref: containerRef, wide, narrow } = useContainerWide()
+  const mouthRef = useRef<HTMLElement>(null)
   /** En el celular, qué arcada se ve. */
   const [arch, setArch] = useState<"upper" | "lower">("upper")
   const detailMode = useDetailMode()
   const dirty = useRef(false)
+  // Lo mismo, para pintar: con un hallazgo a medias, cerrar la pieza al perder el ancho pregunta.
+  const [panelDirty, setPanelDirty] = useState(false)
   const handleDirtyChange = useCallback(
     (value: boolean) => {
       dirty.current = value
+      setPanelDirty(value)
       onDirtyChange?.(value)
     },
     [onDirtyChange],
@@ -309,12 +320,22 @@ function StudioBody({
   const pendingReview = state.history.filter(
     (entry) => entry.needsReview && entry.status !== "voided",
   ).length
-  // En la atención, sin pieza elegida, no hay columna a la derecha: la evolución anterior es
+  // En la atención, sin pieza abierta, no hay columna a la derecha: la evolución anterior es
   // una sola fila plegada bajo el arco y, si no hay nada anterior, nada (segundo repaso del 9
-  // nov: quedaba «▶ ODONTOGRAMA / Evolución» vacío al lado, a 1464 px y a 390 px).
-  const compactRow = compact && selection.length === 0
-  const twoColumns = wide && !compactRow
-  const showInlinePanel = detailMode === "panel" && twoColumns && selection.length > 0 && drawerOpen
+  // nov: quedaba «▶ ODONTOGRAMA / Evolución» vacío al lado, a 1464 px y a 390 px). La pieza que
+  // se cerró al perder el ancho sigue marcada en el arco: un toque la vuelve a abrir.
+  const panelOpen = selection.length > 0 && drawerOpen
+  const compactRow = compact && (selection.length === 0 || (!drawerOpen && !multiple))
+  // La pieza al lado nunca salta encima como ventana porque se abrió otra cosa («Anotar su
+  // respuesta», el dictado): se cierra y queda marcada; a medias, pregunta (regla 5 de `side-dock`).
+  const { beside: showInlinePanel, confirmDialog: besideDialog } = useStaysBeside({
+    open: panelOpen,
+    fits: detailMode === "panel" && wide,
+    dirty: panelDirty,
+    lost: selectedToothLost(selection),
+    onClose: () => setDrawerOpen(false),
+  })
+  const twoColumns = !compactRow && (wide || showInlinePanel)
   const earlier = compactRow
     ? visibleHistory.filter((entry) => !encounterId || entry.encounterId !== encounterId)
     : []
@@ -452,6 +473,7 @@ function StudioBody({
         className={`grid min-w-0 gap-4 ${twoColumns ? "grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]" : "grid-cols-1"}`}
       >
         <section
+          ref={mouthRef}
           aria-label="Boca dental"
           className={`flex min-w-0 flex-col gap-4 rounded-lg border p-4 sm:p-5 ${twoColumns ? "lg:sticky lg:top-4 self-start" : ""}`}
         >
@@ -656,6 +678,7 @@ function StudioBody({
         </section>
         {compactRow ? null : (
           <section
+            data-tooth-panel=""
             aria-label="Registro clínico dental"
             className={
               showInlinePanel
@@ -671,7 +694,16 @@ function StudioBody({
                 open={drawerOpen}
                 onOpenChange={(next) => {
                   setDrawerOpen(next)
-                  if (!next) setSelection([])
+                  if (next) return
+                  // Cerrada con × o Escape, el foco vuelve a su pieza en el arco: con el teclado se
+                  // sigue de ahí, con las flechas, sin volver a empezar desde arriba.
+                  const closed = selection[0]
+                  setSelection([])
+                  const active = document.activeElement
+                  if (closed != null && (active === null || active === document.body || active.closest("[data-tooth-panel]")))
+                    requestAnimationFrame(() =>
+                      mouthRef.current?.querySelector<HTMLElement>(`[data-tooth="${closed}"]`)?.focus({ preventScroll: true }),
+                    )
                 }}
                 patientId={patientId}
                 teeth={selection}
@@ -737,6 +769,7 @@ function StudioBody({
           </Link>
         </div>
       ) : null}
+      {besideDialog}
       {official ? (
         <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
           <DialogContent

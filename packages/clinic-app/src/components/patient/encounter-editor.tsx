@@ -43,6 +43,7 @@ import {
   useAppForm,
   useDetailMode,
   useFormSubmitError,
+  useIconSidebarWhileMounted,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -526,6 +527,9 @@ export function EncounterEditor({
   const orgProfile = useOrgProfile().data
   const orgLocale = orgProfile?.locale
   const uid = useId()
+  // Mientras se atiende, el menú lateral en íconos: le deja a la atención los 256 px que la pieza
+  // necesita para ir al lado. Al salir vuelve como la persona lo tenía; Ctrl+B lo abre como siempre.
+  useIconSidebarWhileMounted()
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
@@ -2198,14 +2202,23 @@ export function EncounterEditor({
     </draftForm.AppField>
   )
 
-  /** El último diagnóstico de hoy con pieza: indicar empieza con esa pieza, su hallazgo y su diagnóstico. */
-  const lastDiagnosis = [...activeDiagnosisRows].reverse().find((dx) => dx.toothNumber != null)
+  // Indicar empieza con la pieza abierta (o marcada) en el arco, su hallazgo y su diagnóstico de
+  // hoy; sin pieza elegida, con la del último diagnóstico de hoy (P09: «Indicar» tomaba la 46 de
+  // antes con la 36 abierta). latidIA y vistIA no tienen sitio: sin valores de partida.
+  const openTooth = product.site?.teeth.length === 1 ? product.site.teeth[0] : null
+  const lastDiagnosis = [...activeDiagnosisRows]
+    .reverse()
+    .find((dx) => (openTooth != null ? dx.toothNumber === openTooth : dx.toothNumber != null))
+  const startTooth = openTooth ?? lastDiagnosis?.toothNumber ?? null
   // El hallazgo de esa pieza como uno solo (sus caras juntas): se vincula por su primera fila, como el panel de la pieza.
-  const lastFinding = lastDiagnosis
-    ? groupFindings((detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt))
-        .reverse()
-        .find((group) => group.first.toothNumber === lastDiagnosis.toothNumber)?.first
-    : undefined
+  const lastFinding =
+    openTooth != null
+      ? product.site?.findingId
+      : startTooth != null
+        ? groupFindings((detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt))
+            .reverse()
+            .find((group) => group.first.toothNumber === startTooth)?.first.id
+        : undefined
   // Su diagnóstico ya lleva su tratamiento hoy (la pulpitis, su endodoncia): lo que se indique
   // después en esa pieza (la corona) no lo hereda; lo elige quien indica (QA del 9 nov).
   const diagnosisUsed =
@@ -2214,12 +2227,12 @@ export function EncounterEditor({
       (item) => item.toothNumber === lastDiagnosis.toothNumber && item.diagnosisCode === lastDiagnosis.diagnosisCode,
     )
   const indicationDefaults =
-    lastDiagnosis?.toothNumber != null
+    startTooth != null
       ? {
           scope: "tooth",
-          teeth: [lastDiagnosis.toothNumber],
-          odontogramEntryId: lastFinding?.id ?? "",
-          diagnosisCode: diagnosisUsed ? "" : lastDiagnosis.diagnosisCode,
+          teeth: [startTooth],
+          odontogramEntryId: lastFinding ?? "",
+          diagnosisCode: lastDiagnosis && !diagnosisUsed ? lastDiagnosis.diagnosisCode : "",
         }
       : undefined
   const removableIds = new Set(

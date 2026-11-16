@@ -238,6 +238,33 @@ export const CLINICA: readonly HelpMore[] = [
 
       // ---------- Odontograma ----------
       {
+        id: "pacientes-odontograma-caries-tablet",
+        q: "¿Cómo registro una caries en la tablet?",
+        a: "Dentro de la atención, toca la pieza: arriba está «¿Qué observas?» con el buscador; escribe «caries» y elígela. Toca las caras en el dibujo de la pieza (o márcalas en «Superficies comprometidas»), elige la profundidad con un toque y, si pones el diagnóstico, su tipo, «Presuntivo» o «Definitivo». «Registrar hallazgo» la deja en el odontograma. Lo que ya tiene la pieza queda abajo, plegado en una línea («Historia de la 46 · 1 hallazgo · 1 procedimiento»): tócala para verlo. Con la pieza abierta, «Indicar un tratamiento» empieza con esa pieza y su hallazgo.",
+        forms: ["registrar una caries en el ipad", "marcar caries en la tablet", "como pongo la profundidad de la caries", "donde esta la historia de la pieza"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
+        id: "pacientes-odontograma-siglas-caries",
+        q: "¿Qué es CDP?",
+        a: "Es una de las siglas de la profundidad de la caries en el odontograma de la norma (NTS 188): MB, mancha blanca; CE, lesión de caries a nivel del esmalte; CD, a nivel de la dentina; y CDP, a nivel de la dentina con compromiso de la pulpa. Al elegir una, debajo se lee su nombre entero. Con CDP aparecen además, para elegir con un toque, los diagnósticos pulpares (pulpitis, necrosis pulpar o periodontitis apical), que se deciden por la vitalidad y los síntomas. En clínicas fuera de Perú la profundidad se elige con su nombre entero.",
+        forms: ["que significa cdp", "que es ce cd mb en el odontograma", "siglas de la caries", "que quiere decir cdp en la caries"],
+        area: "clinica",
+        needs: "clinical.read",
+        own: true,
+      },
+      {
+        id: "pacientes-odontograma-pieza-se-cierra",
+        q: "¿Por qué se cerró la pieza al abrir la respuesta?",
+        a: "La pieza abierta al lado del odontograma nunca salta encima como ventana. Si abres algo que necesita ese espacio («Anotar su respuesta», «Registrar lo de hoy» o el dictado), la pieza se cierra y queda marcada en el arco: tócala para volver a abrirla. Si tenías un hallazgo a medias, antes te pregunta: «Seguir aquí» la deja abierta y «Descartar y salir» la cierra sin registrarlo. Mientras atiendes, el menú de la izquierda queda en íconos para dejarle sitio a la pieza; Ctrl+B lo abre y, al salir de la atención, vuelve como lo tenías. Escape cierra la pieza y el foco vuelve a ella en el arco.",
+        forms: ["se me cerro la pieza", "desaparecio el panel de la pieza", "la pieza se abre encima como ventana", "por que el menu se achico en la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-odontograma-denticion-varias-piezas",
         q: "¿Cómo veo los dientes de leche o registro lo mismo en varias piezas?",
         a: "Arriba del odontograma eliges «Permanente (32)», «Mixta» o «Temporal (20)»; viene sugerida por la edad del paciente. Para registrar lo mismo en varias piezas, dentro de la atención, «Seleccionar varias» y tócalas, o usa «Arcada superior» o «Arcada inferior».",
