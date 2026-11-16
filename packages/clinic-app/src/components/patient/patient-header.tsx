@@ -40,7 +40,7 @@ import { useId, useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { changedHistoryOf, declaredMarkWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
+import { changedHistoryOf, declaredMarkWords, noAllergiesWords, pregnancyChip, unchangedWords } from "../../lib/declared-health"
 import { useCan, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { label } from "../../lib/glossary"
@@ -314,15 +314,12 @@ export function PatientClinicalStrip({
   const isShown = (alert: (typeof alerts)[number]) => shownIds.has(alert.id)
   const hidden = ordered.length - shownIds.size
   const unchanged = health?.unchanged ?? null
+  // La misma frase en la franja, la ficha, la atención y lo que ve recepción (estudio de la atención del
+  // 16 nov, E10a). Su «No sé» no es «no se le preguntó» (QA del 15 nov, K16); su «No» va en su caja.
   const allergyWord =
-    saidNoAllergies !== null
-      ? null
-      : noAllergies && detail.allergyReview === "none"
-        ? "Niega alergias"
-        : noAllergies && detail.allergyReview === "unknown"
-          ? // Su «No sé» no es «no preguntado», como el del anticoagulante (QA del 15 nov, K16).
-            `Alergias: ${detail.allergySaidUnknown ? "no sabe" : "no preguntado"}`
-          : null
+    saidNoAllergies === null && noAllergies && (detail.allergyReview === "none" || detail.allergyReview === "unknown")
+      ? noAllergiesWords({ review: detail.allergyReview, saidUnknown: detail.allergySaidUnknown }, sex)
+      : null
   // Antes de recetar importa saber si se le preguntó qué toma (segunda mesa, latidIA).
   const medicationWord =
     detail.currentMedications.length === 0 && medicationReview === "unknown" ? "Medicación: no preguntado" : null

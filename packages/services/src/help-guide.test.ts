@@ -290,3 +290,64 @@ describe("dentro de una persona", () => {
     expect(describeHelpScreen("/people").title).toBe("Pacientes")
   })
 })
+
+// Estudio de la atención del 16 nov (C9, C22 y las palabras de la novata): la Ayuda le explicaba
+// «Nuevo paciente» al odontólogo, que no lo tiene, y no contestaba qué ve recepción de la atención.
+describe("la Ayuda sabe del rol, de cada botón y de las palabras de la atención", () => {
+  const faqOf = (question: string, role: string) => {
+    const option = exactHelpOption(question, helpGuideForRole(HELP_TOPICS, role))
+    return option?.kind === "faq" ? option.faq.id : null
+  }
+
+  it("«Nuevo paciente» solo a quien lo tiene; al odontólogo, a quién pedírselo", () => {
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "reception")).toBe("registro-paciente-nuevo")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "owner")).toBe("registro-paciente-nuevo")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "clinician")).toBe("registro-paciente-nuevo-lo-pide")
+    expect(faqOf("¿Cómo registro un paciente nuevo?", "cashier")).toBe("registro-paciente-nuevo-lo-pide")
+    const asked = HELP_TOPICS.flatMap((topic) => topic.faqs ?? []).find((faq) => faq.id === "registro-paciente-nuevo-lo-pide")
+    expect(asked?.a).toContain("recepción")
+    expect(asked?.a).not.toContain("«Nuevo paciente»")
+  })
+
+  it("recepción tiene su respuesta sobre la atención, y quien lee la historia no la recibe", () => {
+    expect(faqOf("¿Puedo ver la atención de un paciente?", "reception")).toBe("recepcion-ver-atencion")
+    expect(faqOf("¿Puedo ver la atención de un paciente?", "clinician")).toBeNull()
+  })
+
+  it.each([
+    ["¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?", "pacientes-reservar-lo-aceptado"],
+    ["¿Para qué sirve «Completar» en «Realizado hoy»?", "pacientes-realizado-hoy-completar"],
+    ["Llené la ficha de endodoncia, ¿tengo que poner otra vez el diagnóstico?", "pacientes-ficha-endodoncia-propone-diagnostico"],
+  ])("«%s» tiene su respuesta propia", (question, id) => {
+    expect(faqOf(question, "owner")).toBe(id)
+  })
+
+  const WORDS = [
+    "palabras-siglas-caries",
+    "palabras-nts-188",
+    "palabras-cie-10",
+    "palabras-asa",
+    "palabras-adenda",
+    "palabras-inmutable",
+    "palabras-liberarla",
+    "palabras-lo-piensa",
+    "palabras-indicado-hoy",
+  ]
+  it("cada palabra de la atención se dice en una línea", () => {
+    const faqs = HELP_TOPICS.flatMap((topic) => topic.faqs ?? [])
+    for (const id of WORDS) {
+      const faq = faqs.find((item) => item.id === id)
+      expect(faq, id).toBeDefined()
+      expect(faq!.a.length, id).toBeLessThanOrEqual(260)
+    }
+  })
+
+  it.each([
+    ["¿Qué es CDP?", "palabras-siglas-caries"],
+    ["que es cdp", "palabras-siglas-caries"],
+    ["¿Qué es la ASA?", "palabras-asa"],
+    ["que es una adenda", "palabras-adenda"],
+  ])("«%s» la responde la palabra, no una pantalla", (question, id) => {
+    expect(matchHelpTopics(question, HELP_TOPICS)[0]?.faq?.id).toBe(id)
+  })
+})

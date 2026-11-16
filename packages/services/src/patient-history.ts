@@ -1,8 +1,10 @@
 import {
   budgetStateText,
+  DIAGNOSIS_VERIFICATION_LABELS,
   diagnosisCodeLabel,
   doneSessionWords,
   type HealthAtSigning,
+  isDiagnosisVerification,
   isRetiredPlanStatus,
   LEFT_OUT_DECISIONS,
   planItemStateText,
@@ -36,6 +38,7 @@ import { getCurrentDocumentContexts, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { diagnosisTitlesOf, namedDiagnosis } from "./diagnosis-codes.js"
 import { validation } from "./errors.js"
+import { formDiagnosesOf, formDiagnosisKey } from "./form-diagnoses.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { listFollowUps } from "./follow-ups.js"
@@ -47,6 +50,61 @@ import { productHooks } from "./products.js"
 /** El sitio suelto de una fila como lo dice el producto (odentIA: su pieza). */
 const looseValue = (site: ProductSite, row: Pick<SiteColumns, "siteSystem" | "siteCode">): number | null =>
   row.siteSystem === site.system ? site.value(row.siteCode) : null
+
+/** Un diagnóstico de una atención, como lo lee la Historia. */
+export interface HistoryDiagnosisRow {
+  system: string
+  code: string
+  /** provisional o confirmed (FHIR verificationStatus); null en lo histórico sin clasificar. */
+  type: string | null
+  status: string
+  site: SiteColumns
+  /** Lo que la ficha le suma al nombre del código («irreversible sintomática»), o null. */
+  qualifier?: string | null
+}
+
+/**
+ * Los diagnósticos de una atención en la Historia, uno por línea, con su pieza y su tipo (estudio de
+ * la atención del 16 nov, E10a): «Caries de la dentina (CIE-10 K02.1) · pieza 15 · definitivo». Dos
+ * del mismo nombre en piezas distintas no se juntan, y la pulpitis dice su pieza. Con el término de la
+ * ficha junto al código («Pulpitis (CIE-10 K04.0) · irreversible sintomática · pieza 36 · definitivo»).
+ * «· resuelto» va en su línea solo si quedó resuelto en esa pieza: la caries de la 26 sigue activa
+ * aunque la resina resolviera la de la 16 (revisión antes de entregar, 9 nov). Lo hecho con un código
+ * que la atención no registró en esa pieza va igual, sin tipo, para no perder un diagnóstico.
+ */
+export function encounterDiagnosisLines(input: {
+  diagnoses: readonly HistoryDiagnosisRow[]
+  procedures: ReadonlyArray<{ system: string | null; code: string | null; site: SiteColumns }>
+  titles: ReadonlyMap<string, string>
+  site: ProductSite
+}): string[] {
+  const { site, titles } = input
+  // La pieza como la dice el producto: «pieza 15»; un área, «cuadrante 1»; latidIA, nada.
+  const place = (row: SiteColumns) => site.words(row, "short") ?? site.words(row, "full")?.replace(/^./, (letter) => letter.toLocaleLowerCase("es")) ?? null
+  const lines = new Map<string, { name: string; where: string | null; qualifier: string | null; type: string | null; resolved: boolean }>()
+  for (const row of input.diagnoses) {
+    const name = namedDiagnosis(titles, row.system, row.code)
+    const where = place(row.site)
+    const type = row.type && isDiagnosisVerification(row.type) ? DIAGNOSIS_VERIFICATION_LABELS[row.type].toLocaleLowerCase("es") : null
+    const key = `${name}|${where ?? ""}|${type ?? ""}`
+    const known = lines.get(key)
+    // Resuelto solo si todo lo de esa línea quedó resuelto.
+    if (known) known.resolved &&= row.status === "resuelto"
+    else lines.set(key, { name, where, qualifier: row.qualifier ?? null, type, resolved: row.status === "resuelto" })
+  }
+  const registered = new Set([...lines.values()].map((line) => `${line.name}|${line.where ?? ""}`))
+  for (const row of input.procedures) {
+    if (!row.code) continue
+    const name = namedDiagnosis(titles, row.system, row.code)
+    const where = place(row.site)
+    if (registered.has(`${name}|${where ?? ""}`)) continue
+    registered.add(`${name}|${where ?? ""}`)
+    lines.set(`${name}|${where ?? ""}|`, { name, where, qualifier: null, type: null, resolved: false })
+  }
+  return [...lines.values()]
+    .sort((a, b) => a.name.localeCompare(b.name, "es") || (a.where ?? "").localeCompare(b.where ?? "", "es", { numeric: true }))
+    .map((line) => [line.name, line.qualifier, line.where, line.type, line.resolved ? "resuelto" : null].filter(Boolean).join(" · "))
+}
 import { listTreatmentJourneys } from "./treatment-journey.js"
 import { encounterSessionKey, encounterSessionsOf } from "./to-schedule.js"
 import { type EncounterVisitAnswer, patientVisitAnswers, type VisitAnswerView } from "./visit-answers.js"
@@ -683,7 +741,7 @@ export interface TimelineItemBase {
   procedures?: string[]
   documentsCount?: number
   indications?: string | null
-  /** CIE-10 distintos de procedimientos y notas de la atención. */
+  /** Los diagnósticos de la atención, uno por línea con su pieza y su tipo (`encounterDiagnosisLines`). */
   diagnoses?: string[]
   /** Tratamientos del plan vinculados a la atención (misma unidad clínica). */
   plannedItems?: PlannedLink[]
@@ -1254,6 +1312,10 @@ export async function getTimeline(
           encounterId: encounterDiagnosis.encounterId,
           diagnosisCode: encounterDiagnosis.diagnosisCode,
           diagnosisSystem: encounterDiagnosis.diagnosisSystem,
+          diagnosisType: encounterDiagnosis.diagnosisType,
+          siteSystem: encounterDiagnosis.siteSystem,
+          siteCode: encounterDiagnosis.siteCode,
+          siteQualifiers: encounterDiagnosis.siteQualifiers,
           status: encounterDiagnosis.status,
         })
         .from(encounterDiagnosis)
@@ -1266,6 +1328,33 @@ export async function getTimeline(
         ),
     ])
     const people = [...new Set(records.flatMap((row) => [row.professionalUserId, row.voidedBy].filter((id): id is string => !!id)))]
+    // El término de la ficha junto a su código (odentIA: «irreversible sintomática» de la ficha de
+    // endodoncia junto a K04.0), leído de la ficha de esa atención: el diagnóstico no lo guarda (E10b).
+    const saidInForms = hooks.forms.qualifiers
+      ? formDiagnosesOf(
+          await tx
+            .select({
+              id: clinicalFormResponse.id,
+              encounterId: clinicalFormResponse.encounterId,
+              templateSnapshot: clinicalFormResponse.templateSnapshot,
+              answers: clinicalFormResponse.answers,
+            })
+            .from(clinicalFormResponse)
+            .where(
+              and(
+                eq(clinicalFormResponse.organizationId, orgId),
+                inArray(clinicalFormResponse.encounterId, encounters),
+                notInArray(clinicalFormResponse.status, ["descartado"]),
+              ),
+            ),
+          hooks.forms,
+        )
+      : []
+    const qualifierOf = new Map(
+      saidInForms.flatMap((said) =>
+        said.encounterId && said.qualifier ? [[formDiagnosisKey(said.encounterId, said.code, said.toothNumber), said.qualifier] as const] : [],
+      ),
+    )
     const [planned, docs, productParts, born, titles, names, sessions] = await Promise.all([
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
@@ -1283,27 +1372,23 @@ export async function getTimeline(
       const rowProcedures = procedures.filter((p) => p.encounterId === row.id)
       const rowNotes = notes.filter((n) => n.encounterId === row.id)
       const related = docs.get(row.id) ?? []
-      // Con su nombre: «Pulpitis (CIE-11 DA09.0)», no solo el código (QA de la ficha del 8 nov).
-      // Resuelto, lo dice sin abrir la tarjeta, con la palabra del detalle (tercer repaso del 9 nov, E8).
-      // Solo si todas las piezas con ese diagnóstico quedaron resueltas: la caries de la 26 sigue
-      // activa aunque la resina resolviera la de la 16 (revisión antes de entregar).
-      const noteName = (n: (typeof rowNotes)[number]) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)
-      const resolved = new Set(
-        rowNotes
-          .filter((n) => n.status === "resuelto")
-          .map(noteName)
-          .filter((name) => rowNotes.every((other) => noteName(other) !== name || other.status === "resuelto")),
-      )
-      const diagnoses = [
-        ...new Set(
-          [
-            ...rowProcedures.map((p) => (p.diagnosisCode ? namedDiagnosis(titles, p.diagnosisSystem, p.diagnosisCode) : null)),
-            ...rowNotes.map((n) => namedDiagnosis(titles, n.diagnosisSystem, n.diagnosisCode)),
-          ].filter((code): code is string => !!code),
-        ),
-      ]
-        .sort()
-        .map((name) => (resolved.has(name) ? `${name} · resuelto` : name))
+      const diagnoses = encounterDiagnosisLines({
+        diagnoses: rowNotes.map((n) => ({
+          system: n.diagnosisSystem,
+          code: n.diagnosisCode,
+          type: n.diagnosisType,
+          status: n.status,
+          site: { siteSystem: n.siteSystem, siteCode: n.siteCode, siteQualifiers: n.siteQualifiers },
+          qualifier: qualifierOf.get(formDiagnosisKey(row.id, n.diagnosisCode, looseValue(site, n))) ?? null,
+        })),
+        procedures: rowProcedures.map((p) => ({
+          system: p.diagnosisSystem,
+          code: p.diagnosisCode,
+          site: { siteSystem: p.siteSystem, siteCode: p.siteCode, siteQualifiers: [] },
+        })),
+        titles,
+        site,
+      })
       hydrated.set(row.id, {
         id: row.id,
         refId: row.id,

@@ -5,12 +5,16 @@ import { apiFetch } from "../../lib/api"
 import { type DiagnosisOption, DiagnosisSearch } from "./diagnosis-search"
 
 /**
- * Lo que propone la atención: un hallazgo (odentIA: del odontograma) o un
- * tratamiento que continúa, con su pieza si el producto la registra.
+ * Lo que propone la atención: un hallazgo (odentIA: del odontograma), un
+ * tratamiento que continúa o una ficha de la atención (odentIA: la de
+ * endodoncia), con su pieza si el producto la registra.
  */
 export interface ProposedDiagnosis extends DiagnosisOption {
-  source: "hallazgo" | "tratamiento"
-  /** El hallazgo («Lesión de caries dental») o el tratamiento con su pieza («Endodoncia posterior vital · 46»). */
+  source: "hallazgo" | "tratamiento" | "ficha"
+  /**
+   * El hallazgo («Lesión de caries dental»), el tratamiento con su pieza («Endodoncia posterior vital · 46»)
+   * o la respuesta de la ficha («Pulpitis irreversible sintomática»).
+   */
   finding: string
   /** El tipo con que se registró la última vez para la persona; null si no hay o si lo propone un hallazgo. */
   diagnosisType: string | null
@@ -57,6 +61,8 @@ export function proposalOrigin(item: ProposedDiagnosis): string {
     const area = areaWords(item)
     return `Del tratamiento «${item.finding}»${area ? ` · ${area.toLowerCase()}` : ""}`
   }
+  if (item.source === "ficha")
+    return `De la ficha: «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
   return `Propuesto por el hallazgo «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
 }
 
@@ -91,6 +97,24 @@ export interface DiagnosisSuggestions {
   systemTitle: string
   proposed: ProposedDiagnosis[]
   mostUsed: DiagnosisOption[]
+  /** Lo que dicen las fichas de la atención, esté o no en Diagnóstico (`FormDiagnosisProposals`). */
+  fromForms?: FormProposedDiagnosis[]
+}
+
+/** Lo que una ficha de la atención dice que es un diagnóstico: su término, su código y si ya está registrado. */
+export interface FormProposedDiagnosis extends DiagnosisOption {
+  responseId: string
+  fieldId: string
+  /** La respuesta de la ficha: «Pulpitis irreversible sintomática». */
+  term: string
+  /** Lo que el término le suma al nombre del código («irreversible sintomática»), o null. */
+  qualifier: string | null
+  /** Ya hay un diagnóstico vigente con ese código en esa pieza en esta atención. */
+  registered: boolean
+  toothNumber?: number | null
+  surfaces?: string[]
+  quadrant?: number | null
+  arch?: string | null
 }
 
 /** El hallazgo que se está marcando en la pieza: propone su código antes de guardarlo. */

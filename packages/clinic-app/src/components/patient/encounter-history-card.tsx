@@ -265,7 +265,8 @@ export function EncounterHistoryCard({
   const procedures = (item.procedures ?? []).filter(
     (procedure, _index, all) => !(all.length === 1 && procedure.toLowerCase() === item.title.toLowerCase()),
   )
-  const teeth = item.toothNumbers ?? []
+  // Cada diagnóstico y cada cosa hecha ya dicen su pieza: sin los chips «Pieza 15 · Pieza 24», que lo
+  // repetían (estudio de la atención del 16 nov, E10a).
   const diagnoses = item.diagnoses ?? (item.diagnosisCode ? [item.diagnosisCode] : [])
   const documents = item.documents ?? []
   const born = item.born
@@ -319,15 +320,6 @@ export function EncounterHistoryCard({
           </Part>
         ) : null}
         {item.detail ? <p className="whitespace-pre-wrap text-sm">{item.detail}</p> : null}
-        {teeth.length > 0 ? (
-          <div className="flex flex-wrap gap-1" aria-label="Piezas tratadas">
-            {teeth.map((tooth) => (
-              <Badge variant="secondary" key={tooth}>
-                Pieza {tooth}
-              </Badge>
-            ))}
-          </div>
-        ) : null}
         {procedures.length > 0 ? (
           <Part label="Se hizo">
             <ul className="flex flex-col gap-1 text-sm" aria-label="Procedimientos">

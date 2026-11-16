@@ -25,7 +25,14 @@ import {
 } from "@odentia/clinical"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import { listWords } from "./materials"
-import type { ChangedHealth, DeclaredHealthGroup, HealthDeclarationView, PatientContactLink, PatientHealth } from "./patients"
+import type {
+  ChangedHealth,
+  DeclaredHealthGroup,
+  HealthDeclarationView,
+  HealthReviewState,
+  PatientContactLink,
+  PatientHealth,
+} from "./patients"
 
 export type { HealthDeclarant }
 // Quién lo dijo, en palabras: las mismas de la copia de la historia (`declared-words.ts` de `@odentia/clinical`).
@@ -72,10 +79,32 @@ export function allergiesSaidUnknown(
   })
 }
 
-/** «Su madre dijo que no sabe si tiene alergias (13 nov).»: lo que dijo, no «no se le preguntó». */
-export function allergiesUnknownWords(said: { by: HealthDeclarant; at: string | null }, sex: Sex): string {
-  const day = said.at ? shortDay(said.at) : ""
-  return `${saidNoWords(said.by, sex, "no sabe")} si tiene alergias${day ? ` (${day})` : ""}.`
+/**
+ * Sin alergias vigentes, lo que se sabe de ellas: una sola frase por estado, la misma en la franja,
+ * la ficha, la atención, Antecedentes y lo que ve recepción (estudio de la atención del 16 nov, E10a:
+ * recepción leía «Niega alergias» arriba y «Sin alergias registradas» en la tarjeta, y sin preguntar
+ * la misma página decía «no preguntado», «Sin revisar con el paciente» y «Aún no se le preguntó»).
+ * Son estados distintos y no se juntan (ADR 0035): se le preguntó y no tiene, «Niega alergias»;
+ * nadie le preguntó, «Alergias: no se le preguntó»; su «No sé», que no es «no se le preguntó»; y el
+ * «No» que marcó ella (o quien habla por ella) y nadie revisó, que no es «niega». Con el día en que
+ * lo dijo, si se sabe.
+ */
+export function noAllergiesWords(
+  known: {
+    review: HealthReviewState | null | undefined
+    saidNo?: { by: HealthDeclarant; at?: string | null } | null
+    saidUnknown?: { by: HealthDeclarant; at?: string | null } | null
+  },
+  sex: Sex,
+): string {
+  const said = (by: HealthDeclarant, at: string | null | undefined, answer: "no" | "no sabe") =>
+    `${saidNoWords(by, sex, answer).replace(/^./, (letter) => letter.toLocaleLowerCase("es"))}${at ? ` (${shortDay(at)})` : ""}`
+  if (known.saidNo) return `Alergias: ${said(known.saidNo.by, known.saidNo.at, "no")} · sin revisar`
+  if (known.review === "none") return "Niega alergias"
+  if (known.saidUnknown) return `Alergias: ${said(known.saidUnknown.by, known.saidUnknown.at, "no sabe")}`
+  // Se registraron y ninguna sigue vigente (todas descartadas o inactivas).
+  if (known.review === "recorded") return "Sin alergias vigentes"
+  return "Alergias: no se le preguntó"
 }
 
 /**

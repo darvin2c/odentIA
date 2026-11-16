@@ -14,10 +14,10 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import { allergyTitle } from "../../lib/allergies"
 import {
   allergiesSaidUnknown,
-  allergiesUnknownWords,
   askWhom,
   changedHistoryOf,
   declaredGroupOf,
+  noAllergiesWords,
   pregnancyGroupOf,
   pregnancyWords,
   saidByWords,
@@ -210,14 +210,14 @@ export function EncounterContextBody({
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Alergias</h3>
         {allergies.length === 0 ? (
-          // «No tiene» solo si se le preguntó; si nunca se preguntó, se dice así (ADR 0035).
+          // «Niega» solo si se le preguntó; si nunca se preguntó, se dice así (ADR 0035), con la misma frase
+          // que la franja y la ficha (estudio de la atención del 16 nov, E10a).
           <p className="text-muted-foreground">
-            {saidNo("allergies") ??
-              (data.reviewStatus.allergies === "none"
-                ? "No tiene alergias."
-                : saidUnknownAllergies
-                  ? allergiesUnknownWords(saidUnknownAllergies, sex)
-                  : "Aún no se le preguntó por alergias.")}
+            {noAllergiesWords(
+              { review: data.reviewStatus.allergies, saidNo: saidNoGroupOf(groups, "allergies"), saidUnknown: saidUnknownAllergies },
+              sex,
+            )}
+            .
           </p>
         ) : (
           <ul className="flex flex-col gap-1">

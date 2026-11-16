@@ -7,6 +7,7 @@ import {
   declaredInterviewRows,
   declaredGroupOf,
   declaredMarkWords,
+  noAllergiesWords,
   pregnancyChip,
   pregnancyGroupOf,
   pregnancyWords,
@@ -263,5 +264,28 @@ describe("«Ver declaración original»: la anestesia y el sangrado", () => {
     expect(declaredInterviewRows({ dental: { problemaAnestesia: "no_sabe" } })).toEqual([
       { label: "Problema con la anestesia o sangrado tras una extracción", value: "No sabe" },
     ])
+  })
+})
+
+// Estudio de la atención del 16 nov (B1b, E10a): recepción leía «Niega alergias» arriba y «Sin alergias
+// registradas» en la tarjeta; sin preguntar, la misma página lo decía con tres frases.
+describe("sin alergias vigentes, una sola frase por estado", () => {
+  it("se le preguntó y no tiene: «Niega alergias»", () => {
+    expect(noAllergiesWords({ review: "none" }, "F")).toBe("Niega alergias")
+  })
+  it("nadie le preguntó", () => {
+    expect(noAllergiesWords({ review: "unknown" }, "F")).toBe("Alergias: no se le preguntó")
+    expect(noAllergiesWords({ review: null }, "F")).toBe("Alergias: no se le preguntó")
+  })
+  it("su «No sé» no es «no se le preguntó», y dice quién y cuándo", () => {
+    expect(noAllergiesWords({ review: "unknown", saidUnknown: { by: mother, at: "2026-11-13T15:00:00.000Z" } }, "M")).toBe(
+      "Alergias: su madre dijo que no sabe (13 nov)",
+    )
+  })
+  it("su «No» sin revisar no es «niega», aunque la clínica lo hubiera negado antes", () => {
+    expect(noAllergiesWords({ review: "none", saidNo: { by: herself, at: null } }, "F")).toBe("Alergias: dijo que no · sin revisar")
+  })
+  it("registradas y ninguna vigente", () => {
+    expect(noAllergiesWords({ review: "recorded" }, "F")).toBe("Sin alergias vigentes")
   })
 })

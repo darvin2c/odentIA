@@ -3,7 +3,7 @@ import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
-import { saidByWords, saidNoWords } from "../../lib/declared-health"
+import { noAllergiesWords, saidByWords } from "../../lib/declared-health"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type TaskItem, useCan, usePermission } from "../../lib/crm"
@@ -212,10 +212,12 @@ export function PersonSummary({
           {patientId && canAlerts && detail && !clinical ? (
             <Fact label="Alergias">
               {allergies.length === 0
-                ? // El «No» que marcó la persona (o quien habla por ella) no es un «niega» de la clínica.
-                  detail.allergySaidNo
-                  ? `${saidNoWords(detail.allergySaidNo.by, person.sex)} · sin revisar`
-                  : "Sin alergias registradas"
+                ? // La misma frase que la franja de arriba: «Niega alergias», no «Sin alergias registradas»
+                  // (estudio de la atención del 16 nov, E10a). El «No» que marcó la persona no es un «niega».
+                  noAllergiesWords(
+                    { review: detail.allergyReview, saidNo: detail.allergySaidNo, saidUnknown: detail.allergySaidUnknown },
+                    person.sex,
+                  )
                 : allergies
                     .map((allergy) => {
                       // La que dijo y nadie revisó lleva su marca, como en la franja (QA del 14 nov).

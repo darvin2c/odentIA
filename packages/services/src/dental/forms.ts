@@ -24,27 +24,38 @@ const PULP_TEST = ["Sin respuesta", "Normal", "Aumentada, cede al retirar el est
  * contrario de la fístula, `reviewDiagnosis` propone el otro. Lo normal, lo ya tratado y la osteítis
  * condensante (fuera de K04) no tienen código: no van a Diagnóstico.
  */
-const PULPAL: ReadonlyArray<readonly [string, string | null]> = [
-  ["Pulpa normal", null],
-  ["Pulpitis reversible", "K04.0"],
-  ["Pulpitis irreversible sintomática", "K04.0"],
-  ["Pulpitis irreversible asintomática", "K04.0"],
-  ["Necrosis pulpar", "K04.1"],
-  ["Previamente tratado", null],
-  ["Tratamiento previamente iniciado", null],
+const PULPAL: ReadonlyArray<readonly [string, string | null, string | null]> = [
+  ["Pulpa normal", null, null],
+  ["Pulpitis reversible", "K04.0", "reversible"],
+  ["Pulpitis irreversible sintomática", "K04.0", "irreversible sintomática"],
+  ["Pulpitis irreversible asintomática", "K04.0", "irreversible asintomática"],
+  ["Necrosis pulpar", "K04.1", null],
+  ["Previamente tratado", null, null],
+  ["Tratamiento previamente iniciado", null, null],
 ]
-const APICAL: ReadonlyArray<readonly [string, string | null]> = [
-  ["Tejidos apicales normales", null],
-  ["Periodontitis apical sintomática", "K04.4"],
-  ["Periodontitis apical asintomática", "K04.5"],
-  ["Absceso apical agudo", "K04.7"],
-  ["Absceso apical crónico", "K04.6"],
-  ["Osteítis condensante", null],
+const APICAL: ReadonlyArray<readonly [string, string | null, string | null]> = [
+  ["Tejidos apicales normales", null, null],
+  ["Periodontitis apical sintomática", "K04.4", "sintomática"],
+  ["Periodontitis apical asintomática", "K04.5", "asintomática"],
+  ["Absceso apical agudo", "K04.7", "agudo"],
+  ["Absceso apical crónico", "K04.6", "crónico"],
+  ["Osteítis condensante", null, null],
 ]
 const PULPAL_DIAGNOSES = PULPAL.map(([option]) => option)
 const APICAL_DIAGNOSES = APICAL.map(([option]) => option)
 /** Las opciones que son un diagnóstico, con su código (`ProductForms.diagnoses`). */
 const AAE_ICD10: Readonly<Record<string, string>> = Object.fromEntries([...PULPAL, ...APICAL].flatMap(([option, code]) => (code ? [[option, code]] : [])))
+/**
+ * Lo que el término de la AAE le suma al nombre de su código (`ProductForms.qualifiers`). La CIE-10
+ * de la OMS no separa la pulpitis reversible de la irreversible (las dos son K04.0), y eso está bien:
+ * el término ya tiene dueño, la respuesta de la ficha, y la Historia lo lee de ahí, sin otra columna
+ * en el diagnóstico (estudio de la atención del 16 nov, E10b). La necrosis no le suma nada a K04.1.
+ * Fuente: AAE, Glossary of Endodontic Terms, y Consensus Conference on Diagnostic Terminology (J Endod
+ * 2009;35:1634). Falta verificar si la lista del MINSA usa la ICD-DA.
+ */
+const AAE_QUALIFIERS: Readonly<Record<string, string>> = Object.fromEntries(
+  [...PULPAL, ...APICAL].flatMap(([option, code, qualifier]) => (code && qualifier ? [[option, qualifier]] : [])),
+)
 
 const ENDODONTICS: SuggestedFormTemplate = {
   key: "evaluacion-de-endodoncia",
@@ -304,4 +315,5 @@ export const DENTAL_FORMS: ProductForms = {
   // A un niño se le ofrecen las de odontopediatría aunque su cita no diga de qué es.
   byAge: { underYears: 12, kind: "odontopediatria" },
   diagnoses: AAE_ICD10,
+  qualifiers: AAE_QUALIFIERS,
 }
