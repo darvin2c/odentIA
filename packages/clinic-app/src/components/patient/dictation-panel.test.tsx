@@ -130,6 +130,9 @@ describe("lo que una pausa siguiente respondió deja de avisarse", () => {
     expect(after.phrases).toEqual(["sondaje no lo pude medir bien"])
     expect(after.why).toEqual({})
     expect(Object.keys(after.targets)).toEqual(["sondaje no lo pude medir bien"])
+    // Con mayúsculas o puntuación es la misma frase; una palabra que solo empieza igual, no.
+    expect(withoutAnsweredUnused(before, [proposal({ sourceText: "Calor, sin respuesta." })]).phrases).toEqual(["sondaje no lo pude medir bien"])
+    expect(withoutAnsweredUnused(before, [proposal({ sourceText: "calorías sin respuesta" })])).toBe(before)
   })
 
   it("con otras palabras, en otra pregunta o descartada, el aviso queda", () => {

@@ -165,23 +165,27 @@ const NOTHING_UNUSED: UnusedDictation = { phrases: [], unnamed: false, why: {}, 
  * proponía «calor sin respuesta»). Lo que se propuso con otras palabras sigue avisado.
  */
 export function withoutAnsweredUnused(unused: UnusedDictation, suggestions: readonly DictationSuggestion[]): UnusedDictation {
+  // Sin mayúsculas, tildes ni puntuación: «Calor, sin respuesta.» contiene «calor».
+  const loose = (text: string) =>
+    text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
   const answered = suggestions.filter((item) => item.kind === "ficha" && (item.status === "lista" || item.status === "por_revisar"))
   const resolved = (phrase: string) => {
     const targets = unused.targets[phrase] ?? []
-    const said = phrase.trim().toLowerCase()
-    return (
-      targets.length > 0 &&
-      answered.some(
-        (item) =>
-          targets.some((target) => target.responseId === item.payload["responseId"] && target.fieldId === item.payload["fieldId"]) &&
-          item.sourceText.toLowerCase().includes(said),
-      )
+    return answered.some(
+      (item) =>
+        targets.some((target) => target.responseId === item.payload["responseId"] && target.fieldId === item.payload["fieldId"]) &&
+        ` ${loose(item.sourceText)} `.includes(` ${loose(phrase)} `),
     )
   }
-  const gone = unused.phrases.filter(resolved)
-  if (!gone.length) return unused
-  const keep = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([phrase]) => !gone.includes(phrase)))
-  return { ...unused, phrases: unused.phrases.filter((phrase) => !gone.includes(phrase)), why: keep(unused.why), targets: keep(unused.targets) }
+  const gone = new Set(unused.phrases.filter(resolved))
+  if (!gone.size) return unused
+  const keep = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([phrase]) => !gone.has(phrase)))
+  return { ...unused, phrases: unused.phrases.filter((phrase) => !gone.has(phrase)), why: keep(unused.why), targets: keep(unused.targets) }
 }
 
 export type DictationMode = "off" | "listening" | "paused"

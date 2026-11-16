@@ -350,16 +350,12 @@ function newText(context: string, transcript: string): string {
  * Con una ficha empezada, cómo se responden las fichas (`DICTATION_FORMS_RULES`,
  * igual en toda atención) va al final de las instrucciones, en el mismo mensaje
  * de sistema y antes de su corte: la pausa siguiente, y cualquier atención con
- * ficha, lo leen de la caché. Antes iba dentro de la pausa, después de la fecha,
- * y se pagaba entero en cada pausa (medido el 16 nov: 87 % de la entrada leída
- * de la caché con ficha, 98 % sin ella). Las preguntas siguen donde siempre,
- * junto a lo nuevo. Medido el 16 nov: con las preguntas también antes de la
- * pausa, Clío proponía a veces pulpitis (K04.0) por la necrosis dictada; con
- * todo al principio del mensaje de la pausa, dejaba fuera de la consulta lo que
- * se hizo. Como un mensaje del usuario aparte, antes del de la pausa, las leía
- * peor con el tarifario entero de una clínica (prueba con voz c6): a veces no
- * respondía ninguna pregunta, respondía un conteo con palabras o callaba lo que
- * era de dos hermanas.
+ * ficha, lo leen de la caché. Dentro de la pausa, después de la fecha, se pagaba
+ * entero en cada pausa. Las preguntas siguen donde siempre, junto a lo nuevo.
+ * Descartado (ADR 0012): las preguntas también antes de la pausa (pulpitis por
+ * la necrosis dictada), todo al principio de la pausa (la consulta perdía lo que
+ * se hizo) y las reglas como un mensaje del usuario aparte (con el tarifario de
+ * una clínica, Clío a veces no respondía ninguna pregunta).
  */
 export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({

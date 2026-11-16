@@ -32,7 +32,7 @@ it("el dictado de odentIA no razona: va por Chat Completions con su parte fija m
     // Con una ficha empezada, cómo se responden va al final de las instrucciones, antes de su corte, y la pausa después, sin él.
     const forms = formQuestionsOf([{ id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} }])
     await askDictationModel(model, spec, { ...pause, forms, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:01:00Z") }, profile)
-    expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("text", expect.stringMatching(/\n\nFichas abiertas en esta atención\./)))
+    expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("text"))
     expect((systemBlock(provider.requests[1]) as { text: string }).text.endsWith(DICTATION_FORMS_RULES)).toBe(true)
     expect(JSON.stringify(messageContent(provider.requests[1], 1))).toContain("Lo nuevo que dictó")
     expect(JSON.stringify(messageContent(provider.requests[1], 1))).not.toContain("prompt_cache_breakpoint")

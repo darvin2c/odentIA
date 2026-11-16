@@ -65,6 +65,8 @@ describe("la red avisa lo dicho entre dos hermanas sin decir cuál (v11)", () =>
     const drafts = [answer(estomato, "cpod_p", "2", "perdidos 2"), answer(estomato, "ihos", "1.8", "obturados 4 simplificado 1,8")]
     const notice = noticesOf(drafts, estomato, V11).find((item) => item.questions.includes(cpodO))
     expect(notice?.questions).toEqual(expect.arrayContaining([cpodO, ceodO]))
+    // El mismo aviso que si Clío lo hubiera propuesto sin decir cuál.
+    expect(notice?.why).toBe("No quedó claro si era «CPOD · O, obturados» o «ceod · o, obturados»: nómbrala o escríbela en la ficha.")
     expect(formNetMisses(drafts, estomato, FDI, V11).some((miss) => miss.questions.includes(cpodO) && miss.questions.includes(ceodO))).toBe(true)
   })
 

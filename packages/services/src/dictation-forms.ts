@@ -647,18 +647,10 @@ function dropReasonOf(
   // en silencio: se dice entre cuáles (revisión final del 15 nov, U5).
   const heard = heardBy(question, said)
   const spoken = new Set(stemsOf(heard))
-  const own = labelStems(question.label)
-  const twins = questions.filter((other) => {
-    if (other === question || other.responseId !== question.responseId || other.type !== question.type) return false
-    const theirs = labelStems(other.label)
-    const shared = own.filter((stem) => theirs.includes(stem))
-    const diff = own.filter((stem) => !theirs.includes(stem))
-    // Hermanas que se distinguen en una sola palabra (CPOD o ceod), con todo lo demás dicho.
-    return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && diff.length === 1 && !diff.some((stem) => spoken.has(stem))
-  })
+  const twins = twinsNotTold(question, questions, spoken)
   if (twins.length > 0) {
     const named = [question, ...twins]
-    return about(`No quedó claro si era ${listOf(named.map((item) => `«${item.label}»`), "o")}: nómbrala o escríbela en la ficha.`, named.map((item) => item.number))
+    return about(notClearWhich(named.map((item) => item.label)), named.map((item) => item.number))
   }
   // El número de Clío que es lo dicho con menos decimales no se pierde en silencio, aunque la frase no
   // nombre la pregunta (prueba con voz del 15 nov, c5, v12: Chrome oyó «ese Este 0,99» y Clío propuso 0,9).
@@ -789,37 +781,53 @@ function saysValue(question: DictationFormQuestion, sentence: string): boolean {
   )
 }
 
+/** Cómo se dice la unidad que, en su ficha, solo tiene esta pregunta («18 kg» es el peso); si otra también va en ella, ninguna. */
+function ownUnit(question: DictationFormQuestion, questions: readonly DictationFormQuestion[]): RegExp | undefined {
+  const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
+  return unit && !questions.some((other) => other !== question && other.responseId === question.responseId && other.unit === question.unit) ? unit : undefined
+}
+
 /**
- * ¿La oración dice un número con la unidad que, en su ficha, solo tiene esta pregunta? «18 kg» es
- * el peso aunque no se oiga «peso» (prueba con voz del 16 nov, c6, v08: Chrome oyó «beso 18 kg»).
- * Es lo mismo que deja listo ese número (`numberNamed`); la unidad sola, sin número, no nombra nada.
+ * ¿La oración dice un número con la unidad que solo tiene esta pregunta (`ownUnit`)? «18 kg» es el
+ * peso aunque no se oiga «peso» (prueba con voz del 16 nov, c6, v08: Chrome oyó «beso 18 kg»). La red
+ * mira la oración entera, así que el número va justo antes; la unidad sola no nombra nada.
  */
 function unitNamed(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], sentence: string): boolean {
-  const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
-  if (!unit || questions.some((other) => other !== question && other.responseId === question.responseId && other.unit === question.unit)) return false
+  const unit = ownUnit(question, questions)
+  if (!unit) return false
   const words = plain(sentence).split(/[^a-z0-9,.]+/)
   return words.some((word, index) => index > 0 && unit.test(word) && saidNumbers(words[index - 1] ?? "").length > 0)
 }
 
 /**
- * Las hermanas que la oración nombra por igual, sin decir cuál (prueba con voz del 16 nov, c6, v11:
- * «2 obturados», ¿del CPOD o del ceod?): del mismo tipo y ficha, se distinguen en una sola palabra y la
- * oración dice todo lo demás de su rótulo, pero no lo que distingue a ninguna. Como el motivo de lo
- * parado (`dropReasonOf`), para que la red lo avise aunque Clío no lo proponga. Vacío si la oración
- * dice cuál es o si no hay hermanas así.
+ * Las hermanas de las que lo dicho no distingue esta pregunta («cariados tres»: ¿del CPOD o del
+ * ceod?): del mismo tipo y ficha, se dijo todo lo que comparten de su rótulo y no la única palabra
+ * que la distingue de ellas. Las usan el motivo de lo parado y la red.
  */
-function twinsNamedAlike(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], heard: string): DictationFormQuestion[] {
-  const spoken = new Set(stemsOf(heard))
+function twinsNotTold(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], spoken: ReadonlySet<string>): DictationFormQuestion[] {
   const own = labelStems(question.label)
   return questions.filter((other) => {
     if (other === question || other.responseId !== question.responseId || other.type !== question.type) return false
     const theirs = labelStems(other.label)
     const shared = own.filter((stem) => theirs.includes(stem))
-    const mine = own.filter((stem) => !theirs.includes(stem))
-    const its = theirs.filter((stem) => !own.includes(stem))
-    return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && mine.length === 1 && its.length === 1 && !spoken.has(mine[0] ?? "") && !spoken.has(its[0] ?? "")
+    const diff = own.filter((stem) => !theirs.includes(stem))
+    return shared.length > 0 && shared.every((stem) => spoken.has(stem)) && diff.length === 1 && !diff.some((stem) => spoken.has(stem))
   })
 }
+
+/**
+ * ¿La oración dice algo de esta pregunta y de su hermana sin decir de cuál? Lo que las distingue no se
+ * dijo de ninguna de las dos (prueba con voz del 16 nov, c6, v11: «2 obturados») y Clío no respondió
+ * ninguna: la red lo avisa en las dos aunque Clío no lo proponga.
+ */
+function saidBetweenTwins(question: DictationFormQuestion, questions: readonly DictationFormQuestion[], said: string, handled: ReadonlySet<number>): boolean {
+  const spokenFor = (item: DictationFormQuestion) => new Set(stemsOf(heardBy(item, said)))
+  const alike = twinsNotTold(question, questions, spokenFor(question)).filter((twin) => twinsNotTold(twin, questions, spokenFor(twin)).includes(question))
+  return alike.length > 0 && alike.every((twin) => !handled.has(twin.number))
+}
+
+/** «No quedó claro si era «A» o «B»: …»: lo dicho de dos hermanas sin decir cuál. */
+const notClearWhich = (labels: readonly string[]) => `No quedó claro si era ${listOf(labels.map((label) => `«${label}»`), "o")}: nómbrala o escríbela en la ficha.`
 
 /** «Parece de «Percusión»: revísala en la ficha.»; con varias, «… «Pieza» y «Percusión»: revísalas…». */
 function looksLike(labels: string[]): string {
@@ -849,12 +857,15 @@ export function formSentencesWithoutAnswer(
   return sentencesOf(transcript).flatMap((sentence) => {
     const said = sentence.trim()
     if (!said) return []
+    // Las que la oración nombra solo como una de dos hermanas, sin decir cuál.
+    const between = new Set<DictationFormQuestion>()
     const named = open.filter((question) => {
       const heard = heardBy(question, said)
-      // Lo dicho entre dos hermanas sin decir cuál se avisa en las dos, si Clío no respondió ninguna.
-      const alike = twinsNamedAlike(question, questions, heard)
-      const between = alike.length > 0 && alike.every((twin) => !handled.has(twin.number))
-      if (!(namesQuestion(question, heard, site) || unitNamed(question, questions, heard) || between) || !saysValue(question, heard)) return false
+      if (!saysValue(question, heard)) return false
+      if (!namesQuestion(question, heard, site) && !unitNamed(question, questions, heard)) {
+        if (!saidBetweenTwins(question, questions, said, handled)) return false
+        between.add(question)
+      }
       if (saysWritten(question, said, questions, site, said, pending.has(question.number) ? pending.get(question.number) : question.answered)) return false
       // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar cerca de
       // lo que distingue a esta: en «línea media superior centrada la inferior desviada dos
@@ -866,7 +877,9 @@ export function formSentencesWithoutAnswer(
     })
     if (!named.length) return []
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
-    return [{ said, why: looksLike([...new Set(named.map((question) => question.label))]), questions: named.map((question) => question.number) }]
+    const labels = [...new Set(named.map((question) => question.label))]
+    // Entre hermanas, el mismo aviso que el motivo de lo parado.
+    return [{ said, why: named.every((question) => between.has(question)) ? notClearWhich(labels) : looksLike(labels), questions: named.map((question) => question.number) }]
   })
 }
 
@@ -1584,8 +1597,7 @@ function numberNamed(question: DictationFormQuestion, questions: readonly Dictat
   const saysOwn = (text: string) => own.some((stem) => stemsOf(text).includes(stem) || LABEL_SAID[stem]?.test(plain(text)))
   if (saysOwn(said)) return true
   // Su unidad, si ninguna otra de la ficha va en ella.
-  const unit = question.unit ? UNIT_SAID[plain(question.unit)] : undefined
-  if (unit?.test(plain(said)) && !questions.some((other) => other !== question && other.responseId === question.responseId && other.unit === question.unit)) return true
+  if (ownUnit(question, questions)?.test(plain(said))) return true
   // En una escala, «ocho de diez» (su máximo), con lo suyo en la oración.
   const outOfMax = [...plain(said).matchAll(/\b(?:de|sobre) ([a-z0-9]+)/g)].some((match) => saidNumbers(match[1] ?? "")[0] === question.max)
   if (question.type === "escala" && outOfMax && saysOwn(sentence || said)) return true
