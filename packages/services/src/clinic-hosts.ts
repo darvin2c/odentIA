@@ -14,7 +14,7 @@ import { type PublicLinkConfig, productDomainOf } from "./public-links.js"
  * gratuito: el 15 nov un robot agotó las 100 000 del día y se cayeron todas las pantallas.
  * Una regla de WAF de cada zona bloquea, antes del Worker, todo host del dominio que no
  * sea del sistema ni de una clínica o demo que exista. La lista la mantiene el sistema:
- * al crear, renombrar o borrar una clínica o una demo, y el worker una vez al día.
+ * al crear, renombrar o borrar una clínica o una demo, y el worker cada hora.
  */
 
 /**

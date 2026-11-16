@@ -37,12 +37,12 @@ import {
   metaSignupConfigured,
   type Storage,
   secretsKeyFromEnv,
-  syncClinicHosts,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runAutomationTick } from "./automation.js"
 import { runBackupWatchTick } from "./backup-watch.js"
+import { clinicHostsQueue } from "./clinic-hosts.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runDemosTick } from "./demos.js"
 import { env } from "./env.js"
@@ -426,23 +426,8 @@ queues.push(
   },
 )
 
-// La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y una vez al día: lo que
-// no se sincronizó al crear o borrar una clínica. Sin esperarla, como los videos: Cloudflare lento no detiene
-// la ingesta. Si una zona falló, se reintenta en una hora.
-if (clinicHosts) {
-  let nextClinicHostsPoll = 0
-  queues.push({
-    name: "clinic_hosts",
-    poll: async () => {
-      if (Date.now() < nextClinicHostsPoll) return false
-      nextClinicHostsPoll = Date.now() + 24 * 3_600_000
-      void syncClinicHosts(ownerDb, clinicHosts).then((results) => {
-        if (!results || results.some((zone) => zone.outcome === "error")) nextClinicHostsPoll = Date.now() + 3_600_000
-      })
-      return false
-    },
-  })
-}
+// La regla de hosts permitidos de cada zona de Cloudflare (ADR 0193), al arrancar y cada hora.
+if (clinicHosts) queues.push(clinicHostsQueue(ownerDb, clinicHosts))
 
 // La clave de «Conectar con Facebook» vence a los 60 días: se renueva sola (#121).
 const metaApp =
