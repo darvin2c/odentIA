@@ -8,6 +8,7 @@ import {
   formatVitals,
   gapWords,
   isChildAge,
+  localAnestheticOf,
   moneyTotalsText,
   parseVitals,
   VITAL_SIGNS,
@@ -741,7 +742,25 @@ export function EncounterEditor({
   const anesthesiaUses = [
     ...new Set([...(closingQuery.data?.data.health?.uses ?? []), ...(closingQuery.data?.data.health?.anesthetics ?? [])]),
   ]
-  const [anesthetic, setAnesthetic] = useState<LocalAnestheticKey>(DEFAULT_LOCAL_ANESTHETIC)
+  // Se recuerda en este navegador por atención: recargar no devuelve la lidocaína a quien había elegido otro
+  // (revisión del 16 nov, R12). Sin almacenamiento, vale lo de siempre.
+  const anestheticStoreKey = `odentia:anesthetic:${encounterId}`
+  const [anesthetic, setAnestheticState] = useState<LocalAnestheticKey>(() => {
+    try {
+      const saved = window.localStorage.getItem(anestheticStoreKey)
+      return (localAnestheticOf(saved)?.key as LocalAnestheticKey | undefined) ?? DEFAULT_LOCAL_ANESTHETIC
+    } catch {
+      return DEFAULT_LOCAL_ANESTHETIC
+    }
+  })
+  const setAnesthetic = (next: LocalAnestheticKey) => {
+    setAnestheticState(next)
+    try {
+      window.localStorage.setItem(anestheticStoreKey, next)
+    } catch {
+      // Sin almacenamiento: solo dura esta pantalla.
+    }
+  }
   const patientAge = ageInYears(patient.patient.birthDate, clinicToday())
   const openWide = useOpenWide()
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
