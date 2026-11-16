@@ -11,6 +11,7 @@ import {
   saasClient,
   saasClientContact,
   saasInboundEmail,
+  saasOutreach,
 } from "@odentia/db/schema/admin-arm"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { user } from "@odentia/db/schema/auth"
@@ -142,12 +143,17 @@ const TOOL_WORDS: Record<SaasClientTool, string> = {
 const ACTIVITY_WORDS: Record<string, string> = {
   llamada: "Llamada",
   whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
   correo: "Correo",
   reunion: "Reunión",
   presentacion: "Presentación",
   propuesta: "Propuesta",
   nota: "Nota",
 }
+
+/** Los mensajes: lo que salió por Sallca es lo que le contamos, no un hecho de la clínica. */
+const MESSAGE_KINDS = new Set(["correo", "whatsapp", "instagram", "messenger"])
 
 /* ---------- Lo que puede ver el modelo ---------- */
 
@@ -301,6 +307,7 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
       outcome: saasFollowUp.outcome,
       body: saasFollowUp.body,
       happenedAt: saasFollowUp.happenedAt,
+      chatId: saasFollowUp.chatId,
     })
     .from(saasFollowUp)
     .where(
@@ -312,6 +319,22 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
     )
     .orderBy(desc(saasFollowUp.happenedAt))
     .limit(RECENT_ACTIVITIES)
+  // Lo que salió por Sallca (`outreachWentOut` anota la actividad con la hora en que salió el envío;
+  // la respuesta de una conversación, con su `chat_id`): de ahí el asunto, nunca el texto. Lo
+  // mismo que lee «Lo que hay que saber» (ADR 0196): un aviso nuestro no es un hecho de la clínica.
+  const sentAt = recent
+    .filter((entry) => entry.direction === "salio" && MESSAGE_KINDS.has(entry.kind))
+    .map((entry) => entry.happenedAt)
+  const sent = sentAt.length
+    ? await tx
+        .select({ channel: saasOutreach.channel, sentAt: saasOutreach.sentAt, subject: saasOutreach.subject })
+        .from(saasOutreach)
+        .where(and(eq(saasOutreach.clientId, clientId), inArray(saasOutreach.sentAt, sentAt)))
+    : []
+  const sentOf = (entry: (typeof recent)[number]) =>
+    sent.find(
+      (row) => row.channel === entry.kind && row.sentAt?.getTime() === entry.happenedAt.getTime(),
+    )
   const told = (text: string) => kairosAllowedFact(text, { adminOnly })
   const facts: string[] = []
   for (const entry of recent) {
@@ -321,6 +344,14 @@ async function recentClientFacts(tx: Db, clientId: string, adminOnly: boolean): 
     const day = dayWords(entry.happenedAt, ZONE)
     if (entry.kind === "correo" && entry.direction === "entro") {
       facts.push(`${label} de la clínica el ${day}`)
+      continue
+    }
+    const ours = entry.direction === "salio" && MESSAGE_KINDS.has(entry.kind) && (entry.chatId || sentOf(entry))
+    if (ours) {
+      const raw = sentOf(entry)?.subject?.trim()
+      const subject = raw ? told(raw) : null
+      const channel = entry.kind === "correo" ? "correo" : label
+      facts.push(`Le escribimos por ${channel} el ${day}${subject ? `: «${subject}»` : ""}`)
       continue
     }
     const body = told(entry.body)
