@@ -108,6 +108,10 @@ describe("la pregunta de número nombrada sin un número no se pierde en silenci
     const endo = formOf("evaluacion-de-endodoncia")
     const said = "sondaje no lo pude medir bien después lo vemos radiográficamente radio lucidez periapical necrosis pulpar con absceso apical crónico"
     expect(noticesOf([], endo, said)).toContainEqual(expect.objectContaining({ said: "sondaje no lo pude medir bien", questions: [numberOf(endo, "sondaje")] }))
+    // Lo de antes que es de otra pregunta no va en la frase (el tramo como lo cortó la pausa en c6).
+    const c6 = `sin respuesta también percusión negativa palpación positiva ${said}`
+    const tests = [answer(endo, "percusion", "Negativa", "percusión negativa"), answer(endo, "palpacion", "Positiva", "palpación positiva")]
+    expect(noticesOf(tests, endo, c6)).toContainEqual(expect.objectContaining({ said: "sondaje no lo pude medir bien", questions: [numberOf(endo, "sondaje")] }))
     // Lo que no es de número no avisa por nombrarse solo: «percusión igual que la vez pasada».
     expect(noticesOf([], endo, "percusión igual que la vez pasada")).toEqual([])
   })

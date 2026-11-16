@@ -974,9 +974,15 @@ function unvaluedPhrase(
     if (saysValue(question, span)) continue
     const part = span.split(" ")
     const at = plainWords.findIndex((_, index) => part.every((word, offset) => plainWords[index + offset] === word))
-    const phrase = at >= 0 ? words.slice(at, at + Math.min(part.length, 6)).join(" ") : ""
-    // Con su palabra tal cual se dictó: si solo se oyó parecida, no hay de dónde citarla.
-    if (phrase && ownWordSaid(question, meaningful(phrase))) return phrase
+    if (at < 0) continue
+    // Desde su palabra, tal cual se dictó (si solo se oyó parecida, no hay de dónde citarla), con la de
+    // antes si no es de otra pregunta de la ficha: «ser obturados», pero no «positiva sondaje».
+    const own = words.findIndex((word, index) => index >= at && index < at + part.length && ownWordSaid(question, meaningful(word)))
+    if (own < 0) continue
+    const ficha = new Set((question.siblings ?? []).flatMap((item) => [...labelStems(item.label), ...(item.options ?? []).flatMap(stemsOf)]))
+    const before = stemsOf(words[own - 1] ?? "")
+    const start = own > at && !before.some((stem) => ficha.has(stem)) ? own - 1 : own
+    return words.slice(start, Math.min(at + part.length, start + 6)).join(" ")
   }
   return null
 }
