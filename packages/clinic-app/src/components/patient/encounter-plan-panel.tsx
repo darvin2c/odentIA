@@ -37,6 +37,8 @@ import {
   commonPlanItemIds,
   fetchBudgetDetail,
   fetchTreatmentPlans,
+  ASSEMBLED_QUERY_KEYS,
+  INDICATED_QUERY_KEYS,
   PLAN_QUERY_KEYS,
   planDecisionLabel,
   totalsOf,
@@ -1147,8 +1149,11 @@ export function EncounterBudgetSend({
               // Nada se pudo presupuestar (sin precio o sin código): se dice, en vez de no hacer nada.
               if (!assembled.data)
                 toast.warning("No se pudo armar: a lo indicado le falta el precio o el código. Revísalo en el plan.")
+              // También el detalle de la atención: de ahí sale lo indicado hoy con su presupuesto. Sin
+              // volver a leerlo, esta línea seguía diciendo «entra al firmar» de lo que ya entró (QA del
+              // 16 nov, Q3).
               await Promise.all(
-                [...PLAN_QUERY_KEYS, "plan-items", "next-steps"].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+                ASSEMBLED_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
               )
             } catch (cause) {
               toast.error(submitErrorMessage(cause))
@@ -1380,10 +1385,10 @@ function IndicationForm({
           method: "POST",
           body: JSON.stringify(body),
         })
+        // Lo indicado entra solo al borrador: el presupuesto también cambió, y la tarjeta de cada
+        // opción lee su detalle. Sin volver a pedirlo decía el total de antes (QA del 16 nov, Q4).
         await Promise.all(
-          ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next"].map(
-            (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-          ),
+          INDICATED_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         await onChanged()
         // Se conserva el ámbito, el sitio y el hallazgo para indicar el siguiente de la misma pieza

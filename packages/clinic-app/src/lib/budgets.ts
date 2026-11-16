@@ -833,3 +833,16 @@ export const PLAN_QUERY_KEYS = [
  * aceptó o no eligió deja de pedir consentimiento y de contar por ejecutar.
  */
 export const ANSWER_ENCOUNTER_KEYS = ["encounter", "consent-needs", "encounter-closing"] as const
+
+/**
+ * Lo que se vuelve a leer al indicar un tratamiento en la atención. Lo indicado entra solo al
+ * borrador, así que el presupuesto también cambió: la tarjeta de cada opción lee su detalle
+ * (`budget`) y sin esto decía el total de antes (QA del 16 nov, Q4).
+ */
+export const INDICATED_QUERY_KEYS: readonly string[] = PLAN_QUERY_KEYS
+
+/**
+ * Lo que se vuelve a leer tras «Armarlo ahora»: el plan, «Qué sigue» y el detalle de la atención,
+ * de donde sale lo indicado hoy con su presupuesto (QA del 16 nov, Q3).
+ */
+export const ASSEMBLED_QUERY_KEYS: readonly string[] = [...PLAN_QUERY_KEYS, "next-steps", ...ANSWER_ENCOUNTER_KEYS]
