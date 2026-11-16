@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. «previas» es lo que la pausa anterior dejó propuesto en la ficha (la red no lo avisa otra vez); «espera.diagnosticos», los diagnósticos que también van a Diagnóstico; «espera.dicho», la frase que se muestra en una respuesta. «espera.cambia» es lo que cambia una respuesta ya escrita: queda por revisar con ese valor, nunca lista. Los usa eval:dictado-fichas.",
+  "_nota": "Dictados de práctica con una ficha de consulta ya empezada (entrega 11, ADR 0188), escritos como habla un profesional; ninguno es de un paciente real. «fichas» son las fichas empezadas (las de odentIA por su clave, o las propias de este banco) con lo que ya tenían respondido. «espera.fichas» es lo único que se puede proponer, «ficha.pregunta»: valor; cualquier otra propuesta lista cuenta como inventada. «espera.revisar» son preguntas que se dijeron a medias: no deben quedar listas. «previas» es lo que la pausa anterior dejó propuesto en la ficha (la red no lo avisa otra vez); «espera.diagnosticos», los diagnósticos que también van a Diagnóstico; «espera.dicho», la frase que se muestra en una respuesta. «espera.cambia» es lo que cambia una respuesta ya escrita: queda por revisar con ese valor, nunca lista. «espera.revisarCon» es lo dicho sin nombrar su pregunta («déjame medir 7 mm»): queda por revisar con ese valor, nunca lista. «espera.diagnosticosNo», los diagnósticos que contradicen lo dictado (sin fístula, con la fístula dicha): no deben quedar listos. Los usa eval:dictado-fichas.",
   "servicios": ["Consulta", "Control de ortodoncia", "Endodoncia multirradicular", "Profilaxis", "Aplicación de flúor barniz"],
   "fichasPropias": {
     "control-nino-sano": {
@@ -548,7 +548,7 @@
       "id": "voz-v03-1",
       "texto": "Sí señor este paciente que viene a su control de ortodoncia va en el primer año de tratamiento prefiere que hace como una semana Se le soltó un bracket de abajo y está maltratando el carrillo te duele cuando Comes por favor cuando mastico al examen Claro que sí volar derecha clase 2 división 1 la izquierda también clase dos división 1 clase canina derecha clase 2 izquierda clase dos Sí señora a ver déjame medir 7 mm over byte de 4 succión por favor mordida Cruzada no tiene hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico mala oclusión clase 2 división 1 con protrusión de incisivos superiores hoy reglamentamos el bracket de la 4-2 no de la 41 y cambiamos el arco",
       "fichas": [{ "ficha": "ficha-de-ortodoncia" }],
-      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overjet": 7, "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"], "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "noEnNota": ["te duele"] }
+      "espera": { "fichas": { "ficha-de-ortodoncia.clase_canina_derecha": "Clase II", "ficha-de-ortodoncia.clase_canina_izquierda": "Clase II", "ficha-de-ortodoncia.overbite": 4, "ficha-de-ortodoncia.mordida_cruzada": ["No tiene"], "ficha-de-ortodoncia.habitos": ["Respiración bucal", "Onicofagia"], "ficha-de-ortodoncia.clase_molar_derecha": "Clase II división 1", "ficha-de-ortodoncia.clase_molar_izquierda": "Clase II división 1" }, "revisarCon": { "ficha-de-ortodoncia.overjet": 7 }, "noEnNota": ["te duele", "uñas", "boca abierta"] }
     },
     {
       "id": "voz-v03-2",
@@ -598,13 +598,13 @@
       "contexto": "sin dolor presenta fístula a nivel apical por vestibular tumefacción intraoral leve frío sin respuesta calor",
       "previas": { "evaluacion-de-endodoncia.dolor": "Sin dolor", "evaluacion-de-endodoncia.fistula": true, "evaluacion-de-endodoncia.tumefaccion": "Intraoral", "evaluacion-de-endodoncia.frio": "Sin respuesta" },
       "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
-      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6|K04.7"] }
+      "espera": { "fichas": { "evaluacion-de-endodoncia.calor": "Sin respuesta", "evaluacion-de-endodoncia.percusion": "Negativa", "evaluacion-de-endodoncia.palpacion": "Positiva", "evaluacion-de-endodoncia.hallazgo_radiografico": ["Radiolucidez periapical"], "evaluacion-de-endodoncia.diagnostico_pulpar": "Necrosis pulpar", "evaluacion-de-endodoncia.diagnostico_apical": "Absceso apical crónico" }, "diagnosticos": ["K04.1", "K04.6"], "diagnosticosNo": ["K04.7"] }
     },
     {
       "id": "voz-v08-1",
       "texto": "buah ya mi amor Tranquila ya casi terminamos beso 18 kg me duele descarriados uno con extracción indicada dos obturados no quiero mamá mamá como un león eso bua higiene oral regular tiene placa en los molares",
       "fichas": [{ "ficha": "ficha-de-odontopediatria" }],
-      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"], "noEnNota": ["dolor", "duele", "tranquil"], "dicho": { "ficha-de-odontopediatria.ceod_e": "uno con extracción indicada" } }
+      "espera": { "fichas": { "ficha-de-odontopediatria.peso": 18, "ficha-de-odontopediatria.ceod_e": 1, "ficha-de-odontopediatria.ceod_o": 2, "ficha-de-odontopediatria.higiene": "Regular" }, "revisar": ["ficha-de-odontopediatria.ceod_c"], "noEnNota": ["dolor", "duele", "tranquil", "higiene"], "dicho": { "ficha-de-odontopediatria.ceod_e": "uno con extracción indicada" } }
     },
     {
       "id": "voz-v08-2",
@@ -692,6 +692,24 @@
       "fichas": [{ "ficha": "ficha-odontoestomatologica" }],
       "espera": { "fichas": { "ficha-odontoestomatologica.ceod_c": 5, "ficha-odontoestomatologica.ceod_e": 2 }, "revisar": ["ficha-odontoestomatologica.cpod_c", "ficha-odontoestomatologica.cpod_p", "ficha-odontoestomatologica.cpod_o"] },
       "ignora": ["ficha-odontoestomatologica.ceod_o"]
+    },
+    {
+      "id": "tiempo-1-hace-dos-semanas",
+      "texto": "Dolor provocado desde hace dos semanas en la treinta y seis.",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.pieza": 36, "evaluacion-de-endodoncia.dolor": "Provocado" } }
+    },
+    {
+      "id": "tiempo-2-intensidad-y-tiempo",
+      "texto": "intensidad seis de diez empezó hace tres días",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.dolor_intensidad": 6 } }
+    },
+    {
+      "id": "tiempo-3-golpe-c4",
+      "texto": "paciente refiere un golpe Hace 2 años y que el diente se le ha ido poniendo oscuro sin dolor",
+      "fichas": [{ "ficha": "evaluacion-de-endodoncia" }],
+      "espera": { "fichas": { "evaluacion-de-endodoncia.dolor": "Sin dolor" } }
     }
   ]
 }

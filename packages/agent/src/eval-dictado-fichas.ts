@@ -47,7 +47,7 @@ import {
 } from "@odentia/services"
 import { costMicrosOf, withAiMeter } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile, rereadFormSentences } from "./dictation.js"
-import { diagnosisProposed } from "./eval-consulta.js"
+import { diagnosisProposed, serverDiagnoses } from "./eval-consulta.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
 import { dictationProfileFor } from "./products.js"
 
@@ -73,10 +73,17 @@ interface FormCase {
     fichas?: Record<string, unknown>
     revisar?: string[]
     cambia?: Record<string, unknown>
+    /**
+     * Lo dicho sin nombrar su pregunta («déjame medir 7 mm» del overjet, prueba con voz del 15 nov,
+     * c4): Clío lo propone por revisar con ese valor, nunca listo.
+     */
+    revisarCon?: Record<string, unknown>
     nota?: string[]
     noEnNota?: string[]
     /** Diagnósticos que también se proponen en Diagnóstico, por su código («K04.6|K04.7»: basta con uno). */
     diagnosticos?: string[]
+    /** Diagnósticos que contradicen lo dictado («K04.7», sin fístula, con la fístula dicha): no deben quedar listos. */
+    diagnosticosNo?: string[]
     /** La frase que se muestra en una respuesta: la del número que se usó (prueba con voz del 15 nov). */
     dicho?: Record<string, string>
   }
@@ -126,7 +133,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "").split(",").filter(Boolean)
-const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0, diagnosticosEsperados: 0, diagnosticosBien: 0, dichoEsperado: 0, dichoBien: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0, diagnosticosEsperados: 0, diagnosticosBien: 0, diagnosticosNoEsperados: 0, diagnosticosNoListos: 0, dichoEsperado: 0, dichoBien: 0, revisarConEsperadas: 0, revisarConBien: 0, revisarConListas: 0 }
 /** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
 const netExtra: string[] = []
 const now = new Date()
@@ -266,6 +273,7 @@ for (const dictation of cases) {
     ...Object.keys(dictation.espera.fichas ?? {}),
     ...(dictation.espera.revisar ?? []),
     ...Object.keys(dictation.espera.cambia ?? {}),
+    ...Object.keys(dictation.espera.revisarCon ?? {}),
     ...(dictation.ignora ?? []),
   ])
   totals.avisosRed += net.length
@@ -310,10 +318,13 @@ for (const dictation of cases) {
     }
   }
   const changes = dictation.espera.cambia ?? {}
+  const toReview = dictation.espera.revisarCon ?? {}
   for (const [key, value] of listed) {
     if (key in expected && same(expected[key], value)) continue
     // Cambia lo escrito y quedó lista: el error de la decisión 2, contado aparte.
     if (key in changes || dictation.ignora?.includes(key)) continue
+    // Lo dicho sin nombrar su pregunta y lista con ese valor: se cuenta aparte, no es inventada.
+    if (key in toReview && same(toReview[key], value)) continue
     // Varias opciones, solo parte de lo esperado: se perdió una, no se inventó nada (ya cuenta como perdida).
     const want = expected[key]
     if (Array.isArray(want) && Array.isArray(value) && value.length > 0 && value.every((item) => want.includes(item))) {
@@ -322,6 +333,14 @@ for (const dictation of cases) {
     }
     totals.inventadas += 1
     notes.push(`INVENTÓ ${key} = ${JSON.stringify(value)}`)
+  }
+  for (const [key, value] of Object.entries(toReview)) {
+    totals.revisarConEsperadas += 1
+    if (listed.has(key)) {
+      totals.revisarConListas += 1
+      notes.push(`lista sin nombrar su pregunta ${key} = ${JSON.stringify(listed.get(key))}`)
+    } else if (reviewed.has(key) && same(reviewed.get(key), value)) totals.revisarConBien += 1
+    else notes.push(`no propuso por revisar ${key} = ${JSON.stringify(value)}`)
   }
   for (const [key, value] of Object.entries(changes)) {
     totals.cambiaEsperadas += 1
@@ -340,7 +359,7 @@ for (const dictation of cases) {
         totals.relecturaOtroValor += 1
         notes.push(`la segunda lectura propone ${key} = ${JSON.stringify(value)} por revisar`)
       }
-    } else if (!dictation.ignora?.includes(key) && !(key in changes)) {
+    } else if (!dictation.ignora?.includes(key) && !(key in changes) && !(key in toReview)) {
       totals.relecturaDeMas += 1
       notes.push(`la segunda lectura propone ${key} = ${JSON.stringify(value)} por revisar, sin esperarlo`)
     }
@@ -354,11 +373,19 @@ for (const dictation of cases) {
     if (noteText.includes(want.toLowerCase())) totals.notaBien += 1
     else notes.push(`la nota perdió «${want}» (nota: «${noteText.slice(0, 160)}»; sin limpiar: «${read.drafts.filter((draft) => draft.kind === "nota").flatMap((draft) => Object.values(draft.payload)).join(" ").slice(0, 160)}»)`)
   }
-  const codes = read.drafts.filter((draft) => draft.kind === "diagnostico").map((draft) => String(draft.payload["diagnosisCode"] ?? ""))
+  // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
+  const diagnoses = serverDiagnoses(read.drafts, [heard, dictation.contexto ?? ""])
+  const codes = diagnoses.map((item) => item.code)
   for (const code of dictation.espera.diagnosticos ?? []) {
     totals.diagnosticosEsperados += 1
     if (diagnosisProposed(code, codes)) totals.diagnosticosBien += 1
     else notes.push(`no propuso el diagnóstico ${code} (propuso: ${codes.join(", ") || "ninguno"})`)
+  }
+  for (const code of dictation.espera.diagnosticosNo ?? []) {
+    totals.diagnosticosNoEsperados += 1
+    if (!diagnosisProposed(code, diagnoses.filter((item) => item.ready).map((item) => item.code))) continue
+    totals.diagnosticosNoListos += 1
+    notes.push(`DIAGNÓSTICO QUE CONTRADICE LO DICTADO ${code}, listo`)
   }
   for (const [key, said] of Object.entries(dictation.espera.dicho ?? {})) {
     totals.dichoEsperado += 1
@@ -375,7 +402,7 @@ for (const dictation of cases) {
   }
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   const shown = [...listed].map(([key, value]) => `${key.split(".").at(-1)}=${JSON.stringify(value)}`).join(", ")
-  console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
+  console.log(`${notes.some((note) => note.startsWith("INVENTÓ") || note.startsWith("LISTA SOBRE") || note.startsWith("DIAGNÓSTICO QUE")) ? "✗" : notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}) ${shown}${reviewed.size ? ` · por revisar: ${[...reviewed].join(", ")}` : ""}${notes.length ? ` — ${notes.join("; ")}` : ""}`)
   if (notes.length) {
     const labelOf = (number: unknown) => {
       const question = byNumber.get(Number(number))
@@ -418,7 +445,8 @@ console.log(`La red avisó ${totals.avisosRed} oraciones; ${totals.avisosRedDeMa
 console.log(`Lo dicho a medias que no quedó listo: ${totals.revisarBien} de ${totals.revisarEsperadas}`)
 console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEsperadas} por revisar con el valor dicho, ${totals.cambiaListas} listas (el criterio es cero)`)
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
-console.log(`Diagnóstico dicho que también va a Diagnóstico: ${totals.diagnosticosBien} de ${totals.diagnosticosEsperados}; frase del número usado: ${totals.dichoBien} de ${totals.dichoEsperado}`)
+console.log(`Diagnóstico dicho que también va a Diagnóstico: ${totals.diagnosticosBien} de ${totals.diagnosticosEsperados}; que contradice lo dictado y queda listo: ${totals.diagnosticosNoListos} de ${totals.diagnosticosNoEsperados} (el criterio es cero); frase del número usado: ${totals.dichoBien} de ${totals.dichoEsperado}`)
+console.log(`Lo dicho sin nombrar su pregunta: ${totals.revisarConBien} de ${totals.revisarConEsperadas} por revisar con su valor, ${totals.revisarConListas} listas`)
 console.log(
   `Segunda lectura: ${totals.relecturas} pausas, ${totals.releidas} oraciones leídas de nuevo; ${totals.relecturaRevisar} respuestas por revisar (${totals.relecturaBien} con el valor esperado, ${totals.relecturaOtroValor} con otro valor, ${totals.relecturaDeMas} donde no se esperaba); de las perdidas, ${totals.perdidasPorRevisar} quedaron por revisar`,
 )
