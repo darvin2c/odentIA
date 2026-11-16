@@ -175,6 +175,14 @@ export const WHATSAPP_KEY_FIELDS: ChannelField[] = WHATSAPP_FIELDS.filter((field
 export const WHATSAPP_DISCONNECT_CONSEQUENCE =
   "Los mensajes de WhatsApp dejarán de llegar a la Bandeja y tu equipo no podrá responderlos desde aquí. El agente dejará de atender y de enviar recordatorios y avisos por WhatsApp; lo que pueda salir por correo seguirá saliendo. Las conversaciones que ya tienes se conservan."
 
+/**
+ * Lo que además pasa al desconectar una conexión hecha con «Conectar con
+ * Facebook»: odentIA quita en Meta su acceso a los avisos de la cuenta. El
+ * número no se da de baja.
+ */
+export const WHATSAPP_DISCONNECT_BUTTON =
+  "Tu número sigue funcionando donde lo uses, también en la app del celular: odentIA deja de recibir sus mensajes. Para volver, usa «Volver a conectar»."
+
 /** Donde la clínica agrega la forma de pago de su cuenta de WhatsApp. */
 export const META_ACCOUNT_URL = "https://business.facebook.com/wa/manage/home/"
 

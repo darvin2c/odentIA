@@ -1,0 +1,2 @@
+DROP INDEX "channel_connection_provider_external_uidx";--> statement-breakpoint
+CREATE UNIQUE INDEX "channel_connection_provider_external_uidx" ON "channel_connection" USING btree ("provider","external_id") WHERE "external_id" is not null and "status" = 'active';
