@@ -287,8 +287,8 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
         ],
         // La ASA solo se ve si alguien la clasificó (`showsAsa: false`).
         [
-          "medicación y ASA («niega» si lo negó, «no preguntado» si nadie lo preguntó)",
-          "medicación («niega» si lo negó, «no preguntado» si nadie lo preguntó) y, solo si alguien la clasificó, su ASA",
+          "medicación y ASA («niega» si lo negó; «no se le preguntó» o «no preguntado» si nadie lo preguntó)",
+          "medicación («niega» si lo negó; «no se le preguntó» o «no preguntado» si nadie lo preguntó) y, solo si alguien la clasificó, su ASA",
         ],
       ),
     },

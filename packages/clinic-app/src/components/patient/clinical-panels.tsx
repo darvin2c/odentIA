@@ -1441,6 +1441,12 @@ export function RecetasPanel({
                 // Lleva al primer medicamento que choca para cambiarlo.
                 const allergyIndex = conflictsByMedication.findIndex((lines) => lines.length > 0)
                 const index = allergyIndex >= 0 ? allergyIndex : 0
+                // Lo del anterior no vale para el nuevo: la concentración, la forma y la dosis quedan
+                // vacías para escribirlas (de amoxicilina 500 mg a ibuprofeno no quedan los 500 mg;
+                // estudio de la atención del 16 nov, E10a).
+                form.setFieldValue(`items[${index}].strength`, "")
+                form.setFieldValue(`items[${index}].dosageForm`, "")
+                form.setFieldValue(`items[${index}].dose`, "")
                 const field = document.getElementById(dciId(medications[index]?.key))
                 if (field instanceof HTMLInputElement) {
                   field.focus()

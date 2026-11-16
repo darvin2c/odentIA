@@ -550,7 +550,7 @@ it("su «No sé» a las alergias y lo que saltó se dicen como lo que fueron", (
       <HealthReviewNotice patientId="p1" patientName="Ana Paz" health={paz} sex="F" />
     </QueryClientProvider>,
   ).replace(/<[^>]+>/g, "|")
-  expect(page).toContain("Dijo que no sabe si tiene alergias (13 nov).")
+  expect(page).toContain("Alergias: dijo que no sabe (13 nov).")
   expect(page).not.toContain("Nadie las revisó todavía")
   expect(page).toMatch(/Anticoagulante\|+no respondió/)
 })

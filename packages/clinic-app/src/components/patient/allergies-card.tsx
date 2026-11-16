@@ -23,11 +23,10 @@ import {
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   allergiesSaidUnknown,
-  allergiesUnknownWords,
   declaredGroupOf,
+  noAllergiesWords,
   saidByWords,
   saidNoGroupOf,
-  saidNoWords,
   shortDay,
 } from "../../lib/declared-health"
 import {
@@ -186,16 +185,9 @@ export function AllergiesCard({
       {saidPending ? <ActionError error={noneReviewed.error} /> : null}
       {active.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* La misma frase que la franja, la ficha y la atención (estudio de la atención del 16 nov, E10a). */}
           <p className="text-sm text-muted-foreground">
-            {saidNo
-              ? `${saidNoWords(saidNo.by, sex)} · sin revisar.`
-              : health.reviewStatus.allergies === "none"
-              ? "No tiene alergias: se le preguntó."
-              : health.reviewStatus.allergies === "recorded"
-                ? "Sin alergias vigentes."
-                : saidUnknown
-                  ? allergiesUnknownWords(saidUnknown, sex)
-                  : "Aún no se le preguntó si tiene alergias."}
+            {noAllergiesWords({ review: health.reviewStatus.allergies, saidNo, saidUnknown }, sex)}.
           </p>
           {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
           {canWrite && (health.reviewStatus.allergies === "unknown" || saidNo) ? (
