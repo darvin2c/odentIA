@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClioFormProposals, ClioFormProposalsContext, proposesValue, reread } from "./clio-form-proposals"
 import { UnusedNotice } from "./dictation-panel"
-import { type DictationSuggestion, markedByDefault, type UnusedDictation } from "./dictation-session"
+import { type DictationSuggestion, markedByDefault, type UnusedDictation, withoutAnsweredUnused } from "./dictation-session"
 
 afterEach(cleanup)
 
@@ -100,5 +100,42 @@ describe("lo de la segunda lectura", () => {
     expect(markedByDefault(read)).toBe(false)
     expect(proposesValue(item("por_revisar", { value: null }))).toBe(false)
     expect(markedByDefault(item("lista", { value: "Positiva" }))).toBe(true)
+  })
+})
+
+// Prueba con voz del 16 nov (c6, v07): la pausa cortó «…frío sin respuesta calor» y avisó «calor»;
+// la siguiente propuso «calor sin respuesta». El aviso de antes ya no tiene que decir nada.
+describe("lo que una pausa siguiente respondió deja de avisarse", () => {
+  const calor = { responseId: "endo", fieldId: "calor", label: "Prueba de calor" }
+  const before = unused({
+    phrases: ["calor", "sondaje no lo pude medir bien"],
+    why: { calor: "No alcanzó para responder «Prueba de calor»: dilo con el valor o escríbelo en la ficha." },
+    targets: { calor: [calor], "sondaje no lo pude medir bien": [{ responseId: "endo", fieldId: "sondaje", label: "Sondaje" }] },
+  })
+  const proposal = (over: Partial<DictationSuggestion>): DictationSuggestion => ({
+    id: "s2",
+    kind: "ficha",
+    payload: { responseId: "endo", fieldId: "calor", value: "Sin respuesta" },
+    sourceText: "calor sin respuesta",
+    status: "lista",
+    note: null,
+    summary: "",
+    voice: null,
+    removal: null,
+    ...over,
+  })
+
+  it("la frase que contiene la propuesta de su pregunta sale del aviso; lo demás queda", () => {
+    const after = withoutAnsweredUnused(before, [proposal({})])
+    expect(after.phrases).toEqual(["sondaje no lo pude medir bien"])
+    expect(after.why).toEqual({})
+    expect(Object.keys(after.targets)).toEqual(["sondaje no lo pude medir bien"])
+  })
+
+  it("con otras palabras, en otra pregunta o descartada, el aviso queda", () => {
+    expect(withoutAnsweredUnused(before, [proposal({ sourceText: "prueba térmica negativa" })])).toBe(before)
+    expect(withoutAnsweredUnused(before, [proposal({ payload: { responseId: "endo", fieldId: "frio", value: "Sin respuesta" } })])).toBe(before)
+    expect(withoutAnsweredUnused(before, [proposal({ status: "descartada" })])).toBe(before)
+    expect(withoutAnsweredUnused(before, [])).toBe(before)
   })
 })
