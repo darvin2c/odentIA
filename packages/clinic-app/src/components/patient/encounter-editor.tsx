@@ -43,6 +43,7 @@ import {
   useAppForm,
   useDetailMode,
   useFormSubmitError,
+  useIconSidebarWhileMounted,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -65,7 +66,7 @@ import {
 } from "../../lib/clinical-journey"
 import { unreviewedWords } from "../../lib/declared-health"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
-import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
+import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
@@ -81,6 +82,7 @@ import {
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
+  bringTreatmentApi,
 } from "../../lib/encounters"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -165,6 +167,8 @@ import { useCollectFlow } from "./collect-flow"
 import { EncounterVoidDialog } from "./encounter-void-dialog"
 import { useDiscardEncounter, useOpenEncounter } from "./stale-encounter"
 import { PatientClinicalStrip } from "./patient-header"
+import { EncounterPatientLine, shortPatientName, usePastHeader, useReservedTop } from "./encounter-patient-line"
+import { dictationIdle } from "./dictation-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 
 export interface EncounterEditorProps {
@@ -239,11 +243,6 @@ const CLOSING_SHORT: Record<keyof typeof CLOSING_REQUIREMENT_LABELS, string> = {
   diagnosis: "diagnóstico",
   evolution: "evolución",
   signature: "tu colegiatura",
-}
-
-/** «a, b y c». */
-function listWords(items: string[]): string {
-  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items.at(-1)}`
 }
 
 /** Lo que pide el cierre, en el orden de la historia clínica. */
@@ -526,6 +525,9 @@ export function EncounterEditor({
   const orgProfile = useOrgProfile().data
   const orgLocale = orgProfile?.locale
   const uid = useId()
+  // Mientras se atiende, el menú lateral en íconos: le deja a la atención los 256 px que la pieza
+  // necesita para ir al lado. Al salir vuelve como la persona lo tenía; Ctrl+B lo abre como siempre.
+  useIconSidebarWhileMounted()
   const accountQuery = useQuery({
     queryKey: ["patient-account", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
@@ -569,7 +571,8 @@ export function EncounterEditor({
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
   // Lo que el servidor rechazó del examen, por la ruta de cada dato («extraoral.atm»).
   const [examErrors, setExamErrors] = useState<Record<string, string>>({})
-  const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
+  // Las piezas de la atención se siguen de lo registrado (ya no se eligen a mano en Consulta).
+  const [, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
   const [examination, setExamination] = useState<unknown>(() => exam.draft(encounter.examination))
   // Una sola página (QA de la atención del 8 nov; ADR 0165): todo lo de todos los días se
   // edita en su sitio. Lo opcional que no tiene nada («También»: examen, pronóstico,
@@ -694,6 +697,15 @@ export function EncounterEditor({
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
   const attending = encounter.professionalUserId === myUserId
+  // Al abrir la atención, el foco va al motivo (P10): quedaba en `body` y el primer Tab volvía al
+  // principio de la página. Solo si nada más lo tomó (la pieza pedida por enlace, un aviso).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir la atención.
+  useEffect(() => {
+    if (!canWrite || !attending) return
+    const active = document.activeElement
+    if (active !== null && active !== document.body) return
+    document.getElementById(`${uid}-reason`)?.focus({ preventScroll: true })
+  }, [encounterId])
   // «Falta otra sesión» cambia lo que el cierre anuncia (el odontograma que se firma): se vuelve a pedir.
   const keepOpen = Object.entries(sessionAnswers)
     .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
@@ -721,7 +733,10 @@ export function EncounterEditor({
   const openWide = useOpenWide()
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
-  const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
+  // Lo que espera su firma (o que quien atiende confirme la de su enlace). El que la clínica no
+  // activó no se puede firmar hoy: lo dice Documentos y no cuenta como falta.
+  const awaitingSignature = unsignedConsents.filter((need) => need.status !== "sin_publicar" && !need.personSigned)
+  const awaitingConfirmation = unsignedConsents.filter((need) => need.status !== "sin_publicar" && need.personSigned)
   // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
   const signIdsRef = useRef<string[] | null>(null)
   const closingControls = closingQuery.data?.data.controls ?? null
@@ -972,6 +987,11 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            // Una urgencia no ofrece la ficha de una vez por plan (la odontoestomatológica, P11): si el
+            // motivo guardado pasa a decirlo, o deja de decirlo, las fichas ofrecidas se vuelven a pedir.
+            const urgency = (text: string | null | undefined) => (text ?? "").trim().toLowerCase().startsWith("urgencia")
+            if (sendable.includes("reason") && urgency(savedTextRef.current.reason) !== urgency(saved.data.reason))
+              void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
             // Lo que quedó guardado es la nueva base de cada texto enviado, también en la caché:
             // al volver a la atención se parte de lo guardado, no de una copia vieja.
             for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null
@@ -1107,14 +1127,6 @@ export function EncounterEditor({
     draftForm.setFieldValue(`vitals.${key}`, value)
     rememberVital(key, value)
   }
-  /** El ToothSelector entrega el set completo: se ordena, se publica y el autosave lo persiste. */
-  const editTeeth = (value: number[]) => {
-    const next = sortTeeth(value)
-    valuesRef.current.teeth = next
-    setTeeth(next)
-    markEdited("teeth")
-  }
-
   /** El examen lo arma el producto: el borrador entero cambia de una vez. */
   const editExamination = (next: unknown) => {
     valuesRef.current.examination = next
@@ -1698,19 +1710,21 @@ export function EncounterEditor({
   // Antes de cerrar: qué queda registrado y qué no, con los mismos resúmenes
   // que ve el clínico en cada bloque.
   const missing = closingQuery.data?.data.missing ?? []
-  const closingReady = closingQuery.data?.data.ready === true
-  // Solo falta la colegiatura: se puede abrir el cierre, que la pide ahí mismo.
-  const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty)
   // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   // El odontograma que el cierre firma por lo que hoy queda tratado (la sesión 2 de la endodoncia)
   // tampoco: decía a la vez «queda firmado» y «Sin registrar: odontograma» (QA del 9 nov).
   const signsOdontogram = Boolean(closingQuery.data?.data.odontogram)
+  // Lo opcional del producto (el periodontograma) no se dice como algo sin registrar: no falta (P10).
+  const optionalKeys = new Set(product.blocks.filter((item) => item.key !== "odontograma").map((item) => item.key))
   const unrecorded = closingSections
     .filter(
       (section) =>
-        section.empty && !(section.key === "plan" && closingControls) && !(section.key === "odontograma" && signsOdontogram),
+        section.empty &&
+        !optionalKeys.has(section.key) &&
+        !(section.key === "plan" && closingControls) &&
+        !(section.key === "odontograma" && signsOdontogram),
     )
     .map((section) => section.title.toLowerCase())
   // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
@@ -1832,6 +1846,29 @@ export function EncounterEditor({
   const signer = useConsentSignerWord(patientId, firstNameOf(patient))
   const confirmingRef = useRef(false)
   /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
+  /**
+   * «Preparar y firmar» desde «Registrar procedimiento» (P11): el consentimiento es previo al acto.
+   * Trae el tratamiento a hoy (la misma operación que «Hacerla hoy»), y su consentimiento sale de
+   * la regla de siempre (`consent-needs`): se prepara y se firma ahí mismo. No frena el registro.
+   */
+  const consentFirst = async (planItemId: string) => {
+    try {
+      await flush()
+      if (!detail.plannedItems.some((item) => item.id === planItemId)) await bringTreatmentApi(patientId, encounterId, planItemId)
+      const needs = await queryClient.fetchQuery({
+        queryKey: ["consent-needs", patientId, encounterId],
+        queryFn: () => fetchConsentNeeds(patientId, encounterId),
+        staleTime: 0,
+      })
+      await handleChildChanged()
+      const need = needs.data.find(
+        (item) => item.planItemId === planItemId && item.status !== "firmado" && item.status !== "sin_publicar",
+      )
+      if (need) await signConsentsNow(need)
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    }
+  }
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
       // Ya lo firmó en su enlace: solo falta que quien atiende lo confirme.
@@ -2055,24 +2092,8 @@ export function EncounterEditor({
           ) : null}
         </Field>
       ) : null}
-      {productUi().site && teeth.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Piezas de esta atención</span>
-          {teeth.map((tooth) => (
-            <Button
-              key={tooth}
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={locked}
-              aria-label={`Quitar pieza ${tooth} de la atención`}
-              onClick={() => editTeeth(teeth.filter((value) => value !== tooth))}
-            >
-              {tooth} ×
-            </Button>
-          ))}
-        </div>
-      ) : null}
+      {/* Las piezas de la atención no se eligen aquí: salen del odontograma y de lo registrado, y la
+          pieza equivocada se corrige anulando su hallazgo (estándar E2: un dato, un lugar). */}
     </div>
   )
 
@@ -2134,11 +2155,7 @@ export function EncounterEditor({
         {/* Primero la evolución, que es lo que pide el cierre; después lo que se le indica y, al final, el pronóstico. */}
         <draftForm.AppField name="evolution">
           {(field) => (
-            <field.Control
-              label="Evolución"
-              description="Lo que se hizo hoy y cómo respondió; en una primera consulta, el plan y lo que se le explicó."
-              id={`${uid}-evolution`}
-            >
+            <field.Control label="Evolución" id={`${uid}-evolution`}>
               {(control) => (
                 <Textarea
                   {...control.props}
@@ -2147,7 +2164,8 @@ export function EncounterEditor({
                   value={field.state.value}
                   disabled={locked}
                   maxLength={MAX_EVOLUTION}
-                  placeholder="Evolución clínica…"
+                  // Lo que se espera, como ejemplo dentro del campo: se ve mientras está vacío (estándar E2).
+                  placeholder="Lo que se hizo hoy y cómo respondió; en una primera consulta, el plan y lo que se le explicó…"
                   onChange={(event) => {
                     field.handleChange(event.target.value)
                     rememberText("evolution", event.target.value)
@@ -2203,14 +2221,23 @@ export function EncounterEditor({
     </draftForm.AppField>
   )
 
-  /** El último diagnóstico de hoy con pieza: indicar empieza con esa pieza, su hallazgo y su diagnóstico. */
-  const lastDiagnosis = [...activeDiagnosisRows].reverse().find((dx) => dx.toothNumber != null)
+  // Indicar empieza con la pieza abierta (o marcada) en el arco, su hallazgo y su diagnóstico de
+  // hoy; sin pieza elegida, con la del último diagnóstico de hoy (P09: «Indicar» tomaba la 46 de
+  // antes con la 36 abierta). latidIA y vistIA no tienen sitio: sin valores de partida.
+  const openTooth = product.site?.teeth.length === 1 ? product.site.teeth[0] : null
+  const lastDiagnosis = [...activeDiagnosisRows]
+    .reverse()
+    .find((dx) => (openTooth != null ? dx.toothNumber === openTooth : dx.toothNumber != null))
+  const startTooth = openTooth ?? lastDiagnosis?.toothNumber ?? null
   // El hallazgo de esa pieza como uno solo (sus caras juntas): se vincula por su primera fila, como el panel de la pieza.
-  const lastFinding = lastDiagnosis
-    ? groupFindings((detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt))
-        .reverse()
-        .find((group) => group.first.toothNumber === lastDiagnosis.toothNumber)?.first
-    : undefined
+  const lastFinding =
+    openTooth != null
+      ? product.site?.findingId
+      : startTooth != null
+        ? groupFindings((detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt))
+            .reverse()
+            .find((group) => group.first.toothNumber === startTooth)?.first.id
+        : undefined
   // Su diagnóstico ya lleva su tratamiento hoy (la pulpitis, su endodoncia): lo que se indique
   // después en esa pieza (la corona) no lo hereda; lo elige quien indica (QA del 9 nov).
   const diagnosisUsed =
@@ -2219,12 +2246,12 @@ export function EncounterEditor({
       (item) => item.toothNumber === lastDiagnosis.toothNumber && item.diagnosisCode === lastDiagnosis.diagnosisCode,
     )
   const indicationDefaults =
-    lastDiagnosis?.toothNumber != null
+    startTooth != null
       ? {
           scope: "tooth",
-          teeth: [lastDiagnosis.toothNumber],
-          odontogramEntryId: lastFinding?.id ?? "",
-          diagnosisCode: diagnosisUsed ? "" : lastDiagnosis.diagnosisCode,
+          teeth: [startTooth],
+          odontogramEntryId: lastFinding ?? "",
+          diagnosisCode: lastDiagnosis && !diagnosisUsed ? lastDiagnosis.diagnosisCode : "",
         }
       : undefined
   const removableIds = new Set(
@@ -2241,6 +2268,15 @@ export function EncounterEditor({
         patientName={patient.patient.displayName}
       />
     ))
+  /** «Es una urgencia»: deja el motivo listo para escribir, con el cursor al final. */
+  const markUrgency = () => {
+    if (reason.trim() === "") editText("reason", "Urgencia: ")
+    requestAnimationFrame(() => {
+      const field = document.getElementById(`${uid}-reason`) as HTMLTextAreaElement | null
+      field?.focus()
+      field?.setSelectionRange(field.value.length, field.value.length)
+    })
+  }
   const sectionClass = "flex scroll-mt-4 flex-col gap-3 rounded-sm bg-card p-6 max-sm:px-4"
   /** Una parte de la atención con su título; el contenido se edita en su sitio. */
   const block = (
@@ -2306,6 +2342,10 @@ export function EncounterEditor({
     />
   ) : null
   const age = ageFrom(patient.patient.birthDate)
+  // Al pasar la cabecera, la línea fija del paciente (P12): el nombre y sus alertas siguen a la vista.
+  const headerEnd = useRef<HTMLSpanElement>(null)
+  const pastHeader = usePastHeader(headerEnd)
+  useReservedTop()
   // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
   const saveChip =
     saveState === "offline"
@@ -2319,25 +2359,53 @@ export function EncounterEditor({
   // se guarda o se comprueba, dice por qué aún no se firma: la lista de faltantes podría estar vieja.
   const footerWait =
     signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
-  const footerMissing =
-    !dictation.busy && !footerWait && closingQuery.isSuccess && !onlyRegistrationMissing && !closingReady
-      ? CLOSING_ORDER.filter((requirement) => missing.includes(requirement))
+  // El pie es el único lugar de lo que falta para firmar, y lo dice entero (P10): lo que pide el
+  // cierre, tu colegiatura y las firmas que esperan. Nunca «Listo para firmar» con una firma de la
+  // paciente pendiente («Faltan 2: tu colegiatura y la firma de Carmen»). Cada cosa lleva a su lugar.
+  const footerMissing: Array<{ key: string; words: string; go: () => void }> =
+    !dictation.busy && !footerWait && closingQuery.isSuccess
+      ? [
+          ...CLOSING_ORDER.filter((requirement) => missing.includes(requirement)).map((requirement) => ({
+            key: requirement,
+            // El diagnóstico que Clío o el odontograma sugirieron y nadie confirmó se dice así.
+            words:
+              requirement === "diagnosis" && pendingDiagnoses > 0
+                ? pendingDiagnoses === 1
+                  ? "diagnóstico sugerido sin confirmar"
+                  : `${pendingDiagnoses} diagnósticos sugeridos sin confirmar`
+                : CLOSING_SHORT[requirement],
+            go: () => requireBlock(requirement),
+          })),
+          ...(awaitingSignature.length > 0
+            ? [
+                {
+                  key: "firma",
+                  words:
+                    awaitingSignature.length === 1
+                      ? `la firma de ${signer}`
+                      : `${awaitingSignature.length} firmas de ${signer}`,
+                  go: () => void signConsentsNow(awaitingSignature[0]!),
+                },
+              ]
+            : []),
+          ...(awaitingConfirmation.length > 0
+            ? [
+                {
+                  key: "enlace",
+                  words: "confirmar lo que firmó en su enlace",
+                  go: () => void signConsentsNow(awaitingConfirmation[0]!),
+                },
+              ]
+            : []),
+        ]
       : []
   const footerText = dictation.busy
     ? "Termina el dictado para poder firmar"
     : footerWait
       ? footerWait
       : !closingQuery.isSuccess
-      ? "Comprobando lo que falta…"
-      : onlyRegistrationMissing
-        ? "Listo para firmar · falta tu colegiatura, se pide al firmar"
-        : !closingReady
-          ? `${missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`} para cerrar: ${listWords(missing.map((m) => CLOSING_SHORT[m]))}`
-        : missingConsentSignatures > 0
-          ? `Listo para firmar · falta${missingConsentSignatures === 1 ? "" : "n"} ${missingConsentSignatures} firma${missingConsentSignatures === 1 ? "" : "s"} de ${signer}`
-          : unsignedConsents.length > 0
-            ? "Listo para firmar · falta confirmar lo que firmó en su enlace"
-            : "Listo para firmar"
+        ? "Comprobando lo que falta…"
+        : "Listo para firmar"
 
   return (
     <ClioFormProposalsContext.Provider value={clioForms}>
@@ -2391,9 +2459,29 @@ export function EncounterEditor({
                 onType={() => setDictationTyping(true)}
               />
             ) : null}
+            {/* Dónde termina la cabecera: al pasar por arriba, aparece la línea fija del paciente. */}
+            <span ref={headerEnd} aria-hidden className="h-px w-px shrink-0" />
           </>
         }
       />
+      {pastHeader ? (
+        <EncounterPatientLine
+          detail={patient}
+          health={stripHealth.data?.data ?? null}
+          displayName={patient.patient.displayName}
+          shortName={shortPatientName(patient.patient)}
+          age={age !== "" ? `${age} a` : ""}
+          save={saveChip}
+          canDictate={attending && dictation.enabled && dictation.canListen && dictationIdle(dictation)}
+          onDictate={() => {
+            startDictation()
+            dictation.start()
+          }}
+          dictating={attending && dictation.enabled && dictation.dictating}
+          onFinishDictation={finishDictation}
+          onAntecedentes={() => setContextOpen(true)}
+        />
+      ) : null}
       {saveState === "offline" ? (
         <p role="status" className="text-sm text-muted-foreground">
           Sin conexión: lo escrito se queda en la pantalla y se guarda al volver. Mientras tanto no se puede firmar.
@@ -2502,16 +2590,6 @@ export function EncounterEditor({
                 onUseVisitReason={(told) => {
                   if (!locked && reason.trim() === "") editText("reason", told)
                 }}
-                onUrgency={() => {
-                  if (reason.trim() === "") editText("reason", "Urgencia: ")
-                  requestAnimationFrame(() => {
-                    const field = document.getElementById(
-                      `${uid}-reason`,
-                    ) as HTMLTextAreaElement | null
-                    field?.focus()
-                    field?.setSelectionRange(field.value.length, field.value.length)
-                  })
-                }}
                 disabled={locked}
                 beforeWrite={flush}
                 onChanged={handleChildChanged}
@@ -2540,6 +2618,12 @@ export function EncounterEditor({
               {consultaBody}
               {suggestionsOf("consulta")}
             </>,
+            // «Es una urgencia» va en el título de Consulta, con o sin «Hoy viene a…» (P10).
+            canWrite && attending && reason.trim() === "" ? (
+              <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={markUrgency}>
+                Es una urgencia
+              </Button>
+            ) : undefined,
           )}
 
           {showExam
@@ -2602,6 +2686,7 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
                 prefillPlanItemId={sessionPrefill}
                 onPrefillUsed={() => setSessionPrefill(null)}
+                onConsentFirst={(planItemId) => void consentFirst(planItemId)}
               />
               {suggestionsOf("procedimientos")}
             </>,
@@ -2622,6 +2707,7 @@ export function EncounterEditor({
                 onChanged={handleChildChanged}
                 onPendingChange={handlePendingChange}
                 removableIds={removableIds}
+                broughtIds={new Set(detail.plannedItems.map((item) => item.id))}
                 indicationDefaults={indicationDefaults}
                 showControls={followUps.length > 0}
               />
@@ -2694,177 +2780,26 @@ export function EncounterEditor({
             aria-label="Cierre de la atención"
             className="flex scroll-mt-4 flex-col gap-4 rounded-sm bg-card p-6"
           >
-            <div className="flex flex-col gap-1">
-              <h2 className="font-heading text-base font-medium">Cierre de la atención</h2>
-              <p className="text-sm text-muted-foreground">
-                Al cerrar se firma con tu colegiatura y la atención queda inmutable: después solo se
-                agregan adendas.
-              </p>
-            </div>
-            {/* Solo lo que falta, cada cosa con su «Registrar»; sin nada pendiente, «Lista para firmar». */}
-            {closingQuery.isSuccess ? (
-              missing.length > 0 ? (
-                <ul className="flex flex-col gap-1.5 text-sm" aria-label="Lo que falta para firmar">
-                  {CLOSING_ORDER.filter((requirement) => missing.includes(requirement)).map(
-                    (requirement) => (
-                      // El «!» va con su texto: en un teléfono angosto el texto envuelve a su lado, no debajo.
-                      <li key={requirement} className="flex items-start gap-2">
-                        <span
-                          aria-hidden="true"
-                          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
-                        >
-                          !
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
-                          <span className="min-w-0">
-                            {requirement === "diagnosis" && pendingDiagnoses > 0
-                              ? pendingDiagnoses === 1
-                                ? "Diagnóstico: hay uno sugerido, sin confirmar"
-                                : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
-                              : CLOSING_REQUIREMENT_LABELS[requirement]}
-                            {/* El motivo que trae la cita se usa aquí mismo, en un toque. */}
-                            {requirement === "reason" && offeredReason ? (
-                              <span className="text-muted-foreground">
-                                {" "}
-                                · de la cita: «{offeredReason}»
-                              </span>
-                            ) : null}
-                          </span>
-                          {requirement === "reason" && offeredReason ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="link"
-                              className="h-auto p-0"
-                              disabled={locked}
-                              aria-label={`Usar «${offeredReason}» como motivo`}
-                              onClick={takeOfferedReason}
-                            >
-                              Usar
-                            </Button>
-                          ) : null}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="link"
-                            className="h-auto p-0"
-                            disabled={!attending}
-                            onClick={() => requireBlock(requirement)}
-                          >
-                            {requirement === "signature"
-                              ? "Completar perfil"
-                              : requirement === "reason" && offeredReason
-                                ? "Escribir otro"
-                                : "Registrar"}
-                          </Button>
-                        </span>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              ) : (
-                <p className="flex items-center gap-2 text-sm">
-                  <span
-                    aria-hidden="true"
-                    className="inline-flex size-5 items-center justify-center rounded-full bg-success-soft text-xs font-bold text-success"
-                  >
-                    ✓
-                  </span>
-                  Lista para firmar
-                </p>
-              )
-            ) : null}
-            {unsignedConsents.length > 0 ? (
-              <ul className="flex flex-col gap-1.5 text-sm" aria-label="Consentimientos sin firmar">
-                {unsignedConsents.map((need) => (
-                  <li
-                    key={`${need.templateKey}-${need.documentId ?? ""}`}
-                    className="flex flex-wrap items-center gap-2"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="inline-flex size-5 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
-                    >
-                      !
-                    </span>
-                    <span>
-                      {need.status === "sin_publicar"
-                        ? `Esta clínica aún no activó el consentimiento de «${need.title}»`
-                        : need.personSigned
-                          ? `Lo firmó desde su enlace, falta confirmarlo: «${need.title}»`
-                          : `Consentimiento sin firmar: «${need.title}»`}
-                      <span className="sr-only">: no impide cerrar; el cierre pide el motivo</span>
-                    </span>
-                    {need.status !== "sin_publicar" ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="link"
-                        className="h-auto p-0"
-                        disabled={!attending || locked}
-                        onClick={() => void signConsentsNow(need)}
-                      >
-                        {need.personSigned ? "Confirmar" : "Firmar ahora"}
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            {/* Lo que falta para firmar se dice en un solo lugar, el pie fijo, que lleva a cada cosa;
+                lo registrado lo cuenta el diálogo de firmar (P10). Aquí queda lo que no es eso: lo
+                que se cargará, para quien ve la caja, y anular o descartar. */}
+            <h2 className="font-heading text-base font-medium">Cierre de la atención</h2>
             {closingQuery.isError ? (
               <p role="alert" className="text-sm text-destructive">
                 No se pudo comprobar lo que falta para cerrar.
               </p>
             ) : null}
-            <div className="flex flex-col gap-2 text-sm">
-              {/* Solo lo que hay: «1 diagnóstico · 2 hallazgos», sin «0 …» ni «(s)». */}
-              {(() => {
-                const done = [
-                  activeProcedures > 0
-                    ? counted(activeProcedures, "procedimiento", "procedimientos")
-                    : "",
-                  activeDiagnoses > 0
-                    ? counted(activeDiagnoses, "diagnóstico", "diagnósticos")
-                    : "",
-                  // Una caries de varias caras es un hallazgo.
-                  findingGroups > 0
-                    ? counted(
-                        findingGroups,
-                        "hallazgo en el odontograma",
-                        "hallazgos en el odontograma",
-                      )
-                    : "",
-                  detail.documents.length > 0
-                    ? counted(detail.documents.length, "documento", "documentos")
-                    : "",
-                  pendingTreatments > 0
-                    ? `${counted(pendingTreatments, "tratamiento", "tratamientos")} por ejecutar`
-                    : "",
-                ].filter(Boolean)
-                return done.length > 0 ? (
-                  <p className="text-muted-foreground">{done.join(" · ")}</p>
-                ) : null
-              })()}
-              {canReadFinance ? (
-                accountQuery.isSuccess ? (
-                  <p className="font-medium">
-                    {chargeableText
-                      ? `Cargos nuevos al cerrar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
-                      : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."}
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground">
-                    {accountQuery.isError
-                      ? "No se pudo consultar la cuenta para estimar los cargos."
-                      : "Consultando cargos existentes…"}
-                  </p>
-                )
-              ) : (
-                <p className="text-muted-foreground">
-                  Los actos con precio generan sus cargos al cerrar; caja los gestiona.
-                </p>
-              )}
-            </div>
+            {canReadFinance ? (
+              <p className={accountQuery.isSuccess ? "text-sm font-medium" : "text-sm text-muted-foreground"}>
+                {accountQuery.isSuccess
+                  ? chargeableText
+                    ? `Cargos nuevos al cerrar: ${chargeableText}. El cierre vuelve a comprobar lo ya cobrado.`
+                    : "Sin cargos nuevos: actos sin costo o tratamientos ya cargados."
+                  : accountQuery.isError
+                    ? "No se pudo consultar la cuenta para estimar los cargos."
+                    : "Consultando cargos existentes…"}
+              </p>
+            ) : null}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
               {/* Sin nada registrado se descarta de un toque, sin motivo ni rastro en la Historia (10 nov). */}
               {openRef.data?.data?.id === encounterId &&
@@ -2926,20 +2861,20 @@ export function EncounterEditor({
         >
           <span id={`${uid}-footer`} className="min-w-0 flex-1 text-sm text-muted-foreground">
             {footerMissing.length > 0 ? (
-              // Cada cosa que falta lleva a su bloque, como «Registrar» en el cierre.
+              // Cada cosa que falta lleva a su lugar: el campo, el perfil o la firma en la tablet.
               <>
-                {footerMissing.length === 1 ? "Falta 1" : `Faltan ${footerMissing.length}`} para cerrar:{" "}
-                {footerMissing.map((requirement, index) => (
-                  <span key={requirement}>
+                {footerMissing.length === 1 ? "Falta 1" : `Faltan ${footerMissing.length}`}:{" "}
+                {footerMissing.map((item, index) => (
+                  <span key={item.key}>
                     {index === 0 ? "" : index === footerMissing.length - 1 ? " y " : ", "}
                     <Button
                       type="button"
                       variant="link"
                       className="h-auto p-0 align-baseline text-sm"
-                      disabled={!attending}
-                      onClick={() => requireBlock(requirement)}
+                      disabled={!attending || locked}
+                      onClick={item.go}
                     >
-                      {CLOSING_SHORT[requirement]}
+                      {item.words}
                     </Button>
                   </span>
                 ))}

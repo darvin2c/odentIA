@@ -1,10 +1,13 @@
 /**
  * «Hoy viene a…» (QA de la atención del 8 nov, propuesta 4.1): arriba de la
  * atención, con o sin cita, lo que el servidor sabe que la persona viene a
- * hacer: lo que trae su cita, sus tratamientos aceptados por hacer con la
- * sesión que le toca y los controles por cumplir. Un toque prepara la atención
- * (motivo, diagnóstico que sigue, el tratamiento en «Realizado hoy»); nada se da
- * por hecho: la sesión cuenta al registrarla y el control se cumple al firmar.
+ * hacer de antes: lo que trae su cita, sus tratamientos aceptados por hacer con
+ * la sesión que le toca y los controles por cumplir. Lo indicado en esta misma
+ * atención no se repite aquí: su «Hacerla hoy» está en su fila del Plan. Un
+ * toque prepara la atención (motivo, diagnóstico que sigue, el tratamiento en
+ * «Realizado hoy»); nada se da por hecho: la sesión cuenta al registrarla y el
+ * control se cumple al firmar. Sin nada de antes no hay tarjeta (estándar E2):
+ * «Es una urgencia» va en el título de Consulta.
  */
 import { gapWords, visitReasonForEncounter } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
@@ -94,7 +97,6 @@ export function EncounterVisitStrip({
   bookedReason,
   onUseReason,
   reasonEmpty,
-  onUrgency,
   disabled,
   beforeWrite,
   onChanged,
@@ -129,8 +131,6 @@ export function EncounterVisitStrip({
   bookedReason?: string | null
   onUseReason: () => void
   reasonEmpty: boolean
-  /** «Es una urgencia»: deja el motivo listo para escribir. */
-  onUrgency: () => void
   disabled: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -164,32 +164,22 @@ export function EncounterVisitStrip({
     }
   }
 
+  // Sin nada de antes, ni una cita ya reservada que decir, no hay tarjeta: el motivo se escribe en Consulta.
+  if (nothing && !visit?.booked) return null
+
   return (
     <section
       aria-labelledby={`${encounterId}-visit`}
       className="flex flex-col gap-1 rounded-sm bg-card px-6 py-4"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id={`${encounterId}-visit`} className="font-heading text-base font-medium">
-          {past ? "Vino a…" : "Hoy viene a…"}
-        </h2>
-        {reasonEmpty ? (
-          <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={onUrgency}>
-            Es una urgencia
-          </Button>
-        ) : null}
-      </div>
+      <h2 id={`${encounterId}-visit`} className="font-heading text-base font-medium">
+        {past ? "Vino a…" : "Hoy viene a…"}
+      </h2>
       {visit?.booked ? (
         // Sin cita hoy, pero ya tiene una reservada: se dice, para no reservarle otra sin saberlo (QA del 9 nov).
         <p className="text-sm text-muted-foreground">{visitBookedWords(visit.booked, activeOrgLocale(), activeOrgTimeZone())}</p>
       ) : null}
-      {nothing ? (
-        <p className="text-sm text-muted-foreground">
-          {visit?.booked
-            ? "Sin tratamiento por hacer ni control por cumplir. Escribe el motivo abajo."
-            : "Sin cita, tratamiento por hacer ni control por cumplir. Escribe el motivo abajo."}
-        </p>
-      ) : (
+      {nothing ? null : (
         <ul className="flex flex-col divide-y text-sm">
           {usedReason ? (
             <li className={row}>
@@ -385,11 +375,8 @@ export function EncounterVisitStrip({
           ))}
         </ul>
       )}
-      {!nothing ? (
-        <p className="text-xs text-muted-foreground">
-          Elegir no lo da por hecho: la sesión cuenta cuando la registras y el control, al firmar.
-        </p>
-      ) : null}
+      {/* Qué hace elegir (la sesión cuenta al registrarla; el control, al firmar) lo dicen sus
+          botones y la Ayuda: con contenido, el bloque no repite su regla (estándar E2). */}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}

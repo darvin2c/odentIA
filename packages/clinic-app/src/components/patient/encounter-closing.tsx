@@ -1385,7 +1385,7 @@ export function EncounterClosingDialog({
   onKeepDiagnosis?: (diagnosisIds: string[], keep: boolean) => void
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
-  /** «¿Cuándo vuelve?», justo encima de firmar. */
+  /** «¿Cuándo vuelve?», con lo que se decide, después de «¿Terminaste?». */
   nextVisit?: React.ReactNode
   /**
    * Si algo de hoy puede cargarse a su cuenta al firmar (un procedimiento con precio o de su
@@ -1442,13 +1442,9 @@ export function EncounterClosingDialog({
           </DialogHeader>
           <ScrollArea className="-mx-6 flex min-h-0 flex-1 flex-col">
             <div className="flex flex-col gap-4 px-6 text-sm">
-              {registration ?? (
-                <div className="rounded-lg border p-3">
-                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
-                  {signatureHint}
-                </div>
-              )}
+              {/* Primero lo que se decide (P10): lo que falta, la colegiatura si no la tiene, el
+                  consentimiento, «¿Terminaste?» y «¿Cuándo vuelve?»; después lo que solo se lee. */}
+              {registration}
               {toRegister.length > 0 ? (
                 <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
                   {toRegister.map((requirement) => (
@@ -1470,44 +1466,6 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
-              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
-              {closing?.sessions && onSessionAnswer ? (
-                <ClosingSessions
-                  sessions={closing.sessions}
-                  labelOf={sessionLabel}
-                  answers={sessionAnswers}
-                  onAnswer={onSessionAnswer}
-                  disabled={busy}
-                  resolvable={closing.resolvable}
-                  keepDiagnoses={keepDiagnoses}
-                  onKeepDiagnosis={onKeepDiagnosis}
-                />
-              ) : null}
-              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
-              {materials && materials.items.length > 0 ? (
-                <p className="rounded-lg border p-3">
-                  <span className="font-medium">Materiales</span>
-                  {" · "}
-                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
-                </p>
-              ) : null}
-              <AnesthesiaHealthLine
-                anesthetics={closing?.health?.anesthetics ?? []}
-                gaps={healthGaps}
-                risks={closing?.health?.risks ?? []}
-                onComplete={onCompleteHealth}
-                disabled={busy}
-              />
-              {dictated}
-              <FormsAtSign
-                id={`${ids}-forms`}
-                forms={signForms}
-                finishing={finishingForms ?? []}
-                onComplete={onCompleteForm}
-                proposals={formProposals}
-                {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
-                disabled={busy}
-              />
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (
@@ -1536,6 +1494,45 @@ export function EncounterClosingDialog({
                 )
               })}
               {needsReason ? <ConsentSkipReason form={form} disabled={busy} /> : null}
+              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
+              {closing?.sessions && onSessionAnswer ? (
+                <ClosingSessions
+                  sessions={closing.sessions}
+                  labelOf={sessionLabel}
+                  answers={sessionAnswers}
+                  onAnswer={onSessionAnswer}
+                  disabled={busy}
+                  resolvable={closing.resolvable}
+                  keepDiagnoses={keepDiagnoses}
+                  onKeepDiagnosis={onKeepDiagnosis}
+                />
+              ) : null}
+              {nextVisit}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {materials && materials.items.length > 0 ? (
+                <p className="rounded-lg border p-3">
+                  <span className="font-medium">Materiales</span>
+                  {" · "}
+                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
+                </p>
+              ) : null}
+              <AnesthesiaHealthLine
+                anesthetics={closing?.health?.anesthetics ?? []}
+                gaps={healthGaps}
+                risks={closing?.health?.risks ?? []}
+                onComplete={onCompleteHealth}
+                disabled={busy}
+              />
+              {dictated}
+              <FormsAtSign
+                id={`${ids}-forms`}
+                forms={signForms}
+                finishing={finishingForms ?? []}
+                onComplete={onCompleteForm}
+                proposals={formProposals}
+                {...(onFinishFormToggle ? { onFinishToggle: onFinishFormToggle } : {})}
+                disabled={busy}
+              />
               <form.AppField name="endTime">
                 {(field) => (
                   <field.Control label="Hora de fin">
@@ -1559,6 +1556,14 @@ export function EncounterClosingDialog({
                 )}
               </form.AppField>
               {children}
+              {/* Leído, no decidido: de quién es la firma (sin colegiatura, sus campos van arriba). */}
+              {registration ? null : (
+                <div className="rounded-lg border p-3">
+                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+                  {signatureHint}
+                </div>
+              )}
               {blockedReason ? (
                 <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
                   {blockedReason}
@@ -1574,7 +1579,6 @@ export function EncounterClosingDialog({
                       : "Después: lo que se cargó hoy a su cuenta, para avisar a caja."}
                 </p>
               ) : null}
-              {nextVisit}
             </div>
           </ScrollArea>
           {formError ? (

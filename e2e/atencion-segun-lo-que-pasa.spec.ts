@@ -57,6 +57,6 @@ test("sesión desde su cita: motivo y diagnóstico propuestos, lo que falta una 
   await page.getByLabel("Evolución", { exact: true }).fill("Se trabajó la 36; sin molestias.")
   await views("evolucion-en-linea")
   // Guardado: lo que falta ya no incluye la evolución.
-  await expect(page.getByText(/Falta 1 para cerrar/)).toBeVisible()
+  await expect(page.getByText(/^Falta 1: /)).toBeVisible()
   await shot("sesion-casi-lista")
 })

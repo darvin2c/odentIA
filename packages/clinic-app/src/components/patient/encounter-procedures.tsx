@@ -165,6 +165,28 @@ function earlierWords(earlier: EarlierTreatment): string {
 const OTHER_SERVICE = "Otro servicio del catálogo"
 
 /**
+ * Lo que dice «Registrar procedimiento» del consentimiento de lo elegido, antes de registrarlo:
+ * «Pide el consentimiento «Tratamiento de conductos»:» con «Preparar y firmar». Null si no pide
+ * ninguno o ya está firmado.
+ */
+export function consentAhead(
+  item: Pick<PlanItem, "consent" | "consentMissing">,
+): { words: string; action: string } | null {
+  const titles = (item.consentMissing ?? []).map((title) => `«${title}»`)
+  if (item.consent === "falta")
+    return {
+      words:
+        titles.length === 0
+          ? "Pide su consentimiento:"
+          : `Pide ${titles.length === 1 ? "el consentimiento" : "los consentimientos"} ${titles.join(" y ")}:`,
+      action: "Preparar y firmar",
+    }
+  if (item.consent === "sin_firmar") return { words: "Su consentimiento está listo y falta firmarlo:", action: "Firmar ahora" }
+  if (item.consent === "por_confirmar") return { words: "Firmó su consentimiento en su enlace:", action: "Confirmar" }
+  return null
+}
+
+/**
  * Qué trae puesto «Registrar lo de hoy» y en qué orden se ofrece lo del plan
  * (segundo repaso del 9 nov: arrancaba en el catálogo con la endodoncia recién
  * indicada). Primero lo que trajo esta atención (su cita, «Continuar hoy»),
@@ -242,9 +264,15 @@ export function EncounterProcedures({
   autoOpen = false,
   prefillPlanItemId = null,
   onPrefillUsed,
+  onConsentFirst,
 }: {
   patientId: string
   detail: EncounterDetail
+  /**
+   * «Preparar y firmar» el consentimiento de lo que se va a registrar, antes de hacerlo: la
+   * atención lo trae a hoy, lo prepara y abre la firma. Avisa y no frena (P11).
+   */
+  onConsentFirst?: (planItemId: string) => void
   disabled?: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -263,6 +291,9 @@ export function EncounterProcedures({
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
   /** Lo que vino puesto al abrir: el cajón lo dice mientras siga elegido. */
   const [presetId, setPresetId] = useState<string | null>(null)
+  // «Otro servicio del catálogo» elegido a propósito: sin elegir nada, con varios tratamientos,
+  // la lista dice «Elige qué hiciste» y no da por hecho el catálogo (P10, C25).
+  const [otherPicked, setOtherPicked] = useState(false)
 
   const encounter = detail.encounter
   // Solo el borrador admite registrar o anular actos.
@@ -453,6 +484,7 @@ export function EncounterProcedures({
 
   const onPlanChange = (value: string | null) => {
     const next = value ?? NO_PLAN
+    setOtherPicked(next === NO_PLAN)
     if (next === NO_PLAN) {
       form.setFieldValue("planItemId", "")
       return
@@ -483,6 +515,7 @@ export function EncounterProcedures({
     if (surface.isSubmitting) return
     form.reset()
     setPresetId(null)
+    setOtherPicked(false)
     setOpen(false)
   }
 
@@ -536,7 +569,10 @@ export function EncounterProcedures({
                           )
                         ) : null}
                         <time dateTime={proc.createdAt}>{formatDateTime(proc.createdAt)}</time>
-                        {proc.priceCents != null && proc.currency ? (
+                        {/* Lo de un tratamiento del plan se cobra con su presupuesto (una vez, o por
+                            sesión): la fila no dice un precio que quizá ya se cobró en una sesión
+                            anterior (P10, C18). Lo que se cargará lo dicen el cierre y la caja. */}
+                        {proc.planItemId ? null : proc.priceCents != null && proc.currency ? (
                           <span className="font-medium text-foreground">
                             {orgLocale ? formatMoney(proc.priceCents, proc.currency, orgLocale) : "…"}
                           </span>
@@ -638,7 +674,13 @@ export function EncounterProcedures({
                             </div>
                           ) : (
                             <Select
-                              value={field.state.value === "" ? NO_PLAN : field.state.value}
+                              value={
+                                field.state.value !== ""
+                                  ? field.state.value
+                                  : otherPicked || options.length === 0
+                                    ? NO_PLAN
+                                    : null
+                              }
                               items={planItems}
                               onValueChange={onPlanChange}
                               disabled={busy}
@@ -651,7 +693,7 @@ export function EncounterProcedures({
                                     : "Tratamiento indicado"
                                 }
                               >
-                                <SelectValue />
+                                <SelectValue placeholder="Elige qué hiciste" />
                               </SelectTrigger>
                               <SelectContent>
                                 {options.map((item) => (
@@ -669,6 +711,25 @@ export function EncounterProcedures({
                               del catálogo.
                             </p>
                           )}
+                          {/* El consentimiento es previo al acto (Ley 29414): si lo elegido lo pide y no
+                              está firmado, se dice antes de registrar, con cómo firmarlo ahí mismo.
+                              No frena: se puede registrar igual (P11, la voz clínica). */}
+                          {selectedPlan && consentAhead(selectedPlan) ? (
+                            <p role="status" className="flex flex-wrap items-baseline gap-x-2 text-sm text-warning">
+                              <span>{consentAhead(selectedPlan)?.words}</span>
+                              {onConsentFirst ? (
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  className="h-auto p-0 align-baseline text-sm"
+                                  disabled={busy}
+                                  onClick={() => onConsentFirst(selectedPlan.id)}
+                                >
+                                  {consentAhead(selectedPlan)?.action}
+                                </Button>
+                              ) : null}
+                            </p>
+                          ) : null}
                           {selectedPlan && (
                             <p className="text-xs text-muted-foreground">
                               Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta

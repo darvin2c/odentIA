@@ -100,7 +100,7 @@ export const CLINICA: readonly HelpMore[] = [
       {
         id: "pacientes-dictado-ficha",
         q: "¿Clío puede llenar la ficha de consulta mientras dicto?",
-        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención», u «Otra ficha…» si no se te ofrece) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia solo: si dictas otra cosa para una pregunta ya respondida, Clío lo propone en esa pregunta con «Cambiar a…», fuera de «Confirmar las N». Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar», en el bloque de su ficha (lo que cambia lo ya escrito viene desmarcado). Dicta, confirma y llena la ficha quien lleva la atención o toma el relevo.",
+        a: "Propone, no llena sola. Empieza la ficha antes de dictar («Empezar la de hoy» en «Fichas para esta atención» o, si no se te ofrece, «Nuevo» › «Ficha» en Documentos) y dicta como siempre («overjet de seis milímetros, clase uno molar izquierda»). Clío propone respuestas solo en las preguntas de sí o no, de una o varias opciones, de número, de escala o de pieza, y solo con lo que dijiste. Lee las dos fichas que tocaste último y, además, la que tengas abierta; un dato que preguntan dos fichas (el ceod) lo propone en las dos. En la ficha, debajo de cada pregunta, sale «Clío:» con lo que dijiste, «Confirmar» y la ×. Arriba, con dos o más, «Confirmar las N» las confirma juntas; las que dicen «Clío no la llenó» las eliges tú. La barra del dictado no las confirma: te lleva a la ficha. Nada entra hasta que lo confirmas, y lo que ya escribiste no se cambia solo: si dictas otra cosa para una pregunta ya respondida, Clío lo propone en esa pregunta con «Cambiar a…», fuera de «Confirmar las N». Lo confirmado dice «Clío · confirmó…» en la ficha y en la Historia. Si firmas sin decidir, lo propuesto viene marcado en «Finalizar y firmar», en el bloque de su ficha (lo que cambia lo ya escrito viene desmarcado). Dicta, confirma y llena la ficha quien lleva la atención o toma el relevo.",
         forms: ["clio puede llenar la ficha", "dictar la ficha de ortodoncia", "llenar la ficha con el dictado", "que significa clio propone en la ficha"],
         area: "clinica",
         needs: "clinical.write",
@@ -238,6 +238,33 @@ export const CLINICA: readonly HelpMore[] = [
 
       // ---------- Odontograma ----------
       {
+        id: "pacientes-odontograma-caries-tablet",
+        q: "¿Cómo registro una caries en la tablet?",
+        a: "Dentro de la atención, toca la pieza: arriba está «¿Qué observas?» con el buscador; escribe «caries» y elígela. Toca las caras en el dibujo de la pieza (o márcalas en «Superficies comprometidas»), elige la profundidad con un toque y, si pones el diagnóstico, su tipo, «Presuntivo» o «Definitivo». «Registrar hallazgo» la deja en el odontograma. Lo que ya tiene la pieza queda abajo, plegado en una línea que dice cuántos hallazgos y procedimientos tiene: tócala para verlo. Con la pieza abierta, «Indicar un tratamiento» empieza con esa pieza y su hallazgo.",
+        forms: ["registrar una caries en el ipad", "marcar caries en la tablet", "como pongo la profundidad de la caries", "donde esta la historia de la pieza"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
+        id: "pacientes-odontograma-siglas-caries",
+        q: "¿Qué es CDP?",
+        a: "Es una de las siglas de la profundidad de la caries en el odontograma de la norma (NTS 188): MB, mancha blanca; CE, lesión de caries a nivel del esmalte; CD, a nivel de la dentina; y CDP, a nivel de la dentina con compromiso de la pulpa. Al elegir una, debajo se lee su nombre entero. Con CDP aparecen además, para elegir con un toque, los diagnósticos pulpares (pulpitis, necrosis pulpar o periodontitis apical), que se deciden por la vitalidad y los síntomas. En clínicas fuera de Perú la profundidad se elige con su nombre entero.",
+        forms: ["que significa cdp", "que es ce cd mb en el odontograma", "siglas de la caries", "que quiere decir cdp en la caries"],
+        area: "clinica",
+        needs: "clinical.read",
+        own: true,
+      },
+      {
+        id: "pacientes-odontograma-pieza-se-cierra",
+        q: "¿Por qué se cerró la pieza al abrir la respuesta?",
+        a: "La pieza abierta al lado del odontograma nunca salta encima como ventana. Si abres algo que necesita ese espacio («Anotar su respuesta», «Registrar lo de hoy» o el dictado), la pieza se cierra y queda marcada en el arco: tócala para volver a abrirla. Si tenías un hallazgo a medias, antes te pregunta: «Seguir aquí» la deja abierta y «Descartar y salir» la cierra sin registrarlo. Mientras atiendes, el menú de la izquierda queda en íconos para dejarle sitio a la pieza; Ctrl+B lo abre y, al salir de la atención, vuelve como lo tenías. Escape cierra la pieza y el foco vuelve a ella en el arco.",
+        forms: ["se me cerro la pieza", "desaparecio el panel de la pieza", "la pieza se abre encima como ventana", "por que el menu se achico en la atencion"],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-odontograma-denticion-varias-piezas",
         q: "¿Cómo veo los dientes de leche o registro lo mismo en varias piezas?",
         a: "Arriba del odontograma eliges «Permanente (32)», «Mixta» o «Temporal (20)»; viene sugerida por la edad del paciente. Para registrar lo mismo en varias piezas, dentro de la atención, «Seleccionar varias» y tócalas, o usa «Arcada superior» o «Arcada inferior».",
@@ -304,6 +331,20 @@ export const CLINICA: readonly HelpMore[] = [
         forms: ["revocar un consentimiento", "genere un consentimiento equivocado", "imprimir el consentimiento para firmar a mano"],
         area: "clinica",
         needs: "clinical.write",
+      },
+      {
+        id: "pacientes-ficha-odontoestomatologica-cuando",
+        q: "¿Cuándo lleno la ficha odontoestomatológica?",
+        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar sin ella.",
+        forms: [
+          "por que no me ofrece la ficha odontoestomatologica",
+          "cuando se llena la ficha odontoestomatologica",
+          "la ficha odontoestomatologica sale en cada sesion",
+          "ficha de la norma en la urgencia",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
       },
       {
         id: "pacientes-formulario-llenar-finalizar",

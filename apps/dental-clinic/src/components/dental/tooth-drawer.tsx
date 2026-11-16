@@ -11,7 +11,6 @@ import {
   type PatientDocument,
   type PlanItem,
   planStatusLabel,
-  toothTypeLabel,
 } from "@odentia/clinic-app/lib/patients"
 import { fetchService, type ServiceCatalogItem } from "@odentia/clinic-app/lib/services"
 import { groupFindings } from "@odentia/clinic-app/lib/site-findings"
@@ -30,12 +29,12 @@ import {
   surfacesForTooth,
   toothGroupOf,
   toothNameOf,
-  toothTypeOf,
 } from "@odentia/dental"
 import { Badge, Button, Checkbox, Field, FieldLabel } from "@odentia/ui"
 import {
   FormDrawer,
   FormPanel,
+  RadioChips,
   submitErrorMessage,
   useAppForm,
   useFormSurface,
@@ -48,7 +47,7 @@ import type { OdontogramEntry } from "../../lib/dental/odontogram"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
 import { ToothFitNotice } from "./tooth-fit-notice"
-import { ToothHistory } from "./tooth-history"
+import { ToothHistory, toothHistoryWords, useToothHistory } from "./tooth-history"
 import { ToothSVG } from "./tooth-svg"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
@@ -815,8 +814,11 @@ export function ToothDrawer({
       <Badge variant="outline">Solo lectura · estado histórico</Badge>
     </div>
   ) : null
+  // Lo que se viene a hacer va primero («¿Qué observas?»); la historia de cada pieza, debajo y
+  // plegada en una línea («Historia de la 46 · 1 hallazgo · 1 procedimiento»). Se abre sola si
+  // solo se consulta, o si tiene algo registrado en esta atención que se pueda anular.
   const toothContexts = (
-    <div className="flex flex-col gap-3 pt-2">
+    <div className="flex flex-col gap-3">
       {teeth.map((toothNumber) => (
         <ToothContext
           key={toothNumber}
@@ -829,7 +831,9 @@ export function ToothDrawer({
           encounterId={encounterId}
           canMutate={canMutate && !disabled && !busy}
           voidPending={voidSurface.isSubmitting}
-          defaultOpen
+          defaultOpen={
+            !canMutate || entriesOf(toothNumber).some((entry) => !!encounterId && entry.encounterId === encounterId)
+          }
           onVoid={(ids, label) => {
             voidForm.reset(EMPTY_VOID)
             setVoiding({ ids, label })
@@ -838,10 +842,6 @@ export function ToothDrawer({
       ))}
     </div>
   )
-  // Al elegir una sola pieza, primero su estado (hallazgos, plan, imágenes,
-  // historial) y después el registro. Mientras se edita, el contexto baja y se
-  // pliega para no competir con el formulario.
-  const contextFirst = !multi && !draftDirty && (!canMutate || choosingFinding)
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -849,7 +849,6 @@ export function ToothDrawer({
           {savedMessage}
         </p>
       )}
-      {contextFirst ? toothContexts : null}
 
       {!canMutate ? (
         historical || readOnly || !canWrite ? (
@@ -866,7 +865,9 @@ export function ToothDrawer({
           </div>
         )
       ) : choosingFinding ? (
-        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} />
+        // Al lado de la página, el foco va al buscador al abrir la pieza (con Enter, sin 4 Tab de por
+        // medio). En el cajón de la tablet no: abriría el teclado encima de la pieza.
+        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} autoFocus={inline} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <section aria-labelledby={`${uid}-hallazgo`} className="flex flex-col gap-4 sm:col-span-2">
@@ -892,36 +893,65 @@ export function ToothDrawer({
             {previewContent}
           </section>
 
+          {/* Pocas opciones cortas, todas a la vista y de un toque (estándar E4): la sigla en la
+              pastilla y, debajo de la elegida, su nombre entero: «CDP» no lo entiende todo el que empieza. */}
           {def?.variants?.length ? (
             <form.AppField name="variant">
-              {(field) => (
-                <field.SelectField
-                  id={`${uid}-variant`}
-                  label={variantFieldLabel(official, condition)}
-                  options={(def.variants ?? []).map((v) => ({
-                    value: v.value,
-                    label: official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label,
-                  }))}
-                  placeholder="Elige…"
-                  disabled={fieldDisabled}
-                  // La profundidad elegida se lee entera («…de la dentina / compromiso de la pulpa»).
-                  triggerClassName="h-auto min-h-11 whitespace-normal text-left *:data-[slot=select-value]:line-clamp-3"
-                />
-              )}
+              {(field) => {
+                const legend = variantFieldLabel(official, condition)
+                const chosen = def.variants?.find((v) => v.value === field.state.value)
+                const sigla = (v: { label: string; abbreviation: string }) =>
+                  official && v.abbreviation ? v.abbreviation : v.label
+                const longName = chosen && sigla(chosen) !== chosen.label ? chosen.label : null
+                return (
+                  <field.Group legend={legend} className="flex flex-col gap-2 sm:col-span-2">
+                    {(control) => (
+                      <>
+                        <RadioChips
+                          id={control.id}
+                          aria-label={legend}
+                          aria-describedby={
+                            [control.describedBy, longName ? `${uid}-variant-long` : null].filter(Boolean).join(" ") ||
+                            undefined
+                          }
+                          invalid={control.invalid}
+                          disabled={fieldDisabled}
+                          value={field.state.value || null}
+                          options={(def.variants ?? []).map((v) => ({ value: v.value, label: sigla(v) }))}
+                          onChange={(value) => field.handleChange(value)}
+                          // Sin norma que la pida, la variante se puede dejar sin responder.
+                          onClear={official?.strictVariants ? undefined : () => field.handleChange("")}
+                        />
+                        {longName ? (
+                          <p id={`${uid}-variant-long`} className="text-xs text-muted-foreground">
+                            {longName}
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </field.Group>
+                )
+              }}
             </form.AppField>
           ) : null}
 
           {def?.color === "quality" ? (
             <form.AppField name="quality">
               {(field) => (
-                <field.SelectField
-                  id={`${uid}-quality`}
-                  label="Estado"
-                  options={QUALITY_OPTIONS}
-                  placeholder="Elige el estado…"
-                  disabled={fieldDisabled}
-                  triggerClassName="min-h-11"
-                />
+                <field.Group legend="Estado" className="flex flex-col gap-2">
+                  {(control) => (
+                    <RadioChips
+                      id={control.id}
+                      aria-label="Estado"
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      disabled={fieldDisabled}
+                      value={field.state.value || null}
+                      options={QUALITY_OPTIONS}
+                      onChange={(value) => field.handleChange(value)}
+                    />
+                  )}
+                </field.Group>
               )}
             </form.AppField>
           ) : null}
@@ -929,14 +959,20 @@ export function ToothDrawer({
           {showDirection && (
             <form.AppField name="direction">
               {(field) => (
-                <field.SelectField
-                  id={`${uid}-direction`}
-                  label="Dirección de rotación"
-                  options={DIRECTION_OPTIONS}
-                  placeholder="Selecciona la dirección…"
-                  disabled={fieldDisabled}
-                  triggerClassName="min-h-11"
-                />
+                <field.Group legend="Dirección de rotación" className="flex flex-col gap-2">
+                  {(control) => (
+                    <RadioChips
+                      id={control.id}
+                      aria-label="Dirección de rotación"
+                      aria-describedby={control.describedBy}
+                      invalid={control.invalid}
+                      disabled={fieldDisabled}
+                      value={field.state.value || null}
+                      options={DIRECTION_OPTIONS}
+                      onChange={(value) => field.handleChange(value)}
+                    />
+                  )}
+                </field.Group>
               )}
             </form.AppField>
           )}
@@ -1164,14 +1200,20 @@ export function ToothDrawer({
               </form.AppField>
               <form.AppField name="diagnosisType">
                 {(field) => (
-                  <field.SelectField
-                    id={`${uid}-dx-type`}
-                    label="Tipo"
-                    options={DIAGNOSIS_TYPE_OPTIONS}
-                    placeholder="Elige…"
-                    disabled={fieldDisabled || !draft.diagnosisCode}
-                    triggerClassName="min-h-11"
-                  />
+                  <field.Group legend="Tipo" className="flex min-w-0 flex-col gap-2">
+                    {(control) => (
+                      <RadioChips
+                        id={control.id}
+                        aria-label="Tipo del diagnóstico"
+                        aria-describedby={control.describedBy}
+                        invalid={control.invalid}
+                        disabled={fieldDisabled || !draft.diagnosisCode}
+                        value={field.state.value || null}
+                        options={DIAGNOSIS_TYPE_OPTIONS}
+                        onChange={(value) => field.handleChange(value)}
+                      />
+                    )}
+                  </field.Group>
                 )}
               </form.AppField>
             </div>
@@ -1345,14 +1387,7 @@ export function ToothDrawer({
           </form.AppField>
         </div>
       )}
-      {contextFirst ? null : (
-        <details>
-          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-            Estado y contexto de las piezas
-          </summary>
-          {toothContexts}
-        </details>
-      )}
+      {toothContexts}
     </div>
   )
   const hideSubmit = !canMutate || teeth.length === 0 || choosingFinding
@@ -1473,13 +1508,13 @@ function ToothContext({
     (d) => d.category !== "radiografia" && d.category !== "foto_clinica",
   )
 
+  const historyQuery = useToothHistory(patientId, toothNumber)
+
   return (
     <details className="flex flex-col gap-2 rounded-lg border px-4 py-3" open={defaultOpen}>
-      <summary className="cursor-pointer text-sm font-semibold">
-        Pieza {toothNumber} — {toothNameOf(toothNumber)}{" "}
-        <span className="font-normal text-muted-foreground">
-          ({toothTypeLabel(toothTypeOf(toothNumber))})
-        </span>
+      {/* El nombre de la pieza ya está en el título del panel: aquí, cuánto tiene. */}
+      <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
+        {toothHistoryWords(toothNumber, historyQuery.data?.data)}
       </summary>
 
       <div className="flex flex-col gap-3 pt-2">

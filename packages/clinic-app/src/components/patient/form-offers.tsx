@@ -171,8 +171,8 @@ export function FormOffersBox({
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const list = offers.data?.data ?? []
-  // Si no se pudo leer, igual se ofrece elegir una: «Otra ficha…» está siempre.
-  const view = offersView(offers.data?.data ?? (offers.isError ? [] : undefined), canStart)
+  // Sin ninguna ofrecida (o si no se pudo leer), nada: «Otra ficha…» sigue en Documentos › Nuevo.
+  const view = offersView(offers.data?.data)
   if (view === "nada") return null
 
   const act = (offer: FormOffer) => {
@@ -239,19 +239,6 @@ export function FormOffersBox({
       />
     </>
   )
-
-  if (view === "solo-otra") {
-    return (
-      <>
-        {/* Una línea, pero en su tarjeta como las demás partes de la atención, con «Otra ficha…» a la derecha. */}
-        <p className="flex flex-wrap items-center justify-between gap-2 rounded-sm bg-card px-6 py-2 text-sm text-muted-foreground max-sm:px-4">
-          Ninguna ficha aparece sola en esta atención.
-          {other}
-        </p>
-        {drawers}
-      </>
-    )
-  }
 
   return (
     // Como las demás partes de la atención («Hoy viene a…», «Consulta»): su título y, a la derecha, lo que agrega.

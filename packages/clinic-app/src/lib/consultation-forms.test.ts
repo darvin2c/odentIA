@@ -75,13 +75,11 @@ describe("fichas ofrecidas en la atención", () => {
     expect(offerWhyWords({ why: "empezada", specialtyName: "", underYears: null })).toBe("La empezaste en esta atención")
   })
 
-  it("«Otra ficha…» está siempre: sin ninguna ofrecida queda sola, en una línea", () => {
-    expect(offersView([{ today: null }], true)).toBe("lista")
-    expect(offersView([], true)).toBe("solo-otra")
-    // Quien no puede empezar una no ve una salida que no puede usar.
-    expect(offersView([], false)).toBe("nada")
+  it("sin ninguna ofrecida no hay tarjeta: «Otra ficha…» sigue en Documentos › Nuevo", () => {
+    expect(offersView([{ today: null }])).toBe("lista")
+    expect(offersView([])).toBe("nada")
     // Mientras llegan, no se dice nada.
-    expect(offersView(undefined, true)).toBe("nada")
+    expect(offersView(undefined)).toBe("nada")
   })
 
   it("un solo botón: empezar, seguir o ver la de hoy; nunca «pendiente»", () => {

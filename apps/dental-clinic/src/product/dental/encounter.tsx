@@ -2,7 +2,7 @@ import { diagnosisCodeLabel } from "@odentia/clinical"
 import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS, surfaceLabel } from "@odentia/dental"
 import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import {
   EncounterPeriodontalBlock,
   PeriodontalCaptureHost,
@@ -37,11 +37,19 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
   // El periodontograma de esta atención, si se empezó (issue 49).
   const periodontal = useEncounterPeriodontal(ctx.patientId, ctx.encounterId)
   const [capture, setCapture] = useState<string | null>(null)
+  // La pieza elegida en el arco: «Indicar un tratamiento» empieza con ella y su hallazgo de hoy.
+  const [selected, setSelected] = useState<number[]>([])
+  const onSelectionChange = useCallback((teeth: number[]) => setSelected(teeth), [])
   // odentIA siempre los trae en el detalle (`encounterDetailParts`). Una caries de varias caras es un hallazgo.
   const groups = groupFindings(
     (ctx.detail.odontogramEntries ?? []).filter((entry) => !entry.voidedAt),
   )
   const findings = groups.length
+  const [selectedTooth] = selected
+  const siteFinding =
+    selected.length === 1
+      ? [...groups].reverse().find((group) => group.first.toothNumber === selectedTooth)?.first.id ?? null
+      : null
   return {
     blocks: [
       {
@@ -75,6 +83,7 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
                 onPendingChange={ctx.onPendingChange}
                 disabled={ctx.locked}
                 readOnly={!ctx.canWrite}
+                onSelectionChange={onSelectionChange}
               />
             )}
             {/* Lo registrado hoy, debajo del dibujo: lo que se ve en la atención firmada. */}
@@ -117,6 +126,7 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
         ),
       },
     ],
+    site: selected.length > 0 ? { teeth: selected, findingId: siteFinding } : null,
     overlay: capture ? (
       <PeriodontalCaptureHost
         patientId={ctx.patientId}

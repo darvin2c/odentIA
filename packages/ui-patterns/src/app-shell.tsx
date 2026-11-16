@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
   useSidebar,
+  useSidebarOptional,
 } from "@odentia/ui"
 import { ChevronDown, ExternalLink, LogOut } from "lucide-react"
 import { RiSideBarLine } from "@remixicon/react"
@@ -332,6 +333,16 @@ function SidebarShortcut() {
       <Kbd>B</Kbd>
     </KbdGroup>
   )
+}
+
+/**
+ * El menú en íconos mientras la pantalla está montada (la atención: le deja a la página los
+ * 256 px que necesita), sin pisar la preferencia de la persona: al salir vuelve como estaba, y
+ * Ctrl/⌘ + B lo abre como siempre (y entonces queda como ella lo dejó). Fuera del shell, nada.
+ */
+export function useIconSidebarWhileMounted(): void {
+  const hold = useSidebarOptional()?.holdCollapsed
+  React.useEffect(() => hold?.(), [hold])
 }
 
 /**
