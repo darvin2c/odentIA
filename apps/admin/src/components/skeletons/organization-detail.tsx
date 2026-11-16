@@ -236,7 +236,13 @@ export function OrgBillingSkeleton() {
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-base font-medium">Precio y prueba</h2>
-      <TextSm className="w-96" />
+      <div className="flex flex-wrap items-start justify-between gap-2 rounded-lg border p-3">
+        <div className="flex flex-col gap-1">
+          <TextSm className="w-80" />
+          <TextXs className="w-64" />
+        </div>
+        <Skeleton className="h-8 w-28 rounded-3xl" />
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-2 rounded-lg border p-3">
           <p className="text-sm font-medium">Prueba</p>

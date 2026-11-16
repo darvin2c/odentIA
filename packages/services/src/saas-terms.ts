@@ -553,6 +553,18 @@ export interface OrganizationBillingTerms {
   discountEndsAt: Date | null
   /** Entró por invitación con condiciones garantizadas: hasta cuándo. */
   guaranteedUntil: Date | null
+  /**
+   * El plan que rige cuando terminan sus condiciones garantizadas: el de lista de su producto,
+   * el mismo que pone `endFounderGuarantees` al llegar `startsAt`. null si nada cambia solo.
+   */
+  next: {
+    name: string
+    currency: string
+    priceCents: number
+    creditCents: number
+    prices: Record<SaasPriceKey, number | null>
+    startsAt: Date
+  } | null
   spendCapCents: number | null
   billingCycle: "mensual" | "quincenal"
   /** Con ciclo quincenal, a los cuántos días del tramo en curso se cobra (lo que regía al empezar el tramo). */
@@ -585,6 +597,10 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
     .limit(10)
   const terms = await currentSaasTerms(tx, now)
   const periodTerms = sub.currentPeriodStart ? await saasTermsAt(tx, sub.currentPeriodStart) : terms
+  const [list] =
+    sub.guaranteedUntil && sub.guaranteedUntil > now
+      ? await tx.select().from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
+      : []
   return {
     plan: plan
       ? {
@@ -614,6 +630,17 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
     discountBps: activeDiscountBps(sub, now),
     discountEndsAt: activeDiscountBps(sub, now) > 0 ? sub.discountEndsAt : null,
     guaranteedUntil: sub.guaranteedUntil,
+    next:
+      list && sub.guaranteedUntil && list.id !== plan?.id
+        ? {
+            name: list.name,
+            currency: list.currency,
+            priceCents: list.priceCents,
+            creditCents: list.creditCents,
+            prices: planPrices(list),
+            startsAt: sub.guaranteedUntil,
+          }
+        : null,
     spendCapCents: sub.spendCapCents,
     billingCycle: sub.billingCycle as "mensual" | "quincenal",
     halfCycleDays: periodTerms.halfCycleDays,
