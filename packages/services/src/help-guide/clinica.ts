@@ -248,9 +248,9 @@ export const CLINICA: readonly HelpMore[] = [
       },
       {
         id: "pacientes-odontograma-anular-hallazgo",
-        q: "¿Cómo quito un hallazgo que marqué en la pieza equivocada?",
-        a: "Dentro de la misma atención en que lo registraste, toca la pieza y, en «Estado actual», «Anular» junto al hallazgo: pide el motivo y «Confirmar anulación». No se borra: el registro original y el motivo quedan en el historial. En el mismo panel están el «Plan de la pieza», sus «Imágenes asociadas» y la «Historia de la pieza».",
-        forms: ["como borro un hallazgo del odontograma", "marque una caries en la pieza equivocada", "anular un registro del odontograma", "donde veo todo lo de una pieza"],
+        q: "Marqué la pieza equivocada, ¿cómo lo corrijo?",
+        a: "Dentro de la misma atención en que lo registraste, toca la pieza y, en «Estado actual», «Anular» junto al hallazgo. Vienen marcados lo que nació con él: «También anular su diagnóstico de esta atención» y, si lo indicaste ahí, «Y el tratamiento indicado hoy»; desmarca lo que sí era de esa pieza. Escribe el motivo una vez y «Confirmar anulación»: todo se anula junto, y la pieza deja de ser de la atención si ya no le queda nada. Si otro hallazgo usa el mismo diagnóstico (dos caries de la misma pieza), el diagnóstico sigue. Lo que no se deshace se avisa: un consentimiento ya firmado se revoca aparte, y lo hecho hoy se anula en «Hecho hoy». Desde Diagnóstico es igual, al revés: anular el diagnóstico trae su hallazgo. Nada se borra: lo anulado y el motivo quedan en el historial. En el mismo panel están el «Plan de la pieza», sus «Imágenes asociadas» y la «Historia de la pieza».",
+        forms: ["como borro un hallazgo del odontograma", "marque una caries en la pieza equivocada", "anular un registro del odontograma", "donde veo todo lo de una pieza", "como quito un hallazgo que marque en la pieza equivocada", "anule la caries pero el diagnostico sigue", "me equivoque de diente"],
         area: "clinica",
         needs: "clinical.write",
         own: true,

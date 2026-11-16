@@ -57,6 +57,23 @@ export interface EncounterMoment {
   encounterId: string
 }
 
+/**
+ * Un hallazgo del producto registrado en esta atención y vigente, con lo que nació con él
+ * (odentIA: el hallazgo del odontograma, su diagnóstico de la atención y lo indicado desde él).
+ * Lo lee la corrección conjunta (`encounter-correction.ts`).
+ */
+export interface CorrectionFinding {
+  id: string
+  /** Los que se corrigen juntos: las caras de una caries son filas de un solo hallazgo. */
+  group: string
+  /** «Lesión de caries dental · Oclusal · 47». */
+  label: string
+  siteSystem: string | null
+  siteCode: string | null
+  diagnosisIds: string[]
+  planItemIds: string[]
+}
+
 /** Dónde, como lo guardan las tablas comunes: sistema, código y calificadores (bodySite de FHIR). */
 export interface SiteColumns {
   siteSystem: string | null
@@ -542,6 +559,15 @@ export interface ProductHooks {
   ): Promise<ProductParts>
   /** Al anular la atención: lo que el producto registró en ella también se anula. */
   encounterVoided(tx: Db, moment: EncounterMoment & { at: Date; reason: string }): Promise<void>
+  /**
+   * Lo que se corrige junto (QA del 16 nov, E2): los hallazgos vigentes de esta atención con su
+   * diagnóstico y lo indicado desde ellos, y cómo anularlos con su motivo. Sin él (latidIA,
+   * vistIA), anular un diagnóstico no trae nada más.
+   */
+  correction?: {
+    findings(tx: Db, scope: Omit<EncounterMoment, "actorUserId">): Promise<CorrectionFinding[]>
+    voidFindings(tx: Db, moment: EncounterMoment & { ids: string[]; reason: string }): Promise<void>
+  }
   /** Un tratamiento del plan quedó realizado en la atención (odentIA: lo tratado queda dibujado). */
   treatmentDone(tx: Db, moment: EncounterMoment & { planItemId: string }): Promise<void>
   /** Un tratamiento dejó de estar realizado porque se anuló su procedimiento. */

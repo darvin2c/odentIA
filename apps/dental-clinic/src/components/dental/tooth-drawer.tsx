@@ -1,9 +1,11 @@
+import { CorrectionChoices, useCorrection } from "@odentia/clinic-app/components/patient/correction-choices"
 import { DiagnosisPicker } from "@odentia/clinic-app/components/patient/diagnosis-picker"
 import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
 import { ServicePicker } from "@odentia/clinic-app/components/patient/service-picker"
 import { takenAt } from "@odentia/clinic-app/components/patient/document-labels"
 import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
-import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { fetchTreatmentPlans, PLAN_QUERY_KEYS, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
+import { correctApi } from "@odentia/clinic-app/lib/encounters"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
 import { useDiagnosisSystem, useOrgProfile } from "@odentia/clinic-app/lib/org"
 import {
@@ -552,34 +554,37 @@ export function ToothDrawer({
     }
   }
 
+  // Anular el hallazgo trae, marcados, su diagnóstico de esta atención y lo indicado hoy desde
+  // él (QA del 16 nov, E2): un motivo y una sola operación en el servidor, todo o nada.
+  const correction = useCorrection(
+    patientId,
+    encounterId ?? "",
+    voiding && encounterId ? { findingIds: voiding.ids } : null,
+  )
   const voidForm = useAppForm({
     defaultValues: EMPTY_VOID,
     validators: { onSubmit: voidSchema },
     onSubmit: async ({ value }) => {
-      if (!voiding) return
+      if (!voiding || !encounterId) return
       onPendingChange?.(true)
       try {
         await beforeWrite?.()
-        // Una caries de dos caras se anula entera: cada cara es su fila. Una cara ya anulada
-        // (un intento anterior que se cortó a medias) se salta, y el odontograma se vuelve a
-        // pedir aunque una falle: así se ve lo que quedó y se reintenta lo que falta.
+        // Una caries de dos caras se anula entera: cada cara es su fila, y van todas juntas.
         try {
-          for (const id of voiding.ids) {
-            try {
-              await apiFetch(`/api/patients/${patientId}/odontogram/entries/${id}/void`, {
-                method: "POST",
-                body: JSON.stringify({ reason: value.reason.trim() }),
-              })
-            } catch (error) {
-              if (!(error instanceof ApiError && error.shape.code === "ALREADY_VOIDED")) throw error
-            }
-          }
+          await correctApi(patientId, encounterId, {
+            start: { findingIds: voiding.ids },
+            reason: value.reason.trim(),
+            ...correction.marks,
+          })
         } catch (error) {
-          await onChanged()
-          throw error
+          // Ya anulado (un doble clic, otra pestaña): se toma como hecho y se vuelve a leer.
+          if (!(error instanceof ApiError && error.shape.code === "ALREADY_VOIDED")) throw error
         }
         setVoiding(null)
         voidForm.reset(EMPTY_VOID)
+        await Promise.all(
+          PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+        )
         await onChanged()
       } finally {
         onPendingChange?.(false)
@@ -1410,6 +1415,13 @@ export function ToothDrawer({
         cancelLabel="Volver al registro"
         submitDisabled={!canMutate || disabled}
       >
+        <CorrectionChoices
+          preview={correction.preview}
+          marks={correction.marks}
+          onMarksChange={correction.setMarks}
+          disabled={voidSurface.isSubmitting}
+          idPrefix={`${uid}-void`}
+        />
         <voidForm.AppField name="reason">
           {(field) => (
             <field.TextareaField

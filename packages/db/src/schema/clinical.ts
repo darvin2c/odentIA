@@ -1051,6 +1051,12 @@ export const encounterDiagnosis = pgTable(
       name: "encounter_diagnosis_patient_fk",
     }),
     index("encounter_diagnosis_org_patient_idx").on(table.organizationId, table.patientId),
+    // Para que lo que se une a un diagnóstico (el hallazgo de odentIA) sea del mismo paciente y clínica.
+    uniqueIndex("encounter_diagnosis_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     index("encounter_diagnosis_encounter_idx").on(table.organizationId, table.encounterId),
     uniqueIndex("encounter_diagnosis_legacy_note_uidx")
       .on(table.legacyNoteId)

@@ -45,6 +45,7 @@ import {
   getPatient,
   getPatientDocument,
   getPatientHealth,
+  getCorrectionPreview,
   getPatientSummary,
   getPlanNextStep,
   getPlanNextSteps,
@@ -108,6 +109,7 @@ import {
   updatePlanItem,
   updatePlanItemPlanning,
   voidEncounter,
+  voidWithCorrection,
   voidEncounterDiagnosis,
   voidEncounterProcedure,
 } from "@odentia/services"
@@ -1805,6 +1807,50 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       )
       return { ok: true }
     })
+  })
+  // Lo que nace junto se corrige junto: qué cae con un hallazgo o un diagnóstico de esta
+  // atención (su diagnóstico, su hallazgo y lo indicado hoy desde él), sin efectos.
+  const correctionStart = z.union([
+    z.object({ findingIds: z.array(z.uuid()).min(1).max(20) }).strict(),
+    z.object({ diagnosisId: z.uuid() }).strict(),
+  ])
+  app.get("/:id/encounters/:encounterId/correction", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const query = c.req.query()
+    const parsed = correctionStart.safeParse(
+      query.diagnosisId
+        ? { diagnosisId: query.diagnosisId }
+        : { findingIds: (query.findingIds ?? "").split(",").filter(Boolean) },
+    )
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getCorrectionPreview(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
+      ),
+    )
+  })
+  // Y la anulación conjunta: un motivo, una transacción.
+  const correctionInput = z
+    .object({
+      start: correctionStart,
+      reason: z.string().trim().min(1).max(2000),
+      findingIds: z.array(z.uuid()).max(40).default([]),
+      diagnosisIds: z.array(z.uuid()).max(20).default([]),
+      planItemIds: z.array(z.uuid()).max(20).default([]),
+    })
+    .strict()
+  app.post("/:id/encounters/:encounterId/correction", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const parsed = correctionInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { start, ...input } = parsed.data
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        voidWithCorrection(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), start, input, {
+          memberRole,
+        }),
+      ),
+    )
   })
   // «Deshacer» de «Quitar»: el mismo tratamiento vuelve, a su opción y con su precio.
   app.post("/:id/encounters/:encounterId/indicated/:planItemId/restore", async (c) => {

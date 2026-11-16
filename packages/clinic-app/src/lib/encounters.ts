@@ -30,6 +30,11 @@ export interface ClosingCheck {
   /** El periodontograma de la atención, que queda fijo al firmar; null si no tiene. */
   periodontal: ClosingPeriodontal | null
   /**
+   * odentIA: caras con caries y restauración a la vez, alguna registrada hoy. Un aviso suave:
+   * suele ser caries bajo la restauración. Los demás productos no lo traen.
+   */
+  sameFace?: Array<{ toothNumber: number; surface: string }>
+  /**
    * Lo que se descontará al firmar (los materiales de sus servicios), con la
    * sede de la que sale. Informa, no pide confirmar; null si la atención no
    * tiene sede o no hay nada que descontar (ADR 0067).
@@ -510,6 +515,43 @@ export function voidDiagnosisApi(
     `${base(patientId)}/encounters/${encounterId}/diagnoses/${diagnosisId}/void`,
     { reason },
   )
+}
+
+/** Desde dónde se corrige: las filas de un hallazgo o un diagnóstico de esta atención. */
+export type CorrectionStart = { findingIds: string[] } | { diagnosisId: string }
+
+/** Algo que cae con la anulación: marcable si se puede; si no, `note` dice por qué no. */
+export interface CorrectionChoice {
+  ids: string[]
+  label: string
+  offered: boolean
+  note: string | null
+}
+
+/** Lo que cae con un hallazgo o un diagnóstico (lo calcula el servidor; la pantalla solo marca). */
+export interface CorrectionPreview {
+  target: { kind: "finding" | "diagnosis"; ids: string[]; label: string }
+  findings: CorrectionChoice[]
+  diagnoses: CorrectionChoice[]
+  planItems: CorrectionChoice[]
+  notices: string[]
+}
+
+export function fetchCorrectionPreview(patientId: string, encounterId: string, start: CorrectionStart) {
+  const query =
+    "diagnosisId" in start
+      ? `diagnosisId=${encodeURIComponent(start.diagnosisId)}`
+      : `findingIds=${start.findingIds.map(encodeURIComponent).join(",")}`
+  return apiFetch<{ data: CorrectionPreview }>(`${base(patientId)}/encounters/${encounterId}/correction?${query}`)
+}
+
+/** Anula lo pedido y lo marcado, con un solo motivo y en una sola operación. */
+export function correctApi(
+  patientId: string,
+  encounterId: string,
+  body: { start: CorrectionStart; reason: string; findingIds: string[]; diagnosisIds: string[]; planItemIds: string[] },
+) {
+  return post<unknown>(`${base(patientId)}/encounters/${encounterId}/correction`, body)
 }
 
 export function fetchPatientDiagnoses(patientId: string, status?: "activo" | "resuelto") {
