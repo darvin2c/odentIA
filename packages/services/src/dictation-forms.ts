@@ -445,8 +445,7 @@ function namesAnother(question: DictationFormQuestion, text: string): boolean {
   const [head, ...rest] = labelStems(question.label)
   if (!head || rest.length === 0) return false
   // Lo que es de la ficha no nombra otra cosa: «desviada a la izquierda» es de la línea media.
-  const ficha = (question.siblings ?? []).flatMap((item) => [...labelStems(item.label), ...(item.options ?? []).flatMap(stemsOf)])
-  const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf), ...ficha])
+  const known = new Set([...rest, ...(question.options ?? []).flatMap(stemsOf), ...fichaStemsOf(question)])
   const words = plain(text)
     .split(/[^a-z0-9]+/)
     .filter((word) => (word.length >= 3 && !FILLER.has(word) && !MULETILLAS.has(word)) || /^[0-9]+$/.test(word))
@@ -526,6 +525,12 @@ export interface FormAnswerDraft {
   sourceText?: string | undefined
   /** De la segunda lectura de una oración que la red avisó (`formNetMisses`): queda por revisar. */
   reread?: boolean | undefined
+  /**
+   * Los pedazos que Clío citó separados con «...» en una respuesta de varias opciones, cada uno tal
+   * cual en lo dictado; `sourceText` es el más largo. Cada opción se comprueba en el suyo (prueba con
+   * voz c7, v03: «hábitos respiración bucal ... y se come las uñas» perdía la onicofagia).
+   */
+  pieces?: readonly string[] | undefined
 }
 
 /** Una sugerencia del dictado, de cualquier clase, como la miran las fichas. */
@@ -539,7 +544,7 @@ function checkWithWritten(draft: FormAnswerDraft, questions: readonly DictationF
   const question = questions.find((item) => item.number === draft.payload["question"])
   // La ficha de otra pieza no recibe lo dictado para esta (revisión final del 15 nov, A4).
   if (question && otherToothOf(question, questions, site, draft.sourceText, transcript) !== null) return null
-  const proposed = checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
+  const proposed = question?.type === "opcion_multiple" && (draft.pieces?.length ?? 0) > 1 ? checkPieces(draft, question, questions, site, transcript) : checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
   if (!proposed || question?.answered === undefined) return proposed
   const value = proposed.payload["value"]
   if (value === null || value === undefined || sameAnswer(value, question.answered)) return null
@@ -554,6 +559,29 @@ function checkWithWritten(draft: FormAnswerDraft, questions: readonly DictationF
     status: "por_revisar",
     note: `Ya dice «${now}».`,
   }
+}
+
+/**
+ * Una respuesta de varias opciones citada en pedazos (`pieces`): cada pedazo se comprueba solo, como si
+ * Clío lo hubiera citado así, y quedan las opciones que alguno dice, en el orden de la pregunta, con esos
+ * pedazos como frase. Si ninguno deja algo listo, se comprueba como siempre, con el más largo.
+ */
+function checkPieces(
+  draft: FormAnswerDraft,
+  question: DictationFormQuestion,
+  questions: readonly DictationFormQuestion[],
+  site: ProductSite,
+  transcript: string | undefined,
+): PreparedFormAnswer | null {
+  const listed = (draft.pieces ?? []).flatMap((piece) => {
+    const result = checkFormAnswer({ ...draft, sourceText: piece }, questions, site, sentenceOf(transcript, piece))
+    return result?.status === "lista" ? [{ piece, result }] : []
+  })
+  const [first] = listed
+  if (!first) return checkFormAnswer(draft, questions, site, sentenceOf(transcript, draft.sourceText))
+  const said = new Set(listed.flatMap(({ result }) => result.payload["value"] as string[]))
+  const value = (question.options ?? []).filter((option) => said.has(option))
+  return { ...first.result, payload: { ...first.result.payload, value }, said: listed.map((item) => item.piece).join(" … ") }
 }
 
 /** Una respuesta de ficha que cambia lo ya escrito: queda por revisar y se cambia de a una. */
@@ -667,7 +695,7 @@ function dropReasonOf(
   const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
   if (question.unit && unit?.test(plain(said))) return about(`«${question.label}» va en ${question.unit}: dilo en ${question.unit} o escríbelo en la ficha.`)
   if (!talksAbout(question, spoken)) return about(`No quedó claro si era «${question.label}»: nómbrala (con su lado, si lo tiene) o escríbela en la ficha.`)
-  return about(`No alcanzó para responder «${question.label}»: dilo con el valor o escríbelo en la ficha.`)
+  return about(notEnoughFor(question.label))
 }
 
 /** Cuántos decimales tiene un número. */
@@ -736,15 +764,37 @@ function labelNamed(question: DictationFormQuestion, heard: string, site?: Produ
   const spoken = (word: string) => words.some((item) => item.slice(0, 5) === word.slice(0, 5) && item.length <= word.length + 3)
   const own = meaningful(question.label.replace(/\([^)]*\)/g, " "))
   const proper = [...question.label.matchAll(/\(([^)]*)\)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/\p{Lu}[\p{L}-]*/gu)].flatMap((name) => meaningful(name[0])))
-  // La palabra del rótulo que ninguna otra pregunta de la ficha tiene basta sola: «intensidad», «frío», «sondaje».
-  const others = new Set((question.siblings ?? []).flatMap((item) => meaningful(item.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
-  // No si también es de sus opciones: «clase» de «Clase molar derecha» está en «Clase II», y «maloclusión clase dos» no es de ella.
-  const options = new Set((question.options ?? []).flatMap(stemsOf))
-  const distinctive = own.filter((word) => !others.has(word.slice(0, 5)) && !options.has(word.slice(0, 5)))
-  // Sola, con sus siete primeras letras: «odontograma» no es «odontológica».
-  const close = (word: string) => words.some((item) => item.startsWith(word.slice(0, 7)) && item.length <= word.length + 3)
-  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || distinctive.some(close) || proper.some(spoken)
+  return (own.length > 0 && own.filter(spoken).length >= Math.min(2, own.length)) || ownWordSaid(question, words) || proper.some(spoken)
 }
+
+/**
+ * ¿Se dijo la palabra del rótulo que ninguna otra pregunta de la ficha tiene? Basta sola: «intensidad»,
+ * «frío», «sondaje», «obturados» en la odontopediátrica. No si también es de sus opciones: «clase» de
+ * «Clase molar derecha» está en «Clase II», y «maloclusión clase dos» no es de ella. `words`: lo dicho,
+ * en palabras (`meaningful`).
+ */
+function ownWordSaid(question: DictationFormQuestion, words: readonly string[]): boolean {
+  // Con sus siete primeras letras: «odontograma» no es «odontológica».
+  return ownWordsOf(question).some((word) => words.some((item) => item.startsWith(word.slice(0, 7)) && item.length <= word.length + 3))
+}
+
+/** Las palabras propias de cada pregunta (`ownWordSaid`): salen de la plantilla, así que se arman una vez. */
+const ownWords = new WeakMap<DictationFormQuestion, string[]>()
+
+function ownWordsOf(question: DictationFormQuestion): string[] {
+  let own = ownWords.get(question)
+  if (!own) {
+    const others = new Set((question.siblings ?? []).flatMap((item) => meaningful(item.label.replace(/\([^)]*\)/g, " ")).map((word) => word.slice(0, 5))))
+    const options = new Set((question.options ?? []).flatMap(stemsOf))
+    own = meaningful(question.label.replace(/\([^)]*\)/g, " ")).filter((word) => !others.has(word.slice(0, 5)) && !options.has(word.slice(0, 5)))
+    ownWords.set(question, own)
+  }
+  return own
+}
+
+/** Las raíces de la ficha de una pregunta fuera de ella: los rótulos y las opciones de sus hermanas. */
+const fichaStemsOf = (question: DictationFormQuestion) =>
+  new Set((question.siblings ?? []).flatMap((item) => [...labelStems(item.label), ...(item.options ?? []).flatMap(stemsOf)]))
 
 /**
  * ¿La oración nombra esta pregunta y no otra? `labelNamed`, más lo que la
@@ -863,12 +913,18 @@ export function formSentencesWithoutAnswer(
   site: ProductSite,
   /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta. */
   pending: ReadonlyMap<number, unknown> = new Map(),
-): Array<{ said: string; why: string; questions: number[]; between?: true }> {
+): FormNotice[] {
   const open = questions.filter((question) => !handled.has(question.number))
   if (!transcript?.trim() || !open.length) return []
   return sentencesOf(transcript).flatMap((sentence) => {
     const said = sentence.trim()
     if (!said) return []
+    // Las que la oración nombra, una vez por oración; de ellas, las otras del mismo tipo y ficha.
+    let namedHere: DictationFormQuestion[] | undefined
+    const othersOf = (question: DictationFormQuestion) => {
+      namedHere ??= questions.filter((other) => namesQuestion(other, heardBy(other, said), site))
+      return namedHere.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type)
+    }
     // Las que la oración nombra solo como una de dos hermanas, sin decir cuál.
     const between = new Set<DictationFormQuestion>()
     const named = open.filter((question) => {
@@ -882,19 +938,66 @@ export function formSentencesWithoutAnswer(
       // Si la oración nombra también otra del mismo tipo de su ficha, el valor tiene que estar cerca de
       // lo que distingue a esta: en «línea media superior centrada la inferior desviada dos
       // milímetros», los dos milímetros no son de la superior.
-      const others = questions.filter(
-        (other) => other !== question && other.responseId === question.responseId && other.type === question.type && namesQuestion(other, heardBy(other, said), site),
-      )
+      const others = othersOf(question)
       return !others.length || spansOf(question, others, heard).some((part) => saysValue(question, part))
     })
-    if (!named.length) return []
+    // Las de número nombradas por su palabra propia sin un número en lo que la oración dice de ellas. Leerlas
+    // otra vez no daría un número que se pueda comprobar: el aviso queda.
+    const notices: FormNotice[] = open.flatMap((question) => {
+      const phrase = named.includes(question) ? null : unvaluedPhrase(question, othersOf, said, pending)
+      return phrase ? [{ said: phrase, why: notEnoughFor(question.label), questions: [question.number], noReread: true as const }] : []
+    })
+    if (!named.length) return notices
     // La misma pregunta en dos fichas empezadas (el ceod) se nombra una vez.
     const labels = [...new Set(named.map((question) => question.label))]
     const numbers = named.map((question) => question.number)
-    // Entre hermanas, el mismo aviso que el motivo de lo parado; `between`: leerla otra vez no diría cuál.
-    if (named.every((question) => between.has(question))) return [{ said, why: notClearWhich(labels), questions: numbers, between: true as const }]
-    return [{ said, why: looksLike(labels), questions: numbers }]
+    // Entre hermanas, el mismo aviso que el motivo de lo parado; leerla otra vez no diría cuál.
+    if (named.every((question) => between.has(question))) return [...notices, { said, why: notClearWhich(labels), questions: numbers, noReread: true as const }]
+    return [...notices, { said, why: looksLike(labels), questions: numbers }]
   })
+}
+
+/** Un aviso de «No pude usar esto» de la red: la frase, el motivo y sus preguntas. `noReread`: la segunda lectura no lo resolvería. */
+type FormNotice = { said: string; why: string; questions: number[]; noReread?: true }
+
+/** «No alcanzó para responder «X»: …»: lo dicho de una pregunta sin lo que la responde. */
+const notEnoughFor = (label: string) => `No alcanzó para responder «${label}»: dilo con el valor o escríbelo en la ficha.`
+
+/**
+ * Lo que la oración dice de una pregunta de número que nombra por su palabra propia, tal cual se dictó,
+ * cuando ahí no hay un número: «ser obturados» (Chrome oyó «ser» por «cero», prueba con voz c7, v10) o
+ * «sondaje no lo pude medir bien». La pregunta se nombró y no se pierde en silencio. Desde dos palabras
+ * antes de su palabra hasta lo que distingue a otra que la oración nombra (`spansOf`), hasta seis
+ * palabras. `null` si no es de número, ya tiene respuesta o propuesta, o la oración no la nombra así.
+ */
+function unvaluedPhrase(
+  question: DictationFormQuestion,
+  othersOf: (question: DictationFormQuestion) => DictationFormQuestion[],
+  sentence: string,
+  pending: ReadonlyMap<number, unknown>,
+): string | null {
+  if (question.type !== "numero" || question.answered !== undefined || pending.has(question.number)) return null
+  const ficha = fichaStemsOf(question)
+  // Su palabra propia, tal cual se dictó (si solo se oyó parecida, no hay de dónde citarla), que basta sola
+  // («sondaje no lo pude medir»), y que no sea de otra pregunta de la ficha: «periodontitis», de una opción
+  // del diagnóstico apical, no nombra el «Sondaje periodontal».
+  const ownHere = (word: string) => ownWordSaid(question, meaningful(word)) && !stemsOf(word).some((stem) => ficha.has(stem))
+  const words = sentence.trim().split(/\s+/)
+  if (!words.some(ownHere) || !talksAbout(question, new Set(stemsOf(withoutOtherTests(question, heardBy(question, sentence)))))) return null
+  const plainWords = words.map(plain)
+  for (const span of spansOf(question, othersOf(question), words.join(" "))) {
+    if (saysValue(question, span)) continue
+    const part = span.split(" ")
+    const at = plainWords.findIndex((_, index) => part.every((word, offset) => plainWords[index + offset] === word))
+    if (at < 0) continue
+    // Desde su palabra, con la de antes si no es de otra pregunta de la ficha: «ser obturados», pero no
+    // «positiva sondaje».
+    const own = words.findIndex((word, index) => index >= at && index < at + part.length && ownHere(word))
+    if (own < 0) continue
+    const start = own > at && !stemsOf(words[own - 1] ?? "").some((stem) => ficha.has(stem)) ? own - 1 : own
+    return words.slice(start, Math.min(at + part.length, start + 6)).join(" ")
+  }
+  return null
 }
 
 /**
@@ -912,8 +1015,8 @@ export function formDropNotices<T extends FormDraftLike>(
   where: { site: ProductSite; transcript?: string | undefined },
   /** Lo que proponen las sugerencias de ficha pendientes de otras pausas, por pregunta (`null`: por elegir). */
   pending: ReadonlyMap<number, unknown> = new Map(),
-): Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red"; between?: true }> {
-  const notices: Array<{ said: string; why: string; questions: number[]; by: "motivo" | "red"; between?: true }> = []
+): Array<FormNotice & { by: "motivo" | "red" }> {
+  const notices: Array<FormNotice & { by: "motivo" | "red" }> = []
   // Una pendiente por elegir ya dice «revísala»: no se avisa otra vez.
   const handled = new Set([...pending].flatMap(([number, value]) => (value == null ? [number] : [])))
   for (const { draft, ready } of outcomes) {
@@ -937,8 +1040,9 @@ export function formDropNotices<T extends FormDraftLike>(
  * de «X»»), con sus preguntas: las que Clío lee una vez más, solas, antes de
  * guardar la pausa. La misma cuenta que al guardar (las gemelas, el diagnóstico
  * que también es de la ficha y lo que ya proponen las pendientes); la usan la
- * atención y la medición. Lo dicho entre dos hermanas sin decir cuál no se lee
- * otra vez: la frase no alcanza para que su respuesta quede, y el aviso queda.
+ * atención y la medición. Lo dicho entre dos hermanas sin decir cuál, y la
+ * pregunta de número nombrada sin un número, no se leen otra vez: la frase no
+ * alcanza para que su respuesta quede, y el aviso queda.
  */
 export function formNetMisses<T extends FormDraftLike>(
   drafts: readonly T[],
@@ -955,7 +1059,7 @@ export function formNetMisses<T extends FormDraftLike>(
   const outcomes = expanded
     .filter((draft) => draft.kind === "ficha")
     .map((draft) => ({ draft, ready: prepareFormAnswer(draft, questions, site, transcript) !== null }))
-  return formDropNotices(outcomes, twins, questions, { site, transcript }, pending).flatMap((notice) => (notice.by === "red" && !notice.between ? [{ said: notice.said, questions: notice.questions }] : []))
+  return formDropNotices(outcomes, twins, questions, { site, transcript }, pending).flatMap((notice) => (notice.by === "red" && !notice.noReread ? [{ said: notice.said, questions: notice.questions }] : []))
 }
 
 /**
@@ -988,7 +1092,7 @@ export function formAnswerFragments(said: string, question: DictationFormQuestio
   const whole = said.trim()
   if (!question || !whole) return whole ? [whole] : []
   const parts = whole
-    .split(/[,;.:]\s*|\s+y\s+/)
+    .split(/[,;.:…]\s*|\s+y\s+/)
     .map((part) => part.trim())
     .filter(Boolean)
   if (parts.length <= 1) return [whole]
@@ -1662,10 +1766,21 @@ function checkFormAnswer(
   if (!talksAbout(question, context) || namesAnother(question, said) || partOfOtherTest(question, said, sentence)) return null
   // La frase que nombra otra pregunta del mismo tipo de su ficha, y no esta, es de la otra: «Overbite
   // de tres, no, perdón, de dos y medio» no responde el overjet (medición del 15 nov, orto-21).
-  const namesSibling = questions.some(
-    (other) => other !== question && other.responseId === question.responseId && other.type === question.type && labelNamed(other, heardBy(other, dictated), site),
-  )
-  if (namesSibling && !labelNamed(question, said, site)) return null
+  const siblings = questions.filter((other) => other !== question && other.responseId === question.responseId && other.type === question.type)
+  if (siblings.some((other) => labelNamed(other, heardBy(other, dictated), site)) && !labelNamed(question, said, site)) {
+    // Lo dicho antes de nombrar la otra sí puede ser de esta: en «7 mm over byte de 4» el 7 va antes
+    // del overbite y no es suyo (prueba con voz c7, v03). Se comprueba solo eso, como si Clío lo hubiera
+    // citado así; si empieza por la otra, no queda nada. Los pedazos se leen sin guardarlos en
+    // `lastHeard`, que es para lo que se vuelve a leer.
+    const words = dictated.split(/\s+/)
+    const namesOne = (count: number) => siblings.some((other) => labelNamed(other, asHeard(words.slice(0, count).join(" "), heardVocabularyOf(other)), site))
+    let count = 1
+    while (count < words.length && !namesOne(count)) count += 1
+    const head = words.slice(0, count - 1).join(" ")
+    if (!head) return null
+    const own = checkFormAnswer({ ...draft, sourceText: head }, questions, site, heardSentence)
+    return own ? { ...own, said: own.said ?? head } : null
+  }
   const labelSaid = labelStems(question.label).some((stem) => context.has(stem))
   const ready = (value: unknown): PreparedFormAnswer => ({ payload: { ...base, value }, status: "lista", note: null })
   const review = (value: unknown, note: string): PreparedFormAnswer => ({ payload: { ...base, value }, status: "por_revisar", note })
@@ -1746,7 +1861,10 @@ function checkFormAnswer(
     case "opcion_multiple": {
       const values = [...new Set((list.length ? list : raw ? [raw] : []).map(option).filter((item): item is string => item !== null))]
       const checks = values.map((value) => ({ value, check: chosen(value, false) }))
-      const kept = checks.filter((item) => item.check?.ok).map((item) => item.value)
+      const said = checks.filter((item) => item.check?.ok).map((item) => item.value)
+      // «Ninguno» no va junto a lo que sí se encontró: en «ensanchamiento del ligamento periodontal sin
+      // radio lucidez» el «sin» es de la radiolucidez (medición del 16 nov, voz-v06-1; tramos de c7).
+      const kept = said.length > 1 ? said.filter((value) => !isNegativeOption(value)) : said
       if (kept.length) return ready(kept)
       const failed = checks.find((item) => item.check && !item.check.ok)?.check
       return failed && !failed.ok ? review(null, failed.note) : null

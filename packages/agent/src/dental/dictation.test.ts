@@ -133,6 +133,55 @@ describe("dictado en modo de demostración", () => {
     // Con los puntos solo al principio o al final, es un pedazo y queda como siempre.
     expect(groundSource("cinco cariados...", heard)).toBe("cinco cariados")
   })
+
+  it("en una respuesta de varias opciones, cada pedazo llega aparte para comprobar cada opción en el suyo (prueba con voz c7, v03)", () => {
+    const heard = "Claro que sí volar derecha clase 2 división 1 hábitos respiración bucal o sea duerme con la boca abierta y se come las uñas diagnóstico"
+    const ortho = formQuestionsOf([{ id: "orto", title: "Ficha de ortodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-de-ortodoncia")?.schema, answers: {} }])
+    const habitos = ortho.find((question) => question.fieldId === "habitos")?.number
+    const molar = ortho.find((question) => question.fieldId === "clase_molar_derecha")?.number
+    const read = readWith(
+      {
+        fichas: [
+          { question: habitos, answers: ["Respiración bucal", "Onicofagia"], dicho: "hábitos respiración bucal ... y se come las uñas" },
+          { question: molar, answer: "Clase II división 1", dicho: "claro que sí ... derecha clase 2 división 1" },
+          { question: molar, answer: "Clase II división 1", dicho: "derecha clase 2 división 1" },
+        ],
+      },
+      heard,
+      0,
+      DENTAL_DICTATION_PROFILE.parts,
+      ortho,
+    )
+    // Lo que se muestra sigue siendo un pedazo dicho tal cual; los pedazos van aparte y el servidor decide si los usa.
+    expect(read?.drafts[0]).toMatchObject({ sourceText: "hábitos respiración bucal", pieces: ["hábitos respiración bucal", "y se come las uñas"] })
+    expect(read?.drafts[1]).toMatchObject({ sourceText: "derecha clase 2 división 1", pieces: ["claro que sí", "derecha clase 2 división 1"] })
+    // Citada de una vez, sin pedazos.
+    expect(read?.drafts[2]?.pieces).toBeUndefined()
+  })
+
+  it("las respuestas de ficha que Clío repite como correcciones de lo que no está pendiente no dan un «4» suelto (prueba con voz c7, v11)", () => {
+    // Lo que respondió el modelo al repetir el tramo, tal cual: con una sola pendiente (la nota), corrige la 2 y la 3.
+    const heard = "para confirmarse 6 perdidos 2 obturados 4 simplificado 1,8"
+    const estomato = formQuestionsOf([{ id: "ee", title: "Ficha odontoestomatológica", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-odontoestomatologica")?.schema, answers: {} }])
+    const args = {
+      fichas: [
+        { question: 2, answer: "6", dicho: "6 perdidos" },
+        { question: 3, answer: "2", dicho: "2 obturados" },
+      ],
+      correcciones: [
+        { sugerencia: 1, cambios: { answer: "6" }, dicho: "para confirmarse 6 perdidos" },
+        { sugerencia: 2, cambios: { answer: "2" }, dicho: "6 perdidos 2 obturados" },
+        { sugerencia: 3, cambios: { answer: "4" }, dicho: "4" },
+      ],
+    }
+    const read = readWith(args, heard, 1, DENTAL_DICTATION_PROFILE.parts, estomato)
+    expect(read?.unused).toEqual([])
+    expect(read?.omitted).toBe(0)
+    // La de la pendiente que sí existe sigue llegando: el servicio decide si cambia algo.
+    expect(read?.corrections.map((item) => item.index)).toEqual([0])
+    // Sin ficha, una corrección de lo que no está pendiente se sigue avisando con su frase.
+    expect(readWith({ correcciones: args.correcciones }, heard, 1, DENTAL_DICTATION_PROFILE.parts)?.unused).toEqual(["6 perdidos 2 obturados", "4"])
+  })
 })
 
 /**
