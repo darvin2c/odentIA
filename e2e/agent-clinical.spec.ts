@@ -224,6 +224,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // La atención ya tiene motivo: se dice antes de confirmar que lo dictado se agrega.
   await expect(suggested("Consulta")).toContainText("Se agrega a lo que ya hay en Motivo de consulta.")
+  const closing = page.getByRole("region", { name: "Cierre de la atención" })
   // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
   const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
   // El pie, el único lugar de lo que falta (P10), dice que el diagnóstico está sugerido, no registrado.
