@@ -359,6 +359,8 @@ export function channelAccount(connection: ConnectionItem): string {
  */
 export function awaitsAddress(connection: ConnectionItem): boolean {
   if (connection.channel !== "instagram" && connection.channel !== "messenger") return false
+  // Con Facebook los avisos llegan a la dirección de la app de odentIA: no hay nada que pegar.
+  if (connection.signup) return false
   return connection.status === "active" && connection.webhookVerifiedAt === null && !connection.lastInboundAt
 }
 
@@ -411,6 +413,21 @@ function whatsappPending(connection: ConnectionItem): string | null {
     : "Falta la prueba: escribe «hola» al número de la clínica."
 }
 
+/**
+ * Messenger o Instagram conectado con Facebook: lo mismo que WhatsApp, sin
+ * número que registrar. Se arregla con «Conectar otra con Facebook», que vuelve
+ * a dejar la misma cuenta con sus conversaciones.
+ */
+function pagePending(connection: ConnectionItem): string | null {
+  const signup = connection.signup
+  if (!signup) return null
+  if (signup.metaRemoved || signup.tokenDead) {
+    return "Facebook ya no deja usar esta cuenta (se quitó el permiso o cambió quien administra la página): no recibe ni envía mensajes hasta volver a conectar con Facebook."
+  }
+  const step = signup.pending[0]
+  return step ? (step.problem ?? "Falta un paso para terminar de conectarla: vuelve a conectar con Facebook.") : null
+}
+
 function channelRow(channel: MessagingChannel, connection: ConnectionItem, index: number, since: Since): ChannelRow {
   const account = channelAccount(connection)
   const common = { ...base(channel, `${channel}-${index}`), channel, connection }
@@ -439,7 +456,7 @@ function channelRow(channel: MessagingChannel, connection: ConnectionItem, index
     if (inReview > 0) parts.push(`${inReview} en revisión`)
   }
   const activity = parts.filter((part): part is string => Boolean(part)).join(" · ") || null
-  const pending = channel === "whatsapp" ? whatsappPending(connection) : null
+  const pending = channel === "whatsapp" ? whatsappPending(connection) : pagePending(connection)
   if (pending) {
     return {
       ...common,
@@ -688,6 +705,12 @@ export interface IntegrationsSearch {
   ok?: string | number
   buzon?: string
   error?: string
+  /** La vuelta de «Conectar con Facebook» de Messenger e Instagram, con cuántas cuentas de cada una. */
+  facebook?: string
+  messenger?: string
+  instagram?: string
+  sinig?: string
+  otra?: string
 }
 
 const text = (value: unknown): string | undefined => (typeof value === "string" && value ? value : undefined)
@@ -697,7 +720,46 @@ export function validateIntegrationsSearch(search: Record<string, unknown>): Int
   const ok = typeof search.ok === "number" ? search.ok : text(search.ok)
   const buzon = text(search.buzon)
   const error = text(search.error)
-  return { ...(ok !== undefined ? { ok } : {}), ...(buzon ? { buzon } : {}), ...(error ? { error } : {}) }
+  const counts = Object.fromEntries(
+    (["facebook", "messenger", "instagram", "sinig", "otra"] as const).flatMap((key) => {
+      const value = typeof search[key] === "number" ? String(search[key]) : text(search[key])
+      return value ? [[key, value]] : []
+    }),
+  )
+  return { ...(ok !== undefined ? { ok } : {}), ...(buzon ? { buzon } : {}), ...(error ? { error } : {}), ...counts }
+}
+
+const count = (value: string | undefined): number => {
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : 0
+}
+
+const accounts = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
+
+/** Lo que pasó al volver de Facebook con las páginas de la clínica, dicho sin códigos. */
+function facebookNotice(search: IntegrationsSearch): MailNotice {
+  if (search.facebook === "cancelado") return { tone: "danger", text: "No se conectó nada: cerraste la ventana de Facebook antes de terminar." }
+  if (search.facebook === "sin-sesion") return { tone: "danger", text: "Tu sesión se cerró mientras estabas en Facebook. Entra y vuelve a conectar." }
+  if (search.facebook === "sin-paginas") {
+    return { tone: "danger", text: "No marcaste ninguna página en Facebook. Vuelve a conectar y marca la página de la clínica." }
+  }
+  if (search.facebook !== "ok") return { tone: "danger", text: "No pudimos conectar con Facebook. Vuelve a intentarlo." }
+  const messenger = count(search.messenger)
+  const instagram = count(search.instagram)
+  const parts = [
+    messenger ? `Messenger (${accounts(messenger, "página", "páginas")})` : null,
+    instagram ? `Instagram (${accounts(instagram, "cuenta", "cuentas")})` : null,
+  ].filter(Boolean)
+  const done = parts.length > 0 ? `Quedó conectado ${parts.join(" e ")}: lo que escriban ya entra a la Bandeja.` : "No se conectó ninguna cuenta nueva."
+  const without = count(search.sinig)
+  const elsewhere = count(search.otra)
+  const notes = [
+    without
+      ? `${without === 1 ? "Una página no tiene" : `${without} páginas no tienen`} un Instagram de empresa unido: únelo en Meta Business Suite y vuelve a conectar.`
+      : null,
+    elsewhere ? `${elsewhere === 1 ? "Una cuenta ya está" : `${elsewhere} cuentas ya están`} conectada${elsewhere === 1 ? "" : "s"} en otra clínica y no se tocó.` : null,
+  ].filter(Boolean)
+  return { tone: parts.length > 0 ? "success" : "danger", text: [done, ...notes].join(" ") }
 }
 
 export interface MailNotice {
@@ -707,6 +769,7 @@ export interface MailNotice {
 
 /** Lo que pasó al volver de autorizar el correo, dicho sin códigos. */
 export function mailNotice(search: IntegrationsSearch): MailNotice | null {
+  if (search.facebook) return facebookNotice(search)
   if (search.error) {
     if (search.error === "oauth-denegado") {
       return { tone: "danger", text: "No se conectó el correo: cancelaste la autorización." }

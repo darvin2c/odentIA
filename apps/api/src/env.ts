@@ -115,6 +115,14 @@ const envSchema = z.object({
   META_LOGIN_CONFIG_ID: z.string().default(""),
   META_WEBHOOK_VERIFY_TOKEN: z.string().default(""),
   /**
+   * «Conectar con Facebook» de Messenger e Instagram: otra configuración de
+   * Facebook Login for Business en la misma app (permisos de páginas e
+   * Instagram) y la dirección fija de la API a la que vuelve, registrada en
+   * Meta. Sin las dos, el botón de páginas no existe.
+   */
+  META_PAGES_CONFIG_ID: z.string().default(""),
+  META_PAGES_REDIRECT_URI: z.string().default(""),
+  /**
    * Los canales de la administración (ADR 0189): la app de Meta propia de
    * Sallca, con su número de WhatsApp, su página de Facebook (Messenger) y su
    * cuenta de Instagram. Cada canal se prende con sus variables y las dos

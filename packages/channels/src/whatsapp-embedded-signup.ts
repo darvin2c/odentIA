@@ -6,7 +6,7 @@
 // Documentación leída el 2026-10-13 (la URL exacta va junto a cada llamada):
 // https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider
 //
-// NADA DE ESTO SE HA PROBADO CONTRA META: la app de odentIA todavía no existe.
+// Probado contra Meta real el 16 nov con la app SALLCA (coexistencia incluida).
 // Las formas de las respuestas son las que publica la documentación; donde esta
 // no las muestra completas se aceptan las variantes razonables y se dice.
 import { randomInt } from "node:crypto"

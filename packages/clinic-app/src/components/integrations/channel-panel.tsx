@@ -121,7 +121,6 @@ export function ChannelPanel({
   row,
   loading = false,
   canWrite,
-  otherActive = false,
   onClose,
   onConnected,
 }: {
@@ -131,8 +130,6 @@ export function ChannelPanel({
   /** La conexión existe pero la lista aún no la trae: se espera en vez de ofrecer conectarla otra vez. */
   loading?: boolean
   canWrite: boolean
-  /** Esta cuenta está desconectada y el canal ya tiene otra activa: una a la vez. */
-  otherActive?: boolean
   onClose: () => void
   /** Se creó la conexión: la pantalla sigue con ella sin cerrar el panel. */
   onConnected: (connectionId: string) => void
@@ -159,7 +156,9 @@ export function ChannelPanel({
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["connections"] })
 
   // La dirección y su clave son de quien administra la configuración: el servidor no las entrega a nadie más.
-  const showsSetup = setup.pasteAddress && connection !== null && canWrite
+  // Con Facebook no hay dirección ni clave que pegar: los avisos llegan a la app de odentIA.
+  const byFacebook = connection?.signup != null
+  const showsSetup = setup.pasteAddress && connection !== null && canWrite && !byFacebook
   const setupQuery = useQuery({
     queryKey: ["connection-setup", connection?.id],
     queryFn: () => apiFetch<{ data: ConnectionSetup }>(`/api/channels/connections/${connection?.id}/setup`),
@@ -384,6 +383,11 @@ export function ChannelPanel({
                   <p className="text-sm text-muted-foreground">Meta todavía no verificó la dirección. Cuando lo haga, aquí lo dirá.</p>
                 ) : null}
               </section>
+            ) : byFacebook ? (
+              <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
+                Conectada con Facebook: no hay nada que copiar ni pegar. Si algo cambia en Facebook, vuelve a conectar con Facebook y
+                sigue la misma cuenta, con sus conversaciones.
+              </p>
             ) : setup.pasteAddress ? null : (
               <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
                 No hay nada que copiar ni pegar: {appWords().name} le dice a Telegram adónde avisar.
@@ -392,32 +396,29 @@ export function ChannelPanel({
 
             {canWrite ? (
               <div className="flex flex-col gap-2">
-                {otherActive ? (
-                  <p className="text-sm text-muted-foreground">
-                    Cuenta anterior. Para volver a usarla, desconecta primero la que está conectada.
-                  </p>
-                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {active ? (
                     <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>
                       {test.isPending ? "Probando…" : "Probar"}
                     </Button>
-                  ) : otherActive ? null : (
+                  ) : (
                     <Button type="button" disabled={setStatus.isPending} onClick={() => setStatus.mutate("enable")}>
                       {setStatus.isPending ? "Conectando…" : "Volver a conectar"}
                     </Button>
                   )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      resetForm()
-                      setNotice(null)
-                      setView("key")
-                    }}
-                  >
-                    Cambiar la clave
-                  </Button>
+                  {byFacebook ? null : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        resetForm()
+                        setNotice(null)
+                        setView("key")
+                      }}
+                    >
+                      Cambiar la clave
+                    </Button>
+                  )}
                   {active ? (
                     <Button type="button" variant="destructive" onClick={() => setConfirming(true)}>
                       Desconectar

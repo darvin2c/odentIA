@@ -2,8 +2,8 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
 import { configureMetaGraphVersion } from "./meta-graph.js"
-import { instagramAdapter } from "./meta-messaging.js"
-import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
+import { instagramAdapter, refreshInstagramLoginToken } from "./meta-messaging.js"
+import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 
 // Flujo Instagram API con Instagram Login (docs primarias):
 // host graph.instagram.com, token de usuario de Instagram,
@@ -169,4 +169,17 @@ it("validateConnection usa username de la cuenta", async () => {
     externalId: "IG1",
     displayName: "@clinica.dental",
   })
+})
+
+it("instagram a mano: renueva la clave con ella misma; si ya no sirve, lo dice", async () => {
+  const calls: string[] = []
+  const ok = (async (input: string | URL | Request) => {
+    calls.push(String(input))
+    return new Response(JSON.stringify({ access_token: "NUEVA", token_type: "bearer", expires_in: 5183944 }), { status: 200 })
+  }) as typeof fetch
+  await expect(refreshInstagramLoginToken("VIEJA", { fetch: ok })).resolves.toEqual({ accessToken: "NUEVA", expiresInSeconds: 5183944 })
+  expect(calls[0]).toBe("https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=VIEJA")
+  const dead = (async () =>
+    new Response(JSON.stringify({ error: { message: "Error validating access token", code: 190 } }), { status: 400 })) as unknown as typeof fetch
+  await expect(refreshInstagramLoginToken("VIEJA", { fetch: dead })).rejects.toBeInstanceOf(ConnectionRejectedError)
 })

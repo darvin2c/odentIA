@@ -202,7 +202,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
    * no es de ninguna conexión se descarta dejando registro y se responde 200:
    * Meta reintenta durante 7 días lo que no recibe un 200.
    *
-   * Sin probar contra Meta: la app de odentIA todavía no existe.
+   * Probada con Meta real: los números conectados con el botón reciben por aquí.
    */
   app.post("/meta/whatsapp", async (c) => {
     if (!deps.metaApp) return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
@@ -284,6 +284,86 @@ export function createWebhooksRoute(deps: WebhookDeps) {
           accountEvents: delivery.accountEvents,
         })
       }
+    }
+    return c.json({ ok: true }, 200)
+  })
+
+  // ---- páginas de Facebook e Instagram conectadas con el botón ----
+
+  /** Reto de la dirección de páginas e Instagram de la app de odentIA: el mismo `verifyToken`. */
+  app.get("/meta/pages", (c) => {
+    if (!deps.metaApp) return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+    const challenge = verifyMetaChallenge(
+      {
+        mode: c.req.query("hub.mode") ?? null,
+        token: c.req.query("hub.verify_token") ?? null,
+        challenge: c.req.query("hub.challenge") ?? null,
+      },
+      deps.metaApp.verifyToken,
+    )
+    if (challenge === null) return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
+    return c.text(challenge, 200)
+  })
+
+  /**
+   * Avisos de Messenger (`object: "page"`) y de Instagram (`object: "instagram"`)
+   * de las cuentas conectadas con «Conectar con Facebook»: una dirección de la
+   * app, firmada con su clave, que puede traer varias páginas en el mismo envío.
+   * Cada página o cuenta de Instagram va a su conexión activa hecha con el botón
+   * (`entry.id` es la página o el Instagram); lo que no es de ninguna se
+   * descarta dejando registro y se responde 200, porque Meta reintenta.
+   * https://developers.facebook.com/docs/messenger-platform/webhooks
+   * https://developers.facebook.com/docs/messenger-platform/instagram/features/webhook
+   */
+  app.post("/meta/pages", async (c) => {
+    if (!deps.metaApp) return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
+    const rawBody = await c.req.text().catch(() => "")
+    if (!verifyMetaSignature(c.req.header(), rawBody, deps.metaApp.appSecret)) {
+      return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
+    }
+    let body: { object?: unknown; entry?: unknown }
+    try {
+      body = JSON.parse(rawBody) as { object?: unknown; entry?: unknown }
+    } catch {
+      return c.json({ ok: true }, 200)
+    }
+    const provider: ChannelProvider | null = body.object === "page" ? "messenger" : body.object === "instagram" ? "instagram" : null
+    if (!provider || !Array.isArray(body.entry)) return c.json({ ok: true }, 200)
+    const adapter = channelAdapters[provider]
+    if (!adapter) return c.json({ ok: true }, 200)
+    for (const entry of body.entry as Array<{ id?: unknown }>) {
+      const accountId = typeof entry?.id === "string" ? entry.id : ""
+      if (!accountId) continue
+      const [connection] = await deps.ownerDb
+        .select({
+          id: channelConnection.id,
+          organizationId: channelConnection.organizationId,
+          signup: channelConnection.signup,
+          configEncrypted: channelConnection.configEncrypted,
+        })
+        .from(channelConnection)
+        .where(
+          and(
+            eq(channelConnection.provider, provider),
+            eq(channelConnection.externalId, accountId),
+            eq(channelConnection.status, "active"),
+          ),
+        )
+        .limit(1)
+      // Solo las hechas con el botón: una hecha a mano recibe en su propia dirección.
+      if (!connection?.signup) {
+        console.warn(`[webhooks] aviso de ${provider} descartado: ${accountId} no es de una conexión activa hecha con el botón`)
+        continue
+      }
+      let config: Record<string, unknown>
+      try {
+        config = decryptConfig(deps.secretsKey, connection.configEncrypted)
+      } catch {
+        continue
+      }
+      // Cada página se lee sola: el adaptador descarta lo que no es de su conexión.
+      const single = JSON.stringify({ object: body.object, entry: [entry] })
+      await ingest(provider, connection, adapter.parseWebhook({ headers: c.req.header(), rawBody: single, config }))
     }
     return c.json({ ok: true }, 200)
   })

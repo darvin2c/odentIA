@@ -67,6 +67,7 @@ export {
   type WebchatVisitorPayload,
 } from "./web-chat.js"
 export {
+  refreshInstagramLoginToken,
   instagramAdapter,
   messengerAdapter,
   verifyMetaChallenge,

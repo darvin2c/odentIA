@@ -14,6 +14,7 @@ import {
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
 import { SettingsNoAccess } from "../settings/no-access"
 import { ChannelPanel } from "./channel-panel"
+import { FacebookPagesButton, useFacebookPages } from "./facebook-pages-button"
 import { IntegrationBlock, IntegrationRow, IntegrationRowsSkeleton } from "./integration-list"
 import { IntegrationsCrumbWithText } from "./integrations-crumb"
 
@@ -24,7 +25,7 @@ type Open = { connectionId: string | null; opening: number } | null
 
 /**
  * La página de Instagram, Messenger o Telegram, como la de WhatsApp: en
- * «Conexión», la cuenta activa (una por canal) o cómo conectar una; en
+ * «Conexión», las cuentas activas (varias, como el correo) o cómo conectar una; en
  * «Desconectados», las anteriores, que guardan sus conversaciones. Conectar,
  * cambiar la clave y desconectar siguen en su panel al lado.
  */
@@ -36,6 +37,8 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
   const [tab, setTab] = useState<Tab>("conexion")
   const [open, setOpen] = useState<Open>(null)
   const openings = useRef(0)
+  // Messenger e Instagram se conectan con Facebook; «con tu propia app» queda de segunda.
+  const facebook = useFacebookPages(canWrite && channel !== "telegram") && channel !== "telegram"
 
   const listQuery = useQuery({
     queryKey: ["connections"],
@@ -138,14 +141,17 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
           ) : null}
           {tab === "conexion" && hasActive && canWrite ? (
             // Como varios buzones de correo: otra cuenta se suma a las que ya están.
-            <Button
-              type="button"
-              variant="outline"
-              className="self-start"
-              onClick={() => show(null)}
-            >
-              Conectar otra cuenta
-            </Button>
+            <div className="flex flex-wrap items-start gap-2">
+              {facebook ? <FacebookPagesButton label="Conectar otra con Facebook" variant="outline" /> : null}
+              <Button
+                type="button"
+                variant={facebook ? "ghost" : "outline"}
+                className="self-start"
+                onClick={() => show(null)}
+              >
+                {facebook ? "Con tu propia app de Meta" : "Conectar otra cuenta"}
+              </Button>
+            </div>
           ) : null}
           {tab === "conexion" && !hasActive ? (
             canWrite ? (
@@ -157,15 +163,26 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
                   <h2 className="text-base font-semibold">Conecta {name}</h2>
                   <p className="text-sm text-muted-foreground">
                     <strong className="font-semibold text-foreground">Para conectar:</strong>{" "}
-                    {INTEGRATIONS[channel].toConnect}
+                    {facebook
+                      ? "entra con el Facebook de quien administra la página de la clínica y marca sus páginas. Se conectan Messenger y el Instagram unido a cada una."
+                      : INTEGRATIONS[channel].toConnect}
                     {disconnected.length > 0
                       ? " También puedes volver a conectar una cuenta anterior en «Desconectados»."
                       : null}
                   </p>
                 </div>
-                <Button type="button" className="self-start" onClick={() => show(null)}>
-                  Conectar
-                </Button>
+                {facebook ? (
+                  <div className="flex flex-wrap items-start gap-2">
+                    <FacebookPagesButton label="Conectar con Facebook" />
+                    <Button type="button" variant="ghost" className="self-start" onClick={() => show(null)}>
+                      Con tu propia app de Meta
+                    </Button>
+                  </div>
+                ) : (
+                  <Button type="button" className="self-start" onClick={() => show(null)}>
+                    Conectar
+                  </Button>
+                )}
               </section>
             ) : (
               <EmptyState

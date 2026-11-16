@@ -20,7 +20,7 @@ import { createWhatsAppSignupRoute, type MetaSignupConfig, metaSignupFromEnv } f
 /**
  * «Conectar con Facebook» de punta a punta contra la base, con un `fetch` de
  * prueba que responde como publica Meta. NO acredita que Meta acepte nada de
- * esto: la app de odentIA todavía no existe y el flujo real no se ha probado.
+ * esto: el flujo real se probó a mano con la app SALLCA, no aquí.
  */
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ab".repeat(32))
