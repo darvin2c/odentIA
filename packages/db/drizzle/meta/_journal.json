@@ -967,6 +967,20 @@
       "when": 1794859198364,
       "tag": "0137_estado_oauth_paginas_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1794868068499,
+      "tag": "0138_bandeja_de_la_administracion",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794868085581,
+      "tag": "0139_bandeja_de_la_administracion_reglas",
+      "breakpoints": true
     }
   ]
 }

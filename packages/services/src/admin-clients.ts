@@ -341,6 +341,54 @@ export function clientStageSql(now: Date): SQL<ClientStage> {
     else coalesce(${f.lastDecision}, 'contacto') end)`
 }
 
+/* ---------- La fase (ADR 0196) ---------- */
+
+/**
+ * La fase del cliente, lo que la lista, la ficha, la Bandeja y Kairós dicen de dónde está: por
+ * vender (sin cuenta y sin decidir que no), en alta (con cuenta, hasta su primer pago confirmado) y
+ * activo (con un pago confirmado o devuelto, que se pagó). Sin cuenta y con la venta decidida, su
+ * decisión: «No por ahora» o «Perdido». Como la etapa, se calcula y nunca se guarda.
+ */
+export const CLIENT_PHASES = ["por_vender", "en_alta", "activo", "no_por_ahora", "perdido"] as const
+export type ClientPhase = (typeof CLIENT_PHASES)[number]
+
+export const CLIENT_PHASE_WORDS: Record<ClientPhase, string> = {
+  por_vender: "Por vender",
+  en_alta: "En alta",
+  activo: "Activo",
+  no_por_ahora: "No por ahora",
+  perdido: "Perdido",
+}
+
+/**
+ * Su cuenta tiene un pago que cuenta: confirmado o devuelto. Es la regla del paso «Primer pago
+ * confirmado» del alta (`computeOnboarding`): con solo pagos revertidos, ese paso se pierde y la
+ * clínica vuelve a «En alta».
+ */
+export function clientPaidSql(): SQL<boolean> {
+  return sql<boolean>`exists (select 1 from ${saasPayment} pp where pp.organization_id = ${saasClient.organizationId}
+    and pp.confirmed_at is not null and pp.status in ('confirmado', 'devuelto'))`
+}
+
+/** La fase en SQL, sobre la fila de `saas_client` de la consulta: la única regla. */
+export function clientPhaseSql(now: Date): SQL<ClientPhase> {
+  return sql<ClientPhase>`(case
+    when ${saasClient.organizationId} is not null then (case when ${clientPaidSql()} then 'activo' else 'en_alta' end)
+    else (case ${clientStageSql(now)} when 'no_por_ahora' then 'no_por_ahora' when 'perdido' then 'perdido'
+      else 'por_vender' end) end)`
+}
+
+/** La misma regla para lo que ya se leyó: la etapa, si tiene cuenta y si pagó. */
+export function clientPhaseOf(input: {
+  stage: ClientStage
+  hasAccount: boolean
+  paid: boolean
+}): ClientPhase {
+  if (input.hasAccount) return input.paid ? "activo" : "en_alta"
+  if (input.stage === "no_por_ahora" || input.stage === "perdido") return input.stage
+  return "por_vender"
+}
+
 /* ---------- Tipos públicos ---------- */
 
 export type ClientRow = typeof saasClient.$inferSelect
