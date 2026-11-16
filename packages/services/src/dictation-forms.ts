@@ -1861,7 +1861,10 @@ function checkFormAnswer(
     case "opcion_multiple": {
       const values = [...new Set((list.length ? list : raw ? [raw] : []).map(option).filter((item): item is string => item !== null))]
       const checks = values.map((value) => ({ value, check: chosen(value, false) }))
-      const kept = checks.filter((item) => item.check?.ok).map((item) => item.value)
+      const said = checks.filter((item) => item.check?.ok).map((item) => item.value)
+      // «Ninguno» no va junto a lo que sí se encontró: en «ensanchamiento del ligamento periodontal sin
+      // radio lucidez» el «sin» es de la radiolucidez (medición del 16 nov, voz-v06-1; tramos de c7).
+      const kept = said.length > 1 ? said.filter((value) => !isNegativeOption(value)) : said
       if (kept.length) return ready(kept)
       const failed = checks.find((item) => item.check && !item.check.ok)?.check
       return failed && !failed.ok ? review(null, failed.note) : null

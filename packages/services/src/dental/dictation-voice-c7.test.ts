@@ -64,6 +64,13 @@ describe("el número dicho antes de nombrar otra pregunta es de la suya (v03)", 
     expect(prepareFormAnswer(invented, ortho, FDI, V03)?.payload["value"]).toEqual(["Respiración bucal"])
   })
 
+  it("«Ninguno» no queda junto a un hallazgo que sí se dijo (v06, al repetir el tramo)", () => {
+    const endo = formOf("evaluacion-de-endodoncia")
+    const said = "En la radiografía se ve ensanchamiento del ligamento periodontal sin radio lucidez"
+    const draft = { kind: "ficha", payload: { question: numberOf(endo, "hallazgo_radiografico"), answers: ["Ensanchamiento del ligamento periodontal", "Ninguno"] }, sourceText: said }
+    expect(prepareFormAnswer(draft, endo, FDI, `sondaje 2 mm ${said} diagnóstico pulpar`)).toMatchObject({ status: "lista", payload: { value: ["Ensanchamiento del ligamento periodontal"] } })
+  })
+
   it("no se pierde en silencio: queda propuesto con el overbite", () => {
     const drafts = [answer(ortho, "overjet", "7", "7 mm over byte de 4"), answer(ortho, "overbite", "4", "over byte de 4")]
     expect(drafts.map((draft) => prepareFormAnswer(draft, ortho, FDI, V03)?.status)).toEqual(["por_revisar", "lista"])
