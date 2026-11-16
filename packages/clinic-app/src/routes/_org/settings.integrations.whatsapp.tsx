@@ -180,6 +180,7 @@ function WhatsAppPage() {
                 freshByButton={own?.byButton ?? false}
                 showAccount={connections.length > 1}
                 otherActive={connection.status !== "active" && activeCount > 0}
+                onlyOne
                 canWrite={canWrite}
                 fixedCreate={activeCount === 1}
                 initialMessageId={mensaje ?? null}
@@ -187,11 +188,6 @@ function WhatsAppPage() {
               />
             )
           })}
-          {tab === "conexion" && activeCount > 0 && canWrite ? (
-            <p className="text-sm text-muted-foreground">
-              Solo un WhatsApp a la vez: para conectar otro número, primero desconecta este. Sus conversaciones se guardan.
-            </p>
-          ) : null}
           {tab === "desconectados" && activeCount === 0 && canWrite ? (
             <p className="text-sm text-muted-foreground">Vuelve a conectar uno de estos números, o conecta otro en «Conexión».</p>
           ) : null}

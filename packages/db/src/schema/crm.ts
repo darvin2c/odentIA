@@ -180,6 +180,11 @@ export const channelConnection = pgTable(
     uniqueIndex("channel_connection_provider_external_uidx")
       .on(table.provider, table.externalId)
       .where(sql`"external_id" is not null and "status" = 'active'`),
+    // Una cuenta activa por canal de mensajería en cada clínica (el correo admite varios
+    // buzones): el servicio lo dice antes, y esto lo asegura aunque lleguen dos pedidos a la vez.
+    uniqueIndex("channel_connection_one_active_per_channel_uidx")
+      .on(table.organizationId, table.channel)
+      .where(sql`"status" = 'active' and "channel" in ('whatsapp', 'instagram', 'messenger', 'telegram')`),
     index("channel_connection_account_idx")
       .on(table.provider, table.accountExternalId)
       .where(sql`"account_external_id" is not null`),

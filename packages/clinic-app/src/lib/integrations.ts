@@ -398,6 +398,10 @@ function whatsappPending(connection: ConnectionItem): string | null {
   if (connection.ownApp?.tokenRejectedAt) {
     return "Meta ya no acepta la clave: los mensajes no salen hasta pegar una nueva con «Cambiar la clave»."
   }
+  // Meta soltó el número (la vuelta diaria o su aviso): vuelve a quedar por registrar, con su motivo.
+  if (connection.ownApp && !connection.ownApp.registeredAt && connection.ownApp.problems?.registrar) {
+    return connection.ownApp.problems.registrar
+  }
   if (connection.signup) {
     return connection.signup.pending.length > 0 ? "Falta un paso para terminar de conectarlo." : null
   }

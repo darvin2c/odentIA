@@ -160,6 +160,8 @@ export interface WorkspaceNoticeInput {
  *   volvió a conectar o Meta avisó que se reconectó) o la conexión ya no está activa.
  * - `clave-propia:<conexión>`: WhatsApp con la app propia volvió a enviar o se
  *   pegó otra clave, o la conexión ya no está activa.
+ * - `numero-sin-registro:<conexión>`: el número de la app propia volvió a quedar
+ *   registrado («Volver a comprobar») o la conexión ya no está activa.
  */
 export const NOTICE_SUBJECTS = [
   "producto",
@@ -171,6 +173,7 @@ export const NOTICE_SUBJECTS = [
   "vence-clave-meta",
   "meta-desconecto",
   "clave-propia",
+  "numero-sin-registro",
   "preguntas-nuevas",
 ] as const
 
@@ -286,6 +289,9 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'clave-propia:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("clave-propia")}
             and c.status = 'active' and c.own_app->>'tokenRejectedAt' is not null))
+        or (n.subject like 'numero-sin-registro:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("numero-sin-registro")}
+            and c.status = 'active' and c.own_app is not null and c.own_app->>'registeredAt' is null))
         or (n.subject = 'preguntas-nuevas' and exists (select 1 from patient_registration_config c
           where c.organization_id = n.organization_id and c.questions_version >= ${REGISTRATION_QUESTIONS_VERSION}))
       )`)

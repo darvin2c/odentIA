@@ -829,6 +829,40 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect((await own(manual!.id, "secreto-de-la-clinica")).status).toBe(200)
     expect((await queued()).at(-1)).toBe("org_e wamid.manual-propia")
   })
+
+  it("con la app propia, si Meta avisa que soltó la cuenta, el número queda por registrar con su motivo y se avisa", async () => {
+    const [manual] = await rowsOf("org_e")
+    // Como si ya estuviera registrado y suscrito.
+    const ownApp = { registeredAt: "2026-11-01T00:00:00.000Z", subscribedAt: "2026-11-01T00:00:00.000Z", problems: {}, pinNeeded: false, tokenExpiresAt: null, keysCheckedAt: null, signatureRejectedAt: null }
+    await ownerDb.update(channelConnection).set({ ownApp }).where(eq(channelConnection.id, manual!.id))
+    const raw = body({
+      id: "7005",
+      time: Math.floor(Date.now() / 1000),
+      changes: [{ field: "account_update", value: { event: "PARTNER_REMOVED", waba_info: { waba_id: "7005" }, disconnection_info: { reason: "ACCOUNT_DISCONNECTED", initiated_by: "USER" } } }],
+    })
+    const own = () =>
+      webhooks().request(`/channels/whatsapp_cloud_api/${manual!.id}`, { method: "POST", headers: { "x-hub-signature-256": sign(raw, "secreto-de-la-clinica"), "content-type": "application/json" }, body: raw })
+    expect((await own()).status).toBe(200)
+    const after = (await rowOf(manual!.id)).ownApp
+    expect(after?.registeredAt).toBeNull()
+    expect(after?.problems.registrar).toEqual(expect.any(String))
+    const shown = (await (await buildApp("org_e").request("/channels/connections")).json()) as { data: Array<{ id: string; ownApp: { registeredAt: string | null } | null }> }
+    expect(shown.data.find((item) => item.id === manual!.id)?.ownApp?.registeredAt).toBeNull()
+  })
+
+  it("la base no deja dos cuentas activas del mismo canal en una clínica, aunque se escriban a la vez", async () => {
+    await newOrg("org_r")
+    const values = (n: number) => ({
+      organizationId: "org_r", channel: "telegram", provider: "telegram_bot_api", displayName: `Bot ${n}`,
+      configEncrypted: "c", webhookSecret: `s-${n}`, status: "active",
+    })
+    await ownerDb.insert(channelConnection).values(values(1))
+    await expect(ownerDb.insert(channelConnection).values(values(2))).rejects.toThrow()
+    // Desconectada, la segunda sí entra; y el correo admite varios buzones.
+    await ownerDb.insert(channelConnection).values({ ...values(3), status: "disabled" })
+    const mail = (n: number) => ({ organizationId: "org_r", channel: "email", provider: "gmail", displayName: `buzon${n}@x.test`, externalId: `buzon${n}@x.test`, configEncrypted: "c", webhookSecret: `m-${n}`, status: "active" })
+    await ownerDb.insert(channelConnection).values([mail(1), mail(2)])
+  })
 })
 
 describe("un número desconectado no queda tomado", () => {

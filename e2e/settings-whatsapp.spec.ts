@@ -270,7 +270,9 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await disconnect.getByRole("button", { name: "Cancelar", exact: true }).click()
   await expect(disconnect).toBeHidden()
   // «Cambiar la clave» pide solo las claves y no crea otra conexión.
-  await card.getByRole("button", { name: "Cambiar la clave", exact: true }).click()
+  // Lo que no es de todos los días va en el menú de la tarjeta.
+  await card.getByRole("button", { name: "Más acciones de la conexión", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Cambiar la clave", exact: true }).click()
   const keyForm = surface(page, { name: "Cambiar la clave de WhatsApp", exact: true })
   await expect(keyForm.getByLabel("Identificador del número", { exact: true })).toHaveCount(0)
   await keyForm.getByLabel("Clave de acceso permanente", { exact: true }).fill("e2e-nueva")

@@ -12,7 +12,8 @@ import { canAccess } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { channelConnection, type ConnectionOwnApp } from "@odentia/db/schema/crm"
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { reportAutomaticCase } from "./model-outage.js"
@@ -253,6 +254,10 @@ export async function settleOwnApp(
     .set({ ownApp: next, updatedAt: now })
     .where(and(eq(channelConnection.id, row.id), eq(channelConnection.organizationId, row.organizationId)))
     .returning()
+  // Registrado otra vez: el aviso de que Meta lo había soltado se retira.
+  if (!current.registeredAt && next.registeredAt) {
+    await settleWorkspaceNotifications(tx, row.organizationId, { subject: unregisteredSubject(row.id) })
+  }
   return updated ?? row
 }
 
@@ -266,6 +271,7 @@ async function saveConfig(tx: Db, row: ConnectionRow, value: Record<string, unkn
 /* ---------- Avisos de la campana ---------- */
 
 const signatureSubject = (connectionId: string) => `firma-meta:${connectionId}`
+const unregisteredSubject = (connectionId: string) => `numero-sin-registro:${connectionId}`
 const tokenRejectedSubject = (connectionId: string) => `clave-propia:${connectionId}`
 const expirySubject = (connectionId: string) => `vence-clave-meta:${connectionId}`
 const WHATSAPP_SETTINGS_HREF = "/settings/integrations/whatsapp"
@@ -472,4 +478,109 @@ export async function notifyOwnAppTokenExpiring(tx: Db, orgId: string, connectio
     title: expired ? "La clave de WhatsApp venció" : `La clave de WhatsApp vence el ${day}`,
     body: `${expired ? "Los mensajes de WhatsApp ya no pueden salir." : "Ese día los mensajes de WhatsApp dejarán de salir."} Genera en Meta una clave con caducidad «Nunca» y pégala en Configuración › Integraciones › WhatsApp › Cambiar la clave.`,
   })
+}
+
+/* ---------- La vuelta diaria del número (app propia) ---------- */
+
+/** Por qué Meta ya no tiene el número listo para la API, en palabras de la clínica. */
+export const OWN_APP_NUMBER_GONE =
+  "Meta dice que el número ya no está conectado para enviar y recibir: se desconectó desde el celular, pasó a otro celular o se dio de baja."
+export const OWN_APP_NUMBER_UNREADABLE =
+  "Meta ya no deja leer el número con la clave guardada: se quitó el acceso de la app o el número salió de la cuenta."
+
+/**
+ * Las conexiones activas hechas con la app propia de la clínica: las revisa la
+ * vuelta diaria. Una demo no: sus claves son de ejemplo y no tienen número de
+ * verdad. Recorre todas las clínicas: rol owner.
+ */
+export async function listOwnAppConnections(ownerDb: Db): Promise<{ orgId: string; connectionId: string }[]> {
+  const rows = await ownerDb
+    .select({ orgId: channelConnection.organizationId, connectionId: channelConnection.id })
+    .from(channelConnection)
+    .leftJoin(saasSubscription, eq(saasSubscription.organizationId, channelConnection.organizationId))
+    .where(
+      and(
+        eq(channelConnection.provider, "whatsapp_cloud_api"),
+        eq(channelConnection.status, "active"),
+        isNotNull(channelConnection.ownApp),
+        isNull(channelConnection.signup),
+        or(isNull(saasSubscription.isDemo), eq(saasSubscription.isDemo, false)),
+      ),
+    )
+  return rows
+}
+
+/** La clave y el número de una conexión con la app propia, para preguntarle a Meta. Con base y sin red. */
+export async function ownAppNumberAccess(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  secretsKey: Buffer,
+): Promise<{ token: string; phoneNumberId: string } | null> {
+  const [row] = await tx
+    .select({ configEncrypted: channelConnection.configEncrypted })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .limit(1)
+  if (!row) return null
+  const value = decryptConfig(secretsKey, row.configEncrypted)
+  const token = config(value, "accessToken")
+  const phoneNumberId = config(value, "phoneNumberId")
+  return token && phoneNumberId ? { token, phoneNumberId } : null
+}
+
+/** Lo que Meta respondió por el número en la vuelta diaria. */
+export type OwnAppNumberCheck = "registrado" | "sin-registro" | "sin-acceso" | "clave" | "sin-saber"
+
+/** Pregunta a Meta si el número sigue registrado para la API, con la clave guardada. Sin base. */
+export async function checkOwnAppNumber(
+  access: { token: string; phoneNumberId: string },
+  deps: OwnAppDeps,
+): Promise<OwnAppNumberCheck> {
+  try {
+    const { platformType } = await readOwnAppNumber(graphApp(), access.phoneNumberId, access.token, { fetch: deps.fetch })
+    return platformType === "CLOUD_API" ? "registrado" : "sin-registro"
+  } catch (error) {
+    if (!(error instanceof MetaSignupError) || error.transient) return "sin-saber"
+    if (error.code === 190) return "clave"
+    // 100: el número no existe o la clave ya no lo alcanza.
+    return error.code === 100 ? "sin-acceso" : "sin-saber"
+  }
+}
+
+/**
+ * Meta ya no tiene el número de una conexión con la app propia listo para la
+ * API (lo dijo la vuelta diaria o su aviso de la cuenta). La conexión lo dice
+ * («Necesita atención», con el motivo), su paso «registrar» vuelve a quedar
+ * pendiente con «Volver a comprobar», y la campana avisa a quien administra y
+ * al equipo. Una conexión ya marcada no repite el aviso. Devuelve si se marcó.
+ */
+export async function noteOwnAppUnregistered(tx: Db, orgId: string, connectionId: string, why: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ ownApp: channelConnection.ownApp })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.id, connectionId),
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.status, "active"),
+        isNotNull(channelConnection.ownApp),
+        isNull(channelConnection.signup),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  if (!row?.ownApp || !row.ownApp.registeredAt) return false
+  const next: ConnectionOwnApp = { ...row.ownApp, registeredAt: null, problems: { ...row.ownApp.problems, registrar: why } }
+  await tx
+    .update(channelConnection)
+    .set({ ownApp: next, updatedAt: new Date() })
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+  const subject = unregisteredSubject(connectionId)
+  await notifyAdmins(tx, orgId, subject, {
+    title: "WhatsApp se desconectó de Meta",
+    body: `${why} Mientras tanto no llegan ni salen mensajes de WhatsApp. En Configuración › Integraciones › WhatsApp, «Volver a comprobar» lo registra de nuevo.`,
+  })
+  await notifyTeamChannelDown(tx, orgId, subject)
+  return true
 }

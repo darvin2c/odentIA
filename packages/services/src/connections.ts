@@ -31,7 +31,7 @@ import {
   settleMessageTexts,
 } from "./clinic-messages.js"
 import { isDemoClinic } from "./demo-clinic.js"
-import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation, violatedConstraint } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { checkOwnAppKeys, freshOwnApp, type OwnAppKeysChecked, settleOwnApp } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications } from "./workspace.js"
@@ -394,6 +394,19 @@ function freshSignup(origin: SignupOrigin) {
 }
 
 const ACTIVE_ELSEWHERE = "Esa cuenta ya está conectada en otra clínica de odentIA."
+
+/** El índice que asegura una cuenta activa por canal aunque lleguen dos pedidos a la vez. */
+const ONE_ACTIVE_INDEX = "channel_connection_one_active_per_channel_uidx"
+
+/**
+ * Otro pedido activó una cuenta del mismo canal entre la comprobación y la
+ * escritura: se responde lo mismo que la comprobación, con la cuenta que ganó.
+ */
+async function rethrowOneActive(tx: Db, orgId: string, channel: string, exceptId: string | null, error: unknown): Promise<void> {
+  if (violatedConstraint(error) !== ONE_ACTIVE_INDEX) return
+  await assertSingleActive(tx, orgId, channel, exceptId)
+  throw new ServiceError("CHANNEL_ALREADY_CONNECTED", 409, "La clínica ya tiene una cuenta de ese canal conectada. Para usar otra, desconecta primero esa.")
+}
 
 const REACTIVATE_ELSEWHERE =
   "Ese número ahora está conectado en otra clínica de odentIA. Para usarlo aquí, primero tienen que desconectarlo allá."
@@ -887,6 +900,7 @@ export async function createConnection(
     )
   } catch (error) {
     if (!isUniqueViolation(error)) throw error
+    await rethrowOneActive(tx, orgId, input.channel, null, error)
     throw new ServiceError("CONNECTION_EXISTS", 409, ACTIVE_ELSEWHERE, accountField(input.provider, ACTIVE_ELSEWHERE))
   }
   if (!created) throw new Error("No se pudo crear la conexión")
@@ -980,6 +994,7 @@ export async function adoptConnectionForSignup(
     )
   } catch (error) {
     if (!isUniqueViolation(error)) throw error
+    await rethrowOneActive(tx, orgId, row.channel, id, error)
     throw new ServiceError("CONNECTION_EXISTS", 409, ACTIVE_ELSEWHERE)
   }
   return { id, registrationPin }
@@ -1011,13 +1026,15 @@ export async function setConnectionStatus(
   status: "active" | "disabled",
   options: { secretsKey?: Buffer; deps?: ConnectionDeps } = {},
 ): Promise<ConnectionPublic> {
+  let channel: string | null = null
   if (status === "active") {
     const [current] = await tx
       .select({ channel: channelConnection.channel })
       .from(channelConnection)
       .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
       .limit(1)
-    if (current) await assertSingleActive(tx, orgId, current.channel, id)
+    channel = current?.channel ?? null
+    if (channel) await assertSingleActive(tx, orgId, channel, id)
   }
   let updated: ConnectionRow | undefined
   try {
@@ -1041,6 +1058,7 @@ export async function setConnectionStatus(
     )
   } catch (error) {
     if (!isUniqueViolation(error)) throw error
+    if (channel) await rethrowOneActive(tx, orgId, channel, id, error)
     throw new ServiceError("CONNECTION_EXISTS", 409, REACTIVATE_ELSEWHERE)
   }
   if (!updated) throw notFound("Conexión")

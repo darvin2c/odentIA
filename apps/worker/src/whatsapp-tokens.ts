@@ -7,7 +7,15 @@ import {
 } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  checkOwnAppNumber,
+  listOwnAppConnections,
   listOwnAppTokensExpiring,
+  noteOwnAppTokenRejected,
+  noteOwnAppUnregistered,
+  OWN_APP_NUMBER_GONE,
+  OWN_APP_NUMBER_UNREADABLE,
+  ownAppNumberAccess,
+  reportOwnAppTokenRejected,
   listSignupTokensDue,
   noteSignupTokenProblem,
   noteSignupTokenState,
@@ -153,6 +161,46 @@ export async function runOwnAppTokenTick(ownerDb: Db, appDb: Db, now = new Date(
       result.notified += 1
     } catch (error) {
       result.errors.push(`Aviso de clave ${due.connectionId}: ${messageOf(error)}`)
+    }
+  }
+  return result
+}
+
+/**
+ * Una vez al día, cada conexión con la app propia le pregunta a Meta si su
+ * número sigue registrado para la API. Meta no avisa a esa app si el número se
+ * desconecta desde el celular, pasa a otro celular o se da de baja, y sin esto
+ * la pantalla seguiría diciendo «Conectado» mientras no llega ni sale nada.
+ * Lo que no está bien queda en la conexión («Necesita atención», con su motivo
+ * y «Volver a comprobar») y la campana avisa a quien administra y al equipo.
+ * Si Meta no responde, no se marca nada: se vuelve a preguntar mañana.
+ *
+ * Lee las conexiones de todas las clínicas con el rol owner; las llamadas a
+ * Meta van fuera de las transacciones.
+ */
+export async function runOwnAppNumberTick(
+  ownerDb: Db,
+  appDb: Db,
+  opts: { secretsKey: Buffer; fetch: typeof fetch },
+): Promise<{ checked: number; marked: number; errors: string[] }> {
+  const result = { checked: 0, marked: 0, errors: [] as string[] }
+  for (const { orgId, connectionId } of await listOwnAppConnections(ownerDb)) {
+    try {
+      const access = await withOrgContext(appDb, orgId, (tx) => ownAppNumberAccess(tx, orgId, connectionId, opts.secretsKey))
+      if (!access) continue
+      const answer = await checkOwnAppNumber(access, { fetch: opts.fetch })
+      result.checked += 1
+      if (answer === "registrado" || answer === "sin-saber") continue
+      const marked = await withOrgContext(appDb, orgId, (tx) =>
+        answer === "clave"
+          ? noteOwnAppTokenRejected(tx, orgId, connectionId, opts.secretsKey, access.token)
+          : noteOwnAppUnregistered(tx, orgId, connectionId, answer === "sin-registro" ? OWN_APP_NUMBER_GONE : OWN_APP_NUMBER_UNREADABLE),
+      )
+      if (!marked) continue
+      result.marked += 1
+      if (answer === "clave") await reportOwnAppTokenRejected(ownerDb, { orgId, connectionId })
+    } catch (error) {
+      result.errors.push(`Número ${connectionId}: ${messageOf(error)}`)
     }
   }
   return result

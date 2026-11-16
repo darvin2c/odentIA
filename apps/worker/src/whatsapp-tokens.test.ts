@@ -5,9 +5,9 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { decryptConfig, describeAuditEvent, encryptJson, listWorkspaceNotifications } from "@odentia/services"
-import { and, eq, like } from "drizzle-orm"
+import { and, eq, like, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
-import { runSignupTokenTick } from "./whatsapp-tokens.js"
+import { runOwnAppNumberTick, runSignupTokenTick } from "./whatsapp-tokens.js"
 import { appDb, KEY, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -51,11 +51,33 @@ const signupOf = (extra: Partial<ConnectionSignup>): ConnectionSignup => ({
   ...extra,
 })
 
+/**
+ * Una clínica por conexión: cada una tiene un solo WhatsApp activo. Se llaman
+ * «Clínica», con su dueña y su recepción, como `org_a` (la de la conexión «a»).
+ */
+async function clinicFor(name: string): Promise<string> {
+  const orgId = `org_${name}`
+  if (orgId === "org_a") return orgId
+  await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values (${orgId}, 'Clínica', ${`tokens-${name}`}, now()) on conflict do nothing`)
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values (${orgId}, 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
+  )
+  await ownerDb
+    .insert(member)
+    .values([
+      { id: `m-duena-${name}`, userId: "w-duena", organizationId: orgId, role: "owner", createdAt: new Date() },
+      { id: `m-recepcion-${name}`, userId: "w-recepcion", organizationId: orgId, role: "reception", createdAt: new Date() },
+    ])
+    .onConflictDoNothing()
+  return orgId
+}
+
 async function connection(name: string, token: string, signup: ConnectionSignup | null, status = "active") {
+  const orgId = await clinicFor(name)
   const [row] = await ownerDb
     .insert(channelConnection)
     .values({
-      organizationId: "org_a",
+      organizationId: orgId,
       channel: "whatsapp",
       provider: "whatsapp_cloud_api",
       displayName: `WhatsApp ${name}`,
@@ -203,7 +225,7 @@ it("si Meta no la renueva, anota el motivo, conserva la clave y lo vuelve a inte
     dedupeKey: "clave-meta-sin-renovar:100",
   })
   expect(kase!.lines).toHaveLength(1)
-  expect(kase!.lines[0]).toContain("Clínica [org_a] · WhatsApp (conexión")
+  expect(kase!.lines[0]).toContain("Clínica [org_e] · WhatsApp (conexión")
   // Reintentar con el mismo motivo no repite el aviso ni el caso.
   await runSignupTokenTick(ownerDb, appDb, { app: APP, secretsKey: KEY, fetch: meta.fetch, now })
   expect(await noticesOf(refused)).toHaveLength(1)
@@ -218,7 +240,7 @@ it("si Meta no la renueva, anota el motivo, conserva la clave y lo vuelve a inte
   expect((await stateOf(silent)).token).toBe("J-NUEVA")
   // Renovada, el aviso se retira solo: ya no está en la campana de la dueña.
   expect((await noticesOf(refused))[0]!.resolvedAt).not.toBeNull()
-  const bell = await withOrgContext(appDb, "org_a", (tx) => listWorkspaceNotifications(tx, "org_a", "w-duena", ["settings.write"]))
+  const bell = await withOrgContext(appDb, "org_e", (tx) => listWorkspaceNotifications(tx, "org_e", "w-duena", ["settings.write"]))
   expect(bell.items.map((item) => item.title)).not.toContain("WhatsApp no pudo renovar su conexión con Meta")
 })
 
@@ -268,4 +290,46 @@ it("una clave vencida que Meta ya no acepta queda anotada y no se insiste; si la
   const again = fakeMeta(now)
   await runSignupTokenTick(ownerDb, appDb, { app: APP, secretsKey: KEY, fetch: again.fetch, now })
   expect(again.calls).not.toContain("revisar K-VIEJA")
+})
+
+it("con la app propia, la vuelta diaria ve que Meta soltó el número o la clave, lo dice en la conexión y avisa una vez", async () => {
+  const registered = new Date("2026-11-01T12:00:00Z").toISOString()
+  const ownApp = { registeredAt: registered, subscribedAt: registered, problems: {}, pinNeeded: false, tokenExpiresAt: null, keysCheckedAt: null, signatureRejectedAt: null }
+  const own = async (name: string, token: string) => {
+    const id = await connection(name, token, null)
+    await ownerDb.update(channelConnection).set({ ownApp }).where(eq(channelConnection.id, id))
+    return id
+  }
+  const fine = await own("p1", "P1-CLAVE")
+  const gone = await own("p2", "P2-CLAVE")
+  const dead = await own("p3", "P3-CLAVE")
+  const silent = await own("p4", "P4-CLAVE")
+  // Meta, por número: sigue en la API, ya no está, la clave no sirve, y uno que no responde.
+  const fetchImpl = (async (url: string | URL | Request) => {
+    const path = new URL(String(url)).pathname
+    if (path.endsWith("/pn-p1")) return new Response(JSON.stringify({ platform_type: "CLOUD_API" }), { status: 200 })
+    if (path.endsWith("/pn-p2")) return new Response(JSON.stringify({ platform_type: "NOT_APPLICABLE" }), { status: 200 })
+    if (path.endsWith("/pn-p3")) return new Response(JSON.stringify({ error: { message: "Error validating access token", code: 190 } }), { status: 401 })
+    if (path.endsWith("/pn-p4")) return new Response("{}", { status: 503 })
+    return new Response(JSON.stringify({ platform_type: "CLOUD_API" }), { status: 200 })
+  }) as typeof fetch
+
+  const first = await runOwnAppNumberTick(ownerDb, appDb, { secretsKey: KEY, fetch: fetchImpl })
+  expect(first.errors).toEqual([])
+  const ownAppOf = async (id: string) => (await ownerDb.select().from(channelConnection).where(eq(channelConnection.id, id)))[0]!.ownApp!
+  expect(await ownAppOf(fine)).toMatchObject({ registeredAt: registered, problems: {} })
+  // Ya no está en la API: vuelve a quedar por registrar, con su motivo, y avisa a la dueña y a recepción.
+  expect(await ownAppOf(gone)).toMatchObject({ registeredAt: null, problems: { registrar: expect.stringContaining("ya no está conectado") } })
+  const goneNotices = await ownerDb.select({ title: workspaceNotification.title, userId: workspaceNotification.userId }).from(workspaceNotification).where(eq(workspaceNotification.subject, `numero-sin-registro:${gone}`))
+  expect(goneNotices.map((notice) => notice.title).sort()).toEqual(["WhatsApp no está enviando mensajes", "WhatsApp se desconectó de Meta"])
+  // La clave no sirve: queda anotado como cuando falla un envío.
+  expect((await ownAppOf(dead)).tokenRejectedAt).toEqual(expect.any(String))
+  // Meta no respondió: no se marca nada.
+  expect(await ownAppOf(silent)).toMatchObject({ registeredAt: registered, problems: {} })
+  expect(first.marked).toBe(2)
+
+  // Al día siguiente, lo mismo no vuelve a avisar.
+  const again = await runOwnAppNumberTick(ownerDb, appDb, { secretsKey: KEY, fetch: fetchImpl })
+  expect(again.marked).toBe(0)
+  expect(await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.subject, `numero-sin-registro:${gone}`))).toHaveLength(2)
 })

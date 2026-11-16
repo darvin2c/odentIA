@@ -1141,12 +1141,15 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const templateStatuses: NormalizedTemplateStatus[] = []
     const templateCategories: NormalizedTemplateCategory[] = []
     const appContacts: NormalizedAppContact[] = []
+    // Con la app propia el aviso de la cuenta llega a la dirección de la conexión, si la clínica lo activó.
+    const accountEvents: NormalizedAccountEvent[] = []
     let historyDeclined = false
     for (const change of readChanges(rawBody)) {
       messages.push(...change.messages)
       statuses.push(...change.statuses)
       if (change.templateStatus) templateStatuses.push(change.templateStatus)
       if (change.templateCategory) templateCategories.push(change.templateCategory)
+      if (change.accountEvent) accountEvents.push(change.accountEvent)
       appContacts.push(...(change.appContacts ?? []))
       if (change.historyDeclined) historyDeclined = true
     }
@@ -1155,6 +1158,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       statuses,
       ...(appContacts.length > 0 ? { appContacts } : {}),
       ...(historyDeclined ? { historyDeclined } : {}),
+      ...(accountEvents.length > 0 ? { accountEvents } : {}),
       ...(templateStatuses.length > 0 ? { templateStatuses } : {}),
       ...(templateCategories.length > 0 ? { templateCategories } : {}),
     }
