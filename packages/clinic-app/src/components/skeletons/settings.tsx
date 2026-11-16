@@ -1152,6 +1152,10 @@ const PAGE_BY_PATH: Record<string, () => ReactNode> = {
   "/settings/pipelines": PipelinesPageSkeleton,
   "/settings/integrations": IntegrationsPageSkeleton,
   "/settings/integrations/whatsapp": WhatsAppPageSkeleton,
+  // Instagram, Messenger y Telegram: el encabezado y una fila, como la lista.
+  "/settings/integrations/instagram": IntegrationsPageSkeleton,
+  "/settings/integrations/messenger": IntegrationsPageSkeleton,
+  "/settings/integrations/telegram": IntegrationsPageSkeleton,
   "/settings/integrations/webchat": WebchatPageSkeleton,
   "/settings/audit": TeamActivityPageSkeleton,
   "/settings/plan": PlanPageSkeleton,

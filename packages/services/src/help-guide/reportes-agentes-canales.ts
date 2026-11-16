@@ -262,20 +262,20 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "canales-instagram-messenger",
         q: "¿Cómo conecto Instagram?",
-        a: "En Configuración › Integraciones, «Conectar» en Instagram o Messenger y pega los datos de tu app de Meta: el identificador de la cuenta o de la página, la «Clave de acceso» y la «Clave secreta de la app». Después te muestra la «Dirección de avisos» y la «Clave de verificación»: pégalas en tu app de Meta, en Webhooks. Hasta entonces no llega ningún mensaje y la fila dice «Terminar de conectar».",
+        a: "En Configuración › Integraciones, «Conectar» en Instagram o Messenger te lleva a su página; ahí «Conectar» pide los datos de tu app de Meta: el identificador de la cuenta o de la página, la «Clave de acceso» y la «Clave secreta de la app». Después te muestra la «Dirección de avisos» y la «Clave de verificación»: pégalas en tu app de Meta, en Webhooks. Hasta entonces no llega ningún mensaje y su fila dice «Necesita atención», con «Revisar».",
         forms: ["como conecto messenger", "instagram dice que falta pegar la direccion de avisos"],
       },
       {
         id: "canales-telegram",
         q: "¿Cómo conecto Telegram?",
-        a: "En Configuración › Integraciones, «Conectar» en Telegram y pega la «Clave del bot»: te la da @BotFather, dentro de Telegram, al crear el bot (ahí se llama «token»). Es el único dato: no hay nada más que copiar ni pegar, y lo que le escriban al bot llega a la Bandeja.",
+        a: "En Configuración › Integraciones, «Conectar» en Telegram te lleva a su página; ahí «Conectar» pide la «Clave del bot»: te la da @BotFather, dentro de Telegram, al crear el bot (ahí se llama «token»). Es el único dato: no hay nada más que copiar ni pegar, y lo que le escriban al bot llega a la Bandeja.",
         forms: ["que necesito para conectar telegram", "de donde saco la clave del bot de telegram"],
       },
       {
         id: "canales-administrar",
         q: "¿Cómo desconecto Instagram, Messenger o Telegram?",
-        a: "En Configuración › Integraciones, «Administrar» en su fila: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan; después, «Volver a conectar» lo retoma. Ahí también «Probar» dice si la cuenta responde y «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
-        forms: ["como desconecto instagram", "como se si telegram funciona", "cambie la clave en meta donde la pongo"],
+        a: "En Configuración › Integraciones, entra al canal y, en «Conexión», «Administrar» en su cuenta: «Desconectar» corta los mensajes de ese canal, y las conversaciones que ya tienes se conservan. La cuenta pasa a la pestaña «Desconectados», donde «Volver a conectar» la retoma. Cada canal tiene una sola cuenta activa: para usar otra, primero desconecta la que está. Ahí también «Probar» dice si la cuenta responde y «Cambiar la clave» pega una nueva sin perder la conexión ni sus conversaciones.",
+        forms: ["como desconecto instagram", "como se si telegram funciona", "cambie la clave en meta donde la pongo", "puedo tener dos cuentas de instagram", "cuantos whatsapp puedo conectar"],
       },
       {
         id: "canales-modelo",
@@ -303,7 +303,7 @@ export const REPORTES_AGENTES_CANALES: readonly HelpMore[] = [
       {
         id: "whatsapp-desconectar",
         q: "¿Cómo desconecto el WhatsApp?",
-        a: "En Configuración › Integraciones › WhatsApp, «Desconectar» (en el teléfono, en el menú de la conexión). Los mensajes dejan de llegar a la Bandeja y el agente deja de atender y de enviar recordatorios y avisos por WhatsApp; lo que pueda salir por correo sigue saliendo y las conversaciones se conservan. Si se conectó con Facebook, odentIA también deja de recibir los mensajes de tu cuenta en Meta; el número no se da de baja y sigue funcionando donde lo uses, también en la app del celular. Desconectado, el número queda libre: puedes conectarlo en otra clínica de odentIA o en otro programa. «Volver a conectar» lo retoma, salvo que ya esté conectado en otra clínica. «Probar conexión» dice si la cuenta responde.",
+        a: "En Configuración › Integraciones › WhatsApp, «Desconectar» (en el teléfono, en el menú de la conexión). Los mensajes dejan de llegar a la Bandeja y el agente deja de atender y de enviar recordatorios y avisos por WhatsApp; lo que pueda salir por correo sigue saliendo y las conversaciones se conservan. Si se conectó con Facebook, odentIA también deja de recibir los mensajes de tu cuenta en Meta; el número no se da de baja y sigue funcionando donde lo uses, también en la app del celular. Desconectado, el número queda libre: puedes conectarlo en otra clínica de odentIA o en otro programa. El número pasa a la pestaña «Desconectados», donde «Volver a conectar» lo retoma, salvo que ya esté conectado en otra clínica o que la clínica ya tenga otro número conectado: solo un WhatsApp a la vez. «Probar conexión» dice si la cuenta responde.",
         forms: [
           "como quito el numero de whatsapp de la clinica",
           "como pruebo la conexion de whatsapp",

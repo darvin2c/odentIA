@@ -24,7 +24,7 @@ import type { Storage } from "./storage.js"
 import { createOpportunity, getOpportunity, setOpportunityTask, updateOpportunity } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { createTask, listTasks } from "./tasks.js"
-import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
+import { activeConnectionId, appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 const KEY = secretsKeyFromEnv("dd".repeat(32))
@@ -90,6 +90,8 @@ async function makeWaConnection(orgId: string): Promise<string> {
 }
 
 async function makeTgConnection(orgId: string): Promise<string> {
+  const existing = await activeConnectionId(orgId, "telegram")
+  if (existing) return existing
   return withOrgContext(appDb, orgId, async (tx) => {
     const created = await createConnection(
       tx,

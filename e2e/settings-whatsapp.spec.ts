@@ -438,24 +438,31 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await info.attach("whatsapp-telefono", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
 
-test("whatsapp: al desconectar el número se puede conectar otro y el anterior queda de historial", async ({ owner }, info) => {
+test("whatsapp: al desconectar el número se puede conectar otro y el anterior queda en «Desconectados»", async ({ owner }, info) => {
   const { page, org } = owner
   const first = await createWhatsApp(page, org.slug, [REMINDER, RESUME])
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
-  const another = page.getByRole("heading", { name: "Conecta otro número de WhatsApp", exact: true })
+  const another = page.getByRole("heading", { name: "Conecta el WhatsApp de la clínica", exact: true })
+  const disconnectedTab = page.getByRole("tab", { name: "Desconectados · 1" })
 
-  // Conectado: no se ofrece otro número.
+  // Conectado: no se ofrece otro número, y se dice por qué.
   const card = page.getByRole("region", { name: "Conexión", exact: true })
   await expect(card.getByRole("button", { name: "Probar conexión", exact: true })).toBeVisible()
   await expect(another).toHaveCount(0)
+  await expect(page.getByText("Solo un WhatsApp a la vez: para conectar otro número, primero desconecta este.", { exact: false })).toBeVisible()
+  await expect(disconnectedTab).toHaveCount(0)
   await info.attach("whatsapp-un-numero-conectado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // Desconectado: la conexión sigue ahí con su «Volver a conectar» y ya se puede conectar otro número.
   await card.getByRole("button", { name: "Desconectar", exact: true }).click()
   await page.getByRole("alertdialog", { name: "Desconectar WhatsApp" }).getByRole("button", { name: "Desconectar", exact: true }).click()
+  // «Conexión» ofrece conectar uno; el desconectado pasa a su pestaña, con su «Volver a conectar».
+  await expect(another).toBeVisible()
+  await disconnectedTab.click()
   await expect(card).toContainText("Desconectado.")
   await expect(card.getByRole("button", { name: "Volver a conectar", exact: true })).toBeVisible()
+  await page.getByRole("tab", { name: "Conexión", exact: true }).click()
   await expect(another).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("whatsapp-desconectado-conectar-otro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -484,6 +491,8 @@ test("whatsapp: al desconectar el número se puede conectar otro y el anterior q
   await expect(current.getByRole("button", { name: "Probar conexión", exact: true })).toBeVisible()
   await expect(current).not.toContainText("Desconectado.")
   const previous = page.getByRole("region", { name: "Conexión de WA E2E", exact: true })
+  await expect(previous).toHaveCount(0)
+  await disconnectedTab.click()
   await expect(previous).toContainText("Desconectado.")
   await expect(previous).toContainText("Número anterior.")
   await expect(previous.getByRole("button", { name: "Volver a conectar", exact: true })).toHaveCount(0)
