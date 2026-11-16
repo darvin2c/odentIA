@@ -1,11 +1,11 @@
 /**
  * «Conectar WhatsApp» (`routes/whatsapp.conectar.tsx`): la explicación, los dos
- * orígenes del número y el botón de Facebook. El marco es el `AuthSplit` real,
- * con sus enlaces legales (`AuthLegal`, solo enlaces).
+ * orígenes del número y el botón de Facebook, en el marco real de la página
+ * (`ConnectLayout`), sin el color de la clínica mientras carga.
  */
 import { Skeleton } from "@odentia/ui"
-import { AuthAside, AuthSplit, SkeletonRegion } from "@odentia/ui-patterns"
-import { AuthLegal } from "../../lib/auth-screens"
+import { SkeletonRegion } from "@odentia/ui-patterns"
+import { ConnectLayout } from "../whatsapp/connect-layout"
 import { TextSm } from "./page-loading"
 
 export function WhatsAppConnectSkeleton() {
@@ -37,12 +37,8 @@ export function WhatsAppConnectSkeleton() {
 
 export function WhatsAppConnectPageSkeleton() {
   return (
-    <AuthSplit
-      title="Conectar WhatsApp"
-      aside={<AuthAside tag="WhatsApp" title="Tu clínica" accent="conecta su número." />}
-      legal={<AuthLegal />}
-    >
+    <ConnectLayout title="Conectar WhatsApp" clinicName={null} back={null} brandColor={null}>
       <WhatsAppConnectSkeleton />
-    </AuthSplit>
+    </ConnectLayout>
   )
 }

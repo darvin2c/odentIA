@@ -1,7 +1,7 @@
 import { Button } from "@odentia/ui"
-import { AuthAside, AuthSplit } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { ChevronLeft } from "lucide-react"
 import { useState } from "react"
 import {
   accountWords,
@@ -12,7 +12,8 @@ import {
 import { WhatsAppConnectPageSkeleton, WhatsAppConnectSkeleton } from "../components/skeletons/whatsapp-conectar"
 import { accountOrganizationsQuery } from "../lib/account-organizations"
 import { ApiError, apiFetch } from "../lib/api"
-import { AuthAlert, AuthLegal } from "../lib/auth-screens"
+import { AuthAlert } from "../lib/auth-screens"
+import { ConnectLayout } from "../components/whatsapp/connect-layout"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { panelUrl, tenantUrl } from "../lib/host"
 
@@ -50,6 +51,10 @@ interface SignupConfig {
   graphVersion: string | null
 }
 
+interface Appearance {
+  brandColor: string | null
+}
+
 /** La página de WhatsApp de la clínica; `conectado` le dice que muestre lo que se acaba de conectar. */
 const whatsappPage = (clinic: { slug: string; product: string }, connectedId?: string) =>
   tenantUrl(
@@ -74,36 +79,39 @@ function WhatsAppConnectPage() {
   const [connected, setConnected] = useState<FacebookSignupConnection | null>(null)
 
   const title = clinic ? `Conectar el WhatsApp de ${clinic.organizationName}` : "Conectar WhatsApp"
-  const aside = (
-    <AuthAside
-      tag="WhatsApp"
-      title={clinic?.organizationName ?? "Tu clínica"}
-      accent="conecta su número."
-    />
-  )
+  // El color de la clínica, como en sus páginas: sin él, el del producto.
+  const appearance = useQuery({
+    queryKey: ["appearance", org],
+    queryFn: () => apiFetch<{ data: Appearance }>(`/api/public/appearance/${encodeURIComponent(org ?? "")}`),
+    enabled: Boolean(org),
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const brandColor = appearance.data?.data.brandColor ?? null
   // Un nombre largo pasa a la línea siguiente en vez de salirse de la tarjeta.
   const back = clinic ? (
     <Button
-      variant="ghost"
+      variant="outline"
       className="h-auto min-h-11 whitespace-normal text-left sm:min-h-9"
       render={<a href={whatsappPage(clinic)} />}
     >
+      <ChevronLeft aria-hidden data-icon="inline-start" />
       Volver a {clinic.organizationName}
     </Button>
   ) : null
 
   if (organizations.isPending || (clinic && config.isPending)) {
     return (
-      <AuthSplit title={title} aside={aside} legal={<AuthLegal />} footer={back}>
+      <ConnectLayout title={title} clinicName={clinic?.organizationName ?? null} back={back} brandColor={brandColor}>
         <WhatsAppConnectSkeleton />
-      </AuthSplit>
+      </ConnectLayout>
     )
   }
 
   // No se dice si la clínica existe: solo que no es de quien entró.
   if (!clinic) {
     return (
-      <AuthSplit title="Conectar WhatsApp" aside={aside} legal={<AuthLegal />}>
+      <ConnectLayout title="Conectar WhatsApp" clinicName={null} back={null} brandColor={null}>
         {organizations.isError ? (
           <AuthAlert>No pudimos cargar tus clínicas. Recarga la página.</AuthAlert>
         ) : (
@@ -122,7 +130,7 @@ function WhatsAppConnectPage() {
             </Button>
           </>
         )}
-      </AuthSplit>
+      </ConnectLayout>
     )
   }
 
@@ -134,7 +142,17 @@ function WhatsAppConnectPage() {
       : null
 
   return (
-    <AuthSplit title={title} aside={aside} legal={<AuthLegal />} footer={back}>
+    <ConnectLayout
+      title={title}
+      intro={
+        ready && !forbidden && !connected
+          ? `Entras con el Facebook de quien administra la clínica, eliges el número y vuelves a ${clinic.organizationName} ya conectado.`
+          : undefined
+      }
+      clinicName={clinic.organizationName}
+      back={back}
+      brandColor={brandColor}
+    >
       {forbidden ? (
         <AuthAlert>
           No puedes conectar el WhatsApp de {clinic.organizationName}. Lo hace quien administra la
@@ -166,10 +184,6 @@ function WhatsAppConnectPage() {
         </p>
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            Entras con el Facebook de quien administra la clínica, eliges el número y vuelves a{" "}
-            {clinic.organizationName} con él conectado. Ten a mano el teléfono de ese número.
-          </p>
           <FacebookSignup
             slug={clinic.slug}
             config={ready}
@@ -181,6 +195,6 @@ function WhatsAppConnectPage() {
           />
         </>
       )}
-    </AuthSplit>
+    </ConnectLayout>
   )
 }
