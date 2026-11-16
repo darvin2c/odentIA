@@ -157,7 +157,7 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   // Una fila por integración: su estado en palabras, para qué sirve y qué hace falta.
   for (const [name, needs] of [
     ["WhatsApp", "Para conectar:"],
-    ["Instagram", "Para conectar: la cuenta profesional de Instagram de la clínica."],
+    ["Instagram", "Para conectar: la página de Facebook unida al Instagram profesional de la clínica."],
     ["Messenger", "Para conectar: la página de Facebook de la clínica."],
     ["Telegram", "Para conectar: la clave del bot, que da @BotFather."],
   ] as const) {

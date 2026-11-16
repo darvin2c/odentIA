@@ -51,7 +51,7 @@ export const INTEGRATIONS: Record<IntegrationId, IntegrationCopy> = {
     mark: "IG",
     purpose: "Responder en la Bandeja los mensajes directos de la clínica.",
     purposeShort: "Responder sus mensajes directos",
-    toConnect: "la cuenta profesional de Instagram de la clínica.",
+    toConnect: "la página de Facebook unida al Instagram profesional de la clínica.",
   },
   messenger: {
     name: "Messenger",
@@ -415,8 +415,8 @@ function whatsappPending(connection: ConnectionItem): string | null {
 
 /**
  * Messenger o Instagram conectado con Facebook: lo mismo que WhatsApp, sin
- * número que registrar. Se arregla con «Conectar otra con Facebook», que vuelve
- * a dejar la misma cuenta con sus conversaciones.
+ * número que registrar. Se arregla con «Volver a conectar con Facebook» en su
+ * panel, que deja la misma cuenta con sus conversaciones.
  */
 function pagePending(connection: ConnectionItem): string | null {
   const signup = connection.signup
@@ -738,7 +738,7 @@ const accounts = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}`
 
 /** Lo que pasó al volver de Facebook con las páginas de la clínica, dicho sin códigos. */
 function facebookNotice(search: IntegrationsSearch): MailNotice {
-  if (search.facebook === "cancelado") return { tone: "danger", text: "No se conectó nada: cerraste la ventana de Facebook antes de terminar." }
+  if (search.facebook === "cancelado") return { tone: "info", text: "No se conectó nada: cerraste la ventana de Facebook antes de terminar." }
   if (search.facebook === "sin-sesion") return { tone: "danger", text: "Tu sesión se cerró mientras estabas en Facebook. Entra y vuelve a conectar." }
   if (search.facebook === "sin-paginas") {
     return { tone: "danger", text: "No marcaste ninguna página en Facebook. Vuelve a conectar y marca la página de la clínica." }
@@ -763,7 +763,7 @@ function facebookNotice(search: IntegrationsSearch): MailNotice {
 }
 
 export interface MailNotice {
-  tone: "success" | "danger"
+  tone: "success" | "danger" | "info"
   text: string
 }
 

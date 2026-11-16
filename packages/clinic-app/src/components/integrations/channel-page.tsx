@@ -1,4 +1,4 @@
-import { Button } from "@odentia/ui"
+import { Button, Skeleton } from "@odentia/ui"
 import { EmptyState, ErrorState, PageHeader, SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { MessageCircle } from "lucide-react"
@@ -38,7 +38,8 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
   const [open, setOpen] = useState<Open>(null)
   const openings = useRef(0)
   // Messenger e Instagram se conectan con Facebook; «con tu propia app» queda de segunda.
-  const facebook = useFacebookPages(canWrite && channel !== "telegram") && channel !== "telegram"
+  const pages = useFacebookPages(canWrite && channel !== "telegram")
+  const facebook = pages.on && channel !== "telegram"
 
   const listQuery = useQuery({
     queryKey: ["connections"],
@@ -145,7 +146,7 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
               {facebook ? <FacebookPagesButton label="Conectar otra con Facebook" variant="outline" /> : null}
               <Button
                 type="button"
-                variant={facebook ? "ghost" : "outline"}
+                variant="outline"
                 className="self-start"
                 onClick={() => show(null)}
               >
@@ -164,17 +165,31 @@ export function ChannelPage({ channel }: { channel: PanelChannel }) {
                   <p className="text-sm text-muted-foreground">
                     <strong className="font-semibold text-foreground">Para conectar:</strong>{" "}
                     {facebook
-                      ? "entra con el Facebook de quien administra la página de la clínica y marca sus páginas. Se conectan Messenger y el Instagram unido a cada una."
+                      ? channel === "instagram"
+                        ? "entra con el Facebook de quien administra la página unida al Instagram de la clínica y márcala. Se conectan su Instagram y su Messenger."
+                        : "entra con el Facebook de quien administra la página de la clínica y marca sus páginas. Se conectan su Messenger y el Instagram unido a cada una."
                       : INTEGRATIONS[channel].toConnect}
                     {disconnected.length > 0
                       ? " También puedes volver a conectar una cuenta anterior en «Desconectados»."
                       : null}
                   </p>
                 </div>
-                {facebook ? (
+                {pages.pending ? (
+                  <Skeleton className="h-9 w-44 rounded-3xl" aria-label="Cargando cómo conectar" />
+                ) : facebook ? (
                   <div className="flex flex-wrap items-start gap-2">
                     <FacebookPagesButton label="Conectar con Facebook" />
-                    <Button type="button" variant="ghost" className="self-start" onClick={() => show(null)}>
+                    <Button type="button" variant="outline" className="self-start" onClick={() => show(null)}>
+                      Con tu propia app de Meta
+                    </Button>
+                  </div>
+                ) : pages.failed ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm text-muted-foreground">No pudimos saber si está «Conectar con Facebook».</p>
+                    <Button type="button" variant="outline" size="sm" onClick={pages.retry}>
+                      Reintentar
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => show(null)}>
                       Con tu propia app de Meta
                     </Button>
                   </div>

@@ -22,8 +22,9 @@ test("whatsapp en el panel: la clínica sale de la membresía, y vuelve a la cl�
 
   // La dueña llega a la página de su clínica; sin la app de Meta lo dice y ofrece volver.
   await gotoHydrated(mine.page, connectPage(mine.org.slug))
-  await expect(mine.page.getByText(`Conectar el WhatsApp de ${mine.org.name}`)).toBeVisible()
-  await expect(mine.page.getByRole("alert")).toContainText("«Conectar con Facebook» no está disponible en esta instalación")
+  await expect(mine.page.getByRole("heading", { name: "Conectar el WhatsApp de la clínica" })).toBeVisible()
+  await expect(mine.page.getByText(`${mine.org.name} · Integraciones · WhatsApp`)).toBeVisible()
+  await expect(mine.page.getByRole("status")).toContainText("«Conectar con Facebook» todavía no está disponible")
   await expect(mine.page.getByRole("button", { name: "Abrir la ventana de Meta" })).toHaveCount(0)
   await expect(mine.page.getByRole("link", { name: `Volver a ${mine.org.name}` })).toHaveAttribute(
     "href",
@@ -64,7 +65,7 @@ test("whatsapp en el panel: sin sesión, entrar vuelve a la misma página", asyn
     await page.getByLabel("Contraseña").fill(owner.user.password)
     await page.getByRole("button", { name: "Entrar", exact: true }).click()
     await expect(page).toHaveURL(connectPage(owner.org.slug))
-    await expect(page.getByText(`Conectar el WhatsApp de ${owner.org.name}`)).toBeVisible()
+    await expect(page.getByText(`${owner.org.name} · Integraciones · WhatsApp`)).toBeVisible()
   } finally {
     await context.close()
   }

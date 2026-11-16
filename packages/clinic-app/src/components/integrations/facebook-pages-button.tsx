@@ -2,8 +2,12 @@ import { Button } from "@odentia/ui"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 
-/** Si la instalación tiene «Conectar con Facebook» para páginas: sin él, solo «con tu propia app». */
-export function useFacebookPages(enabled: boolean): boolean {
+/**
+ * Si hay «Conectar con Facebook» para páginas: sin él, solo «con tu propia app».
+ * `pending` mientras se pregunta (no se ofrece la vía a mano antes de saberlo) y
+ * `failed` si no se pudo preguntar.
+ */
+export function useFacebookPages(enabled: boolean): { on: boolean; pending: boolean; failed: boolean; retry: () => void } {
   const status = useQuery({
     queryKey: ["meta-pages-status"],
     queryFn: () => apiFetch<{ data: { enabled: boolean } }>("/api/meta-pages/status"),
@@ -11,7 +15,12 @@ export function useFacebookPages(enabled: boolean): boolean {
     retry: 1,
     staleTime: Number.POSITIVE_INFINITY,
   })
-  return status.data?.data.enabled === true
+  return {
+    on: status.data?.data.enabled === true,
+    pending: enabled && status.isPending,
+    failed: enabled && status.isError,
+    retry: () => void status.refetch(),
+  }
 }
 
 /**

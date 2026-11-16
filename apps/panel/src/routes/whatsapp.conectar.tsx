@@ -78,7 +78,8 @@ function WhatsAppConnectPage() {
   })
   const [connected, setConnected] = useState<FacebookSignupConnection | null>(null)
 
-  const title = clinic ? `Conectar el WhatsApp de ${clinic.organizationName}` : "Conectar WhatsApp"
+  // El nombre ya va en las migas y en «Volver»: el título no lo repite.
+  const title = "Conectar el WhatsApp de la clínica"
   // El color de la clínica, como en sus páginas: sin él, el del producto.
   const appearance = useQuery({
     queryKey: ["appearance", org],
@@ -175,11 +176,16 @@ function WhatsAppConnectPage() {
           </Button>
         </>
       ) : !ready ? (
-        <AuthAlert>
-          «Conectar con Facebook» no está disponible en esta instalación. Vuelve a{" "}
-          {clinic.organizationName} y conecta WhatsApp con los datos de la app de Meta de la
-          clínica.
-        </AuthAlert>
+        // Falta configurar la app de odentIA en Meta: no es un error de quien llega.
+        <div role="status" className="flex flex-col gap-3">
+          <p className="text-sm">
+            «Conectar con Facebook» todavía no está disponible. Puedes conectar WhatsApp con los datos de tu propia app de
+            Meta desde Integraciones.
+          </p>
+          <Button variant="outline" className="min-h-11 self-start sm:min-h-9" render={<a href={whatsappPage(clinic)} />}>
+            Ir a Integraciones › WhatsApp
+          </Button>
+        </div>
       ) : connected ? (
         <p role="status" className="text-sm font-medium text-success">
           {reconectar ? "Conectado de nuevo" : "Conectado"}: {accountWords(connected)}. Volviendo a{" "}

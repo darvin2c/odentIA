@@ -25,6 +25,7 @@ import {
   secretFields,
 } from "../../lib/integrations"
 import { appWords } from "../../lib/product-words"
+import { FacebookPagesButton } from "./facebook-pages-button"
 import { AccountField } from "./whatsapp/account-field"
 
 /** La cuenta que el proveedor reconoce con unos datos; cada parte puede faltar. */
@@ -396,6 +397,10 @@ export function ChannelPanel({
 
             {canWrite ? (
               <div className="flex flex-col gap-2">
+                {/* Facebook cortó la cuenta: la salida está aquí mismo, y deja la misma cuenta con sus conversaciones. */}
+                {byFacebook && active && row.tone === "attention" ? (
+                  <FacebookPagesButton label="Volver a conectar con Facebook" />
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {active ? (
                     <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>
