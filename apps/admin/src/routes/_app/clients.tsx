@@ -3,7 +3,9 @@
  * odentIA, latidIA y vistIA en una sola lista, desde el primer contacto hasta
  * las que pagan. Reemplaza a Lista de espera y Organizaciones: cada clínica es
  * una fila, con su etapa (la calcula el servidor; nadie la mueve), su próximo
- * paso y quién la lleva, y lo que Kairós marca en palabras. Las vistas, los
+ * paso y quién la lleva, y lo que Kairós marca en palabras. Las vistas van por
+ * fase (ADR 0196): Por vender, En alta, Activos, No por ahora, Perdidos y Todos;
+ * con cuenta, la etapa se dice por su fase («En alta» o «Activo»). Las vistas, los
  * filtros y la búsqueda viven en la dirección (`clientsSearchOf`); la fila abre
  * la ficha, que es su página. Las demos no son clientes: están en Demos.
  */
@@ -33,6 +35,7 @@ import {
   ORIGIN_WORDS,
   SELLING_STAGES,
   STAGE_WORDS,
+  stageWords,
   VIEW_WORDS,
   whenWords,
   wordOf,
@@ -70,13 +73,17 @@ export const Route = createFileRoute("/_app/clients")({
 
 const PAGE_SIZE = 50
 
-/** Las etapas que tienen sentido en cada vista: en las cerradas, la etapa ya es la vista. */
+/**
+ * Las etapas que tienen sentido en cada vista: en las cerradas y en las de la cuenta, la etapa ya
+ * es la vista. En «Todos» no va «entro»: con cuenta, la fase tiene sus propias vistas.
+ */
 const STAGES_OF: Record<ClientListView, readonly string[]> = {
   por_vender: SELLING_STAGES,
-  con_cuenta: [],
+  en_alta: [],
+  activos: [],
   no_por_ahora: [],
   perdidos: [],
-  todos: CLIENT_STAGE_NAMES,
+  todos: CLIENT_STAGE_NAMES.filter((stage) => stage !== "entro"),
 }
 
 /** Lugares de Fundador y cómo se abren las clínicas de cada producto (ADR 0093), como en la lista de espera. */
@@ -160,9 +167,7 @@ function ClientsPage() {
       {
         id: "stage",
         header: "Etapa",
-        cell: ({ row }) => (
-          <Badge variant="outline">{wordOf(STAGE_WORDS, row.original.stage, "Contacto")}</Badge>
-        ),
+        cell: ({ row }) => <Badge variant="outline">{stageWords(row.original)}</Badge>,
         meta: { view: { primary: true } },
       },
       {

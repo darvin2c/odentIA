@@ -51,12 +51,12 @@ test("la administración distingue el producto de cada clínica y filtra por él
   await expect(page.getByRole("group", { name: "Producto" })).toBeVisible()
   await shot("hoy-claro")
 
-  // Clientes, en «Con cuenta»: cada clínica es una fila que dice su producto y lleva a su ficha.
+  // Clientes, en «Todos»: cada clínica es una fila que dice su producto y lleva a su ficha.
   // La misma persona lleva las dos clínicas: buscarla por su correo deja solo las de esta prueba.
   const contact = { name: "Ana Pruebas", email: `productos-${randomUUID()}@test.dev` }
   for (const [org, product] of [[medical.org, "medical"], [owner.org, "dental"]] as const)
     await accountClient(fixtureDb, { org, product, contact })
-  await page.goto(`${ADMIN}/clients?vista=con_cuenta&q=${encodeURIComponent(contact.email)}`)
+  await page.goto(`${ADMIN}/clients?vista=todos&q=${encodeURIComponent(contact.email)}`)
   await expect(page.getByRole("heading", { level: 1, name: "Clientes" })).toBeVisible()
   const medicalRow = page.getByRole("row").filter({ hasText: medical.org.name })
   const dentalRow = page.getByRole("row").filter({ hasText: owner.org.name })
