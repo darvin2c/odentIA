@@ -467,6 +467,13 @@ export interface ProductForms {
    */
   byAge: { underYears: number; kind: string } | null
   /**
+   * Las fichas (por su clave) que se llenan una vez por plan, no en cada atención (odentIA: la
+   * odontoestomatológica de la norma, ADR 0196): se ofrecen mientras el plan de ahora no tenga una,
+   * no en una urgencia, y otra vez cuando el paciente regresa con un plan nuevo. Las demás se
+   * ofrecen como siempre (el control de ortodoncia se repite).
+   */
+  oncePerPlan?: readonly string[]
+  /**
    * Las opciones de sus fichas que son un diagnóstico, como se escriben en la ficha, con su código de
    * la CIE-10 (OMS): la respuesta dictada va también a Diagnóstico si Clío no lo propuso (prueba con
    * voz del 15 nov, c5; `withFormDiagnoses`). odentIA: el diagnóstico pulpar y el apical de la AAE.

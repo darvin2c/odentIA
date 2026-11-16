@@ -333,6 +333,20 @@ export const CLINICA: readonly HelpMore[] = [
         needs: "clinical.write",
       },
       {
+        id: "pacientes-ficha-odontoestomatologica-cuando",
+        q: "¿Cuándo lleno la ficha odontoestomatológica?",
+        a: "Una vez por plan: en la primera atención que no es una urgencia, la atención te la ofrece sola en «Fichas para esta atención» y la llenas ahí (índice de caries, higiene oral, riesgo y alta básica). No vuelve a aparecer en las sesiones siguientes de ese plan ni en una urgencia (cuando el motivo empieza con «Urgencia»); si no la llenaste, sigue apareciendo hasta que la llenes. Cuando el paciente regresa con un plan nuevo, aparece otra vez. Si la necesitas en otro momento, «Nuevo» › «Ficha» en Documentos. Ofrecerla no es pedirla: puedes firmar sin ella.",
+        forms: [
+          "por que no me ofrece la ficha odontoestomatologica",
+          "cuando se llena la ficha odontoestomatologica",
+          "la ficha odontoestomatologica sale en cada sesion",
+          "ficha de la norma en la urgencia",
+        ],
+        area: "clinica",
+        needs: "clinical.write",
+        own: true,
+      },
+      {
         id: "pacientes-formulario-llenar-finalizar",
         q: "¿Cómo lleno y finalizo una ficha de consulta?",
         a: "En la atención, las de su especialidad aparecen solas en «Fichas para esta atención»: «Empezar la de hoy». En el control también aparece la que ya tiene de antes, con «Usar lo de la anterior» para copiar lo de la última con respuestas. Cualquier otra, en «Otra ficha…» o en «Nuevo» › «Ficha», eliges cuál y «Empezar»: se guarda sola mientras la llenas. En una atención en curso se finaliza al firmar la atención («Finalizarla al firmar» viene marcada si tiene respuestas); suelta o después de firmar, con «Finalizar…». La llena quien lleva la atención o toma el relevo; queda con quién la finalizó. Finalizada ya no se cambia: se corrige con «Agregar adenda». Un borrador que no sirve se quita con «Descartar borrador…», al pie de la ficha, con su motivo. Si la agregaste por error, en su fila de «Fichas para esta atención»: vacía, «Quitar» la saca sin preguntar y «Deshacer» la vuelve a poner; con algo escrito, «Descartar…» pide el motivo. Las dos quedan registradas. Lo que contó el paciente antes de venir no se llena aquí: está en «Hoy viene a…» de su atención.",

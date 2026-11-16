@@ -853,9 +853,16 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         area: "clinica",
       },
       {
+        id: "atencion-donde-hacerla-hoy",
+        q: "¿Dónde quedó «Hacerla hoy»?",
+        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Lo que «va después» de otro (la corona tras la endodoncia) no lo trae: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice «Pide el consentimiento «…»» con «Preparar y firmar»; puedes registrarlo igual.",
+        forms: ["donde esta hacerla hoy", "ya no sale hacerla hoy en hoy viene a", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento"],
+        area: "clinica",
+      },
+      {
         id: "atencion-dice-necesita-consentimiento",
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
-        a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy») para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma antes de hacerlo (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Al firmar la atención, solo avisa de lo que hiciste hoy sin consentimiento firmado: elige «Urgencia», «Firmado en papel» (con la foto de la hoja) u «Otro motivo»; la constancia queda en la atención y, si después lo firma, se agrega con su fecha. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        a: "Porque hoy haces un servicio (lo registraste, o lo trajo su cita o «Hacerla hoy», de «Hoy viene a…» o de su fila del Plan) para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Lo indicado para otro día no lo pide: se firma antes de hacerlo (si lo quieres firmar hoy, «Nuevo» › Consentimiento). Al firmar la atención, solo avisa de lo que hiciste hoy sin consentimiento firmado: elige «Urgencia», «Firmado en papel» (con la foto de la hoja) u «Otro motivo»; la constancia queda en la atención y, si después lo firma, se agrega con su fecha. Lo que el paciente no aceptó o no eligió ya no lo pide; si después lo acepta, vuelve a pedirlo. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
         area: "clinica",
       },
       {
@@ -867,7 +874,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "tratamiento-va-despues-de-otro",
         q: "¿Por qué la corona dice «va después de terminar» la endodoncia?",
-        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, «Hacerla hoy» y «Reservar» siguen ahí.",
+        a: "Porque en la misma pieza hay otro tratamiento aceptado que va antes y sigue sin terminar. «Hoy viene a…», «Qué sigue», su fila del Plan («Va después de…») y el enlace del paciente lo dicen igual, y mientras la sesión que falta ya tiene su cita, la corona no aparece como «sin cita» en Inicio ni en Pacientes. Es solo un aviso: si decides hacerla igual, en una visita siguiente «Hoy viene a…» la ofrece con «Hacerla hoy», y «Reservar» sigue ahí. Lo indicado hoy que va después de otro no se ofrece para hoy: su fila del Plan no trae «Hacerla hoy».",
         area: "plan",
       },
       {
@@ -2337,7 +2344,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "fichas-por-que-aparece",
         q: "¿Por qué me aparece esta ficha?",
-        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
+        a: "La atención ofrece sola, en «Fichas para esta atención», debajo de «Hoy viene a…», las fichas de la especialidad del servicio de la cita. Si el producto ofrece una por la edad, también esa, aunque la cita sea de otra especialidad. Si la cita no tiene servicio, o es una atención sin cita, ofrece las de la especialidad de quien atiende. Cada una dice debajo por qué aparece («Por la especialidad de su cita», «Por su edad», «Por la especialidad de quien atiende»). Ofrecerla no es pedirla: puedes firmar y cobrar sin tocarla. Una ficha que se llena una vez por plan, como la odontoestomatológica de la norma, no aparece en cada sesión ni en una urgencia: aparece mientras el plan no tenga una. «Otra ficha…» o «Nuevo» › «Ficha» abren cualquier otra; si no se ofrece ninguna, la tarjeta no aparece y está «Nuevo» › «Ficha», en Documentos. En Configuración › Fichas de consulta cada ficha dice «Aparece en la atención de:» y su especialidad; para que aparezca en otra, cámbiasela con «Ver y cambiar».",
         forms: [
           "por que me sale esta ficha en la atencion",
           "de donde sale la ficha que aparece sola",

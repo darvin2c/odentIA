@@ -43,7 +43,7 @@ import {
 } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import { reviseTreatmentApi } from "../../lib/clinical-journey"
-import { removeIndicatedApi } from "../../lib/encounters"
+import { bringTreatmentApi, removeIndicatedApi } from "../../lib/encounters"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel, quotedPriceOf, treatmentConsentWords } from "../../lib/patients"
 import {
@@ -186,6 +186,7 @@ export function EncounterPlanPanel({
   onPendingChange,
   patientName,
   removableIds,
+  broughtIds = new Set<string>(),
   indicationDefaults,
   showControls = true,
 }: {
@@ -193,6 +194,8 @@ export function EncounterPlanPanel({
   encounterId: string
   /** Lo indicado hoy que quien atiende aún puede quitar o cambiar (lo decide el servidor). */
   removableIds: ReadonlySet<string>
+  /** Lo que ya se trajo a esta atención («Hacerla hoy» o su cita): su fila no lo ofrece otra vez. */
+  broughtIds?: ReadonlySet<string>
   /** Al indicar, la pieza y el diagnóstico del último hallazgo de hoy. */
   indicationDefaults?: Partial<IndicationValues>
   /**
@@ -324,6 +327,52 @@ export function EncounterPlanPanel({
       onPendingChange(false)
     }
   }
+  // «Hacerla hoy» de lo indicado y aceptado hoy (P11, D6): está en su fila, no en «Hoy viene a…», y
+  // trae el tratamiento a la atención con la misma operación, para que su consentimiento se pida
+  // antes del acto. Nunca en lo que «va después» de otro (la corona tras la endodoncia): no toca hoy.
+  const [bringing, setBringing] = useState<string | null>(null)
+  const bringToday = async (item: PlanItem) => {
+    if (bringing) return
+    setBringing(item.id)
+    setRowError(null)
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await bringTreatmentApi(patientId, encounterId, item.id)
+      await refreshPlan()
+    } catch (err) {
+      setRowError({ itemId: item.id, message: submitErrorMessage(err) })
+    } finally {
+      setBringing(null)
+      onPendingChange(false)
+    }
+  }
+  const bringAction = (item: PlanItem) =>
+    canWrite &&
+    !disabled &&
+    today.has(item.id) &&
+    !broughtIds.has(item.id) &&
+    !item.waitsFor &&
+    item.decisionStatus === "aceptado" &&
+    ["pendiente", "programado", "en_curso"].includes(item.status) ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        aria-label={`Hacerla hoy: ${item.title}`}
+        disabled={bringing !== null || removing !== null}
+        onClick={() => void bringToday(item)}
+      >
+        {bringing === item.id ? "Preparando…" : "Hacerla hoy"}
+      </Button>
+    ) : null
+  /** Lo que se hace con un renglón: traerlo a hoy y corregirlo. */
+  const actionsOf = (item: PlanItem) => (
+    <>
+      {bringAction(item)}
+      {rowActions(item)}
+    </>
+  )
   /**
    * Las acciones de un renglón indicado hoy, mientras se pueda corregir. Lo ya respondido y abierto
    * se cambia aquí mismo con la misma revisión de la ficha («Revisar indicación»), con su motivo
@@ -599,7 +648,7 @@ export function EncounterPlanPanel({
                         {isLeftOut(item.decisionStatus) || item.status === "pendiente" ? null : (
                           <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
                         )}
-                        {rowActions(item)}
+                        {actionsOf(item)}
                       </span>
                       <ExtractionRisks lines={item.extractionRisks} />
                       {fitNotice(item)}
@@ -646,7 +695,7 @@ export function EncounterPlanPanel({
                       : null
                 }
                 onPlace={placeIn}
-                rowActions={rowActions}
+                rowActions={actionsOf}
                 changeForm={changeForm}
                 fitNotice={fitNotice}
               />

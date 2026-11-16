@@ -165,6 +165,28 @@ function earlierWords(earlier: EarlierTreatment): string {
 const OTHER_SERVICE = "Otro servicio del catálogo"
 
 /**
+ * Lo que dice «Registrar procedimiento» del consentimiento de lo elegido, antes de registrarlo:
+ * «Pide el consentimiento «Tratamiento de conductos»:» con «Preparar y firmar». Null si no pide
+ * ninguno o ya está firmado.
+ */
+export function consentAhead(
+  item: Pick<PlanItem, "consent" | "consentMissing">,
+): { words: string; action: string } | null {
+  const titles = (item.consentMissing ?? []).map((title) => `«${title}»`)
+  if (item.consent === "falta")
+    return {
+      words:
+        titles.length === 0
+          ? "Pide su consentimiento:"
+          : `Pide ${titles.length === 1 ? "el consentimiento" : "los consentimientos"} ${titles.join(" y ")}:`,
+      action: "Preparar y firmar",
+    }
+  if (item.consent === "sin_firmar") return { words: "Su consentimiento está listo y falta firmarlo:", action: "Firmar ahora" }
+  if (item.consent === "por_confirmar") return { words: "Firmó su consentimiento en su enlace:", action: "Confirmar" }
+  return null
+}
+
+/**
  * Qué trae puesto «Registrar lo de hoy» y en qué orden se ofrece lo del plan
  * (segundo repaso del 9 nov: arrancaba en el catálogo con la endodoncia recién
  * indicada). Primero lo que trajo esta atención (su cita, «Continuar hoy»),
@@ -242,9 +264,15 @@ export function EncounterProcedures({
   autoOpen = false,
   prefillPlanItemId = null,
   onPrefillUsed,
+  onConsentFirst,
 }: {
   patientId: string
   detail: EncounterDetail
+  /**
+   * «Preparar y firmar» el consentimiento de lo que se va a registrar, antes de hacerlo: la
+   * atención lo trae a hoy, lo prepara y abre la firma. Avisa y no frena (P11).
+   */
+  onConsentFirst?: (planItemId: string) => void
   disabled?: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
@@ -683,6 +711,25 @@ export function EncounterProcedures({
                               del catálogo.
                             </p>
                           )}
+                          {/* El consentimiento es previo al acto (Ley 29414): si lo elegido lo pide y no
+                              está firmado, se dice antes de registrar, con cómo firmarlo ahí mismo.
+                              No frena: se puede registrar igual (P11, la voz clínica). */}
+                          {selectedPlan && consentAhead(selectedPlan) ? (
+                            <p role="status" className="flex flex-wrap items-baseline gap-x-2 text-sm text-warning">
+                              <span>{consentAhead(selectedPlan)?.words}</span>
+                              {onConsentFirst ? (
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  className="h-auto p-0 align-baseline text-sm"
+                                  disabled={busy}
+                                  onClick={() => onConsentFirst(selectedPlan.id)}
+                                >
+                                  {consentAhead(selectedPlan)?.action}
+                                </Button>
+                              ) : null}
+                            </p>
+                          ) : null}
                           {selectedPlan && (
                             <p className="text-xs text-muted-foreground">
                               Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta

@@ -66,7 +66,7 @@ import {
 } from "../../lib/clinical-journey"
 import { unreviewedWords } from "../../lib/declared-health"
 import { useMemberName, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
-import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
+import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
@@ -82,6 +82,7 @@ import {
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
+  bringTreatmentApi,
 } from "../../lib/encounters"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -979,6 +980,11 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            // Una urgencia no ofrece la ficha de una vez por plan (la odontoestomatológica, P11): si el
+            // motivo guardado pasa a decirlo, o deja de decirlo, las fichas ofrecidas se vuelven a pedir.
+            const urgency = (text: string | null | undefined) => (text ?? "").trim().toLowerCase().startsWith("urgencia")
+            if (sendable.includes("reason") && urgency(savedTextRef.current.reason) !== urgency(saved.data.reason))
+              void queryClient.invalidateQueries({ queryKey: ["form-offers", patientId, encounterId] })
             // Lo que quedó guardado es la nueva base de cada texto enviado, también en la caché:
             // al volver a la atención se parte de lo guardado, no de una copia vieja.
             for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null
@@ -1833,6 +1839,29 @@ export function EncounterEditor({
   const signer = useConsentSignerWord(patientId, firstNameOf(patient))
   const confirmingRef = useRef(false)
   /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
+  /**
+   * «Preparar y firmar» desde «Registrar procedimiento» (P11): el consentimiento es previo al acto.
+   * Trae el tratamiento a hoy (la misma operación que «Hacerla hoy»), y su consentimiento sale de
+   * la regla de siempre (`consent-needs`): se prepara y se firma ahí mismo. No frena el registro.
+   */
+  const consentFirst = async (planItemId: string) => {
+    try {
+      await flush()
+      if (!detail.plannedItems.some((item) => item.id === planItemId)) await bringTreatmentApi(patientId, encounterId, planItemId)
+      const needs = await queryClient.fetchQuery({
+        queryKey: ["consent-needs", patientId, encounterId],
+        queryFn: () => fetchConsentNeeds(patientId, encounterId),
+        staleTime: 0,
+      })
+      await handleChildChanged()
+      const need = needs.data.find(
+        (item) => item.planItemId === planItemId && item.status !== "firmado" && item.status !== "sin_publicar",
+      )
+      if (need) await signConsentsNow(need)
+    } catch (err) {
+      toast.error(submitErrorMessage(err))
+    }
+  }
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
       // Ya lo firmó en su enlace: solo falta que quien atiende lo confirme.
@@ -2626,6 +2655,7 @@ export function EncounterEditor({
                 onPendingChange={handlePendingChange}
                 prefillPlanItemId={sessionPrefill}
                 onPrefillUsed={() => setSessionPrefill(null)}
+                onConsentFirst={(planItemId) => void consentFirst(planItemId)}
               />
               {suggestionsOf("procedimientos")}
             </>,
@@ -2646,6 +2676,7 @@ export function EncounterEditor({
                 onChanged={handleChildChanged}
                 onPendingChange={handlePendingChange}
                 removableIds={removableIds}
+                broughtIds={new Set(detail.plannedItems.map((item) => item.id))}
                 indicationDefaults={indicationDefaults}
                 showControls={followUps.length > 0}
               />

@@ -303,5 +303,7 @@ export const DENTAL_FORMS: ProductForms = {
   suggestions: [ENDODONTICS, ORTHODONTICS, PEDIATRIC, STOMATOLOGIC],
   // A un niño se le ofrecen las de odontopediatría aunque su cita no diga de qué es.
   byAge: { underYears: 12, kind: "odontopediatria" },
+  // La de la norma (CPOD, IHO-S, riesgo y alta) es de la evaluación, no de cada sesión (P11, D7).
+  oncePerPlan: [STOMATOLOGIC.key],
   diagnoses: AAE_ICD10,
 }

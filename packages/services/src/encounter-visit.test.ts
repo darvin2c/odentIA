@@ -274,6 +274,22 @@ it("el consentimiento es de lo que se hace hoy: lo indicado para otro día no lo
   expect(await needs()).toEqual([])
 })
 
+// Estudio de la atención (16 nov, P11, D6): «Hoy viene a…» lleva solo lo de antes. Lo indicado y
+// aceptado en esta misma atención no se repite ahí (su «Hacerla hoy» está en su fila del Plan); traído
+// a hoy, sí, con su «Hoy no». En la sesión siguiente vuelve a ser «de antes».
+it("lo indicado en esta misma atención no se repite en «Hoy viene a…»; traído a hoy, sí; en la siguiente, también", async () => {
+  const f = await clinicalFixture()
+  const item = await accepted(f, 2)
+  const visitOf = async (id: string) =>
+    (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, id))).visit?.treatments.map((row) => row.planItemId)
+  expect(await visitOf(f.encounter.id)).toEqual([])
+  await f.run((tx) => bringTreatmentToEncounter(tx, ...f.args, f.encounter.id, item.id))
+  expect(await visitOf(f.encounter.id)).toEqual([item.id])
+  await f.run((tx) => leaveTreatmentFromEncounter(tx, ...f.args, f.encounter.id, item.id))
+  const today = await secondVisit(f)
+  expect(await visitOf(today)).toEqual([item.id])
+})
+
 it("«Quitar» lo indicado hoy sin respuesta: sale del plan y del presupuesto en borrador; lo ya respondido no", async () => {
   const f = await clinicalFixture()
   const indicated = await f.run((tx) =>
