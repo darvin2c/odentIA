@@ -295,6 +295,33 @@ export function budgetPaths(budget: Pick<BudgetWithTotals, "items" | "options">)
   }
 }
 
+/** La respuesta marcada de un tratamiento en «¿Qué respondió?»: vacía mientras no se marca. */
+export interface AnswerMark {
+  planItemId: string
+  decision: "aceptado" | "pospuesto" | "rechazado" | ""
+}
+
+/**
+ * Las marcas del panel puestas al día con el presupuesto de ahora (QA del 16 nov, Q1). El panel se
+ * abre con el presupuesto que tenía la pantalla; si después entra un tratamiento (lo indicado
+ * entra solo al borrador) o sale otro, lo marcado se conserva, lo nuevo llega con su marca de
+ * partida y lo que ya no está se va. Sin esto la línea nueva viajaba sin respuesta y el servidor
+ * rechazaba el guardado.
+ */
+export function syncAnswerMarks(
+  marked: readonly AnswerMark[],
+  wanted: readonly AnswerMark[],
+): { marks: AnswerMark[]; added: string[]; changed: boolean } {
+  const before = new Map(marked.map((entry) => [entry.planItemId, entry]))
+  const added = wanted.filter((entry) => !before.has(entry.planItemId)).map((entry) => entry.planItemId)
+  const marks = wanted.map((entry) => before.get(entry.planItemId) ?? entry)
+  const changed =
+    added.length > 0 ||
+    marks.length !== marked.length ||
+    marks.some((entry, index) => entry.planItemId !== marked[index]?.planItemId)
+  return { marks, added, changed }
+}
+
 /** Lo que lleva una revisión, en el orden en que se muestra. */
 export interface RevisionScope {
   /** Cada tratamiento una vez: es lo que se manda (`itemIds`). */
