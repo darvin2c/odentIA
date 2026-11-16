@@ -821,6 +821,8 @@ export function EncounterDocumentsBlock({
         encounters={encounters}
         planItems={attentionItems}
         suggestions={paperFor ? [`Hoja firmada: ${paperFor.title}`] : []}
+        // Es la hoja de un consentimiento: un PDF no se propone como «Informe».
+        defaultCategory="consentimiento"
         open={paperFor !== null}
         onOpenChange={(open) => {
           if (!open) setPaperFor(null)

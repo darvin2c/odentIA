@@ -1066,7 +1066,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "subo-radiografia",
         q: "¿Dónde subo una radiografía?",
-        a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Es una fila más de la lista y «Ver» la abre a toda la ventana: dos dedos, Ctrl + rueda o doble clic la acercan, «Más» la gira, la voltea o la pone en negativo, y «Informe y datos» trae «Comparar con».",
+        a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Lo que el archivo ya trae se llena solo y dice de dónde salió («Tomada del archivo»): la fecha de un DICOM o de la foto del celular, el tipo de un DICOM o el que dice su nombre, «Informe» en un PDF y el título, si el archivo se llama como lo deja la cámara o la captura de pantalla; desde una atención, también sus piezas. Revísalo y cámbialo si no es. Es una fila más de la lista y «Ver» la abre a toda la ventana: dos dedos, Ctrl + rueda o doble clic la acercan, «Más» la gira, la voltea o la pone en negativo, y «Informe y datos» trae «Comparar con».",
         forms: ["donde subo una radiografia", "subir imagen", "subir radiografia", "subir examen"],
         area: "clinica",
       },

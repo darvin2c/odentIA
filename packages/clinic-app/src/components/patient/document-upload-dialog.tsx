@@ -42,9 +42,19 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { readChosenFile } from "../../lib/chosen-file"
+import { shortDay } from "../../lib/declared-health"
 import { orgSlugFromHostname } from "../../lib/host"
 import { mayHoldStudy, type SelectedFile } from "../../lib/imaging-scan"
-import type { Encounter, PlanItem } from "../../lib/patients"
+import type { Encounter, EncounterDetail, PlanItem } from "../../lib/patients"
+import {
+  attentionTeeth,
+  composeTitle,
+  type FileHints,
+  type HintSource,
+  isGenericFileName,
+  placesWords,
+  readFileHints,
+} from "../../lib/upload-hints"
 import {
   basenameWithoutExtension,
   capturedInstant,
@@ -54,6 +64,7 @@ import {
   imageTypeLabel,
   imageTypesFor,
   isAcceptedFile,
+  isDicomFile,
   MAX_BYTES,
   maxBytesFor,
   planItemLabel,
@@ -76,6 +87,34 @@ const GENERAL_WORDS = "General (sin atención)"
 
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 
+/**
+ * De dónde salió lo que se llenó solo: el archivo (sus datos, su nombre o su formato),
+ * la atención, la pieza del filtro, la hoja que se va a subir o, en el título, todo eso junto.
+ */
+type FilledFrom = HintSource | "atencion" | "pieza" | "hoja" | "titulo"
+type FilledField = "title" | "category" | "imageType" | "capturedAt" | "teeth"
+/** Lo que se puso solo en un campo (las piezas, separadas por coma) y de dónde salió. */
+interface Filled {
+  value: string
+  from: FilledFrom
+}
+
+/** La marca de lo que se llenó solo, mientras el campo siga con eso: después es de la persona. */
+const FILLED_WORDS: Record<FilledField, Partial<Record<FilledFrom, string>>> = {
+  title: { titulo: "Sugerido con lo que trae el archivo" },
+  category: {
+    archivo: "Tomada del archivo",
+    nombre: "Tomada del nombre del archivo",
+    formato: "Sugerida para un PDF",
+    hoja: "La de la hoja que vas a subir",
+  },
+  imageType: { archivo: "Tomado del archivo", nombre: "Tomado del nombre del archivo" },
+  capturedAt: { archivo: "Tomada del archivo" },
+  teeth: { atencion: "De la atención", pieza: "La del filtro «Pieza»" },
+}
+
+const isOpenRow = (status: RowStatus | undefined) => status === "pending" || status === "error"
+
 /** Lo que se escribe de cada archivo: los campos de su fila. */
 interface RowValues {
   key: string
@@ -90,6 +129,8 @@ interface RowValues {
   tags: string[]
   planItemId: string
   links: DocumentLinkValue
+  /** Lo que se llenó solo (no se envía): marca su campo mientras nadie lo cambie. */
+  filled: Partial<Record<FilledField, Filled>>
 }
 
 /** El archivo de una fila y cómo va su subida (no son datos que se escriban). */
@@ -100,6 +141,10 @@ interface RowFile {
   /** Lo que la ficha dijo del archivo y no es de ningún campo de la fila. */
   error: string | null
   expanded: boolean
+  /** El nombre es el de la cámara o la captura: el título lo arma la ficha mientras nadie lo cambie. */
+  autoTitle: boolean
+  /** Una radiografía intraoral sin decir cuál: el título dice «Radiografía intraoral». */
+  intraoral: boolean
 }
 
 interface UploadValues {
@@ -198,7 +243,13 @@ export interface DocumentUploadDialogProps {
   defaultEncounterId?: string
   /** Tratamiento ya en foco (p. ej. desde su recorrido): se propone en cada fila. */
   defaultPlanItemId?: string
+  /**
+   * La pieza en foco (el filtro «Pieza» de Documentos): se propone en cada fila y gana a
+   * las de la atención, que se proponen sin ella.
+   */
   initialTeeth?: number[]
+  /** Lo que se sube ya se sabe qué es (la hoja firmada de un consentimiento): gana a lo que diga el archivo. */
+  defaultCategory?: string
   encounters: Encounter[]
   planItems: PlanItem[]
   suggestions: string[]
@@ -230,34 +281,93 @@ function fileProblem(file: File): string | null {
   return null
 }
 
-function toRow(
-  file: File,
-  initialTeeth: number[],
-  defaultPlanItemId?: string,
-  forAll: { category: string; capturedAt: string } = { category: "", capturedAt: "" },
-): { values: RowValues; meta: RowFile } {
+/**
+ * Cómo se llama en el título lo que es el archivo, con lo elegido en su fila: su tipo, su
+ * categoría o, sin ninguna, su formato.
+ */
+function titleWhat(row: RowValues, meta: Pick<RowFile, "file" | "intraoral">): string {
+  if (row.imageType && imageTypesFor(row.category).includes(row.imageType))
+    return imageTypeLabel(row.imageType) ?? row.imageType
+  if (row.category === "radiografia" && meta.intraoral) return "Radiografía intraoral"
+  if (row.category === "otro" || (!row.category && meta.file.type === "application/pdf")) return "Documento"
+  return row.category ? categoryLabel(row.category) : "Imagen"
+}
+
+/** «Radiografía periapical · pieza 46 · 15 nov»: sin fecha propia, la de subida (hoy). */
+function rowTitle(row: RowValues, meta: Pick<RowFile, "file" | "intraoral">): string {
+  return composeTitle(
+    titleWhat(row, meta),
+    placesWords(row.teeth, productUi().site),
+    shortDay(row.capturedAt || regionToday()),
+  )
+}
+
+/** Lo que se llenó solo, sin la entrada del campo si ya no hay nada. */
+function withFilled(
+  filled: RowValues["filled"],
+  field: FilledField,
+  value: Filled | null,
+): RowValues["filled"] {
+  const { [field]: _gone, ...rest } = filled
+  return value ? { ...rest, [field]: value } : rest
+}
+
+interface RowContext {
+  hints: FileHints
+  /** Las piezas que se proponen (las del filtro o las de la atención) y de dónde salen. */
+  teeth: { values: readonly number[]; from: FilledFrom }
+  defaultPlanItemId?: string
+  defaultCategory?: string
+  forAll: { category: string; capturedAt: string }
+}
+
+/**
+ * La fila de un archivo, con lo que ya se sabe de él. La categoría que trae el archivo
+ * (su modalidad o su nombre) gana a «Para todos», que es para los que no tienen una propia;
+ * la que solo sale del formato (PDF) no. Lo que se sube para algo ya dicho (la hoja de un
+ * consentimiento) gana a todo.
+ */
+function toRow(file: File, context: RowContext): { values: RowValues; meta: RowFile } {
   rowSeq += 1
-  return {
-    values: {
-      key: `${Date.now()}-${rowSeq}`,
-      title: basenameWithoutExtension(file.name),
-      category: forAll.category,
-      imageType: "",
-      capturedAt: forAll.capturedAt,
-      source: "",
-      teeth: [...initialTeeth],
-      tags: [],
-      planItemId: defaultPlanItemId ?? "",
-      links: { ...NO_LINKS },
-    },
-    meta: {
-      file,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
-      status: "pending",
-      error: null,
-      expanded: false,
-    },
+  const { hints, teeth, forAll } = context
+  const filled: RowValues["filled"] = {}
+  let category = forAll.category
+  if (context.defaultCategory) filled.category = { value: context.defaultCategory, from: "hoja" }
+  else if (hints.category && hints.from && (hints.from !== "formato" || !forAll.category))
+    filled.category = { value: hints.category, from: hints.from }
+  if (filled.category) category = filled.category.value
+  const imageType = category === hints.category && hints.imageType ? hints.imageType : ""
+  if (imageType && hints.from) filled.imageType = { value: imageType, from: hints.from }
+  const capturedAt = hints.takenOn ?? forAll.capturedAt
+  if (hints.takenOn) filled.capturedAt = { value: hints.takenOn, from: "archivo" }
+  if (teeth.values.length > 0) filled.teeth = { value: teeth.values.join(","), from: teeth.from }
+  const meta: RowFile = {
+    file,
+    previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+    status: "pending",
+    error: null,
+    expanded: false,
+    autoTitle: isGenericFileName(file.name),
+    intraoral: hints.intraoral,
   }
+  const values: RowValues = {
+    key: `${Date.now()}-${rowSeq}`,
+    title: basenameWithoutExtension(file.name),
+    category,
+    imageType,
+    capturedAt,
+    source: "",
+    teeth: [...teeth.values],
+    tags: [],
+    planItemId: context.defaultPlanItemId ?? "",
+    links: { ...NO_LINKS },
+    filled,
+  }
+  if (meta.autoTitle) {
+    values.title = rowTitle(values, meta)
+    filled.title = { value: values.title, from: "titulo" }
+  }
+  return { values, meta }
 }
 
 /**
@@ -276,6 +386,7 @@ export function DocumentUploadDialog({
   defaultEncounterId,
   defaultPlanItemId,
   initialTeeth,
+  defaultCategory,
   encounters,
   planItems,
   suggestions,
@@ -459,19 +570,54 @@ export function DocumentUploadDialog({
   // con la atención a la vista, nunca escribiendo un identificador.
   const procedureQuery = useQuery({
     queryKey: ["encounter-procedures", patientId, encounterChoice],
-    queryFn: () =>
-      apiFetch<{ data: { procedures: Array<{ id: string; description: string }> } }>(
-        `/api/patients/${patientId}/encounters/${encounterChoice}`,
-      ),
+    queryFn: () => apiFetch<{ data: EncounterDetail }>(`/api/patients/${patientId}/encounters/${encounterChoice}`),
     enabled: open && encounterChoice !== "",
   })
-  const procedures = procedureQuery.data?.data.procedures ?? []
+  const attention = encounterChoice ? procedureQuery.data?.data : undefined
+  const procedures = attention?.procedures ?? []
+  // Las piezas que se proponen: la del filtro «Pieza», o las que la atención elegida trata o
+  // examina. Nunca salen de la imagen.
+  const focusTeeth = initialTeeth ?? []
+  const suggestedTeeth: RowContext["teeth"] = !productUi().site
+    ? { values: [], from: "atencion" }
+    : focusTeeth.length > 0
+      ? { values: focusTeeth, from: "pieza" }
+      : { values: attention ? attentionTeeth(attention) : [], from: "atencion" }
+  const teethKey = suggestedTeeth.values.join(",")
   const statusOf = (key: string) => files[key]?.status
   const pendingKeys = rows
-    .filter((row) => statusOf(row.key) === "pending" || statusOf(row.key) === "error")
+    .filter((row) => isOpenRow(statusOf(row.key)))
     .map((row) => row.key)
   // Todo guardado o por verificar en su fila: no queda nada que subir y el pie no ofrece «Subir 0».
   const nothingLeft = !uploading && rows.length > 0 && pendingKeys.length === 0
+
+  // Lo propuesto sigue a lo que cambia, en cada fila por subir, hasta que la persona lo toca. Se lee
+  // la fila al día (no la de este render): las piezas cambian antes de armar el título.
+  useEffect(() => {
+    // Las piezas llegan con la atención (o cambian al elegir otra): las toma la fila que sigue con
+    // las que se le propusieron, o sin ninguna.
+    form.getFieldValue("rows").forEach((row, index) => {
+      if (!isOpenRow(files[row.key]?.status)) return
+      const current = row.teeth.join(",")
+      const before = row.filled.teeth
+      if (before ? current !== before.value : current !== "") return
+      if (current === teethKey && (before?.from ?? suggestedTeeth.from) === suggestedTeeth.from) return
+      form.setFieldValue(`rows[${index}].teeth`, [...suggestedTeeth.values])
+      form.setFieldValue(
+        `rows[${index}].filled`,
+        withFilled(row.filled, "teeth", teethKey ? { value: teethKey, from: suggestedTeeth.from } : null),
+      )
+    })
+    // El título armado sigue a lo elegido en la fila (tipo, fecha, piezas) hasta que la persona lo escribe.
+    form.getFieldValue("rows").forEach((row, index) => {
+      const meta = files[row.key]
+      if (!meta?.autoTitle || !isOpenRow(meta.status) || row.filled.title?.value !== row.title) return
+      const next = rowTitle(row, meta)
+      if (next === row.title) return
+      form.setFieldValue(`rows[${index}].title`, next)
+      form.setFieldValue(`rows[${index}].filled`, withFilled(row.filled, "title", { value: next, from: "titulo" }))
+    })
+  })
 
   /** Lo último que se copió con «Para todos»: lo que una fila cambió a mano no se pisa. */
   const lastCommon = useRef({ category: "", capturedAt: "" })
@@ -500,19 +646,23 @@ export function DocumentUploadDialog({
     const added: Record<string, RowFile> = {}
     // Lo elegido en «Para todos» vale también para los archivos que se agregan después.
     const forAll = { category: form.getFieldValue("allCategory"), capturedAt: form.getFieldValue("allCapturedAt") }
-    // Se sube la copia leída ahora, no el archivo del disco (`readChosenFile`); se leen a la vez.
+    // Se sube la copia leída ahora, no el archivo del disco (`readChosenFile`); se leen a la vez,
+    // y de la copia sale lo que el archivo ya trae (su fecha, su tipo).
+    const types = productUi().documents.imaging.types
+    const today = regionToday()
     const read = await Promise.all(
       list.map(async (chosen) => {
         const problem = fileProblem(chosen)
-        return { chosen, problem, file: problem ? null : await readChosenFile(chosen) }
+        const file = problem ? null : await readChosenFile(chosen)
+        return { chosen, problem, file, hints: file ? await readFileHints(file, types, today) : null }
       }),
     )
-    for (const { chosen, problem, file } of read) {
-      if (!file) {
+    for (const { chosen, problem, file, hints } of read) {
+      if (!file || !hints) {
         bad.push(`${chosen.name}: ${problem ?? UNREADABLE_FILE}`)
         continue
       }
-      const row = toRow(file, initialTeeth ?? [], defaultPlanItemId, forAll)
+      const row = toRow(file, { hints, teeth: suggestedTeeth, defaultPlanItemId, defaultCategory, forAll })
       added[row.values.key] = row.meta
       form.pushFieldValue("rows", row.values)
     }
@@ -671,7 +821,8 @@ export function DocumentUploadDialog({
       hideSubmit={nothingLeft}
       cancelLabel={nothingLeft ? common.actions.close : undefined}
     >
-      <fieldset disabled={uploading || disabled} className="flex flex-col gap-3">
+      {/* min-w-0: un fieldset mide lo que su contenido más ancho (la atención con su motivo largo) y a 390 px se salía de la ventana. */}
+      <fieldset disabled={uploading || disabled} className="flex min-w-0 flex-col gap-3">
         <form.AppField name="encounterId">
           {(field) => (
             <field.Control
@@ -770,7 +921,7 @@ export function DocumentUploadDialog({
               </rowsField.Group>
 
               {pendingKeys.length > 1 && (
-                <fieldset className="flex flex-col gap-3 rounded-xl bg-muted/50 p-4">
+                <fieldset className="flex min-w-0 flex-col gap-3 rounded-xl bg-muted/50 p-4">
                   <legend className="float-left text-sm font-medium">Para todos</legend>
                   <p className="clear-left text-sm text-muted-foreground">
                     Se copia a los archivos que no tienen una propia; después puedes cambiar la de cualquiera.
@@ -964,8 +1115,16 @@ const QueuedRow = withForm({
     const name = meta.file.name
     const forFile = <span className="sr-only"> de {name}</span>
     const types = imageTypesFor(row.category)
+    // Una foto o un DICOM sin categoría todavía ya es una toma: su fecha no es «la del documento».
+    const image = types.length > 0 || (!row.category && (meta.previewUrl !== null || isDicomFile(meta.file)))
     const removable = meta.status === "pending" || meta.status === "error" || meta.status === "unconfirmed"
     const at = `rows[${index}]` as const
+    /** «Tomada del archivo», «De la atención»…: mientras el campo siga con lo que se llenó solo. */
+    const note = (field: FilledField): string | undefined => {
+      const filled = row.filled[field]
+      const value = field === "teeth" ? row.teeth.join(",") : row[field]
+      return filled && value === filled.value ? FILLED_WORDS[field][filled.from] : undefined
+    }
     const withExtras =
       row.teeth.length > 0 ||
       row.planItemId ||
@@ -1016,6 +1175,7 @@ const QueuedRow = withForm({
                   <field.TextField
                     id={`${id}-title`}
                     label={<>Título{forFile}</>}
+                    description={note("title")}
                     disabled={busy}
                     placeholder={`p. ej. ${appWords().examples.imagingTitle}`}
                     maxLength={200}
@@ -1038,6 +1198,7 @@ const QueuedRow = withForm({
                   <field.SelectField
                     id={`${id}-category`}
                     label={<>Categoría{forFile}</>}
+                    description={note("category")}
                     placeholder="Elige la categoría"
                     options={UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
                   />
@@ -1051,6 +1212,7 @@ const QueuedRow = withForm({
                     <field.SelectField
                       id={`${id}-type`}
                       label={<>Tipo de imagen{forFile}</>}
+                      description={note("imageType")}
                       placeholder="Elige el tipo"
                       options={types.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t }))}
                     />
@@ -1063,14 +1225,15 @@ const QueuedRow = withForm({
                     id={`${id}-taken`}
                     label={
                       <>
-                        {documentDateLabel(row.category)}
+                        {documentDateLabel(row.category, image)}
                         {forFile}
                       </>
                     }
                     description={
-                      types.length > 0 || several
+                      note("capturedAt") ??
+                      (image || several
                         ? "Si queda vacía se usa la fecha de subida."
-                        : "La que tiene el papel; si abarca varios años, la de su última anotación. Vacía, vale la de subida."
+                        : "La que tiene el papel; si abarca varios años, la de su última anotación. Vacía, vale la de subida.")
                     }
                   >
                     {(control) => (
@@ -1151,7 +1314,11 @@ const QueuedRow = withForm({
                 {productUi().site ? (
                   <form.AppField name={`${at}.teeth`}>
                     {(field) => (
-                      <field.Group id={`${id}-teeth`} legend={`${productUi().site?.placesLabel} (opcional)`}>
+                      <field.Group
+                        id={`${id}-teeth`}
+                        legend={`${productUi().site?.placesLabel} (opcional)`}
+                        description={note("teeth")}
+                      >
                         {(control) => (
                           <PlacesField
                             id={control.id}

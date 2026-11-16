@@ -84,7 +84,8 @@ function isPart10(head: Uint8Array): boolean {
   return head.length >= 132 && head[128] === 0x44 && head[129] === 0x49 && head[130] === 0x43 && head[131] === 0x4d
 }
 
-async function headerOf(file: Blob): Promise<dicomParser.DataSet | null> {
+/** La cabecera de un DICOM (PS3.10), sin los píxeles; null si el archivo no es uno. */
+export async function dicomHeader(file: Blob): Promise<dicomParser.DataSet | null> {
   // Casi siempre la cabecera cabe en 256 KB; un CT de varios cuadros puede traer
   // varios MB de grupos funcionales, así que se amplía antes de rendirse.
   for (const limit of [256 * 1024, 8 * 1024 * 1024, file.size]) {
@@ -101,7 +102,7 @@ async function headerOf(file: Blob): Promise<dicomParser.DataSet | null> {
 
 async function scanOne(selected: SelectedFile): Promise<ScannedDicom | null> {
   if (selected.file.size < 132) return null
-  const ds = await headerOf(selected.file)
+  const ds = await dicomHeader(selected.file)
   if (!ds) return null
   if (text(ds, "x00020002") === DICOMDIR_CLASS) return null
   const sop = text(ds, "x00080018")
