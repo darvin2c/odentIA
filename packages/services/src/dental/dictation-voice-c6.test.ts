@@ -63,8 +63,9 @@ describe("el máximo de la escala dicho tras otro número no es la respuesta", (
   const transcript = "intensidad seis de diez empezó hace tres días"
   const ask = (value: string, phrase = said, heard = transcript) => prepareFormAnswer(answer(endo, "dolor_intensidad", value, phrase), endo, FDI, heard)
 
-  it("«seis de diez» es 6, nunca 10", () => {
+  it("«seis de diez» es 6, nunca 10, aunque Clío cite solo «de diez»", () => {
     expect(ask("10")).toBeNull()
+    expect(ask("10", "de diez")).toBeNull()
     expect(ask("6")).toMatchObject({ status: "lista", payload: { value: 6 } })
   })
 

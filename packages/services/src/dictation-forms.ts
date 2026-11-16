@@ -783,8 +783,8 @@ function saysValue(question: DictationFormQuestion, sentence: string): boolean {
 
 /**
  * Lo dicho sin el máximo de la escala que va tras otro número: en «seis de diez» el diez dice sobre
- * cuánto es, no la respuesta (medición del 16 nov: Clío propuso 6 y 10 con la misma frase, y quedaba el
- * 10). Solo detrás de un número: «overjet de 20» sí dice 20.
+ * cuánto es, no la respuesta (medición del 16 nov: Clío propuso 6 y 10, con «intensidad seis de diez»
+ * o solo «de diez», y quedaba el 10). Solo detrás de un número: «overjet de 20» sí dice 20.
  */
 function withoutOutOf(text: string, max: number | null): string {
   if (max === null) return text
@@ -1762,12 +1762,11 @@ function checkFormAnswer(
       // pregunta que no se mide en tiempo.
       const measuresTime = TIME_WORDS.has(plain(question.unit ?? ""))
       const numbers =
-        question.type === "pieza"
-          ? toothNumbersIn(said)
-          : measuresTime
-            ? heard
-            : saidNumbers(withoutOutOf(`${said} ${wordsAfter(said, sentence, 1)}`, question.type === "escala" ? (question.max ?? 10) : question.max), { roman: "largos", times: false })
+        question.type === "pieza" ? toothNumbersIn(said) : measuresTime ? heard : saidNumbers(`${said} ${wordsAfter(said, sentence, 1)}`, { roman: "largos", times: false })
       if (!containsAll(numbers, [proposed])) return null
+      // El máximo de la escala tiene que decirse como respuesta en algún lugar de la oración, aunque Clío cite solo «de diez».
+      const top = question.type === "escala" ? (question.max ?? 10) : question.max
+      if (top !== null && proposed === top && !saidNumbers(withoutOutOf(sentence || said, top), { roman: "largos", times: false }).includes(top)) return null
       const unit = question.unit ? OTHER_UNITS[plain(question.unit)] : undefined
       if (unit?.test(plain(said))) return null
       // «Al menos dos», «unos tres»: lo aproximado no entra como exacto.
