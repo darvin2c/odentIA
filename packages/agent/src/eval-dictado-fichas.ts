@@ -42,8 +42,10 @@ import {
   productHooksFor,
   pendingFormValues,
   withDiagnosisFormAnswers,
+  withFormDiagnoses,
   withFormTwins,
   withoutFormNotes,
+  withoutRepeatedNotes,
 } from "@odentia/services"
 import { costMicrosOf, withAiMeter } from "./ai-usage.js"
 import { askDictationModel, type DictationProfile, rereadFormSentences } from "./dictation.js"
@@ -62,6 +64,8 @@ interface FormCase {
    * servidor (`pendingFormValues`): la red no lo avisa otra vez y lo mismo no se propone dos veces.
    */
   previas?: Record<string, unknown>
+  /** Lo que ya dicen las notas pendientes de pausas anteriores: la nota de esta no lo repite (`withoutRepeatedNotes`). */
+  notasPrevias?: string[]
   fichas: Array<{ ficha: string; respondidas?: Record<string, unknown> }>
   /** Preguntas que no se cuentan: lo que el reconocimiento de voz oyó mal y no se puede saber de lo oído. */
   ignora?: string[]
@@ -86,6 +90,13 @@ interface FormCase {
     diagnosticosNo?: string[]
     /** La frase que se muestra en una respuesta: la del número que se usó (prueba con voz del 15 nov). */
     dicho?: Record<string, string>
+    /**
+     * Lo que nunca se pierde en silencio: si no queda propuesto (listo o por revisar), va a «No pude
+     * usar esto» (prueba con voz c5, v12: el IHO-S de «ese Este 0,99»).
+     */
+    avisar?: string[]
+    /** Lo dicho a medias que la pregunta ofrece con «¿Cuál?», con las opciones que debe ofrecer. */
+    cual?: Record<string, string[]>
   }
 }
 
@@ -108,7 +119,7 @@ function productOf(name: "odentia" | "latidia") {
   const hooks = productHooksFor(product)
   const profile = dictationProfileFor(product)
   if (!profile || !hooks.dictation) throw new Error(`${name} no dicta`)
-  return { profile, catalog: hooks.dictation.catalogText(), site: hooks.site, forms: hooks.forms.suggestions }
+  return { profile, catalog: hooks.dictation.catalogText(), site: hooks.site, forms: hooks.forms.suggestions, formDiagnoses: hooks.forms.diagnoses }
 }
 const PRODUCTS = { odentia: productOf("odentia"), latidia: productOf("latidia") }
 const models = new Map<string, unknown>()
@@ -133,7 +144,7 @@ const same = (a: unknown, b: unknown) =>
 
 const only = arg("producto", "")
 const solo = arg("solo", "").split(",").filter(Boolean)
-const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0, diagnosticosEsperados: 0, diagnosticosBien: 0, diagnosticosNoEsperados: 0, diagnosticosNoListos: 0, dichoEsperado: 0, dichoBien: 0, revisarConEsperadas: 0, revisarConBien: 0, revisarConListas: 0 }
+const totals = { esperadas: 0, bien: 0, perdidas: 0, perdidasAvisadas: 0, perdidasRed: 0, inventadas: 0, revisarBien: 0, revisarEsperadas: 0, cambiaEsperadas: 0, cambiaBien: 0, cambiaListas: 0, paradas: 0, conFichas: 0, leidas: 0, costo: 0, sinCosto: 0, notaEsperada: 0, notaBien: 0, notaSobra: 0, notaSobraEsperada: 0, avisosRed: 0, avisosRedDeMas: 0, relecturas: 0, releidas: 0, relecturaRevisar: 0, relecturaBien: 0, relecturaOtroValor: 0, relecturaDeMas: 0, relecturaCosto: 0, relecturaSinCosto: 0, perdidasPorRevisar: 0, diagnosticosEsperados: 0, diagnosticosBien: 0, diagnosticosNoEsperados: 0, diagnosticosNoListos: 0, dichoEsperado: 0, dichoBien: 0, revisarConEsperadas: 0, revisarConBien: 0, revisarConListas: 0, avisarEsperadas: 0, avisarSilencio: 0, cualEsperadas: 0, cualBien: 0 }
 /** Los avisos de la red en preguntas que el dictado no espera: se imprimen para leerlos. */
 const netExtra: string[] = []
 const now = new Date()
@@ -232,7 +243,9 @@ for (const dictation of cases) {
   const all = withDiagnosisFormAnswers(dictated, questions)
   const derived = new Set(all.slice(dictated.length))
   const answers = all.filter((draft) => draft.kind === "ficha")
-  const noteText = withoutFormNotes(all, questions, product.site, heard)
+  // Y la respuesta de ficha que es un diagnóstico va también a Diagnóstico si Clío no lo propuso.
+  const fromForms = withFormDiagnoses(all, questions, product.formDiagnoses, { site: product.site, transcript: heard, pending })
+  const noteText = withoutRepeatedNotes(withoutFormNotes(all, questions, product.site, heard), dictation.notasPrevias ?? [])
     .filter((draft) => draft.kind === "nota")
     .flatMap((draft) => Object.values(draft.payload).filter((value): value is string => typeof value === "string"))
     .join(" ")
@@ -274,6 +287,8 @@ for (const dictation of cases) {
     ...(dictation.espera.revisar ?? []),
     ...Object.keys(dictation.espera.cambia ?? {}),
     ...Object.keys(dictation.espera.revisarCon ?? {}),
+    ...(dictation.espera.avisar ?? []),
+    ...Object.keys(dictation.espera.cual ?? {}),
     ...(dictation.ignora ?? []),
   ])
   totals.avisosRed += net.length
@@ -374,7 +389,19 @@ for (const dictation of cases) {
     else notes.push(`la nota perdió «${want}» (nota: «${noteText.slice(0, 160)}»; sin limpiar: «${read.drafts.filter((draft) => draft.kind === "nota").flatMap((draft) => Object.values(draft.payload)).join(" ").slice(0, 160)}»)`)
   }
   // Como el servidor: el diagnóstico cuyo nombre contradice lo dictado pasa al hermano que calza, por revisar.
-  const { codes, ready: readyCodes } = await serverDiagnoses(read.drafts, [heard, dictation.contexto ?? ""])
+  const { codes, ready: readyCodes } = await serverDiagnoses([...read.drafts, ...fromForms], [heard, dictation.contexto ?? ""])
+  for (const key of dictation.espera.avisar ?? []) {
+    totals.avisarEsperadas += 1
+    if (listed.has(key) || reviewed.has(key) || noticedKeys.has(key) || caughtKeys.has(key)) continue
+    totals.avisarSilencio += 1
+    notes.push(`SE PERDIÓ EN SILENCIO ${key}`)
+  }
+  for (const [key, options] of Object.entries(dictation.espera.cual ?? {})) {
+    totals.cualEsperadas += 1
+    const offered = prepared.find(({ ready }) => ready && keyOf(ready.payload) === key && Array.isArray(ready.payload["choices"]))?.ready?.payload["choices"] as string[] | undefined
+    if (offered && options.every((option) => offered.includes(option))) totals.cualBien += 1
+    else notes.push(`no ofreció «¿Cuál?» de ${key} con ${options.join(" / ")}${offered ? ` (ofreció ${offered.join(" / ")})` : ""}`)
+  }
   for (const code of dictation.espera.diagnosticos ?? []) {
     totals.diagnosticosEsperados += 1
     if (diagnosisProposed(code, codes)) totals.diagnosticosBien += 1
@@ -446,6 +473,7 @@ console.log(`Lo que cambia lo escrito: ${totals.cambiaBien} de ${totals.cambiaEs
 console.log(`Texto de la consulta: conserva ${totals.notaBien} de ${totals.notaEsperada}; repite lo de la ficha en ${totals.notaSobra} de ${totals.notaSobraEsperada}`)
 console.log(`Diagnóstico dicho que también va a Diagnóstico: ${totals.diagnosticosBien} de ${totals.diagnosticosEsperados}; que contradice lo dictado y queda listo: ${totals.diagnosticosNoListos} de ${totals.diagnosticosNoEsperados} (el criterio es cero); frase del número usado: ${totals.dichoBien} de ${totals.dichoEsperado}`)
 console.log(`Lo dicho sin nombrar su pregunta: ${totals.revisarConBien} de ${totals.revisarConEsperadas} por revisar con su valor, ${totals.revisarConListas} listas`)
+console.log(`Lo que no puede perderse en silencio: ${totals.avisarEsperadas - totals.avisarSilencio} de ${totals.avisarEsperadas} propuesto o avisado; «¿Cuál?» con las opciones dichas: ${totals.cualBien} de ${totals.cualEsperadas}`)
 console.log(
   `Segunda lectura: ${totals.relecturas} pausas, ${totals.releidas} oraciones leídas de nuevo; ${totals.relecturaRevisar} respuestas por revisar (${totals.relecturaBien} con el valor esperado, ${totals.relecturaOtroValor} con otro valor, ${totals.relecturaDeMas} donde no se esperaba); de las perdidas, ${totals.perdidasPorRevisar} quedaron por revisar`,
 )

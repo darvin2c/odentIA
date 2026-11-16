@@ -1,5 +1,5 @@
 {
-  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato; «adulto», que el paciente es adulto (a un adulto no se le propone lo de diente de leche). Los servicios de leche, anterior o posterior son para ver que el servidor siga la pieza (prueba con voz c3). «diagnosticosNo» son los diagnósticos que contradicen lo dictado (sin fístula con la fístula dicha, agudo con crónico dicho) y no deben quedar listos (prueba con voz c4).",
+  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa. Los «voz-…» son tramos de la prueba con voz del 15 nov tal como los oyó Chrome (sin puntuación, con muletillas y voces de fondo): «serviciosNo» y «serviciosSi» son servicios que el servidor no debe o sí debe proponer para lo hecho o el plan, con la misma búsqueda (`dictatedService`); «indicaciones», palabras de lo que se le indica al paciente en la consulta; «sinPlan», que nada vaya al plan; «relatoSin», lo que no debe quedar en el relato; «adulto», que el paciente es adulto (a un adulto no se le propone lo de diente de leche). Los servicios de leche, anterior o posterior son para ver que el servidor siga la pieza (prueba con voz c3). «diagnosticosNo» son los diagnósticos que contradicen lo dictado (sin fístula con la fístula dicha, agudo con crónico dicho) y no deben quedar listos (prueba con voz c4). «serviciosNoListos» son los servicios que el servidor no debe dar por buenos, aunque los ofrezca para elegir: la endodoncia que contradice la pulpa diagnosticada o, sin diagnóstico, cualquiera de las dos (prueba con voz c5).",
   "servicios": [
     "Obturación con resina",
     "Endodoncia multirradicular",
@@ -16,7 +16,9 @@
     "Aparatología removible de ortodoncia",
     "Apertura cameral",
     "Endodoncia anterior vital",
+    "Endodoncia anterior no vital",
     "Endodoncia posterior vital",
+    "Endodoncia posterior no vital",
     "Pulpectomía anterior, deciduo",
     "Pulpectomía posterior, deciduo"
   ],
@@ -408,6 +410,57 @@
         ],
         "diagnosticosNo": [
           "K04.7"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "voz-c5-v06-endodoncia-vital",
+      "adulto": true,
+      "texto": "ya a ver paciente de 42 años viene porque le duele la muela de abajo del lado izquierdo refiere que empezó Hace 3 días el dolor es espontáneo no la deja dormir y tomó ibuprofeno pero no le calma este 10 a 36 intensidad 9 de 10 a la inspección caries profunda ocluso distal tumefacción no tiene fístula tampoco pásame en algodón con el frío por favor prueba de frío aumentada que persiste o sea se queda doliendo como 10 segundos calor también aumentado persiste percusión positiva palpación negativa movilidad fisiológica grado 0 sondaje 2 mm En la radiografía se ve ensanchamiento del ligamento periodontal sin radio lucidez diagnóstico pulpar pulpitis Irreversible sintomática apical periodontitis apical sintomática plan endodoncia de la 36 y luego Corona hoy hacemos la apertura y la pulpectomía",
+      "espera": {
+        "diagnosticos": [
+          "K04.0",
+          "K04.4"
+        ],
+        "serviciosNoListos": [
+          "Endodoncia posterior no vital"
+        ],
+        "serviciosSi": [
+          "Endodoncia posterior vital"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "endodoncia-no-vital-por-necrosis",
+      "adulto": true,
+      "texto": "Pieza veintiuno, necrosis pulpar con absceso apical crónico. Plan: endodoncia de la veintiuno.",
+      "espera": {
+        "diagnosticos": [
+          "K04.1"
+        ],
+        "serviciosNoListos": [
+          "Endodoncia anterior vital"
+        ],
+        "serviciosSi": [
+          "Endodoncia anterior no vital"
+        ],
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "endodoncia-sin-diagnostico",
+      "adulto": true,
+      "texto": "Plan: endodoncia de la treinta y seis y después una corona.",
+      "espera": {
+        "serviciosNoListos": [
+          "Endodoncia posterior vital",
+          "Endodoncia posterior no vital"
+        ],
+        "serviciosSi": [
+          "Endodoncia posterior vital",
+          "Endodoncia posterior no vital"
         ],
         "soloConsulta": true
       }
