@@ -11,14 +11,14 @@ import { member, user } from "@odentia/db/schema/auth"
 import { automationJob, automationRule } from "@odentia/db/schema/automation"
 import { encounter } from "@odentia/db/schema/clinical"
 import { agentConfig } from "@odentia/db/schema/crm"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { setLine, syncLapsedInvites } from "./automation.js"
 import { nextPatientNumber } from "./patients.js"
 import { listPeople } from "./people.js"
-import { activePatientsMany } from "./report-patients.js"
-import { lapsedToInvite } from "./return-invites.js"
+import { activePatientsMany, getPatientReportList, invitedToReturnCount } from "./report-patients.js"
+import { INVITED_TO_RETURN_ACTION, lapsedToInvite } from "./return-invites.js"
 import { insertTestPatients } from "./test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -143,4 +143,34 @@ it("B8b: con la línea prendida, la invitación de quien vino sin cita sale una 
     .where(and(eq(automationJob.organizationId, c.orgId), eq(automationJob.kind, "invitar_a_volver")))
   expect(jobs).toHaveLength(1)
   expect(jobs[0]).toMatchObject({ patientId: luis, appointmentId: null, dedupeKey: `invitar_a_volver:${luis}:${away.id}:0` })
+})
+
+// Revisión del 16 nov (R6): Marta fue invitada a volver y volvió sin cita; su atención firmada es la
+// visita. «Volvieron tras la invitación» la cuenta, como «Invitar a volver» ya no la invita.
+it("R6: quien vuelve sin cita tras la invitación cuenta en «Volvieron tras la invitación», con su atención", async () => {
+  const c = await clinic()
+  const marta = await c.person("Marta Salas")
+  const rosa = await c.person("Rosa Díaz")
+  const invite = (patientId: string) =>
+    ownerDb.insert(auditEvent).values({
+      organizationId: c.orgId,
+      action: INVITED_TO_RETURN_ACTION,
+      entity: "patient",
+      entityId: patientId,
+      metadata: { via: "telefono" },
+      createdAt: new Date("2026-09-05T15:00:00Z"),
+    })
+  await invite(marta)
+  await invite(rosa)
+  const back = await c.signed(marta, new Date("2026-10-02T15:00:00Z"))
+  // Rosa tiene una atención sin firmar después de la invitación: todavía no volvió.
+  await c.signed(rosa, new Date("2026-10-03T15:00:00Z"), "borrador")
+  const september = { start: new Date("2026-09-01T05:00:00Z"), end: new Date("2026-10-01T05:00:00Z") }
+  expect(await c.run((tx) => invitedToReturnCount(tx, c.orgId, september))).toEqual({ invited: 2, returned: 1 })
+  const list = await c.run((tx) =>
+    getPatientReportList(tx, c.orgId, { period: "2026-09", list: "invited_returned" }, new Date("2026-10-12T15:00:00Z")),
+  )
+  expect(list.rows.map((row) => [row.id, row.personName, row.at, row.branchName])).toEqual([
+    [back.id, "Marta Salas", "2026-10-02T15:00:00.000Z", "Centro"],
+  ])
 })
