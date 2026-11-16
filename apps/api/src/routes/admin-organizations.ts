@@ -9,6 +9,7 @@ import {
   approveRecoveryCase,
   getFoundersMove,
   getOrganizationBillingTerms,
+  listSaasPlanChanges,
   moveClinicToFounders,
   setSaasBillingCycle,
   setSaasDiscount,
@@ -508,7 +509,10 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     return runService(c, 200, () =>
       owner(async (tx) => {
         const terms = await getOrganizationBillingTerms(tx, id)
-        return terms ? { ...terms, founders: await getFoundersMove(tx, id) } : null
+        // «Cambios del plan»: de las dos auditorías, del más nuevo al más viejo (ADR 0196).
+        return terms
+          ? { ...terms, founders: await getFoundersMove(tx, id), changes: await listSaasPlanChanges(tx, id) }
+          : null
       }),
     )
   })
