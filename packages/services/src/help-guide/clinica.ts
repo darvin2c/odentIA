@@ -552,6 +552,125 @@ export const CLINICA: readonly HelpMore[] = [
         area: "plan",
         needs: "tasks.write",
       },
+
+      // ---------- Lo de cada rol y cada botón (estudio de la atención del 16 nov, C22) ----------
+      // La Ayuda no contestaba «¿cómo le reservo lo que aceptó?», ni para qué sirve «Completar», ni qué ve
+      // recepción de una atención: estaban dentro de respuestas largas o en ninguna.
+      {
+        id: "pacientes-reservar-lo-aceptado",
+        q: "¿Cómo le reservo lo que aceptó, como la corona o la sesión que sigue?",
+        a: "En su página, en «Qué sigue»: «Reservar lo aceptado» abre «Nueva cita» con lo que aceptó ya marcado en «Para esta cita»; eliges con quién y cuándo. Si tiene un tratamiento en curso, va primero «Reservar la sesión» con su número. Lo que va después de otro tratamiento (la corona después de la endodoncia) lo dice la fila, y la hora se busca desde después de esa sesión. La misma fila está en la lista de Pacientes.",
+        forms: [
+          "como le reservo la corona que acepto",
+          "como le reservo lo que acepto",
+          "reservar lo que acepto el paciente",
+          "como le saco cita para el tratamiento que acepto",
+          "como agendo lo aceptado",
+          "como le reservo la cita de la corona que acepto",
+        ],
+        area: "plan",
+        needs: "appointments.write",
+        // En latidIA y vistIA lo indicado ya queda aceptado: su botón es «Reservar lo indicado» (sus `OWN_FAQS`).
+        own: true,
+      },
+      {
+        id: "pacientes-realizado-hoy-completar",
+        q: "¿Para qué sirve «Completar» en «Realizado hoy»?",
+        a: "Da por terminado hoy un tratamiento de varias sesiones aunque falten sesiones de las previstas (lo que terminaste en menos sesiones de las que pensabas): queda realizado al firmar y deja de pedir su siguiente sesión. Sale cuando ya registraste su sesión de hoy; si no, el botón es «Registrar la sesión». Si con la de hoy llega a sus sesiones previstas, no hace falta: al firmar te pregunta «¿Terminaste?» con «Sí, terminar» ya elegido.",
+        forms: ["para que sirve completar", "que hace completar", "que pasa si le doy completar", "boton completar en realizado hoy"],
+        area: "clinica",
+        needs: "clinical.write",
+      },
+      {
+        id: "recepcion-ver-atencion",
+        q: "¿Puedo ver la atención de un paciente?",
+        a: "No: la atención es parte de la historia clínica y la abren quienes atienden. Recepción ve en su página «Qué sigue», con lo que falta reservar (la sesión que sigue, lo aceptado o su control), y sus alergias; caja ve en Inicio, en «Caja de hoy», lo que dejó por cobrar.",
+        forms: ["puedo ver la atencion", "recepcion ve la atencion", "que ve recepcion de la atencion", "puedo ver lo que el doctor hizo en la atencion"],
+        // Quien lee la historia tiene la suya: «¿Cómo veo completa una atención anterior?».
+        notFor: { has: "clinical.read" },
+        // Dice lo que su rol no ve: no lleva a una pantalla ni depende de poder abrirla.
+        general: true,
+        area: "clinica",
+      },
+
+      // ---------- Palabras de la atención (estudio de la atención del 16 nov, novata) ----------
+      // Cada una en una línea y con palabras simples: la odontóloga nueva no entendió ninguna de estas.
+      {
+        id: "palabras-siglas-caries",
+        q: "¿Qué significan MB, CE, CD y CDP?",
+        a: "Son las siglas de la caries en el odontograma, según hasta dónde llega: MB, mancha blanca; CE, caries del esmalte; CD, caries de la dentina; y CDP, caries de la dentina que ya compromete la pulpa.",
+        forms: ["que es cdp", "que significa cdp", "que es mb", "que es cd en el odontograma", "que es ce en el odontograma", "siglas de la caries"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-nts-188",
+        q: "¿Qué es la NTS 188?",
+        a: "Es la norma del Ministerio de Salud del Perú para el odontograma (NTS 188-MINSA/DGIESP-2022): dice cómo se dibuja cada hallazgo, de qué color y con qué sigla.",
+        forms: ["que es la nts", "que es nts 188", "que norma sigue el odontograma", "que es la sigla de la nts"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-cie-10",
+        q: "¿Qué es la CIE-10?",
+        a: "Es la lista de diagnósticos de la Organización Mundial de la Salud (Clasificación Internacional de Enfermedades): cada diagnóstico lleva su código, como K02.1 para la caries de la dentina.",
+        forms: ["que es cie 10", "que es el codigo del diagnostico", "que significa k02"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-asa",
+        q: "¿Qué es la ASA?",
+        a: "Es cómo está de salud la persona antes de anestesiarla, según la Sociedad Americana de Anestesiólogos: ASA I, sana; ASA II, una enfermedad leve y controlada; ASA III, una enfermedad grave; ASA IV, una que amenaza su vida.",
+        forms: ["que es asa", "que significa asa", "que es la clasificacion asa", "que es el riesgo asa"],
+        general: true,
+        area: "clinica",
+        own: true,
+      },
+      {
+        id: "palabras-adenda",
+        q: "¿Qué es una adenda?",
+        a: "Es una corrección que se agrega a algo ya firmado (una atención o una ficha): lo firmado no cambia y la corrección queda debajo, con tu nombre, el día y la hora.",
+        forms: ["que es adenda", "que significa adenda", "que es una adenda"],
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "palabras-inmutable",
+        q: "¿Qué quiere decir que queda inmutable?",
+        a: "Que ya no se puede editar ni borrar: la atención firmada queda como se firmó, y si algo estaba mal se corrige con una adenda.",
+        forms: ["que significa inmutable", "que es inmutable", "por que no puedo editar la atencion firmada"],
+        general: true,
+        area: "clinica",
+      },
+      {
+        id: "palabras-liberarla",
+        q: "¿Qué hace «Liberarla» en una cita?",
+        a: "En una cita que ya no tiene para qué (lo que traía ya se terminó), la cancela y deja esa hora libre para otra persona; solo le avisa si marcas «Avisarle». Si le queda algo aceptado por hacer, «Usarla para…» la aprovecha en vez de cancelarla.",
+        forms: ["que es liberarla", "que pasa si libero la cita", "liberar la cita borra al paciente"],
+        general: true,
+        area: "plan",
+      },
+      {
+        id: "palabras-lo-piensa",
+        q: "¿Qué quiere decir «Lo piensa»?",
+        a: "Que todavía no decide ese tratamiento: su respuesta sigue pendiente y se le puede volver a preguntar. No es un rechazo. En el Plan, lo que aún no tiene respuesta dice «Por decidir».",
+        forms: ["que significa lo piensa", "lo piensa es una respuesta", "que es lo piensa"],
+        general: true,
+        area: "plan",
+      },
+      {
+        id: "palabras-indicado-hoy",
+        q: "¿Qué quiere decir «Indicado hoy»?",
+        a: "Que lo indicaste en esta atención: es lo que propones hacer y todavía no está hecho. Lo que haces hoy se registra aparte, con su procedimiento.",
+        forms: ["que significa indicado hoy", "indicado hoy es que ya lo hice"],
+        general: true,
+        area: "plan",
+      },
     ],
   },
   {

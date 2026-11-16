@@ -663,6 +663,16 @@ const BY_ID: Record<string, (faq: Faq) => Faq[]> = {
 const OWN_FAQS: Record<string, Faq[]> = {
   pacientes: [
     {
+      // Estudio de la atención del 16 nov (C22): la Ayuda no contestaba cómo reservar lo que sigue. En
+      // odentIA es «Reservar lo aceptado»; aquí lo indicado ya queda aceptado al indicarlo.
+      id: "pacientes-reservar-lo-indicado",
+      q: "¿Cómo le reservo lo indicado?",
+      a: "En su página, en «Qué sigue»: «Reservar lo indicado» abre «Nueva cita» con lo indicado ya marcado en «Para esta cita»; eliges con quién y cuándo.",
+      forms: ["como le reservo lo indicado", "como le saco cita para lo indicado", "que es reservar lo indicado"],
+      area: "plan",
+      needs: "appointments.write",
+    },
+    {
       id: "pacientes-recetas-lentes-quien",
       q: "¿Quién ve las recetas de lentes y quién puede transcribir o anular una?",
       a: "«Recetas de lentes», en su página › Clínica, es de quien lee la historia clínica: el optómetra, administración y la dueña la ven y la imprimen con «Imprimir»; transcribir la externa, verificarla y anularla es de quien escribe en la historia. Ventas no ve esa sección: ve la receta vigente al vender, en «Vender lentes». El cliente la tiene en su portal.",

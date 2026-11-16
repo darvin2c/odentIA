@@ -668,6 +668,19 @@ const BASE_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo registro un paciente nuevo?",
         a: "En Pacientes, «Nuevo paciente»: pide nombres, apellidos y celular, te muestra quién coincide para no duplicar y eliges quién completa lo demás (el paciente en su celular, con su código QR, o tú en la misma ventana). Si ya escribió, abre su página y pulsa «Registrar»: trae lo que se sabe de ella. También puedes «Escribirle con su enlace»: abre su conversación con el enlace listo para enviar, y ahí elige su cita y deja sus datos.",
         forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
+        // Solo quien tiene «Nuevo paciente»: al odontólogo le explicaba un botón que no tiene (estudio de la
+        // atención del 16 nov, C9). Quien no lo tiene recibe la suya, que le dice a quién pedírselo.
+        needs: "patients.write",
+        notFor: { lacks: "patients.write" },
+      },
+      {
+        id: "registro-paciente-nuevo-lo-pide",
+        q: "¿Cómo registro un paciente nuevo?",
+        a: "Tu rol no registra pacientes: lo hacen recepción, el propietario y el administrador. Pídeselo con su nombre, apellidos y celular, y que lo registre antes de atenderlo. Si ya está registrado, búscalo por su nombre y, en su página, «Atender» abre su atención.",
+        forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
+        notFor: { has: "patients.write" },
+        // Dice lo que su rol no hace: no lleva a una pantalla ni depende de poder abrirla.
+        general: true,
       },
       {
         id: "registrar-menor-madre-padre-trae-documento",
