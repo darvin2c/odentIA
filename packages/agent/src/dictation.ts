@@ -59,15 +59,9 @@ export function dictationList(
   return dictationItems(operationAgentSchema(operation, words), describe)
 }
 
-/**
- * Lo mismo con el esquema ya armado (latidIA: un diagnóstico sin pieza ni caras).
- * Cada lista es opcional: con `default([])` el esquema las pedía todas y Clío
- * escribía en cada pausa las doce vacías (`"recetas":[]`…), unos 50 tokens de
- * salida de los 130 de una pausa con ficha (medido el 16 nov). Lo que no llega
- * se lee como vacío (`readDictation`).
- */
+/** Lo mismo con el esquema ya armado (latidIA: un diagnóstico sin pieza ni caras). */
 export function dictationItems(schema: z.ZodObject, describe: string) {
-  return z.array(schema.extend({ dicho: dictationSaid })).max(DICTATION_MAX_SUGGESTIONS).optional().describe(describe)
+  return z.array(schema.extend({ dicho: dictationSaid })).max(DICTATION_MAX_SUGGESTIONS).default([]).describe(describe)
 }
 
 /**
@@ -94,7 +88,7 @@ export function dictationEdits(example: string) {
         }),
       )
       .max(VOICE_EDITS_HINT)
-      .optional()
+      .default([])
       .describe(
         "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
       ),
@@ -110,7 +104,7 @@ export function dictationEdits(example: string) {
         }),
       )
       .max(VOICE_EDITS_HINT)
-      .optional()
+      .default([])
       .describe("Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna."),
   }
 }

@@ -123,6 +123,7 @@
       "additionalProperties": false
     },
     "examen": {
+      "default": [],
       "description": "Un elemento por cada sistema del examen físico que nombró, de la lista de sistemas.",
       "maxItems": 40,
       "type": "array",
@@ -163,6 +164,7 @@
       }
     },
     "diagnosticos": {
+      "default": [],
       "description": "Un elemento por cada diagnóstico que nombró el médico.",
       "maxItems": 40,
       "type": "array",
@@ -203,6 +205,7 @@
       }
     },
     "indicaciones": {
+      "default": [],
       "description": "Un elemento por cada prestación del consultorio que indicó.",
       "maxItems": 40,
       "type": "array",
@@ -234,6 +237,7 @@
       }
     },
     "recetas": {
+      "default": [],
       "description": "Un elemento por cada medicamento que recetó.",
       "maxItems": 40,
       "type": "array",
@@ -307,6 +311,7 @@
       }
     },
     "controles": {
+      "default": [],
       "description": "Un elemento por cada control que pidió.",
       "maxItems": 40,
       "type": "array",
@@ -345,6 +350,7 @@
       }
     },
     "alergias": {
+      "default": [],
       "description": "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene.",
       "maxItems": 40,
       "type": "array",
@@ -386,6 +392,7 @@
       }
     },
     "procedimientos": {
+      "default": [],
       "description": "Un elemento por cada cosa que el médico ya hizo hoy en la atención.",
       "maxItems": 40,
       "type": "array",
@@ -417,6 +424,7 @@
       }
     },
     "citas": {
+      "default": [],
       "description": "La próxima cita, solo si pidió reservarla (normalmente una sola).",
       "maxItems": 40,
       "type": "array",
@@ -500,6 +508,7 @@
       "additionalProperties": false
     },
     "materiales": {
+      "default": [],
       "description": "Un elemento por cada material que dijo que usó en la atención.",
       "maxItems": 40,
       "type": "array",
@@ -531,6 +540,7 @@
       }
     },
     "fichas": {
+      "default": [],
       "description": "Respuestas a las preguntas de las fichas abiertas que se listan con lo dictado, una por pregunta. Vacío si no hay fichas abiertas o lo dictado no responde ninguna.",
       "maxItems": 40,
       "type": "array",
@@ -572,6 +582,7 @@
       }
     },
     "correcciones": {
+      "default": [],
       "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
       "maxItems": 10,
       "type": "array",
@@ -606,6 +617,7 @@
       }
     },
     "quitar": {
+      "default": [],
       "description": "Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna.",
       "maxItems": 10,
       "type": "array",
@@ -631,5 +643,19 @@
       }
     }
   },
+  "required": [
+    "examen",
+    "diagnosticos",
+    "indicaciones",
+    "recetas",
+    "controles",
+    "alergias",
+    "procedimientos",
+    "citas",
+    "materiales",
+    "fichas",
+    "correcciones",
+    "quitar"
+  ],
   "additionalProperties": false
 }
