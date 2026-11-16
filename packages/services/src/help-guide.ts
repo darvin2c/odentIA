@@ -854,9 +854,9 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       },
       {
         id: "atencion-donde-hacerla-hoy",
-        q: "¿Dónde quedó «Hacerla hoy»?",
-        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Lo que «va después» de otro (la corona tras la endodoncia) no lo trae: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice «Pide el consentimiento «…»» con «Preparar y firmar»; puedes registrarlo igual.",
-        forms: ["donde esta hacerla hoy", "ya no sale hacerla hoy en hoy viene a", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento"],
+        q: "¿Por qué lo que indiqué hoy no sale en «Hoy viene a…»?",
+        a: "«Hoy viene a…» lleva solo lo que viene de antes: su cita, la sesión que le toca y sus controles. Lo que indicas en esta misma atención no se repite ahí: cuando lo acepta, su fila del Plan («Indicado hoy») trae «Hacerla hoy», que lo deja en «Realizado hoy» y pide su consentimiento antes de hacerlo. Lo que «va después» de otro tratamiento que aún no termina no lo trae: no toca hoy. Si registras con «Registrar lo de hoy» algo cuyo consentimiento falta firmar, antes de registrarlo te dice qué consentimiento pide, con «Preparar y firmar»; puedes registrarlo igual.",
+        forms: ["lo que indique hoy no aparece arriba", "como hago hoy lo que acabo de indicar", "registrar lo de hoy pide consentimiento"],
         area: "clinica",
       },
       {
@@ -1018,7 +1018,7 @@ const BASE_TOPICS: readonly HelpTopic[] = [
       {
         id: "atiendo-paciente",
         q: "¿Cómo atiendo a un paciente?",
-        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic, con el cursor en el motivo, y si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice el pie fijo de abajo, todo junto, y cada cosa lleva a su lugar («Faltan 2: tu colegiatura y la firma de Carmen»); cuando no falta nada, dice «Listo para firmar». Si es una urgencia, «Es una urgencia» está junto al título de Consulta. Solo lo ve quien escribe en la historia clínica.",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic, con el cursor en el motivo, y si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice el pie fijo de abajo, todo junto (también tu colegiatura y la firma de la paciente), y cada cosa lleva a su lugar; cuando no falta nada, dice «Listo para firmar». Si es una urgencia, «Es una urgencia» está junto al título de Consulta. Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
         area: "clinica",
       },

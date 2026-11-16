@@ -54,18 +54,18 @@ describe("la ficha de la especialidad toma la pieza de la atención", () => {
   it("con una sola pieza en la atención, la ficha empieza con ella", async () => {
     const { start } = await attentionWithTeeth(["36"])
     const form = await start()
-    expect(form.answers).toEqual({ pieza: 36 })
+    expect(form.answers).toMatchObject({ pieza: 36, dolor: null })
   })
 
   it("con dos piezas no adivina: la pregunta queda sin responder", async () => {
     const { start } = await attentionWithTeeth(["36", "46"])
     const form = await start()
-    expect(form.answers).toEqual({})
+    expect(form.answers).toMatchObject({ pieza: null })
   })
 
   it("lo que se mandó escrito gana sobre la pieza de la atención", async () => {
     const { start } = await attentionWithTeeth(["36"])
     const form = await start({ pieza: 46 })
-    expect(form.answers).toEqual({ pieza: 46 })
+    expect(form.answers).toMatchObject({ pieza: 46 })
   })
 })
