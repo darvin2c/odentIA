@@ -3,7 +3,7 @@ import { formQuestionsOf } from "@odentia/services"
 import { examSystemsText } from "@odentia/services/medical"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { askDictationModel, parseToolArguments, readDictation } from "../dictation.js"
+import { askDictationModel, DICTATION_FORMS_RULES, parseToolArguments, readDictation } from "../dictation.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "../llm.js"
 import { cacheMarked, fakeProvider, messageContent, systemBlock, toolCallReply } from "../test-provider.js"
 import { demoSegment, MEDICAL_DICTATION_PROFILE } from "./dictation.js"
@@ -21,11 +21,11 @@ it("el dictado de latidIA razona por /v1/responses y su parte fija llega con el 
     expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text"))
     // Por /v1/responses no se pide prompt_cache_options: el proveedor pone además su propio corte.
     expect(provider.requests[0]?.body).not.toHaveProperty("prompt_cache_options")
-    // Con una ficha empezada, sus preguntas van en su mensaje con su corte, también en un bloque `input_text`.
+    // Con una ficha empezada, cómo se responden va en su mensaje con su corte, también en un bloque `input_text`.
     const snapshot = { sections: [{ id: "control", title: "Control", fields: [{ id: "peso", label: "Peso", type: "numero", unit: "kg", min: 0, max: 200 }] }] }
     const forms = formQuestionsOf([{ id: "ficha", title: "Control de niño sano", snapshot, answers: {} }])
     await askDictationModel(model, spec, { ...pause, forms, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:01:00Z") }, profile)
-    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("input_text", expect.stringContaining("Fichas abiertas"))])
+    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("input_text", DICTATION_FORMS_RULES)])
     expect(JSON.stringify(messageContent(provider.requests[1], 2))).toContain("Lo nuevo que dictó")
     expect(JSON.stringify(messageContent(provider.requests[1], 2))).not.toContain("prompt_cache_breakpoint")
   } finally {

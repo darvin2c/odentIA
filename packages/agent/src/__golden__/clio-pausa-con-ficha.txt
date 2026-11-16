@@ -8,20 +8,6 @@ Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas
 - Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.
 - Lo dictado viene del reconocimiento de voz del navegador y puede traer mal escritos los términos de estas preguntas: con otra letra que suena igual (b o v; s, c o z; ll o y; sin la h), una sigla con espacios entre sus letras, una palabra en inglés escrita como suena u otra parecida. Léelos por cómo suenan cuando no haya duda de cuál es. En `dicho` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.
 - Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.
-Ficha de ortodoncia:
-1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
-2. Clase molar izquierda (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
-3. Clase canina derecha · una opción: Clase I | Clase II | Clase III
-4. Clase canina izquierda · una opción: Clase I | Clase II | Clase III
-5. Overjet · número en mm, de -10 a 20
-6. Overbite · número en mm, de -10 a 15
-7. Línea media superior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
-8. Desviación de la línea media superior · número en mm, de 0 a 15
-9. Línea media inferior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
-10. Desviación de la línea media inferior · número en mm, de 0 a 15
-11. Mordida cruzada · varias opciones: No tiene | Anterior | Posterior derecha | Posterior izquierda
-12. Apiñamiento · una opción: No | Leve | Moderado | Severo
-13. Hábitos · varias opciones: Ninguno | Succión digital | Respiración bucal | Deglución atípica | Onicofagia | Bruxismo
 ⟦corte de caché⟧
 ⟦otro mensaje⟧
 Hoy es lunes, 16 de noviembre de 2026, 2026-11-16T15:00:00.000Z (zona America/Lima).
@@ -32,8 +18,20 @@ Ya ordenado antes en este dictado (no lo registres otra vez):
 Sugerencias pendientes de este dictado:
 1. Fichas · Overjet: 6 mm
 
-Preguntas de las fichas abiertas que ya tienen respuesta:
-5. Overjet · ya dice «6 mm»
+Ficha de ortodoncia:
+1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
+2. Clase molar izquierda (Angle) · una opción: Clase I | Clase II división 1 | Clase II división 2 | Clase III
+3. Clase canina derecha · una opción: Clase I | Clase II | Clase III
+4. Clase canina izquierda · una opción: Clase I | Clase II | Clase III
+5. Overjet · número en mm, de -10 a 20 · ya dice «6 mm»
+6. Overbite · número en mm, de -10 a 15
+7. Línea media superior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
+8. Desviación de la línea media superior · número en mm, de 0 a 15
+9. Línea media inferior · una opción: Centrada | Desviada a la derecha | Desviada a la izquierda
+10. Desviación de la línea media inferior · número en mm, de 0 a 15
+11. Mordida cruzada · varias opciones: No tiene | Anterior | Posterior derecha | Posterior izquierda
+12. Apiñamiento · una opción: No | Leve | Moderado | Severo
+13. Hábitos · varias opciones: Ninguno | Succión digital | Respiración bucal | Deglución atípica | Onicofagia | Bruxismo
 
 Lo nuevo que dictó:
 «Overbite de dos.»

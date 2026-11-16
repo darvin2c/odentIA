@@ -4,6 +4,7 @@ import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
 import {
   askDictationModel,
+  DICTATION_FORMS_RULES,
   type DictationAsk,
   dictationFormsText,
   dictationMessages,
@@ -28,10 +29,10 @@ it("el dictado de odentIA no razona: va por Chat Completions con su parte fija m
     expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("text"))
     // Por Chat Completions el proveedor guarda solo hasta el corte.
     expect(provider.requests[0]?.body).toMatchObject({ prompt_cache_options: { mode: "explicit" } })
-    // Con una ficha empezada, sus preguntas van en su mensaje con su corte, y la pausa después, sin él.
+    // Con una ficha empezada, cómo se responden va en su mensaje con su corte, y la pausa después, sin él.
     const forms = formQuestionsOf([{ id: "endo", title: "Evaluación de endodoncia", snapshot: productHooksFor("dental").forms.suggestions.find((item) => item.key === "evaluacion-de-endodoncia")?.schema, answers: {} }])
     await askDictationModel(model, spec, { ...pause, forms, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:01:00Z") }, profile)
-    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("text", expect.stringContaining("Fichas abiertas"))])
+    expect(messageContent(provider.requests[1], 1)).toEqual([cacheMarked("text", DICTATION_FORMS_RULES)])
     expect(JSON.stringify(messageContent(provider.requests[1], 2))).toContain("Lo nuevo que dictó")
     expect(JSON.stringify(messageContent(provider.requests[1], 2))).not.toContain("prompt_cache_breakpoint")
   } finally {
@@ -279,26 +280,24 @@ describe("lo que recibe el modelo en cada pausa", () => {
       { number: 2, responseId: "r1", formTitle: "Ficha de ortodoncia", fieldId: "overjet", label: "Overjet", type: "numero" as const, options: null, unit: "mm", min: -10, max: 20, order: 1, dependsOn: null },
     ]
     const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, now: NOW, transcript: "Overjet de seis.", context: "", pending: [] }
-    const [fixedWith, formsWith, pauseWith] = dictationMessages({ ...base, forms }, DENTAL_DICTATION_PROFILE, false)
+    const [fixedWith, rulesWith, pauseWith] = dictationMessages({ ...base, forms }, DENTAL_DICTATION_PROFILE, false)
     const without = dictationMessages(base, DENTAL_DICTATION_PROFILE, false)
     expect(fixedWith?.content).toEqual(without[0]?.content)
-    // Las reglas y las preguntas van en su mensaje, con su corte; la pausa, después y como siempre.
-    const [questions] = (formsWith?.content ?? []) as Array<{ text: string }>
-    expect(questions).toMatchObject({ type: "text", prompt_cache_breakpoint: { mode: "explicit" } })
-    expect(questions?.text).toContain(
-      ["Ficha de ortodoncia:", "1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1", "2. Overjet · número en mm, de -10 a 20"].join("\n"),
-    )
-    expect(questions?.text).toContain("el silencio no es «No»")
+    // Cómo se responden las fichas va en su mensaje, con su corte; las preguntas, en la pausa, junto a lo nuevo.
+    expect(rulesWith?.content).toEqual([{ type: "text", text: DICTATION_FORMS_RULES, prompt_cache_breakpoint: { mode: "explicit" } }])
+    expect(DICTATION_FORMS_RULES).toContain("el silencio no es «No»")
     expect(pauseWith?.content).toMatch(/^Hoy es /)
-    expect(pauseWith?.content).toContain("Lo nuevo que dictó:\n«Overjet de seis.»")
-    // Sin ficha, la pausa es la de siempre: el mensaje de sistema y el de la pausa, igual que con ficha.
+    expect(pauseWith?.content).toContain(
+      ["Ficha de ortodoncia:", "1. Clase molar derecha (Angle) · una opción: Clase I | Clase II división 1", "2. Overjet · número en mm, de -10 a 20", "", "Lo nuevo que dictó:\n«Overjet de seis.»"].join("\n"),
+    )
+    // Sin ficha, la pausa es la de siempre: el mensaje de sistema y el de la pausa, sin nada de fichas.
     expect(without).toHaveLength(2)
-    expect(without[1]?.content).toEqual(pauseWith?.content)
+    expect(String(without[1]?.content)).not.toContain("Ficha")
     // Sin caché (el modelo de demostración), el mismo texto, sin marca.
-    expect(dictationMessages({ ...base, provider: "fake", forms }, DENTAL_DICTATION_PROFILE, false)[1]?.content).toBe(questions?.text)
+    expect(dictationMessages({ ...base, provider: "fake", forms }, DENTAL_DICTATION_PROFILE, false)[1]?.content).toBe(DICTATION_FORMS_RULES)
   })
 
-  it("con ficha, lo fijo de la atención es igual entre pausas; lo que ya dice una pregunta va con lo que cambia", () => {
+  it("con ficha, cómo se responden es igual entre pausas y se lee de la caché; las preguntas y lo que ya dicen van con lo que cambia", () => {
     const form = productHooksFor("dental").forms.suggestions.find((item) => item.key === "ficha-de-ortodoncia")
     const questionsOf = (answers: Record<string, unknown>) => formQuestionsOf([{ id: "orto", title: form?.title ?? null, snapshot: form?.schema, answers }])
     const base = { provider: "openai" as const, services: SERVICES, diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), zone: { locale: "es-PE", timezone: "America/Lima" }, pending: [] }
@@ -312,12 +311,11 @@ describe("lo que recibe el modelo en cada pausa", () => {
     // Todo hasta el corte de las fichas es igual: la pausa siguiente lo lee de la caché.
     expect(next[0]?.content).toEqual(first[0]?.content)
     expect(next[1]?.content).toEqual(first[1]?.content)
-    expect(JSON.stringify(next[1]?.content)).not.toContain("· ya dice")
     const overjet = questionsOf({}).find((item) => item.fieldId === "overjet")
     const pauseNext = String(next[2]?.content)
-    expect(pauseNext).toContain(`Preguntas de las fichas abiertas que ya tienen respuesta:\n${overjet?.number}. ${overjet?.label} · ya dice «6 mm»`)
-    // Lo que cambia va al final, en este orden: la fecha, lo ya ordenado, lo pendiente, lo respondido y lo nuevo.
-    const order = ["Hoy es ", "Ya ordenado antes", "Sugerencias pendientes", "ya tienen respuesta", "Lo nuevo que dictó"].map((words) => pauseNext.indexOf(words))
+    expect(pauseNext).toContain(`${overjet?.number}. ${overjet?.label} · número en mm, de -10 a 20 · ya dice «6 mm»`)
+    // Lo que cambia va después, como siempre: la fecha, lo ya ordenado, lo pendiente, las preguntas y lo nuevo.
+    const order = ["Hoy es ", "Ya ordenado antes", "Sugerencias pendientes", "Ficha de ortodoncia:", "Lo nuevo que dictó"].map((words) => pauseNext.indexOf(words))
     expect(order.every((at) => at >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
@@ -366,7 +364,7 @@ describe("la prueba con voz del 15 nov", () => {
 
   it("el tiempo de enfermedad cuenta desde lo que se fecha, y el diagnóstico de la ficha va también a Diagnóstico (v07)", () => {
     expect(fixed).toContain("Si lo que le pasa empezó con algo que se fecha («un golpe hace dos años»")
-    expect(dictationFormsText(endo)).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
+    expect(DICTATION_FORMS_RULES).toContain("Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.")
   })
 
   // Tercera prueba (c3, v10): «hoy solo hacemos adaptación y profilaxis y los citamos en una semana».
@@ -417,10 +415,10 @@ describe("las respuestas de una ficha", () => {
   })
 
   it("con una ficha empezada, Clío sabe que lo dictado viene de la voz y copia la frase como llegó", () => {
-    const text = dictationFormsText(ortho)
-    expect(text).toContain("Lo dictado viene del reconocimiento de voz del navegador")
-    expect(text).toContain("una sigla con espacios entre sus letras")
-    expect(text).toContain("En `dicho` copia la frase tal como llegó, con la palabra mal escrita")
+    expect(DICTATION_FORMS_RULES).toContain("Lo dictado viene del reconocimiento de voz del navegador")
+    expect(DICTATION_FORMS_RULES).toContain("una sigla con espacios entre sus letras")
+    expect(DICTATION_FORMS_RULES).toContain("En `dicho` copia la frase tal como llegó, con la palabra mal escrita")
+    expect(dictationFormsText(ortho)).toMatch(/^Ficha de ortodoncia:\n1\. /)
     // Sin ficha, nada nuevo: la pausa de siempre.
     expect(dictationFormsText([])).toBe("")
   })

@@ -252,14 +252,7 @@ export interface DictationAsk {
   forms?: readonly DictationFormQuestion[] | undefined
 }
 
-/** Lo que ya dice una pregunta respondida, como lo lee el modelo. */
-const answeredWords = (question: DictationFormQuestion) =>
-  question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
-
-/**
- * Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo. Sin lo
- * que ya dice (`answeredWords`): así la pregunta es igual en toda la atención.
- */
+/** Cómo se responde cada tipo de pregunta de una ficha, en una frase corta para el modelo. */
 function formQuestionWords(question: DictationFormQuestion): string {
   const range =
     question.min !== null && question.max !== null
@@ -285,7 +278,8 @@ function formQuestionWords(question: DictationFormQuestion): string {
   const depends = question.dependsOn
     ? ` (solo si «${question.dependsOn.label}» es «${equals === true ? "Sí" : equals === false ? "No" : String(equals)}»)`
     : ""
-  return `${question.number}. ${question.label} · ${how}${depends}`
+  const now = question.answered === undefined ? "" : ` · ya dice «${formAnswerWords({ value: question.answered, unit: question.unit })}»`
+  return `${question.number}. ${question.label} · ${how}${depends}${now}`
 }
 
 /**
@@ -298,41 +292,33 @@ const HEARD_HINT =
   "Lo dictado viene del reconocimiento de voz del navegador y puede traer mal escritos los términos de estas preguntas: con otra letra que suena igual (b o v; s, c o z; ll o y; sin la h), una sigla con espacios entre sus letras, una palabra en inglés escrita como suena u otra parecida. Léelos por cómo suenan cuando no haya duda de cuál es."
 
 /**
- * Las fichas empezadas con sus preguntas y cómo se responden. Va con la pausa y
- * no en las instrucciones fijas: sin ficha empezada el modelo no
- * lee nada nuevo y lo de siempre no cambia. Es igual en toda la atención (lo que
- * ya dice cada pregunta va aparte, `dictationFormsAnswered`), así que va en un
- * mensaje propio antes del de la pausa, con su corte de caché (`dictationMessages`).
+ * Cómo se responden las fichas empezadas: igual para toda ficha y toda atención,
+ * así que va en un mensaje propio antes del de la pausa, con su corte de caché
+ * (`dictationMessages`). Solo con una ficha empezada: sin ella el modelo no lee
+ * nada nuevo y lo de siempre no cambia.
  */
-export function dictationFormsText(forms: readonly DictationFormQuestion[]): string {
-  if (!forms.length) return ""
-  const byForm = new Map<string, DictationFormQuestion[]>()
-  for (const question of forms) byForm.set(question.responseId, [...(byForm.get(question.responseId) ?? []), question])
-  return [
-    "Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.",
-    "- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).",
-    "- Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.",
-    "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.",
-    "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
-    "- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta. Lo demás que dijo (lo que siente el paciente, desde cuándo, lo que se hizo) sí va en la consulta, como siempre.",
-    // Prueba con voz del 15 nov (v07): «necrosis pulpar con absceso apical crónico» llenaba la ficha y no proponía el diagnóstico.
-    "- Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.",
-    "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
-    `- ${HEARD_HINT} En \`dicho\` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.`,
-    "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.",
-    ...[...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")),
-  ].join("\n")
-}
+export const DICTATION_FORMS_RULES = [
+  "Fichas abiertas en esta atención. Si lo dictado responde una de estas preguntas, va en `fichas` con su número, la respuesta y en `dicho` la frase que la responde. Si no se dijo, no la respondas: el silencio no es «No», y lo habitual o lo de la vez anterior tampoco cuenta.",
+  "- Sí o no: «Sí» si lo afirmó; «No» solo si lo negó en voz alta («no», «sin», «niega»).",
+  "- Una opción: una de la lista, tal cual está escrita, la que más se acerque a lo dicho. Si no alcanza para elegir una sola (falta el lado, la división o el grado), respóndela igual: el profesional la elige.",
+  "- Número, escala o pieza: el número que dijo, en cifras. No conviertas unidades: si lo dijo en otra unidad, respóndela igual con el número dicho; no se llena y se le avisa al profesional.",
+  "- Una pregunta que «ya dice» algo respóndela solo si lo dictado la corrige con otro valor («corrijo, es…»): el profesional decide si la cambia.",
+  "- Lo que es de una de estas preguntas va en `fichas` y no en el texto de la consulta, aunque no puedas responderla. Una corrección («perdón», «no, es…», «corrijo») tampoco va en el texto de la consulta. Lo demás que dijo (lo que siente el paciente, desde cuándo, lo que se hizo) sí va en la consulta, como siempre.",
+  // Prueba con voz del 15 nov (v07): «necrosis pulpar con absceso apical crónico» llenaba la ficha y no proponía el diagnóstico.
+  "- Un diagnóstico que nombró va en `diagnosticos`, con su código, aunque también responda una de estas preguntas: va en los dos.",
+  "- Lo dictado suele llegar del micrófono, sin puntuación, y un mismo tramo responde varias preguntas seguidas («sin dolor presenta fístula tumefacción intraoral leve frío sin respuesta» son cuatro): respóndelas todas, cada una con su frase.",
+  `- ${HEARD_HINT} En \`dicho\` copia la frase tal como llegó, con la palabra mal escrita: no la corrijas.`,
+  "- Lo que se le pregunta o pide al paciente o al asistente («¿te duele cuando comes?», «abre», «pásame…») no va en ninguna parte. Lo que se le dice para calmarlo y lo que el paciente dice o llora en ese momento («me duele», «no quiero», «mamá») no va al motivo ni al relato. Lo que el profesional encuentra al examinarlo («dolor a la percusión») sí va en su pregunta.",
+].join("\n")
 
 /**
- * Lo que ya dicen las preguntas respondidas de las fichas empezadas: cambia
- * cuando el profesional acepta una respuesta, así que va con lo de la pausa,
- * después de lo fijo. Sin ninguna respondida, nada.
+ * Las preguntas de las fichas empezadas, con lo que ya dicen. Van en el mensaje
+ * de la pausa, donde siempre, justo antes de lo nuevo. Sin fichas, nada.
  */
-export function dictationFormsAnswered(forms: readonly DictationFormQuestion[]): string {
-  const answered = forms.filter((question) => question.answered !== undefined)
-  if (!answered.length) return ""
-  return ["Preguntas de las fichas abiertas que ya tienen respuesta:", ...answered.map((question) => `${question.number}. ${question.label}${answeredWords(question)}`)].join("\n")
+export function dictationFormsText(forms: readonly DictationFormQuestion[]): string {
+  const byForm = new Map<string, DictationFormQuestion[]>()
+  for (const question of forms) byForm.set(question.responseId, [...(byForm.get(question.responseId) ?? []), question])
+  return [...byForm.values()].map((questions) => [`${questions[0]?.formTitle ?? "Ficha"}:`, ...questions.map(formQuestionWords)].join("\n")).join("\n")
 }
 
 /**
@@ -361,15 +347,15 @@ function newText(context: string, transcript: string): string {
  * por Chat Completions, el proveedor no escribe además lo de cada pausa, que
  * nunca se vuelve a leer; por /v1/responses ese pedido no se envía.
  *
- * Con una ficha empezada, sus reglas y preguntas van en un mensaje propio,
- * antes del de la pausa y con su corte: son iguales en toda la atención y la
- * pausa siguiente las lee de la caché. Lo que ya dicen las respondidas va con
- * lo que cambia. Antes iban dentro de la pausa, después de la fecha y de lo ya
- * ordenado, y se pagaban enteras en cada pausa (medido el 16 nov: 87 % de la
- * entrada leída de la caché con ficha, 98 % sin ella). En un mensaje propio, y
- * no al principio del de la pausa: así este empieza como siempre, con la
- * fecha, y Clío lo lee igual; empezando por las fichas, dejaba fuera de la
- * consulta lo que se hizo (5 de 8 veces en nota-3-correccion, frente a 1 de 8).
+ * Con una ficha empezada, cómo se responden las fichas (`DICTATION_FORMS_RULES`,
+ * igual en toda atención) va en un mensaje propio, antes del de la pausa y con
+ * su corte: la pausa siguiente, y cualquier atención con ficha, lo leen de la
+ * caché. Antes iba dentro de la pausa, después de la fecha, y se pagaba entero
+ * en cada pausa (medido el 16 nov: 87 % de la entrada leída de la caché con
+ * ficha, 98 % sin ella). Las preguntas siguen donde siempre, junto a lo nuevo.
+ * Medido el 16 nov: con las preguntas también antes de la pausa, Clío proponía
+ * a veces pulpitis (K04.0) por la necrosis dictada; con todo al principio del
+ * mensaje de la pausa, dejaba fuera de la consulta lo que se hizo.
  */
 export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({
@@ -389,15 +375,14 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     input.pending.length
       ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}`
       : "",
-    dictationFormsAnswered(forms),
+    dictationFormsText(forms),
     newText(context, input.transcript),
   ]
     .filter(Boolean)
     .join("\n\n")
-  const formsText = dictationFormsText(forms)
   return [
     new SystemMessage({ content: cachedPrompt(input.provider, fixed, responses) }),
-    ...(formsText ? [new HumanMessage({ content: cachedPrompt(input.provider, formsText, responses) })] : []),
+    ...(forms.length ? [new HumanMessage({ content: cachedPrompt(input.provider, DICTATION_FORMS_RULES, responses) })] : []),
     new HumanMessage({ content: pause }),
   ]
 }
@@ -782,7 +767,7 @@ export async function rereadFormSentences(
     .filter((target) => target.questions.length > 0)
   if (!targets.length) return []
   const human = targets
-    .map((target, index) => [`${index + 1}. «${target.said}»`, ...target.questions.map((question) => `   ${question.formTitle}: ${formQuestionWords(question)}${answeredWords(question)}`)].join("\n"))
+    .map((target, index) => [`${index + 1}. «${target.said}»`, ...target.questions.map((question) => `   ${question.formTitle}: ${formQuestionWords(question)}`)].join("\n"))
     .join("\n\n")
   const recorder = tool(async () => "registrado", {
     name: DICTATION_REREAD_TOOL,
